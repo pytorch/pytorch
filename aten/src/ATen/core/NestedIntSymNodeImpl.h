@@ -6,6 +6,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
+#include <ATen/core/TensorBody.h>
 #include <cstdint>
 #include <string>
 
@@ -34,12 +35,39 @@ namespace c10 {
 // During tracing the strides of the outputs need to be a function of the size
 // and strides of the inputs so it is important that NestedIntSymNode itself is
 // able to express this.
+//
+// NOTE [ NestedTensorVariant ]
+//
+// Currently, if NestedTensorVariant::CPP is passed, that means that the
+// nested int is only meant to be used to ferry nested_tensor_size metadata
+// from forward to use in backward. In this case we set `val`, `coeff` etc
+// to bogus values and make sure to error if they are accessed.
+enum class NestedTensorVariant { PYTHON, CPP };
+
+constexpr c10::DispatchKeySet py_nested_int_ks({c10::DispatchKey::Python, c10::DispatchKey::PythonTLSSnapshot});
+constexpr c10::DispatchKeySet cpp_nested_int_ks({c10::DispatchKey::NestedTensor});
+
 class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
  public:
   // CAUTION: you should probably not be constructing these directly; please
-  // the higher-level API in python instead (TODO: actually introduce that).
-  explicit NestedIntSymNodeImpl(int64_t val, int64_t coeff)
-      : val_(val), coeff_(coeff) {}
+  // the higher-level API in python instead.
+  explicit NestedIntSymNodeImpl(
+      int64_t val,
+      int64_t coeff,
+      at::Tensor vec,
+      NestedTensorVariant type)
+      : val_(val), coeff_(coeff), vec_(std::move(vec)), type_(type) {
+    // See NOTE [ NestedTensorVariant ]
+    if (type == NestedTensorVariant::PYTHON) {
+      key_set_ = py_nested_int_ks;
+    } else if (type == NestedTensorVariant::CPP) {
+      TORCH_INTERNAL_ASSERT(val == -1 && coeff == -1);
+      // NB: Since we possibly don't have python instead of relying on torch
+      //     dispatch, we dispatch to the NestedTensor kernel directly.
+      // NB: we can potentially add the AutogradNestedTensor key
+      key_set_ = cpp_nested_int_ks;
+    }
+  }
 
   bool bool_() override {
     return false;
@@ -86,6 +114,9 @@ class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
   }
 
   std::string str() override {
+    if (type_ == NestedTensorVariant::CPP) {
+      return "jx";
+    }
     if (coeff_ == 1) {
       return "j" + std::to_string(val_);
     }
@@ -179,8 +210,27 @@ class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
 #undef DEFINE_NOT_SUPPORTED
 
  private:
+  // Why do we need to store val in additional to vec?
+  // It is not possible in eq to simply check whether the two vecs are the
+  // same because each nested int may be associated multiple vec, e.g. two
+  // NestedTensor with same raggedness but on different devices would have two
+  // different offsets tensors on different devices, but we'd still want their
+  // nested ints to compare equal, and we would do that by mapping both vec
+  // to the same val.
   int64_t val_;
   int64_t coeff_;
+  // Vec is a 1D tensor either representing offsets or lengths of a NestedTensor
+  // It should not be mutated
+  at::Tensor vec_;
+  // See NOTE [ NestedTensorVariant ]
+  NestedTensorVariant type_;
+  // Depending on the NestedTensorVariant we may want to either dispatch to
+  // Python or NestedTensor kernels. We dispatch to the Python kernel in the
+  // case the nested int corresponds to a NT python because we'd like for
+  // infra modes to be able to trace underneath.
+  c10::DispatchKeySet key_set_;
 };
+
+TORCH_API at::Tensor get_nested_int_vec(const c10::SymNodeImpl* node);
 
 } // namespace c10

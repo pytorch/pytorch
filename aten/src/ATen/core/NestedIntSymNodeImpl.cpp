@@ -72,7 +72,14 @@ c10::SymNode NestedIntSymNodeImpl::mul(const c10::SymNode& other) {
   }
   c10::optional<int64_t> c = other->constant_int();
   TORCH_CHECK(c.has_value());
-  return SymNode(c10::make_intrusive<NestedIntSymNodeImpl>(val_, coeff_ * *c));
+  return SymNode(c10::make_intrusive<NestedIntSymNodeImpl>(val_, coeff_ * *c, vec_, type_));
+}
+
+// TODO: it would be nice to have a version of this that does not bump the
+// refcount.
+at::Tensor get_nested_int_vec(const c10::SymNodeImpl* node) {
+  TORCH_INTERNAL_ASSERT(node->is_nested_int());
+  return at::Tensor(c10::intrusive_ptr<c10::TensorImpl>::reclaim_copy(node->nested_int_vec()));
 }
 
 } // namespace c10

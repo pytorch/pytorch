@@ -267,7 +267,7 @@ class FakeTensorConverter:
         if type(t) is torch.nn.Parameter:
             assert not make_constant
 
-        def mk_fake_tensor(make_meta_t):
+        def mk_fake_tensor(make_meta_t, *, orig_t=None):
             # NB: don't use in_kernel_invocation_manager. to
             # ensure FakeTensor can internally do constant computation
             # as necessary.  Invocation manager is "more correct" as
@@ -275,6 +275,10 @@ class FakeTensorConverter:
             # invariant is that make_meta_t only calls factories
             # for which it is not strictly necessary to use the
             # invocation manager (I think!)
+            if orig_t is not None:
+                maybe_memo = self._get_memo(orig_t)
+                if maybe_memo is not None:
+                    return maybe_memo
             with no_dispatch():
                 return FakeTensor(
                     fake_mode,

@@ -6,6 +6,7 @@ import sys
 from typing import Optional, Tuple
 import unittest
 from functools import partial
+import weakref
 
 import numpy as np
 import torch
@@ -41,6 +42,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_ROCM,
     TestCase,
+    disable_gc
 )
 
 from torch.nested._internal.nested_tensor import (
@@ -3012,7 +3014,7 @@ class TestNestedTensorSubclass(TestCase):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
         c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
-        nt, _offsets = jagged_from_list([a, b, c], None)
+        nt, offsets = jagged_from_list([a, b, c], None)
 
         for op in (
             torch.ops.aten.is_non_overlapping_and_dense.default,
@@ -3028,7 +3030,8 @@ class TestNestedTensorSubclass(TestCase):
                                     "directly calling torch.ops.aten.size"):
             torch.ops.aten.size.default(nt)
 
-        nested_int = torch.nested._internal.nested_tensor.get_tensor_symint(_offsets, coeff=1)
+        registry = torch.nested._internal.nested_tensor.get_nested_int_registry()
+        nested_int = registry.maybe_create(offsets)
         self.assertEqual(nt.size(), (3, nested_int, 3))
         self.assertEqual(nt.shape, (3, nested_int, 3))
         self.assertEqual(nt.dim(), 3)
@@ -3949,6 +3952,142 @@ class TestNestedTensorSubclass(TestCase):
             output_ref_atol, output_ref_rtol = get_tolerances(out, out_lp_ref)
 
             self.assertEqual(out, out_component, atol=output_ref_atol, rtol=output_ref_rtol)
+
+
+class TestNestedIntRegistry(TestCase):
+    def test_basic_creation(self):
+        registry = torch.nested._internal.nested_tensor.NestedIntRegistry()
+        vec = torch.tensor([1, 2, 3])
+        nested_int = registry.maybe_create(vec)
+        # Vec is the only vec, and so it is also the canonical vec
+        self.assertIs(nested_int.node.nested_int_vec(), vec)
+        nested_int2 = registry.maybe_create(vec)
+        # Return the same nested int if same vec is passed in
+        self.assertIs(nested_int2, nested_int)
+
+    def test_multiple_equiv_sets(self):
+        registry = torch.nested._internal.nested_tensor.NestedIntRegistry()
+        vec = torch.tensor([1, 2, 3])
+        vec2 = torch.tensor([4, 5, 6])
+        nested_int = registry.maybe_create(vec)
+        nested_int2 = registry.maybe_create(vec2)
+        self.assertIs(nested_int.node.nested_int_vec(), vec)
+        self.assertIs(nested_int2.node.nested_int_vec(), vec2)
+        self.assertIsNot(nested_int, nested_int2)
+        self.assertIs(nested_int == nested_int2, False)
+
+        # The same vec cannot belong to more than one equiv set
+        with self.assertRaisesRegex(AssertionError, "vec already has equiv_set"):
+            registry.maybe_create(vec, equiv_set_from=nested_int2)
+
+    def test_version_counting(self):
+        registry = torch.nested._internal.nested_tensor.NestedIntRegistry()
+        vec = torch.tensor([1, 2, 3])
+        registry.maybe_create(vec)
+        vec.add_(1)
+        with self.assertRaisesRegex(AssertionError, "has been mutated"):
+            registry.maybe_create(vec)
+
+        with self.assertRaisesRegex(AssertionError, "has been mutated"):
+            registry.maybe_set_metadata(vec, "foo", "bar")
+
+        with self.assertRaisesRegex(AssertionError, "has been mutated"):
+            registry.get_metadata(vec)
+
+    def test_return_canonical_nested_int_and_vec(self):
+        # Add another vec to the same equiv set returns the canonical nested int
+        registry = torch.nested._internal.nested_tensor.NestedIntRegistry()
+        vec = torch.tensor([1, 2, 3])
+        vec_clone = vec.clone()
+        nested_int = registry.maybe_create(vec)
+        nested_int2 = registry.maybe_create(vec_clone, equiv_set_from=nested_int)
+        self.assertIs(nested_int2, nested_int)
+
+    def test_ownership(self):
+        registry = torch.nested._internal.nested_tensor.NestedIntRegistry()
+        vec = torch.tensor([1, 2, 3])
+        nested_int = registry.maybe_create(vec)
+
+        # Vec does NOT keep the nested int alive
+        ref = weakref.ref(nested_int)
+        with disable_gc():
+            # There are no reference cycles
+            del nested_int
+            self.assertIsNone(ref())
+
+        # Nested int DOES keep the vec alive
+        nested_int = registry.maybe_create(vec)
+        ref = weakref.ref(vec)
+        del vec
+        self.assertIs(ref(), nested_int.node.nested_int_vec())
+
+    def test_changing_canonical_nested_int_and_vec(self):
+        registry = torch.nested._internal.nested_tensor.NestedIntRegistry()
+        vec = torch.tensor([1, 2, 3])
+        nested_int = registry.maybe_create(vec)
+        equiv_set_id = nested_int.node.nested_int()
+        del nested_int
+        nested_int2 = registry.maybe_create(vec)
+        # As long as the vec stays alive, the equiv_set_id should stay the same
+        self.assertEqual(nested_int2.node.nested_int(), equiv_set_id)
+
+        vec_clone = vec.clone()
+        nested_int3 = registry.maybe_create(vec_clone, equiv_set_from=nested_int2)
+        self.assertIs(nested_int3, nested_int2)
+        ref = weakref.ref(vec)
+        del vec, nested_int2, nested_int3
+        # vec is dead because there are no more nested ints keeping it alive
+        self.assertIsNone(ref())
+
+        nested_int4 = registry.maybe_create(vec_clone)
+        # The equiv_set_id should not have changed because at least one vec
+        # in the equiv set is still alive: vec_clone
+        self.assertEqual(nested_int4.node.nested_int(), equiv_set_id)
+        # The new canonical vec is vec_clone
+        self.assertIs(nested_int4.node.nested_int_vec(), vec_clone)
+
+        self.assertTrue(len(registry._equiv_sets) == 1)
+        with disable_gc():
+            del vec_clone, nested_int4
+            self.assertTrue(len(registry._equiv_sets) == 0)
+
+    def test_custom_equiv_set(self):
+        # A equiv set is "custom" if its canonical int was created using a
+        # custom ctor_fn.
+        count = [0]
+
+        def ctor_fn(equiv_id, vec):
+            count[0] += 1
+            return torch.nested._internal.nested_tensor._get_nested_int(equiv_id, vec)
+
+        registry = torch.nested._internal.nested_tensor.NestedIntRegistry()
+        vec = torch.tensor([1, 2, 3])
+        nested_int = registry.maybe_create(vec, ctor_fn=ctor_fn)
+        self.assertEqual(count[0], 1)
+
+        # Grab the same nested int again, and the ctor_fn should not be called
+        self.assertIs(registry.maybe_create(vec), nested_int)
+        self.assertEqual(count[0], 1)
+        # Okay to pass ctor_fn again, it won't be used here though
+        self.assertIs(registry.maybe_create(vec, ctor_fn=ctor_fn), nested_int)
+        self.assertEqual(count[0], 1)
+
+        # Custom equiv set are different from ordinary equiv set
+        # in that their canonical nested int cannot be changed. If the nested
+        # int of a custom equiv set dies, don't allow re-creation.
+        del nested_int
+        with self.assertRaises(AssertionError):
+            registry.maybe_create(vec)
+        with self.assertRaises(AssertionError):
+            registry.maybe_create(vec, ctor_fn=ctor_fn)
+
+        # Custom-ness of a given equiv set is immutable. ctor_fn cannot be used
+        # during re-creation.
+        vec = torch.tensor([1, 2, 3])
+        nested_int = registry.maybe_create(vec)
+        del nested_int
+        with self.assertRaises(AssertionError):
+            registry.maybe_create(vec, ctor_fn=ctor_fn)
 
 
 instantiate_parametrized_tests(TestNestedTensor)

@@ -227,6 +227,25 @@ class TensorPropertySource(ChainedSource):
         else:
             raise AssertionError(f"unhandled {self.prop}")
 
+@dataclasses.dataclass(frozen=True)
+class SymNodePropertySource(ChainedSource):
+    prop: str
+
+    def __post_init__(self):
+        assert self.base is not None
+
+    def reconstruct(self, codegen):
+        return [
+            *self.base.reconstruct(codegen),
+            codegen.create_load_attr(self.prop),
+        ]
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"{self.base.name()}.node.{self.prop}()"
+
 
 @dataclasses.dataclass(frozen=True)
 class NegateSource(ChainedSource):

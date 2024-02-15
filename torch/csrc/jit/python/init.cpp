@@ -101,6 +101,7 @@
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
 #include <torch/csrc/utils/cpp_stacktraces.h>
 
+#include <ATen/core/NestedIntSymNodeImpl.h>
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
 #include <c10/util/signal_handler.h>
@@ -1300,9 +1301,23 @@ void initJITBindings(PyObject* module) {
             return node->nested_int();
           })
       .def(
+          "nested_int_vec",
+          [](const c10::SymNode& node) {
+            TORCH_CHECK(node->is_nested_int());
+            return c10::get_nested_int_vec(node.get());
+          })
+      .def(
           "nested_int_coeff",
           [](const c10::SymNode& node) {
+            TORCH_CHECK(node->is_nested_int());
             return node->nested_int_coeff();
+          })
+      .def(
+          "clone_nested_int_with_new_vec",
+          [](const c10::SymNode& node, const at::Tensor& vec, int64_t sum_vec) {
+            TORCH_CHECK(node->is_nested_int());
+            return c10::SymNode(c10::make_intrusive<c10::NestedIntSymNodeImpl>(
+                *node->nested_int(), *node->nested_int_coeff(), vec, c10::NestedTensorVariant::PYTHON));
           });
 
   // clang-format on

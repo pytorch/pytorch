@@ -65,6 +65,7 @@ from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._traceback import format_frame, CapturedTraceback
+from torch.utils.weak import WeakTensorKeyDictionary
 from torch._utils_internal import signpost_event
 
 from torch._logging import LazyString
@@ -932,10 +933,13 @@ class SubclassSymbolicContext(StatefulSymbolicContext):
     flexibility, with inner symbolic contexts mapped via attr -> symbolic context.
     """
     inner_contexts: Dict[str, SymbolicContext] = None
+    tensor_to_inner_context: WeakTensorKeyDictionary = None
 
     def __post_init__(self):
         if self.inner_contexts is None:
             self.inner_contexts = {}
+        if self.tensor_to_inner_context is None:
+            self.tensor_to_inner_context = WeakTensorKeyDictionary()
 
 
 def is_symbolic(val: Union[int, SymInt, float, SymFloat, bool, SymBool]) -> bool:
@@ -2170,6 +2174,7 @@ class ShapeEnv:
         source: Source,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
+        metafy_fn: Optional[Callable] = None,
     ):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
@@ -2230,6 +2235,7 @@ class ShapeEnv:
             [_is_dim_dynamic(ex, i) for i in range(ex.dim())],
             source,
             symbolic_context=symbolic_context,
+            metafy_fn=metafy_fn,
         )
 
     @record_shapeenv_event()
@@ -2242,6 +2248,7 @@ class ShapeEnv:
         source: Source,
         *,
         symbolic_context: Optional[SymbolicContext] = None,
+        metafy_fn: Optional[Callable] = None,
     ):
         dim = len(ex_size)
 
@@ -2328,6 +2335,7 @@ class ShapeEnv:
                 sym,
                 hint=hint,
                 source=TensorPropertySource(source, TensorProperty.SIZE, i),
+                metafy_fn=metafy_fn,
             )
             for i, (sym, hint) in enumerate(zip(size, ex_size))
         ]
@@ -2337,7 +2345,7 @@ class ShapeEnv:
             # we computed
             assert stride_expr is not None
             sym_stride.append(self.create_symintnode(
-                stride_expr, hint=ex_stride[i], source=TensorPropertySource(source, TensorProperty.STRIDE, i)))
+                stride_expr, hint=ex_stride[i], source=TensorPropertySource(source, TensorProperty.STRIDE, i),  metafy_fn=metafy_fn))
         sym_storage_offset = self.create_symintnode(
             self.create_symbol(
                 ex_storage_offset,
@@ -2347,7 +2355,8 @@ class ShapeEnv:
                 symbolic_context=symbolic_context
             ),
             hint=ex_storage_offset,
-            source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
+            source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
+            metafy_fn=metafy_fn)
         return tuple(sym_sizes), tuple(sym_stride), sym_storage_offset
 
     @record_shapeenv_event()
@@ -2357,6 +2366,7 @@ class ShapeEnv:
             *,
             hint: Optional[int],
             source: Optional[Source] = None,
+            metafy_fn: Optional[Callable] = None,
     ):
         """Create a SymInt value from a symbolic expression
 
@@ -2385,7 +2395,24 @@ class ShapeEnv:
                 assert int(sym) == hint
             out = int(sym)
         else:
-            out = SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
+            if is_nested_int(hint):
+                fake_vec = metafy_fn(
+                    hint.node.nested_int_vec(),
+                    torch._dynamo.source.SymNodePropertySource(source, "nested_int_vec"),
+                )
+
+                def ctor(i, v):
+                    return SymInt(
+                        SymNode(sym, self, int, hint, fx_node=fx_node,
+                                nested_int=i, nested_int_vec=v)
+                    )
+                registry = torch.nested._internal.nested_tensor.get_nested_int_registry()
+
+                out = registry.maybe_create(fake_vec, ctor_fn=ctor)
+                if hint.node.nested_int_coeff() != 1:
+                    out = ctor(out.node.nested_int(), out.node.nested_int_vec())
+            else:
+                out = SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
         return out
 
     @record_shapeenv_event()

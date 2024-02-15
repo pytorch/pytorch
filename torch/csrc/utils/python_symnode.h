@@ -3,6 +3,7 @@
 #include <c10/core/SafePyObject.h>
 #include <c10/core/SymNodeImpl.h>
 
+#include <ATen/core/NestedIntSymNodeImpl.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/pybind.h>
@@ -98,6 +99,12 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   bool is_nested_int() const override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("is_nested_int")().is(py::handle(Py_True));
+  }
+
+  c10::TensorImpl* nested_int_vec() const override {
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "We don't expect to call this nested_int_vec on PythonSymNodeImpl in C++");
   }
 
   bool has_hint() override {
