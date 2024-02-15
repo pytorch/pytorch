@@ -28,17 +28,10 @@ layout(set = 0, binding = 4) uniform PRECISION restrict Block {
 }
 uBlock;
 
-// In our shader's usage, both the numerator and denominator are int, so the
-// result of their division is already truncated to int. GLSL's ceil() expects
-// one float input, so instead we introduce our own helper.
-int ceil(int a, int b) {
-  return (a + b - 1) / b;
-}
-
 // Let us define
 //
-// input = (n, in_C, in_L),
-// output = (n, out_C, out_L),
+// input = (N, in_C, in_L),
+// output = (N, out_C, out_L),
 // groups = G,
 // kernel = K,
 //
@@ -47,9 +40,13 @@ int ceil(int a, int b) {
 // weight = (out_C, in_C / G, K),
 // bias = (out_C,).
 //
-// This implementation performs out_C number of shader invocations, where each
-// invocation calculates the rolling kernel of the length dimension, i.e.,
-// computes the out_L results.
+// This implementation performs out_C shader invocations, where each invocation
+// calculates the rolling kernel of the length dimension for each batch, i.e.,
+// computes out_L * N results.
+//
+// Note that we can rewrite this implementation as out_L * out_C * ceil(N / 4)
+// shader invocations, where each invocation computes 1 result. But that
+// performs worse.
 void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
 
@@ -62,13 +59,8 @@ void main() {
   const int out_group_size = uBlock.out_group_size;
   const int batch_size = uBlock.batch_size;
 
-  // The global workgroup should have taken care of it. We perform one shader
-  // invocation, per 1D length array of the output tensor.
-  if (pos.x >= 1 || pos.z >= 1) {
-    return;
-  }
-
   // "out_c" is the output's channel index where we write our result.
+  // Across shader invocations, this is the only value that varies.
   int out_c = pos.y;
   vec4 bias = texelFetch(uBias, ivec3(out_c, 0, 0), 0);
 
@@ -82,43 +74,41 @@ void main() {
   int l_start = -padding;
   int l_end = in_length + padding - dilation * (kernel_size - 1);
 
-  // "out_l" tracks the output's length index where we write our result.
-  int out_l = 0;
+  // Since the input/output tensors are channel-packed, which is along the
+  // batch dimension, we can batch-read/write four elements at a time.
+  for (int n = 0; n < batch_size; n += 4) {
+    // "out_l" tracks the output's length index where we write our result.
+    int out_l = 0;
 
-  for (int in_l = l_start; in_l < l_end; in_l += strides, ++out_l) {
-
-    // "k" tracks the kernel's index for our input-kernel computation.
-    // The kstart/kend borders detect when the corresponding input index is out
-    // of bounds.
-    int k_start = max(0, ceil(-in_l, dilation));
-    int k_end = min(kernel_size, ceil(in_length-in_l, dilation));
-
-    // Since the input/output tensors are channel-packed, which is along the
-    // batch dimension, we can batch-read/write four elements at a time.
-    for (int n = 0; n < batch_size; n += 4) {
-      vec4 v = vec4(0,0,0,0);
+    for (int in_l = l_start; in_l < l_end; in_l += strides, ++out_l) {
+      vec4 sum = vec4(0,0,0,0);
 
       for (int in_c = c_start; in_c < c_end; ++in_c) {
-        for (int k = k_start; k < k_end; ++k) {
-          int in_pos_x = in_l + k * dilation;
-          const ivec3 in_pos = ivec3(in_pos_x, in_c, n / 4);
-          const vec4 input_value = texelFetch(uInput, in_pos, 0);
-
-          // Note that we are reading weight in the inner loop, this could be
-          // improved by moving it before the outer loop. Since the weight vector is
-          // contant for the entire call.
-
-          // weight in input-space: (out_c, in_c % in_group_size, k);
-          // notice that c is 4-packed. We need to mod 4 to get the actual weight.
-          const ivec3 w_pos = ivec3(k, in_c % in_group_size, out_c / 4);
+        // "k" tracks the kernel's index for our input-kernel computation.
+        // It reads out-of-bound zeros, but trying to avoid them complicates
+        // for-loop conditions, which results in worse performance.
+        for (int k = 0; k < kernel_size; k += 4) {
+          // Since the weight tensor is width-packed, which is along the length
+          // dimension, we can batch-read four elements at a time.
+          const ivec3 w_pos = ivec3(k / 4, in_c % in_group_size, out_c);
           const vec4 weight = texelFetch(uKernel, w_pos, 0);
 
-          v += weight[out_c % 4] * input_value;
+          const ivec3 in_pos_0 = ivec3(in_l + k * dilation, in_c, n / 4);
+          sum = fma(weight.xxxx, texelFetch(uInput, in_pos_0, 0), sum);
+
+          const ivec3 in_pos_1 = ivec3(in_l + (k+1) * dilation, in_c, n / 4);
+          sum = fma(weight.yyyy, texelFetch(uInput, in_pos_1, 0), sum);
+
+          const ivec3 in_pos_2 = ivec3(in_l + (k+2) * dilation, in_c, n / 4);
+          sum = fma(weight.zzzz, texelFetch(uInput, in_pos_2, 0), sum);
+
+          const ivec3 in_pos_3 = ivec3(in_l + (k+3) * dilation, in_c, n / 4);
+          sum = fma(weight.wwww, texelFetch(uInput, in_pos_3, 0), sum);
         }
       }
 
       ivec3 out_pos = ivec3(out_l, out_c, n / 4);
-      imageStore(uOutput, out_pos, v + bias.x);
+      imageStore(uOutput, out_pos, sum + bias.x);
     }
   }
 }
