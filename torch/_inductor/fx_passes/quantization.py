@@ -1360,7 +1360,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
             graph.erase_node(conv_node)
             # Erase the dequant pattern
             if dtype == torch.bfloat16:
-                graph.erase_node(convert_to_bf16)
+                graph.erase_node(convert_to_bf16)  # type: ignore[possibly-undefined]
             # Erase the dequant pattern
             graph.erase_node(mul_node)
             graph.erase_node(sub_node)
@@ -1369,7 +1369,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
             if clone_node is not None:
                 graph.erase_node(clone_node)
             if dtype == torch.bfloat16:
-                graph.erase_node(weight_to_bf16_node)
+                graph.erase_node(weight_to_bf16_node)  # type: ignore[possibly-undefined]
             graph.erase_node(dequant_per_channel)
             counters["inductor"]["qconv2d_weight_prepack_matcher_count"] += 1
             counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"] += len(
@@ -1697,14 +1697,14 @@ def _register_qlinear_weight_prepack_pass(
                 if input_contiguous:
                     graph.erase_node(output_reshape_node)
                 elif not input_contiguous and bias:
-                    graph.erase_node(output_add_node_for_bias)
+                    graph.erase_node(output_add_node_for_bias)  # type: ignore[possibly-undefined]
             graph.erase_node(linear_node)
             if input_dim_exceeds_two:
                 if input_contiguous:
                     graph.erase_node(act_reshape_node)
                 else:
                     graph.erase_node(act_expand_node)
-                    graph.erase_node(wgt_expand_node)
+                    graph.erase_node(wgt_expand_node)  # type: ignore[possibly-undefined]
             if dtype == torch.bfloat16:
                 graph.erase_node(activation_to_bf16_node)
             # Erase the dequant pattern
@@ -1714,7 +1714,7 @@ def _register_qlinear_weight_prepack_pass(
             # Erase the dequant per channel pattern
             graph.erase_node(t_node)
             if dtype == torch.bfloat16:
-                graph.erase_node(weight_to_bf16_node)
+                graph.erase_node(weight_to_bf16_node)  # type: ignore[possibly-undefined]
             graph.erase_node(dequant_per_channel)
 
             counters["inductor"]["qlinear_weight_prepack_matcher_count"] += 1
