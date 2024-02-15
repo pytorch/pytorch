@@ -1,7 +1,6 @@
 name: Index PyTorch Tests for Target Determination
 
 on:
-  pull_request:
   workflow_dispatch:
   # TODO: Trigger every few hours
 
@@ -59,12 +58,6 @@ jobs:
           repository: osalpekar/llm-target-determinator
           ref: v0.0.1
           path: llm-target-determinator
-
-      # - name: Setup Conda
-      #   uses: conda-incubator/setup-miniconda@v2.1.1
-      #   with:
-      #     miniconda-version: "py39_4.12.0"
-      #     python-version: 3.9
 
       - name: Install Requirements
         shell: bash -l {0}
