@@ -379,6 +379,15 @@ static c10::optional<int64_t> maybe_current_level() {
   return nullopt;
 }
 
+static int64_t count_interpreters(TransformType key) {
+  const auto& stack = getDynamicLayerStack();
+  int64_t cnt = 0;
+  for (auto i : stack) {
+    cnt += i.interpreter().key() == key ? 1 : 0;
+  }
+  return cnt;
+}
+
 static void tls_set_vmap_excluded(bool excluded) {
   c10::impl::tls_set_dispatch_key_excluded(
       c10::DispatchKey::FuncTorchBatched, excluded);
@@ -489,6 +498,7 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("_set_dynamic_layer_keys_included", &_set_dynamic_layer_keys_included);
   m.def("dump_dls", &dump_dls);
   m.def("dump_local_tls", &dump_local_tls);
+  m.def("count_interpreters", &count_interpreters);
   m.def("is_functorch_wrapped_tensor", [](const Tensor& tensor) {
     return maybe_get_level(tensor) != -1;
   });

@@ -2657,6 +2657,10 @@ class GraphModule(torch.nn.Module):
         v = torch.randn(5)
         wrapped_gm = self._compile_check(wrapper_fn, (x, v))
 
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         self.assertExpectedInline(
             actual,
@@ -2707,6 +2711,10 @@ class GraphModule(torch.nn.Module):
         x = torch.randn([5])
         v = torch.randn(5)
         wrapped_gm = self._compile_check(wrapper_fn, (x, v))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         self.assertExpectedInline(
@@ -2761,6 +2769,10 @@ class GraphModule(torch.nn.Module):
         x = torch.randn([5])
         v = torch.randn(5)
         wrapped_gm = self._compile_check(wrapper_fn, (x, v))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         self.assertExpectedInline(

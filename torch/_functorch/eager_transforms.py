@@ -992,7 +992,8 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
 
     with jvp_increment_nesting() as level:
         with fwAD._set_fwd_grad_enabled(True):
-            ctx = fwAD.dual_level if torch._C._functorch.maybe_current_level() == 1 else noop
+            JVP_NESTING = torch._C._functorch.count_interpreters(torch._C._functorch.TransformType.Jvp)
+            ctx = fwAD.dual_level if JVP_NESTING == 1 else noop
             with ctx() as dual_level:
                 flat_duals = tuple(fwAD.make_dual(p, t, level=dual_level)
                                    for p, t in zip(flat_primals, flat_tangents))
