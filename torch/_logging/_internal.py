@@ -2,6 +2,7 @@ import functools
 import itertools
 import logging
 import os
+import os.path
 import re
 from dataclasses import dataclass, field
 from importlib import __import__
@@ -706,7 +707,7 @@ class TorchLogsFormatter(logging.Formatter):
                 return artifact_formatter.format(record)
 
         record.message = record.getMessage()
-        record.asctime = self.formatTime(record, self.datefmt)
+        record.asctime = self.formatTime(record, "%m%d %H:%M:%S")
 
         # exception handling - copied from logging.Formatter.format
         s = record.message
@@ -733,7 +734,21 @@ class TorchLogsFormatter(logging.Formatter):
         if (trace_id := torch._guards.CompileContext.current_trace_id()) is not None:
             record.traceid = f" [{trace_id}]"
 
-        prefix = f"{record.rankprefix}[{record.asctime}]{record.traceid} {record.name}: [{record.levelname}]"
+        glog_level_to_abbr = {
+            "DEBUG": "V",  # V is for VERBOSE in glog
+            "INFO": "I",
+            "WARNING": "W",
+            "ERROR": "E",
+            "CRITICAL": "C",
+        }
+
+        shortlevel = glog_level_to_abbr.get(record.levelname, record.levelname)
+
+        prefix = (
+            f"{record.rankprefix}{shortlevel}{record.asctime}.{int(record.msecs*1000):06d} {record.thread} "
+            f"{os.path.relpath(record.pathname, os.path.dirname(os.path.dirname(torch.__file__)))}:"
+            f"{record.lineno}{record.traceid}"
+        )
         return "\n".join(f"{prefix} {l}" for l in lines)
 
 
