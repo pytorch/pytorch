@@ -2611,7 +2611,7 @@ class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s0 : torch.SymInt, L_x_ : torch.Tensor):
+    def forward(self, L_x_ : torch.Tensor):
         child = L_x_
 
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
