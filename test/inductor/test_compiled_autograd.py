@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import contextlib
 import functools
 import re
 import sys
@@ -18,14 +19,18 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 # note: these tests are not run on windows due to inductor_utils.HAS_CPU
 
 
-def compiler_fn(gm):
+def compiler_fn(gm, fullgraph):
     """Same as torch.compile() but counts number of compiles"""
 
     def inner_compiler(gm_, example_inputs_):
         counters["compiled_autograd"]["compiles"] += 1
         return inductor.compile(gm_, example_inputs_)
 
-    return torch.compile(gm, backend=inner_compiler, fullgraph=True, dynamic=True)
+    return torch.compile(gm, backend=inner_compiler, fullgraph=fullgraph, dynamic=True)
+
+
+def compiled_autograd_ctx(compiler_fn, fullgraph=True):
+    return compiled_autograd.enable(functools.partial(compiler_fn, fullgraph=fullgraph))
 
 
 # TODO(jansel): hooks as lambdas creates recompiles in dynamo, we should fix that
@@ -51,9 +56,11 @@ class TestCompiledAutograd(TestCase):
             torch.manual_seed(123)
             expected = list(fn())
             torch.manual_seed(123)
-            with compiled_autograd.enable(compiler_fn):
+            with compiled_autograd_ctx(compiler_fn):
                 opt_fn = torch.compile(fn) if compile_fn else fn
                 actual = list(opt_fn())
+            print(f"expected: {expected}")
+            print(f"actual: {actual}")
             self.assertEqual(expected, actual)
             self.assertEqual(counters["compiled_autograd"]["captures"], count)
             self.assertEqual(counters["compiled_autograd"]["compiles"], count)
@@ -374,7 +381,7 @@ class TestCompiledAutograd(TestCase):
         eager_check()
 
         for i in range(0, 5):
-            with compiled_autograd.enable(compiler_fn):
+            with compiled_autograd_ctx(compiler_fn):
                 eager_check()
 
             eager_check()
@@ -542,7 +549,7 @@ class TestCompiledAutograd(TestCase):
 
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_custom_fn_output_metadata(self):
-        def my_compiler_fn(gm):
+        def my_compiler_fn(gm, fullgraph):
             for node in gm.graph.nodes:
                 if isinstance(node.target, torch._ops.OpOverload):
                     assert (
@@ -554,7 +561,7 @@ class TestCompiledAutograd(TestCase):
                 return inductor.compile(gm_, example_inputs_)
 
             return torch.compile(
-                gm, backend=inner_compiler, fullgraph=True, dynamic=True
+                gm, backend=inner_compiler, fullgraph=fullgraph, dynamic=True
             )
 
         def fn():
@@ -699,8 +706,20 @@ class EagerAutogradTests(TestCase):
         @functools.wraps(fn)
         def wrapped(self: EagerAutogradTests):
             torch._dynamo.reset()
-            with compiled_autograd.enable(compiler_fn):
-                return fn(self)
+            expected_graph_breaks_cnt = pass_with_graph_breaks_tests.get(name, 0)
+            with compiled_autograd_ctx(
+                compiler_fn, fullgraph=(expected_graph_breaks_cnt == 0)
+            ):
+                result = fn(self)
+
+                actual_graph_breaks = torch._dynamo.utils.counters.get("graph_break", [])
+                if expected_graph_breaks_cnt != len(actual_graph_breaks):
+                    print(actual_graph_breaks)
+                    assert(len(actual_graph_breaks) == expected_graph_breaks_cnt)
+                    # breakpoint()
+
+                return result
+
 
         if not callable(fn):
             return
@@ -717,8 +736,30 @@ known_failures_re = re.compile(
     r"^test_(sparse|profiler|gradcheck|checkpoint|named_tensor)"
 )
 
+pass_with_graph_breaks_tests = {
+    "test_grad_fn_prehooks_remove_hooks": 1,  # skipfiles: RemovableHandle.remove
+    "test_hook_none": 1,  # skipfiles: TestCase.assertIsNotNone
+    "test_hooks": 1,  # skipfiles: TestCase.assertIsInstance
+    "test_index_backward_does_not_save_tensor": 1,  # dynamic shape operator: aten.nonzero.default
+    "test_mark_non_differentiable_mixed": 1,  # skipfiles: TestCase.assertTrue
+    "test_materialize_grads": 1,  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
+    "test_return_leaf": 1,  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
+    "test_save_none_for_backward": 1,  # skipfiles: TestCase.assertIsNone
+    "test_set_materialize_non_diff_grads": 1,  # skipfiles: TestCase.assertIsNone
+    "test_setitem_mask": 1,  # dynamic shape operator: aten.nonzero.default
+    "test_tensor_hooks_inplace": 1,  # call_function UserDefinedClassVariable() [] {}
+    "test_tensor_hooks_inplace_multiple_outputs": 1,  # call_function UserDefinedClassVariable() [] {}
+    "test_tensor_hooks_inplace_over_view": 1,  # call_function UserDefinedClassVariable() [] {}
+}
+
 # Bugs needing investigation:
 known_failing_tests = {
+    "test_accumulate_grad_posthooks_can_observe_tensor_prehook",  # data dependent operator: aten.allclose.default
+    "test_grad_fn_prehooks",  # call_function UserDefinedClassVariable() [] {}
+    "test_post_accumulate_grad_hook_e2e",  # optimizer directly calls torch._dynamo.graph_break
+    # continue investigating above, has more than 1 graph break
+    "test_post_accumulate_grad_hook_ordering",  # AssertionError: Tensor-likes are not close!
+    "test_post_accumulate_grad_hook_returns_not_None",  # AssertionError: RuntimeError not raised"
     "test_current_graph_task_execution_order",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function <
     "test_input_buffer_accum",  # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
     "test_graph_save_on_cpu_cuda",  # AssertionError: 0 not greater than 0
@@ -727,11 +768,7 @@ known_failing_tests = {
     "test_reentrant_with_non_leaf_variable_hook",  # torch._dynamo.exc.Unsupported: inline in skipfiles: RemovableHan
     "test_saved_variable_saved_original_inplace_detach",  # AssertionError: RuntimeError not raised
     "test_saving_variable_to_disk",  # Cannot call numel() on tensor with symbolic sizes/strides
-    "test_setitem_mask",  # torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode: It appears that you're
-    "test_tensor_hooks_inplace_over_view",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
-    "test_tensor_hooks_inplace",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
     "test_wrapped_number_saved_variable_hooks",  # RuntimeError: this hook should not be called
-    "test_accumulate_grad_posthooks_can_observe_tensor_prehook",  # data dependent operator: aten.allclose.default
     "test_accumulate_grad_tensor_reference",  # backend='inner_compiler' raised:
     "test_anomaly_grad_warnings",  # "one of the variables needed for gradient computation has been modified by an...
     "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
@@ -740,13 +777,6 @@ known_failing_tests = {
     "test_custom_function_exception",  # "Simulate error on backward pass" does not match "type object 'SimulateBackwa...
     "test_grad_batched_grad",  # Cannot access storage of BatchedTensorImpl
     "test_grad_unreachable_discovery",  # specifying inputs= with .backward() not yet implemented for compiled autograd
-    "test_index_backward_does_not_save_tensor",  # dynamic shape operator: aten.nonzero.default
-    "test_post_accumulate_grad_hook_e2e",  # tensor_post_acc_grad_hooks not implemented for compiled autograd
-    "test_post_accumulate_grad_hook_gets_cleaned_up",  # tensor_post_acc_grad_hooks not implemented for compiled autograd
-    "test_post_accumulate_grad_hook_multiple_hooks",  # tensor_post_acc_grad_hooks not implemented for compiled autograd
-    "test_post_accumulate_grad_hook_multiple_tensors",  # tensor_post_acc_grad_hooks not implemented for compiled autograd
-    "test_post_accumulate_grad_hook_ordering",  # tensor_post_acc_grad_hooks not implemented for compiled autograd
-    "test_post_accumulate_grad_hook_returns_not_None",  # "hooks should return None." does not match
     "test_reentrant_child_error",  # "Simulate error" does not match "type object 'ReentrantFunc' has no attribute...
     "test_retain_grad_cycle",  # retains_grad_hooks not implemented for compiled autograd
     "test_retain_grad_inplace",  # retains_grad_hooks not implemented for compiled autograd
@@ -777,7 +807,6 @@ known_failing_tests = {
     "test_hook_closure_cycle_use_custom_function_True_use_tensor_hook_False",  # AttributeError: type object
     "test_hook_closure_cycle_use_custom_function_True_use_tensor_hook_True",  # AttributeError: type object
     "test_hook_edge_case_when_called_with_grad",  # RuntimeError: specifying inputs= with .backward() not yet
-    "test_hooks",  # torch._dynamo.exc.Unsupported: inline in skipfiles
     "test_inplace_on_view_backward",  # RuntimeError: compiled_autograd does not support create_graph
     "test_multi_grad_any_hooks",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
     "test_multi_grad_all_hooks",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
@@ -807,14 +836,9 @@ known_failing_tests = {
     "test_deep_reentrant",  # torch._dynamo.exc.InternalTorchDynamoError: '<' not supported between instances of
     "test_dont_materialize_grads",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsNone
     "test_function_returns_undefined_tensor",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function
-    "test_grad_fn_prehooks",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
     "test_grad_fn_prehooks_multiple_outputs",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles:
-    "test_grad_fn_prehooks_remove_hooks",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: RemovableHandle.remove
     "test_grad_mode_restored_reentrant",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertTrue
-    "test_hook_none",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsNotNone
     "test_invalid_gradients",  # AssertionError: "expected shape" does not match "The size of tensor a (5) must match
-    "test_mark_non_differentiable_mixed",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertTrue
-    "test_materialize_grads",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
     "test_naughty_autograd_function_stashing_ctx",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function
     "test_no_grad_copy",  # torch._dynamo.exc.Unsupported: call_function args: TensorVariable() SkipFunctionVariable()
     "test_no_grad_copy_sparse",  # torch._dynamo.exc.Unsupported: Tensor.data_ptr
@@ -824,14 +848,10 @@ known_failing_tests = {
     "test_reentrant_with_callbacks_depth_1",  # torch._dynamo.exc.Unsupported: Tensor.requires_grad_
     "test_return_duplicate",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
     "test_return_duplicate_inplace",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
-    "test_return_leaf",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
-    "test_save_none_for_backward",  # AssertionError:
     "test_save_output_nr",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
     "test_saved_variables_deprecated",  # torch._dynamo.exc.Unsupported: UNPACK_SEQUENCE SkipFunctionVariable()
-    "test_set_materialize_non_diff_grads",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsNone
     "test_setup_context_when_forward_has_default_args",  # torch._dynamo.exc.Unsupported: call_function args
     "test_simple_reentrant",  # torch._dynamo.exc.Unsupported: call_method SkipFunctionVariable() sum [] {}
-    "test_tensor_hooks_inplace_multiple_outputs",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
     "test_lobpcg",  # torch._dynamo.exc.Unsupported: 'call_function LOBPCGAutogradFunction.backward in skip_files
 }
 
