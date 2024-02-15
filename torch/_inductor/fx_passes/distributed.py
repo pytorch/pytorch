@@ -442,16 +442,27 @@ def _bucket_size_fusion(
     curr_size = 0
     curr_blocks = []
 
+    count = 0
     for block in comm_blocks:
         curr_blocks.append(block)
         # TODO: determine the dtype
         curr_size += cast(torch.Size, block.shape).numel() * 4
         if curr_size < bucket_size:
             continue
+
+        count += 1
+        if torch.distributed.get_rank() == 0:
+            logging.info(
+                f"DDP bucketing, new block {count=}, {curr_size=}, {bucket_size}"
+            )
         yield curr_blocks
 
+        bucket_size = bucket_cap_size
         curr_blocks = []
         curr_size = 0
+
+    if curr_blocks:
+        yield curr_blocks
 
 
 def _fuse_ddp_communication(
