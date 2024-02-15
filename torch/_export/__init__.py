@@ -220,36 +220,6 @@ def capture_pre_autograd_graph(
     return module
 
 
-def export(
-    f: Callable,
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
-    constraints: Optional[List[Constraint]] = None,
-    *,
-    strict: bool = True,
-    preserve_module_call_signature: Tuple[str, ...] = (),
-) -> ExportedProgram:
-    from torch.export._trace import _export
-    warnings.warn("This function is deprecated. Please use torch.export.export instead.")
-
-    if constraints is not None:
-        warnings.warn(
-            "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
-            "and will not be supported in the future. "
-            "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-    return _export(
-        f,
-        args,
-        kwargs,
-        constraints,
-        strict=strict,
-        preserve_module_call_signature=preserve_module_call_signature,
-    )
-
-
 def save(
     ep: ExportedProgram,
     f: Union[str, os.PathLike, io.BytesIO],
