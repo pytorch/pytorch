@@ -26,6 +26,7 @@ from torch._dynamo.testing import (
 from torch._dynamo.utils import counters, ifdynstaticdefault
 from torch._higher_order_ops.wrap import wrap
 from torch.testing._internal.common_utils import (
+    munge_exc,
     TEST_WITH_TORCHDYNAMO,
     xfailIfTorchDynamo,
 )
@@ -2424,8 +2425,8 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([])      # with grad_increment_nesting() as level:  # _functorch/eager_transforms.py:1228 in grad_and_value_impl""",
-            record.getMessage(),
+    - torch._functorch.pyfunctorch.compare_functorch_state([])      # with grad_increment_nesting() as level:  # _functorch/eager_transforms.py:N in grad_and_value_impl""",
+            munge_exc(record.getMessage()),
         )
 
     @config.patch(capture_func_transforms=True)
@@ -2472,8 +2473,8 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'same')])  # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:401 in _flat_vmap""",
-            record.getMessage(),
+    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'same')])  # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:N in _flat_vmap""",
+            munge_exc(record.getMessage()),
         )
 
     @xfailIfTorchDynamo
@@ -2499,8 +2500,8 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])  # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:401 in _flat_vmap""",
-            record.getMessage(),
+    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])  # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:N in _flat_vmap""",
+            munge_exc(record.getMessage()),
         )
 
     @xfailIfTorchDynamo
@@ -2530,8 +2531,8 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])  # with grad_increment_nesting() as level:  # _functorch/eager_transforms.py:1228 in grad_and_value_impl""",
-            record.getMessage(),
+    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])  # with grad_increment_nesting() as level:  # _functorch/eager_transforms.py:N in grad_and_value_impl""",
+            munge_exc(record.getMessage()),
         )
 
     @xfailIfTorchDynamo
@@ -2552,8 +2553,8 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'same')])  # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:401 in _flat_vmap""",
-            record.getMessage(),
+    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'same')])  # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:N in _flat_vmap""",
+            munge_exc(record.getMessage()),
         )
 
 
