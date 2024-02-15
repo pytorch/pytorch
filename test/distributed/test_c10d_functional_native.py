@@ -499,10 +499,8 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         self._init_process_group()
 
         def func(arg: torch.Tensor) -> torch.Tensor:
-            ag0 = torch.ops._c10d_functional.all_gather_into_tensor(
-                arg, self.world_size, "default"
-            )
-            ag0 = torch.ops._c10d_functional.wait_tensor(ag0)
+            ag0 = funcol.all_gather_tensor(arg, 0, "default")
+            ag0 = funcol.wait_tensor(ag0)
             return ag0
 
         arg = torch.rand(4, 4, device=self.device)
@@ -533,10 +531,8 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         self._init_process_group()
 
         def func(args: List[torch.Tensor]) -> torch.Tensor:
-            ag0 = torch.ops._c10d_functional.all_gather_into_tensor_coalesced(
-                args, self.world_size, "default"
-            )
-            ag0 = [torch.ops._c10d_functional.wait_tensor(out) for out in ag0]
+            ag0 = funcol.all_gather_into_tensor_coalesced(args, "default")
+            ag0 = [funcol.wait_tensor(out) for out in ag0]
             return ag0
 
         args = [torch.rand(4, 4, device=self.device) for _ in range(4)]
@@ -575,10 +571,8 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         self._init_process_group()
 
         def func(arg: torch.Tensor) -> torch.Tensor:
-            rs0 = torch.ops._c10d_functional.reduce_scatter_tensor(
-                arg, "avg", self.world_size, "default"
-            )
-            rs0 = torch.ops._c10d_functional.wait_tensor(rs0)
+            rs0 = funcol.reduce_scatter_tensor(arg, "avg", 0, "default")
+            rs0 = funcol.wait_tensor(rs0)
             return rs0
 
         arg = torch.rand(4, 4, device=self.device)
@@ -609,10 +603,10 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         self._init_process_group()
 
         def func(args: List[torch.Tensor]) -> torch.Tensor:
-            rs0 = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(
-                args, "avg", self.world_size, "default"
+            rs0 = funcol.reduce_scatter_tensor_coalesced(
+                args, "avg", [0] * len(args), "default"
             )
-            rs0 = [torch.ops._c10d_functional.wait_tensor(out) for out in rs0]
+            rs0 = [funcol.wait_tensor(out) for out in rs0]
             return rs0
 
         args = [torch.rand(4, 4, device=self.device) for _ in range(4)]
@@ -662,13 +656,13 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             output_split_sizes: torch.Tensor,
             input_split_sizes: torch.Tensor,
         ) -> torch.Tensor:
-            output = torch.ops._c10d_functional.all_to_all_single(
+            output = funcol.all_to_all_single(
                 input,
                 _tolist_with_constrain_as_size(output_split_sizes),
                 _tolist_with_constrain_as_size(input_split_sizes),
                 "default",
             )
-            return torch.ops._c10d_functional.wait_tensor(output)
+            return funcol.wait_tensor(output)
 
         torch.manual_seed(42)
         send_sz_matrix = torch.randint(0, 20, (self.world_size, self.world_size))
