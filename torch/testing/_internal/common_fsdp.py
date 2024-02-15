@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
-from functools import partial, wraps
+from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from unittest import mock
 
@@ -1238,20 +1238,24 @@ class FSDPTest(MultiProcessTestCase):
 
 
 def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
-    def fully_shard_with_compiled_compute(*args, **kwargs):
-        # compile ``module._call_impl``
-        # to showcase how to include user-registered hooks
-        if compile_compute_on_module is None or isinstance(
-            args[0], compile_compute_on_module
-        ):
-            args[0].compile()
-        return torch.distributed._composable.fsdp.fully_shard(*args, **kwargs)  # type: ignore[operator]
-
     class FullyShardPatch(Enum):
-        # apply ``partial`` in order to use ``Enum.value``
-        EAGER = partial(torch.distributed._composable.fsdp.fully_shard)  # type: ignore[var-annotated, arg-type]
-        COMPILED_COMPUTE = partial(fully_shard_with_compiled_compute)  # type: ignore[arg-type]
+        EAGER = auto()
+        COMPILED_COMPUTE = auto()
         # add FULL for tracing FSDP
+
+    def _wrap_with_compiled_compute(func: Callable):
+        # expose ``fully_shard.state`` after wrapping
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # compile ``module._call_impl``
+            # to include user-registered hooks
+            if compile_compute_on_module is None or isinstance(
+                args[0], compile_compute_on_module
+            ):
+                args[0].compile()
+            return func(*args, **kwargs)
+
+        return wrapper
 
     def decorator(func):
         @wraps(func)
@@ -1260,9 +1264,14 @@ def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
                 if fully_shard_patch != FullyShardPatch.EAGER and not has_triton():
                     warnings.warn("Inductor on GPU needs Triton and recent GPU arch")
                     continue
+                patched_fully_shard = torch.distributed._composable.fsdp.fully_shard
+                if fully_shard_patch == FullyShardPatch.COMPILED_COMPUTE:
+                    patched_fully_shard = _wrap_with_compiled_compute(
+                        patched_fully_shard
+                    )
                 with mock.patch(
                     f"{func.__module__}.{torch.distributed._composable.fsdp.fully_shard.__name__}",
-                    fully_shard_patch.value,
+                    patched_fully_shard,
                 ):
                     func(*args, **kwargs)
 

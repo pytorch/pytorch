@@ -6,7 +6,11 @@ import unittest
 import torch.nn as nn
 from torch.distributed._composable.fsdp import FSDP, fully_shard
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_fsdp import FSDPTestMultiThread, MLP
+from torch.testing._internal.common_fsdp import (
+    FSDPTestMultiThread,
+    MLP,
+    test_compiled_fsdp,
+)
 from torch.testing._internal.common_utils import run_tests
 
 
@@ -16,6 +20,7 @@ class TestFullyShardState(FSDPTestMultiThread):
         return 1
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @test_compiled_fsdp()
     def test_fully_shard_state(self):
         """
         Tests the ability to get the state object from a fully sharded module.
@@ -32,6 +37,7 @@ class TestFullyShardState(FSDPTestMultiThread):
         self.assertEqual(len(set(all_states)), num_mlps + 1)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @test_compiled_fsdp()
     def test_fully_shard_reapply(self):
         model = MLP(8)
         fully_shard(model)
@@ -42,6 +48,7 @@ class TestFullyShardState(FSDPTestMultiThread):
             fully_shard(model)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @test_compiled_fsdp()
     def test_fully_shard_cls(self):
         # Check that we only swap class for the module passed to `fully_shard`
         model = MLP(8)
@@ -65,6 +72,7 @@ class TestFullyShardState(FSDPTestMultiThread):
         self.assertFalse(isinstance(sliced_model, FSDP))
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @test_compiled_fsdp()
     def test_fully_shard_unsupported_module_cls(self):
         regex = (
             r"fully\_shard does not support containers that do not implement forward"
@@ -77,6 +85,7 @@ class TestFullyShardState(FSDPTestMultiThread):
             fully_shard(model)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @test_compiled_fsdp()
     def test_fully_shard_deepcopy(self):
         model = MLP(8)
         fully_shard(model)

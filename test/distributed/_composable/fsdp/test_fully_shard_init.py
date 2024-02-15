@@ -22,7 +22,11 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_fsdp import FSDPTestMultiThread, MLP
+from torch.testing._internal.common_fsdp import (
+    FSDPTestMultiThread,
+    MLP,
+    test_compiled_fsdp,
+)
 from torch.testing._internal.common_utils import run_tests
 
 
@@ -34,6 +38,7 @@ class TestFullyShardDeviceTensor(FSDPTestMultiThread):
         return 1
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @test_compiled_fsdp()
     def test_move_states_to_device_tensor(self):
         model = MLP(8, torch.device("cpu"), with_buffer=True)
         for tensor in itertools.chain(model.parameters(), model.buffers()):
@@ -52,6 +57,7 @@ class TestFullyShardDeviceDTensor(FSDPTestMultiThread):
         return 4
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @test_compiled_fsdp()
     def test_move_states_to_device_dtensor_valid(self):
         assert self.world_size >= 4, f"{self.world_size}"
         dp_size = 2
@@ -81,6 +87,7 @@ class TestFullyShardDeviceDTensor(FSDPTestMultiThread):
                 self.assertEqual(tensor._local_tensor.device, cuda_device)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @test_compiled_fsdp()
     def test_move_states_to_device_dtensor_invalid(self):
         assert self.world_size >= 4, f"{self.world_size}"
         dp_size = 2
@@ -115,6 +122,7 @@ class TestFullyShardMeshArg(FSDPTestMultiThread):
         return 2
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @test_compiled_fsdp()
     def test_invalid_mesh_ndim(self):
         mesh = init_device_mesh("cuda", (self.world_size, 1, 1))
         model = MLP(8)
@@ -139,6 +147,7 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         self._check_managed_modules(managed_modules, expected_managed_modules)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @test_compiled_fsdp()
     def test_managed_modules_nested(self):
         model = nn.Sequential(*[MLP(8) for _ in range(2)])
         fully_shard(model[0])
@@ -148,6 +157,7 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         self._check_managed_modules(managed_modules, expected_managed_modules)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @test_compiled_fsdp()
     def test_managed_modules_nested_fully_shard_and_replicate(self):
         model = nn.Sequential(*[MLP(8) for _ in range(3)])
         replicate(model[0])
@@ -190,6 +200,7 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
         self._check_managed_states(params, buffers, expected_params, expected_buffers)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @test_compiled_fsdp()
     def test_managed_states_nested_fully_shard(self):
         model = nn.Sequential(*[MLP(8, with_buffer=True) for _ in range(2)])
         fully_shard(model[0])
@@ -274,6 +285,7 @@ class TestFullyShardShardedParameterTensor(FSDPTestMultiThread):
         return 2
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @test_compiled_fsdp()
     def test_shard_tensor_parameters(self):
         # Use odd dim sizes to test uneven shards
         model = nn.Sequential(*[MLP(3, dim_multiplier=3) for _ in range(3)])
@@ -310,6 +322,7 @@ class TestFullyShardShardedParameterDTensor(FSDPTestMultiThread):
         return 4
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @test_compiled_fsdp()
     def test_shard_dtensor_parameters(self):
         dp_size = 2 if self.world_size > 2 else 1
         global_mesh = init_device_mesh(
@@ -350,6 +363,7 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         return 2
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @test_compiled_fsdp()
     def test_fully_shard_is_root(self):
         """
         Tests that ``_is_root`` is set correctly after lazy initialization.
@@ -379,6 +393,7 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         )
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @test_compiled_fsdp()
     def test_fully_shard_module_and_param_fqns(self):
         """
         Tests that the module and parameter FQNs are computed correctly after
@@ -437,6 +452,7 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
         )
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @test_compiled_fsdp()
     def test_fully_shard_double_lazy_init(self):
         model = nn.Sequential(MLP(8), MLP(8))
         fully_shard(model[0].in_proj)
