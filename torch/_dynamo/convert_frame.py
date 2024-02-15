@@ -35,7 +35,7 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 from torch.utils._python_dispatch import _disable_current_modes
 from torch.utils._traceback import format_traceback_short
 
-from . import config, exc, skipfiles
+from . import config, exc, trace_rules
 from .backends.registry import CompilerFn
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
@@ -719,6 +719,10 @@ def _compile(
                 backend_compile_time = frame_phase_timing[frame_key].get(
                     "backend_compile", None
                 )
+                inductor_compile_time = frame_phase_timing[frame_key].get(
+                    "inductor_compile", None
+                )
+                code_gen_time = frame_phase_timing[frame_key].get("code_gen", None)
                 non_compliant_ops = {op.__qualname__ for op in output.non_compliant_ops}
                 compliant_custom_ops = {
                     op.__qualname__ for op in output.compliant_custom_ops
@@ -731,6 +735,8 @@ def _compile(
                 graph_input_count = None
                 entire_frame_compile_time = None
                 backend_compile_time = None
+                inductor_compile_time = None
+                code_gen_time = None
                 non_compliant_ops = set({})
                 compliant_custom_ops = set({})
             metrics = CompilationMetrics(
@@ -747,6 +753,8 @@ def _compile(
                 graph_input_count,
                 entire_frame_compile_time,
                 backend_compile_time,
+                inductor_compile_time,
+                code_gen_time,
                 fail_type,
                 fail_reason,
                 fail_user_frame_filename,
@@ -855,7 +863,7 @@ def catch_errors_wrapper(callback, hooks: Hooks):
     def catch_errors(frame, cache_entry, frame_state):
         assert frame_state is not None
 
-        is_skipfile = skipfiles.check(frame.f_code)
+        is_skipfile = trace_rules.check(frame.f_code)
         if (
             # TODO: the first condition is not covered by any test
             frame.f_lasti >= first_real_inst_idx(frame.f_code)
@@ -867,7 +875,7 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                     "traced frame already"
                     if frame.f_lasti >= first_real_inst_idx(frame.f_code)
                     else "in skipfiles"
-                    if skipfiles.check(frame.f_code)
+                    if trace_rules.check(frame.f_code)
                     else "dynamo tracing is disabled"
                 )
                 if not is_skipfile or config.verbose:
@@ -881,7 +889,7 @@ def catch_errors_wrapper(callback, hooks: Hooks):
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
             # nametuple constructor
             return None
-        if config.optimize_ddp:
+        if config._get_optimize_ddp_mode() == "ddp_optimizer":
             ddp_module = DistributedDataParallel._get_active_ddp_module()
             if ddp_module:
                 with compile_lock:

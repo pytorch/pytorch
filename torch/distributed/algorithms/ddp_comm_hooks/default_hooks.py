@@ -1,9 +1,16 @@
-from typing import Any, Callable
+from typing import Any, Callable, cast, Tuple
 
 import torch
 import torch.distributed as dist
 
-__all__ = ["allreduce_hook", "fp16_compress_hook", "bf16_compress_hook", "fp16_compress_wrapper", "bf16_compress_wrapper"]
+__all__ = [
+    "allreduce_hook",
+    "fp16_compress_hook",
+    "bf16_compress_hook",
+    "fp16_compress_wrapper",
+    "bf16_compress_wrapper",
+]
+
 
 def _allreduce_fut(
     process_group: dist.ProcessGroup, tensor: torch.Tensor
@@ -44,7 +51,8 @@ def allreduce_hook(
 
 
 def fp16_compress_hook(
-    process_group: dist.ProcessGroup, bucket: dist.GradBucket
+    process_group: dist.ProcessGroup,
+    bucket: dist.GradBucket,
 ) -> torch.futures.Future[torch.Tensor]:
     """
     Compress by casting ``GradBucket`` to ``torch.float16`` divided by process group size.
@@ -62,24 +70,37 @@ def fp16_compress_hook(
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     world_size = group_to_use.size()
 
-    compressed_tensor = bucket.buffer().to(torch.float16).div_(world_size)
-
-    fut = dist.all_reduce(
-        compressed_tensor, group=group_to_use, async_op=True
-    ).get_future()
+    buffer = (
+        cast(Tuple[torch.Tensor, ...], bucket)[0]
+        if isinstance(bucket, tuple)
+        else bucket.buffer()
+    )
+    compressed_tensor = buffer.to(torch.float16).div_(world_size)
 
     def decompress(fut):
-        decompressed_tensor = bucket.buffer()
+        decompressed_tensor = buffer
         # Decompress in place to reduce the peak memory.
         # See: https://github.com/pytorch/pytorch/issues/45968
-        decompressed_tensor.copy_(fut.value()[0])
+        value = fut if isinstance(fut, torch.Tensor) else fut.value()[0]
+        decompressed_tensor.copy_(value)
         return decompressed_tensor
 
-    return fut.then(decompress)
+    if torch._utils.is_compiling():
+        grad = dist._functional_collectives.all_reduce(
+            compressed_tensor, "sum", group_to_use
+        )
+        return decompress(grad)
+    else:
+        fut = dist.all_reduce(
+            compressed_tensor, group=group_to_use, async_op=True
+        ).get_future()
+        return fut.then(decompress)
+
 
 # TODO: create an internal helper function and extract the duplicate code in FP16_compress and BF16_compress.
 def bf16_compress_hook(
-    process_group: dist.ProcessGroup, bucket: dist.GradBucket
+    process_group: dist.ProcessGroup,
+    bucket: dist.GradBucket,
 ) -> torch.futures.Future[torch.Tensor]:
     """
     Warning: This API is experimental, and it requires NCCL version later than 2.9.6.
@@ -98,20 +119,31 @@ def bf16_compress_hook(
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     world_size = group_to_use.size()
 
-    compressed_tensor = bucket.buffer().to(torch.bfloat16).div_(world_size)
-
-    fut = dist.all_reduce(
-        compressed_tensor, group=group_to_use, async_op=True
-    ).get_future()
+    buffer = (
+        cast(Tuple[torch.Tensor, ...], bucket)[0]
+        if isinstance(bucket, tuple)
+        else bucket.buffer()
+    )
+    compressed_tensor = buffer.to(torch.bfloat16).div_(world_size)
 
     def decompress(fut):
-        decompressed_tensor = bucket.buffer()
+        decompressed_tensor = buffer
         # Decompress in place to reduce the peak memory.
         # See: https://github.com/pytorch/pytorch/issues/45968
-        decompressed_tensor.copy_(fut.value()[0])
+        value = fut if isinstance(fut, torch.Tensor) else fut.value()[0]
+        decompressed_tensor.copy_(value)
         return decompressed_tensor
 
-    return fut.then(decompress)
+    if torch._utils.is_compiling():
+        grad = dist._functional_collectives.all_reduce(
+            compressed_tensor, "sum", group_to_use
+        )
+        return decompress(grad)
+    else:
+        fut = dist.all_reduce(
+            compressed_tensor, group=group_to_use, async_op=True
+        ).get_future()
+        return fut.then(decompress)
 
 
 def fp16_compress_wrapper(
@@ -150,6 +182,7 @@ def fp16_compress_wrapper(
         return fut.then(decompress)
 
     return fp16_compress_wrapper_hook
+
 
 def bf16_compress_wrapper(
     hook: Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]

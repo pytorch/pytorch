@@ -955,7 +955,7 @@ class TestSymbolicTracing(TestCase):
         import torch.library
         from torch.library import Library
 
-        foo = Library("foo", "DEF")
+        foo = Library("foo", "DEF")  # noqa: TOR901
         foo.define("foo(Tensor self) -> Tensor")
 
         # Operator where meta and cpu disagree on strides
@@ -1104,6 +1104,23 @@ def forward(self, y_1, x_1):
     repeat_interleave = torch.ops.aten.repeat_interleave.Tensor(x_1);  x_1 = None
     index_select = torch.ops.aten.index_select.default(y_1, 1, repeat_interleave);  y_1 = repeat_interleave = None
     return index_select""")
+
+    def test_cumsum_unbacked(self):
+        def f(x):
+            y = x.item()
+            z = torch.randn((3, y, 3))
+            return z.cumsum(0)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.tensor([5])).code).strip()
+        self.assertExpectedInline(
+            r, """\
+def forward(self, x_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x_1);  x_1 = None
+    randn = torch.ops.aten.randn.default([3, _local_scalar_dense, 3], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
+    cumsum = torch.ops.aten.cumsum.default(randn, 0);  randn = None
+    return cumsum"""  # noqa: B950
+        )
+
 
     def test_repeat_interleave_unbacked_output_size(self):
         def f(x, y):
@@ -1864,7 +1881,6 @@ symbolic_tensor_failures = {
     xfail('histc', ''),  # Could not run 'aten::histc' with arguments from the 'Meta' backend. This could be because...
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
-    xfail('isin', ''),  # aten.isin.Tensor_Tensor - couldn't find symbolic meta function/decomposition
     xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -1914,8 +1930,6 @@ symbolic_tensor_segfaults = {
 symbolic_tensor_failures.update(symbolic_tensor_segfaults)
 
 outplace_symbolic_tensor_failures = {
-    xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
-
     xfail('linalg.norm', ''),
 }
 
@@ -1940,7 +1954,6 @@ out_symbolic_tensor_failures = {
     xfail('fft.ifft2', ''),
     xfail('fft.ifftn', ''),
     xfail('gather', ''),
-    xfail('i0', ''),
     xfail('linalg.cholesky', ''),
     xfail('linalg.cholesky_ex', ''),
     xfail('linalg.det', ''),

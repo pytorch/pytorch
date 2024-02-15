@@ -46,6 +46,52 @@ class TestXpu(TestCase):
         self.assertTrue(device_capability["max_work_group_size"] > 0)
         self.assertTrue(device_capability["max_num_sub_groups"] > 0)
 
+    def test_wrong_xpu_fork(self):
+        stderr = TestCase.runWithPytorchAPIUsageStderr(
+            """\
+import torch
+from torch.multiprocessing import Process
+def run(rank):
+    torch.xpu.set_device(rank)
+if __name__ == "__main__":
+    size = 2
+    processes = []
+    for rank in range(size):
+        # it would work fine without the line below
+        torch.xpu.set_device(0)
+        p = Process(target=run, args=(rank,))
+        p.start()
+        processes.append(p)
+    for p in processes:
+        p.join()
+"""
+        )
+        self.assertRegex(stderr, "Cannot re-initialize XPU in forked subprocess.")
+
+    def test_streams(self):
+        s0 = torch.xpu.Stream()
+        torch.xpu.set_stream(s0)
+        s1 = torch.xpu.current_stream()
+        self.assertEqual(s0, s1)
+        s2 = torch.xpu.Stream()
+        self.assertFalse(s0 == s2)
+        torch.xpu.set_stream(s2)
+        with torch.xpu.stream(s0):
+            self.assertEqual(s0, torch.xpu.current_stream())
+        self.assertEqual(s2, torch.xpu.current_stream())
+
+    def test_stream_priority(self):
+        low, high = torch.xpu.Stream.priority_range()
+        s0 = torch.xpu.Stream(device=0, priority=low)
+
+        self.assertEqual(low, s0.priority)
+        self.assertEqual(torch.device("xpu:0"), s0.device)
+
+        s1 = torch.xpu.Stream(device=0, priority=high)
+
+        self.assertEqual(high, s1.priority)
+        self.assertEqual(torch.device("xpu:0"), s1.device)
+
 
 if __name__ == "__main__":
     run_tests()
