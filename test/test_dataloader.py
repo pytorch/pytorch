@@ -1083,8 +1083,8 @@ class TestDataLoader(TestCase):
             self.assertEqual(i, math.floor((len(self.dataset) - 1) / batch_size))
 
     def _test_shuffle(self, loader):
-        found_data = {i: 0 for i in range(self.data.size(0))}
-        found_labels = {i: 0 for i in range(self.labels.size(0))}
+        found_data = dict.fromkeys(range(self.data.size(0)), 0)
+        found_labels = dict.fromkeys(range(self.labels.size(0)), 0)
         batch_size = loader.batch_size
         if batch_size is None:
             for i, (batch_samples, batch_targets) in enumerate(loader):

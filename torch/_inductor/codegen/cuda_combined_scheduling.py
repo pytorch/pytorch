@@ -59,7 +59,7 @@ class CUDACombinedScheduling(BaseScheduling):
                 template_node, epilogue_nodes
             )
 
-    def codegen_nodes(self, nodes: List[BaseSchedulerNode]):
+    def codegen_nodes(self, nodes: List[SchedulerNode]):
         return self._triton_scheduling.codegen_nodes(nodes)
 
     def codegen_sync(self):
