@@ -19,10 +19,12 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     run_tests,
 )
+from torch.testing._internal.common_distributed import (
+    run_with_both_funcol_impls_with_arg,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     NUM_DEVICES,
-    run_with_both_funcol_impls_with_arg,
     with_comms,
 )
 

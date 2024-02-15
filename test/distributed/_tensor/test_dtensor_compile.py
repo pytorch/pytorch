@@ -33,7 +33,11 @@ from torch.distributed.tensor.parallel import (
     PrepareModuleOutput,
     RowwiseParallel,
 )
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    run_with_both_funcol_impls,
+    run_with_both_funcol_impls_with_arg,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -42,8 +46,6 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
-    run_with_both_funcol_impls,
-    run_with_both_funcol_impls_with_arg,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
