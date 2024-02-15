@@ -122,7 +122,7 @@ struct BlockInfo {
 
 // Struct containing info of a memory segment (i.e. one contiguous cudaMalloc).
 struct SegmentInfo {
-  int64_t device = 0;
+  c10::DeviceIndex device = 0;
   int64_t address = 0;
   int64_t total_size = 0;
   int64_t requested_size = 0; // unrounded, actually requested size
@@ -179,7 +179,7 @@ struct TraceEntry {
     time_.approx_t_ = time;
   }
   Action action_;
-  int device_;
+  c10::DeviceIndex device_;
   int64_t addr_; // for OOM, this is the amount of free bytes reported by cuda
   std::shared_ptr<GatheredContext> context_;
   cudaStream_t stream_{};
