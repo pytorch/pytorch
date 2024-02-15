@@ -13008,6 +13008,9 @@ op_db: List[OpInfo] = [
                             'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides', device_type="cuda"),
                # batch_norm_with_update does not have python bindings
                DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # aten out variants do not accept out= kwarg, only python out variants
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
            )
            ),
     OpInfo('nn.functional.cosine_similarity',
