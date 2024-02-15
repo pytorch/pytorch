@@ -98,10 +98,8 @@ def make_dual(tensor, tangent, *, level=None):
     if os.environ.get("PYTORCH_JIT", "1") == "1" and __debug__:
         from torch._decomp import decompositions_for_jvp  # noqa: F401
 
-    _current_level = torch._C._get_current_dual_level()
-
     if level is None:
-        level = _current_level
+        level = torch._C._get_current_dual_level()
 
     if level < 0:
         raise RuntimeError(
@@ -154,10 +152,8 @@ def unpack_dual(tensor, *, level=None):
     Please see the `forward-mode AD tutorial <https://pytorch.org/tutorials/intermediate/forward_ad_usage.html>`__
     for detailed steps on how to use this API.
     """
-    _current_level = torch._C._get_current_dual_level()
-
     if level is None:
-        level = _current_level
+        level = torch._C._get_current_dual_level()
 
     if level < 0:
         return UnpackedDualTensor(tensor, None)
