@@ -648,7 +648,7 @@ class TestForeach(TestCase):
 
     @onlyCUDA
     @ops(foreach_reduce_op_db, allowed_dtypes=floating_types())
-    def test_foreach_norm_big_num_tensors(self, device, dtype, op):
+    def test_big_num_tensors(self, device, dtype, op):
         N = 600
         tensorlist = [make_tensor((2, 3), dtype=dtype, device=device, noncontiguous=False) for _ in range(N)]
         fn, ref_fn, *_ = self._get_funcs(op)

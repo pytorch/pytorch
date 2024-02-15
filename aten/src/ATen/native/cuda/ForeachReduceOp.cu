@@ -196,7 +196,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
   }
   const auto options = tensors[0].options();
   auto output_per_tensor = at::zeros(
-      {static_cast<long>(ntensors) * max_chunks_per_tensor},
+      {static_cast<int64_t>(ntensors) * max_chunks_per_tensor},
       options.dtype(toOpMathType(tensors[0].scalar_type())));
 
   std::vector<at::Tensor> vec_res;
