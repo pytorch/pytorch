@@ -188,7 +188,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
 
         if self.bn.training:
             avg_dims = [0] + list(range(2, len(self.weight.shape)))
-            batch_mean = conv_out.mean(avg_dims)
+            batch_mean = conv_out.mean(avg_dims)  # type: ignore[possibly-undefined]
             batch_var = torch.square(conv_out - batch_mean.reshape(bias_shape)).mean(
                 avg_dims
             )

@@ -210,7 +210,7 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
                     raise BufferError("ForkerIterDataPipe buffer overflow," +
                                       f"buffer size {self.buffer_size} is insufficient.")
 
-                yield self.copy_fn(return_val)
+                yield self.copy_fn(return_val)  # type: ignore[possibly-undefined]
         finally:
             self._child_stop[instance_id] = True
             # Cleanup _datapipe_iterator for the case that fork exits earlier
