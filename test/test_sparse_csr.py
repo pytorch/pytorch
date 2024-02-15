@@ -1271,6 +1271,7 @@ class TestSparseCSR(TestCase):
                 new_shape = (2, 2)
                 a.resize_(new_shape)
 
+    @skipIfTorchDynamo()
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_sparse_csr_from_dense(self, device, dtype):
         dense = torch.tensor([[4, 5, 0], [0, 0, 0], [1, 0, 0]], dtype=dtype, device=device)
@@ -3087,7 +3088,28 @@ class TestSparseCSR(TestCase):
             return sp.csc_matrix(tensor.cpu().numpy())
         if layout is torch.sparse_bsr:
             return sp.bsr_matrix(tensor.cpu().numpy(), blocksize=blocksize).sorted_indices()
-        # No native scipy BSC support?
+        if layout is torch.sparse_bsc:
+            # SciPy doesn't have native BSC support - but our tests don't need the full
+            # functionality so fake it by using a transposed BSR matrix.
+            class FakeBscMatrix:
+                def __init__(self, matrix):
+                    self._matrix = matrix
+                    self.shape = tuple(reversed(matrix.shape))
+                    self.indptr = matrix.indptr
+                    self.indices = matrix.indices
+                    self.data = [x.transpose() for x in matrix.data]
+
+                @staticmethod
+                def from_matrix(matrix, blocksize):
+                    blocksize = tuple(reversed(blocksize))
+                    matrix = matrix.transpose()
+                    return FakeBscMatrix(sp.bsr_matrix(matrix, blocksize=blocksize))
+
+                def sorted_indices(self):
+                    sub = self._matrix.sorted_indices()
+                    return FakeBscMatrix(sub)
+
+            return FakeBscMatrix.from_matrix(tensor.cpu().numpy(), blocksize=blocksize).sorted_indices()
         raise NotImplementedError(repr(tensor))
 
     @skipMeta
@@ -3383,29 +3405,32 @@ class TestSparseCSR(TestCase):
         page with SciPy.  Independent from SciPy, all conversion
         combinations are tested in TestSparseAny.test_to_sparse.
         """
-        if layout is torch.sparse_bsc:
-            # TODO: Remove this once support has been enabled
-            self.skipTest('NOT IMPL')
-        if layout is torch.sparse_bsr:
-            # TODO: Remove this once support has been enabled
-            self.skipTest('NOT IMPL')
 
-        for shape in [(0, 10), (6, 0), (6, 10), (0, 0)]:
+        blocksize_kw = {}
+        if layout in (torch.sparse_bsc, torch.sparse_bsr):
+            blocksize_kw['blocksize'] = (2, 2)
+            # block modes don't support 0 width/height
+            shapes = [(6, 10)]
+        elif layout in (torch.sparse_csc, torch.sparse_csr):
+            shapes = [(0, 10), (6, 0), (6, 10), (0, 0)]
+        else:
+            raise NotImplementedError("unhandled layout")
+
+        if layout in (torch.sparse_bsc, torch.sparse_csc):
+            compressed_indices_mth = torch.Tensor.ccol_indices
+            plain_indices_mth = torch.Tensor.row_indices
+        elif layout in (torch.sparse_bsr, torch.sparse_csr):
+            compressed_indices_mth = torch.Tensor.crow_indices
+            plain_indices_mth = torch.Tensor.col_indices
+        else:
+            raise NotImplementedError("unhandled layout")
+
+        for shape in shapes:
             sparse_dim = 2
             nnz = shape[0] * shape[1] // 2
             sparse, _, _ = self.genSparseTensor(shape, sparse_dim, nnz, coalesced, device, dtype)
             sp_matrix = self._construct_sp_matrix(sparse, layout)
-            pt_matrix = sparse.to_sparse(layout=layout)
-
-            compressed_indices_mth = {
-                torch.sparse_csr: torch.Tensor.crow_indices,
-                torch.sparse_csc: torch.Tensor.ccol_indices,
-            }[layout]
-
-            plain_indices_mth = {
-                torch.sparse_csr: torch.Tensor.col_indices,
-                torch.sparse_csc: torch.Tensor.row_indices,
-            }[layout]
+            pt_matrix = sparse.to_sparse(layout=layout, **blocksize_kw)
 
             self.assertEqual(layout, pt_matrix.layout)
             self.assertEqual(sp_matrix.shape, pt_matrix.shape)
@@ -3415,7 +3440,7 @@ class TestSparseCSR(TestCase):
 
             sparse_csc = sparse.to_sparse_csc()
             sp_matrix = self._construct_sp_matrix(sparse_csc, layout)
-            pt_matrix = sparse_csc.to_sparse(layout=layout)
+            pt_matrix = sparse_csc.to_sparse(layout=layout, **blocksize_kw)
 
             self.assertEqual(layout, pt_matrix.layout)
             self.assertEqual(sp_matrix.shape, pt_matrix.shape)
@@ -3462,6 +3487,7 @@ class TestSparseCompressedTritonKernels(TestCase):
         return d
 
     @onlyCUDA
+    @skipIfRocm(msg="test is too slow on ROCm stack")
     @dtypes(torch.half, torch.bfloat16, torch.float)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
@@ -3626,7 +3652,6 @@ class TestSparseCompressedTritonKernels(TestCase):
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
     @precisionOverride({torch.float16: 1e-3})
-    @unittest.skip("Disable to unblock triton pin upgrade. Details in https://github.com/pytorch/pytorch/issues/108102")
     def test_triton_scaled_dot_product_attention(self, device, dtype, block_size):
         from functools import partial
         from torch.sparse._triton_ops import _scaled_dot_product_attention

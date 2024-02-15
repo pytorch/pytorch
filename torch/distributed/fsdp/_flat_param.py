@@ -1423,9 +1423,7 @@ class FlatParamHandle:
         """
         unsharded_size = self.flat_param._unpadded_unsharded_size
         flat_param_part = padded_unsharded_flat_param[: unsharded_size.numel()]
-        flat_param_part_view = flat_param_part.view(
-            unsharded_size
-        )  # this `.view()` is not autograd visible
+        # slicing [:] is not visible to autograd because of .data
         self.flat_param.data = flat_param_part
         in_forward = self._training_state == HandleTrainingState.FORWARD
         in_pre_backward = self._training_state == HandleTrainingState.BACKWARD_PRE
@@ -1731,7 +1729,8 @@ class FlatParamHandle:
 
     def _free_unsharded_flat_param(self):
         """
-        Free the padded unsharded flat parameter.
+        Free the padded unsharded flat parameter. We allow this
+        function to be called even when storage is not allocated
 
         The tensor to free depends
         on the calling context since the unshard may have forced full
@@ -1739,7 +1738,6 @@ class FlatParamHandle:
         """
         self._check_sharded_strategy()
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
-        self._check_storage_allocated(unsharded_flat_param)
         self._check_on_compute_device(unsharded_flat_param)
         # Do not free the memory until all ops in the current stream finish
         _no_dispatch_record_stream(
@@ -1769,8 +1767,8 @@ class FlatParamHandle:
             )
         flat_param.data = flat_param._local_shard  # type: ignore[attr-defined]
         if self._use_orig_params:
-            if skip_use_sharded_views:
-                self._unsharded_flat_param_for_skipped_views = unsharded_flat_param
+            if skip_use_sharded_views:  # type: ignore[possibly-undefined]
+                self._unsharded_flat_param_for_skipped_views = unsharded_flat_param  # type: ignore[possibly-undefined]
             else:
                 self._use_sharded_views()
             # For the post-forward reshard, we may try to use sharded gradient
@@ -1778,7 +1776,7 @@ class FlatParamHandle:
             # in `no_sync()`), but for the post-backward reshard, we delay the
             # call to after the reduce-scatter.
             if (
-                in_forward
+                in_forward  # type: ignore[possibly-undefined]
                 # Skip using gradient views if skipped using sharded views
                 # since exposing unsharded parameters with sharded gradients
                 # may be confusing to the user

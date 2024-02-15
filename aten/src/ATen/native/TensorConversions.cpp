@@ -1525,9 +1525,7 @@ void convert_indices_from_csr_to_coo_cpu(
   int64_t batch_ndim = crow_indices.dim() - 1;
   if (batch_ndim > 0) {
     auto batch_indices = indices.narrow(0, 0, batch_ndim);
-    batch_indices.copy_(batch_indices.new_ones(crow_indices.sizes().slice(0, batch_ndim))
-                        .nonzero()
-                        .transpose(0, 1)
+    batch_indices.copy_(at::sparse::full_coo_indices(crow_indices.sizes().slice(0, batch_ndim), crow_indices.options())
                         .repeat_interleave(nnz, 1));
   }
   const input_t* crow_indices_data_in = crow_indices_->data_ptr<input_t>();
@@ -1853,16 +1851,8 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, const int64_t sparse_dim)
       DimVector batch_blocksize;
       batch_blocksize.append(batch_ndim, 1);
       batch_blocksize.append(blocksize);
-      const auto max_blocksize = std::max(blocksize[0], blocksize[1]);
-      const auto max_blocksize_arange = at::arange(max_blocksize, indices.options());
-      const auto blocksize_arange_0 = max_blocksize_arange.narrow(-1, 0, blocksize[0]);
-      const auto blocksize_arange_1 = max_blocksize_arange.narrow(-1, 0, blocksize[1]);
-      const auto block_coo_indices_ = at::stack({
-          blocksize_arange_0.unsqueeze(-1).expand({-1, blocksize[1]}),
-          blocksize_arange_1.unsqueeze(0).expand({blocksize[0], -1})
-      }).flatten(-2, -1);  // equivalent to torch.ones(blocksize).nonzero().T
       const auto block_coo_indices = at::zeros({batch_ndim + 2, blocksize[0] * blocksize[1]}, indices.options());
-      block_coo_indices.narrow(0, batch_ndim, 2).copy_(block_coo_indices_);
+      block_coo_indices.narrow(0, batch_ndim, 2).copy_(at::sparse::full_coo_indices(blocksize, indices.options()));
       indices = indices
         // Scale indices that identify blocks to element-wise coordinates that correspond
         // to the top-left corner of each block.

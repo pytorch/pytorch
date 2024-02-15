@@ -247,6 +247,14 @@ void initDispatchBindings(PyObject* module) {
 
   // TODO: figure out how to do chaining
   py::class_<torch::Library>(m, "_DispatchModule")
+      .def(
+          "reset",
+          [](const py::object& self) {
+            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
+            self.cast<torch::Library&>().reset();
+            return;
+          },
+          "")
       // Some of these APIs are only for testing and do not work in multipy
       // environment
       .def(

@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 r"""Importing this file includes common utility methods and base clases for
 checking quantization api and properties of resulting modules.
 """
@@ -416,6 +418,22 @@ def skipIfNoDynamoSupport(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         if not torchdynamo.is_dynamo_supported():
+            raise unittest.SkipTest(reason)
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+def skipIfNoInductorSupport(fn):
+    reason = "inductor doesn't support."
+    if isinstance(fn, type):
+        if not torchdynamo.is_inductor_supported():
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = reason
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not torchdynamo.is_inductor_supported():
             raise unittest.SkipTest(reason)
         else:
             fn(*args, **kwargs)
@@ -1179,7 +1197,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             m = prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
-        m = convert_pt2e(m, fold_quantize=True)
+        m = convert_pt2e(m)
 
         pt2_quant_output = m(*example_inputs)
         ns = NodeSpec
@@ -1217,13 +1235,16 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             self.assertEqual(fx_quant_output, pt2_quant_output)
 
     def _quantize(self, m, quantizer, example_inputs):
+        # resetting dynamo cache
+        torch._dynamo.reset()
+
         m = capture_pre_autograd_graph(
             m,
             example_inputs,
         )
         m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
-        m = convert_pt2e(m, fold_quantize=True)
+        m = convert_pt2e(m)
         return m
 
     def _get_pt2e_quantized_linear(self, is_per_channel=False) -> torch.fx.GraphModule:
@@ -2801,3 +2822,13 @@ class TestHelperModules:
 
         def example_inputs(self):
             return (torch.randn(2, 4, 10, 10),)
+
+    class LinearReluModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc = torch.nn.Linear(5, 5).to(dtype=torch.float)
+            self.relu = torch.nn.ReLU()
+
+        def forward(self, x):
+            x = self.relu(self.fc(x))
+            return x

@@ -125,6 +125,10 @@ public:
     return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, mask,
                                                       0xFFFFFFFF));
   }
+  bool has_inf_nan() const {
+    __m512 self_sub  = _mm512_sub_ps(values, values);
+    return (_mm512_movepi8_mask(_mm512_castps_si512(self_sub)) & 0x7777777777777777) != 0;
+  }
   Vectorized<float> map(float (*const f)(float)) const {
     __at_align__ float tmp[size()];
     store(tmp);
@@ -163,6 +167,9 @@ public:
   }
   Vectorized<float> acos() const {
     return Vectorized<float>(Sleef_acosf16_u10(values));
+  }
+  Vectorized<float> acosh() const {
+    return Vectorized<float>(Sleef_acoshf16_u10(values));
   }
   Vectorized<float> asin() const {
     return Vectorized<float>(Sleef_asinf16_u10(values));

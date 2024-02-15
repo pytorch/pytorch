@@ -4,9 +4,20 @@ from typing import List
 
 import torch
 import torch.distributed as dist
+import torch.distributed._functional_collectives as funcol
 from torch._C import FileCheck
 from torch._dynamo.utils import same
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
+from torch.distributed._functional_collectives import (
+    all_gather_into_tensor_coalesced,
+    all_gather_tensor,
+    all_reduce,
+    all_reduce_coalesced,
+    all_to_all_single,
+    AsyncCollectiveTensor,
+    reduce_scatter_tensor,
+    reduce_scatter_tensor_coalesced,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
@@ -42,6 +53,7 @@ if not dist.is_available():
 class C10DFunctionalNativeTest(MultiProcessTestCase):
     def setUp(self) -> None:
         super().setUp()
+        funcol.enable_native_funcol()
         self._spawn_processes()
 
     @property
@@ -86,6 +98,17 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         expect = sum(self.ranks) / self.world_size
         assert output.eq(expect).all()
 
+        # Test Python API and AsyncCollectiveTensor
+        output = all_reduce(
+            input,
+            "avg",
+            "default",
+        )
+        assert isinstance(output, AsyncCollectiveTensor)
+        assert not output.completed
+        assert output.eq(expect).all()
+        assert output.completed
+
     @skip_if_lt_x_gpu(2)
     def test_all_reduce_(self) -> None:
         self._init_process_group()
@@ -118,6 +141,17 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             output = torch.ops._c10d_functional.wait_tensor(output)
             assert id(output) != id(input)
             assert output.eq(sum(self.ranks) / self.world_size * i).all()
+
+        # Test Python API and AsyncCollectiveTensor
+        outputs = all_reduce_coalesced(
+            inputs,
+            "avg",
+            "default",
+        )
+        for i, (output, input) in enumerate(zip(outputs, inputs)):
+            assert not output.completed
+            assert output.eq(sum(self.ranks) / self.world_size * i).all()
+            assert output.completed
 
     @skip_if_lt_x_gpu(2)
     def test_all_reduce_coalesced_(self) -> None:
@@ -157,6 +191,17 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         assert torch.allclose(output, expect)
         assert output.eq(expect).all()
 
+        # Test Python API and AsyncCollectiveTensor
+        output = all_gather_tensor(
+            input,
+            0,
+            "default",
+        )
+        assert isinstance(output, AsyncCollectiveTensor)
+        assert not output.completed
+        assert output.eq(expect).all()
+        assert output.completed
+
     @skip_if_lt_x_gpu(2)
     def test_all_gather_into_tensor_coalesced(self) -> None:
         self._init_process_group()
@@ -170,15 +215,28 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             self.world_size,
             "default",
         )
-        for i, output in enumerate(outputs):
-            output = torch.ops._c10d_functional.wait_tensor(output)
-            expect = torch.cat(
+        expect = [
+            torch.cat(
                 [
                     torch.full((10, 10), float(rank) * i, device=self.device)
                     for rank in self.ranks
                 ]
             )
-            assert output.eq(expect).all()
+            for i in range(10)
+        ]
+        for i, output in enumerate(outputs):
+            output = torch.ops._c10d_functional.wait_tensor(output)
+            assert output.eq(expect[i]).all()
+
+        # Test Python API and AsyncCollectiveTensor
+        outputs = all_gather_into_tensor_coalesced(
+            inputs,
+            "default",
+        )
+        for i, output in enumerate(outputs):
+            assert not output.completed
+            assert output.eq(expect[i]).all()
+            assert output.completed
 
     @skip_if_lt_x_gpu(2)
     def test_reduce_scatter_tensor(self) -> None:
@@ -194,6 +252,18 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         output = torch.ops._c10d_functional.wait_tensor(output)
         assert output.eq(self.rank).all()
 
+        # Test Python API and AsyncCollectiveTensor
+        output = reduce_scatter_tensor(
+            input,
+            "avg",
+            0,
+            "default",
+        )
+        assert isinstance(output, AsyncCollectiveTensor)
+        assert not output.completed
+        assert output.eq(self.rank).all()
+        assert output.completed
+
     @skip_if_lt_x_gpu(2)
     def test_reduce_scatter_tensor_coalesced(self) -> None:
         self._init_process_group()
@@ -208,6 +278,18 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         for i, output in enumerate(outputs):
             output = torch.ops._c10d_functional.wait_tensor(output)
             assert output.eq(self.rank * i).all()
+
+        # Test Python API and AsyncCollectiveTensor
+        outputs = reduce_scatter_tensor_coalesced(
+            inputs,
+            "avg",
+            [0] * 10,
+            "default",
+        )
+        for i, output in enumerate(outputs):
+            assert not output.completed
+            assert output.eq(self.rank * i).all()
+            assert output.completed
 
     @skip_if_lt_x_gpu(2)
     def test_all_to_all_single(self) -> None:
@@ -236,6 +318,14 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         )
         assert output.eq(expect).all()
 
+        # Test Python API and AsyncCollectiveTensor
+        output = all_to_all_single(
+            input, output_split_sizes, input_split_sizes, "default"
+        )
+        assert not output.completed
+        assert output.eq(expect).all()
+        assert output.completed
+
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(debug=True)
     @fresh_inductor_cache()
@@ -245,11 +335,11 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = arg + 42
             # Expect in-place with inductor allocated buf
-            ar0 = torch.ops._c10d_functional.all_reduce(buf0, "avg", "default")
-            ar0 = torch.ops._c10d_functional.wait_tensor(ar0)
+            ar0 = funcol.all_reduce(buf0, "avg", "default")
+            ar0 = funcol.wait_tensor(ar0)
             # Expect no in-place with graph input
-            ar1 = torch.ops._c10d_functional.all_reduce(arg, "avg", "default")
-            ar1 = torch.ops._c10d_functional.wait_tensor(ar1)
+            ar1 = funcol.all_reduce(arg, "avg", "default")
+            ar1 = funcol.wait_tensor(ar1)
             return ar0, ar1
 
         arg = torch.rand(4, 4, device=self.device)
@@ -258,16 +348,16 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         code = run_and_get_triton_code(compiled, arg)
         (
             FileCheck()
-            .check("buf0 = empty(")
-            .check("buf5 = empty(")
+            .check("buf0 = empty")
+            .check("buf7 = empty")
             # Expect in-place with inductor allocated buf
             .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
             .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
             # Expect no in-place with graph input (buf5 is a clone)
-            .check("torch.ops._c10d_functional.all_reduce_.default(buf5")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf5")
+            .check("torch.ops._c10d_functional.all_reduce_.default(buf7")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf7")
             # Expect no extra copy on return
-            .check("return (buf0, buf5, )")
+            .check("return (buf0, buf7, )")
             .run(code)
         )
         out = compiled(arg)
@@ -287,15 +377,11 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         def func(args: List[torch.Tensor]) -> torch.Tensor:
             bufs = [arg + 42 for arg in args]
             # Expect in-place with inductor allocated buf
-            ar0 = torch.ops._c10d_functional.all_reduce_coalesced(
-                bufs, "avg", "default"
-            )
-            ar0 = [torch.ops._c10d_functional.wait_tensor(out) for out in ar0]
+            ar0 = funcol.all_reduce_coalesced(bufs, "avg", "default")
+            ar0 = [funcol.wait_tensor(out) for out in ar0]
             # Expect no in-place with graph input
-            ar1 = torch.ops._c10d_functional.all_reduce_coalesced(
-                args, "avg", "default"
-            )
-            ar1 = [torch.ops._c10d_functional.wait_tensor(out) for out in ar1]
+            ar1 = funcol.all_reduce_coalesced(args, "avg", "default")
+            ar1 = [funcol.wait_tensor(out) for out in ar1]
             return ar0, ar1
 
         args = [torch.rand(4, 4, device=self.device) for _ in range(2)]
@@ -303,10 +389,10 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         code = run_and_get_triton_code(compiled, args)
         (
             FileCheck()
-            .check("buf0 = empty(")
-            .check("buf5 = empty(")
-            .check("buf1 = empty(")
-            .check("buf6 = empty(")
+            .check("buf0 = empty")
+            .check("buf5 = empty")
+            .check("buf1 = empty")
+            .check("buf6 = empty")
             # Expect in-place with inductor allocated buf
             .check(
                 "torch.ops._c10d_functional.all_reduce_coalesced_"
@@ -336,14 +422,47 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(debug=True)
     @fresh_inductor_cache()
+    def test_inductor_inplace_op_on_view(self):
+        self._init_process_group()
+
+        def func(arg: torch.Tensor) -> torch.Tensor:
+            buf0 = (arg + 10)[:2]
+            ar0 = funcol.all_reduce(buf0, "avg", "default")
+            ar0 = funcol.wait_tensor(ar0)
+            return ar0
+
+        arg = torch.rand(4, 4, device=self.device)
+        compiled = torch.compile(func)
+
+        code = run_and_get_triton_code(compiled, arg)
+        (
+            FileCheck()
+            .check("buf0 = empty")
+            # Ensure the all_reduce_ input is a view
+            .check(
+                "torch.ops._c10d_functional.all_reduce_.default(reinterpret_tensor(buf0"
+            )
+            .check(
+                "torch.ops._c10d_functional.wait_tensor.default(reinterpret_tensor(buf0"
+            )
+            .check("return (reinterpret_tensor(buf0")
+            .run(code)
+        )
+        out = compiled(arg)
+        correct = func(arg)
+        assert same(out, correct), f"{out} va {correct}"
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(debug=True)
+    @fresh_inductor_cache()
     def test_inductor_reuse_buffer_after_inplace_collective(self):
         self._init_process_group()
 
         def func(arg: torch.Tensor) -> torch.Tensor:
             # Expect allocation
             buf0 = arg + 42
-            ar0 = torch.ops._c10d_functional.all_reduce(buf0, "avg", "default")
-            ar0 = torch.ops._c10d_functional.wait_tensor(ar0)
+            ar0 = funcol.all_reduce(buf0, "avg", "default")
+            ar0 = funcol.wait_tensor(ar0)
             # Expect allocation
             buf1 = torch.mm(arg, ar0)
             # Expect buf0 to be reused
@@ -356,17 +475,17 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         (
             FileCheck()
             # Expect allocation
-            .check("buf0 = empty(")
+            .check("buf0 = empty")
             .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
             .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
             # Expect allocation
-            .check("buf5 = empty(")
-            .check("extern_kernels.mm(arg0_1, buf0, out=buf5")
+            .check("buf7 = empty")
+            .check("extern_kernels.mm(arg0_1, buf0, out=buf7")
             # Expect buf0 to be reused
-            .check("buf6 = buf0; del buf0  # reuse")
-            .check("extern_kernels.mm(arg0_1, buf5, out=buf6")
+            .check("buf8 = buf0; del buf0  # reuse")
+            .check("extern_kernels.mm(arg0_1, buf7, out=buf8")
             # Expect no extra copy on return
-            .check("return (buf5, buf6, )")
+            .check("return (buf7, buf8, )")
             .run(code)
         )
         out = compiled(arg)
@@ -380,10 +499,8 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         self._init_process_group()
 
         def func(arg: torch.Tensor) -> torch.Tensor:
-            ag0 = torch.ops._c10d_functional.all_gather_into_tensor(
-                arg, self.world_size, "default"
-            )
-            ag0 = torch.ops._c10d_functional.wait_tensor(ag0)
+            ag0 = funcol.all_gather_tensor(arg, 0, "default")
+            ag0 = funcol.wait_tensor(ag0)
             return ag0
 
         arg = torch.rand(4, 4, device=self.device)
@@ -414,16 +531,13 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         self._init_process_group()
 
         def func(args: List[torch.Tensor]) -> torch.Tensor:
-            ag0 = torch.ops._c10d_functional.all_gather_into_tensor_coalesced(
-                args, self.world_size, "default"
-            )
-            ag0 = [torch.ops._c10d_functional.wait_tensor(out) for out in ag0]
+            ag0 = funcol.all_gather_into_tensor_coalesced(args, "default")
+            ag0 = [funcol.wait_tensor(out) for out in ag0]
             return ag0
 
         args = [torch.rand(4, 4, device=self.device) for _ in range(4)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
-        print(code)
         (
             FileCheck()
             .check(
@@ -457,10 +571,8 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         self._init_process_group()
 
         def func(arg: torch.Tensor) -> torch.Tensor:
-            rs0 = torch.ops._c10d_functional.reduce_scatter_tensor(
-                arg, "avg", self.world_size, "default"
-            )
-            rs0 = torch.ops._c10d_functional.wait_tensor(rs0)
+            rs0 = funcol.reduce_scatter_tensor(arg, "avg", 0, "default")
+            rs0 = funcol.wait_tensor(rs0)
             return rs0
 
         arg = torch.rand(4, 4, device=self.device)
@@ -491,10 +603,10 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         self._init_process_group()
 
         def func(args: List[torch.Tensor]) -> torch.Tensor:
-            rs0 = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(
-                args, "avg", self.world_size, "default"
+            rs0 = funcol.reduce_scatter_tensor_coalesced(
+                args, "avg", [0] * len(args), "default"
             )
-            rs0 = [torch.ops._c10d_functional.wait_tensor(out) for out in rs0]
+            rs0 = [funcol.wait_tensor(out) for out in rs0]
             return rs0
 
         args = [torch.rand(4, 4, device=self.device) for _ in range(4)]
@@ -544,13 +656,13 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             output_split_sizes: torch.Tensor,
             input_split_sizes: torch.Tensor,
         ) -> torch.Tensor:
-            output = torch.ops._c10d_functional.all_to_all_single(
+            output = funcol.all_to_all_single(
                 input,
                 _tolist_with_constrain_as_size(output_split_sizes),
                 _tolist_with_constrain_as_size(input_split_sizes),
                 "default",
             )
-            return torch.ops._c10d_functional.wait_tensor(output)
+            return funcol.wait_tensor(output)
 
         torch.manual_seed(42)
         send_sz_matrix = torch.randint(0, 20, (self.world_size, self.world_size))
@@ -572,7 +684,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             FileCheck()
             .check_regex(
                 "torch.ops._c10d_functional.all_to_all_single.default\\("
-                "arg\\d+_\\d+, \\[i\\d+, i\\d+\\], \\[i\\d+, i\\d+\\]"
+                "arg\\d+_\\d+, \\[u\\d+, u\\d+\\], \\[u\\d+, u\\d+\\]"
             )
             .check("torch.ops._c10d_functional.wait_tensor.default(")
             .run(code)
