@@ -17,6 +17,7 @@ import math
 import operator
 import os
 import pstats
+import re
 import subprocess
 import sys
 import textwrap
@@ -49,6 +50,7 @@ from typing import (
     ValuesView,
 )
 
+from ..utils.hooks import RemovableHandle
 
 try:
     import numpy as np
@@ -523,6 +525,7 @@ def is_function_or_wrapper(value):
         is_function(value)
         or isinstance(value, functools._lru_cache_wrapper)
         and is_function(inspect.getattr_static(value, "__wrapped__"))
+        or isinstance(value, (torch._ops.OpOverloadPacket, torch._ops.OpOverload))
     )
 
 
@@ -534,14 +537,20 @@ def is_function(value):
             types.BuiltinFunctionType,
             types.MethodDescriptorType,
             types.WrapperDescriptorType,
+            torch.jit.ScriptFunction,
         ),
     )
 
 
-def unwrap_if_wrapper(value):
-    if isinstance(value, functools._lru_cache_wrapper):
-        value = inspect.getattr_static(value, "__wrapped__")
-    return value
+def unwrap_if_wrapper(fn):
+    if isinstance(fn, functools._lru_cache_wrapper):
+        fn = inspect.getattr_static(fn, "__wrapped__")
+    # unpack @torch._dynamo.optimize()(fn) wrapped function
+    fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
+    # unpack torch.jit.script_if_tracing
+    if inspect.getattr_static(fn, "__script_if_tracing_wrapper", False):
+        fn = inspect.getattr_static(fn, "__original_fn", fn)
+    return fn
 
 
 def is_numpy_ndarray(value):
@@ -761,10 +770,24 @@ def clone_inputs(example_inputs):
     return res
 
 
+def skip_frame_if_in_functorch_mode(val: torch.Tensor):
+    try:
+        val.data_ptr()  # will throw for functorch tensors
+    except RuntimeError as e:
+        from .exc import SkipFrame
+
+        # This will be GradTrackingTensor/BatchedTensor/etc
+        functorch_subclass_name = re.sub(r"\(.*", "", repr(val))
+        raise SkipFrame(
+            f"torch.compile cannot be run in context: {functorch_subclass_name}"
+        ) from e
+
+
 @contextmanager
 def preserve_rng_state():
     with torch.utils._python_dispatch._disable_current_modes():
         rng_state = torch.clone(torch.random.get_rng_state())
+        skip_frame_if_in_functorch_mode(rng_state)
         if torch.cuda.is_available():
             cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
     try:
@@ -773,7 +796,7 @@ def preserve_rng_state():
         with torch.utils._python_dispatch._disable_current_modes():
             torch.random.set_rng_state(rng_state)
             if torch.cuda.is_available():
-                torch.cuda.set_rng_state(cuda_rng_state)
+                torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
 
 
 def is_jit_model(model0):
@@ -892,7 +915,7 @@ def timed(model, example_inputs, times=1):
         result = model(*example_inputs)
         synchronize()
     t1 = time.perf_counter()
-    return result, t1 - t0
+    return result, t1 - t0  # type: ignore[possibly-undefined]
 
 
 def check_is_cuda(gm, example_inputs):
@@ -1540,8 +1563,11 @@ def ensure_graph_fake(e, tx):
     return e
 
 
-def get_fake_values_from_nodes(tx, nodes):
+def get_fake_values_from_nodes(tx, nodes, allow_non_graph_fake):
     def visit(n: torch.fx.Node):
+        if n.op == "call_function" and "example_value" not in n.meta:
+            return get_fake_value(n, tx, allow_non_graph_fake)
+
         return n.meta["example_value"]
 
     args_kwargs = torch.fx.node.map_arg(nodes, visit)
@@ -1574,7 +1600,9 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     if "example_value" in node.meta and is_fake(node.meta["example_value"]):
         return node.meta["example_value"]
 
-    args, kwargs = get_fake_values_from_nodes(tx, (node.args, node.kwargs))
+    args, kwargs = get_fake_values_from_nodes(
+        tx, (node.args, node.kwargs), allow_non_graph_fake
+    )
 
     nnmodule = None
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
@@ -2066,18 +2094,18 @@ def defake(x):
     size: "torch._prims_common.ShapeType"
     stride: "torch._prims_common.StrideType"
     if x._has_symbolic_sizes_strides:
-        size = [
-            s.node.shape_env.size_hint(s.node.expr)
-            if isinstance(s, torch.SymInt)
-            else s
-            for s in x.size()
-        ]
-        stride = [
-            s.node.shape_env.size_hint(s.node.expr)
-            if isinstance(s, torch.SymInt)
-            else s
-            for s in x.stride()
-        ]
+        size = []
+        for s in x.size():
+            if isinstance(s, torch.SymInt):
+                size.append(s.node.shape_env.size_hint(s.node.expr))
+            else:
+                size.append(s)
+        stride = []
+        for s in x.stride():
+            if isinstance(s, torch.SymInt):
+                stride.append(s.node.shape_env.size_hint(s.node.expr))
+            else:
+                stride.append(s)
     else:
         size = x.size()
         stride = x.stride()
@@ -2472,3 +2500,11 @@ def maybe_enable_compiled_autograd(should_enable):
             yield ctx
     else:
         yield
+
+
+def invalid_removeable_handle():
+    # need a subclass so weakref works
+    class Invalid(dict):  # type: ignore[type-arg]
+        pass
+
+    return RemovableHandle(Invalid())

@@ -42,11 +42,12 @@ ValueRef add_arithmetic_node(
     const ValueRef t1,
     const ValueRef t2,
     const float alpha,
-    const arithmetic::OpType optype) {
+    const arithmetic::OpType optype,
+    const int64_t shared_object_idx) {
   std::vector<int64_t> t1_sizes = graph.get_val_sizes(t1);
   api::ScalarType t1_dtype = graph.get_val_dtype(t1);
 
-  ValueRef out = graph.add_tensor(t1_sizes, t1_dtype);
+  ValueRef out = graph.add_tensor(t1_sizes, t1_dtype, shared_object_idx);
   add_arithmetic_node(graph, t1, t2, out, alpha, optype);
   return out;
 }
