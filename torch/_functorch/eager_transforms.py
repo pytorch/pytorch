@@ -60,6 +60,12 @@ def enable_inplace_requires_grad(enabled):
         set_inplace_requires_grad_allowed(prev_state)
 
 
+def _treespec_compare(left, right):
+    _, left_spec = tree_flatten(left)
+    _, right_spec = tree_flatten(right)
+    return left_spec != right_spec
+
+
 def _tensor_requires_grad(x):
     # avoid graph-break on x.requires_grad_()
     # https://github.com/pytorch/pytorch/pull/110053
@@ -351,12 +357,20 @@ def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = N
             if create_graph is None:
                 create_graph = torch.is_grad_enabled()
             flat_cotangents, cotangents_spec = tree_flatten(cotangents)
-            if primals_out_spec != cotangents_spec:
-                raise RuntimeError(
-                    f'Expected pytree structure of cotangents to be the same '
-                    f'as pytree structure of outputs to the function. '
-                    f'cotangents: {treespec_pprint(cotangents_spec)}, '
-                    f'primal output: {treespec_pprint(primals_out_spec)}')
+            if torch._dynamo.is_compiling():
+                # Not ideal but we cannot compare treespec structures in dynamo
+                # due to issue #116264
+                if _treespec_compare(primals_out, cotangents):
+                    raise RuntimeError(
+                        'Expected pytree structure of cotangents to be the same '
+                        'as pytree structure of outputs to the function.')
+            else:
+                if primals_out_spec != cotangents_spec:
+                    raise RuntimeError(
+                        f'Expected pytree structure of cotangents to be the same '
+                        f'as pytree structure of outputs to the function. '
+                        f'cotangents: {treespec_pprint(cotangents_spec)}, '
+                        f'primal output: {treespec_pprint(primals_out_spec)}')
             result = _autograd_grad(flat_primals_out, flat_diff_primals, flat_cotangents,
                                     retain_graph=retain_graph, create_graph=create_graph)
             return tree_unflatten(result, primals_spec)
