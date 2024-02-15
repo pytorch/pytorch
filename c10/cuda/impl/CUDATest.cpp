@@ -5,9 +5,7 @@
 
 #include <cuda_runtime.h>
 
-namespace c10 {
-namespace cuda {
-namespace impl {
+namespace c10::cuda::impl {
 
 bool has_cuda_gpu() {
   int count = 0;
@@ -29,6 +27,4 @@ int c10_cuda_private_test() {
   return 2;
 }
 
-} // namespace impl
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda::impl

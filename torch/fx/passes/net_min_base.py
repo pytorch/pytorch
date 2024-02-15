@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 import torch.fx
+
 from torch.fx._compatibility import compatibility
 from torch.fx.node import map_arg
 
@@ -371,11 +372,11 @@ class _MinimizerBase:
         # Compare results
         names: Names = output_names
         if output_names is None:
-            names = [str(v) for v in result_key]
+            names = [str(v) for v in result_key]  # type: ignore[possibly-undefined]
 
         numeric_result, bool_result = self.compare_fn(a_result, b_result, names)
 
-        self.results[result_key] = numeric_result
+        self.results[result_key] = numeric_result  # type: ignore[possibly-undefined]
         report.append(f"Numerical accuracy = {numeric_result}")
         if not bool_result:
             report.append(f"Result mismatch for {result_key}")
@@ -492,6 +493,27 @@ class _MinimizerBase:
                 self.print_report(report)
                 if not self.settings.find_all:
                     return culprits
+
+        return culprits
+
+    def _defined_traverse(self, nodes: NodeList) -> NodeSet:
+        """
+        run user defined `nodes` and determine if it is a culprit.
+        """
+        culprits: NodeSet = set()
+
+        first_node_name = nodes[0].name
+        output_node_name = nodes[-1].name
+        report = [f"Defined graph from {first_node_name} to {output_node_name}"]
+        cur_nodes: NodeSet = set(nodes)
+        try:
+            split_module, submod_name = self._build_submodule(cur_nodes)
+            self._run_and_compare(split_module, submod_name, [output_node_name])
+            self.print_report(report)
+        except (FxNetMinimizerResultMismatchError, FxNetMinimizerRunFuncError):
+            report.append(f"Found culprit {cur_nodes}")
+            self.print_report(report)
+            return culprits
 
         return culprits
 
@@ -702,5 +724,8 @@ class _MinimizerBase:
             if (skip_nodes is None):
                 raise RuntimeError("'skip_nodes' can't be None when 'traverse_method' is 'skip'.")
             return self._skip_traverse(nodes, skip_nodes)
+
+        if self.settings.traverse_method == "defined":
+            return self._defined_traverse(nodes)
 
         raise RuntimeError(f"Unknown traverse method {self.settings.traverse_method}!")
