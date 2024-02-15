@@ -7,7 +7,7 @@ import types
 import unittest
 from copy import deepcopy
 from functools import partial
-from typing import Tuple
+from typing import Dict, NamedTuple, Tuple
 from unittest.mock import patch
 
 import torch
@@ -579,6 +579,38 @@ class LazyMLP(torch.nn.Module):
         x = self.relu1(self.fc1(input))
         y = self.relu2(self.fc2(x))
         return y
+
+
+class MyInput(NamedTuple):
+    x: Dict[str, Dict[str, torch.Tensor]]
+    y: torch.Tensor
+
+
+class LazyLayerWithNamedTupleInput(LazyModuleMixin, torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def initialize_parameters(self, input):
+        with torch.no_grad():
+            self._param = torch.nn.Parameter(
+                torch.empty(input.x["a"][0].shape).fill_(0.5)
+            )
+
+    def forward(self, input):
+        input = input.x["a"]
+        x = 0
+        for i in range(len(input)):
+            x = x + input[i]
+        return x
+
+
+class LazyModuleWithNamedTupleInput(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer = LazyLayerWithNamedTupleInput()
+
+    def forward(self, input):
+        return self.layer(input)
 
 
 class LazyLayerWithListInput(LazyModuleMixin, torch.nn.Module):
@@ -1451,6 +1483,20 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         m = LazyModuleWithLazySubmodule()
         x = [torch.rand([5, 5])] * 3
         opt_m = torch._dynamo.optimize("eager", nopython=True)(m)
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+    @expectedFailureDynamic
+    def test_lazy_module7(self):
+        # Test lazy module works well with namedtuple/dict input
+        m = LazyModuleWithNamedTupleInput()
+        x = MyInput(
+            x={"a": [torch.rand([5, 5])] * 3, "b": torch.rand([5, 5])},
+            y=torch.rand([5, 5]),
+        )
+        opt_m = torch.compile(backend="eager", fullgraph=True)(m)
         res = opt_m(x)
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
