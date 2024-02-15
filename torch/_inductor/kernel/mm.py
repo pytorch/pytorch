@@ -127,7 +127,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
         size1 = torch.tensor([], dtype=dtype1).element_size()
         size2 = torch.tensor([], dtype=dtype2).element_size()
         out_dtype = dtype1 if size1 >= size2 else dtype2
-    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout, out_dtype=out_dtype)
+    m, n, k, layout, mat1, mat2 = mm_args(
+        mat1, mat2, layout=layout, out_dtype=out_dtype
+    )
 
     # options to tune from
     choices = [aten_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []

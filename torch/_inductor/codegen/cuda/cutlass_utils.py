@@ -223,7 +223,9 @@ def get_accumulator_dtype(
         size0 = torch.tensor([], dtype=input_torch_dtypes[0]).element_size()
         size1 = torch.tensor([], dtype=input_torch_dtypes[1]).element_size()
         if size0 != size1:
-            torch_dtype = input_torch_dtypes[0] if size0 >= size1 else input_torch_dtypes[1]
+            torch_dtype = (
+                input_torch_dtypes[0] if size0 >= size1 else input_torch_dtypes[1]
+            )
 
     if torch_dtype == torch.half:
         if torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction:
@@ -235,6 +237,7 @@ def get_accumulator_dtype(
     if torch_dtype == torch.int8:
         return torch.int32
     raise NotImplementedError(f"Unsupported data types: {input_torch_dtypes=}")
+
 
 def get_alignments(torch_dtype: torch.dtype) -> List[int]:
     """
