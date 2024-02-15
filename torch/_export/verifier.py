@@ -10,7 +10,6 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.export.exported_program import ExportedProgram
 from torch.export.graph_signature import (
     CustomObjArgument,
-    ExportGraphSignature,
     InputKind,
     SymIntArgument,
     TensorArgument,
@@ -83,6 +82,15 @@ class _VerifierMeta(type):
         metacls._registry[attrs["dialect"]] = ret  # type: ignore[assignment]
         return ret
 
+def getattr_recursive(obj: Any, target: str) -> Any:
+    target_atoms = target.split('.')
+    attr_itr = obj
+    for i, atom in enumerate(target_atoms):
+        if not hasattr(attr_itr, atom):
+            raise RuntimeError(f"Node referenced nonexistent target {'.'.join(target_atoms[:i])}")
+        attr_itr = getattr(attr_itr, atom)
+    return attr_itr
+
 
 class Verifier(metaclass=_VerifierMeta):
     dialect = "ATEN"
@@ -129,9 +137,6 @@ class Verifier(metaclass=_VerifierMeta):
 
     @final
     def check(self, ep: ExportedProgram) -> None:
-        if not isinstance(ep.graph_signature, ExportGraphSignature):
-            # TODO Enforce type checking in the constructor.
-            return
         self._check_graph_module(ep.graph_module)
         _verify_exported_program_signature(ep)
 
@@ -208,7 +213,7 @@ class Verifier(metaclass=_VerifierMeta):
                             f"Expected get_attr target to be string, but got {type(node.target)}"
                         )
 
-                    attr = getattr(mod, node.target)
+                    attr = getattr_recursive(mod, node.target)
                     if isinstance(attr, torch.nn.Module):
                         def _is_type(name, ty):
                             return isinstance(getattr(attr, name, None), ty)
@@ -301,9 +306,19 @@ def _verify_exported_program_signature(exported_program) -> None:
                 )
 
             buffer = input_spec.target
-            if buffer not in exported_program.state_dict:
+            if input_spec.persistent is None:
+                raise SpecViolationError(
+                    f"Buffer {buffer} is missing a persistence flag"
+                )
+
+            if input_spec.persistent is True and buffer not in exported_program.state_dict:
                 raise SpecViolationError(
                     f"Buffer {buffer} is not in the state dict."
+                )
+
+            if input_spec.persistent is False and buffer in exported_program.state_dict:
+                raise SpecViolationError(
+                    f"Non-persistent buffer {buffer} is in the state dict, it should not be."
                 )
         elif input_spec.kind == InputKind.CONSTANT_TENSOR:
             if not isinstance(input_spec.arg, TensorArgument):
