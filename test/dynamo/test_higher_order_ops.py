@@ -2685,7 +2685,7 @@ class GraphModule(torch.nn.Module):
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting()
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
 
-        _treespec_compare = torch._functorch.eager_transforms._treespec_compare((primal_out, primal_out_1), (child_8, child_8))
+        _vjp_treespec_compare = torch._functorch.eager_transforms._vjp_treespec_compare((primal_out, primal_out_1), (child_8, child_8))
 
         _autograd_grad = torch._functorch.eager_transforms._autograd_grad([primal_out, primal_out_1], [child_4], [child_8, child_8], retain_graph = True, create_graph = True);  primal_out = primal_out_1 = child_4 = child_8 = None
         getitem = _autograd_grad[0];  _autograd_grad = None
@@ -2738,7 +2738,7 @@ class GraphModule(torch.nn.Module):
 
         child_8 = child_7.sin()
 
-        _treespec_compare = torch._functorch.eager_transforms._treespec_compare({'first': primal_out, 'second': primal_out_1}, {'first': child_7, 'second': child_8})
+        _vjp_treespec_compare = torch._functorch.eager_transforms._vjp_treespec_compare({'first': primal_out, 'second': primal_out_1}, {'first': child_7, 'second': child_8})
 
         _autograd_grad = torch._functorch.eager_transforms._autograd_grad([primal_out, primal_out_1], [child_4], [child_7, child_8], retain_graph = True, create_graph = True);  primal_out = primal_out_1 = child_4 = child_7 = child_8 = None
         getitem = _autograd_grad[0];  _autograd_grad = None
