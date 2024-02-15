@@ -109,7 +109,7 @@ if(@USE_XPU@)
   set(CMAKE_MODULE_PATH "${old_CMAKE_MODULE_PATH}")
 endif()
 
-if(@CAFFE2_USE_MKL@ AND @USE_MAGMA@)
+if(@CAFFE2_USE_MKL@ AND APPLE)
   include("${CMAKE_CURRENT_LIST_DIR}/public/mkl.cmake")
 endif()
 
