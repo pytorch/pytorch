@@ -42,7 +42,7 @@ class SourceTests(torch._dynamo.test_case.TestCase):
 
         e = Elements()
         a = func(e)
-        b = torch.compile(func)(e)
+        b = torch.compile(func, backend="eager", fullgraph=True)(e)
         self.assertEqual(a, b)
 
 
