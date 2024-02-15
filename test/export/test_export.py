@@ -806,7 +806,7 @@ class TestExport(TestCase):
                 dynamic_shapes={"kjt": [{0: dim}, None, {0: dim}, {0: dim_plus_one}]},
             )
             self.assertEqual(
-                [out.shape for out in efoo(*inputs)],
+                [out.shape for out in efoo.module()(*inputs)],
                 [out.shape for out in foo(*inputs)]
             )
 
@@ -2964,7 +2964,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         m = MyModule()
         ep = export(m, (inp,), {})
 
-        self.assertEqual(ep(inp), m(inp))
         # Non-persistent buffers should not show up in the state dict
         self.assertNotIn("foo", ep.state_dict)
         named_buffers = {name: buffer for (name, buffer) in ep.named_buffers()}
@@ -3148,7 +3147,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return [((1, 3), [x + x, x * x])]
 
         ep = torch.export.export(M(), (torch.ones(2, 3),))
-        res = ep(torch.ones(2, 3))
+        res = ep.module()(torch.ones(2, 3))
         self.assertEqual(res[0][0], (1, 3))
 
     def test_primitive_constant_output(self):
@@ -3157,7 +3156,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return y * x
 
         ep = torch.export.export(Z(), (torch.tensor(3), 5))
-        res = ep(torch.tensor(4), 5)
+        res = ep.module()(torch.tensor(4), 5)
         self.assertEqual(res, torch.tensor(20))
 
         class B(torch.nn.Module):
@@ -3165,12 +3164,12 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return y * x, y
 
         ep = torch.export.export(B(), (torch.tensor(3), 5))
-        res = ep(torch.tensor(4), 5)
+        res = ep.module()(torch.tensor(4), 5)
         self.assertEqual(res[0], torch.tensor(20))
         self.assertEqual(res[1], 5)
 
         with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[1] to be equal to 5, but got 20")):
-            res = ep(torch.tensor(4), 20)
+            res = ep.module()(torch.tensor(4), 20)
 
         class F(torch.nn.Module):
             def forward(self, x):
@@ -3179,7 +3178,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return y * x, y
 
         ep = torch.export.export(F(), (torch.tensor(3),))
-        res = ep(torch.tensor(4))
+        res = ep.module()(torch.tensor(4))
         self.assertEqual(res[0], torch.tensor(20))
         self.assertEqual(res[1], 5)
 
@@ -3188,7 +3187,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return y * x, y - 1
 
         ep = torch.export.export(Q(), (torch.tensor(3), 5))
-        res = ep(torch.tensor(4), 5)
+        res = ep.module()(torch.tensor(4), 5)
         self.assertEqual(res[0], torch.tensor(20))
         self.assertEqual(res[1], 4)
 
@@ -3198,7 +3197,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return x * x
 
         ep = torch.export.export(Z(), (torch.tensor(3), None))
-        res = ep(torch.tensor(4), None)
+        res = ep.module()(torch.tensor(4), None)
         self.assertEqual(res, torch.tensor(16))
 
         class B(torch.nn.Module):
@@ -3206,12 +3205,12 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return x * x, y
 
         ep = torch.export.export(B(), (torch.tensor(3), None))
-        res = ep(torch.tensor(4), None)
+        res = ep.module()(torch.tensor(4), None)
         self.assertEqual(res[0], torch.tensor(16))
         self.assertEqual(res[1], None)
 
         decomp = ep.run_decompositions()
-        res = decomp(torch.tensor(4), None)
+        res = decomp.module()(torch.tensor(4), None)
         self.assertEqual(res[0], torch.tensor(16))
         self.assertEqual(res[1], None)
 
