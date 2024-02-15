@@ -1091,9 +1091,11 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState>>(
       m, "_cuda_CUDAAllocator_AllocatorState");
 
-  m.def("_cuda_getCheckpointState", [](int device, c10::cuda::MempoolId_t id) {
-    return c10::cuda::CUDACachingAllocator::getCheckpointState(device, id);
-  });
+  m.def(
+      "_cuda_getCheckpointState",
+      [](c10::DeviceIndex device, c10::cuda::MempoolId_t id) {
+        return c10::cuda::CUDACachingAllocator::getCheckpointState(device, id);
+      });
 
   m.def("_free_And_Remove_DeleterFn", [](size_t storage_impl_ptr) {
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
@@ -1157,7 +1159,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
 
   m.def(
       "_cuda_beginAllocateCurrentStreamToPool",
-      [](int device, at::cuda::MempoolId_t mempool_id) {
+      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
         auto stream = at::cuda::getCurrentCUDAStream(device);
         TORCH_CHECK(stream, "Expected stream capture to be under way");
         c10::cuda::CUDACachingAllocator::beginAllocateToPool(
@@ -1168,17 +1170,19 @@ static void registerCudaPluggableAllocator(PyObject* module) {
 
   m.def(
       "_cuda_endAllocateCurrentStreamToPool",
-      [](int device, at::cuda::MempoolId_t mempool_id) {
+      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
         c10::cuda::CUDACachingAllocator::endAllocateToPool(device, mempool_id);
       });
 
-  m.def("_cuda_releasePool", [](int device, at::cuda::MempoolId_t mempool_id) {
-    c10::cuda::CUDACachingAllocator::releasePool(device, mempool_id);
-  });
+  m.def(
+      "_cuda_releasePool",
+      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
+        c10::cuda::CUDACachingAllocator::releasePool(device, mempool_id);
+      });
 
   m.def(
       "_cuda_checkPoolLiveAllocations",
-      [](int device,
+      [](c10::DeviceIndex device,
          at::cuda::MempoolId_t mempool_id,
          const py::set& expected_live_allocations) {
         std::unordered_set<void*> allocations;
@@ -1192,7 +1196,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
 
   m.def(
       "_cuda_setCheckpointPoolState",
-      [](int device,
+      [](c10::DeviceIndex device,
          std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps,
          std::vector<size_t> stale_storages_ptr,
          std::vector<size_t> storages_to_add_deleters_to_ptr = {}) {
