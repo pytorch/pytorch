@@ -1351,49 +1351,20 @@ class CppVecOverrides(CppOverrides):
         assert opt_ctx_x
         assert opt_ctx_x.dtype is not None
         assert isinstance(V.kernel, CppVecKernel)
-        src_cpp_type = DTYPE_TO_CPP[opt_ctx_x.dtype]
-        cpp_type = DTYPE_TO_CPP[dtype]
-        num_vectors = V.kernel._get_num_vectors(dtype)
-        if opt_ctx_x.dtype != torch.bool and dtype == torch.bool:
-            return f"{V.kernel._get_mask_type(opt_ctx_x.dtype)}::from<{src_cpp_type},{num_vectors}>({x})"
+        src_dtype = opt_ctx_x.dtype
+        src_cpp_type = DTYPE_TO_CPP[src_dtype]
+        src_num_vectors = V.kernel._get_num_vectors(src_dtype)
+        dst_cpp_type = DTYPE_TO_CPP[dtype]
+        dst_num_vectors = V.kernel._get_num_vectors(dtype)
+        if src_dtype != torch.bool and dtype == torch.bool:
+            return f"{V.kernel._get_mask_type(src_dtype)}::from<{src_cpp_type},{src_num_vectors}>({x})"
         if opt_ctx_x.dtype == torch.bool and dtype != torch.bool:
-            return f"{x}.to<{cpp_type},{num_vectors}>()"
-        if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype in DTYPE_LOWP_FP:
-            return f"cvt_fp32_to_lowp_fp<{cpp_type}>({x})"
-        if opt_ctx_x.dtype in DTYPE_LOWP_FP and dtype in (torch.float, torch.float32):
-            return f"cvt_lowp_fp_to_fp32<{src_cpp_type}>({x})"
-        if opt_ctx_x.dtype in (torch.uint8, torch.int8) and dtype in (
-            torch.float,
-            torch.float32,
-        ):
-            # Note: this function only convert inputs number of elements equal to at::vec::Vectorized<float>.size()
-            return f"at::vec::convert_int8_to_float({x})"
-        if opt_ctx_x.dtype in (torch.float, torch.float32) and dtype in (
-            torch.uint8,
-            torch.int8,
-        ):
-            # if we already handle the saturation previously.
-            # * Pattern match of quantization op in the loop body.
-            # * Skip the explicit saturation and clamp inside at::vec::convert_float_to_int8.
-            return f"at::vec::convert_float_to_int8<{cpp_type}>({x})"
-        if opt_ctx_x.dtype == torch.int32 and dtype == torch.float:
-            return f"at::vec::convert_to_fp_of_same_size<float>({x})"
-        if opt_ctx_x.dtype == torch.float and dtype == torch.int32:
-            return f"at::vec::convert_to_int_of_same_size({x})"
-        if opt_ctx_x.dtype == torch.int64 and dtype == torch.float:
-            return f"cvt_int64_to_fp32({x})"
-        if opt_ctx_x.dtype == torch.float and dtype == torch.int64:
-            return f"cvt_fp32_to_int64({x})"
-        if opt_ctx_x.dtype == torch.int32 and dtype == torch.int64:
-            return f"cvt_int32_to_int64({x})"
-        if opt_ctx_x.dtype == torch.int64 and dtype == torch.int32:
-            return f"cvt_int64_to_int32({x})"
-        if opt_ctx_x.dtype in (torch.int8, torch.uint8) and dtype == torch.int32:
-            return f"cvt_int8_to_int32({x})"
-        if opt_ctx_x.dtype in (torch.int8, torch.uint8) and dtype == torch.int64:
-            return f"cvt_int8_to_int64({x})"
-        # TODO(jgong5): support conversion for other types
-        # currently we only allow load/store torch.uint8 and handle conversion there
+            return f"{x}.to<{dst_cpp_type},{dst_num_vectors}>()"
+        if src_dtype != dtype:
+            if src_num_vectors == dst_num_vectors == 1:
+                return f"at::vec::convert<{dst_cpp_type}>({x})"
+            else:
+                return f"at::vec::convert<{dst_cpp_type},{dst_num_vectors},{src_cpp_type},{src_num_vectors}>({x})"
         return f"({x})"
 
     @staticmethod
