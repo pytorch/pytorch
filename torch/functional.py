@@ -640,7 +640,7 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
 
     Returns:
         Tensor: A tensor containing the STFT result with shape `(B?, N, T, C?)` where
-           - `B?` is an optional batch dimnsion from the input
+           - `B?` is an optional batch dimension from the input.
            - `N` is the number of frequency samples, `(n_fft // 2) + 1` for
              `onesided=True`, or otherwise `n_fft`.
            - `T` is the number of frames, `1 + L // hop_length`
