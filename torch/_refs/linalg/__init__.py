@@ -64,10 +64,12 @@ def _check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_nam
 
 # Utilities should come BEFORE this import
 from torch._decomp import register_decomposition
+from torch._decomp.decompositions import pw_cast_for_opmath
 
 
 @register_decomposition(torch._ops.ops.aten.linalg_cross)
 @out_wrapper()
+@pw_cast_for_opmath
 def cross(a: Tensor, b: Tensor, dim: int = -1):
     torch._check(
         a.ndim == b.ndim,
