@@ -228,7 +228,7 @@ non-None device argument.  To globally change the default device, see also
    >>> torch.randn((2,3), device=1)  # legacy
 
 .. note::
-   Scalar Tensors (with tensor.dim()==0) are automatically transferred to the GPU device due to the efficiency of this operation. Non-scalar Tensors, however, are not auto-transferred. Additionally, the automatic transfer of Scalar Tensors is uni-directional, only from CPU to GPU, and not vice versa.
+   Tensors are never moved automatically between devices and require an explicit call from the user. Scalar Tensors (with tensor.dim()==0) are the only exception to this rule and they are automatically transferred from CPU to GPU when needed as this operation can be done "for free".
    Example:
 
    >>> # two scalars
