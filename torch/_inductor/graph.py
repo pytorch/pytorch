@@ -327,19 +327,19 @@ class GraphLowering(torch.fx.Interpreter):
         if nconv == 0:
             return False
 
-        # For cpu backend and mkldnn enabled, we always using channels_last for a better performance.
+        # For cpu backend and mkldnn enabled, we always use channels_last for better performance.
         if (
-            all(
+            torch.backends.mkldnn.enabled
+            and torch.backends.mkldnn.is_available()
+            and all(
                 n.args[idx].meta["val"].device == torch.device("cpu")
                 for n in conv_nodes
                 for idx in [0, 1]
             )
-            and torch.backends.mkldnn.enabled
-            and torch.backends.mkldnn.is_available()
         ):
             return True
 
-        # Followering models are skipped due to this:
+        # Following models are skipped due to this:
         # jx_nest_base
         # volo_d1_224
         if len(list(gm.graph.nodes)) >= 300 * nconv:
@@ -442,7 +442,7 @@ class GraphLowering(torch.fx.Interpreter):
         #
         # The following heuristics skip using channels-last if the model contains
         # grouped convolution with in-channels > 1.
-        if any(is_grouped(n) for n in conv_nodes):
+        if any(map(is_grouped, conv_nodes)):
             log.debug(
                 "Skip layout opt because found grouped convolution with >1 in_channels!"
             )
@@ -455,7 +455,7 @@ class GraphLowering(torch.fx.Interpreter):
         # - phlippe_densenet (slightly worse)
         # - Background_Matting (1.22x -> 0.821x)
         # - pytorch_CycleGAN_and_pix2pix (1.597x -> 1.294x)
-        if any(is_in_out_channel(n) for n in conv_nodes):
+        if any(map(is_in_out_channel, conv_nodes)):
             log.debug(
                 "Skip layout opt because some convolutions have smaller out_channel"
             )
@@ -463,7 +463,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         # Following models are skipped due to this:
         # - functorch_maml_omniglot
-        if all(is_small_channel(n) for n in conv_nodes):
+        if all(map(is_small_channel, conv_nodes)):
             log.debug("Skip layout opt because all convolution channels are too small")
             return False
 
@@ -817,6 +817,9 @@ class GraphLowering(torch.fx.Interpreter):
     def get_attr(self, target, args, kwargs):
         # this is a constant
         value = getattr_recursive(self.module, target)
+
+        if isinstance(value, torch.fx.GraphModule):
+            return ir.Subgraph(name=target, graph_module=value)
 
         if (
             config.aot_inductor.use_runtime_constant_folding
@@ -1183,28 +1186,23 @@ class GraphLowering(torch.fx.Interpreter):
         self.scheduler.codegen()
         return self.wrapper_code.generate(self.is_inference)
 
-    def codegen_subgraph(self, parent_wrapper_code):
+    def codegen_subgraph(self, parent_graph):
         """
         This is a more compact version of the `codegen()` above
         where we codegen this graph as a subgraph of some parent
-        graph. The parent graph's wrapper is passed as an
-        argument: the intention is to inline codegening of the
-        subgraph in the parent's wrapper code (including the
-        generated kerenls). The wrapper code is not finalized
-        (via `.generate()` call), as this will be done in the
-        parent graph's `codegen()`.
+        graph. The parent graph is passed as an argument: the
+        intention is to inline codegening of the subgraph in
+        the parent graph's wrapper code (including the generated
+        kerenls). The wrapper code is not finalized (via `.generate()`
+        call), as this will be done in the parent graph's `codegen()`.
         """
         from .scheduler import Scheduler
 
-        old_wrapper_code = self.wrapper_code
-        self.wrapper_code = parent_wrapper_code
+        self.wrapper_code = parent_graph.wrapper_code
+        self.device_ops = parent_graph.device_ops
 
-        try:
-            self.scheduler = Scheduler(self.buffers)
-            self.scheduler.codegen()
-        finally:
-            # restore the old wrapper code, just in case
-            self.wrapper_code = old_wrapper_code
+        self.scheduler = Scheduler(self.buffers)
+        self.scheduler.codegen()
 
     def count_bytes(self):
         from .scheduler import Scheduler
@@ -1221,7 +1219,7 @@ class GraphLowering(torch.fx.Interpreter):
             node_runtimes.append((node, node.get_estimated_runtime()))
         return total_bytes, node_counts, node_runtimes
 
-    @dynamo_timed
+    @dynamo_timed(phase_name="code_gen")
     def compile_to_module(self):
         from .codecache import PyCodeCache
 
