@@ -133,8 +133,9 @@ class OperatorBase:
     #   @py_functionalize_impl
     #   def functionalize_rule(ctx, inner_f, *args):
     #       args_unwrapped = ctx.unwrap_tensors(args)
-    #       out = ctx.functionalize(inner_f)(*args_unwrapped)
-    #       return ctx.wrap_tensors(out)
+    #       with ctx.redispatch_to_next():
+    #           out = ctx.functionalize(inner_f)(*args_unwrapped)
+    #           return ctx.wrap_tensors(out)
     def py_functionalize_impl(self, fn):
         from torch._subclasses.functional_tensor import (
             CppFunctionalizeAPI as _CppFunctionalizeAPI,
