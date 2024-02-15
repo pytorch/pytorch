@@ -723,6 +723,9 @@ class FunctoolsPartialVariable(VariableTracker):
             len(keys) + len(self.args) + 1, keys, True
         )
 
+    def get_function(self):
+        return self.as_python_constant()
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":

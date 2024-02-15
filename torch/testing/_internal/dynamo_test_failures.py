@@ -2095,11 +2095,6 @@ dynamo_expected_failures = {
     "LoggingTests.test_dynamo_info",  # dynamo/test_logging
     "LoggingTests.test_graph_breaks",  # dynamo/test_logging
     "LoggingTests.test_aot",  # dynamo/test_logging
-    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape2_cpu",  # test_transformers.py
-    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape3_cpu",  # test_transformers.py
-    "TestAttnBiasCPU.test_is_causal_and_mask_fails_cpu",  # test_transformers.py
-    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape1_cpu",  # test_transformers.py
-    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape0_cpu",  # test_transformers.py
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_float32",  # test_linalg.py
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_int64",  # test_linalg.py
     "TestLinalgCPU.test_matmul_small_brute_force_3d_Nd_cpu_complex64",  # test_linalg.py
@@ -2217,11 +2212,6 @@ dynamo_skips = {
     "TestAttnBiasCUDA.test_causal_variants_compile_causal_variant_CausalVariant_UPPER_LEFT_shape2_CUDA",  # known py38 fail
     "TestAttnBiasCUDA.test_causal_variants_compile_causal_variant_CausalVariant_UPPER_LEFT_shape1_CUDA",  # known py38 fail
     "TestTransformersCPU.test_decoder_padding_and_src_mask_bool_cpu",  # known py311 fail
-    "TestAttnBiasCPU.test_causal_variants_causal_variant_2_shape3_cpu",  # known py311 fail
-    "TestAttnBiasCPU.test_causal_variants_causal_variant_1_shape3_cpu",  # known py311 fail
-    "TestAttnBiasCPU.test_causal_variants_causal_variant_1_shape2_cpu",  # known py311 fail
-    "TestAttnBiasCPU.test_causal_variants_causal_variant_1_shape1_cpu",  # known py311 fail
-    "TestAttnBiasCPU.test_causal_variants_causal_variant_2_shape1_cpu",  # known py311 fail
     "TestSWAUtils.test_averaged_model_all_devices_ema_True",  # flaky
     "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_False",  # flaky
     "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_True",  # flaky

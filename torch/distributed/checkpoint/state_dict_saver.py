@@ -56,7 +56,7 @@ def save(
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
-    no_dist: bool = False,
+    no_dist: Optional[bool] = None,
 ) -> Metadata:
     """
     Save a distributed model in SPMD style.
@@ -83,6 +83,7 @@ def save(
     .. note::
         This function can be used to save a state_dict without having a process group
         initialized by passing ``no_dist=True``.
+        (Default: ``False`` when torch.distributed is available and initialized)
 
 
     Args:
@@ -132,6 +133,14 @@ def save(
         each rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
+
+    if no_dist is None:
+        no_dist = not (dist.is_available() and dist.is_initialized())
+        if no_dist:
+            warnings.warn(
+                "Saving with `no_dist` set to True because torch.distributed"
+                " is unavailable or uninitialized."
+            )
 
     with _profile():
         storage_writer = cast(
