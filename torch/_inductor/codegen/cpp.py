@@ -1431,7 +1431,6 @@ class CppVecOverrides(CppOverrides):
             csevar = V.kernel.cse.generate(
                 V.kernel.compute, f"{mask} ? {body_code} : {other_code}"
             )
-
         # `result` is explicitly added to the args for correct propagation
         # of relevant itervars and vectorization status.
         csevar.update_on_args("masked", (mask, body, other, result), {})

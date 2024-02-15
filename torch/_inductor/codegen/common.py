@@ -1180,12 +1180,7 @@ class CSE:
     def generate(
         self,
         buffer: IndentedBuffer,
-        expr: Union[
-            str,
-            CSEVariable,
-            OpsValue,
-            IndentedBuffer,
-        ],
+        expr: Union[str, CSEVariable, OpsValue, IndentedBuffer],
         *,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
         write=True,

@@ -40,6 +40,7 @@ from torch.testing._internal.common_device_type import (
     precisionOverride,
     dtypesIfCPU,
 )
+from torch.utils import _pytree as pytree
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -321,11 +322,8 @@ class TestUnaryUfuncs(TestCase):
         torch_kwargs, _ = op.sample_kwargs(device, dtype, non_contig)
         expected = op(non_contig, **torch_kwargs)
         result = op(contig, **torch_kwargs)
-        if is_iterable_of_tensors(expected):
-            for a, b in zip(result, expected):
-                self.assertEqual(a[::2], b)
-        else:
-            self.assertEqual(result[::2], expected)
+        result = pytree.tree_map(lambda x: x[::2], result)
+        self.assertEqual(result, expected)
 
     @ops(unary_ufuncs)
     def test_contig_vs_transposed(self, device, dtype, op):
@@ -340,11 +338,8 @@ class TestUnaryUfuncs(TestCase):
         torch_kwargs, _ = op.sample_kwargs(device, dtype, contig)
         expected = op(non_contig, **torch_kwargs)
         result = op(contig, **torch_kwargs)
-        if is_iterable_of_tensors(expected):
-            for a, b in zip(result, expected):
-                self.assertEqual(a.T, b)
-        else:
-            self.assertEqual(result.T, expected)
+        result = pytree.tree_map(lambda x: x.T, result)
+        self.assertEqual(result, expected)
 
     @ops(unary_ufuncs)
     def test_non_contig(self, device, dtype, op):
