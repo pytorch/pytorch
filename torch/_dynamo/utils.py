@@ -1744,7 +1744,8 @@ def run_node(tracer, node, args, kwargs, nnmodule):
             raise unimplemented(
                 f"running {op} {node.target}(*{args}, **{kwargs})"
             ) from e
-
+        except UnsupportedFakeTensorException:
+            raise
         except Exception as e:
             fn_str = f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n"
             raise RuntimeError(fn_str + str(e)).with_traceback(e.__traceback__) from e
