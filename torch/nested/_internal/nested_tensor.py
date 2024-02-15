@@ -366,13 +366,13 @@ _nt_view_dummy = NestedTensor(
 )
 
 
-def nested_view_from_values_offsets(values, offsets):
-    return torch._nested_view_from_values_offsets(
-        values, offsets, _nt_view_dummy
+def nested_view_from_values_offsets(values, offsets, ragged_idx=1):
+    return torch._nested_view_from_jagged(
+        values, offsets, _nt_view_dummy, None, ragged_idx
     )  # type: ignore[return-value]
 
 
-def nested_view_from_values_offsets_lengths(values, offsets, lengths):
-    return torch._nested_view_from_values_offsets_lengths(
-        values, offsets, lengths, _nt_view_dummy
+def nested_view_from_values_offsets_lengths(values, offsets, lengths, ragged_idx=1):
+    return torch._nested_view_from_jagged(
+        values, offsets, _nt_view_dummy, lengths, ragged_idx
     )  # type: ignore[return-value]
