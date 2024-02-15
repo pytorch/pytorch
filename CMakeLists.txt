@@ -351,6 +351,8 @@ cmake_dependent_option(
     "NOT INTERN_BUILD_MOBILE" OFF)
 cmake_dependent_option(
     BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
+cmake_dependent_option(
+    BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin fodler" OFF "USE_CUDA" OFF)
 
 option(USE_MIMALLOC "Use mimalloc" OFF)
 # Enable third party mimalloc library to improve memory allocation performance on Windows.
@@ -1240,4 +1242,13 @@ if(DEFINED USE_CUSTOM_DEBINFO)
     # Link everything with debug info when any file is in debug mode
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -g")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -g")
+endif()
+
+# Bundle PTXAS if needed
+if(BUILD_BUNDLE_PTXAS AND USE_CUDA)
+   if(NOT EXISTS "${PROJECT_SOURCE_DIR}/build/bin/ptxas")
+     message(STATUS "Copying PTXAS into the bin folder")
+     file(COPY "${CUDAToolkit_BIN_DIR}/ptxas" DESTINATION "${PROJECT_BINARY_DIR}")
+   endif()
+   install(PROGRAMS "${PROJECT_BINARY_DIR}/ptxas" DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
