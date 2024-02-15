@@ -588,6 +588,7 @@ class BackedgeTracker:
     idea is that if you're looping and each loop is inlining a large sub-graph
     we detect that and skip frame when it's looking untenable.
     """
+
     def __init__(self):
         self.n_seen = 0
 
@@ -1084,7 +1085,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def jump(self, inst):
         target = self.indexof[inst.target]
-        if target < self.instruction_pointer:
+        if self.instruction_pointer and target < self.instruction_pointer:
             key = (self.instruction_pointer, target)
             count = len(self.output.graph.nodes)
             self.loop_backedge_trackers[key].append(count)
