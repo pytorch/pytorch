@@ -114,6 +114,9 @@ def broadcast_shapes(*shapes):
                 if max_len < s:
                     max_len = s
         result = [1] * max_len
+
+        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
         for shape in shapes:
             if isinstance(shape, (int, torch.SymInt)):
                 shape = (shape,)
@@ -121,7 +124,9 @@ def broadcast_shapes(*shapes):
                 for i in range(-1, -1 - len(shape), -1):
                     if shape[i] < 0:
                         raise RuntimeError(f"Trying to create tensor with negative dimension ({shape[i]}): ({shape[i]})")
-                    if shape[i] == 1 or shape[i] == result[i]:
+                    # NB: result is initialized to 1 so this is effectively an
+                    # equals one test
+                    if guard_size_oblivious(shape[i] == 1) or guard_size_oblivious(shape[i] == result[i]):
                         continue
                     if result[i] != 1:
                         raise RuntimeError("Shape mismatch: objects cannot be broadcast to a single shape")

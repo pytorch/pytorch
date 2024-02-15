@@ -29,7 +29,7 @@ using CuSolverDnPoolType = DeviceThreadHandlePool<cusolverDnHandle_t, createCuso
 } // namespace
 
 cusolverDnHandle_t getCurrentCUDASolverDnHandle() {
-  int device;
+  c10::DeviceIndex device = 0;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
 
   // Thread local PoolWindows are lazily-initialized

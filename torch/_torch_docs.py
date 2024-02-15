@@ -1,4 +1,4 @@
-"""Adds docstrings to functions defined in the torch._C"""
+"""Adds docstrings to functions defined in the torch._C module."""
 
 import re
 
@@ -7,7 +7,8 @@ from torch._C import _add_docstr as add_docstr
 
 
 def parse_kwargs(desc):
-    """Maps a description of args to a dictionary of {argname: description}.
+    r"""Map a description of args to a dictionary of {argname: description}.
+
     Input:
         ('    weight (Tensor): a weight tensor\n' +
          '        Some optional description')
@@ -24,6 +25,7 @@ def parse_kwargs(desc):
 
 
 def merge_dicts(*dicts):
+    """Merge dictionaries into a single dictionary."""
     return {x: d[x] for d in dicts for x in d}
 
 
@@ -2306,7 +2308,7 @@ cat(tensors, dim=0, *, out=None) -> Tensor
 
 Concatenates the given sequence of :attr:`seq` tensors in the given dimension.
 All tensors must either have the same shape (except in the concatenating
-dimension) or be empty.
+dimension) or be a 1-D empty tensor with size ``(0,)``.
 
 :func:`torch.cat` can be seen as an inverse operation for :func:`torch.split`
 and :func:`torch.chunk`.
@@ -3413,13 +3415,11 @@ Keyword args:
 
 Example::
 
-    >>> a = torch.randn(10)
+    >>> a = torch.randint(1, 20, (10,))
     >>> a
-    tensor([-0.8286, -0.4890,  0.5155,  0.8443,  0.1865, -0.1752, -2.0595,
-             0.1850, -1.1571, -0.4243])
+    tensor([13,  7,  3, 10, 13,  3, 15, 10,  9, 10])
     >>> torch.cumsum(a, dim=0)
-    tensor([-0.8286, -1.3175, -0.8020,  0.0423,  0.2289,  0.0537, -2.0058,
-            -1.8209, -2.9780, -3.4022])
+    tensor([13, 20, 23, 33, 46, 49, 64, 74, 83, 93])
 """.format(
         **reduceops_common_args
     ),
@@ -4428,7 +4428,7 @@ elements.
 Note that either of the following must be true:
 
 1. :attr:`count` is a positive non-zero number, and the total number of bytes
-in the buffer is less than :attr:`offset` plus :attr:`count` times the size
+in the buffer is more than :attr:`offset` plus :attr:`count` times the size
 (in bytes) of :attr:`dtype`.
 
 2. :attr:`count` is negative, and the length (number of bytes) of the buffer
@@ -7712,12 +7712,16 @@ Keyword args:
 
 Example::
 
-    >>> a = torch.randint(10, (5,))
-    >>> a
-    tensor([6, 5, 1, 0, 2])
-    >>> b = a + (torch.randn(50, 1) * 5).long()
+    >>> b = torch.tensor(
+           [[0, 0, 0, 2, 0, 0, 2],
+            [0, 3, 0, 0, 2, 0, 1],
+            [2, 2, 2, 0, 0, 0, 3],
+            [2, 2, 3, 0, 1, 1, 0],
+            [1, 1, 0, 0, 2, 0, 2]])
     >>> torch.mode(b, 0)
-    torch.return_types.mode(values=tensor([6, 5, 1, 0, 2]), indices=tensor([2, 2, 2, 2, 2]))
+    torch.return_types.mode(
+    values=tensor([0, 2, 0, 0, 0, 0, 2]),
+    indices=tensor([1, 3, 4, 4, 2, 4, 4]))
 """.format(
         **single_dim_common
     ),
@@ -9866,7 +9870,7 @@ Disables denormal floating numbers on CPU.
 
 Returns ``True`` if your system supports flushing denormal numbers and it
 successfully configures flush denormal mode.  :meth:`~torch.set_flush_denormal`
-is only supported on x86 architectures supporting SSE3.
+is supported on x86 architectures supporting SSE3 and AArch64 architecture.
 
 Args:
     mode (bool): Controls whether to enable flush denormal mode or not

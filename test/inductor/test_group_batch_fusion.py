@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import collections
 import unittest
 
 import torch
@@ -467,6 +468,630 @@ class TestPostGradBatchLinearFusion(TestCase):
             counters["inductor"]["batch_fusion"],
             2,
         )
+
+
+class TestFindIndependentSubsetGreedy(TestCase):
+    # Helper function to build a Graph from a data description.
+    def build_graph(self, desc):
+        # desc: {
+        #   "n1": ["n2", "n3"],
+        #   "n2": ["n3"],
+        #   "n3": [],
+        # }
+        #
+        g = torch.fx.Graph()
+        lookup = {}
+        desc = collections.deque((k, v) for k, v in desc.items())
+        unsatisfied = 0
+        while desc:
+            unsatisfied += 1
+            assert unsatisfied <= len(desc)  # cycle or bad input?
+            name, v = desc.popleft()
+            args = tuple(lookup.get(n, None) for n in v)
+            if None in args:
+                desc.append((name, v))
+                continue
+            node = g.create_node("placeholder", "target", name=name, args=args)
+            lookup[name] = node
+            unsatisfied = 0
+        return g, lookup
+
+    def verify(self, tree, subnodes, min_fuse, max_fuse, expected):
+        g, lookup = self.build_graph(tree)
+        subnodes = [lookup[n] for n in subnodes]
+        expected = [[lookup[n] for n in sub] for sub in expected]
+        opts = {
+            "min_fuse_set_size": min_fuse,
+            "max_fuse_set_size": max_fuse,
+        }
+        result = list(
+            torch._inductor.fx_passes.group_batch_fusion.find_independent_subset_greedy(
+                subnodes, opts
+            )
+        )
+        self.assertEqual(expected, result)
+
+    def test_find_independent_subset_greedy(self):
+        # First some randomly generated tests.
+        self.verify({"n0": (), "n1": ()}, ["n0"], 0, 100, [["n0"]])
+        self.verify(
+            {"n0": (), "n1": (), "n2": ("n0",)}, ["n1", "n2"], 0, 100, [["n1", "n2"]]
+        )
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": ("n0",),
+                "n3": (),
+                "n4": ("n0", "n1", "n2"),
+                "n5": ("n0", "n2", "n4"),
+                "n6": ("n3",),
+                "n7": ("n4", "n5", "n6", "n1", "n3"),
+                "n8": ("n7", "n1", "n3", "n5", "n0"),
+                "n9": ("n3", "n4", "n8", "n6", "n5", "n2", "n0", "n7"),
+                "n10": ("n0",),
+                "n11": ("n4", "n0", "n2", "n3", "n1", "n9"),
+                "n12": ("n2", "n3", "n10", "n6", "n9"),
+            },
+            ["n10", "n5", "n3", "n4", "n9"],
+            0,
+            100,
+            [["n10", "n5", "n3"], ["n4"], ["n9"]],
+        )
+        self.verify({"n0": (), "n1": (), "n2": ("n0",)}, ["n2"], 0, 100, [["n2"]])
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": (),
+                "n3": (),
+                "n4": ("n3", "n1", "n0"),
+                "n5": ("n1", "n2", "n4", "n0"),
+                "n6": ("n0", "n3", "n2"),
+                "n7": ("n6", "n1", "n5", "n4", "n3", "n0"),
+                "n8": ("n2", "n7", "n3"),
+                "n9": ("n3", "n5", "n6", "n7", "n2", "n1"),
+                "n10": ("n8", "n0", "n2", "n4", "n6", "n3"),
+                "n11": ("n6", "n5", "n8", "n1", "n3", "n10", "n2"),
+                "n12": ("n7", "n4"),
+            },
+            ["n7"],
+            0,
+            100,
+            [["n7"]],
+        )
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": (),
+                "n3": ("n1", "n2"),
+                "n4": ("n1",),
+                "n5": (),
+                "n6": ("n5",),
+                "n7": ("n1", "n6", "n5", "n2", "n3", "n0"),
+                "n8": ("n5", "n7", "n2", "n6"),
+                "n9": ("n1",),
+                "n10": ("n9",),
+                "n11": ("n3", "n4", "n0", "n2"),
+                "n12": ("n8", "n9", "n5", "n1"),
+                "n13": ("n11", "n4", "n12", "n1", "n9", "n3", "n0"),
+            },
+            ["n9", "n2", "n8", "n10", "n5", "n6", "n13", "n7", "n3", "n0", "n4"],
+            0,
+            100,
+            [
+                ["n9", "n2", "n5", "n0", "n4"],
+                ["n8", "n10"],
+                ["n6", "n3"],
+                ["n13"],
+                ["n7"],
+            ],
+        )
+        self.verify({"n0": ()}, ["n0"], 0, 100, [["n0"]])
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": (),
+                "n3": (),
+                "n4": ("n1", "n2"),
+                "n5": ("n0", "n4", "n1"),
+                "n6": ("n1", "n5"),
+                "n7": (),
+                "n8": ("n7", "n1", "n3", "n5", "n6"),
+                "n9": ("n2", "n1", "n8", "n0", "n4", "n7", "n6", "n5"),
+                "n10": ("n4", "n7", "n2", "n3", "n8"),
+                "n11": (),
+                "n12": ("n9", "n7", "n5", "n11", "n8"),
+                "n13": (
+                    "n5",
+                    "n6",
+                    "n12",
+                    "n3",
+                    "n9",
+                    "n8",
+                    "n4",
+                    "n11",
+                    "n2",
+                    "n10",
+                    "n1",
+                ),
+                "n14": ("n7", "n3", "n12", "n10", "n2", "n0", "n4", "n5"),
+                "n15": ("n9", "n5", "n1", "n13", "n8", "n10", "n12", "n7", "n11", "n3"),
+                "n16": (
+                    "n2",
+                    "n4",
+                    "n15",
+                    "n5",
+                    "n0",
+                    "n6",
+                    "n3",
+                    "n8",
+                    "n14",
+                    "n12",
+                    "n9",
+                    "n10",
+                    "n7",
+                    "n13",
+                ),
+            },
+            ["n0", "n3", "n2", "n11", "n1", "n6", "n12", "n5", "n4", "n15", "n8"],
+            0,
+            100,
+            [
+                ["n0", "n3", "n2", "n11", "n1"],
+                ["n6"],
+                ["n12"],
+                ["n5"],
+                ["n4"],
+                ["n15"],
+                ["n8"],
+            ],
+        )
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": (),
+                "n3": ("n2", "n1"),
+                "n4": ("n2", "n3", "n1"),
+                "n5": ("n3", "n1"),
+                "n6": ("n1",),
+                "n7": ("n5", "n4"),
+                "n8": ("n6", "n2"),
+            },
+            ["n4", "n3", "n1", "n8", "n5", "n6", "n2"],
+            0,
+            100,
+            [["n4", "n8", "n5"], ["n3", "n6"], ["n1", "n2"]],
+        )
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": (),
+                "n3": ("n1", "n0"),
+                "n4": ("n0",),
+                "n5": ("n1", "n4"),
+                "n6": ("n2", "n1", "n4"),
+                "n7": ("n0", "n3"),
+                "n8": ("n5", "n0", "n6", "n1", "n4", "n2", "n3"),
+                "n9": ("n1", "n4", "n8", "n7", "n5"),
+                "n10": ("n9", "n8", "n0", "n2", "n7", "n1", "n3", "n5"),
+                "n11": ("n9", "n2", "n6", "n0", "n3"),
+                "n12": ("n1", "n4", "n7", "n10", "n5", "n2", "n11", "n6"),
+                "n13": ("n9", "n2", "n3", "n0", "n7", "n5", "n10", "n11"),
+                "n14": (
+                    "n8",
+                    "n0",
+                    "n3",
+                    "n6",
+                    "n10",
+                    "n1",
+                    "n5",
+                    "n9",
+                    "n12",
+                    "n11",
+                    "n4",
+                ),
+                "n15": (
+                    "n3",
+                    "n10",
+                    "n0",
+                    "n4",
+                    "n9",
+                    "n11",
+                    "n2",
+                    "n13",
+                    "n12",
+                    "n8",
+                    "n5",
+                    "n14",
+                ),
+                "n16": ("n6",),
+                "n17": (
+                    "n4",
+                    "n3",
+                    "n14",
+                    "n8",
+                    "n15",
+                    "n16",
+                    "n2",
+                    "n5",
+                    "n7",
+                    "n12",
+                    "n1",
+                    "n0",
+                    "n11",
+                ),
+            },
+            ["n17", "n16", "n10", "n4", "n8", "n12", "n6", "n1"],
+            0,
+            100,
+            [["n17"], ["n16", "n10"], ["n4", "n1"], ["n8"], ["n12"], ["n6"]],
+        )
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": ("n0",),
+                "n3": ("n0", "n1"),
+                "n4": ("n0",),
+                "n5": ("n0",),
+                "n6": ("n5", "n3", "n0", "n2"),
+                "n7": (),
+                "n8": ("n2", "n5", "n3", "n1", "n7", "n6", "n0"),
+                "n9": ("n4",),
+                "n10": ("n4", "n5", "n1", "n2", "n0", "n6", "n8", "n9", "n7"),
+                "n11": ("n3", "n0", "n9", "n10", "n5", "n1", "n2", "n7", "n4", "n6"),
+                "n12": ("n9", "n5"),
+            },
+            ["n8", "n3", "n1", "n12", "n2", "n5", "n11", "n4", "n10", "n6", "n0"],
+            0,
+            100,
+            [
+                ["n8", "n12"],
+                ["n3", "n2", "n5", "n4"],
+                ["n1", "n0"],
+                ["n11"],
+                ["n10"],
+                ["n6"],
+            ],
+        )
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": (),
+                "n3": (),
+                "n4": ("n2", "n3"),
+                "n5": ("n1", "n3", "n2", "n4"),
+                "n6": ("n5", "n4", "n1", "n3"),
+                "n7": ("n5",),
+                "n8": ("n5", "n4", "n1"),
+                "n9": ("n2", "n3", "n1", "n5", "n7", "n0", "n8"),
+                "n10": ("n5", "n3", "n1", "n7", "n8", "n9"),
+                "n11": ("n1", "n4", "n2", "n0", "n8", "n9"),
+                "n12": ("n4", "n3", "n9"),
+                "n13": (
+                    "n6",
+                    "n10",
+                    "n4",
+                    "n8",
+                    "n0",
+                    "n11",
+                    "n12",
+                    "n7",
+                    "n3",
+                    "n2",
+                    "n1",
+                ),
+                "n14": ("n4", "n13", "n2"),
+                "n15": ("n11", "n7", "n6", "n10", "n14"),
+                "n16": ("n15", "n3"),
+                "n17": ("n10", "n2", "n7", "n0", "n5", "n6", "n9"),
+                "n18": (
+                    "n16",
+                    "n8",
+                    "n6",
+                    "n9",
+                    "n11",
+                    "n12",
+                    "n14",
+                    "n5",
+                    "n13",
+                    "n4",
+                    "n1",
+                ),
+            },
+            [
+                "n1",
+                "n0",
+                "n16",
+                "n6",
+                "n15",
+                "n9",
+                "n7",
+                "n4",
+                "n3",
+                "n11",
+                "n13",
+                "n17",
+                "n12",
+                "n18",
+            ],
+            0,
+            100,
+            [
+                ["n1", "n0", "n4"],
+                ["n16", "n17"],
+                ["n6", "n9"],
+                ["n15"],
+                ["n7"],
+                ["n3"],
+                ["n11", "n12"],
+                ["n13"],
+                ["n18"],
+            ],
+        )
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": (),
+                "n3": ("n2",),
+                "n4": ("n1",),
+                "n5": (),
+                "n6": ("n1", "n4"),
+                "n7": ("n5", "n1"),
+                "n8": ("n6",),
+                "n9": ("n6", "n1", "n2", "n0"),
+                "n10": ("n0", "n7"),
+                "n11": ("n0", "n4", "n3", "n5"),
+                "n12": ("n9", "n8", "n7", "n4", "n0"),
+            },
+            ["n8", "n9", "n11", "n2", "n4", "n0", "n7", "n5", "n1"],
+            0,
+            100,
+            [["n8", "n9", "n11", "n7"], ["n2", "n4", "n0", "n5"], ["n1"]],
+        )
+        self.verify(
+            {"n0": (), "n1": (), "n2": (), "n3": ("n0",), "n4": ("n3",)},
+            ["n1", "n2", "n4"],
+            0,
+            100,
+            [["n1", "n2", "n4"]],
+        )
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": ("n1",),
+                "n3": ("n2", "n1"),
+                "n4": ("n3",),
+                "n5": (),
+                "n6": ("n1", "n5"),
+                "n7": (),
+                "n8": ("n4", "n5"),
+                "n9": ("n0", "n3", "n6", "n4", "n5", "n8", "n7", "n1"),
+                "n10": ("n3", "n0", "n6", "n9", "n7"),
+                "n11": (),
+                "n12": ("n1", "n8", "n3", "n6", "n7", "n0", "n10", "n5", "n9", "n11"),
+                "n13": ("n9", "n11", "n4"),
+                "n14": (),
+                "n15": ("n6", "n12"),
+                "n16": (
+                    "n1",
+                    "n7",
+                    "n10",
+                    "n3",
+                    "n9",
+                    "n0",
+                    "n2",
+                    "n5",
+                    "n8",
+                    "n13",
+                    "n14",
+                    "n15",
+                    "n4",
+                    "n6",
+                ),
+            },
+            [
+                "n11",
+                "n16",
+                "n5",
+                "n12",
+                "n7",
+                "n2",
+                "n0",
+                "n6",
+                "n3",
+                "n9",
+                "n8",
+                "n15",
+                "n14",
+                "n4",
+                "n13",
+                "n1",
+            ],
+            0,
+            100,
+            [
+                ["n11", "n5", "n7", "n2", "n0", "n14"],
+                ["n16"],
+                ["n12", "n13"],
+                ["n6", "n3"],
+                ["n9"],
+                ["n8"],
+                ["n15"],
+                ["n4"],
+                ["n1"],
+            ],
+        )
+        self.verify({"n0": (), "n1": ()}, ["n1"], 0, 100, [["n1"]])
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": ("n1",),
+                "n3": (),
+                "n4": ("n0", "n2", "n3"),
+                "n5": ("n2", "n3"),
+                "n6": ("n3",),
+            },
+            ["n6", "n2", "n3", "n1"],
+            0,
+            100,
+            [["n6", "n2"], ["n3", "n1"]],
+        )
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": (),
+                "n3": ("n2",),
+                "n4": ("n0",),
+                "n5": ("n1", "n2"),
+                "n6": ("n2", "n3", "n1", "n0", "n5"),
+                "n7": ("n6", "n2", "n0", "n4", "n5", "n1"),
+                "n8": ("n4",),
+                "n9": ("n4", "n6", "n7", "n1", "n2"),
+            },
+            ["n8", "n6", "n2", "n4", "n7", "n5", "n3", "n9"],
+            0,
+            100,
+            [["n8", "n6"], ["n2", "n4"], ["n7"], ["n5", "n3"], ["n9"]],
+        )
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": (),
+                "n3": ("n1", "n2"),
+                "n4": ("n0",),
+                "n5": ("n2", "n3", "n0", "n1"),
+                "n6": ("n4", "n1"),
+                "n7": ("n5",),
+                "n8": ("n7", "n1", "n5", "n6", "n3", "n4", "n0"),
+                "n9": ("n2", "n8"),
+            },
+            ["n1", "n7", "n4", "n2", "n0", "n8", "n3", "n5"],
+            0,
+            100,
+            [["n1", "n4", "n2"], ["n7"], ["n0", "n3"], ["n8"], ["n5"]],
+        )
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": ("n0",),
+                "n3": ("n1",),
+                "n4": ("n2", "n1"),
+                "n5": (),
+                "n6": ("n0",),
+                "n7": ("n6", "n3", "n2", "n1", "n0"),
+                "n8": ("n0", "n2"),
+                "n9": ("n6", "n5", "n8", "n4", "n0"),
+                "n10": ("n1", "n7", "n5", "n8", "n6", "n2", "n4", "n9"),
+            },
+            ["n0"],
+            0,
+            100,
+            [["n0"]],
+        )
+
+        # trivial test of min_fuse
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": (),
+                "n3": ("n1", "n2"),
+                "n4": ("n1",),
+                "n5": (),
+                "n6": ("n5",),
+                "n7": ("n1", "n6", "n5", "n2", "n3", "n0"),
+                "n8": ("n5", "n7", "n2", "n6"),
+                "n9": ("n1",),
+                "n10": ("n9",),
+                "n11": ("n3", "n4", "n0", "n2"),
+                "n12": ("n8", "n9", "n5", "n1"),
+                "n13": ("n11", "n4", "n12", "n1", "n9", "n3", "n0"),
+            },
+            ["n9", "n2", "n8", "n10", "n5", "n6", "n13", "n7", "n3", "n0", "n4"],
+            2,
+            10,
+            [["n9", "n2", "n5", "n0", "n4"], ["n8", "n10"], ["n6", "n3"]],
+        )
+
+        # trivial test of max_fuse
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": (),
+                "n3": ("n1", "n2"),
+                "n4": ("n1",),
+                "n5": (),
+                "n6": ("n5",),
+                "n7": ("n1", "n6", "n5", "n2", "n3", "n0"),
+                "n8": ("n5", "n7", "n2", "n6"),
+                "n9": ("n1",),
+                "n10": ("n9",),
+                "n11": ("n3", "n4", "n0", "n2"),
+                "n12": ("n8", "n9", "n5", "n1"),
+                "n13": ("n11", "n4", "n12", "n1", "n9", "n3", "n0"),
+            },
+            ["n9", "n2", "n8", "n10", "n5", "n6", "n13", "n7", "n3", "n0", "n4"],
+            0,
+            3,
+            [
+                ["n9", "n2", "n5"],
+                ["n8", "n10", "n4"],
+                ["n6", "n3", "n0"],
+                ["n13"],
+                ["n7"],
+            ],
+        )
+
+    def test_find_independent_subset_greedy_fuse(self):
+        # ensure that fusing the sets during iteration results in the correct
+        # iteration results. In the example graph after we merge n2 and n3,
+        # n4 is no longer independent from n1.
+        g, lookup = self.build_graph(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": ("n0",),
+                "n3": ("n1",),
+                "n4": ("n2",),
+                "n5": (),
+            }
+        )
+        opts = {
+            "min_fuse_set_size": 0,
+            "max_fuse_set_size": 100,
+        }
+        subnodes = ["n2", "n3", "n4", "n0", "n1", "n5"]
+        subnodes = [lookup[n] for n in subnodes]
+        i = torch._inductor.fx_passes.group_batch_fusion.find_independent_subset_greedy(
+            subnodes, opts
+        )
+        self.assertEqual(next(i), [lookup[n] for n in ["n2", "n3", "n5"]])
+
+        # fuse n2 and n3 which makes n4 now dependant on n1.
+        args = tuple(lookup[n] for n in ["n0", "n1"])
+        fused = g.create_node("placeholder", "target", name="n2+n3", args=args)
+        lookup["n2"].replace_all_uses_with(fused)
+        g.erase_node(lookup["n2"])
+        lookup["n3"].replace_all_uses_with(fused)
+        g.erase_node(lookup["n3"])
+
+        self.assertEqual(next(i), [lookup[n] for n in ["n4"]])
+        self.assertEqual(next(i), [lookup[n] for n in ["n0", "n1"]])
+        self.assertRaises(StopIteration, lambda: next(i))
 
 
 if __name__ == "__main__":
