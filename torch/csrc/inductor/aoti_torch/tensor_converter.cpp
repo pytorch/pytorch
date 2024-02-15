@@ -13,6 +13,11 @@ AtenTensorHandle tensor_pointer_to_tensor_handle(at::Tensor* tensor) {
   return reinterpret_cast<AtenTensorHandle>(tensor);
 }
 
+AtenTensorHandle new_tensor_handle(at::Tensor&& tensor) {
+  at::Tensor* new_tensor = new at::Tensor(std::move(tensor));
+  return tensor_pointer_to_tensor_handle(new_tensor);
+}
+
 std::vector<AtenTensorHandle> unsafe_alloc_new_handles_from_tensors(
     std::vector<at::Tensor>& tensors) {
   std::vector<AtenTensorHandle> result;
