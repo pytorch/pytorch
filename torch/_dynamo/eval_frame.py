@@ -43,6 +43,7 @@ import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch import _guards
 from torch._subclasses import fake_tensor
+from torch._utils_internal import log_export_usage
 from torch.export import Constraint
 from torch.export.dynamic_shapes import _process_dynamic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
@@ -1115,6 +1116,7 @@ def export(
     assume_static_by_default: bool = False,
     same_signature: bool = True,
     disable_constraint_solver: bool = False,
+    _log_export_usage: bool = True,
     **extra_kwargs,
 ) -> Callable[..., ExportResult]:
     """
@@ -1179,6 +1181,9 @@ def export(
 
     Note - this headerdoc was authored by ChatGPT, with slight modifications by the author.
     """
+    if _log_export_usage:
+        log_export_usage(event="export.private_api", flags={"_dynamo"})
+
     # Deal with "local variable referenced before assignment"
     _f = f
     _assume_static_by_default = assume_static_by_default
