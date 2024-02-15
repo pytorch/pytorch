@@ -543,7 +543,13 @@ class FlopCounterMode(TorchDispatchMode):
         if func_packet in self.flop_registry:
             flop_count_func = self.flop_registry[func_packet]
             flop_count = flop_count_func(*args, **kwargs, out=out)  # type: ignore[operator]
-            for par in self.parents:
+            if len(set(self.parents)) != len(self.parents):
+                print(
+                    "The module hierarchy tracking seems to be messed up."
+                    "Please file a bug or just run the flop counter without"
+                    "tracking the module hierarchy (i.e. `with FlopCounterMode():`)"
+                )
+            for par in set(self.parents):
                 self.flop_counts[par][func_packet] += flop_count
 
         return out
