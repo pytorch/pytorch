@@ -1871,6 +1871,7 @@ def wrap_output_with_input_device_(x, common_device):
 
     return x
 
+
 @register_decomposition(aten._to_copy)
 @out_wrapper()
 def _to_copy(
