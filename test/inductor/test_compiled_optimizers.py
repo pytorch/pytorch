@@ -29,7 +29,10 @@ from torch.optim import (
     SGD,
     SparseAdam,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipCUDAIf,
+)
 
 from torch.testing._internal.common_optimizers import (
     _get_optim_inputs_including_global_cliquey_kwargs,
@@ -38,12 +41,7 @@ from torch.testing._internal.common_optimizers import (
 )
 
 from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.inductor_utils import (
-    HAS_CPU,
-    HAS_CUDA,
-    has_triton,
-    skipCUDAIf,
-)
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, has_triton
 from torch.testing._internal.triton_utils import requires_cuda
 
 
