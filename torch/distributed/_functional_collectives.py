@@ -6,7 +6,6 @@ import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from torch._custom_ops import impl_abstract
-from torch.distributed import ReduceOp
 from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import get_innermost_proxy_mode
 
@@ -1022,20 +1021,6 @@ def all_gather_inplace(
     return tensor_list
 
 
-def reduce_scatter_list(
-    output: torch.Tensor,
-    input_list: List[torch.Tensor],
-    op=ReduceOp.SUM,
-    group=None,
-    async_op=False,
-    tag: str = "",
-):
-    assert (
-        not async_op
-    ), "Can't remap async version of inplace op to functional collective"
-    return output.copy_(reduce_scatter_tensor(torch.cat(input_list), op, 0, group, tag))
-
-
 from torch.distributed.distributed_c10d import (
     _all_gather_base as legacy_all_gather_base,
     _reduce_scatter_base as legacy_reduce_scatter_base,
@@ -1043,7 +1028,6 @@ from torch.distributed.distributed_c10d import (
     all_gather_into_tensor as legacy_allgather,
     all_reduce as legacy_allreduce,
     all_to_all_single as legacy_all_to_all_single,
-    reduce_scatter as legacy_reduce_scatter_list,
     reduce_scatter_tensor as legacy_reducescatter,
 )
 
@@ -1057,5 +1041,4 @@ traceable_collective_remaps = {
     legacy_all_gather: all_gather_inplace,
     legacy_reduce_scatter_base: reduce_scatter_tensor_inplace,
     legacy_all_gather_base: all_gather_tensor_inplace,
-    legacy_reduce_scatter_list: reduce_scatter_list,
 }

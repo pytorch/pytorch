@@ -791,28 +791,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 3
         assert same(outputs, correct_outputs)
 
-    def test_dynamo_rewrite_dist_reduce_scatter_list(self):
-
-        def func(inp, out, *, pg):
-            torch.distributed.reduce_scatter(
-                out,
-                inp,
-                group=pg,
-            )
-        local_size = [4, 4]
-        # single-proc test
-        global_size = local_size
-
-        inputs = [torch.ones(local_size, device=self.device)]
-        outputs = torch.empty(global_size, device=self.device)
-        correct_outputs = torch.empty(global_size, device=self.device)
-        counter = CompileCounter()
-        compiled = torch.compile(func, backend=counter, fullgraph=True)
-        compiled(inputs, outputs, pg=GroupMember.WORLD)
-        func(inputs, correct_outputs, pg=GroupMember.WORLD)
-        assert counter.frame_count == 1
-        assert same(outputs, correct_outputs)
-
     def test_dynamo_rewrite_dist_allreduce(self):
 
         def func(tensor, pg):
@@ -837,23 +815,26 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     def test_dynamo_rewrite_dist_all_to_all_single(self):
 
-        def func(tensor, pg):
+        def func(output, input, pg):
             torch.distributed.all_to_all_single(
-                tensor,
+                output,
+                input,
                 group=pg
             )
 
         counter = CompileCounter()
         compiled = torch.compile(func, backend=counter, fullgraph=True)
 
-        inputs_compiled = torch.ones(2, device=self.device)
-        inputs_eager = torch.ones(2, device=self.device)
+        input_compiled = torch.ones(2, device=self.device)
+        input_eager = torch.ones(2, device=self.device)
+        output_compiled = torch.empty(2, device=self.device)
+        output_eager = torch.empty(2, device=self.device)
 
-        compiled(inputs_compiled, GroupMember.WORLD)
-        func(inputs_eager, GroupMember.WORLD)
+        compiled(output_compiled, input_compiled, GroupMember.WORLD)
+        func(output_eager, input_eager, GroupMember.WORLD)
 
         assert counter.frame_count == 1
-        assert same(inputs_compiled, inputs_eager)
+        assert same(output_compiled, output_eager)
 
     def test_dynamo_support_collective_op_with_async_op_False(self):
 
