@@ -324,6 +324,7 @@ inductor_override_kwargs = {
     ("cummax", "cuda", f16): {"atol": 5e-4, "rtol": 0.002},
     ("cumsum", "cuda", f16): {"reference_in_float": True},
     ("cumprod", "cuda"): {"reference_in_float": True, "atol": 7e-5, "rtol": 0.002},
+    ("logcumsumexp", "cuda"): {"grad_atol": 8e-4, "grad_rtol": 0.001},
     ("exponential", "cuda"): {"reference_in_float": True},
     ("geometric", "cuda"): {"reference_in_float": True},
     ("kron", "cuda", f16): {"reference_in_float": True},
