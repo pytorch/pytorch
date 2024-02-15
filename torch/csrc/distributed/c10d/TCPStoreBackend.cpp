@@ -539,6 +539,7 @@ void TCPStoreMasterDaemon::run() {
       int rawSocket = socket.handle();
       sockets_.emplace_back(std::move(socket));
       tcputil::addPollfd(fds, rawSocket, POLLIN);
+      addMiscellaneousSocket(rawSocket);
     }
     queryFds(fds);
   }

@@ -20,8 +20,8 @@ void cpu_max_unpool(
     const Tensor& indices) {
   auto output = output_.contiguous();
 
-  auto input_data = input.data_ptr<scalar_t>();
-  auto indices_data = indices.data_ptr<int64_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
+  auto indices_data = indices.const_data_ptr<int64_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   // NB: input tensor dimensions:
@@ -105,8 +105,8 @@ void cpu_max_unpool_channels_last(
   auto memory_format = at::MemoryFormat::ChannelsLast;
   auto output = output_.contiguous(memory_format);
 
-  auto input_data = input.data_ptr<scalar_t>();
-  auto indices_data = indices.data_ptr<int64_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
+  auto indices_data = indices.const_data_ptr<int64_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   int64_t nbatch = input.size(0);
@@ -127,8 +127,8 @@ void cpu_max_unpool_channels_last(
     data_index_init(begin, n, nbatch, ip, input_image_size);
 
     for (const auto i : c10::irange(begin, end)) {
-      scalar_t* input_ptr = input_data + i * channels;
-      int64_t* indices_ptr = indices_data + i * channels;
+      const scalar_t* input_ptr = input_data + i * channels;
+      const int64_t* indices_ptr = indices_data + i * channels;
       scalar_t* output_ptr = output_data + n * output_image_size * channels;
 
       // can't do scatter on avx2 (only available on avx512)
