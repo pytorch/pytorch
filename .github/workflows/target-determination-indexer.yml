@@ -104,10 +104,13 @@ jobs:
           conda activate tdenv
           cd "${GITHUB_WORKSPACE}"/llm-target-determinator/assets
 
-          zip -r indexer-files.zip indexer-files
+          TIMESTAMP=$(date -Iseconds)
+          ZIP_NAME = "indexer-files-${TIMESTAMP}.zip"
+
+          zip -r "${ZIP_NAME}" indexer-files
           aws s3 cp \
-            "indexer-files.zip" \
-            "s3://target-determinator-assets/indexes/indexer-files.zip"
+            "${ZIP_NAME}" \
+            "s3://target-determinator-assets/indexes/${ZIP_NAME}"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
