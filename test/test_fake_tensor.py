@@ -554,8 +554,19 @@ class FakeTensorTest(TestCase):
     def test_data_dependent_operator(self):
         with FakeTensorMode(allow_fallback_kernels=False):
             x = torch.rand([10, 10])
-
             self.assertRaises(DynamicOutputShapeException, lambda: torch.nonzero(x))
+            self.assertRaises(DynamicOutputShapeException, lambda: torch.unique(x))
+        
+        # unique()
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            x = torch.rand([10, 10])
+            y = torch.unique(x)
+            self.assertEqual(type(y.shape[0]), torch.SymInt)
+            self.assertEqual(shape_env.var_to_range.get(y.shape[0].node.expr).lower, 1)
+            self.assertEqual(shape_env.var_to_range.get(y.shape[0].node.expr).upper, 100)
+
+       
 
     def test_tolist(self):
         shape_env = ShapeEnv()
