@@ -18,9 +18,9 @@ C10_XPU_API DeviceIndex current_device();
 
 C10_XPU_API void set_device(DeviceIndex device);
 
-C10_XPU_API int exchange_device(int device);
+C10_XPU_API c10::DeviceIndex exchange_device(c10::DeviceIndex device);
 
-C10_XPU_API int maybe_exchange_device(int to_device);
+C10_XPU_API c10::DeviceIndex maybe_exchange_device(c10::DeviceIndex to_device);
 
 C10_XPU_API sycl::device& get_raw_device(int device);
 
