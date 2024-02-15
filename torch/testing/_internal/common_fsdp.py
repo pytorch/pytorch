@@ -1355,18 +1355,20 @@ class FSDPTest(MultiProcessTestCase):
             )
 
 
-def test_compiled_fsdp():
-    class FullyShardPatch(Enum):
-        @staticmethod
-        def fully_shard_with_compiled_compute(*args, **kwargs):
-            # compile ``module._call_impl``
-            # to showcase how to include user-registered hooks
+def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
+    def fully_shard_with_compiled_compute(*args, **kwargs):
+        # compile ``module._call_impl``
+        # to showcase how to include user-registered hooks
+        if compile_compute_on_module is None or isinstance(
+            args[0], compile_compute_on_module
+        ):
             args[0].compile()
-            return torch.distributed._composable.fsdp.fully_shard(*args, **kwargs)
+        return torch.distributed._composable.fsdp.fully_shard(*args, **kwargs)
 
+    class FullyShardPatch(Enum):
         # apply ``partial`` in order to use ``Enum.value``
         EAGER = partial(torch.distributed._composable.fsdp.fully_shard)
-        COMPILED_COMPUTE = partial(fully_shard_with_compiled_compute)
+        COMPILED_COMPUTE = partial(fully_shard_with_compiled_compute)  # type: ignore[arg-type]
         # add FULL for tracing FSDP
 
     def decorator(func):
