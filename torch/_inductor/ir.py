@@ -1674,10 +1674,6 @@ class Scan(Loops):
             # TODO: CPU support
             return None
 
-        if torch.version.hip is not None:
-            # TODO: ROCm support
-            return None
-
         sizevars = V.graph.sizevars
         scan_numel = sizevars.simplify(sympy_product(scan_ranges))
 
