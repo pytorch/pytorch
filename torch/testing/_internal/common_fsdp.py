@@ -1363,11 +1363,11 @@ def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
             args[0], compile_compute_on_module
         ):
             args[0].compile()
-        return torch.distributed._composable.fsdp.fully_shard(*args, **kwargs) # type: ignore[operator]
+        return torch.distributed._composable.fsdp.fully_shard(*args, **kwargs)  # type: ignore[operator]
 
     class FullyShardPatch(Enum):
         # apply ``partial`` in order to use ``Enum.value``
-        EAGER = partial(torch.distributed._composable.fsdp.fully_shard) # type: ignore[var-annotated, arg-type]
+        EAGER = partial(torch.distributed._composable.fsdp.fully_shard)  # type: ignore[var-annotated, arg-type]
         COMPILED_COMPUTE = partial(fully_shard_with_compiled_compute)  # type: ignore[arg-type]
         # add FULL for tracing FSDP
 
