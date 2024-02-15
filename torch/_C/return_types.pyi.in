@@ -12,6 +12,7 @@ from typing import (
     overload,
     Sequence,
     Tuple,
+    Type,
     TypeVar,
     Union,
 )
@@ -28,5 +29,7 @@ from torch.types import (
     _size,
     Number,
 )
+
+all_return_types: List[Type] = []
 
 ${namedtuple_defs}
