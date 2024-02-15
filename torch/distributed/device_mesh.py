@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 import math
+from functools import cached_property
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
@@ -338,6 +339,7 @@ else:
                 and self._flatten_mesh_list == other._flatten_mesh_list
             )
 
+        @cached_property
         def __getitem__(self, mesh_dim_name: str) -> "DeviceMesh":
             """
             Slice the current DeviceMesh based on the mesh_dim_name given to create a child
