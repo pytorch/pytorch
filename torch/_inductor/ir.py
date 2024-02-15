@@ -6940,8 +6940,7 @@ class LoopBodyBlock:
 
             def frexp(self, value_proxy):
                 result = self._inner.frexp(value_proxy)
-                # TODO(isuruf): fix me. need some more pytree.tree_map sprinkled
-                # in the codebase
+                # Proxies are iterable, but some methods expect tuples/lists
                 return (result[0], result[1])
 
             @staticmethod
