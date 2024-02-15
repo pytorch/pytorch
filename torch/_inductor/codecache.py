@@ -201,6 +201,7 @@ class CacheBase:
     def update_local_cache(self, local_cache: Dict[str, Any]) -> None:
         if not os.path.exists(self.local_cache_path.parent):
             os.makedirs(self.local_cache_path.parent, exist_ok=True)
+
         write_atomic(
             str(self.local_cache_path),
             json.dumps({"system": self.system, "cache": local_cache}, indent=4),
@@ -1342,11 +1343,11 @@ def get_include_and_linking_paths(
 
             # check the `OMP_PREFIX` environment first
             if os.getenv("OMP_PREFIX") is not None:
-                header_path = os.path.join(os.getenv("OMP_PREFIX"), "include", "omp.h")
+                header_path = os.path.join(os.getenv("OMP_PREFIX"), "include", "omp.h")  # type: ignore[arg-type]
                 valid_env = os.path.exists(header_path)
                 if valid_env:
-                    ipaths.append(os.path.join(os.getenv("OMP_PREFIX"), "include"))
-                    lpaths.append(os.path.join(os.getenv("OMP_PREFIX"), "lib"))
+                    ipaths.append(os.path.join(os.getenv("OMP_PREFIX"), "include"))  # type: ignore[arg-type]
+                    lpaths.append(os.path.join(os.getenv("OMP_PREFIX"), "lib"))  # type: ignore[arg-type]
                 else:
                     warnings.warn("environment variable `OMP_PREFIX` is invalid.")
                 omp_available = omp_available or valid_env
@@ -1357,8 +1358,8 @@ def get_include_and_linking_paths(
             if not omp_available and os.getenv("CONDA_PREFIX") is not None:
                 omp_available = is_conda_llvm_openmp_installed()
                 if omp_available:
-                    conda_lib_path = os.path.join(os.getenv("CONDA_PREFIX"), "lib")
-                    ipaths.append(os.path.join(os.getenv("CONDA_PREFIX"), "include"))
+                    conda_lib_path = os.path.join(os.getenv("CONDA_PREFIX"), "lib")  # type: ignore[arg-type]
+                    ipaths.append(os.path.join(os.getenv("CONDA_PREFIX"), "include"))  # type: ignore[arg-type]
                     lpaths.append(conda_lib_path)
                     # Prefer Intel OpenMP on x86 machine
                     if os.uname().machine == "x86_64" and os.path.exists(
@@ -1870,11 +1871,13 @@ class CppCodeCache:
         return cls.cache[key]
 
 
+# Customized Python binding for cpp kernels
 class CppPythonBindingsCodeCache(CppCodeCache):
     cache: Dict[str, Union[CDLL, ModuleType]] = {}
     clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
-        "include_pytorch": True,
+        # kernels have no dependency on libtorch
+        "include_pytorch": False,
         "shared": True,
     }
     entry_function = "kernel"
@@ -1955,7 +1958,11 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 
     @classmethod
     def load_pybinding(
-        cls, argtypes: List[str], source_code: str, cuda: bool = False
+        cls,
+        argtypes: List[str],
+        source_code: str,
+        cuda: bool = False,
+        num_outputs: int = -1,
     ) -> Any:
         """
         Wrap a C++ function in fast Python bindings.
@@ -1973,7 +1980,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         )
         suffix = cls.suffix_template % (
             cls.entry_function,
-            cls.extra_parse_arg,
+            cls.extra_parse_arg % num_outputs if cls.extra_parse_arg else "",
             cls.entry_function,
             len(argtypes),
             len(argtypes),
@@ -2000,9 +2007,31 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     extra_parse_arg = textwrap.dedent(
         """
         #include <torch/csrc/autograd/python_variable.h>
+        #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
         template <> inline std::vector<at::Tensor> parse_arg<std::vector<at::Tensor>>(PyObject* args, size_t n) {
             return THPVariable_UnpackList(PyTuple_GET_ITEM(args, n));
+        }
+
+        std::vector<at::Tensor> inductor_entry_cpp(std::vector<at::Tensor>&& inputs) {
+            auto input_handles =
+                torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
+            // For outputs, we only allocate a vector to hold returned tensor handles,
+            // not allocating the actual output tensor storage here
+            std::vector<AtenTensorHandle> output_handles(%s);
+
+            try {
+                inductor_entry_impl(input_handles.data(), output_handles.data());
+            } catch(std::exception const& e) {
+                PyErr_SetString(PyExc_RuntimeError, e.what());
+                return {};
+            } catch(...) {
+                PyErr_SetString(PyExc_RuntimeError, "unhandled error");
+                return {};
+            }
+
+            return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
+                output_handles.data(), output_handles.size());
         }
         """
     )
@@ -2168,6 +2197,7 @@ def _nvcc_compiler_options() -> List[str]:
         config.cuda.compile_opt_level,
         "-std=c++17",
         "--expt-relaxed-constexpr",
+        "-DNDEBUG",
     ]
     if config.cuda.enable_debug_info:
         options.extend(["-lineinfo", "-g", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"])

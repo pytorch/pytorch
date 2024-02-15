@@ -11,13 +11,14 @@ import numpy as np
 import torch
 import torch.nn
 import torch.nn.functional as F
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import SM70OrLater, SM80OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
+    skipCUDAIf,
     skipMeta,
     PYTORCH_CUDA_MEMCHECK,
 )
@@ -3827,11 +3828,10 @@ class TestNestedTensorSubclass(TestCase):
             if not (str(device).startswith("cuda") and dtype == torch.bfloat16):
                 check_forward_backward()
 
-    # This requires NT -> NT views to work in inductor, which is a TODO
-    @unittest.expectedFailure  # noqa: E301
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @onlyCUDA
-    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if
-                 SM80OrLater else [torch.float16, torch.float32])
+    @dtypes(*([torch.float16, torch.bfloat16, torch.float32] if SM80OrLater
+            else [torch.float16, torch.float32]))
     def test_sdpa_compile(self, device, dtype):
         batch_size = 1
         emb_dims = 1024
@@ -3857,9 +3857,9 @@ class TestNestedTensorSubclass(TestCase):
         k_d2 = key(x_d2).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
         v_d2 = value(x_d2).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
 
-        q_nt = query(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
-        k_nt = key(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
-        v_nt = value(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
+        q_nt = query(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).detach().transpose(1, 2)
+        k_nt = key(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).detach().transpose(1, 2)
+        v_nt = value(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).detach().transpose(1, 2)
 
         # High Precision Math Reference
         q_d1_f32 = q_d1.to(torch.float32)

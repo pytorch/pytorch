@@ -326,7 +326,7 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         # Calibrate
         m(*example_inputs)
         prepare_model = copy.deepcopy(m)
-        m = convert_pt2e(m, fold_quantize=True)
+        m = convert_pt2e(m)
         convert_model = copy.deepcopy(m)
         pt2_quant_output = m(*example_inputs)
         node_occurrence = {

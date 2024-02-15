@@ -8,8 +8,6 @@
 
 #include <atomic>
 #include <cstdint>
-#include <mutex>
-#include <vector>
 
 namespace c10::cuda {
 
