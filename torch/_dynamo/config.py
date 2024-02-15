@@ -401,6 +401,11 @@ fake_tensor_cache_crosscheck_enabled = (
 # WARNING: this is an experimental flag and is subject to change.
 _experimental_support_context_fn_in_torch_utils_checkpoint = False
 
+# Approximate maximum number of nodes to unroll loops into. A value of 0 will
+# unroll fully but could result in very large graphs that take an inordinate
+# amount of time to process.
+max_loop_unroll_nodes = int(os.environ.get("TORCHDYNAMO_MAX_LOOP_UNROLL_NODES", 5000))
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
