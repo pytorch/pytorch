@@ -120,7 +120,14 @@ aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 
 @register_lowering(aten.mm, type_promotion_kind=None)
 def tuned_mm(mat1, mat2, *, layout=None):
-    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
+    out_dtype = None
+    if layout is None:
+        dtype1 = mat1.get_dtype()
+        dtype2 = mat2.get_dtype()
+        size1 = torch.tensor([], dtype=dtype1).element_size()
+        size2 = torch.tensor([], dtype=dtype2).element_size()
+        out_dtype = dtype1 if size1 >= size2 else dtype2
+    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout, out_dtype=out_dtype)
 
     # options to tune from
     choices = [aten_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
