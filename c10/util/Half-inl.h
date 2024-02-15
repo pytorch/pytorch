@@ -44,6 +44,8 @@ inline C10_HOST_DEVICE Half::Half(float value)
 #if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && \
     !defined(__APPLE__)
       x(at::vec::float2half_scalar(value))
+#elif defined(__ARM_FEATURE_FP16_SCALAR_ARITHMETIC) && !defined(C10_MOBILE)
+      x(detail::sve_fp32_to_fp16_value(value))
 #else
       x(detail::fp16_ieee_from_fp32_value(value))
 #endif
@@ -62,6 +64,8 @@ inline C10_HOST_DEVICE Half::operator float() const {
 #if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && \
     !defined(__APPLE__)
   return at::vec::half2float_scalar(x);
+#elif defined(__ARM_FEATURE_FP16_SCALAR_ARITHMETIC) && !defined(C10_MOBILE)
+  return detail::sve_fp16_to_fp32_value(x);
 #else
   return detail::fp16_ieee_to_fp32_value(x);
 #endif
