@@ -223,9 +223,9 @@ VaryingShape<Stride> TensorType::computeStrideProps(
       has_overlap = possible_cross_dimension_overlap(sizes, strides);
     }
   }
+
   std::vector<Stride> stride_properties;
-
-
+  stride_properties.reserve(stride_indices.size());
   for (size_t i = 0; i < stride_indices.size(); i++) {
     bool contiguous_ = tensor_contiguity;
     if (!contiguous_) {

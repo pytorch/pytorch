@@ -34,6 +34,9 @@ class Adamax(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
+        if foreach is False and capturable:
+            raise ValueError("Capturable not supported with single tensor Adamax")
+
         defaults = dict(
             lr=lr,
             betas=betas,
@@ -53,13 +56,12 @@ class Adamax(Optimizer):
             group.setdefault("maximize", False)
             group.setdefault("differentiable", False)
             group.setdefault("capturable", False)
-        state_values = list(self.state.values())
-        step_is_tensor = (len(state_values) != 0) and torch.is_tensor(
-            state_values[0]["step"]
-        )
-        if not step_is_tensor:
-            for s in state_values:
-                s["step"] = torch.tensor(float(s["step"]), dtype=_get_scalar_dtype())
+            for p in group["params"]:
+                p_state = self.state.get(p, [])
+                if len(p_state) != 0 and not torch.is_tensor(p_state['step']):
+                    step_val = float(p_state["step"])
+                    p_state["step"] = (torch.tensor(step_val, dtype=_get_scalar_dtype(), device=p.device) if group['capturable']
+                                       else torch.tensor(step_val, dtype=_get_scalar_dtype()))
 
     def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_infs, state_steps):
         has_complex = False
@@ -265,6 +267,8 @@ def _single_tensor_adamax(
     capturable: bool,
     has_complex: bool,
 ):
+    if capturable:
+        raise RuntimeError("capturable is not supported for single tensor Adamax (when foreach=False)")
 
     for i, param in enumerate(params):
         grad = grads[i]
@@ -272,6 +276,7 @@ def _single_tensor_adamax(
         exp_avg = exp_avgs[i]
         exp_inf = exp_infs[i]
         step_t = state_steps[i]
+
         # update step
         step_t += 1
 
@@ -327,6 +332,11 @@ def _multi_tensor_adamax(
 
     if len(params) == 0:
         return
+
+    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+    if (not torch._utils.is_compiling() and capturable
+            and not all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps))):
+        raise RuntimeError("If capturable=True, params and state_steps must be CUDA tensors.")
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_infs, state_steps])
     for ((grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_infs, grouped_state_steps), _) in grouped_tensors.values():

@@ -423,6 +423,9 @@ class Interval:
         self.end = end
 
     def elapsed_us(self):
+        r"""
+        Returns the length of the interval
+        """
         return self.end - self.start
 
 
@@ -781,6 +784,9 @@ class MemRecordsAcc:
             self._start_uses, self._indices = zip(*tmp)  # type: ignore[assignment]
 
     def in_interval(self, start_us, end_us):
+        r"""
+        Return all records in the given interval
+        """
         start_idx = bisect.bisect_left(self._start_uses, start_us)
         end_idx = bisect.bisect_right(self._start_uses, end_us)
         for i in range(start_idx, end_idx):
@@ -1142,7 +1148,7 @@ def _build_table(
             if evt.flops <= 0:
                 row_values.append("--")
             else:
-                row_values.append(f"{evt.flops * flops_scale:8.3f}")
+                row_values.append(f"{evt.flops * flops_scale:8.3f}")  # type: ignore[possibly-undefined]
         if has_stack:
             src_field = ""
             if len(evt.stack) > 0:

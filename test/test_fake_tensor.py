@@ -87,7 +87,7 @@ class FakeTensorTest(TestCase):
     def test_custom_op_fallback(self):
         from torch.library import Library, impl
 
-        test_lib = Library("my_test_op", "DEF")
+        test_lib = Library("my_test_op", "DEF")  # noqa: TOR901
         test_lib.define('foo(Tensor self) -> Tensor')
 
         @impl(test_lib, 'foo', 'CPU')
@@ -1066,6 +1066,23 @@ class FakeTensorOperatorInvariants(TestCase):
             if "_like" == schema.name[-5:]:
                 op = self.get_aten_op(schema)
                 self.assertIn(op, torch._subclasses.fake_tensor._like_tensor_constructors)
+
+    def test_str_storage(self):
+        x = torch.zeros(3)
+        with FakeTensorMode() as m:
+            y = m.from_tensor(x)
+            self.assertExpectedInline(str(x.storage()), '''\
+ 0.0
+ 0.0
+ 0.0
+[torch.storage.TypedStorage(dtype=torch.float32, device=cpu) of size 3]''')
+            self.assertExpectedInline(str(y.storage()), '''\
+...
+[torch.storage.TypedStorage(dtype=torch.float32, device=meta) of size 3]''')
+
+        self.assertExpectedInline(str(y.storage()), '''\
+...
+[torch.storage.TypedStorage(dtype=torch.float32, device=meta) of size 3]''')
 
     # at::_embedding_bag has no op info,
     # and returns extra tensors that at::embedding bag throws away
