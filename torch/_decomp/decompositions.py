@@ -1909,18 +1909,20 @@ def batch_norm_with_update_functional(
     eps: float,
     cudnn_enabled: bool,
 ) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
-    new_rm = running_mean.clone()
-    new_rv = running_var.clone()
-    (output, save_mean, save_rstd, reserve) = batch_norm_with_update(
-        input,
-        weight,
-        bias,
+    (
+        output,
+        save_mean,
+        save_rstd,
         new_rm,
         new_rv,
-        momentum,
-        eps,
-        cudnn_enabled,
+    ) = native_batch_norm_helper(
+        input, weight, bias, running_mean, running_var, True, momentum, eps, True
     )
+    reserve = _get_batch_norm_reserve_tensor(
+        input, weight, bias, running_mean, running_var, eps, cudnn_enabled
+    )
+    assert new_rm is not None, "new_running_mean should not be None"
+    assert new_rv is not None, "new_running_var should not be None"
     return (output, save_mean, save_rstd, reserve, new_rm, new_rv)
 
 
