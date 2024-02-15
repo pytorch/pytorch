@@ -1162,9 +1162,9 @@ def get_device_tflops(dtype):
 
     if inspect.signature(get_max_simd_tflops).parameters.get("clock_rate"):
         # Triton API change in https://github.com/openai/triton/pull/2293
-        from triton.testing import nvsmi
+        from torch._utils_internal import max_clock_rate
 
-        sm_clock = nvsmi(["clocks.max.sm"])[0]
+        sm_clock = max_clock_rate()
         if dtype in (torch.float16, torch.bfloat16):
             return get_max_tensorcore_tflops(dtype, sm_clock)
 
@@ -1267,3 +1267,15 @@ def pass_execution_and_save(func, gm, msg):
             t,
             time_elapsed,
         )
+
+
+def is_collective(node):
+    from . import ir
+
+    return isinstance(node, ir.CollectiveKernel) or type(node) == ir._CollectiveKernel
+
+
+def is_wait(node):
+    from . import ir
+
+    return isinstance(node, ir.Wait) or type(node) == ir._WaitKernel

@@ -106,10 +106,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         if isinstance(obj, staticmethod):
             func = obj.__get__(self.value)
-            if trace_rules.lookup(func) is not None:
+            if source is not None:
                 return trace_rules.lookup(func).create_with_source(func, source=source)
             else:
-                return variables.UserFunctionVariable(func, source=source)
+                return trace_rules.lookup(func)(func)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
         elif source and inspect.ismemberdescriptor(obj):
@@ -727,6 +727,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 unimplemented("UserDefined with non-function __getattr__")
 
         if isinstance(subobj, property):
+            # Rewrite the source being explicit about reading it statically.
+            if self.source:
+                source = AttrSource(self.source, name, get_static=True)
+                source = AttrSource(source, "fget")
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source
             ).call_function(tx, [], {})
@@ -737,10 +741,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ).call_function(tx, [self], {})
         elif isinstance(subobj, staticmethod):
             func = subobj.__get__(self.value)
-            if source is not None and trace_rules.lookup(func) is not None:
+            if source is not None:
                 return trace_rules.lookup(func).create_with_source(func, source=source)
             else:
-                return variables.UserFunctionVariable(func, source=source)
+                return trace_rules.lookup(func)(func)
         elif isinstance(subobj, classmethod):
             return variables.UserMethodVariable(subobj.__func__, self, source=source)
         elif isinstance(subobj, types.FunctionType) or (
@@ -770,12 +774,12 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             elif inspect.isfunction(dynamic_subobj):
                 if is_utils_checkpoint(func):
                     return build_checkpoint_variable(source=source)
-                elif source is not None and trace_rules.lookup(func) is not None:
+                elif source is not None:
                     return trace_rules.lookup(func).create_with_source(
                         func, source=source
                     )
                 else:
-                    return variables.UserFunctionVariable(func, source=source)
+                    return trace_rules.lookup(func)(func)
 
         if (
             name in getattr(value, "__dict__", {})
