@@ -969,7 +969,7 @@ class ReduceLROnPlateau(LRScheduler):
             which the learning rate will be reduced.
             For example, consider the case of having no patience (`patience = 0`).
             In the first epoch, a baseline is established and is always considered good as there's no previous baseline.
-            From the second epoch, if the performance is worse than the baseline,
+            In the second epoch, if the performance is worse than the baseline,
             we have what is considered an intolerable epoch.
             Since the count of intolerable epochs (1) is greater than the patience level (0),
             the learning rate is reduced at the end of this epoch.
