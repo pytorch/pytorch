@@ -104,6 +104,7 @@ struct TORCH_API ForwardADLevel {
   ~ForwardADLevel();
 
   static uint64_t get_next_idx();
+  static uint64_t get_current_idx();
   static void release_idx(uint64_t idx);
   static std::shared_ptr<ForwardADLevel> get_by_idx(uint64_t idx);
   static std::shared_ptr<ForwardADLevel> try_get_by_idx(uint64_t idx);

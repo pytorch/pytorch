@@ -93,6 +93,9 @@ namespace forward_ad {
 /// levels. These can be used to compute higher order derivatives.
 TORCH_API uint64_t enter_dual_level();
 
+/// Get the current dual level and returns its index.
+TORCH_API uint64_t get_current_dual_level();
+
 /// Exits the given level. This will clear up all the gradients from this level
 /// and all dual Tensors that had gradients for this level will become regular
 /// Tensors again. This function can only be used to exit the innermost nesting
