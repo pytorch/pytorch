@@ -682,7 +682,7 @@ It has the same parameters (+ additional optional parameter of :attr:`length`) a
 least squares estimation of the original signal. The algorithm will check using the NOLA condition (
 nonzero overlap).
 
-Important consideration in the parameters :attr:`window` and :attr:`center` so that the envelop
+Important consideration in the parameters :attr:`window` and :attr:`center` so that the envelope
 created by the summation of all the windows is never zero at certain point in time. Specifically,
 :math:`\sum_{t=-\infty}^{\infty} |w|^2[n-t\times hop\_length] \cancel{=} 0`.
 
