@@ -5354,12 +5354,15 @@ def meta__flash_attention_forward(
     return_debug_mask: bool,
     scale: Optional[float] = None,
 ):
-    batch_size = query.size(0)
-    max_seqlen_batch_q = query.size(1)
-    num_heads = query.size(2)
-    head_dim = query.size(3)
-
-    max_seqlen_batch_k = key.size(1)
+    # NB: there are two underlying paths:
+    # 1. normal dense path; expect 4D inputs of shape (batch_size, seqlen, num_heads, head_dim)
+    # 2. varseqlen path; expect 3D inputs of shape (total, num_heads, head_dim) where total
+    #    includes all batch item sequences. cum_seq_q / cum_seq_k contain offsets into total
+    batch_size = query.size(0) if cum_seq_q is None else cum_seq_q.numel() - 1
+    max_seqlen_batch_q = query.size(1) if cum_seq_q is None else max_q
+    max_seqlen_batch_k = key.size(1) if cum_seq_k is None else max_k
+    num_heads = query.size(-2)
+    head_dim = query.size(-1)
 
     # Cuda Path
     attention = torch.empty_like(query)

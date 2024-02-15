@@ -2417,14 +2417,14 @@ def forward(self, x):
         example_inputs = (copy(x), y)
         ep = torch.export.export(foo, example_inputs, constraints=constraints)
         with self.assertRaisesRegex(RuntimeError, "input.*shape.*to be equal to 2"):
-            ep(torch.randn(3), y)
+            ep.module()(torch.randn(3), y)
 
         dim0_x, dim0_y = torch.export.dims("dim0_x", "dim0_y")
         dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_y}}
 
         example_inputs = (copy(x), y)
         ep = torch.export.export(foo, example_inputs, dynamic_shapes=dynamic_shapes)
-        ep(torch.randn(3), y)  # no specialization error
+        ep.module()(torch.randn(3), y)  # no specialization error
 
     def test_export_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
@@ -4406,6 +4406,15 @@ def forward(self, x, b, y):
             torch._dynamo.exc.Unsupported, "boolean masking setitem backwards"
         ):
             gm, _ = torch._dynamo.export(fn)(x, b, y)
+
+    def test_dynamo_list_index(self):
+        def fn(x, in_list):
+            return x + in_list.index(2)
+
+        inputs = (torch.ones(2, 2), [1, 2])
+        graph, _ = torch._dynamo.export(fn)(*inputs)
+        out = graph(*inputs)
+        self.assertEqual(out, torch.ones(2, 2) + 1)
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
