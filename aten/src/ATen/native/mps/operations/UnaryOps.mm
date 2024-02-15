@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/mps/Copy.h>
+#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
@@ -18,6 +19,7 @@
 #include <ATen/ops/atan_native.h>
 #include <ATen/ops/atanh_native.h>
 #include <ATen/ops/ceil_native.h>
+#include <ATen/ops/conj_physical_native.h>
 #include <ATen/ops/cos_native.h>
 #include <ATen/ops/cosh_native.h>
 #include <ATen/ops/cumprod_native.h>
@@ -28,6 +30,7 @@
 #include <ATen/ops/expm1_native.h>
 #include <ATen/ops/floor_native.h>
 #include <ATen/ops/frac_native.h>
+#include <ATen/ops/imag.h>
 #include <ATen/ops/log10_native.h>
 #include <ATen/ops/log1p_native.h>
 #include <ATen/ops/log2_native.h>
@@ -35,7 +38,9 @@
 #include <ATen/ops/logical_not_native.h>
 #include <ATen/ops/logit_backward_native.h>
 #include <ATen/ops/logit_native.h>
+#include <ATen/ops/neg.h>
 #include <ATen/ops/neg_native.h>
+#include <ATen/ops/real.h>
 #include <ATen/ops/reciprocal_native.h>
 #include <ATen/ops/reshape.h>
 #include <ATen/ops/round_native.h>
@@ -125,11 +130,8 @@ static void unary_op(const Tensor& self,
 
     auto selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self_, /*mpsShape=*/nullptr, gatherTensorData);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output, /*mpsShape=*/nullptr, false);
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
-        @{selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()};
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
 
     if (needsCopyToOutput) {
       output_.copy_(output);
@@ -394,13 +396,8 @@ TORCH_IMPL_FUNC(logit_backward_out_mps)
     Placeholder gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input);
 
     // Create dictionary of inputs and outputs
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData(),
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-    };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{gradInputPlaceholder.getMPSGraphTensor() : gradInputPlaceholder.getMPSGraphTensorData()};
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(gradOutputPlaceholder, inputPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, gradInputPlaceholder);
   }
 }
 
@@ -497,6 +494,22 @@ TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
   };
 
   mps::unary_op(realInput, realOutput, "sgn_out_mps", complex_sgn_op);
+}
+
+Tensor& conj_physical_out_mps(const Tensor& self, Tensor& result) {
+  TORCH_CHECK(self.is_complex());
+  if (!mps::supportsComplex()) {
+    if (!result.is_same_size(self)) {
+      result.resize_(self.sizes());
+    }
+    at::real(result).copy_(at::real(self));
+    at::imag(result).copy_(at::neg(at::imag(self)));
+  } else {
+    mps::unary_op(self, result, "conj", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
+      return [mpsGraph conjugateWithTensor:inputTensor name:nil];
+    });
+  }
+  return result;
 }
 
 } // namespace at::native

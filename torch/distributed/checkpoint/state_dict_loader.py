@@ -1,13 +1,13 @@
 import os
 import warnings
-from typing import Any, Dict, Optional, Union
+from typing import Any, cast, Dict, Optional, Union
 
 import torch
 import torch.distributed as dist
 from torch.distributed.checkpoint.stateful import Stateful
 
+from ._storage_utils import _storage_setup
 from .default_planner import DefaultLoadPlanner
-from .filesystem import FileSystemReader
 from .planner import LoadPlanner
 from .storage import StorageReader
 from .utils import _all_gather_keys, _api_bc_check, _DistWrapper, _profile
@@ -50,7 +50,7 @@ def load(
     planner: Optional[LoadPlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
-    no_dist: bool = False,
+    no_dist: Optional[bool] = None,
 ) -> None:
     """
     Load a distributed ``state_dict`` in SPMD style.
@@ -99,8 +99,8 @@ def load(
             (Default: ``None``)
         coordinator_rank (int): Rank to use to coordinate the checkpoint.
             rank0 is used by default. (Default: ``0``)
-        no_dist (bool): If ``True``, distributed checkpoint will not save
-            in SPMD style. (Default: ``False``)
+        no_dist (Optional[bool]): If ``True``, distributed checkpoint will not save
+            in SPMD style. (Default: ``False`` when torch.distributed is available and initialized)
 
     Returns:
         None.
@@ -131,18 +131,18 @@ def load(
         rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
 
-    with _profile():
-        if not storage_reader:
-            if not checkpoint_id:
-                raise RuntimeError(
-                    "`checkpoint_id` must be specificed if storage_reader is None."
-                )
-            # TODO: automatically decide whether to use FSSpecFileSystem
-            # https://github.com/pytorch/pytorch/issues/118033 and
-            # https://github.com/pytorch/pytorch/issues/118036
-            storage_reader = FileSystemReader(checkpoint_id)
+    if no_dist is None:
+        no_dist = not (dist.is_available() and dist.is_initialized())
+        if no_dist:
+            warnings.warn(
+                "Loading with `no_dist` set to True because torch.distributed"
+                " is unavailable or uninitialized."
+            )
 
-        storage_reader.reset(checkpoint_id)
+    with _profile():
+        storage_reader = cast(
+            StorageReader, _storage_setup(storage_reader, checkpoint_id, reader=True)
+        )
 
         if no_dist:
             keys = list(state_dict.keys())
