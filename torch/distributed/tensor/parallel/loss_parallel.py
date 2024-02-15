@@ -63,6 +63,35 @@ def _propagate_tensor_meta(
         raise RuntimeError(f"Unexpected tensor meta type: {type(tensor_meta)}.")
 
 
+# NOTE: The implementation follows torch._decomp.decomposition._log_softmax,
+# with all_reduce manually inserted to perform distributed computation.
+def _log_softmax(x, dim, half_to_float, mesh, mesh_dim):
+    x = x.contiguous()
+    if half_to_float:
+        assert x.dtype == torch.half
+    computation_dtype, result_dtype = utils.elementwise_dtypes(
+        x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    x = x.to(computation_dtype)
+    if x.numel() == 0:
+        shifted = x
+    else:
+        x_max = torch.amax(x, dim, keepdim=True)
+        x_max = funcol.all_reduce(
+            x_max, reduceOp=c10d.ReduceOp.MAX.name, group=(mesh, mesh_dim)
+        )
+        shifted = x - x_max
+    shifted_sumexp = torch.sum(torch.exp(shifted), dim, keepdim=True)
+    shifted_sumexp = funcol.all_reduce(
+        shifted_sumexp, reduceOp=c10d.ReduceOp.SUM.name, group=(mesh, mesh_dim)
+    )
+    shifted_logsumexp = torch.log(shifted_sumexp)
+    result = shifted - shifted_logsumexp
+    if not half_to_float:
+        result = result.to(result_dtype)
+    return result
+
+
 def _log_softmax_handler(
     op_call: torch._ops.OpOverload,
     args: Tuple[object, ...],
@@ -71,34 +100,6 @@ def _log_softmax_handler(
     x = cast(DTensor, args[0])
     dim = cast(int, args[1])
     half_to_float = cast(bool, args[2])
-
-    # NOTE: The implementation follows torch._decomp.decomposition._log_softmax,
-    # with all_reduce manually inserted to perform distributed computation.
-    def _log_softmax(x, dim, half_to_float, mesh, mesh_dim):
-        x = x.contiguous()
-        if half_to_float:
-            assert x.dtype == torch.half
-        computation_dtype, result_dtype = utils.elementwise_dtypes(
-            x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-        )
-        x = x.to(computation_dtype)
-        if x.numel() == 0:
-            shifted = x
-        else:
-            x_max = torch.amax(x, dim, keepdim=True)
-            x_max = funcol.all_reduce(
-                x_max, reduceOp=c10d.ReduceOp.MAX.name, group=(mesh, mesh_dim)
-            )
-            shifted = x - x_max
-        shifted_sumexp = torch.sum(torch.exp(shifted), dim, keepdim=True)
-        shifted_sumexp = funcol.all_reduce(
-            shifted_sumexp, reduceOp=c10d.ReduceOp.SUM.name, group=(mesh, mesh_dim)
-        )
-        shifted_logsumexp = torch.log(shifted_sumexp)
-        result = shifted - shifted_logsumexp
-        if not half_to_float:
-            result = result.to(result_dtype)
-        return result
 
     spec = x._spec
     mesh_dim = _find_all_reduce_mesh_dim(spec.placements, dim)
@@ -117,6 +118,20 @@ def _log_softmax_handler(
     )
 
 
+# NOTE: As explained below at _nll_loss_and_log_softmax_backward, the
+# _log_softmax_backward_handler does not actually do any computation.
+def _log_softmax_backward_no_computation(
+    grad_output: Tensor, output: Tensor, dim: int, input_dtype: torch.dtype
+):
+    # The log_softmax backward computation has been performed during
+    # nll_loss backward in _nll_loss_and_log_softmax_backward.
+    grad_input = grad_output
+
+    if grad_output.dtype != input_dtype:
+        grad_input = grad_input.to(input_dtype)
+    return grad_input
+
+
 def _log_softmax_backward_handler(
     op_call: torch._ops.OpOverload,
     args: Tuple[object, ...],
@@ -126,22 +141,6 @@ def _log_softmax_backward_handler(
     output = cast(DTensor, args[1])
     dim = cast(int, args[2])
     input_dtype = cast(torch.dtype, args[3])
-
-    # NOTE: As explained below at _nll_loss_and_log_softmax_backward, the
-    # _log_softmax_backward_handler does not actually do any computation.
-    def _log_softmax_backward_no_computation(
-        grad_output: Tensor, output: Tensor, dim: int, input_dtype: torch.dtype
-    ):
-        # The log_softmax backward computation has been performed during
-        # nll_loss backward in _nll_loss_and_log_softmax_backward.
-        # grad_input = grad_output - torch.exp(output) * torch.sum(
-        #     grad_output, dim=dim, keepdim=True
-        # )
-        grad_input = grad_output
-
-        if grad_output.dtype != input_dtype:
-            grad_input = grad_input.to(input_dtype)
-        return grad_input
 
     spec = grad_output._spec
     res = _log_softmax_backward_no_computation(

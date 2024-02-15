@@ -2249,7 +2249,6 @@ make_fallback(aten.fractional_max_pool3d)
 make_fallback(aten.frexp)
 make_fallback(aten.geqrf)
 make_fallback(aten.histc)
-make_fallback(aten.isin)
 make_fallback(aten.kthvalue)
 make_fallback(aten.linalg_cholesky_ex)
 make_fallback(aten.linalg_cross)
@@ -5400,6 +5399,13 @@ def accumulate_grad_(variable, new_grad):
     variable.realize()
     new_grad.realize()
     ir.AccumulateGrad(variable, new_grad)
+    return variable
+
+
+@register_lowering(torch.ops.inductor.resize_storage_bytes_)
+def resize_storage_bytes_(variable, new_size):
+    variable.realize()
+    ir.ResizeStorageBytes(variable, new_size)
     return variable
 
 
