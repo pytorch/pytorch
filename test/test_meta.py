@@ -1325,26 +1325,22 @@ class TestMeta(TestCase):
 
     @onlyCPU
     def test_meta_autograd_no_error(self):
-        lib = torch.library.Library("meta_test", "DEF")
-        impl_cpu = torch.library.Library("meta_test", "IMPL", "CPU")
-        impl_meta = torch.library.Library("meta_test", "IMPL", "Meta")
+        with torch.library._scoped_library("meta_test", "DEF") as lib:
+            with torch.library._scoped_library("meta_test", "IMPL", "CPU") as impl_cpu:
+                with torch.library._scoped_library("meta_test", "IMPL", "Meta") as impl_meta:
+                    def foo_impl(x):
+                        return x + 1
 
-        def foo_impl(x):
-            return x + 1
+                    lib.define("foo(Tensor a) -> Tensor")
+                    impl_meta.impl("foo", foo_impl)
+                    impl_cpu.impl("foo", foo_impl)
 
-        lib.define("foo(Tensor a) -> Tensor")
-        impl_meta.impl("foo", foo_impl)
-        impl_cpu.impl("foo", foo_impl)
-
-        a = torch.ones(2, device='meta')
-        # The point of the test is that this should not error:
-        # We have a fallthrough kernel registered to the AutogradMeta
-        # key for custom ops, so it's fine that `foo()` doesn't have
-        # an autograd kernel.
-        b = torch.ops.meta_test.foo.default(a)
-        del impl_meta
-        del impl_cpu
-        del lib
+                    a = torch.ones(2, device='meta')
+                    # The point of the test is that this should not error:
+                    # We have a fallthrough kernel registered to the AutogradMeta
+                    # key for custom ops, so it's fine that `foo()` doesn't have
+                    # an autograd kernel.
+                    b = torch.ops.meta_test.foo.default(a)
 
     def test_huber_loss_backward(self):
         inps = [torch.rand(2**52, device='meta') for _ in range(3)]

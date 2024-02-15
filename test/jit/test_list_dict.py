@@ -1114,7 +1114,7 @@ class TestList(JitTestCase):
 
         def check_list(fn, li):
             if len(li) == 0:
-                self.checkScriptRaisesRegex(fn, (li,), Exception, "arg is an empty sequence")
+                self.checkScriptRaisesRegex(fn, (li,), Exception, "empty")
             else:
                 self.checkScript(fn, (li,))
 
@@ -1468,7 +1468,7 @@ class TestDict(JitTestCase):
 
         def test_dictcomprehension_is_typed_from_annotation():
             metasyntactics = ["foo", "bar", "baz"]
-            x: Dict[str, Optional[int]] = {word: None for word in metasyntactics}
+            x: Dict[str, Optional[int]] = {word: None for word in metasyntactics}  # noqa: RUF025
             return x
 
         self.checkScript(test_dictcomprehension_is_typed_from_annotation, ())

@@ -460,7 +460,8 @@ class TestPublicBindings(TestCase):
             # verifies that each public API has the correct module name and naming semantics
             def check_one_element(elem, modname, mod, *, is_public, is_all):
                 obj = getattr(mod, elem)
-                if not (isinstance(obj, Callable) or inspect.isclass(obj)):
+                # torch.dtype is not a class nor callable, so we need to check for it separately
+                if not (isinstance(obj, (Callable, torch.dtype)) or inspect.isclass(obj)):
                     return
                 elem_module = getattr(obj, '__module__', None)
                 # Only used for nice error message below

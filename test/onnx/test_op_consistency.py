@@ -52,25 +52,26 @@ OPS_DB = copy.deepcopy(common_methods_invocations.op_db)
 
 # TODO: Directly modify DecorateInfo in each OpInfo in ob_db when all ops are enabled.
 # Ops to be tested for numerical consistency between onnx and pytorch
+# TODO: https://github.com/pytorch/pytorch/issues/102211
 TESTED_OPS: frozenset[str] = frozenset(
     [
         "atan",
         "atan2",
         # "atleast_1d",  # How to support list input?
-        # "atleast_2d",  # How to support list input?
-        # "atleast_3d",  # How to support list input?
+        # "atleast_2d",
+        # "atleast_3d",
         "broadcast_to",
         "ceil",
         "expand",
         "flatten",
         "hstack",
         "logical_not",
-        # "logit",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
+        # "logit",
         "nn.functional.scaled_dot_product_attention",
         "repeat",
         "round",
-        # "scatter_add",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
-        # "scatter_reduce",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
+        # "scatter_add",
+        # "scatter_reduce",
         "sqrt",
         "stft",
         "t",
