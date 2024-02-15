@@ -1890,7 +1890,7 @@ def _to_copy(
         return x.clone()
     dtype_converted = False
     common_device = device_hint(x)
-    inputIsFake = isinstance(x, torch._subclasses.FakeTensor)
+    input_is_fake = isinstance(x, torch._subclasses.FakeTensor)
 
     if device is not None and device != x.device:
         # avoid conversions on cpu
@@ -1903,8 +1903,8 @@ def _to_copy(
         x = torch._prims.convert_element_type(x, dtype)
         dtype_converted = True
 
-    currentIsFake = isinstance(x, torch._subclasses.FakeTensor)
-    if dtype_converted and inputIsFake and not currentIsFake:
+    current_is_fake = isinstance(x, torch._subclasses.FakeTensor)
+    if dtype_converted and input_is_fake and not current_is_fake:
         # In case of dtype promotion, faketensor could be converted into tensor.
         # Need to convert into faketensor if input was a faketensor.
         x = wrap_output_with_input_device_(x, common_device)
