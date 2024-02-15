@@ -861,22 +861,14 @@ Tensor _nested_view_from_buffer(
     storage_offsets);
 }
 
-Tensor _nested_view_from_values_offsets(
+Tensor _nested_view_from_jagged(
     const Tensor& values,
     const Tensor& offsets,
-    const Tensor& dummy) {
+    const Tensor& dummy,
+    const c10::optional<Tensor>& lengths,
+    const int64_t ragged_idx) {
   TORCH_INTERNAL_ASSERT(
-      false, "_nested_view_from_values_offsets(): expected to be implemented from Python");
-  return Tensor();
-}
-
-Tensor _nested_view_from_values_offsets_lengths(
-    const Tensor& values,
-    const Tensor& offsets,
-    const Tensor& lengths,
-    const Tensor& dummy) {
-  TORCH_INTERNAL_ASSERT(
-      false, "_nested_view_from_values_offsets_lengths(): expected to be implemented from Python");
+      false, "_nested_view_from_jagged(): expected to be implemented from Python");
   return Tensor();
 }
 
@@ -896,6 +888,12 @@ Tensor _nested_get_lengths(const Tensor& self) {
   TORCH_INTERNAL_ASSERT(
       false, "_nested_get_lengths(): expected to be implemented from Python");
   return Tensor();
+}
+
+int64_t _nested_get_ragged_idx(const Tensor& self) {
+  TORCH_INTERNAL_ASSERT(
+      false, "_nested_get_ragged_idx(): expected to be implemented from Python");
+  return 0;
 }
 
 std::tuple<Tensor, Tensor> _nested_compute_contiguous_strides_offsets(const Tensor& nested_size) {

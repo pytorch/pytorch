@@ -1183,6 +1183,8 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 
     def _get_views(self):
         # Test all cases with both an NT base and a dense base
+        # Subclass -> Subclass
+        # Dense -> Subclass
         for base_is_nt in [False, True]:
             # There are three cases to consider here based on the logic in
             # meta_utils.py
@@ -1222,6 +1224,10 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
             x_view_view = x_view.unsqueeze(-1)
             yield x_view_view
 
+        # Subclass -> Dense
+        x = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[0].clone()
+        yield x.values()
+
     def test_inputs_to_compiled_fn_are_views(self):
         for nt_view in self._get_views():
 
@@ -1238,7 +1244,10 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
             # Check metadata and values are correct
             self.assertTrue(out.size() == out_ref.size())
             self.assertTrue(out.stride() == out_ref.stride())
-            self.assertTrue(torch.allclose(out.values(), out_ref.values()))
+            if out.is_nested:
+                self.assertTrue(torch.allclose(out.values(), out_ref.values()))
+            else:
+                self.assertTrue(torch.allclose(out, out_ref))
 
             # Check that no guards are incurred
             def backend(gm, args):
