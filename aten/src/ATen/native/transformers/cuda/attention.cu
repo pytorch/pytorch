@@ -51,7 +51,10 @@
 #include <ATen/ops/scaled_dot_product_attention.h>
 #include <ATen/ops/split_native.h>
 #include <ATen/ops/narrow_native.h>
+#include <ATen/ops/zeros.h>
 #endif
+
+#include <ATen/native/cudnn/MHA.h>
 
 #include <c10/cuda/CUDAMathCompat.h>
 
@@ -558,7 +561,8 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
     // For now I am going to turn of that path not have to deal with all the annoying
     // Mask type shape grossness
     if (!mask.has_value() && no_seq_len_1_nested &&
-        (backend == sdp::SDPBackend::flash_attention || backend == sdp::SDPBackend::efficient_attention)) {
+        (backend == sdp::SDPBackend::flash_attention || backend == sdp::SDPBackend::efficient_attention ||
+         backend == sdp::SDPBackend::cudnn_attention)) {
       auto x = at::linear(query, qkv_weight, qkv_bias);
       auto chunks = x.chunk(3, -1);
       auto x_size_0 = x.size(0);
@@ -718,6 +722,56 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   Tensor attention = output.transpose(1,2);
 
   return std::make_tuple(attention, logsumexp, Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, philox_seed, philox_offset, debug_attn_mask);
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_cuda(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    double dropout_p,
+    bool is_causal,
+    bool training,
+    c10::optional<double> scale) {
+  // Used for tracking usage statistics
+  C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention_cudnn");
+  // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
+  // Key   (Batch x Num_heads x KV_seq_len x Dim_per_head)
+  // Value (Batch x Num_heads x KV_seq_len x Dim_per_head)
+  const int64_t batch_size = query.size(0);
+  const int64_t num_heads = query.size(1);
+  const int64_t max_seqlen_batch_q = query.size(2);
+  const int64_t head_dim = query.size(3);
+
+  const int64_t max_seqlen_batch_k = key.size(2);
+  const int64_t max_seqlen_batch_v = value.size(2);
+  TORCH_CHECK(
+      max_seqlen_batch_k == max_seqlen_batch_v,
+      "Key and Value must have the same sequence length");
+
+  Tensor attention, log_sumexp;
+
+  auto cudnn_seed = at::zeros({1}, query.options().dtype(kLong));
+  auto cudnn_offset = at::zeros({1}, query.options().dtype(kLong));
+  const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+
+  run_cudnn_SDP_fprop(batch_size/*int64_t b*/,
+                      num_heads/*int64_t h*/,
+                      max_seqlen_batch_q/*int64_t s_q*/,
+                      max_seqlen_batch_k/*int64_t s_kv*/,
+                      head_dim/*int64_t d*/,
+                      softmax_scale/*float scaling_factor*/,
+                      training/* bool */,
+                      is_causal/* bool */,
+                      dropout_p/*double dropout_probability*/,
+                      query/* Tensor q*/,
+                      key/* Tensor k*/,
+                      value/* Tensor v*/,
+                      log_sumexp/*Tensor softmaxstats*/,
+                      attention/*Tensor o*/,
+                      cudnn_seed/*Tensor dropoutseed*/,
+                      cudnn_offset/*Tensor dropoutoffset*/);
+
+  return std::make_tuple(attention, log_sumexp, cudnn_seed, cudnn_offset);
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
