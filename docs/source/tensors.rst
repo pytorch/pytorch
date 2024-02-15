@@ -542,6 +542,7 @@ Tensor class reference
     Tensor.max
     Tensor.maximum
     Tensor.mean
+    Tensor.module_load
     Tensor.nanmean
     Tensor.median
     Tensor.nanmedian
