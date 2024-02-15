@@ -573,7 +573,21 @@ class MetaConverter:
                         # tensor's storage.  The most typical way to end
                         # up here is with set_.  So use set_ to bludgeon this
                         # in.
-                        r_s = self.meta_storage(s, callback=callback)
+                        if is_traceable_wrapper_subclass(t):
+                            # This is interesting - here, we are caching the **actual**
+                            # storage from the input tensor subclass.
+                            # Why is this a reasonable thing to do?
+                            # For wrapper tensor subclasses, their storage doesn't
+                            # acutally contain allocated data. So in fact, they function
+                            # similarly to meta storages.
+                            self.storage_memo[swr] = s
+                            # TODO: my (weak hope / assumption) here is that for storages of this type,
+                            # these storages are effectively un-modifiable (because they have nodata).
+                            # but if it's possible to modify the metadata on this storage, that would be bad
+                            # (mutating the storage in eager mode would mutate this cached copy).
+                            r_s = s
+                        else:
+                            r_s = self.meta_storage(s, callback=callback)
                         # NB: In principle, this should always work, but there
                         # is some subtle difference in the autograd metadata
                         # that means we will backprop the set_ call, even if
