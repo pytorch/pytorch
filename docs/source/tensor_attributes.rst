@@ -227,6 +227,21 @@ non-None device argument.  To globally change the default device, see also
    >>> torch.randn((2,3), device='cuda:1')
    >>> torch.randn((2,3), device=1)  # legacy
 
+.. note::
+   Scalar Tensors (with tensor.dim()==0) are automatically transferred to the GPU device due to the efficiency of this operation. Non-scalar Tensors, however, are not auto-transferred. Additionally, the automatic transfer of Scalar Tensors is uni-directional, only from CPU to GPU, and not vice versa.
+   Example:
+
+   >>> # two scalars
+   >>> torch.ones(()) + torch.ones(()).cuda()  # OK, scalar auto-transferred from CPU to GPU
+   >>> torch.ones(()).cuda() + torch.ones(())  # OK, scalar auto-transferred from CPU to GPU
+
+   >>> # one scalar (CPU), one vector (GPU)
+   >>> torch.ones(()) + torch.ones(1).cuda()  # OK, scalar auto-transferred from CPU to GPU
+   >>> torch.ones(1).cuda() + torch.ones(())  # OK, scalar auto-transferred from CPU to GPU
+
+   >>> # one scalar (GPU), one vector (CPU)
+   >>> torch.ones(()).cuda() + torch.ones(1)  # Fail, scalar not auto-transferred from GPU to CPU and non-scalar not auto-transferred from CPU to GPU
+   >>> torch.ones(1) + torch.ones(()).cuda()  # Fail, scalar not auto-transferred from GPU to CPU and non-scalar not auto-transferred from CPU to GPU
 
 .. _layout-doc:
 
