@@ -57,22 +57,6 @@ def get_default_test_flags():
     ]
 
 
-def caffe2_flaky(test_method):
-    # This decorator is used to mark a test method as flaky.
-    # This is used in conjunction with the environment variable
-    # CAFFE2_RUN_FLAKY_TESTS that specifies "flaky tests" mode
-    # If flaky tests mode are on, only flaky tests are run
-    # If flaky tests mode are off, only non-flaky tests are run
-    # NOTE: the decorator should be applied as the top-level decorator
-    # in a test method.
-    test_method.__caffe2_flaky__ = True
-    return test_method
-
-
-def is_flaky_test_mode():
-    return os.getenv('CAFFE2_RUN_FLAKY_TESTS', '0') == '1'
-
-
 class TestCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -82,15 +66,6 @@ class TestCase(unittest.TestCase):
         core.SetEnginePref({}, {})
 
     def setUp(self):
-        # Skip tests based on whether we're in flaky test mode and
-        # the test is decorated as a flaky test.
-        test_method = getattr(self, self._testMethodName)
-        is_flaky_test = getattr(test_method, "__caffe2_flaky__", False)
-        if (is_flaky_test_mode() and not is_flaky_test):
-            raise unittest.SkipTest("Non-flaky tests are skipped in flaky test mode")
-        elif (not is_flaky_test_mode() and is_flaky_test):
-            raise unittest.SkipTest("Flaky tests are skipped in regular test mode")
-
         self.ws = workspace.C.Workspace()
         workspace.ResetWorkspace()
 

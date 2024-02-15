@@ -43,7 +43,8 @@ def dedup_tensors(all_plans: List[SavePlan]) -> List[SavePlan]:
     for key, plans in replicated_items.items():
         for plan_idx in plans[1:]:
             plan_to_keys.setdefault(plan_idx, []).append(key)
-    logger.info("Duplicate keys to remove: %s", plan_to_keys)
+    if len(plan_to_keys) > 0:
+        logger.info("Duplicate keys to remove: %s", plan_to_keys)
 
     for plan_idx, keys in plan_to_keys.items():
         key_set = set(keys)

@@ -912,6 +912,7 @@ def aot_export_module(
     # Your module can return multiple outputs, so you must specify which output the loss is.
     output_loss_index: Optional[int] = None,
     pre_dispatch: bool = False,
+    kwargs=None,
 ) -> Tuple[torch.fx.GraphModule, GraphSignature]:
     """
     This function takes in a module, and returns:
@@ -955,6 +956,8 @@ def aot_export_module(
     params_and_buffers_flat, params_spec = pytree.tree_flatten(params_and_buffers)
     params_and_buffers_flat = tuple(params_and_buffers_flat)
     params_len = len(params_and_buffers_flat)
+
+    kwargs = kwargs or {}
 
     functional_call = create_functional_call(mod, params_spec, params_len, store_orig_mod=True)
 
@@ -1024,6 +1027,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             num_params_buffers=params_len,
             no_tangents=True,
             pre_dispatch=pre_dispatch,
+            kwargs=kwargs,
         )
     if trace_joint:
         def flattened_joint(*args):
@@ -1060,7 +1064,7 @@ https://github.com/pytorch/pytorch/issues/101192
             return *fw_outs, *output_gradients
         fx_g = make_fx(flattened_joint)(*full_args)
 
-    user_args_flat = pytree.arg_tree_leaves(*args)
+    user_args_flat = pytree.arg_tree_leaves(*args, **kwargs)
     return fx_g, create_graph_signature(
         fx_g,
         metadata,
@@ -1115,6 +1119,7 @@ def aot_export_joint_simple(
             args,
             decompositions=decompositions,
         )
+        in_spec, _kw_in_spec = in_spec.children_specs
     # At this point, we can just directly return the (joint or inference graph) that we traced.
     # First though: a bunch of assertions to make sure that our graph doesn't require
     # any calling convention changes compared to the original function.
@@ -1170,15 +1175,18 @@ def _aot_export_function(
     # We don't know this info at trace time though, so we need to make it an explicit config.
     no_tangents: bool = False,
     pre_dispatch: bool = False,
+    kwargs=None,
 ) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
+    kwargs = kwargs or {}
+
+    flat_fn, out_spec = create_tree_flattened_fn(func, args, kwargs)
+    flat_args, in_spec = pytree.tree_flatten((args, kwargs))
+
     dynamic_shapes = False
-    for x in args:
+    for x in flat_args:
         if isinstance(x, FakeTensor):
             dynamic_shapes = x.fake_mode.shape_env is not None
             break
-
-    flat_fn, out_spec = create_tree_flattened_fn(func, args)
-    flat_args, in_spec = pytree.tree_flatten(args)
 
     # The export use case doesn't care about several bits of AOTConfig
     # (1) compilers (we just export the graph)

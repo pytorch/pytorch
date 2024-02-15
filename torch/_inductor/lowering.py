@@ -398,8 +398,13 @@ def make_pointwise(
     override_fn_when_input_bool=None,
     override_fn_when_cuda_float64=None,
     allow_alpha=False,
+    triton_fallback=None,
 ):
     def inner(*inputs: List[TensorBox], alpha=None):
+        if triton_fallback is not None and any(map(is_triton, inputs)):
+            assert not allow_alpha  # not implemented
+            return triton_fallback(*inputs)
+
         inputs = promote_constants(inputs, override_return_dtype)
         if allow_alpha:
             if alpha is not None and alpha != 1:
@@ -607,6 +612,7 @@ def register_pointwise(
     override_fn_when_input_bool=None,
     allow_alpha=False,
     use_libdevice_for_f64=False,
+    triton_fallback=None,
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
@@ -622,6 +628,7 @@ def register_pointwise(
         override_fn_when_input_bool=override_fn_when_input_bool,
         override_fn_when_cuda_float64=fn_libdevice if use_libdevice_for_f64 else None,  # type: ignore[possibly-undefined]
         allow_alpha=allow_alpha,
+        triton_fallback=triton_fallback,
     )
     fn = register_lowering(
         aten_fn,
@@ -2316,7 +2323,6 @@ make_fallback(aten.avg_pool3d)
 make_fallback(aten._cdist_forward)
 make_fallback(aten.cummax)
 make_fallback(aten.cummin)
-make_fallback(aten.digamma, warn=False)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
 make_fallback(aten._efficientzerotensor)
@@ -2326,10 +2332,6 @@ make_fallback(aten.fractional_max_pool3d)
 make_fallback(aten.frexp)
 make_fallback(aten.geqrf)
 make_fallback(aten.histc)
-make_fallback(aten.i0)
-make_fallback(aten.igamma, warn=False)
-make_fallback(aten.igammac, warn=False)
-make_fallback(aten.isin)
 make_fallback(aten.kthvalue)
 make_fallback(aten.linalg_cholesky_ex)
 make_fallback(aten.linalg_cross)
@@ -2357,33 +2359,12 @@ make_fallback(aten.mode)
 make_fallback(aten.nanmedian)
 make_fallback(aten.ormqr)
 make_fallback(aten._pdist_forward)
-make_fallback(aten.polygamma)
 make_fallback(aten.put)
 make_fallback(aten.resize)
 make_fallback(aten.resize_)
 make_fallback(aten.resize_as)
 make_fallback(aten.resize_as_)
 make_fallback(aten.searchsorted)
-make_fallback(aten.special_airy_ai)
-make_fallback(aten.special_bessel_y0, warn=False)
-make_fallback(aten.special_bessel_y1)
-make_fallback(aten.special_chebyshev_polynomial_t)
-make_fallback(aten.special_chebyshev_polynomial_u)
-make_fallback(aten.special_erfcx, warn=False)
-make_fallback(aten.special_hermite_polynomial_h)
-make_fallback(aten.special_hermite_polynomial_he)
-make_fallback(aten.special_i0e, warn=False)
-make_fallback(aten.special_i1, warn=False)
-make_fallback(aten.special_i1e, warn=False)
-make_fallback(aten.special_laguerre_polynomial_l)
-make_fallback(aten.special_modified_bessel_i1)
-make_fallback(aten.special_modified_bessel_k0)
-make_fallback(aten.special_modified_bessel_k1)
-make_fallback(aten.special_ndtri, warn=False)
-make_fallback(aten.special_scaled_modified_bessel_k0)
-make_fallback(aten.special_scaled_modified_bessel_k1)
-make_fallback(aten.special_spherical_bessel_j0, warn=False)
-make_fallback(aten.special_zeta, warn=False)
 make_fallback(aten._trilinear)
 make_fallback(aten.uniform, warn=False)
 make_fallback(aten._adaptive_avg_pool3d_backward)
@@ -5180,11 +5161,12 @@ add = register_pointwise(
 )
 
 
-def register_pointwise_numeric(op, name=None):
+def register_pointwise_numeric(op, name=None, triton_fallback=None):
     return register_pointwise(
         op,
         name=name,
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+        triton_fallback=triton_fallback,
     )
 
 
@@ -5286,11 +5268,48 @@ register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.nextafter)
 
-register_pointwise_numeric(aten.special_bessel_j0, name="bessel_j0")
-register_pointwise_numeric(prims.bessel_j0, name="bessel_j0")
-register_pointwise_numeric(aten.special_bessel_j1, name="bessel_j1")
-register_pointwise_numeric(prims.bessel_j1, name="bessel_j1")
-register_pointwise_numeric(aten.special_modified_bessel_i0, name="modified_bessel_i0")
+from .codegen.common import pointwise_overrides_data
+
+
+def _get_pointwise_overrides(ns, name):
+    data = pointwise_overrides_data[name]
+    op = getattr(ns, data.name, None)
+    if op is None:
+        return
+
+    def make_triton_fallback(op):
+        if data.triton is None:
+            return fallback_handler(op)
+
+    if isinstance(op, torch._ops.OpOverloadPacket):
+        for olname in op.overloads():
+            ol = getattr(op, olname)
+            yield ol, data.type_promotion_kind, make_triton_fallback(ol)
+    else:
+        yield op, data.type_promotion_kind, make_triton_fallback(op)
+
+
+for name in pointwise_overrides_data:
+    for op, type_promotion_kind, triton_fallback in _get_pointwise_overrides(
+        aten, name
+    ):
+        register_pointwise(
+            op,
+            name=name,
+            type_promotion_kind=type_promotion_kind,
+            triton_fallback=triton_fallback,
+        )
+
+    for op, type_promotion_kind, triton_fallback in _get_pointwise_overrides(
+        prims, name
+    ):
+        register_pointwise(
+            op,
+            name=name,
+            type_promotion_kind=type_promotion_kind,
+            triton_fallback=triton_fallback,
+        )
+
 
 foreach_add_list = register_foreach_pointwise(
     aten._foreach_add.List, add, allow_alpha=True
@@ -5404,9 +5423,11 @@ register_inplace(aten.__ixor__, aten.__xor__)
 
 
 @register_lowering(aten.sym_constrain_range)
-def sym_constrain_range(a, min, max):
-    tracing_context = torch._guards.TracingContext.get()
-    assert a in tracing_context.fake_mode.shape_env.var_to_range
+def sym_constrain_range(a, min=None, max=None):
+    tracing_context = torch._guards.TracingContext.try_get()
+    assert (
+        tracing_context is None or a in tracing_context.fake_mode.shape_env.var_to_range
+    )
     return a
 
 
@@ -5461,6 +5482,13 @@ def accumulate_grad_(variable, new_grad):
     variable.realize()
     new_grad.realize()
     ir.AccumulateGrad(variable, new_grad)
+    return variable
+
+
+@register_lowering(torch.ops.inductor.resize_storage_bytes_)
+def resize_storage_bytes_(variable, new_size):
+    variable.realize()
+    ir.ResizeStorageBytes(variable, new_size)
     return variable
 
 
