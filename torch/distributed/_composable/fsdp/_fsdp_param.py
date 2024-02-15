@@ -445,11 +445,8 @@ class FSDPParam:
         self._assert_in_states(ShardedState.SHARDED, ShardedState.SHARDED_POST_FORWARD)
         if self.sharded_state == ShardedState.SHARDED:
             if self._use_all_gather_extensions:
-                module = self._module_info.module
                 fsdp_pre_all_gather = self._inner_tensor.fsdp_pre_all_gather  # type: ignore[attr-defined]
-                all_gather_inputs, self._all_gather_metadata = fsdp_pre_all_gather(
-                    module
-                )
+                all_gather_inputs, self._all_gather_metadata = fsdp_pre_all_gather()
                 return [t.view(-1) for t in all_gather_inputs]
             return [_to_dtype_if_needed(self._sharded_param_data, self.param_dtype)]
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
