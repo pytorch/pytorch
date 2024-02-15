@@ -229,9 +229,7 @@ def _verify_options(
             )
             state_dict_type = StateDictType.FULL_STATE_DICT
         else:
-            state_dict_config = ShardedStateDictConfig(
-                offload_to_cpu=options.cpu_offload,
-            )
+            state_dict_config = ShardedStateDictConfig()
             optim_state_dict_config = ShardedOptimStateDictConfig(
                 offload_to_cpu=options.cpu_offload,
             )
