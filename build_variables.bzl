@@ -24,6 +24,7 @@ def libtorch_generated_sources(gencode_pattern):
         "torch/csrc/autograd/generated/VariableType_2.cpp",
         "torch/csrc/autograd/generated/VariableType_3.cpp",
         "torch/csrc/autograd/generated/VariableType_4.cpp",
+        "torch/csrc/autograd/generated/ViewFuncs.cpp",
         "torch/csrc/autograd/generated/TraceType_0.cpp",
         "torch/csrc/autograd/generated/TraceType_1.cpp",
         "torch/csrc/autograd/generated/TraceType_2.cpp",
