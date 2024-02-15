@@ -224,7 +224,7 @@ def should_pad_bench(
             n_padded_length = get_padded_length(n, get_alignment_size(mat2))
         elif op is torch.ops.aten.bmm:
             m = mat1.shape[1]
-            k = mat2.shape[2]
+            k = mat1.shape[2]
             n = mat2.shape[2]
 
             m_padded_length = get_padded_length(m, get_alignment_size(mat1))

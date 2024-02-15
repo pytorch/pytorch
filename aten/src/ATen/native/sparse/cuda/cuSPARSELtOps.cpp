@@ -135,6 +135,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         compute_type = CUSPARSE_COMPUTE_32I;
         compression_factor = 10;
         break;
+
 // cuSPARSELt v0.5.2 onwards changes CUSPARSE_COMPUTE_TF32, CUSPARES_COMPUT_16F to CUSPARSE_COMPUTE_32F
 #if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 502
     case at::ScalarType::Half:
@@ -152,6 +153,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         output_type = CUDA_R_32F;
         compute_type = CUSPARSE_COMPUTE_32F;
         break;
+
 // cuSPARSELt <= v0.5.2 uses CUSPARSE_COMPUTE_TF32, CUSPARES_COMPUTE_16F
 #else
     case at::ScalarType::Half:
@@ -170,21 +172,30 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         compute_type = CUSPARSE_COMPUTE_TF32;
         break;
 #endif
+
     default:
         TORCH_CHECK(false, "Unsupported dtype for cuSPARSELt compressed matrix multiplication.");
         break;
   }
   ScalarType out_dtype = dense_B.scalar_type();
-  // special check for int8 int8 -> fp16 support
+  // special check for mixed dtype int8 int8 -> {fp16, bf16, int32} support
   if (out_dtype_opt.has_value()) {
     out_dtype = out_dtype_opt.value();
-    if (input_type == CUDA_R_8I and out_dtype == at::ScalarType::Half)
+    TORCH_CHECK(input_type == CUDA_R_8I, "out_dtype support only available for int8 inputs");
+    switch (out_dtype)
     {
-        output_type = CUDA_R_16F;
-    }
-    else
-    {
-        TORCH_CHECK(false, "Setting out_dtype is only supported for int8 input and fp16 output.");
+        case at::ScalarType::Half:
+            output_type = CUDA_R_16F;
+            break;
+        case at::ScalarType::BFloat16:
+            output_type = CUDA_R_16BF;
+            break;
+        case at::ScalarType::Int:
+            output_type = CUDA_R_32I;
+            break;
+        default:
+            TORCH_CHECK(false, "Unsupported out_dtype passed, must be one of {fp16, bf16, int32}");
+            break;
     }
   }
 
