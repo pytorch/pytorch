@@ -43,6 +43,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
     run_with_both_funcol_impls,
+    run_with_both_funcol_impls_with_arg,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -261,8 +262,8 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     @patch.object(torch._inductor.config, "reorder_for_compute_comm_overlap", True)
-    @run_with_both_funcol_impls
-    def test_tp_compile_comm_reordering(self):
+    @run_with_both_funcol_impls_with_arg
+    def test_tp_compile_comm_reordering(self, use_native_funcol):
         class FakeAttention(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -324,14 +325,23 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
 
         code = run_and_get_triton_code(compiled_model, inp)
-        # Check that `buf2` is correctly waited on before first use.
-        # fmt: off
-        FileCheck() \
-            .check("buf1_work = dist.all_gather_into_tensor(buf1[0]") \
-            .check("buf2 = buf1[0]") \
-            .check("buf2 = _wait_tensor(buf2)") \
-            .check("extern_kernels.mm(buf2,") \
-            .run(code)
+        if use_native_funcol:
+            FileCheck().check(
+                "buf0 = torch.ops._c10d_functional.all_gather_into_tensor.default(primal"
+            ).check("buf1 = torch.ops._c10d_functional.wait_tensor.default(buf0").check(
+                "extern_kernels.mm(buf0,"
+            ).run(
+                code
+            )
+        else:
+            # Check that `buf2` is correctly waited on before first use.
+            # fmt: off
+            FileCheck() \
+                .check("buf1_work = dist.all_gather_into_tensor(buf1[0]") \
+                .check("buf2 = buf1[0]") \
+                .check("buf2 = _wait_tensor(buf2)") \
+                .check("extern_kernels.mm(buf2,") \
+                .run(code)
 
 
 @instantiate_parametrized_tests
