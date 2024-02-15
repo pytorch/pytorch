@@ -2685,7 +2685,7 @@ class GraphModule(torch.nn.Module):
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting()
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
 
-        _treespec_compare = torch._functorch.eager_transforms._treespec_compare((primal_out, primal_out_1), (child_8, child_8))
+        _vjp_treespec_compare = torch._functorch.eager_transforms._vjp_treespec_compare((primal_out, primal_out_1), (child_8, child_8))
 
         _autograd_grad = torch._functorch.eager_transforms._autograd_grad([primal_out, primal_out_1], [child_4], [child_8, child_8], retain_graph = True, create_graph = True);  primal_out = primal_out_1 = child_4 = child_8 = None
         getitem = _autograd_grad[0];  _autograd_grad = None
@@ -2738,7 +2738,7 @@ class GraphModule(torch.nn.Module):
 
         child_8 = child_7.sin()
 
-        _treespec_compare = torch._functorch.eager_transforms._treespec_compare({'first': primal_out, 'second': primal_out_1}, {'first': child_7, 'second': child_8})
+        _vjp_treespec_compare = torch._functorch.eager_transforms._vjp_treespec_compare({'first': primal_out, 'second': primal_out_1}, {'first': child_7, 'second': child_8})
 
         _autograd_grad = torch._functorch.eager_transforms._autograd_grad([primal_out, primal_out_1], [child_4], [child_7, child_8], retain_graph = True, create_graph = True);  primal_out = primal_out_1 = child_4 = child_7 = child_8 = None
         getitem = _autograd_grad[0];  _autograd_grad = None
@@ -3521,6 +3521,9 @@ class GraphModule(torch.nn.Module):
         t = L_v_
 
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+
+        _jvp_treespec_compare = torch._functorch.eager_transforms._jvp_treespec_compare((p,), (t,))
+
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
 
@@ -3575,6 +3578,9 @@ class GraphModule(torch.nn.Module):
         t = L_v_
 
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+
+        _jvp_treespec_compare = torch._functorch.eager_transforms._jvp_treespec_compare((p,), (t,))
+
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
 
@@ -3633,6 +3639,9 @@ class GraphModule(torch.nn.Module):
         t = L_v_
 
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+
+        _jvp_treespec_compare = torch._functorch.eager_transforms._jvp_treespec_compare((p, p_1), (t, t))
+
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
 
@@ -3694,6 +3703,9 @@ class GraphModule(torch.nn.Module):
 
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(False)
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+
+        _jvp_treespec_compare = torch._functorch.eager_transforms._jvp_treespec_compare((p,), (t,))
+
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
         _set_fwd_grad_enabled_1 = torch._C._set_fwd_grad_enabled(True)
 
@@ -3764,6 +3776,9 @@ class GraphModule(torch.nn.Module):
         _set_fwd_grad_enabled_1 = torch._C._set_fwd_grad_enabled(True)
         _set_fwd_grad_enabled_2 = torch._C._set_fwd_grad_enabled(False)
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+
+        _jvp_treespec_compare = torch._functorch.eager_transforms._jvp_treespec_compare((p,), (t,))
+
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
         _set_fwd_grad_enabled_3 = torch._C._set_fwd_grad_enabled(True)
 
@@ -3806,13 +3821,14 @@ class GraphModule(torch.nn.Module):
             return (x.sin() + y).sum()
 
         def wrapper_fn(x):
-            return torch.func.jvp(fn, (x,), (x))
+            return torch.func.jvp(fn, (x,), (x,))
 
-        x = torch.randn(3, 3, 3)
+        x = torch.randn(3, 3)
         expected = wrapper_fn(x)
         actual = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(actual, expected)
 
+    # @unittest.expectedFailure
     # @config.patch(capture_func_transforms=True)
     # def test_jvp_freevar_python_scalar(self):
     #     counters.clear()

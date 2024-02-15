@@ -60,10 +60,26 @@ def enable_inplace_requires_grad(enabled):
         set_inplace_requires_grad_allowed(prev_state)
 
 
-def _treespec_compare(left, right):
-    _, left_spec = tree_flatten(left)
-    _, right_spec = tree_flatten(right)
-    return left_spec != right_spec
+def _vjp_treespec_compare(primals_out, cotangents):
+    _, primals_out_spec = tree_flatten(primals_out)
+    _, cotangents_spec = tree_flatten(cotangents)
+    if primals_out_spec != cotangents_spec:
+        raise RuntimeError(
+            f'Expected pytree structure of cotangents to be the same '
+            f'as pytree structure of outputs to the function. '
+            f'cotangents: {treespec_pprint(cotangents_spec)}, '
+            f'primal output: {treespec_pprint(primals_out_spec)}')
+
+
+def _jvp_treespec_compare(primals, tangents):
+    _, primals_spec = tree_flatten(primals)
+    _, tangents_spec = tree_flatten(tangents)
+    if primals_spec != tangents_spec:
+        raise RuntimeError(
+            f'{jvp_str}: Expected primals and tangents to have the same python '
+            f'structure. For example, if primals is a tuple of 3 tensors, '
+            f'tangents also must be. Got primals with structure {primals_spec} '
+            f'and tangents with structure {tangents_spec}')
 
 
 def _tensor_requires_grad(x):
@@ -357,20 +373,7 @@ def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = N
             if create_graph is None:
                 create_graph = torch.is_grad_enabled()
             flat_cotangents, cotangents_spec = tree_flatten(cotangents)
-            if torch._dynamo.is_compiling():
-                # Not ideal but we cannot compare treespec structures in dynamo
-                # due to issue #116264
-                if _treespec_compare(primals_out, cotangents):
-                    raise RuntimeError(
-                        'Expected pytree structure of cotangents to be the same '
-                        'as pytree structure of outputs to the function.')
-            else:
-                if primals_out_spec != cotangents_spec:
-                    raise RuntimeError(
-                        f'Expected pytree structure of cotangents to be the same '
-                        f'as pytree structure of outputs to the function. '
-                        f'cotangents: {treespec_pprint(cotangents_spec)}, '
-                        f'primal output: {treespec_pprint(primals_out_spec)}')
+            _vjp_treespec_compare(primals_out, cotangents)
             result = _autograd_grad(flat_primals_out, flat_diff_primals, flat_cotangents,
                                     retain_graph=retain_graph, create_graph=create_graph)
             return tree_unflatten(result, primals_spec)
@@ -983,14 +986,9 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
     diff_args = primals if argnums is None else _slice_argnums(primals, argnums)
     flat_primals, primals_spec = tree_flatten(diff_args)
     flat_tangents, tangents_spec = tree_flatten(tangents)
-    # if primals_spec != tangents_spec:
-    #     raise RuntimeError(
-    #         f'{jvp_str}: Expected primals and tangents to have the same python '
-    #         f'structure. For example, if primals is a tuple of 3 tensors, '
-    #         f'tangents also must be. Got primals with structure {primals_spec} '
-    #         f'and tangents with structure {tangents_spec}')
-    # assert_non_empty_list_of_tensors(flat_primals, jvp_str, 'primals')
-    # assert_non_empty_list_of_tensors(flat_tangents, jvp_str, 'tangents')
+    _jvp_treespec_compare(diff_args, tangents)
+    assert_non_empty_list_of_tensors(flat_primals, jvp_str, 'primals')
+    assert_non_empty_list_of_tensors(flat_tangents, jvp_str, 'tangents')
 
     with jvp_increment_nesting() as level:
         with fwAD._set_fwd_grad_enabled(True):
