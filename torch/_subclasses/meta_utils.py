@@ -394,32 +394,21 @@ class MetaConverter:
                     # version counters to get shared.
                     assert t._is_view()
 
-                    from torch._dynamo.source import AttrSource
-                    from torch.fx.experimental.symbolic_shapes import (
-                        DimDynamic,
-                        StatelessSymbolicContext,
-                        SubclassSymbolicContext,
-                    )
+                    base_symbolic_context = None
+                    if shape_env and symbolic_context is not None:
+                        from torch.fx.experimental.symbolic_shapes import (
+                            StatelessSymbolicContext,
+                        )
 
-                    if shape_env:
-                        if is_traceable_wrapper_subclass(t):
-                            assert isinstance(symbolic_context, SubclassSymbolicContext)
-                            # TODO: Do this for dense tensors too
-                            base_symbolic_context = symbolic_context.inner_contexts[
-                                "_base"
-                            ]
-                        else:
-                            base_symbolic_context = StatelessSymbolicContext(
-                                dynamic_sizes=[DimDynamic.STATIC] * t._base.dim(),
-                                constraint_sizes=[None] * t._base.dim(),
-                            )
-                    else:
-                        base_symbolic_context = None
+                        assert isinstance(symbolic_context, StatelessSymbolicContext)
+                        assert symbolic_context.view_base_context is not None
+                        base_symbolic_context = symbolic_context.view_base_context
+
                     base = self.meta_tensor(
                         t._base,
                         shape_env,
                         callback,
-                        source=AttrSource(source, "_base"),
+                        source=torch._dynamo.source.AttrSource(source, "_base"),
                         symbolic_context=base_symbolic_context,
                     )
 
@@ -529,8 +518,11 @@ class MetaConverter:
                                 )
                                 return fake_t
 
-                            # elif is_traceable_wrapper_subclass(base):
-                            # Covers Subclass -> Dense views
+                            elif is_traceable_wrapper_subclass(base):
+                                # Covers Subclass -> Dense views
+                                # NB: For simplicitly, assume no tensors / SymInts will be
+                                # closed over for this type of view.
+                                return t._view_func_unsafe(base)
 
                             else:
                                 # Covers Dense -> Dense views
