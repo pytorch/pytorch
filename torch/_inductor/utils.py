@@ -20,6 +20,7 @@ import tempfile
 import textwrap
 import time
 import unittest
+from dataclasses import fields
 from datetime import datetime
 from io import StringIO
 from typing import (
@@ -634,31 +635,50 @@ def has_incompatible_cudagraph_ops(gm):
     return False
 
 
+# Attempt to import AttrsDescriptor from Triton
 try:
     from triton.compiler.compiler import AttrsDescriptor
 
     attrs_descriptor_available = True
+    # Determine if 'ids_of_folded_args' is a valid field for AttrsDescriptor
+    ids_of_folded_args_available = "ids_of_folded_args" in [
+        f.name for f in fields(AttrsDescriptor)
+    ]
 except ImportError:
     attrs_descriptor_available = False
+    ids_of_folded_args_available = False
 
+# Define `instance_descriptor` function with clear conditional handling
 if attrs_descriptor_available:
 
-    class instance_descriptor(AttrsDescriptor):
-        def __new__(cls, *args, **kwargs):
-            # Check if 'ids_of_folded_args' is an expected parameter
-            expected_params = cls.__annotations__
-            if "ids_of_folded_args" not in expected_params:
-                # Remove it from kwargs if not expected
-                kwargs.pop("ids_of_folded_args", None)
-            # Call the parent class with updated args and kwargs
-            return super().__new__(cls, *args, **kwargs)
+    def instance_descriptor(
+        divisible_by_16=None,
+        equal_to_1=None,
+        ids_of_folded_args=None,
+        divisible_by_8=None,
+    ):
+        # Prepare the arguments for AttrsDescriptor
+        kwargs = {
+            "divisible_by_16": divisible_by_16,
+            "equal_to_1": equal_to_1,
+            "divisible_by_8": divisible_by_8,
+        }
+
+        # Conditionally add 'ids_of_folded_args' if it's available in AttrsDescriptor
+        if ids_of_folded_args_available:
+            kwargs["ids_of_folded_args"] = ids_of_folded_args
+
+        # Instantiate AttrsDescriptor with the prepared arguments
+        return AttrsDescriptor(**kwargs)
 
 else:
+    # Define a namedtuple as a fallback when AttrsDescriptor is not available
     instance_descriptor = collections.namedtuple( # type: ignore[no-redef]
         "instance_descriptor",
         ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
-        defaults=(tuple(), tuple(), tuple(), tuple()),
+        defaults=[tuple(), tuple(), tuple(), tuple()],
     )
+
 
 @functools.lru_cache(None)
 def cache_dir() -> str:
