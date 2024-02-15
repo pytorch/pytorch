@@ -492,8 +492,8 @@ def with_native_funcol(use_native_funcol: bool, with_arg: bool):
     return decorator
 
 
-run_with_native_funcol = with_native_funcol(True, with_arg=False)
-run_with_legacy_funcol = with_native_funcol(True, with_arg=False)
+run_with_native_funcol = with_native_funcol(True, with_arg=True)
+run_with_legacy_funcol = with_native_funcol(False, with_arg=True)
 
 
 run_with_both_funcol_impls = parametrize(
