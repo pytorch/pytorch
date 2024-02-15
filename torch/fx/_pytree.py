@@ -89,11 +89,9 @@ register_pytree_flatten_spec(
     _tuple_flatten_spec,
     _tuple_flatten_spec_exact_match,
 )
-for return_type in torch.return_types.__all__:
-    if return_type == "pytree_register_structseq":
-        continue
+for return_type in torch.return_types.all_return_types:
     register_pytree_flatten_spec(
-        getattr(torch.return_types, return_type),
+        return_type,
         _tuple_flatten_spec,
         _tuple_flatten_spec_exact_match,
     )

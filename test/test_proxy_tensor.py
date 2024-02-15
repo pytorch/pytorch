@@ -1941,7 +1941,6 @@ inplace_symbolic_tensor_failures = {
 
 out_symbolic_tensor_failures = {
     xfail('_native_batch_norm_legit', ''),
-    xfail('aminmax', ''),
     xfail('angle', ''),
     xfail('argmax', ''),
     xfail('argmin', ''),
