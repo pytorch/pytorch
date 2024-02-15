@@ -476,6 +476,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_cudnn_benchmark",
         "torch._C._get_cudnn_deterministic",
         "torch._C._get_cudnn_enabled",
+        "torch._C._get_current_dual_level",
         "torch._C._get_custom_class_python_wrapper",
         "torch._C._get_default_device",
         "torch._C._get_deterministic_algorithms_warn_only",
