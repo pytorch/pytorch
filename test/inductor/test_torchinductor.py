@@ -123,7 +123,7 @@ skip_if_x86_mac = functools.partial(
 )
 vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 
-libtest = torch.library.Library("test", "FRAGMENT")
+libtest = torch.library.Library("test", "FRAGMENT")  # noqa: TOR901
 ids = set()
 
 f32 = torch.float32
@@ -4200,6 +4200,94 @@ class CommonTemplate:
             (
                 torch.ones([0]),
                 torch.randn([1, 3, 3, 16]),
+            ),
+        )
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_cat_unbacked_legacy_empty(self):
+        def fn(x, y):
+            z = y.item()
+            return torch.cat([x, x.new_ones(z)])
+
+        self.common(
+            fn,
+            (
+                torch.randn([2, 3]),
+                torch.tensor([0]),
+            ),
+        )
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_cat_unbacked_empty_1d(self):
+        def fn(x, y):
+            z = y.item()
+            return torch.cat([x, x.new_ones(z)])
+
+        self.common(
+            fn,
+            (
+                torch.randn([2]),
+                torch.tensor([0]),
+            ),
+        )
+
+        self.common(
+            fn,
+            (
+                torch.randn([2]),
+                torch.tensor([3]),
+            ),
+        )
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_cat_unbacked_2d(self):
+        def fn(x, y):
+            z = y.item()
+            return torch.cat([x, x.new_ones(z, x.shape[1])])
+
+        self.common(
+            fn,
+            (
+                torch.randn([2, 3]),
+                torch.tensor([0]),
+            ),
+        )
+
+        self.common(
+            fn,
+            (
+                torch.randn([2, 3]),
+                torch.tensor([4]),
+            ),
+        )
+
+    def test_cat_negative_dim(self):
+        def fn(*tensors):
+            return torch.cat(tensors, dim=-1)
+
+        self.common(
+            fn,
+            (
+                torch.randn([2, 3]),
+                torch.randn([2, 4]),
+            ),
+        )
+
+        self.common(
+            fn,
+            (
+                torch.randn([2, 3]),
+                torch.randn([0]),
+                torch.randn([2, 4]),
+            ),
+        )
+
+        self.common(
+            fn,
+            (
+                torch.randn([0]),
+                torch.randn([2, 3]),
+                torch.randn([2, 4]),
             ),
         )
 

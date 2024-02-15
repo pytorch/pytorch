@@ -2419,14 +2419,6 @@ class ShapeEnv:
         # for validation.
         return SymBool(SymNode(sym, self, bool, None))
 
-    def _log_create_unbacked_symbol(self, prefix: str, symbol, vr: ValueRanges):
-        is_debug = config.extended_debug_create_symbol is not None and str(symbol) in config.extended_debug_create_symbol.split(',')
-        fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
-        log.info(
-            "%s %s [%s, %s]%s (%s)%s",
-            prefix, symbol, vr.lower, vr.upper, maybe_user_loc, format_frame(fsummary), maybe_extra_debug, stack_info=is_debug
-        )
-
     @record_shapeenv_event()
     def create_unbacked_symfloat(self):
         """Create a symbolic float without a hint value
@@ -2439,7 +2431,8 @@ class ShapeEnv:
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, float)
 
-        self._log_create_unbacked_symbol("create_unbacked_symfloat", symbol, vr)
+        fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
+        log.info("create_unbacked_symfloat %s [%s, %s]%s (%s)", symbol, vr.lower, vr.upper, maybe_user_loc, format_frame(fsummary))
 
         return SymFloat(SymNode(symbol, self, float, None, fx_node=fx_node))
 
@@ -2455,7 +2448,8 @@ class ShapeEnv:
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, int)
 
-        self._log_create_unbacked_symbol("create_unbacked_symint", symbol, vr)
+        fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
+        log.info("create_unbacked_symint %s [%s, %s]%s (%s)", symbol, vr.lower, vr.upper, maybe_user_loc, format_frame(fsummary))
 
         return SymInt(SymNode(symbol, self, int, None, fx_node=fx_node))
 
@@ -2477,7 +2471,8 @@ class ShapeEnv:
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, bool)
 
-        self._log_create_unbacked_symbol("create_unbacked_symbool", symbol, vr)
+        fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
+        log.info("create_unbacked_symbool %s [%s, %s]%s (%s)", symbol, vr.lower, vr.upper, maybe_user_loc, format_frame(fsummary))
 
         return SymBool(SymNode(sympy.Eq(symbol, 1), self, bool, None, fx_node=fx_node))
 
@@ -2612,15 +2607,11 @@ class ShapeEnv:
 
             r = sympy_expr
 
-            is_debug = (
-                config.extended_debug_create_symbol is not None and
-                str(sympy_expr) in config.extended_debug_create_symbol.split(',')
-            )
-            fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
+            fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
             self.log.info(
-                "create_symbol %s = %s for %s %s%s (%s)%s",
+                "create_symbol %s = %s for %s %s%s (%s)",
                 sympy_expr, val, source.name(), range_str,
-                maybe_user_loc, format_frame(fsummary), maybe_extra_debug, stack_info=is_debug
+                maybe_user_loc, format_frame(fsummary)
             )
 
             self.counter["create_symbol"] += 1
@@ -3482,25 +3473,16 @@ class ShapeEnv:
     def _make_data_dependent_error(self, expr, unhinted_expr):
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
-        size_like_symbols = []
         for s in expr.free_symbols:
             stacktrace = ''.join(self.var_to_stack[s].format())
             self.log.debug("Data dependent variable '%s' allocated at:\n%s", s, stacktrace)
-            if s in self.size_like:
-                size_like_symbols.append(s)
-        fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(True)
+        # cpp_stack = CapturedTraceback.extract(cpp=True)
         return GuardOnDataDependentSymNode(
-            f"Could not guard on data-dependent expression {expr} (unhinted: {unhinted_expr}).  "
-            f"(Size-like symbols: {', '.join(map(str, size_like_symbols)) or 'none'})\n\n"
-            "Potential framework code culprit (scroll up for full backtrace):\n"
-            f"{''.join(traceback.StackSummary.from_list([fsummary]).format())}\n"
-            "For more information, run with TORCH_LOGS=\"dynamic\"\n"
-            "For extended logs when we create symbols, also add "
-            f"TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL=\"{','.join(map(str, expr.free_symbols))}\"\n"
-            "If you suspect the guard was triggered from C++, add TORCHDYNAMO_EXTENDED_DEBUG_CPP=1\n"
-            "For more debugging help, see "
-            "https://docs.google.com/document/d/1HSuTTVvYH1pTew89Rtpeu84Ht3nQEFTYhAX3Ypa_xJs/edit?usp=sharing\n" +
-            maybe_extra_debug
+            # "C++ stack trace:\n" + ''.join(cpp_stack.format()) + "\n\n"
+            "It appears that you're trying to get a value out of symbolic int/float "
+            "whose value is data-dependent (and thus we do not know the true value.)  "
+            f"The expression we were trying to evaluate is {expr} (unhinted: {unhinted_expr}).  "
+            "For more information, run with TORCH_LOGS=\"+dynamic\".\n"
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
         )
@@ -3788,7 +3770,7 @@ class ShapeEnv:
             log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
 
 
-    def _get_stack_summary(self, is_debug: bool = False):
+    def _get_stack_summary(self):
         fsummary = None
         frame = inspect.currentframe()
         try:
@@ -3811,24 +3793,28 @@ class ShapeEnv:
         if user_tb:
             maybe_user_loc = " at " + format_frame(user_tb[-1])
 
-        maybe_extra_debug = ""
-        if is_debug and user_tb:
-            maybe_extra_debug = (
-                '\nUser Stack (most recent call last):\n' +
-                '  (snipped, see stack below for prefix)\n' +
-                ''.join(traceback.format_list(user_tb))
-            )
-        if is_debug and config.extended_debug_cpp:
-            cpp_stack = CapturedTraceback.extract(cpp=True)
-            maybe_extra_debug += "\nC++ stack trace:\n" + ''.join(cpp_stack.format())
-
-        return fsummary, maybe_user_loc, maybe_extra_debug
+        return fsummary, user_tb, maybe_user_loc
 
     def _log_guard(self, prefix: str, g, forcing_spec: bool):
         if self.log.isEnabledFor(logging.INFO):
+            fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
+
             str_g = str(g)
-            is_debug = config.extended_debug_guard_added is not None and str_g == config.extended_debug_guard_added
-            fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
+
+            # TODO: make this an artifact
+            is_debug = False
+            if config.extended_debug_guard_added is not None and str_g == config.extended_debug_guard_added:
+                is_debug = True
+            maybe_extra_debug = ""
+            if is_debug and user_tb:
+                maybe_extra_debug = (
+                    '\nUser Stack (most recent call last):\n' +
+                    '  (snipped, see stack below for prefix)\n' +
+                    ''.join(traceback.format_list(user_tb))
+                )
+            if is_debug:
+                cpp_stack = CapturedTraceback.extract(cpp=True)
+                maybe_extra_debug += "\nC++ stack trace:\n" + ''.join(cpp_stack.format())
             self.log.info(
                 "%s %s [guard added]%s (%s)%s",
                 prefix if not forcing_spec else f"{prefix} (forcing_spec)",
