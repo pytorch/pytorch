@@ -30,7 +30,6 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import parametrize, subtest
 
 
 from torch.distributed._tensor import (
@@ -471,43 +470,3 @@ class DTensorConverter:
             raise RuntimeError(
                 f"Trying to convert to DTensor, but got {type(t)}"
             )
-
-
-def with_native_funcol(use_native_funcol: bool, with_arg: bool):
-    import torch.distributed._functional_collectives_impl as funcol_impl
-
-    def decorator(fn):
-        def inner(*args, **kwargs):
-            if not with_arg:
-                del kwargs["use_native_funcol"]
-            prev = funcol_impl._use_native_funcol
-            funcol_impl._use_native_funcol = use_native_funcol
-            try:
-                return fn(*args, **kwargs)
-            finally:
-                funcol_impl._use_native_funcol = prev
-
-        return inner
-
-    return decorator
-
-
-run_with_native_funcol = with_native_funcol(True, with_arg=False)
-run_with_legacy_funcol = with_native_funcol(True, with_arg=False)
-
-
-run_with_both_funcol_impls = parametrize(
-    "use_native_funcol",
-    [
-        subtest(True, decorators=[with_native_funcol(True, with_arg=False)]),
-        subtest(False, decorators=[with_native_funcol(False, with_arg=False)]),
-    ]
-)
-
-run_with_both_funcol_impls_with_arg = parametrize(
-    "use_native_funcol",
-    [
-        subtest(True, decorators=[with_native_funcol(True, with_arg=True)]),
-        subtest(False, decorators=[with_native_funcol(False, with_arg=True)]),
-    ]
-)
