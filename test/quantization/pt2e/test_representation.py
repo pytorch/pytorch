@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 import copy
+import sys
+import unittest
 from typing import Any, Dict, Tuple
 
 import torch
@@ -20,6 +22,9 @@ from torch.testing._internal.common_quantization import (
 
 
 @skipIfNoQNNPACK
+@unittest.skipIf(
+    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+)
 class TestPT2ERepresentation(QuantizationTestCase):
     def _test_representation(
         self,
@@ -42,9 +47,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
         model = prepare_pt2e(model, quantizer)
         # Calibrate
         model(*example_inputs)
-        model = convert_pt2e(
-            model, use_reference_representation=True, fold_quantize=True
-        )
+        model = convert_pt2e(model, use_reference_representation=True)
         self.checkGraphModuleNodes(model, expected_node_occurrence=ref_node_occurrence)
         # make sure it runs
         pt2e_quant_output = model(*example_inputs)
@@ -54,9 +57,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
         model_copy = prepare_pt2e(model_copy, quantizer)
         # Calibrate
         model_copy(*example_inputs)
-        model_copy = convert_pt2e(
-            model_copy, use_reference_representation=False, fold_quantize=True
-        )
+        model_copy = convert_pt2e(model_copy, use_reference_representation=False)
         self.checkGraphModuleNodes(
             model_copy, expected_node_occurrence=non_ref_node_occurrence
         )

@@ -1,11 +1,13 @@
 #pragma once
 
 #include <ATen/CPUGeneratorImpl.h>
+#include <ATen/DeviceAccelerator.h>
 #include <ATen/LinalgBackend.h>
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/Generator.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/detail/AcceleratorHooksInterface.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
 #include <ATen/detail/IPUHooksInterface.h>
@@ -54,6 +56,22 @@ class TORCH_API Context {
           device.index());
     } else {
       AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
+    }
+  }
+  const AcceleratorHooksInterface& getAcceleratorHooksInterface(
+      c10::optional<c10::DeviceType> opt_device_type = c10::nullopt) {
+    c10::DeviceType device_type = opt_device_type.has_value()
+        ? opt_device_type.value()
+        : at::getAccelerator(true).value();
+    if (device_type == at::kCUDA) {
+      return at::detail::getCUDAHooks();
+    } else if (device_type == at::kMPS) {
+      return at::detail::getMPSHooks();
+    } else if (device_type == at::kPrivateUse1) {
+      return at::detail::getPrivateUse1Hooks();
+    } else {
+      AT_ERROR(
+          c10::DeviceTypeName(device_type), " device type not an accelerator.");
     }
   }
   Device getDeviceFromPtr(void* data, c10::DeviceType device_type) {
@@ -180,6 +198,9 @@ class TORCH_API Context {
 
   void setSDPUseMath(bool);
   bool userEnabledMathSDP() const;
+
+  void setSDPUseCuDNN(bool);
+  bool userEnabledCuDNNSDP() const;
 
   at::LinalgBackend linalgPreferredBackend() const;
   void setLinalgPreferredBackend(at::LinalgBackend);
@@ -319,6 +340,7 @@ class TORCH_API Context {
   bool enabled_flashSDP = true;
   bool enabled_mem_efficientSDP = true;
   bool enabled_mathSDP = true;
+  bool enabled_cudnnSDP = false;
 #ifdef USE_ROCM
   bool benchmark_cudnn = true;
 #else

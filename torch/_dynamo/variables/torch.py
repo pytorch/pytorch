@@ -75,6 +75,7 @@ constant_fold_functions = [
     torch._assert,
     torch._utils._get_device_index,
     torch._C._get_cublas_allow_tf32,
+    torch.cuda.get_device_properties,
     torch.cuda.is_available,
     torch.distributed.is_available,
     torch.get_autocast_gpu_dtype,
@@ -199,7 +200,9 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 tx, args[0].as_python_constant(), initialized=True
             )
         elif self.value is torch.inference_mode:
-            return InferenceModeVariable.create(tx, args[0].as_python_constant())
+            assert len(args) <= 1 and len(kwargs) == 0
+            inf_mode = args[0].as_python_constant() if len(args) == 1 else True
+            return InferenceModeVariable.create(tx, inf_mode)
         elif inspect.isclass(self.value) and issubclass(self.value, _StreamBase):
             from torch._dynamo.variables.builder import wrap_fx_proxy_cls
 
@@ -249,6 +252,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     def __repr__(self):
         return f"TorchInGraphFunctionVariable({self.value})"
 
+    def get_function(self):
+        return self.value
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -290,7 +296,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 self.value,
                 source=self.source,
             ).call_function(tx, args, kwargs)
-        elif self.value is torch.overrides.get_default_nowrap_functions:
+        elif self.value is torch.overrides.get_default_nowrap_functions.__wrapped__:
             # [Note: __torch_function__] we return empty here because we restrict
             # the set of functions that we trace __torch_function__ on to
             # functions outside of the actual set. Implementing this properly will require implementing
