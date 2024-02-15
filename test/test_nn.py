@@ -6526,6 +6526,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         expected = m(inp.view(6, 5)).view(2, 3, 8)
         self.assertEqual(expected, m(inp))
 
+    def test_linear_raise_on_scalar_input(self):
+        # This used to cause an int underflow issue when reshaping the input
+        # see https://github.com/pytorch/pytorch/issues/119161
+        m = nn.Linear(1, 1)
+        inp = torch.ones(1).squeeze()
+        with self.assertRaisesRegex(RuntimeError, ".*both arguments.*1D.*"):
+            m(inp)
+
     @parametrize_test('device', ['cpu'] + (['cuda'] if TEST_CUDA else []))
     @parametrize_test('bias', [
         subtest(False, name='nobias'), subtest(True, name='bias')])

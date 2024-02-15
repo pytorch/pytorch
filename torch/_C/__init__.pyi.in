@@ -1881,6 +1881,10 @@ def _xpu_maybeExchangeDevice(device: _int) -> _int: ...
 def _xpu_getDevice() -> _int: ...
 def _xpu_getDeviceCount() -> _int: ...
 def _xpu_init() -> None: ...
+def _xpu_setStream(stream_id: _int, device_index: _int, device_type: _int) -> None: ...
+def _xpu_getCurrentStream(device: _int) -> Tuple: ...
+def _xpu_getCurrentRawStream(device: _int) -> _int: ...
+def _xpu_synchronize(device: _int) -> None: ...
 
 class _XpuDeviceProperties:
     name: str
@@ -1893,6 +1897,28 @@ class _XpuDeviceProperties:
     max_num_sub_groups: _int
     sub_group_sizes: List[_int]
     type: str
+
+# Defined in torch/csrc/xpu/Stream.cpp
+class _XpuStreamBase(Stream):
+    stream_id: _int
+    device_index: _int
+    device_type: _int
+
+    device: _device
+    sycl_queue: _int
+    priority: _int
+
+    def __new__(
+        cls,
+        priority: _int = 0,
+        stream_id: _int = 0,
+        device_index: _int = 0,
+        device_type: _int = 0,
+    ) -> _XpuStreamBase: ...
+    def query(self) -> _bool: ...
+    def synchronize(self) -> None: ...
+    @staticmethod
+    def priority_range() -> Tuple: ...
 
 # Defined in torch/csrc/DataLoader.cpp
 def _set_worker_signal_handlers(

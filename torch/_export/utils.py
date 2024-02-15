@@ -3,9 +3,9 @@ import math
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Type
 
 import torch
-
-from torch._export import ExportedProgram
 from torch._subclasses.fake_tensor import FakeTensor
+
+from torch.export import ExportedProgram
 from torch.utils._pytree import (
     _register_pytree_node,
     Context,

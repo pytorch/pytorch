@@ -45,23 +45,25 @@ def initialize_lazy_module(tx, mod, args, kwargs):
     useful now that 'allowed' modules graph-break on hooks, calling this first ensures there is no hook
     by the time we trace __call__ and thus no graph-break for lazy allowed modules.
     """
-    assert len(kwargs) == 0
-
     if hasattr(mod, "_initialize_hook"):
 
         def convert_to_fake(x):
-            if isinstance(x, torch.fx.Proxy):
-                return get_fake_value(x.node, tx)
-            else:
-                return x
+            return get_fake_value(x.node, tx) if isinstance(x, torch.fx.Proxy) else x
 
-        input = [
+        proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
+        fake_args = [
             type(arg)([convert_to_fake(x) for x in arg])
             if isinstance(arg, (list, tuple))
             else convert_to_fake(arg)
-            for arg in proxy_args_kwargs(args, {})[0]
+            for arg in proxy_args
         ]
-        mod._infer_parameters(mod, input)
+        fake_kwargs = {
+            k: type(v)([convert_to_fake(x) for x in v])
+            if isinstance(v, (list, tuple))
+            else convert_to_fake(v)
+            for k, v in proxy_kwargs.items()
+        }
+        mod._infer_parameters(mod, fake_args, fake_kwargs)
 
 
 @contextmanager
