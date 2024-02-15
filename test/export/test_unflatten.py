@@ -210,6 +210,7 @@ class TestUnflatten(TestCase):
             id(getattr(unflattened_module.sub_net, "2")),
         )
 
+    @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
     @skipIfTorchDynamo("Non strict mode is not meant to run with dynamo")
     def test_unflatten_preserve_signature(self):
         class NestedChild(torch.nn.Module):
@@ -546,7 +547,7 @@ class TestUnflatten(TestCase):
         export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
         unflattened = unflatten(export_module)
 
-        self.compare_outputs(export_module, unflattened, (torch.randn((2, 3)),))
+        self.compare_outputs(export_module.module(), unflattened, (torch.randn((2, 3)),))
 
     @skipIfTorchDynamo("custom objects not supported in dynamo yet")
     def test_unflatten_constant_obj(self):
@@ -583,7 +584,7 @@ class TestUnflatten(TestCase):
             export_module = torch.export.export(Mod(), (torch.randn((2, 3)),), strict=False)
         unflattened = unflatten(export_module)
 
-        self.compare_outputs(export_module, unflattened, (torch.randn((2, 3)),))
+        self.compare_outputs(export_module.module(), unflattened, (torch.randn((2, 3)),))
 
 if __name__ == "__main__":
     run_tests()
