@@ -1,7 +1,6 @@
 #include <c10/core/impl/SizesAndStrides.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 void SizesAndStrides::resizeSlowPath(
     const size_t newSize,
@@ -77,5 +76,4 @@ void SizesAndStrides::resizeSlowPath(
   size_ = newSize;
 }
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

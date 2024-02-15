@@ -11,7 +11,6 @@ import torch.nn as nn
 from torch.distributed._tensor._collective_utils import mesh_broadcast
 from torch.distributed._tensor._utils import compute_global_tensor_info
 from torch.distributed._tensor.placement_types import (
-    _Partial,
     DTensorSpec,
     Placement,
     Replicate,
@@ -271,14 +270,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         protocol to inform how to flatten a DTensor to local tensor
         for PT2 tracing
         """
-        return ["_local_tensor"], {
-            "_spec": self._spec,
-            "requires_grad": self.requires_grad,
-            # Any DTensor methods marked with @property need to go here,
-            # so dynamo can pick them upas proxy-able attributes
-            "placements": self._spec.placements,
-            "device_mesh": self._spec.mesh,
-        }
+        return ["_local_tensor"], (self._spec, self.requires_grad)
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, flatten_spec, outer_size, outer_stride):
@@ -286,8 +278,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             flatten_spec is not None
         ), "Expecting spec to be not None from `__tensor_flatten__` return value!"
         local_tensor = inner_tensors["_local_tensor"]
-        spec = flatten_spec["_spec"]
-        requires_grad = flatten_spec["requires_grad"]
+        spec, requires_grad = flatten_spec
         return DTensor(
             local_tensor,
             spec.mesh,
@@ -299,23 +290,6 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         )
 
     __torch_function__ = torch._C._disabled_torch_function_impl
-
-    def __force_standard_metadata__(self):
-        if not any(isinstance(p, _Partial) for p in self.placements):
-            return self
-        placements = [
-            Replicate() if isinstance(p, _Partial) else p for p in self.placements
-        ]
-        return self.redistribute(
-            device_mesh=self.device_mesh, placements=placements, force_wait=True
-        )
-
-    def __force_same_metadata__(self, metadata_tensor):
-        return self.redistribute(
-            device_mesh=self.device_mesh,
-            placements=metadata_tensor.placements,
-            force_wait=True,
-        )
 
     @classmethod
     # pyre-fixme[3]: Return type must be annotated.
@@ -444,7 +418,6 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         self,
         device_mesh: Optional[DeviceMesh] = None,
         placements: Optional[Sequence[Placement]] = None,
-        force_wait: bool = False,
     ) -> "DTensor":
         """
         `redistribute` performs necessary collective operations that redistribute the current
@@ -491,7 +464,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             return self
 
         # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
-        return Redistribute.apply(self, device_mesh, placements, force_wait)
+        return Redistribute.apply(self, device_mesh, placements)
 
     def full_tensor(
         self, *, grad_placements: Optional[Sequence[Placement]] = None
