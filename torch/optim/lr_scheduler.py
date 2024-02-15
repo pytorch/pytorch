@@ -967,12 +967,15 @@ class ReduceLROnPlateau(LRScheduler):
             reduced. new_lr = lr * factor. Default: 0.1.
         patience (int): The number of allowed epochs with no improvement after
             which the learning rate will be reduced.
-            For example, with ``patience = 0``, the case of having no patience:
-            - 1st epoch: A baseline is established. As there's no previous baseline, the first epoch is always considered good.
-            - 2nd epoch: If this epoch performs worse than the baseline, we now have one intolerable epoch.
-            Since 1 > 0,  the learning rate will be reduced at the end of this epoch.
-            - 3rd epoch onwards: If the epoch continues to perform worse than the baseline,
-            the learning rate will keep getting reduced at the end of the epoch. Otherwise, the learning rate will remain the same.
+            For example, consider the case of having no patience (`patience = 0`).
+            In the first epoch, a baseline is established and is always considered good as there's no previous baseline.
+            From the second epoch, if the performance is worse than the baseline,
+            we have what is considered an intolerable epoch.
+            Since the count of intolerable epochs (1) is greater than the patience level (0),
+            the learning rate is reduced at the end of this epoch.
+            From the third epoch onwards, the learning rate continues to be reduced at the end of each epoch
+            if the performance is worse than the baseline. If the performance improves or remains the same,
+            the learning rate is not adjusted.
             Default: 10.
         threshold (float): Threshold for measuring the new optimum,
             to only focus on significant changes. Default: 1e-4.
