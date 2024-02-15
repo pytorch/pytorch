@@ -2277,11 +2277,12 @@ class DeviceCachingAllocator {
 
     // Do not return an oversized block for a large request
     if ((p.size() < CUDAAllocatorConfig::max_split_size()) &&
-        ((*it)->size >= CUDAAllocatorConfig::max_split_size()))
+        ((*it)->size >= CUDAAllocatorConfig::max_split_size()) &&
+        !(*it)->expandable_segment_)
       return false;
     // Allow oversized block size to be rounded up but within a limit
     if ((p.size() >= CUDAAllocatorConfig::max_split_size()) &&
-        ((*it)->size >= p.size() + kLargeBuffer))
+        ((*it)->size >= p.size() + kLargeBuffer) && !(*it)->expandable_segment_)
       return false;
     p.block = *it;
     pool.blocks.erase(it);
@@ -2348,7 +2349,7 @@ class DeviceCachingAllocator {
           gc_reclaimed += block->size;
           total_age -= block->gc_count(); // Decrement the age
           freeable_block_count--; // One less block that can be freed
-          release_block(block, context);
+          release_block_if_not_expandable(block, context);
         }
       }
     }
@@ -2486,16 +2487,16 @@ class DeviceCachingAllocator {
         totalReleased += (*it)->size;
         if (it != pool.blocks.begin()) {
           --it;
-          release_block(*cur, context);
+          release_block_if_not_expandable(*cur, context);
         } else {
-          release_block(*cur, context);
+          release_block_if_not_expandable(*cur, context);
           break;
         }
       }
       if (totalReleased < key.size)
         return false;
     } else {
-      release_block(*it, context);
+      release_block_if_not_expandable(*it, context);
     }
     return true;
   }
@@ -2541,6 +2542,14 @@ class DeviceCachingAllocator {
     block->pool->unmapped.erase(block);
     delete block->expandable_segment_;
     delete block;
+  }
+
+  void release_block_if_not_expandable(
+      Block* block,
+      const std::shared_ptr<GatheredContext>& context) {
+    if (!block->expandable_segment_) {
+      release_block(block, context);
+    }
   }
 
   void release_block(
