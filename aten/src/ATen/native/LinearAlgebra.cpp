@@ -422,8 +422,7 @@ std::tuple<Tensor&, Tensor&> slogdet_out(const Tensor& A, Tensor& sign, Tensor& 
 Tensor logdet(const Tensor& A) {
   squareCheckInputs(A, "logdet");
   checkFloatingOrComplex(A, "logdet", /*low_precision*/false);
-  Tensor sign, logabsdet;
-  std::tie(sign, logabsdet) = at::linalg_slogdet(A);
+  auto [sign, logabsdet] = at::linalg_slogdet(A);
 
   if (A.is_complex()) {
     return sign.log() + logabsdet;
@@ -515,9 +514,8 @@ Tensor linalg_pinv(
   if (input.sym_numel() == 0) {
     // The implementation below uses operations that do not work for zero numel tensors
     // therefore we need this early return for 'input.numel() == 0' case
-    Tensor U, S, V;
     // TODO: replace input.svd with linalg_svd when torch/xla can work with at::linalg_svd
-    std::tie(U, S, V) = input.svd();
+    auto [U, S, V] = input.svd();
     return at::matmul(V * S.reciprocal().unsqueeze(-2), U.mH());
   }
 
@@ -547,8 +545,7 @@ Tensor linalg_pinv(
 }
 
 Tensor linalg_pinv(const Tensor& input, optional<double> atol, optional<double> rtol, bool hermitian) {
-  Tensor atol_tensor, rtol_tensor;
-  std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, atol, rtol);
+  auto [atol_tensor, rtol_tensor] = get_atol_rtol(input, atol, rtol);
   return at::linalg_pinv(input, atol_tensor, rtol_tensor, hermitian);
 }
 
