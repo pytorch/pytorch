@@ -278,7 +278,9 @@ def _is_sm7x_or_older_gpu(index: Optional[int]) -> bool:
 def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None)
 
-    choices = [aten_fallback_mixed_mm.bind((mat1, mat2), layout)]
+    fallback = aten_fallback_mixed_mm.bind((mat1, mat2), layout)
+
+    choices = [fallback]
 
     # can't use triton kernel unless one of these is true or if running on v100 (numerical issues)
     skip_triton = (
@@ -302,6 +304,9 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
+
+    if skip_triton and not choices:
+        choices = [fallback]
 
     return autotune_select_algorithm("mixed_mm", choices, [mat1, mat2], layout)
 
