@@ -26,17 +26,17 @@ def secretly_mutating(x):
 def output_is_input(x):
     return x
 
-custom_lib = torch.library.Library("bad_schemas", "DEF")
+custom_lib = torch.library.Library("bad_schemas", "DEF")  # noqa: TOR901
 custom_lib.define("secretly_aliasing(Tensor x) -> Tensor")
 custom_lib.define("secretly_mutating(Tensor x) -> Tensor")
 custom_lib.define("output_is_input(Tensor(a) x) -> Tensor(a)")
 
-custom_lib_cpu = torch.library.Library("bad_schemas", "IMPL", "CPU")
+custom_lib_cpu = torch.library.Library("bad_schemas", "IMPL", "CPU")  # noqa: TOR901
 custom_lib_cpu.impl("secretly_aliasing", secretly_aliasing)
 custom_lib_cpu.impl("secretly_mutating", secretly_mutating)
 custom_lib_cpu.impl("output_is_input", output_is_input)
 
-custom_lib_meta = torch.library.Library("bad_schemas", "IMPL", "Meta")
+custom_lib_meta = torch.library.Library("bad_schemas", "IMPL", "Meta")  # noqa: TOR901
 custom_lib_meta.impl("secretly_aliasing", secretly_aliasing)
 custom_lib_meta.impl("secretly_mutating", secretly_mutating)
 custom_lib_meta.impl("output_is_input", output_is_input)

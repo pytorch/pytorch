@@ -1181,7 +1181,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             m = prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
-        m = convert_pt2e(m, fold_quantize=True)
+        m = convert_pt2e(m)
 
         pt2_quant_output = m(*example_inputs)
         ns = NodeSpec
@@ -1228,7 +1228,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         )
         m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
-        m = convert_pt2e(m, fold_quantize=True)
+        m = convert_pt2e(m)
         return m
 
     def _get_pt2e_quantized_linear(self, is_per_channel=False) -> torch.fx.GraphModule:

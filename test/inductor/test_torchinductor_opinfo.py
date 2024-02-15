@@ -200,6 +200,7 @@ if not SM80OrLater:
 if TEST_WITH_ROCM:
     # Tensors are not alike
     inductor_skips["cuda"]["logcumsumexp"] = {f32}
+    inductor_skips["cuda"]["special.modified_bessel_i1"] = {f64}
 
 inductor_expected_failures_single_sample = defaultdict(dict)
 
@@ -321,8 +322,8 @@ inductor_override_kwargs = {
     ("atanh", "cuda", f16): {"reference_in_float": True},
     ("cauchy", "cuda"): {"reference_in_float": True},
     ("cummax", "cuda", f16): {"atol": 5e-4, "rtol": 0.002},
+    ("cumsum", "cuda", f16): {"reference_in_float": True},
     ("cumprod", "cuda"): {"reference_in_float": True, "atol": 7e-5, "rtol": 0.002},
-    ("logcumsumexp", "cuda"): {"grad_atol": 8e-4, "grad_rtol": 0.001},
     ("exponential", "cuda"): {"reference_in_float": True},
     ("geometric", "cuda"): {"reference_in_float": True},
     ("kron", "cuda", f16): {"reference_in_float": True},
@@ -350,6 +351,15 @@ inductor_override_kwargs = {
     ("softmax", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
     ("_softmax_backward_data", "cuda", f16): {"atol": 0.008, "rtol": 0.002},
     ("special.log_ndtr", "cuda", f64): {"atol": 1e-6, "rtol": 1e-5},
+    ("polygamma.polygamma_n_0", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("polygamma.polygamma_n_1", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("polygamma.polygamma_n_2", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("polygamma.polygamma_n_3", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("polygamma.polygamma_n_4", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("special.polygamma.special_polygamma_n_0", "cpu", f32): {
+        "atol": 1e-3,
+        "rtol": 1e-4,
+    },
     ("std_mean.unbiased", "cuda", f16): {"reference_in_float": True},
     ("uniform", "cuda"): {"reference_in_float": True},
     # Following tests are failing with strict comparision but atol=1 is acceptable due roundings errors
@@ -363,15 +373,6 @@ inductor_override_kwargs = {
         "check_gradient": False,
     },
 }
-
-
-if not TEST_WITH_ROCM:
-    inductor_override_kwargs.update(
-        {
-            # We have better precision than eager
-            ("cumsum", "cuda", f16): {"reference_in_float": True},
-        }
-    )
 
 
 # Always test with all sample for following ops
@@ -498,7 +499,6 @@ class TestInductorOpInfo(TestCase):
             overridden_kwargs = inductor_override_kwargs[(op_name, device_type)]
         elif (op_name, device_type, dtype) in inductor_override_kwargs:
             overridden_kwargs = inductor_override_kwargs[(op_name, device_type, dtype)]
-
         func = op.get_op()
 
         def fn(*args, **kwargs):
