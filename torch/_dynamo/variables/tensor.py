@@ -193,10 +193,12 @@ class TensorVariable(VariableTracker):
                 from .builder import wrap_fx_proxy
 
                 return wrap_fx_proxy(tx=tx, proxy=proxy, example_value=example_value)
+            # any other attributes on the subclass (that are not methods)
+            # are assumed to be constant metadata.
+            elif not callable(example_value):
+                from .builder import SourcelessBuilder
 
-            from .builder import SourcelessBuilder
-
-            return SourcelessBuilder()(tx, example_value)
+                return SourcelessBuilder()(tx, example_value)
         if not self.source:
             raise NotImplementedError()
 
