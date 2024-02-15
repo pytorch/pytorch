@@ -1085,7 +1085,8 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 # Original outputs.
                 # model_with_state_dict=real_model is used to create non-fake weights
                 ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
-                    real_model(*args, **kwargs), model_with_state_dict=real_model
+                    real_model.module()(*args, **kwargs),
+                    model_with_state_dict=real_model,
                 )
                 # ORT outputs.
                 # model_with_state_dict=real_model is used to create non-fake weights
