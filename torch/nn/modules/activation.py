@@ -949,7 +949,6 @@ class MultiheadAttention(Module):
     - training is disabled (using ``.eval()``)
     - ``add_bias_kv`` is ``False``
     - ``add_zero_attn`` is ``False``
-    - ``batch_first`` is ``True`` and the input is batched
     - ``kdim`` and ``vdim`` are equal to ``embed_dim``
     - if a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ is passed, neither ``key_padding_mask``
       nor ``attn_mask`` is passed
