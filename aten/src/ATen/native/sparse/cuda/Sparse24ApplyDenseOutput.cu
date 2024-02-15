@@ -1,14 +1,11 @@
 #include <ATen/ScalarOps.h>
 #include <ATen/Tensor.h>
+#include <ATen/Functions.h>
 #include <ATen/autocast_mode.h>
+#include <ATen/native/sparse/cuda/ComputeSparseTile.h>
+#include <ATen/native/sparse/cuda/Sparse24Pack.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/library.h>
-#include "compute_sparse_tile.h"
-#include "sparse24_pack.h"
-#include <ATen/Context.h>
-#include <ATen/Dispatch.h>
-#include <ATen/Functions.h>
-#include <ATen/Utils.h>
 
 namespace torch::sparse {
 struct Params {
@@ -138,10 +135,8 @@ at::Tensor sparse24_apply_dense_output(
   p.threads_masks = (uint64_t const*)threads_masks.data_ptr();
 
   TORCH_CHECK(threads_masks.dim() == 3);
-  TORCH_CHECK(
-      threads_masks.size(0) == p.getBlocksGrid().x * p.getThreadsGrid().x);
-  TORCH_CHECK(
-      threads_masks.size(1) == p.getBlocksGrid().y * p.getThreadsGrid().y);
+  TORCH_CHECK(threads_masks.size(0) == p.getBlocksGrid().x * p.getThreadsGrid().x);
+  TORCH_CHECK(threads_masks.size(1) == p.getBlocksGrid().y * p.getThreadsGrid().y);
   TORCH_CHECK(threads_masks.stride(1) == sizeof(p.threads_masks[0]));
   TORCH_CHECK(threads_masks.size(2) == sizeof(p.threads_masks[0]));
   TORCH_CHECK(threads_masks.stride(2) == 1);

@@ -1,15 +1,12 @@
 #include <ATen/ScalarOps.h>
+#include <ATen/Functions.h>
 #include <ATen/Tensor.h>
 #include <ATen/autocast_mode.h>
+#include <ATen/native/sparse/cuda/ComputeSparseTile.h>
+#include <ATen/native/sparse/cuda/Sparse24Pack.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/library.h>
 #include <torch/types.h>
-#include "compute_sparse_tile.h"
-#include "sparse24_pack.h"
-#include <ATen/Context.h>
-#include <ATen/Dispatch.h>
-#include <ATen/Functions.h>
-#include <ATen/Utils.h>
 
 using namespace torch::sparse;
 
@@ -28,9 +25,7 @@ struct MetadataCuSparseLt {
   int64_t _cols;
 
   static int64_t getMetadataSize(int rows, int cols) {
-    TORCH_CHECK(
-        rows % 128 == 0 && cols % 128 == 0,
-        "Only supports rows/cols multiples of 128");
+    TORCH_CHECK(rows % 128 == 0 && cols % 128 == 0, "Only supports rows/cols multiples of 128");
     // 1 bit per dense value
     return (rows * cols) / (8 * sizeof(ElementInputE));
   }

@@ -1,10 +1,9 @@
 #pragma once
 
+#include <ATen/native/sparse/cuda/Sparse24Pack.h>
+#include <ATen/native/sparse/cuda/StaticSort.h>
 #include <cutlass/bfloat16.h>
 #include <cutlass/half.h>
-
-#include "sparse24_pack.h"
-#include "static_sort.h"
 
 // Given 4x4 values, computes the selected indices that will remain after 2:4
 // sparsification, as a bitmask.
@@ -19,8 +18,8 @@ struct numeric_limits<cutlass::bfloat16_t> {
   }
 };
 } // namespace platform
-namespace torch {
-namespace sparse {
+
+namespace torch::sparse{
 
 template <typename Element, typename Pointwise>
 struct TileValueOrderedT {
@@ -183,5 +182,4 @@ void named_algorithms(T callback) {
   callback(LargestValuesGreedy<IdentityOp>(), "");
 }
 
-} // namespace sparse
-} // namespace torch
+} // namespace torch::sparse

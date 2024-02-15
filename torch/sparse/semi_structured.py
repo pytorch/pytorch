@@ -328,8 +328,8 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
 def to_sparse_semi_structured(
     original_tensor: torch.Tensor,
-    training=False,
     transposed: bool = False,
+    training=False,
     backend: str = None,
 ) -> SparseSemiStructuredTensor:
     """

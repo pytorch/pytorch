@@ -1,12 +1,12 @@
 #pragma once
 
+#include <ATen/native/sparse/cuda/StaticSort.h>
 #include <cutlass/arch/memory.h>
 #include <cutlass/array.h>
 #include <cutlass/bfloat16.h>
 #include <cutlass/fast_math.h>
 #include <cutlass/half.h>
 #include <cutlass/integer_subbyte.h>
-#include "static_sort.h"
 
 namespace torch {
 namespace sparse {

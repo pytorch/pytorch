@@ -1,13 +1,11 @@
 #include <ATen/ScalarOps.h>
 #include <ATen/Tensor.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <torch/library.h>
-#include "sparse24_pack.h"
-#include <ATen/Context.h>
-#include <ATen/Dispatch.h>
 #include <ATen/Functions.h>
 #include <ATen/Utils.h>
+#include <ATen/native/sparse/cuda/Sparse24Pack.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/util/accumulate.h>
+#include <torch/library.h>
 
 using namespace torch::sparse;
 
@@ -15,22 +13,16 @@ namespace {
 
 template <typename KT>
 __global__ void __launch_bounds__(32 /* num_threads */)
-    sparse24_apply_kernel(typename KT::Params p) {
+  sparse24_apply_kernel(typename KT::Params p)
+{
   KT::sparse24_apply_kernel(p);
 }
 
 // Apply a 2:4 sparsify pattern computed with
 // `sparse24_sparsify_both_ways_kernel` to another Tensor
 template <bool kIsMeta, typename Element>
-std::
-    tuple<
-        at::Tensor, // packed
-        at::Tensor // packed_trans
-        >
-    sparse24_apply_typed(
-        at::Tensor input, // Tensor to sparsify
-        at::Tensor threads_masks // Returned by `sparse24_sparsify_both_ways`
-    ) {
+std::tuple<at::Tensor, at::Tensor> sparse24_apply_typed(at::Tensor input, at::Tensor threads_masks) // Returned by `sparse24_sparsify_both_ways`
+{
   using KT = KernelTypes<Element>;
   // TODO: Technically we should be able to deal with that
   // by running on the transpose of `input` and swapping
@@ -92,23 +84,16 @@ std::
 }
 
 template <bool kIsMeta>
-std::
-    tuple<
-        at::Tensor, // packed
-        at::Tensor // packed_trans
-        >
-    sparse24_apply(
-        at::Tensor input, // Tensor to sparsify
-        at::Tensor threads_masks // Returned by `sparse24_sparsify_both_ways`
-    ) {
-  if (input.scalar_type() == at::ScalarType::Half) {
+std::tuple<at::Tensor, at::Tensor> sparse24_apply(at::Tensor input, at::Tensor threads_masks) // Returned by `sparse24_sparsify_both_ways`
+{
+  if (input.scalar_type() == at::ScalarType::Half)
+  {
     return sparse24_apply_typed<kIsMeta, cutlass::half_t>(input, threads_masks);
-  } else {
-    TORCH_CHECK(
-        input.scalar_type() == at::ScalarType::Half ||
-        input.scalar_type() == at::ScalarType::BFloat16);
-    return sparse24_apply_typed<kIsMeta, cutlass::bfloat16_t>(
-        input, threads_masks);
+  }
+  else
+  {
+    TORCH_CHECK(input.scalar_type() == at::ScalarType::Half || input.scalar_type() == at::ScalarType::BFloat16);
+    return sparse24_apply_typed<kIsMeta, cutlass::bfloat16_t>(input, threads_masks);
   }
 }
 
