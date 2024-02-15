@@ -1938,7 +1938,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     rank = p2pRank;
   }
   // Get the device index
-  int deviceIndex = device.index();
+  auto deviceIndex = device.index();
   gpuGuard.set_index(deviceIndex);
 #ifdef NCCL_HAS_COMM_SPLIT
   if (options_->split_from) {
@@ -2162,7 +2162,8 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
   r->trace_id_ = NCCLTraceBuffer::get()->record(
       uid_,
       seq_,
-      profilingTitle,
+      // create a string copy of profilingTitle
+      profilingTitle ? profilingTitle : "",
       inputs,
       outputs,
       r->ncclStartEvent_.get(),
