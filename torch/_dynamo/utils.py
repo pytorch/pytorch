@@ -254,10 +254,10 @@ def dynamo_timed(original_function=None, phase_name=None):
                 frame_key = str(curr_frame)
                 if frame_key not in frame_phase_timing:
                     frame_phase_timing[frame_key] = {}
-                assert (
-                    phase_name not in frame_phase_timing[frame_key]
-                ), f"Duplicate phase name {phase_name} for frame {frame_key}"
-                frame_phase_timing[frame_key][phase_name] = time_spent
+                if phase_name not in frame_phase_timing[frame_key]:
+                    frame_phase_timing[frame_key][phase_name] = time_spent
+                else:
+                    frame_phase_timing[frame_key][phase_name] += time_spent
             return r
 
         return time_wrapper
@@ -620,6 +620,8 @@ class CompilationMetrics:
     graph_input_count: Optional[int]
     entire_frame_compile_time_s: Optional[float]
     backend_compile_time_s: Optional[float]
+    inductor_compile_time_s: Optional[float]
+    code_gen_time_s: Optional[float]
     fail_type: Optional[str]
     fail_reason: Optional[str]
     fail_user_frame_filename: Optional[str]
@@ -1722,6 +1724,10 @@ def run_node(tracer, node, args, kwargs, nnmodule):
     op = node.op
 
     with set_current_node(node):
+
+        def make_error_message(e):
+            return f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n" + str(e)
+
         try:
             if op == "call_function":
                 return node.target(*args, **kwargs)
@@ -1735,17 +1741,16 @@ def run_node(tracer, node, args, kwargs, nnmodule):
             elif op == "placeholder":
                 assert "example_value" in node.meta
                 return node.meta["example_value"]
-        except NotImplementedError as e:
+
+        except (NotImplementedError, UnsupportedFakeTensorException) as e:
             # NB: mimic how wrap_fake_exception does it
             from .exc import unimplemented
 
-            raise unimplemented(
-                f"running {op} {node.target}(*{args}, **{kwargs})"
-            ) from e
-
+            raise unimplemented(make_error_message(e)) from e
         except Exception as e:
-            fn_str = f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n"
-            raise RuntimeError(fn_str + str(e)).with_traceback(e.__traceback__) from e
+            raise RuntimeError(make_error_message(e)).with_traceback(
+                e.__traceback__
+            ) from e
 
     raise AssertionError(op)
 
