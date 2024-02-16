@@ -6478,7 +6478,7 @@
 # return values are: output, save_mean, save_var, reserve
 # reserve tensor is only used in cudnn
 # note: for cudnn and miopen backends, input, weight, bias, running_mean, and running_var are all expected to be contiguous
-- func: batch_norm_with_update(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor)
+- func: batch_norm_with_update(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, float momentum, float eps) -> (Tensor, Tensor, Tensor, Tensor)
   dispatch:
     CPU: batch_norm_with_update_cpu
     CUDA: batch_norm_with_update_cuda
@@ -6486,18 +6486,18 @@
     MkldnnCPU: batch_norm_with_update_mkldnn
   autogen: batch_norm_with_update_functional
 
-- func: batch_norm_no_update(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor)
+- func: batch_norm_no_update(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, float momentum, float eps) -> (Tensor, Tensor, Tensor, Tensor)
   dispatch:
     CompositeExplicitAutograd: batch_norm_no_update
   autogen: batch_norm_no_update.out
 
-- func: batch_norm_with_update.out(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, float momentum, float eps, bool cudnn_enabled, *, Tensor(d!) out, Tensor(e!) save_mean, Tensor(f!) save_invstd, Tensor(g!) reserve) -> (Tensor(d!), Tensor(e!), Tensor(f!), Tensor(g!))
+- func: batch_norm_with_update.out(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, float momentum, float eps, *, Tensor(d!) out, Tensor(e!) save_mean, Tensor(f!) save_invstd, Tensor(g!) reserve) -> (Tensor(d!), Tensor(e!), Tensor(f!), Tensor(g!))
   dispatch:
     CPU: batch_norm_with_update_cpu_out
     CUDA: batch_norm_with_update_cuda_out
     MPS: batch_norm_with_update_mps_out
 
-- func: batch_norm_backward(Tensor grad_out, Tensor input, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, bool update, float eps, bool[3] output_mask, Tensor reserve, bool cudnn_enabled) -> (Tensor, Tensor, Tensor)
+- func: batch_norm_backward(Tensor grad_out, Tensor input, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, bool update, float eps, bool[3] output_mask, Tensor reserve) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU: _new_batch_norm_backward_cpu
     CUDA: _new_batch_norm_backward_cuda

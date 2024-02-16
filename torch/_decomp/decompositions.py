@@ -1850,7 +1850,6 @@ def _get_batch_norm_reserve_tensor(
     running_mean: Tensor,
     running_var: Tensor,
     eps: float,
-    cudnn_enabled: bool,
 ) -> Tensor:
     """
     Return a reserve tensor for batch norm, used only by cudnn to pass forward state to the
@@ -1860,7 +1859,7 @@ def _get_batch_norm_reserve_tensor(
     and rely on DCE to avoid materializing this tensor.
     """
     backend = torch._C._select_batch_norm_backend(  # type: ignore[attr-defined]
-        input, weight, bias, running_mean, running_var, True, eps, cudnn_enabled
+        input, weight, bias, running_mean, running_var, True, eps
     )
     reserve_size = 0
     if backend == torch._C._BatchNormBackend.Cudnn:  # type: ignore[attr-defined]
@@ -1879,7 +1878,6 @@ def batch_norm_with_update(
     running_var: Tensor,
     momentum: float,
     eps: float,
-    cudnn_enabled: bool,
 ) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
     output, save_mean, save_rstd, _, _ = native_batch_norm_helper(
         input,
@@ -1893,7 +1891,7 @@ def batch_norm_with_update(
         False,  # functional
     )
     reserve = _get_batch_norm_reserve_tensor(
-        input, weight, bias, running_mean, running_var, eps, cudnn_enabled
+        input, weight, bias, running_mean, running_var, eps
     )
     return output, save_mean, save_rstd, reserve
 
@@ -1907,7 +1905,6 @@ def batch_norm_with_update_functional(
     running_var: Tensor,
     momentum: float,
     eps: float,
-    cudnn_enabled: bool,
 ) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     (
         output,
@@ -1919,7 +1916,7 @@ def batch_norm_with_update_functional(
         input, weight, bias, running_mean, running_var, True, momentum, eps, True
     )
     reserve = _get_batch_norm_reserve_tensor(
-        input, weight, bias, running_mean, running_var, eps, cudnn_enabled
+        input, weight, bias, running_mean, running_var, eps
     )
     assert new_rm is not None, "new_running_mean should not be None"
     assert new_rv is not None, "new_running_var should not be None"
@@ -1935,7 +1932,6 @@ def batch_norm_no_update(
     running_var: Tensor,
     momentum: float,
     eps: float,
-    cudnn_enabled: bool,
 ) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
     output, save_mean, save_rstd, _, _ = native_batch_norm_helper(
         input,
@@ -1949,7 +1945,7 @@ def batch_norm_no_update(
         False,  # functional
     )
     reserve = _get_batch_norm_reserve_tensor(
-        input, weight, bias, running_mean, running_var, eps, cudnn_enabled
+        input, weight, bias, running_mean, running_var, eps
     )
     return output, save_mean, save_rstd, reserve
 
@@ -2085,7 +2081,6 @@ def batch_norm_backward(
     eps: float,
     output_mask: List[bool],
     reserve: Tensor,
-    cudnn_enabled: bool,
 ) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
     return native_batch_norm_backward(
         grad_out,

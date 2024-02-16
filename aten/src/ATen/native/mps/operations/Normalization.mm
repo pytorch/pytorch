@@ -414,8 +414,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_with_update_mps(const Tens
                                                                       Tensor& running_mean,
                                                                       Tensor& running_var,
                                                                       double momentum,
-                                                                      double eps,
-                                                                      bool cudnn_enabled) {
+                                                                      double eps) {
   Tensor output, save_mean, save_var;
   std::tie(output, save_mean, save_var) =
       batch_norm_mps(input, weight_opt, bias_opt, running_mean, running_var, /*train*/ true, momentum, eps);
@@ -430,7 +429,6 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> batch_norm_with_update_mps_out(co
                                                                               Tensor& running_var,
                                                                               double momentum,
                                                                               double eps,
-                                                                              bool cudnn_enabled,
                                                                               Tensor& out,
                                                                               Tensor& save_mean,
                                                                               Tensor& save_var,
@@ -515,8 +513,7 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mps(const Tensor& gr
                                                                 bool update,
                                                                 double eps,
                                                                 std::array<bool, 3> grad_input_mask,
-                                                                const Tensor& reserve,
-                                                                bool cudnn_enabled) {
+                                                                const Tensor& reserve) {
   return batch_norm_backward_mps(grad_output,
                                  input,
                                  weight,
