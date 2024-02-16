@@ -2,7 +2,6 @@ from typing import List, NamedTuple, Optional
 
 import torch
 import torch.distributed as dist
-from torch.utils._contextlib import _DecoratorContextManager
 from ._fsdp_common import (
     _get_dim0_padded_size,
     _raise_assert_with_print,
@@ -26,7 +25,6 @@ def foreach_all_gather(
     all_gather_copy_in_stream: torch.cuda.Stream,
     all_gather_stream: torch.cuda.Stream,
     device: torch.device,
-    dtype: torch.dtype,
 ) -> Optional[AllGatherResult]:
     world_size, rank = group.size(), group.rank()
     # - Copy in
@@ -34,6 +32,11 @@ def foreach_all_gather(
         param_all_gather_inputs = [
             fsdp_param.all_gather_input for fsdp_param in fsdp_params
         ]
+        dtype = param_all_gather_inputs[0].dtype
+        if not all(t.dtype == dtype for t in param_all_gather_inputs):
+            raise NotImplementedError(
+                f"Mixed dtype not supported yet: {[t.dtype for t in param_all_gather_inputs]}"
+            )
         inp_split_sizes = [inp.numel() for inp in param_all_gather_inputs]
         all_gather_input_numel = sum(inp_split_sizes)
         all_gather_output = torch.empty(
@@ -63,6 +66,7 @@ def foreach_all_gather(
         )
 
 
+@torch.no_grad()
 def foreach_all_gather_copy_out(
     all_gather_result: AllGatherResult,
     fsdp_params: List[FSDPParam],
@@ -89,10 +93,9 @@ def foreach_all_gather_copy_out(
     out = [
         fsdp_param.all_gather_output.view(world_size, -1) for fsdp_param in fsdp_params
     ]
-    # TODO: Use `torch.split_with_sizes_copy` fast path once it lands.
-    splits = torch.split(all_gather_output, all_gather_input_numels, dim=1)
-    with _unsafe_preserve_version_counters(out):
-        torch._foreach_copy_(out, splits)  # one `copy_` per parameter
+    torch.split_with_sizes_copy(
+        all_gather_output, all_gather_input_numels, dim=1, out=out
+    )
 
 
 @torch.no_grad()
@@ -139,6 +142,10 @@ def foreach_reduce_scatter(
         # Record to mark the end of the reduce-scatter copy-in in the RS stream
         copy_in_event = torch.cuda.Event()
         copy_in_event.record()
+        # Only after the copy-in finishes can we free the gradients, which were
+        # computed in the default stream
+        current_stream.wait_event(copy_in_event)
+        unsharded_grads.clear()
         reduce_scatter_output = reduce_scatter_input.new_empty(
             (reduce_scatter_output_numel,)
         )
@@ -168,10 +175,6 @@ def foreach_reduce_scatter(
             flat_grad_offset += padded_sharded_numel
         reduce_scatter_view_out_event = torch.cuda.Event()
         reduce_scatter_view_out_event.record()
-    # Only after the copy-in finishes can we free the gradients, which were
-    # computed in the default stream
-    current_stream.wait_event(copy_in_event)
-    unsharded_grads.clear()
     # The RS output is allocated in the RS stream and used in the default
     # stream (for optimizer). To ensure its memory is not reused for later
     # RSs, we do not need extra synchronization since the sharded parameters
@@ -204,23 +207,3 @@ def foreach_reduce_scatter_copy_in(
 def _div_if_needed(tensor: torch.Tensor, div_factor: float) -> None:
     if div_factor > 1:
         tensor.div_(div_factor)
-
-
-# We need this context for the backward all-gather, which would otherwise
-# raise an error when writing to the all-gather output tensors in-place, e.g.:
-# RuntimeError: one of the variables needed for gradient computation has been
-# modified by an inplace operation: [torch.cuda.FloatTensor [15, 3]], which is
-# output 0 of AsStridedBackward0, is at version 3; expected version 2 instead.
-class _unsafe_preserve_version_counters(_DecoratorContextManager):
-    # Same as `_unsafe_preserve_version_counter` but only entering/exiting the
-    # context manager once for a list of tensors to reduce CPU overhead
-    def __init__(self, tensors: List[torch.Tensor]) -> None:
-        self.tensors = tensors
-        self.prev_versions = [t._version for t in tensors]
-
-    def __enter__(self) -> None:
-        pass
-
-    def __exit__(self, *args) -> None:
-        for tensor, prev_version in zip(self.tensors, self.prev_versions):
-            torch._C._autograd._unsafe_set_version_counter(tensor, prev_version)

@@ -128,17 +128,17 @@ const OptionalTensorRef max) {
     TensorIteratorConfig()                  \
       .set_check_mem_overlap(true)          \
       .add_output(maybe_get_output())       \
-      .add_input(self)                      \
+      .add_const_input(self)                \
       .promote_inputs_to_common_dtype(true) \
       .cast_common_dtype_to_outputs(true)   \
       .enforce_safe_casting_to_output(true)
 
   if (min && max) {
-    build(CLAMP_CONFIG().add_input(*min).add_input(*max));
+    build(CLAMP_CONFIG().add_const_input(*min).add_const_input(*max));
   } else if (min) {
-    build(CLAMP_CONFIG().add_input(*min));
+    build(CLAMP_CONFIG().add_const_input(*min));
   } else if (max) {
-    build(CLAMP_CONFIG().add_input(*max));
+    build(CLAMP_CONFIG().add_const_input(*max));
   }
 }
 
@@ -535,9 +535,9 @@ Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor
   auto iter = at::TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(out)
-    .add_input(condition_)
-    .add_input(self_)
-    .add_input(other_)
+    .add_const_input(condition_)
+    .add_const_input(self_)
+    .add_const_input(other_)
     .build();
   where_kernel(iter.device_type(), iter);
   return out;
