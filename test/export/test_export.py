@@ -727,7 +727,10 @@ class TestExport(TestCase):
             a: Tensor
             b: Tensor
 
-        register_dataclass_as_pytree_node(DataClass)
+        register_dataclass_as_pytree_node(
+            DataClass,
+            serialized_type_name="test_export_api_with_dynamic_shapes.DataClass"
+        )
 
         class Foo(torch.nn.Module):
             def forward(self, inputs):
@@ -913,7 +916,7 @@ class TestExport(TestCase):
         self.assertEqual(
             spec,
             TreeSpec(
-                MyDataClass, (MyDataClass, ["x", "y"], ["z"]), [LeafSpec(), LeafSpec()]
+                MyDataClass, [["x", "y"], ["z"]], [LeafSpec(), LeafSpec()]
             ),
         )
         self.assertEqual(flat, [3, 4])
@@ -946,11 +949,7 @@ class TestExport(TestCase):
             spec,
             TreeSpec(
                 MyOtherDataClass,
-                (
-                    MyOtherDataClass,
-                    ["x", "y", "z"],
-                    [],
-                ),
+                [["x", "y", "z"], []],
                 [LeafSpec(), LeafSpec(), LeafSpec()],
             ),
         )
@@ -1953,7 +1952,10 @@ def forward(self, arg_0):
             f: torch.Tensor
             p: torch.Tensor
 
-        torch._export.utils.register_dataclass_as_pytree_node(Input)
+        torch._export.utils.register_dataclass_as_pytree_node(
+            Input,
+            serialized_type_name="test_preserve_shape_dynamism_for_unused_inputs.Input"
+        )
 
         class Module(torch.nn.Module):
             def forward(self, x: Input):
