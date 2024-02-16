@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/utils/disable_torch_function.h>
+#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_symnode.h>
 #include <torch/extension.h>
@@ -545,7 +546,16 @@ static PyObject* dict_version(PyObject* dummy, PyObject* args) {
   if (!PyDict_Check(obj)) {
     return nullptr;
   }
+#if IS_PYTHON_3_12_PLUS
+  TORCH_CHECK(false, "Dynamo does not support CPython 3.12 yet.");
+  return nullptr;
+#else
+  // ma_version_tag is deprecated since 3.12. We will need to transition
+  // to use the appropriate API for later versions.
+  // This warning is an error on some clang builds, so we have to ifdef it
+  // away for now.
   return THPUtils_packUInt64(((PyDictObject*)obj)->ma_version_tag);
+#endif
 }
 
 static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
@@ -780,6 +790,10 @@ class LAMBDA_GUARD : public LeafGuard {
   // Runs the lambda function with the current f_locals value.
   bool check_nopybind(PyObject* value) override { // borrowed ref
     PyObject* x = PyObject_CallOneArg(_guard_check_fn.ptr(), value); // new ref
+    if (x == nullptr) {
+      // An exception is caught in the lambda function.
+      return false;
+    }
     bool result = PyObject_IsTrue(x);
     Py_DECREF(x);
     return result;
@@ -803,7 +817,7 @@ class TYPE_MATCH : public LeafGuard {
 
  private:
   // id of the type of the original object.
-  unsigned long long _expected;
+  intptr_t _expected;
 };
 
 class ID_MATCH : public LeafGuard {
@@ -819,7 +833,7 @@ class ID_MATCH : public LeafGuard {
 
  private:
   // id of the original object.
-  unsigned long long _expected;
+  intptr_t _expected;
 };
 
 class EQUALS_MATCH : public LeafGuard {
@@ -919,7 +933,7 @@ class GuardAccessor {
     return _guard_manager;
   }
 
-  bool matches_key(const py::object key) const {
+  bool matches_key(const py::handle key) const {
     return _accessor_key.equal(key);
   }
 
@@ -1034,22 +1048,22 @@ class GuardManager {
   // guards and does not change the fail count. For simplicity, we duplicate
   // the code here.
   virtual bool check_nopybind(PyObject* value) { // borrowed ref
-    bool result = true;
     // Iterate over leaf guards
     for (const auto& guard : _leaf_guards) {
-      result = result && guard->check_nopybind(value);
-      if (!result) { // early exit
+      if (!guard->check_nopybind(value)) { // early exit
         _fail_count += 1;
-        return result;
+        // no need of sorting, just return.
+        return false;
       }
     }
 
     // Iterate over accessors.
+    bool result = true;
     bool failed_on_first = true;
     for (const auto& accessor : _accessors) {
-      result = result && accessor->check_nopybind(value);
-      if (!result) { // early exit
+      if (!accessor->check_nopybind(value)) { // early exit
         _fail_count += 1;
+        // need to sort, so break the loop.
         break;
       }
       failed_on_first = false;
@@ -1085,14 +1099,12 @@ class GuardManager {
   // deliberate to keep check function simple and fast.
   virtual GuardDebugInfo check_verbose_nopybind(
       PyObject* value) { // borrowed ref
-    bool result = true;
     int num_guards_executed = 0;
     // Iterate over leaf guards
     for (const auto& guard : _leaf_guards) {
       const GuardDebugInfo& debug_info = guard->check_verbose_nopybind(value);
-      result = result && debug_info.result;
       num_guards_executed++;
-      if (!result) {
+      if (!debug_info.result) {
         return GuardDebugInfo(
             false, debug_info.verbose_code_parts, num_guards_executed);
       }
@@ -1102,9 +1114,8 @@ class GuardManager {
     for (const auto& accessor : _accessors) {
       const GuardDebugInfo& debug_info =
           accessor->check_verbose_nopybind(value);
-      result = result && debug_info.result;
       num_guards_executed += debug_info.num_guards_executed;
-      if (!result) {
+      if (!debug_info.result) {
         return GuardDebugInfo(
             false, debug_info.verbose_code_parts, num_guards_executed);
       }
@@ -1150,7 +1161,7 @@ class GuardManager {
  protected:
   // Keeps a count of how many times this guard manager check function returns
   // False. This is used for sorting optimization.
-  int _fail_count{0};
+  int64_t _fail_count{0};
 
  private:
   // Root of the guard manager, this is the used to install the relational
@@ -1206,26 +1217,32 @@ class RootGuardManager : public GuardManager {
 
   // Fast check function.
   virtual bool check_nopybind(PyObject* value) override { // borrowed ref
-    bool result = GuardManager::check_nopybind(value);
-    if (!result) {
+    // reset_state is not thread safe. So acquire a lock.
+    static std::mutex lock;
+    std::lock_guard<std::mutex> lock_guard(lock);
+
+    if (!GuardManager::check_nopybind(value)) {
       _reset_relational_guard_state();
-      return result;
+      return false;
     }
 
     // Iterate over epilogue leaf guards.
     for (const auto& guard : _epilogue_lambda_guards) {
-      result = result && guard->check_nopybind(value);
-      if (!result) { // early exit
+      if (!guard->check_nopybind(value)) { // early exit
         _reset_relational_guard_state();
-        return result;
+        return false;
       }
     }
-    return result;
+    return true;
   }
 
   // Fast check_verbose function.
   virtual GuardDebugInfo check_verbose_nopybind(
       PyObject* value) override { // borrowed ref
+    // reset_state is not thread safe. So acquire a lock.
+    static std::mutex lock;
+    std::lock_guard<std::mutex> lock_guard(lock);
+
     GuardDebugInfo debug_info = GuardManager::check_verbose_nopybind(value);
     if (!debug_info.result) {
       _reset_relational_guard_state();
@@ -1233,15 +1250,13 @@ class RootGuardManager : public GuardManager {
     }
 
     int num_guards_executed = debug_info.num_guards_executed;
-    bool result = true;
 
     // Iterate over epilogue leaf guards
     for (const auto& guard : _epilogue_lambda_guards) {
       const GuardDebugInfo& tmp_debug_info =
           guard->check_verbose_nopybind(value);
-      result = result && tmp_debug_info.result;
       num_guards_executed++;
-      if (!result) {
+      if (!tmp_debug_info.result) {
         _reset_relational_guard_state();
         return GuardDebugInfo(
             false, tmp_debug_info.verbose_code_parts, num_guards_executed);
