@@ -118,6 +118,11 @@ class FSDPParamGroup:
         # of the output's grad fns and later query the autograd engine whether
         # any grad fn will execute in the current backward to know to prefetch.
         self.all_forward_output_grad_fns: Set[Tuple[Node, ...]] = set()
+        # Whether to reduce-scatter or all-reduce gradients, respectively
+        # (can be set to false to save communication during gradient
+        # accumulation); all-reducing without reduce-scatter is disallowed
+        self.reduce_scatter_grads: bool = True
+        self.all_reduce_grads: bool = True
         self._init_grad_divide_factors()
 
         # - CUDA events for stream synchronization
@@ -275,6 +280,9 @@ class FSDPParamGroup:
     def post_backward(self, *unused: Any):
         self._training_state = TrainingState.POST_BACKWARD
         with torch.profiler.record_function("FSDP::post_backward_reshard"):
+            if not self.reduce_scatter_grads:
+                self.reshard()
+                return
             # Save the autograd-computed gradients before resharding to only
             # access the unsharded parameters when their data is present
             fsdp_params_with_grad: List[FSDPParam] = []
