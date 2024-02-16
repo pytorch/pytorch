@@ -5560,6 +5560,21 @@ try:
             )
         )
 
+    @register_lowering(_c10d_functional.broadcast)
+    def _broadcast(inp, src, group_name):
+        inp = clone(inp)
+        ir._CollectiveKernel.create_inplace(
+            _c10d_functional.broadcast_.default, inp, src, group_name
+        )
+        return inp
+
+    @register_lowering(_c10d_functional.broadcast_)
+    def _broadcast_(inp, src, group_name):
+        ir._CollectiveKernel.create_inplace(
+            _c10d_functional.broadcast_.default, inp, src, group_name
+        )
+        return inp
+
     @register_lowering(_c10d_functional.wait_tensor)
     def _wait_tensor(inp):
         ir._WaitKernel.create_wait(_c10d_functional.wait_tensor.default, inp)
