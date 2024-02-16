@@ -1355,6 +1355,7 @@ class FSDPTest(MultiProcessTestCase):
             )
 
 
+@no_type_check
 def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
     class FullyShardPatch(Enum):
         EAGER = auto()
