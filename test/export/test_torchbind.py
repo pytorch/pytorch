@@ -16,22 +16,40 @@ from torch.testing._internal.common_utils import (
 )
 
 
+if IS_MACOS:
+    raise unittest.SkipTest("non-portable load_library call used in test")
+elif IS_SANDCASTLE or IS_FBCODE:
+    torch.ops.load_library("//caffe2/test/cpp/jit:test_custom_class_registrations")
+elif IS_WINDOWS:
+    lib_file_path = find_library_location("torchbind_test.dll")
+    torch.ops.load_library(str(lib_file_path))
+else:
+    lib_file_path = find_library_location("libtorchbind_test.so")
+    torch.ops.load_library(str(lib_file_path))
+
+
+@torch.library.impl_abstract_class("_TorchScriptTesting::_Foo")
+class FakeFoo:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    @staticmethod
+    def from_real(obj):
+        (x, y), classname = obj.__getstate__()
+        return FakeFoo(x, y)
+
+    def add_tensor(self, z):
+        return (self.x + self.y) * z
+
+
+@torch.library.impl_abstract("_TorchScriptTesting::takes_foo")
+def fake_takes_foo(foo, z):
+    return foo.add_tensor(z)
+
+
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestExportTorchbind(TestCase):
-    def setUp(self):
-        if IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        elif IS_SANDCASTLE or IS_FBCODE:
-            torch.ops.load_library(
-                "//caffe2/test/cpp/jit:test_custom_class_registrations"
-            )
-        elif IS_WINDOWS:
-            lib_file_path = find_library_location("torchbind_test.dll")
-            torch.ops.load_library(str(lib_file_path))
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-            torch.ops.load_library(str(lib_file_path))
-
     def _test_export_same_as_eager(self, f, args, kwargs=None, strict=True):
         kwargs = kwargs or {}
         with enable_torchbind_tracing():
@@ -98,24 +116,6 @@ class TestExportTorchbind(TestCase):
 
             def forward(self, x, cc):
                 return x + torch.ops._TorchScriptTesting.takes_foo(cc, x)
-
-        @torch.library.impl_abstract_class("_TorchScriptTesting::_Foo")
-        class FakeFoo:
-            def __init__(self, x, y):
-                self.x = x
-                self.y = y
-
-            @staticmethod
-            def from_real(obj):
-                (x, y), classname = obj.__getstate__()
-                return FakeFoo(x, y)
-
-            def add_tensor(self, z):
-                return (self.x + self.y) * z
-
-        @torch.library.impl_abstract("_TorchScriptTesting::takes_foo")
-        def fake_takes_foo(foo, z):
-            return foo.add_tensor(z)
 
         cc = torch.classes._TorchScriptTesting._Foo(10, 20)
         self._test_export_same_as_eager(
