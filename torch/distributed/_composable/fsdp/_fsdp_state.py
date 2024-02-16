@@ -12,9 +12,10 @@ from torch.distributed._composable_state import (
     _State,
 )
 from torch.distributed.utils import _to_kwargs
-from torch.utils._pytree import tree_flatten
+from torch.utils._pytree import tree_flatten, tree_map
 from torch.utils.hooks import RemovableHandle
-from ._fsdp_common import TrainingState
+from ._fsdp_api import MixedPrecisionPolicy
+from ._fsdp_common import _cast_fp_tensor, TrainingState
 from ._fsdp_param import FSDPParam
 from ._fsdp_param_group import FSDPCommContext, FSDPParamGroup
 
@@ -36,9 +37,6 @@ class FSDPStateContext:
 
 
 class FSDPState(_State):
-    _module: nn.Module  # permit ref cycle since module and state lifetimes are 1:1
-    _device: torch.device
-
     def __init__(self):
         super().__init__()
         self._fsdp_param_group: Optional[FSDPParamGroup] = None
@@ -46,14 +44,16 @@ class FSDPState(_State):
         self._state_ctx = FSDPStateContext()
         self._comm_ctx = FSDPCommContext()
         self._training_state: TrainingState = TrainingState.IDLE
-        self._pre_forward_hook_handle: Optional[RemovableHandle] = None
         self._pre_backward_hook_handles: List[RemovableHandle] = []
 
     # Define a separate init since `__init__` is called in the contract
-    def init(self, module: nn.Module, device: torch.device) -> None:
+    def init(
+        self, module: nn.Module, device: torch.device, mp_policy: MixedPrecisionPolicy
+    ) -> None:
         _insert_module_state(module, self)
         self._module = module
         self._device = device
+        self._mp_policy = mp_policy
         self._pre_forward_hook_handle = module.register_forward_pre_hook(
             self._pre_forward, prepend=True, with_kwargs=True
         )
@@ -104,6 +104,8 @@ class FSDPState(_State):
                     )
                 state._is_root = False
             self._state_ctx.all_states.append(state)
+            if state._fsdp_param_group:
+                state._fsdp_param_group.lazy_init()
         if self._fsdp_param_group:
             # For the root, do not reshard after forward since for training,
             # the parameters would be freed and all-gathered immediately
@@ -140,13 +142,27 @@ class FSDPState(_State):
     def _pre_forward(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        # When composing with module-hook-based activation checkpointing, the
+        # the pre-backward hook is responsible for the unshard
+        if self._training_state == TrainingState.PRE_BACKWARD:
+            return args, kwargs
         self._training_state = TrainingState.FORWARD
         args, kwargs = self._root_pre_forward(module, args, kwargs)
+        if self._mp_policy.cast_forward_inputs and self._mp_policy.param_dtype:
+            with torch.profiler.record_function("FSDP::cast_forward_inputs"):
+                cast_fn = functools.partial(
+                    _cast_fp_tensor, self._mp_policy.param_dtype
+                )
+                args, kwargs = tree_map(cast_fn, args), tree_map(cast_fn, kwargs)
         if self._fsdp_param_group:
             args, kwargs = self._fsdp_param_group.pre_forward(module, args, kwargs)
         return args, kwargs
 
     def _post_forward(self, module: nn.Module, input: Any, output: Any) -> Any:
+        # When composing with module-hook-based activation checkpointing, the
+        # post-backward hook is responsible for the reshard
+        if self._training_state == TrainingState.PRE_BACKWARD:
+            return output
         if self._fsdp_param_group:
             output = self._fsdp_param_group.post_forward(module, input, output)
         output = self._register_pre_backward_hook(output)
@@ -161,6 +177,13 @@ class FSDPState(_State):
                 self._comm_ctx.all_gather_stream.wait_event(all_gather_state.event)
                 self._comm_ctx.all_gather_state = None  # free the all-gather result
             self._state_ctx.iter_forward_root = None
+        if self._mp_policy.output_dtype is not None:
+            with torch.profiler.record_function("FSDP::cast_forward_outputs"):
+                output = tree_map(
+                    functools.partial(_cast_fp_tensor, self._mp_policy.output_dtype),
+                    output,
+                )
+        return output
 
     def _pre_backward(self, forward_grad_fns: Tuple[Node, ...], *unused: Any) -> None:
         self._training_state = TrainingState.PRE_BACKWARD

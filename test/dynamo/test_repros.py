@@ -861,6 +861,16 @@ class MockModule(torch.nn.Module):
         return self.inner_fn(tensor.shape, (1, 2, 3))
 
 
+class IncByOne:
+    def __init__(self, x):
+        self.x = x + 1
+
+
+class IncByTwo:
+    def __init__(self, x):
+        self.x = x + 2
+
+
 class ReproTests(torch._dynamo.test_case.TestCase):
     def test_do_paste_mask(self):
         torch._dynamo.utils.counters.clear()
@@ -4118,6 +4128,45 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter[0], 12)
         self.assertEqual(cnt.frame_count, torch._dynamo.utils.ifdynstaticdefault(3, 2))
 
+    @unittest.expectedFailure
+    def test_many_overlapping_inputs_does_not_explode_guards(self):
+        from torch._dynamo.backends.common import aot_autograd
+
+        # Before, this was (9702, 0)
+        num_shape_guards = None
+        num_aot_guards = None
+        num_compiles = 0
+
+        def guard_count_backend(gm, *args):
+            nonlocal num_shape_guards
+            nonlocal num_aot_guards
+            nonlocal num_compiles
+            num_shape_guards = len(torch._guards.TracingContext.try_get().fake_mode.shape_env.guards)
+            num_aot_guards = len(torch._guards.TracingContext.try_get().guards_context.aotautograd_guards)
+            num_compiles += 1
+            return gm
+
+        aot_guard_counter = aot_autograd(fw_compiler=guard_count_backend)
+
+        @torch.compile(backend=aot_guard_counter, dynamic=True)
+        def f(*args):
+            for a in args:
+                a.add_(1)
+        x = torch.ones(1000, requires_grad=True)
+        args = x.split(10)
+
+        with torch.no_grad():
+            f(*args)
+        # In this example, there were 4950 guards (roughly (# tensors) ^ 2 // 2),
+        # because every pair of aliased inputs needs a guard.
+        self.assertTrue(num_aot_guards < 5000)
+        # But there are no dynamic shape guards.
+        self.assertEqual(num_shape_guards, 0)
+        # don't recompile
+        with torch.no_grad():
+            f(*args)
+        self.assertEqual(num_compiles, 1)
+
     def test_invalid_seq_unpack(self):
         def myfn(arg):
             (a, b) = arg
@@ -4131,6 +4180,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             pass
         else:
             self.fail("expected exception")
+
+    def test_udf_classes_reconstruction(self):
+        def fn(x):
+            o = T(5)
+            return o.x + x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        T = IncByOne
+
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+        # This should recompile
+        T = IncByTwo
+        self.assertEqual(fn(x), opt_fn(x))
 
 
 if __name__ == "__main__":
