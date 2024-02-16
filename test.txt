@@ -1,0 +1,2135 @@
+
+
+>>> Lint for torch/_decomp/decompositions.py:
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "pad" has incompatible type "tuple[int, int, int, int]";
+    expected "list[int]"
+
+         909  |
+         910  |    # Note that F.pad takes (padding_left, padding_right, padding_top, padding_bottom)
+         911  |    # ugh
+    >>>  912  |    padded_input = F.pad(input, (padding_w, padding_w, padding_h, padding_h))
+         913  |
+         914  |    blocks_row_indices = blocks_row_indices.unsqueeze(-1).unsqueeze(-1)
+         915  |    output = padded_input[:, :, blocks_row_indices, blocks_col_indices]
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "pad" has incompatible type "tuple[int, int, int, int]";
+    expected "list[int]"
+
+        1017  |    )
+        1018  |    idx = (None, None, indices_row, indices_col)
+        1019  |    output = aten._unsafe_index_put(output, idx, input, accumulate=True)
+    >>> 1020  |    output = F.pad(output, (-padding_w, -padding_w, -padding_h, -padding_h))
+        1021  |
+        1022  |    if not batched_input:
+        1023  |        output = output.squeeze(0)
+
+  Error (MYPY) [arg-type]
+    Argument "pad" to "pad" has incompatible type "tuple[int, int]"; expected
+    "list[int]"
+
+        3563  |    grid_one = torch.ones((1, 1, 1), dtype=dtype, device=device)
+        3564  |
+        3565  |    # this is just a temporary hack and we should use torch.stack here once #104480 is merged
+    >>> 3566  |    grid_x = torch.nn.functional.pad(grid_x, pad=(0, 2), mode="constant", value=0)
+        3567  |    grid_y = torch.nn.functional.pad(grid_y, pad=(1, 1), mode="constant", value=0)
+        3568  |    grid_one = torch.nn.functional.pad(grid_one, pad=(2, 0), mode="constant", value=0)
+        3569  |    return grid_x + grid_y + grid_one
+
+  Error (MYPY) [arg-type]
+    Argument "pad" to "pad" has incompatible type "tuple[int, int]"; expected
+    "list[int]"
+
+        3564  |
+        3565  |    # this is just a temporary hack and we should use torch.stack here once #104480 is merged
+        3566  |    grid_x = torch.nn.functional.pad(grid_x, pad=(0, 2), mode="constant", value=0)
+    >>> 3567  |    grid_y = torch.nn.functional.pad(grid_y, pad=(1, 1), mode="constant", value=0)
+        3568  |    grid_one = torch.nn.functional.pad(grid_one, pad=(2, 0), mode="constant", value=0)
+        3569  |    return grid_x + grid_y + grid_one
+        3570  |
+
+  Error (MYPY) [arg-type]
+    Argument "pad" to "pad" has incompatible type "tuple[int, int]"; expected
+    "list[int]"
+
+        3565  |    # this is just a temporary hack and we should use torch.stack here once #104480 is merged
+        3566  |    grid_x = torch.nn.functional.pad(grid_x, pad=(0, 2), mode="constant", value=0)
+        3567  |    grid_y = torch.nn.functional.pad(grid_y, pad=(1, 1), mode="constant", value=0)
+    >>> 3568  |    grid_one = torch.nn.functional.pad(grid_one, pad=(2, 0), mode="constant", value=0)
+        3569  |    return grid_x + grid_y + grid_one
+        3570  |
+        3571  |
+
+  Error (MYPY) [arg-type]
+    Argument "pad" to "pad" has incompatible type "tuple[int, int]"; expected
+    "list[int]"
+
+        3579  |    grid_one = torch.ones((1, 1, 1, 1), dtype=dtype, device=device)
+        3580  |
+        3581  |    # this is just a temporary hack and we should use torch.stack here once #104480 is merged
+    >>> 3582  |    grid_x = torch.nn.functional.pad(grid_x, pad=(0, 3), mode="constant", value=0)
+        3583  |    grid_y = torch.nn.functional.pad(grid_y, pad=(1, 2), mode="constant", value=0)
+        3584  |    grid_z = torch.nn.functional.pad(grid_z, pad=(2, 1), mode="constant", value=0)
+        3585  |    grid_one = torch.nn.functional.pad(grid_one, pad=(3, 0), mode="constant", value=0)
+
+  Error (MYPY) [arg-type]
+    Argument "pad" to "pad" has incompatible type "tuple[int, int]"; expected
+    "list[int]"
+
+        3580  |
+        3581  |    # this is just a temporary hack and we should use torch.stack here once #104480 is merged
+        3582  |    grid_x = torch.nn.functional.pad(grid_x, pad=(0, 3), mode="constant", value=0)
+    >>> 3583  |    grid_y = torch.nn.functional.pad(grid_y, pad=(1, 2), mode="constant", value=0)
+        3584  |    grid_z = torch.nn.functional.pad(grid_z, pad=(2, 1), mode="constant", value=0)
+        3585  |    grid_one = torch.nn.functional.pad(grid_one, pad=(3, 0), mode="constant", value=0)
+        3586  |    return grid_x + grid_y + grid_z + grid_one
+
+  Error (MYPY) [arg-type]
+    Argument "pad" to "pad" has incompatible type "tuple[int, int]"; expected
+    "list[int]"
+
+        3581  |    # this is just a temporary hack and we should use torch.stack here once #104480 is merged
+        3582  |    grid_x = torch.nn.functional.pad(grid_x, pad=(0, 3), mode="constant", value=0)
+        3583  |    grid_y = torch.nn.functional.pad(grid_y, pad=(1, 2), mode="constant", value=0)
+    >>> 3584  |    grid_z = torch.nn.functional.pad(grid_z, pad=(2, 1), mode="constant", value=0)
+        3585  |    grid_one = torch.nn.functional.pad(grid_one, pad=(3, 0), mode="constant", value=0)
+        3586  |    return grid_x + grid_y + grid_z + grid_one
+        3587  |
+
+  Error (MYPY) [arg-type]
+    Argument "pad" to "pad" has incompatible type "tuple[int, int]"; expected
+    "list[int]"
+
+        3582  |    grid_x = torch.nn.functional.pad(grid_x, pad=(0, 3), mode="constant", value=0)
+        3583  |    grid_y = torch.nn.functional.pad(grid_y, pad=(1, 2), mode="constant", value=0)
+        3584  |    grid_z = torch.nn.functional.pad(grid_z, pad=(2, 1), mode="constant", value=0)
+    >>> 3585  |    grid_one = torch.nn.functional.pad(grid_one, pad=(3, 0), mode="constant", value=0)
+        3586  |    return grid_x + grid_y + grid_z + grid_one
+        3587  |
+        3588  |
+
+
+
+>>> Lint for torch/_refs/__init__.py:
+
+  Error (MYPY) [arg-type]
+    Argument 1 to "sub" has incompatible type "Tensor | bool | int | float |
+    complex"; expected "Tensor | int | float | bool"
+
+        1683  |        msg = "Received a Number for the first argument, but expected a Tensor"
+        1684  |        raise ValueError(msg)
+        1685  |
+    >>> 1686  |    return torch.sub(b, a, alpha=alpha)
+        1687  |
+        1688  |
+        1689  |# TODO: consider refactoring this with add impl
+
+  Error (MYPY) [arg-type]
+    Argument "alpha" to "sub" has incompatible type "bool | int | float |
+    complex"; expected "int | float | bool | None"
+
+        1683  |        msg = "Received a Number for the first argument, but expected a Tensor"
+        1684  |        raise ValueError(msg)
+        1685  |
+    >>> 1686  |    return torch.sub(b, a, alpha=alpha)
+        1687  |
+        1688  |
+        1689  |# TODO: consider refactoring this with add impl
+
+
+
+>>> Lint for torch/_tensor.py:
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "split_with_sizes"
+
+         910  |        if isinstance(split_size, (int, torch.SymInt)):
+         911  |            return torch._VF.split(self, split_size, dim)  # type: ignore[attr-defined]
+         912  |        else:
+    >>>  913  |            return torch._VF.split_with_sizes(self, split_size, dim)
+         914  |
+         915  |    def unique(self, sorted=True, return_inverse=False, return_counts=False, dim=None):
+         916  |        r"""Returns the unique elements of the input tensor.
+
+
+
+>>> Lint for torch/ao/nn/quantizable/modules/activation.py:
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "pad" has incompatible type "tuple[int, int]"; expected
+    "list[int]"
+
+        369  |                k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
+        370  |                v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
+        371  |                if attn_mask is not None:
+    >>> 372  |                    attn_mask = nnF.pad(attn_mask, (0, 1))
+        373  |                if key_padding_mask is not None:
+        374  |                    key_padding_mask = nnF.pad(key_padding_mask, (0, 1))
+        375  |            else:
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "pad" has incompatible type "tuple[int, int]"; expected
+    "list[int]"
+
+        371  |                if attn_mask is not None:
+        372  |                    attn_mask = nnF.pad(attn_mask, (0, 1))
+        373  |                if key_padding_mask is not None:
+    >>> 374  |                    key_padding_mask = nnF.pad(key_padding_mask, (0, 1))
+        375  |            else:
+        376  |                assert static_k is None, "bias cannot be added to static key."
+        377  |                assert static_v is None, "bias cannot be added to static value."
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "pad" has incompatible type "tuple[int, int]"; expected
+    "list[int]"
+
+        413  |            v = torch.cat([v, v_zeros], dim=1)
+        414  |
+        415  |            if attn_mask is not None:
+    >>> 416  |                attn_mask = nnF.pad(attn_mask, (0, 1))
+        417  |            if key_padding_mask is not None:
+        418  |                key_padding_mask = nnF.pad(key_padding_mask, (0, 1))
+        419  |
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "pad" has incompatible type "tuple[int, int]"; expected
+    "list[int]"
+
+        415  |            if attn_mask is not None:
+        416  |                attn_mask = nnF.pad(attn_mask, (0, 1))
+        417  |            if key_padding_mask is not None:
+    >>> 418  |                key_padding_mask = nnF.pad(key_padding_mask, (0, 1))
+        419  |
+        420  |        # Leaving the quantized zone here
+        421  |        q = self.dequant_q(q)
+
+
+
+>>> Lint for torch/ao/nn/quantized/reference/modules/rnn.py:
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "rnn_tanh_cell"
+
+        138  |            hx = hx.unsqueeze(0) if not is_batched else hx
+        139  |
+        140  |        if self.nonlinearity == "tanh":
+    >>> 141  |            ret = _VF.rnn_tanh_cell(
+        142  |                input, hx,
+        143  |                self.get_weight_ih(), self.get_weight_hh(),
+        144  |                self.bias_ih, self.bias_hh,
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "rnn_relu_cell"
+
+        144  |                self.bias_ih, self.bias_hh,
+        145  |            )
+        146  |        elif self.nonlinearity == "relu":
+    >>> 147  |            ret = _VF.rnn_relu_cell(
+        148  |                input, hx,
+        149  |                self.get_weight_ih(), self.get_weight_hh(),
+        150  |                self.bias_ih, self.bias_hh,
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "lstm_cell"
+
+        202  |        else:
+        203  |            hx = (hx[0].unsqueeze(0), hx[1].unsqueeze(0)) if not is_batched else hx
+        204  |
+    >>> 205  |        ret = _VF.lstm_cell(
+        206  |            input, hx,
+        207  |            self.get_weight_ih(), self.get_weight_hh(),
+        208  |            self.bias_ih, self.bias_hh,
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "gru_cell"
+
+        253  |        else:
+        254  |            hx = hx.unsqueeze(0) if not is_batched else hx
+        255  |
+    >>> 256  |        ret = _VF.gru_cell(
+        257  |            input, hx,
+        258  |            self.get_weight_ih(), self.get_weight_hh(),
+        259  |            self.bias_ih, self.bias_hh,
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "lstm"
+
+        453  |
+        454  |        self.check_forward_args(input, hx, batch_sizes)
+        455  |        if batch_sizes is None:
+    >>> 456  |            result = _VF.lstm(input, hx, self.get_flat_weights(), self.bias, self.num_layers,
+        457  |                              self.dropout, self.training, self.bidirectional, self.batch_first)
+        458  |        else:
+        459  |            result = _VF.lstm(input, batch_sizes, hx, self.get_flat_weights(), self.bias,
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "lstm"
+
+        456  |            result = _VF.lstm(input, hx, self.get_flat_weights(), self.bias, self.num_layers,
+        457  |                              self.dropout, self.training, self.bidirectional, self.batch_first)
+        458  |        else:
+    >>> 459  |            result = _VF.lstm(input, batch_sizes, hx, self.get_flat_weights(), self.bias,
+        460  |                              self.num_layers, self.dropout, self.training, self.bidirectional)
+        461  |        output = result[0]
+        462  |        hidden = result[1:]
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "gru"
+
+        576  |
+        577  |        self.check_forward_args(input, hx, batch_sizes)
+        578  |        if batch_sizes is None:
+    >>> 579  |            result = _VF.gru(input, hx, self.get_flat_weights(), self.bias, self.num_layers,
+        580  |                             self.dropout, self.training, self.bidirectional, self.batch_first)
+        581  |        else:
+        582  |            result = _VF.gru(input, batch_sizes, hx, self.get_flat_weights(), self.bias,
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "gru"
+
+        579  |            result = _VF.gru(input, hx, self.get_flat_weights(), self.bias, self.num_layers,
+        580  |                             self.dropout, self.training, self.bidirectional, self.batch_first)
+        581  |        else:
+    >>> 582  |            result = _VF.gru(input, batch_sizes, hx, self.get_flat_weights(), self.bias,
+        583  |                             self.num_layers, self.dropout, self.training, self.bidirectional)
+        584  |        output = result[0]
+        585  |        hidden = result[1]
+
+
+
+>>> Lint for torch/autograd/forward_ad.py:
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "_make_dual"
+
+        120  |            f"Expected tangent to be floating point or complex, but got: {tangent.dtype}"
+        121  |        )
+        122  |
+    >>> 123  |    return torch._VF._make_dual(tensor, tangent, level=level)
+        124  |
+        125  |
+        126  |_UnpackedDualTensor = namedtuple("_UnpackedDualTensor", ["primal", "tangent"])
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "_unpack_dual"
+
+        163  |    if level < 0:
+        164  |        return UnpackedDualTensor(tensor, None)
+        165  |
+    >>> 166  |    primal, dual = torch._VF._unpack_dual(tensor, level=level)
+        167  |
+        168  |    return UnpackedDualTensor(primal, dual)
+        169  |
+
+
+
+>>> Lint for torch/distributed/_functional_collectives.py:
+
+  Error (MYPY) [attr-defined]
+    "ProcessGroup" has no attribute "group_name"; maybe "_set_group_name"?
+
+         721  |        warnings.warn(f"tag ({tag}) is ignored for process group resolution.")
+         722  |
+         723  |    if isinstance(group, dist.ProcessGroup):
+    >>>  724  |        return group.group_name
+         725  |    elif isinstance(group, str):
+         726  |        return group
+         727  |    elif isinstance(group, DeviceMesh):
+
+
+
+>>> Lint for torch/distributed/_tensor/tp_conv.py:
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "pad" has incompatible type "tuple[int, Any]"; expected
+    "list[int]"
+
+        194  |        padding_w = padding[1]
+        195  |        if rank == 0:
+        196  |            grad_out_tensor = torch.nn.functional.pad(
+    >>> 197  |                grad_out_tensor, (0, padding_w), "constant", 0
+        198  |            )
+        199  |        elif rank == size - 1:
+        200  |            grad_out_tensor = torch.nn.functional.pad(
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "pad" has incompatible type "tuple[Any, int]"; expected
+    "list[int]"
+
+        198  |            )
+        199  |        elif rank == size - 1:
+        200  |            grad_out_tensor = torch.nn.functional.pad(
+    >>> 201  |                grad_out_tensor, (padding_w, 0), "constant", 0
+        202  |            )
+        203  |        else:
+        204  |            grad_out_tensor = torch.nn.functional.pad(
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "pad" has incompatible type "tuple[Any, Any]"; expected
+    "list[int]"
+
+        202  |            )
+        203  |        else:
+        204  |            grad_out_tensor = torch.nn.functional.pad(
+    >>> 205  |                grad_out_tensor, (padding_w, padding_w), "constant", 0
+        206  |            )
+        207  |
+        208  |        # step3 feed local input tensor to op_call
+
+
+
+>>> Lint for torch/distributed/algorithms/ddp_comm_hooks/quantization_hooks.py:
+
+  Error (MYPY) [arg-type]
+    Argument "pad" to "pad" has incompatible type "tuple[int, Any]"; expected
+    "list[int]"
+
+        153  |    tensor_in_channels = (
+        154  |        nn.functional.pad(
+        155  |            input=tensor,
+    >>> 156  |            pad=(0, bucket_size - len(tensor) % bucket_size),
+        157  |            mode="constant",
+        158  |            value=0,
+        159  |        )
+
+
+
+>>> Lint for torch/distributed/device_mesh.py:
+
+  Error (MYPY) [attr-defined]
+    "ProcessGroup" has no attribute "group_name"; maybe "_set_group_name"?
+
+        270  |                    (
+        271  |                        _get_group_tag(_get_default_group()),
+        272  |                        list(range(get_world_size())),
+    >>> 273  |                        _get_default_group().group_name,
+        274  |                    )
+        275  |                )
+        276  |            else:
+
+
+
+>>> Lint for torch/distributed/distributed_c10d.py:
+
+  Error (MYPY) [attr-defined]
+    Module "torch._C._distributed_c10d" has no attribute
+    "_register_process_group"
+
+          16  |from typing import Any, Callable, Dict, Optional, Tuple, Union, List
+          17  |
+          18  |import torch
+    >>>   19  |from torch._C._distributed_c10d import (
+          20  |    AllgatherOptions,
+          21  |    AllreduceCoalescedOptions,
+          22  |    AllreduceOptions,
+
+  Error (MYPY) [attr-defined]
+    Module "torch._C._distributed_c10d" has no attribute
+    "_resolve_process_group"
+
+          16  |from typing import Any, Callable, Dict, Optional, Tuple, Union, List
+          17  |
+          18  |import torch
+    >>>   19  |from torch._C._distributed_c10d import (
+          20  |    AllgatherOptions,
+          21  |    AllreduceCoalescedOptions,
+          22  |    AllreduceOptions,
+
+  Error (MYPY) [attr-defined]
+    Module "torch._C._distributed_c10d" has no attribute
+    "_unregister_all_process_groups"
+
+          16  |from typing import Any, Callable, Dict, Optional, Tuple, Union, List
+          17  |
+          18  |import torch
+    >>>   19  |from torch._C._distributed_c10d import (
+          20  |    AllgatherOptions,
+          21  |    AllreduceCoalescedOptions,
+          22  |    AllreduceOptions,
+
+  Error (MYPY) [attr-defined]
+    Module "torch._C._distributed_c10d" has no attribute
+    "_unregister_process_group"
+
+          16  |from typing import Any, Callable, Dict, Optional, Tuple, Union, List
+          17  |
+          18  |import torch
+    >>>   19  |from torch._C._distributed_c10d import (
+          20  |    AllgatherOptions,
+          21  |    AllreduceCoalescedOptions,
+          22  |    AllreduceOptions,
+
+  Error (MYPY) [attr-defined]
+    "ProcessGroupNCCL" has no attribute "_shutdown"
+
+        1348  |        pass
+        1349  |    if isinstance(backend, ProcessGroupNCCL):
+        1350  |        # explictly call shutdown to ensure that NCCL resources are released
+    >>> 1351  |        backend._shutdown()
+        1352  |
+        1353  |def _new_process_group_helper(
+        1354  |    group_size,
+
+  Error (MYPY) [attr-defined]
+    "ProcessGroup" has no attribute "group_name"; maybe "_set_group_name"?
+
+        1670  |                    _world.tags_to_pg[""].remove(pg)
+        1671  |            except Exception:
+        1672  |                pass
+    >>> 1673  |        _unregister_process_group(pg.group_name)
+        1674  |
+        1675  |
+        1676  |def get_rank(group: Optional[ProcessGroup] = None) -> int:
+
+
+
+>>> Lint for torch/functional.py:
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "unique_dim"
+
+         899  |            return_counts=return_counts, dim=dim)
+         900  |
+         901  |    if dim is not None:
+    >>>  902  |        output, inverse_indices, counts = _VF.unique_dim(
+         903  |            input,
+         904  |            dim,
+         905  |            sorted=sorted,
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "frobenius_norm"
+
+        1638  |    if dim is None and out is None and dtype is None and p is not None:
+        1639  |        if isinstance(p, str):
+        1640  |            if p == "fro":
+    >>> 1641  |                return _VF.frobenius_norm(input, dim=(), keepdim=keepdim)
+        1642  |        if not isinstance(p, str):
+        1643  |            _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
+        1644  |            return _VF.norm(input, p, dim=_dim, keepdim=keepdim)  # type: ignore[attr-defined]
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "frobenius_norm"
+
+        1662  |            if _dim is None:
+        1663  |                _dim = list(range(ndim))
+        1664  |            if out is None:
+    >>> 1665  |                return _VF.frobenius_norm(input, _dim, keepdim=keepdim)  # type: ignore[arg-type]
+        1666  |            else:
+        1667  |                return _VF.frobenius_norm(input, _dim, keepdim=keepdim, out=out)  # type: ignore[arg-type]
+        1668  |        elif p == "nuc":
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "frobenius_norm"
+
+        1664  |            if out is None:
+        1665  |                return _VF.frobenius_norm(input, _dim, keepdim=keepdim)  # type: ignore[arg-type]
+        1666  |            else:
+    >>> 1667  |                return _VF.frobenius_norm(input, _dim, keepdim=keepdim, out=out)  # type: ignore[arg-type]
+        1668  |        elif p == "nuc":
+        1669  |            if dtype is not None:
+        1670  |                raise ValueError("dtype argument is not supported in nuclear norm")
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "nuclear_norm"
+
+        1670  |                raise ValueError("dtype argument is not supported in nuclear norm")
+        1671  |            if _dim is None:
+        1672  |                if out is None:
+    >>> 1673  |                    return _VF.nuclear_norm(input, keepdim=keepdim)  # type: ignore[arg-type]
+        1674  |                else:
+        1675  |                    return _VF.nuclear_norm(input, keepdim=keepdim, out=out)  # type: ignore[arg-type]
+        1676  |            else:
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "nuclear_norm"
+
+        1672  |                if out is None:
+        1673  |                    return _VF.nuclear_norm(input, keepdim=keepdim)  # type: ignore[arg-type]
+        1674  |                else:
+    >>> 1675  |                    return _VF.nuclear_norm(input, keepdim=keepdim, out=out)  # type: ignore[arg-type]
+        1676  |            else:
+        1677  |                if out is None:
+        1678  |                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim)  # type: ignore[arg-type]
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "nuclear_norm"
+
+        1675  |                    return _VF.nuclear_norm(input, keepdim=keepdim, out=out)  # type: ignore[arg-type]
+        1676  |            else:
+        1677  |                if out is None:
+    >>> 1678  |                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim)  # type: ignore[arg-type]
+        1679  |                else:
+        1680  |                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim, out=out)  # type: ignore[arg-type]
+        1681  |        raise RuntimeError(f"only valid string values are 'fro' and 'nuc', found {p}")
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "nuclear_norm"
+
+        1677  |                if out is None:
+        1678  |                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim)  # type: ignore[arg-type]
+        1679  |                else:
+    >>> 1680  |                    return _VF.nuclear_norm(input, _dim, keepdim=keepdim, out=out)  # type: ignore[arg-type]
+        1681  |        raise RuntimeError(f"only valid string values are 'fro' and 'nuc', found {p}")
+        1682  |    else:
+        1683  |        if _dim is None:
+
+
+
+>>> Lint for torch/jit/_builtins.py:
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "unique_dim"
+
+        101  |    (torch._VF.istft, "aten::istft"),  # type: ignore[attr-defined]
+        102  |    (torch._VF.cdist, "aten::cdist"),  # type: ignore[attr-defined]
+        103  |    (torch._VF.norm, "aten::norm"),  # type: ignore[attr-defined]
+    >>> 104  |    (torch._VF.unique_dim, "aten::unique_dim"),
+        105  |    (torch._VF.unique_consecutive, "aten::unique_consecutive"),  # type: ignore[attr-defined]
+        106  |    (torch._VF.nuclear_norm, "aten::nuclear_norm"),
+        107  |    (torch._VF.frobenius_norm, "aten::frobenius_norm"),
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "nuclear_norm"
+
+        103  |    (torch._VF.norm, "aten::norm"),  # type: ignore[attr-defined]
+        104  |    (torch._VF.unique_dim, "aten::unique_dim"),
+        105  |    (torch._VF.unique_consecutive, "aten::unique_consecutive"),  # type: ignore[attr-defined]
+    >>> 106  |    (torch._VF.nuclear_norm, "aten::nuclear_norm"),
+        107  |    (torch._VF.frobenius_norm, "aten::frobenius_norm"),
+        108  |    (torch._VF.tensordot, "aten::tensordot"),  # type: ignore[attr-defined]
+        109  |]
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "frobenius_norm"
+
+        104  |    (torch._VF.unique_dim, "aten::unique_dim"),
+        105  |    (torch._VF.unique_consecutive, "aten::unique_consecutive"),  # type: ignore[attr-defined]
+        106  |    (torch._VF.nuclear_norm, "aten::nuclear_norm"),
+    >>> 107  |    (torch._VF.frobenius_norm, "aten::frobenius_norm"),
+        108  |    (torch._VF.tensordot, "aten::tensordot"),  # type: ignore[attr-defined]
+        109  |]
+        110  |
+
+
+
+>>> Lint for torch/nn/functional.py:
+
+  Error (MYPY) [attr-defined]
+    Module "torch._jit_internal" has no attribute "BroadcastingList2"; maybe
+    "BroadcastingList1"?
+
+          22  |    # The JIT doesn't understand Union, nor torch.dtype here
+          23  |    DType = int
+          24  |
+    >>>   25  |from .._jit_internal import boolean_dispatch, _overload, BroadcastingList1, BroadcastingList2, BroadcastingList3
+          26  |from ..overrides import (
+          27  |    has_torch_function, has_torch_function_unary, has_torch_function_variadic,
+          28  |    handle_torch_function)
+
+  Error (MYPY) [attr-defined]
+    Module "torch._jit_internal" has no attribute "BroadcastingList3"; maybe
+    "BroadcastingList1"?
+
+          22  |    # The JIT doesn't understand Union, nor torch.dtype here
+          23  |    DType = int
+          24  |
+    >>>   25  |from .._jit_internal import boolean_dispatch, _overload, BroadcastingList1, BroadcastingList2, BroadcastingList3
+          26  |from ..overrides import (
+          27  |    has_torch_function, has_torch_function_unary, has_torch_function_variadic,
+          28  |    handle_torch_function)
+
+  Error (MYPY) [valid-type]
+    Variable "torch._jit_internal.BroadcastingList1" is not valid as a type
+
+         636  |
+         637  |
+         638  |def max_pool1d_with_indices(
+    >>>  639  |    input: Tensor, kernel_size: BroadcastingList1[int],
+         640  |    stride: Optional[BroadcastingList1[int]] = None,
+         641  |    padding: BroadcastingList1[int] = 0,
+         642  |    dilation: BroadcastingList1[int] = 1,
+
+  Error (MYPY) [valid-type]
+    Variable "torch._jit_internal.BroadcastingList1" is not valid as a type
+
+         637  |
+         638  |def max_pool1d_with_indices(
+         639  |    input: Tensor, kernel_size: BroadcastingList1[int],
+    >>>  640  |    stride: Optional[BroadcastingList1[int]] = None,
+         641  |    padding: BroadcastingList1[int] = 0,
+         642  |    dilation: BroadcastingList1[int] = 1,
+         643  |    ceil_mode: bool = False,
+
+  Error (MYPY) [valid-type]
+    Variable "torch._jit_internal.BroadcastingList1" is not valid as a type
+
+         638  |def max_pool1d_with_indices(
+         639  |    input: Tensor, kernel_size: BroadcastingList1[int],
+         640  |    stride: Optional[BroadcastingList1[int]] = None,
+    >>>  641  |    padding: BroadcastingList1[int] = 0,
+         642  |    dilation: BroadcastingList1[int] = 1,
+         643  |    ceil_mode: bool = False,
+         644  |    return_indices: bool = False
+
+  Error (MYPY) [valid-type]
+    Variable "torch._jit_internal.BroadcastingList1" is not valid as a type
+
+         639  |    input: Tensor, kernel_size: BroadcastingList1[int],
+         640  |    stride: Optional[BroadcastingList1[int]] = None,
+         641  |    padding: BroadcastingList1[int] = 0,
+    >>>  642  |    dilation: BroadcastingList1[int] = 1,
+         643  |    ceil_mode: bool = False,
+         644  |    return_indices: bool = False
+         645  |) -> Tuple[Tensor, Tensor]:  # noqa: D400
+
+  Error (MYPY) [valid-type]
+    Variable "torch._jit_internal.BroadcastingList1" is not valid as a type
+
+         686  |
+         687  |
+         688  |def _max_pool1d(
+    >>>  689  |    input: Tensor, kernel_size: BroadcastingList1[int],
+         690  |    stride: Optional[BroadcastingList1[int]] = None,
+         691  |    padding: BroadcastingList1[int] = 0,
+         692  |    dilation: BroadcastingList1[int] = 1,
+
+  Error (MYPY) [valid-type]
+    Variable "torch._jit_internal.BroadcastingList1" is not valid as a type
+
+         687  |
+         688  |def _max_pool1d(
+         689  |    input: Tensor, kernel_size: BroadcastingList1[int],
+    >>>  690  |    stride: Optional[BroadcastingList1[int]] = None,
+         691  |    padding: BroadcastingList1[int] = 0,
+         692  |    dilation: BroadcastingList1[int] = 1,
+         693  |    ceil_mode: bool = False,
+
+  Error (MYPY) [valid-type]
+    Variable "torch._jit_internal.BroadcastingList1" is not valid as a type
+
+         688  |def _max_pool1d(
+         689  |    input: Tensor, kernel_size: BroadcastingList1[int],
+         690  |    stride: Optional[BroadcastingList1[int]] = None,
+    >>>  691  |    padding: BroadcastingList1[int] = 0,
+         692  |    dilation: BroadcastingList1[int] = 1,
+         693  |    ceil_mode: bool = False,
+         694  |    return_indices: bool = False
+
+  Error (MYPY) [valid-type]
+    Variable "torch._jit_internal.BroadcastingList1" is not valid as a type
+
+         689  |    input: Tensor, kernel_size: BroadcastingList1[int],
+         690  |    stride: Optional[BroadcastingList1[int]] = None,
+         691  |    padding: BroadcastingList1[int] = 0,
+    >>>  692  |    dilation: BroadcastingList1[int] = 1,
+         693  |    ceil_mode: bool = False,
+         694  |    return_indices: bool = False
+         695  |) -> Tensor:
+
+  Error (MYPY) [valid-type]
+    Variable "torch._jit_internal.BroadcastingList1" is not valid as a type
+
+         924  |
+         925  |def max_unpool1d(
+         926  |    input: Tensor, indices: Tensor,
+    >>>  927  |    kernel_size: BroadcastingList1[int],
+         928  |    stride: Optional[BroadcastingList1[int]] = None,
+         929  |    padding: BroadcastingList1[int] = 0,
+         930  |    output_size: Optional[BroadcastingList1[int]] = None
+
+  Error (MYPY) [valid-type]
+    Variable "torch._jit_internal.BroadcastingList1" is not valid as a type
+
+         925  |def max_unpool1d(
+         926  |    input: Tensor, indices: Tensor,
+         927  |    kernel_size: BroadcastingList1[int],
+    >>>  928  |    stride: Optional[BroadcastingList1[int]] = None,
+         929  |    padding: BroadcastingList1[int] = 0,
+         930  |    output_size: Optional[BroadcastingList1[int]] = None
+         931  |) -> Tensor:
+
+  Error (MYPY) [valid-type]
+    Variable "torch._jit_internal.BroadcastingList1" is not valid as a type
+
+         926  |    input: Tensor, indices: Tensor,
+         927  |    kernel_size: BroadcastingList1[int],
+         928  |    stride: Optional[BroadcastingList1[int]] = None,
+    >>>  929  |    padding: BroadcastingList1[int] = 0,
+         930  |    output_size: Optional[BroadcastingList1[int]] = None
+         931  |) -> Tensor:
+         932  |    r"""Compute a partial inverse of :class:`MaxPool1d`.
+
+  Error (MYPY) [valid-type]
+    Variable "torch._jit_internal.BroadcastingList1" is not valid as a type
+
+         927  |    kernel_size: BroadcastingList1[int],
+         928  |    stride: Optional[BroadcastingList1[int]] = None,
+         929  |    padding: BroadcastingList1[int] = 0,
+    >>>  930  |    output_size: Optional[BroadcastingList1[int]] = None
+         931  |) -> Tensor:
+         932  |    r"""Compute a partial inverse of :class:`MaxPool1d`.
+         933  |
+
+  Error (MYPY) [valid-type]
+    Variable "torch._jit_internal.BroadcastingList1" is not valid as a type
+
+        1079  |def lp_pool1d(
+        1080  |    input: Tensor, norm_type: Union[int, float],
+        1081  |    kernel_size: int,
+    >>> 1082  |    stride: Optional[BroadcastingList1[int]] = None,
+        1083  |    ceil_mode: bool = False
+        1084  |) -> Tensor:
+        1085  |    r"""Apply a 1D power-average pooling over an input signal composed of several input planes.
+
+  Error (MYPY) [valid-type]
+    Variable "torch._jit_internal.BroadcastingList1" is not valid as a type
+
+        1102  |
+        1103  |
+        1104  |def adaptive_max_pool1d_with_indices(
+    >>> 1105  |    input: Tensor, output_size: BroadcastingList1[int], return_indices: bool = False
+        1106  |) -> Tuple[Tensor, Tensor]:  # noqa: D400
+        1107  |    r"""
+        1108  |    adaptive_max_pool1d(input, output_size, return_indices=False)
+
+  Error (MYPY) [valid-type]
+    Variable "torch._jit_internal.BroadcastingList1" is not valid as a type
+
+        1123  |    return torch.adaptive_max_pool1d(input, output_size)
+        1124  |
+        1125  |
+    >>> 1126  |def _adaptive_max_pool1d(input: Tensor, output_size: BroadcastingList1[int], return_indices: bool = False) -> Tensor:
+        1127  |    if has_torch_function_unary(input):
+        1128  |        return handle_torch_function(
+        1129  |            adaptive_max_pool1d, (input,), input, output_size, return_indices=return_indices
+
+  Error (MYPY) [no-redef]
+    Name "upsample" already defined on line 3740
+
+        3742  |    pass
+        3743  |
+        3744  |
+    >>> 3745  |@_overload  # noqa: F811
+        3746  |def upsample(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[float] = None, mode: str = "nearest", align_corners: Optional[bool] = None) -> Tensor:  # noqa: F811,B950
+        3747  |    pass
+        3748  |
+
+  Error (MYPY) [no-redef]
+    Name "upsample" already defined on line 3740
+
+        3747  |    pass
+        3748  |
+        3749  |
+    >>> 3750  |def upsample(input, size=None, scale_factor=None, mode="nearest", align_corners=None):  # noqa: F811
+        3751  |    r"""Upsample input.
+        3752  |
+        3753  |    Provided tensor is upsampled to either the given :attr:`size` or the given
+
+  Error (MYPY) [no-redef]
+    Name "interpolate" already defined on line 3829
+
+        3831  |    pass
+        3832  |
+        3833  |
+    >>> 3834  |@_overload  # noqa: F811
+        3835  |def interpolate(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811,B950
+        3836  |    pass
+        3837  |
+
+  Error (MYPY) [no-redef]
+    Name "interpolate" already defined on line 3829
+
+        3836  |    pass
+        3837  |
+        3838  |
+    >>> 3839  |@_overload  # noqa: F811
+        3840  |def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811,B950
+        3841  |    pass
+        3842  |
+
+  Error (MYPY) [no-redef]
+    Name "interpolate" already defined on line 3829
+
+        3841  |    pass
+        3842  |
+        3843  |
+    >>> 3844  |@_overload  # noqa: F811
+        3845  |def interpolate(  # noqa: F811
+        3846  |    input: Tensor,
+        3847  |    size: Optional[List[int]] = None,
+
+  Error (MYPY) [no-redef]
+    Name "interpolate" already defined on line 3829
+
+        3853  |) -> Tensor:  # noqa: F811
+        3854  |    pass
+        3855  |
+    >>> 3856  |def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811,B950
+        3857  |    r"""Down/up samples the input.
+        3858  |
+        3859  |    Tensor interpolated to either the given :attr:`size` or the given
+
+  Error (MYPY) [no-redef]
+    Name "upsample_nearest" already defined on line 4099
+
+        4101  |    pass
+        4102  |
+        4103  |
+    >>> 4104  |@_overload  # noqa: F811
+        4105  |def upsample_nearest(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[float] = None) -> Tensor:  # noqa: F811
+        4106  |    pass
+        4107  |
+
+  Error (MYPY) [no-redef]
+    Name "upsample_nearest" already defined on line 4099
+
+        4106  |    pass
+        4107  |
+        4108  |
+    >>> 4109  |def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
+        4110  |    r"""Upsamples the input, using nearest neighbours' pixel values.
+        4111  |
+        4112  |    .. warning::
+
+  Error (MYPY) [no-redef]
+    Name "upsample_bilinear" already defined on line 4137
+
+        4141  |    pass
+        4142  |
+        4143  |
+    >>> 4144  |@_overload  # noqa: F811
+        4145  |def upsample_bilinear(  # noqa: F811
+        4146  |    input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[float] = None
+        4147  |) -> Tensor:  # noqa: F811
+
+  Error (MYPY) [no-redef]
+    Name "upsample_bilinear" already defined on line 4137
+
+        4148  |    pass
+        4149  |
+        4150  |
+    >>> 4151  |@_overload  # noqa: F811
+        4152  |def upsample_bilinear(  # noqa: F811
+        4153  |    input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None
+        4154  |) -> Tensor:  # noqa: F811
+
+  Error (MYPY) [no-redef]
+    Name "upsample_bilinear" already defined on line 4137
+
+        4155  |    pass
+        4156  |
+        4157  |
+    >>> 4158  |@_overload  # noqa: F811
+        4159  |def upsample_bilinear(  # noqa: F811
+        4160  |    input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[List[float]] = None
+        4161  |) -> Tensor:  # noqa: F811
+
+  Error (MYPY) [no-redef]
+    Name "upsample_bilinear" already defined on line 4137
+
+        4162  |    pass
+        4163  |
+        4164  |
+    >>> 4165  |def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
+        4166  |    r"""Upsamples the input, using bilinear upsampling.
+        4167  |
+        4168  |    .. warning::
+
+  Error (MYPY) [assignment]
+    Incompatible types in assignment (expression has type "None", variable has
+    type Module)
+
+           7  |try:
+           8  |    import numpy as np
+           9  |except ModuleNotFoundError:
+    >>>   10  |    np = None
+          11  |
+          12  |import torch
+          13  |from torch import _VF
+
+  Error (MYPY) [arg-type]
+    Argument 3 to "max_pool1d_with_indices" has incompatible type
+    "BroadcastingList1?[builtins.int] | None"; expected "int | Size |
+    list[int] | tuple[int, ...]"
+
+         682  |        )
+         683  |    if stride is None:
+         684  |        stride = torch.jit.annotate(List[int], [])
+    >>>  685  |    return torch.max_pool1d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
+         686  |
+         687  |
+         688  |def _max_pool1d(
+
+  Error (MYPY) [arg-type]
+    Argument 3 to "max_pool1d" has incompatible type "BroadcastingList1?
+    [builtins.int] | None"; expected "int | Size | list[int] |
+    tuple[int, ...]"
+
+         707  |        )
+         708  |    if stride is None:
+         709  |        stride = torch.jit.annotate(List[int], [])
+    >>>  710  |    return torch.max_pool1d(input, kernel_size, stride, padding, dilation, ceil_mode)
+         711  |
+         712  |
+         713  |max_pool1d = boolean_dispatch(
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "max_pool2d_with_indices"
+
+         768  |        )
+         769  |    if stride is None:
+         770  |        stride = torch.jit.annotate(List[int], [])
+    >>>  771  |    return torch._C._nn.max_pool2d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
+         772  |
+         773  |
+         774  |def _max_pool2d(
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "max_pool3d_with_indices"
+
+         854  |        )
+         855  |    if stride is None:
+         856  |        stride = torch.jit.annotate(List[int], [])
+    >>>  857  |    return torch._C._nn.max_pool3d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
+         858  |
+         859  |
+         860  |def _max_pool3d(
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "max_unpool2d"
+
+         955  |        output_size = output_size + [1]
+         956  |    else:
+         957  |        output_size = output_size + (1,)
+    >>>  958  |    return torch._C._nn.max_unpool2d(input.unsqueeze(-1), indices.unsqueeze(-1), output_size).squeeze(-1)
+         959  |
+         960  |
+         961  |def max_unpool2d(
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "max_unpool2d"
+
+         987  |        _stride = kernel_size
+         988  |    padding = _pair(padding)
+         989  |    output_size = _unpool_output_size(input, kernel_size, _stride, padding, output_size)
+    >>>  990  |    return torch._C._nn.max_unpool2d(input, indices, output_size)
+         991  |
+         992  |
+         993  |def max_unpool3d(
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "max_unpool3d"
+
+        1019  |        _stride = kernel_size
+        1020  |    padding = _triple(padding)
+        1021  |    output_size = _unpool_output_size(input, kernel_size, _stride, padding, output_size)
+    >>> 1022  |    return torch._C._nn.max_unpool3d(input, indices, output_size, _stride, padding)
+        1023  |
+        1024  |
+        1025  |def lp_pool3d(
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "_list_with_default" has incompatible type "Size"; expected
+    "list[int]"
+
+        1162  |        return handle_torch_function(
+        1163  |            adaptive_max_pool2d_with_indices, (input,), input, output_size, return_indices=return_indices
+        1164  |        )
+    >>> 1165  |    output_size = _list_with_default(output_size, input.size())
+        1166  |    return torch._C._nn.adaptive_max_pool2d(input, output_size)
+        1167  |
+        1168  |
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "_list_with_default" has incompatible type "Size"; expected
+    "list[int]"
+
+        1206  |        return handle_torch_function(
+        1207  |            adaptive_max_pool3d_with_indices, (input,), input, output_size, return_indices=return_indices
+        1208  |        )
+    >>> 1209  |    output_size = _list_with_default(output_size, input.size())
+        1210  |    return torch._C._nn.adaptive_max_pool3d(input, output_size)
+        1211  |
+        1212  |
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "_list_with_default" has incompatible type "Size"; expected
+    "list[int]"
+
+        1256  |    """
+        1257  |    if has_torch_function_unary(input):
+        1258  |        return handle_torch_function(adaptive_avg_pool2d, (input,), input, output_size)
+    >>> 1259  |    _output_size = _list_with_default(output_size, input.size())
+        1260  |    return torch._C._nn.adaptive_avg_pool2d(input, _output_size)
+        1261  |
+        1262  |
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "adaptive_avg_pool2d"; maybe "adaptive_max_pool2d"
+    or "adaptive_max_pool3d"?
+
+        1257  |    if has_torch_function_unary(input):
+        1258  |        return handle_torch_function(adaptive_avg_pool2d, (input,), input, output_size)
+        1259  |    _output_size = _list_with_default(output_size, input.size())
+    >>> 1260  |    return torch._C._nn.adaptive_avg_pool2d(input, _output_size)
+        1261  |
+        1262  |
+        1263  |def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> Tensor:
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "_list_with_default" has incompatible type "Size"; expected
+    "list[int]"
+
+        1271  |    """
+        1272  |    if has_torch_function_unary(input):
+        1273  |        return handle_torch_function(adaptive_avg_pool3d, (input,), input, output_size)
+    >>> 1274  |    _output_size = _list_with_default(output_size, input.size())
+        1275  |    return torch._C._nn.adaptive_avg_pool3d(input, _output_size)
+        1276  |
+        1277  |
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "adaptive_avg_pool3d"; maybe "adaptive_max_pool3d"
+    or "adaptive_max_pool2d"?
+
+        1272  |    if has_torch_function_unary(input):
+        1273  |        return handle_torch_function(adaptive_avg_pool3d, (input,), input, output_size)
+        1274  |    _output_size = _list_with_default(output_size, input.size())
+    >>> 1275  |    return torch._C._nn.adaptive_avg_pool3d(input, _output_size)
+        1276  |
+        1277  |
+        1278  |# Activation functions
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "dropout_"
+
+        1292  |        return handle_torch_function(dropout, (input,), input, p=p, training=training, inplace=inplace)
+        1293  |    if p < 0.0 or p > 1.0:
+        1294  |        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
+    >>> 1295  |    return _VF.dropout_(input, p, training) if inplace else _VF.dropout(input, p, training)
+        1296  |
+        1297  |
+        1298  |def alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False, inplace: bool = False) -> Tensor:
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "dropout"
+
+        1292  |        return handle_torch_function(dropout, (input,), input, p=p, training=training, inplace=inplace)
+        1293  |    if p < 0.0 or p > 1.0:
+        1294  |        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
+    >>> 1295  |    return _VF.dropout_(input, p, training) if inplace else _VF.dropout(input, p, training)
+        1296  |
+        1297  |
+        1298  |def alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False, inplace: bool = False) -> Tensor:
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "alpha_dropout_"
+
+        1304  |        return handle_torch_function(alpha_dropout, (input,), input, p=p, training=training, inplace=inplace)
+        1305  |    if p < 0.0 or p > 1.0:
+        1306  |        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
+    >>> 1307  |    return _VF.alpha_dropout_(input, p, training) if inplace else _VF.alpha_dropout(input, p, training)
+        1308  |
+        1309  |
+        1310  |def dropout1d(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "alpha_dropout"
+
+        1304  |        return handle_torch_function(alpha_dropout, (input,), input, p=p, training=training, inplace=inplace)
+        1305  |    if p < 0.0 or p > 1.0:
+        1306  |        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
+    >>> 1307  |    return _VF.alpha_dropout_(input, p, training) if inplace else _VF.alpha_dropout(input, p, training)
+        1308  |
+        1309  |
+        1310  |def dropout1d(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "feature_dropout_"
+
+        1337  |    if not is_batched:
+        1338  |        input = input.unsqueeze_(0) if inplace else input.unsqueeze(0)
+        1339  |
+    >>> 1340  |    result = _VF.feature_dropout_(input, p, training) if inplace else _VF.feature_dropout(input, p, training)
+        1341  |
+        1342  |    if not is_batched:
+        1343  |        result = result.squeeze_(0) if inplace else result.squeeze(0)
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "feature_dropout"
+
+        1337  |    if not is_batched:
+        1338  |        input = input.unsqueeze_(0) if inplace else input.unsqueeze(0)
+        1339  |
+    >>> 1340  |    result = _VF.feature_dropout_(input, p, training) if inplace else _VF.feature_dropout(input, p, training)
+        1341  |
+        1342  |    if not is_batched:
+        1343  |        result = result.squeeze_(0) if inplace else result.squeeze(0)
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "feature_dropout_"
+
+        1384  |                      "input as one without a batch dimension, i.e. shape (C, H, W). To maintain the 1D "
+        1385  |                      "channel-wise dropout behavior, please switch to using dropout1d instead.")
+        1386  |
+    >>> 1387  |    result = _VF.feature_dropout_(input, p, training) if inplace else _VF.feature_dropout(input, p, training)
+        1388  |
+        1389  |    return result
+        1390  |
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "feature_dropout"
+
+        1384  |                      "input as one without a batch dimension, i.e. shape (C, H, W). To maintain the 1D "
+        1385  |                      "channel-wise dropout behavior, please switch to using dropout1d instead.")
+        1386  |
+    >>> 1387  |    result = _VF.feature_dropout_(input, p, training) if inplace else _VF.feature_dropout(input, p, training)
+        1388  |
+        1389  |    return result
+        1390  |
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "feature_dropout_"
+
+        1421  |    if not is_batched:
+        1422  |        input = input.unsqueeze_(0) if inplace else input.unsqueeze(0)
+        1423  |
+    >>> 1424  |    result = _VF.feature_dropout_(input, p, training) if inplace else _VF.feature_dropout(input, p, training)
+        1425  |
+        1426  |    if not is_batched:
+        1427  |        result = result.squeeze_(0) if inplace else result.squeeze(0)
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "feature_dropout"
+
+        1421  |    if not is_batched:
+        1422  |        input = input.unsqueeze_(0) if inplace else input.unsqueeze(0)
+        1423  |
+    >>> 1424  |    result = _VF.feature_dropout_(input, p, training) if inplace else _VF.feature_dropout(input, p, training)
+        1425  |
+        1426  |    if not is_batched:
+        1427  |        result = result.squeeze_(0) if inplace else result.squeeze(0)
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "feature_alpha_dropout_"
+
+        1454  |        )
+        1455  |    if p < 0.0 or p > 1.0:
+        1456  |        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
+    >>> 1457  |    return _VF.feature_alpha_dropout_(input, p, training) if inplace else _VF.feature_alpha_dropout(input, p, training)
+        1458  |
+        1459  |
+        1460  |def _threshold(input: Tensor, threshold: float, value: float, inplace: bool = False) -> Tensor:
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "feature_alpha_dropout"
+
+        1454  |        )
+        1455  |    if p < 0.0 or p > 1.0:
+        1456  |        raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
+    >>> 1457  |    return _VF.feature_alpha_dropout_(input, p, training) if inplace else _VF.feature_alpha_dropout(input, p, training)
+        1458  |
+        1459  |
+        1460  |def _threshold(input: Tensor, threshold: float, value: float, inplace: bool = False) -> Tensor:
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "threshold_"
+
+        1465  |    if has_torch_function_unary(input):
+        1466  |        return handle_torch_function(_threshold, (input,), input, threshold, value, inplace=inplace)
+        1467  |    if inplace:
+    >>> 1468  |        result = _VF.threshold_(input, threshold, value)
+        1469  |    else:
+        1470  |        result = _VF.threshold(input, threshold, value)
+        1471  |    return result
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "threshold"
+
+        1467  |    if inplace:
+        1468  |        result = _VF.threshold_(input, threshold, value)
+        1469  |    else:
+    >>> 1470  |        result = _VF.threshold(input, threshold, value)
+        1471  |    return result
+        1472  |
+        1473  |
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "threshold_"
+
+        1477  |threshold = _threshold
+        1478  |
+        1479  |threshold_ = _add_docstr(
+    >>> 1480  |    _VF.threshold_,
+        1481  |    r"""
+        1482  |threshold_(input, threshold, value) -> Tensor
+        1483  |
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "glu"; maybe "gelu"?
+
+        1533  |        return handle_torch_function(glu, (input,), input, dim=dim)
+        1534  |    if input.dim() == 0:
+        1535  |        raise RuntimeError("glu does not support scalars because halving size must be even")
+    >>> 1536  |    return torch._C._nn.glu(input, dim)
+        1537  |
+        1538  |
+        1539  |def hardtanh(input: Tensor, min_val: float = -1., max_val: float = 1., inplace: bool = False) -> Tensor:  # noqa: D400,D402
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "relu6_"; maybe "elu_"?
+
+        1572  |    if has_torch_function_unary(input):
+        1573  |        return handle_torch_function(relu6, (input,), input, inplace=inplace)
+        1574  |    if inplace:
+    >>> 1575  |        result = torch._C._nn.relu6_(input)
+        1576  |    else:
+        1577  |        result = torch._C._nn.relu6(input)
+        1578  |    return result
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "relu6"
+
+        1574  |    if inplace:
+        1575  |        result = torch._C._nn.relu6_(input)
+        1576  |    else:
+    >>> 1577  |        result = torch._C._nn.relu6(input)
+        1578  |    return result
+        1579  |
+        1580  |
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "elu"; maybe "elu_" or "gelu"?
+
+        1588  |    if inplace:
+        1589  |        result = torch._C._nn.elu_(input, alpha)
+        1590  |    else:
+    >>> 1591  |        result = torch._C._nn.elu(input, alpha)
+        1592  |    return result
+        1593  |
+        1594  |
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "hardsigmoid_"; maybe "hardsigmoid"?
+
+        2028  |    if has_torch_function_unary(input):
+        2029  |        return handle_torch_function(hardsigmoid, (input,), input, inplace=inplace)
+        2030  |    if inplace:
+    >>> 2031  |        return torch._C._nn.hardsigmoid_(input)
+        2032  |    return torch._C._nn.hardsigmoid(input)
+        2033  |
+        2034  |
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "silu_"
+
+        2098  |    if has_torch_function_unary(input):
+        2099  |        return handle_torch_function(silu, (input,), input, inplace=inplace)
+        2100  |    if inplace:
+    >>> 2101  |        return torch._C._nn.silu_(input)
+        2102  |    return torch._C._nn.silu(input)
+        2103  |
+        2104  |
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "silu"
+
+        2099  |        return handle_torch_function(silu, (input,), input, inplace=inplace)
+        2100  |    if inplace:
+        2101  |        return torch._C._nn.silu_(input)
+    >>> 2102  |    return torch._C._nn.silu(input)
+        2103  |
+        2104  |
+        2105  |def mish(input: Tensor, inplace: bool = False) -> Tensor:
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "mish_"
+
+        2118  |    if has_torch_function_unary(input):
+        2119  |        return handle_torch_function(mish, (input,), input, inplace=inplace)
+        2120  |    if inplace:
+    >>> 2121  |        return torch._C._nn.mish_(input)
+        2122  |    return torch._C._nn.mish(input)
+        2123  |
+        2124  |
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "mish"
+
+        2119  |        return handle_torch_function(mish, (input,), input, inplace=inplace)
+        2120  |    if inplace:
+        2121  |        return torch._C._nn.mish_(input)
+    >>> 2122  |    return torch._C._nn.mish(input)
+        2123  |
+        2124  |
+        2125  |def hardswish(input: Tensor, inplace: bool = False) -> Tensor:
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "hardswish_"
+
+        2143  |    if has_torch_function_unary(input):
+        2144  |        return handle_torch_function(hardswish, (input,), input, inplace=inplace)
+        2145  |    if inplace:
+    >>> 2146  |        return torch._C._nn.hardswish_(input)
+        2147  |    return torch._C._nn.hardswish(input)
+        2148  |
+        2149  |
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "hardswish"
+
+        2144  |        return handle_torch_function(hardswish, (input,), input, inplace=inplace)
+        2145  |    if inplace:
+        2146  |        return torch._C._nn.hardswish_(input)
+    >>> 2147  |    return torch._C._nn.hardswish(input)
+        2148  |
+        2149  |
+        2150  |def _no_grad_embedding_renorm_(weight: Tensor, input: Tensor, max_norm: float, norm_type: float) -> Tuple[Tensor, Tensor]:
+
+  Error (MYPY) [return]
+    Missing return statement
+
+        2147  |    return torch._C._nn.hardswish(input)
+        2148  |
+        2149  |
+    >>> 2150  |def _no_grad_embedding_renorm_(weight: Tensor, input: Tensor, max_norm: float, norm_type: float) -> Tuple[Tensor, Tensor]:
+        2151  |    torch.embedding_renorm_(weight.detach(), input, max_norm, norm_type)
+        2152  |
+        2153  |
+
+  Error (MYPY) [arg-type]
+    Argument 1 to "_verify_batch_size" has incompatible type "Size"; expected
+    "list[int]"
+
+        2504  |            eps=eps,
+        2505  |        )
+        2506  |    if training:
+    >>> 2507  |        _verify_batch_size(input.size())
+        2508  |
+        2509  |    return torch.batch_norm(
+        2510  |        input, weight, bias, running_mean, running_var, training, momentum, eps, torch.backends.cudnn.enabled
+
+  Error (MYPY) [arg-type]
+    Argument 1 to "_verify_spatial_size" has incompatible type "Size";
+    expected "list[int]"
+
+        2549  |            eps=eps,
+        2550  |        )
+        2551  |    if use_input_stats:
+    >>> 2552  |        _verify_spatial_size(input.size())
+        2553  |    return torch.instance_norm(
+        2554  |        input, weight, bias, running_mean, running_var, use_input_stats, momentum, eps, torch.backends.cudnn.enabled
+        2555  |    )
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "pad" has incompatible type "tuple[int, int, int, int]";
+    expected "list[int]"
+
+        2610  |    div = input.mul(input)
+        2611  |    if dim == 3:
+        2612  |        div = div.unsqueeze(1)
+    >>> 2613  |        div = pad(div, (0, 0, size // 2, (size - 1) // 2))
+        2614  |        div = avg_pool2d(div, (size, 1), stride=1).squeeze(1)
+        2615  |    else:
+        2616  |        sizes = input.size()
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "pad" has incompatible type "tuple[int, int, int, int, int,
+    int]"; expected "list[int]"
+
+        2615  |    else:
+        2616  |        sizes = input.size()
+        2617  |        div = div.view(sizes[0], 1, sizes[1], sizes[2], -1)
+    >>> 2618  |        div = pad(div, (0, 0, 0, 0, size // 2, (size - 1) // 2))
+        2619  |        div = avg_pool3d(div, (size, 1, 1), stride=1).squeeze(1)
+        2620  |        div = div.view(sizes)
+        2621  |    div = div.mul(alpha).add(k).pow(beta)
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "nll_loss_nd"
+
+        2757  |        )
+        2758  |    if size_average is not None or reduce is not None:
+        2759  |        reduction = _Reduction.legacy_get_string(size_average, reduce)
+    >>> 2760  |    return torch._C._nn.nll_loss_nd(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
+        2761  |
+        2762  |
+        2763  |def poisson_nll_loss(
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "cross_entropy_loss"
+
+        3083  |        )
+        3084  |    if size_average is not None or reduce is not None:
+        3085  |        reduction = _Reduction.legacy_get_string(size_average, reduce)
+    >>> 3086  |    return torch._C._nn.cross_entropy_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index, label_smoothing)
+        3087  |
+        3088  |
+        3089  |def binary_cross_entropy(
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "binary_cross_entropy"
+
+        3151  |        new_size = _infer_size(target.size(), weight.size())
+        3152  |        weight = weight.expand(new_size)
+        3153  |
+    >>> 3154  |    return torch._C._nn.binary_cross_entropy(input, target, weight, reduction_enum)
+        3155  |
+        3156  |
+        3157  |def binary_cross_entropy_with_logits(
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "l1_loss"
+
+        3265  |    expanded_input, expanded_target = torch.broadcast_tensors(input, target)
+        3266  |
+        3267  |    if beta == 0.0:
+    >>> 3268  |        return torch._C._nn.l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
+        3269  |    else:
+        3270  |        return torch._C._nn.smooth_l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction), beta)
+        3271  |
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "smooth_l1_loss"
+
+        3267  |    if beta == 0.0:
+        3268  |        return torch._C._nn.l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
+        3269  |    else:
+    >>> 3270  |        return torch._C._nn.smooth_l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction), beta)
+        3271  |
+        3272  |
+        3273  |def huber_loss(
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "huber_loss"
+
+        3302  |                      stacklevel=2)
+        3303  |
+        3304  |    expanded_input, expanded_target = torch.broadcast_tensors(input, target)
+    >>> 3305  |    return torch._C._nn.huber_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction), delta)
+        3306  |
+        3307  |
+        3308  |def l1_loss(
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "l1_loss"
+
+        3333  |        reduction = _Reduction.legacy_get_string(size_average, reduce)
+        3334  |
+        3335  |    expanded_input, expanded_target = torch.broadcast_tensors(input, target)
+    >>> 3336  |    return torch._C._nn.l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
+        3337  |
+        3338  |
+        3339  |def mse_loss(
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "mse_loss"
+
+        3363  |        reduction = _Reduction.legacy_get_string(size_average, reduce)
+        3364  |
+        3365  |    expanded_input, expanded_target = torch.broadcast_tensors(input, target)
+    >>> 3366  |    return torch._C._nn.mse_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
+        3367  |
+        3368  |
+        3369  |def margin_ranking_loss(
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "multilabel_margin_loss"
+
+        3458  |        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
+        3459  |    else:
+        3460  |        reduction_enum = _Reduction.get_enum(reduction)
+    >>> 3461  |    return torch._C._nn.multilabel_margin_loss(input, target, reduction_enum)
+        3462  |
+        3463  |
+        3464  |def soft_margin_loss(
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "soft_margin_loss"
+
+        3481  |        reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
+        3482  |    else:
+        3483  |        reduction_enum = _Reduction.get_enum(reduction)
+    >>> 3484  |    return torch._C._nn.soft_margin_loss(input, target, reduction_enum)
+        3485  |
+        3486  |
+        3487  |def multilabel_soft_margin_loss(
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "multi_margin_loss"
+
+        3600  |        if weight.dim() != 1:
+        3601  |            raise ValueError("weight must be one-dimensional")
+        3602  |
+    >>> 3603  |    return torch._C._nn.multi_margin_loss(input, target, p, margin, weight, reduction_enum)
+        3604  |
+        3605  |
+        3606  |pixel_shuffle = _add_docstr(
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "im2col"
+
+        4814  |        return handle_torch_function(
+        4815  |            unfold, (input,), input, kernel_size, dilation=dilation, padding=padding, stride=stride
+        4816  |        )
+    >>> 4817  |    return torch._C._nn.im2col(input, _pair(kernel_size), _pair(dilation), _pair(padding), _pair(stride))
+        4818  |
+        4819  |
+        4820  |def fold(
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "col2im"
+
+        4835  |        return handle_torch_function(
+        4836  |            fold, (input,), input, output_size, kernel_size, dilation=dilation, padding=padding, stride=stride
+        4837  |        )
+    >>> 4838  |    return torch._C._nn.col2im(
+        4839  |        input, _pair(output_size), _pair(kernel_size), _pair(dilation), _pair(padding), _pair(stride)
+        4840  |    )
+        4841  |
+
+  Error (MYPY) [return-value]
+    Incompatible return value type (got "tuple[Any, Any, Any]", expected
+    "list[Tensor]")
+
+        4884  |            proj = linear(q, w, b)
+        4885  |            # reshape to 3, E and not E, 3 is deliberate for better memory coalescing and keeping same order as chunk()
+        4886  |            proj = proj.unflatten(-1, (3, E)).unsqueeze(0).transpose(0, -2).squeeze(-2).contiguous()
+    >>> 4887  |            return proj[0], proj[1], proj[2]
+        4888  |        else:
+        4889  |            # encoder-decoder attention
+        4890  |            w_q, w_kv = w.split([E, E * 2])
+
+  Error (MYPY) [return-value]
+    Incompatible return value type (got "tuple[Tensor, Any, Any]", expected
+    "list[Tensor]")
+
+        4896  |            kv_proj = linear(k, w_kv, b_kv)
+        4897  |            # reshape to 2, E and not E, 2 is deliberate for better memory coalescing and keeping same order as chunk()
+        4898  |            kv_proj = kv_proj.unflatten(-1, (2, E)).unsqueeze(0).transpose(0, -2).squeeze(-2).contiguous()
+    >>> 4899  |            return (q_proj, kv_proj[0], kv_proj[1])
+        4900  |    else:
+        4901  |        w_q, w_k, w_v = w.chunk(3)
+        4902  |        if b is None:
+
+  Error (MYPY) [return-value]
+    Incompatible return value type (got "tuple[Tensor, Tensor, Tensor]",
+    expected "list[Tensor]")
+
+        4903  |            b_q = b_k = b_v = None
+        4904  |        else:
+        4905  |            b_q, b_k, b_v = b.chunk(3)
+    >>> 4906  |        return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
+        4907  |
+        4908  |
+        4909  |def _in_projection(
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "pad" has incompatible type "tuple[int, int]"; expected
+    "list[int]"
+
+        5394  |        k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
+        5395  |        v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
+        5396  |        if attn_mask is not None:
+    >>> 5397  |            attn_mask = pad(attn_mask, (0, 1))
+        5398  |        if key_padding_mask is not None:
+        5399  |            key_padding_mask = pad(key_padding_mask, (0, 1))
+        5400  |    else:
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "pad" has incompatible type "tuple[int, int]"; expected
+    "list[int]"
+
+        5396  |        if attn_mask is not None:
+        5397  |            attn_mask = pad(attn_mask, (0, 1))
+        5398  |        if key_padding_mask is not None:
+    >>> 5399  |            key_padding_mask = pad(key_padding_mask, (0, 1))
+        5400  |    else:
+        5401  |        assert bias_k is None
+        5402  |        assert bias_v is None
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "pad" has incompatible type "tuple[int, int]"; expected
+    "list[int]"
+
+        5430  |        k = torch.cat([k, torch.zeros(zero_attn_shape, dtype=k.dtype, device=k.device)], dim=1)
+        5431  |        v = torch.cat([v, torch.zeros(zero_attn_shape, dtype=v.dtype, device=v.device)], dim=1)
+        5432  |        if attn_mask is not None:
+    >>> 5433  |            attn_mask = pad(attn_mask, (0, 1))
+        5434  |        if key_padding_mask is not None:
+        5435  |            key_padding_mask = pad(key_padding_mask, (0, 1))
+        5436  |
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "pad" has incompatible type "tuple[int, int]"; expected
+    "list[int]"
+
+        5432  |        if attn_mask is not None:
+        5433  |            attn_mask = pad(attn_mask, (0, 1))
+        5434  |        if key_padding_mask is not None:
+    >>> 5435  |            key_padding_mask = pad(key_padding_mask, (0, 1))
+        5436  |
+        5437  |    # update source sequence length after adjustments
+        5438  |    src_len = k.size(1)
+
+
+
+>>> Lint for torch/nn/modules/normalization.py:
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "layer_norm" has incompatible type "tuple[int, ...]";
+    expected "list[int]"
+
+        199  |
+        200  |    def forward(self, input: Tensor) -> Tensor:
+        201  |        return F.layer_norm(
+    >>> 202  |            input, self.normalized_shape, self.weight, self.bias, self.eps)
+        203  |
+        204  |    def extra_repr(self) -> str:
+        205  |        return '{normalized_shape}, eps={eps}, ' \
+
+
+
+>>> Lint for torch/nn/modules/padding.py:
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "pad" has incompatible type "Sequence[int]"; expected
+    "list[int]"
+
+         23  |
+         24  |    def forward(self, input: Tensor) -> Tensor:
+         25  |        self._check_input_dim(input)
+    >>>  26  |        return F.pad(input, self.padding, 'circular')
+         27  |
+         28  |    def extra_repr(self) -> str:
+         29  |        return f'{self.padding}'
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "pad" has incompatible type "Sequence[int]"; expected
+    "list[int]"
+
+        202  |        self.value = value
+        203  |
+        204  |    def forward(self, input: Tensor) -> Tensor:
+    >>> 205  |        return F.pad(input, self.padding, 'constant', self.value)
+        206  |
+        207  |    def extra_repr(self) -> str:
+        208  |        return f'padding={self.padding}, value={self.value}'
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "pad" has incompatible type "Sequence[int]"; expected
+    "list[int]"
+
+        355  |    padding: Sequence[int]
+        356  |
+        357  |    def forward(self, input: Tensor) -> Tensor:
+    >>> 358  |        return F.pad(input, self.padding, 'reflect')
+        359  |
+        360  |    def extra_repr(self) -> str:
+        361  |        return f'{self.padding}'
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "pad" has incompatible type "Sequence[int]"; expected
+    "list[int]"
+
+        514  |    padding: Sequence[int]
+        515  |
+        516  |    def forward(self, input: Tensor) -> Tensor:
+    >>> 517  |        return F.pad(input, self.padding, 'replicate')
+        518  |
+        519  |    def extra_repr(self) -> str:
+        520  |        return f'{self.padding}'
+
+
+
+>>> Lint for torch/nn/modules/rnn.py:
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "rnn_tanh"
+
+          15  |__all__ = ['RNNBase', 'RNN', 'LSTM', 'GRU', 'RNNCellBase', 'RNNCell', 'LSTMCell', 'GRUCell']
+          16  |
+          17  |_rnn_impls = {
+    >>>   18  |    'RNN_TANH': _VF.rnn_tanh,
+          19  |    'RNN_RELU': _VF.rnn_relu,
+          20  |}
+          21  |
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "rnn_relu"
+
+          16  |
+          17  |_rnn_impls = {
+          18  |    'RNN_TANH': _VF.rnn_tanh,
+    >>>   19  |    'RNN_RELU': _VF.rnn_relu,
+          20  |}
+          21  |
+          22  |
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "rnn_tanh"
+
+         578  |        assert self.mode == 'RNN_TANH' or self.mode == 'RNN_RELU'
+         579  |        if batch_sizes is None:
+         580  |            if self.mode == 'RNN_TANH':
+    >>>  581  |                result = _VF.rnn_tanh(input, hx, self._flat_weights, self.bias, self.num_layers,
+         582  |                                      self.dropout, self.training, self.bidirectional,
+         583  |                                      self.batch_first)
+         584  |            else:
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "rnn_relu"
+
+         582  |                                      self.dropout, self.training, self.bidirectional,
+         583  |                                      self.batch_first)
+         584  |            else:
+    >>>  585  |                result = _VF.rnn_relu(input, hx, self._flat_weights, self.bias, self.num_layers,
+         586  |                                      self.dropout, self.training, self.bidirectional,
+         587  |                                      self.batch_first)
+         588  |        else:
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "rnn_tanh"
+
+         587  |                                      self.batch_first)
+         588  |        else:
+         589  |            if self.mode == 'RNN_TANH':
+    >>>  590  |                result = _VF.rnn_tanh(input, batch_sizes, hx, self._flat_weights, self.bias,
+         591  |                                      self.num_layers, self.dropout, self.training,
+         592  |                                      self.bidirectional)
+         593  |            else:
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "rnn_relu"
+
+         591  |                                      self.num_layers, self.dropout, self.training,
+         592  |                                      self.bidirectional)
+         593  |            else:
+    >>>  594  |                result = _VF.rnn_relu(input, batch_sizes, hx, self._flat_weights, self.bias,
+         595  |                                      self.num_layers, self.dropout, self.training,
+         596  |                                      self.bidirectional)
+         597  |
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "lstm"
+
+         903  |                hx = self.permute_hidden(hx, sorted_indices)
+         904  |
+         905  |        if batch_sizes is None:
+    >>>  906  |            result = _VF.lstm(input, hx, self._flat_weights, self.bias, self.num_layers,
+         907  |                              self.dropout, self.training, self.bidirectional, self.batch_first)
+         908  |        else:
+         909  |            result = _VF.lstm(input, batch_sizes, hx, self._flat_weights, self.bias,
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "lstm"
+
+         906  |            result = _VF.lstm(input, hx, self._flat_weights, self.bias, self.num_layers,
+         907  |                              self.dropout, self.training, self.bidirectional, self.batch_first)
+         908  |        else:
+    >>>  909  |            result = _VF.lstm(input, batch_sizes, hx, self._flat_weights, self.bias,
+         910  |                              self.num_layers, self.dropout, self.training, self.bidirectional)
+         911  |        output = result[0]
+         912  |        hidden = result[1:]
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "gru"
+
+        1125  |
+        1126  |        self.check_forward_args(input, hx, batch_sizes)
+        1127  |        if batch_sizes is None:
+    >>> 1128  |            result = _VF.gru(input, hx, self._flat_weights, self.bias, self.num_layers,
+        1129  |                             self.dropout, self.training, self.bidirectional, self.batch_first)
+        1130  |        else:
+        1131  |            result = _VF.gru(input, batch_sizes, hx, self._flat_weights, self.bias,
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "gru"
+
+        1128  |            result = _VF.gru(input, hx, self._flat_weights, self.bias, self.num_layers,
+        1129  |                             self.dropout, self.training, self.bidirectional, self.batch_first)
+        1130  |        else:
+    >>> 1131  |            result = _VF.gru(input, batch_sizes, hx, self._flat_weights, self.bias,
+        1132  |                             self.num_layers, self.dropout, self.training, self.bidirectional)
+        1133  |        output = result[0]
+        1134  |        hidden = result[1]
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "rnn_tanh_cell"
+
+        1267  |            hx = hx.unsqueeze(0) if not is_batched else hx
+        1268  |
+        1269  |        if self.nonlinearity == "tanh":
+    >>> 1270  |            ret = _VF.rnn_tanh_cell(
+        1271  |                input, hx,
+        1272  |                self.weight_ih, self.weight_hh,
+        1273  |                self.bias_ih, self.bias_hh,
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "rnn_relu_cell"
+
+        1273  |                self.bias_ih, self.bias_hh,
+        1274  |            )
+        1275  |        elif self.nonlinearity == "relu":
+    >>> 1276  |            ret = _VF.rnn_relu_cell(
+        1277  |                input, hx,
+        1278  |                self.weight_ih, self.weight_hh,
+        1279  |                self.bias_ih, self.bias_hh,
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "lstm_cell"
+
+        1371  |        else:
+        1372  |            hx = (hx[0].unsqueeze(0), hx[1].unsqueeze(0)) if not is_batched else hx
+        1373  |
+    >>> 1374  |        ret = _VF.lstm_cell(
+        1375  |            input, hx,
+        1376  |            self.weight_ih, self.weight_hh,
+        1377  |            self.bias_ih, self.bias_hh,
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "gru_cell"
+
+        1463  |        else:
+        1464  |            hx = hx.unsqueeze(0) if not is_batched else hx
+        1465  |
+    >>> 1466  |        ret = _VF.gru_cell(
+        1467  |            input, hx,
+        1468  |            self.weight_ih, self.weight_hh,
+        1469  |            self.bias_ih, self.bias_hh,
+
+
+
+>>> Lint for torch/sparse/semi_structured.py:
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "pad" has incompatible type "tuple[int, Any, int, Any]";
+    expected "list[int]"
+
+        278  |        to_pad_m = -m % min_rows if m < min_rows or m % min_rows else 0
+        279  |        to_pad_n = -n % min_cols if n < min_cols or n % min_rows else 0
+        280  |        if to_pad_m or to_pad_n:
+    >>> 281  |            return torch.nn.functional.pad(original_tensor, (0, to_pad_n, 0, to_pad_m))
+        282  |        else:
+        283  |            return original_tensor
+        284  |
+
+
+
+>>> Lint for torch/utils/_content_store.py:
+
+  Error (MYPY) [arg-type]
+    Argument 2 to "pad" has incompatible type "tuple[int, int]"; expected
+    "list[int]"
+
+        127  |        # though it could be profitably fused
+        128  |        pad = -x.numel() % 4
+        129  |        if pad > 0:
+    >>> 130  |            x = F.pad(x, (0, pad), "constant", 0)
+        131  |        x = x.view(torch.int32)
+        132  |        # We run the 32-bit hash five times with differing parameters to
+        133  |        # reduce chance of collision
+
+
+
+>>> Lint for torch/xpu/__init__.py:
+
+  Error (MYPY) [valid-type]
+    Variable "torch.xpu._XpuDeviceProperties" is not valid as a type
+
+        193  |    }
+        194  |
+        195  |
+    >>> 196  |def get_device_properties(device: Optional[_device_t] = None) -> _XpuDeviceProperties:
+        197  |    r"""Get the properties of a device.
+        198  |
+        199  |    Args:
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "_has_xpu"
+
+         23  |
+         24  |def _is_compiled() -> bool:
+         25  |    r"""Return true if compile with XPU support."""
+    >>>  26  |    return torch._C._has_xpu
+         27  |
+         28  |
+         29  |if _is_compiled():
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "_XpuDeviceProperties"; maybe
+    "_CudaDeviceProperties"?
+
+         27  |
+         28  |
+         29  |if _is_compiled():
+    >>>  30  |    _XpuDeviceProperties = torch._C._XpuDeviceProperties
+         31  |    _exchange_device = torch._C._xpu_exchangeDevice
+         32  |    _maybe_exchange_device = torch._C._xpu_maybeExchangeDevice
+         33  |else:
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "_xpu_exchangeDevice"; maybe
+    "_cuda_exchangeDevice"?
+
+         28  |
+         29  |if _is_compiled():
+         30  |    _XpuDeviceProperties = torch._C._XpuDeviceProperties
+    >>>  31  |    _exchange_device = torch._C._xpu_exchangeDevice
+         32  |    _maybe_exchange_device = torch._C._xpu_maybeExchangeDevice
+         33  |else:
+         34  |    # Define dummy if PyTorch was compiled without XPU
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "_xpu_maybeExchangeDevice"; maybe
+    "_cuda_maybeExchangeDevice"?
+
+         29  |if _is_compiled():
+         30  |    _XpuDeviceProperties = torch._C._XpuDeviceProperties
+         31  |    _exchange_device = torch._C._xpu_exchangeDevice
+    >>>  32  |    _maybe_exchange_device = torch._C._xpu_maybeExchangeDevice
+         33  |else:
+         34  |    # Define dummy if PyTorch was compiled without XPU
+         35  |    _XpuDeviceProperties = _dummy_type("_XpuDeviceProperties")  # type: ignore[assignment, misc]
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "_xpu_getDeviceCount"; maybe
+    "_cuda_getDeviceCount"?
+
+         46  |    r"""Return the number of XPU device available."""
+         47  |    if not _is_compiled():
+         48  |        return 0
+    >>>  49  |    return torch._C._xpu_getDeviceCount()
+         50  |
+         51  |
+         52  |def is_available() -> bool:
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "_xpu_init"; maybe "_rpc_init"?
+
+         92  |        if not _is_compiled():
+         93  |            raise AssertionError("Torch not compiled with XPU enabled")
+         94  |        # This function inits XPU backend and detects bad fork processing.
+    >>>  95  |        torch._C._xpu_init()
+         96  |        _initialized = True
+         97  |
+         98  |
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "_xpu_setDevice"; maybe "_cuda_setDevice" or
+    "_cuda_getDevice"?
+
+        154  |    _lazy_init()
+        155  |    device = _get_device_index(device)
+        156  |    if device >= 0:
+    >>> 157  |        torch._C._xpu_setDevice(device)
+        158  |
+        159  |
+        160  |def get_device_name(device: Optional[_device_t] = None) -> str:
+
+  Error (MYPY) [attr-defined]
+    _XpuDeviceProperties? has no attribute "name"
+
+        169  |    Returns:
+        170  |        str: the name of the device
+        171  |    """
+    >>> 172  |    return get_device_properties(device).name
+        173  |
+        174  |
+        175  |def get_device_capability(device: Optional[_device_t] = None) -> Dict[str, Any]:
+
+  Error (MYPY) [attr-defined]
+    _XpuDeviceProperties? has no attribute "max_work_group_size"
+
+        187  |    """
+        188  |    prop = get_device_properties(device)
+        189  |    return {
+    >>> 190  |        "max_work_group_size": prop.max_work_group_size,
+        191  |        "max_num_sub_groups": prop.max_num_sub_groups,
+        192  |        "sub_group_sizes": prop.sub_group_sizes,
+        193  |    }
+
+  Error (MYPY) [attr-defined]
+    _XpuDeviceProperties? has no attribute "max_num_sub_groups"
+
+        188  |    prop = get_device_properties(device)
+        189  |    return {
+        190  |        "max_work_group_size": prop.max_work_group_size,
+    >>> 191  |        "max_num_sub_groups": prop.max_num_sub_groups,
+        192  |        "sub_group_sizes": prop.sub_group_sizes,
+        193  |    }
+        194  |
+
+  Error (MYPY) [attr-defined]
+    _XpuDeviceProperties? has no attribute "sub_group_sizes"
+
+        189  |    return {
+        190  |        "max_work_group_size": prop.max_work_group_size,
+        191  |        "max_num_sub_groups": prop.max_num_sub_groups,
+    >>> 192  |        "sub_group_sizes": prop.sub_group_sizes,
+        193  |    }
+        194  |
+        195  |
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "_xpu_getDevice"; maybe "_cuda_getDevice" or
+    "_cuda_setDevice"?
+
+        213  |def current_device() -> int:
+        214  |    r"""Return the index of a currently selected device."""
+        215  |    _lazy_init()
+    >>> 216  |    return torch._C._xpu_getDevice()
+        217  |
+        218  |
+        219  |def _get_device(device: Union[int, str, torch.device]) -> torch.device:
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "_xpu_setStream"; maybe "_cuda_setStream"?
+
+        287  |          device_index (int): selected device index.
+        288  |          device_type (int): selected device type.
+        289  |    """
+    >>> 290  |    torch._C._xpu_setStream(
+        291  |        stream_id=stream_id,
+        292  |        device_index=device_index,
+        293  |        device_type=device_type,
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "_xpu_getCurrentStream"; maybe
+    "_cuda_getCurrentStream"?
+
+        323  |            (default).
+        324  |    """
+        325  |    _lazy_init()
+    >>> 326  |    streamdata = torch._C._xpu_getCurrentStream(
+        327  |        _get_device_index(device, optional=True)
+        328  |    )
+        329  |    return Stream(
+
+  Error (MYPY) [attr-defined]
+    Module has no attribute "_xpu_synchronize"; maybe "_cuda_synchronize"?
+
+        341  |    """
+        342  |    _lazy_init()
+        343  |    device = _get_device_index(device)
+    >>> 344  |    return torch._C._xpu_synchronize(device)
+        345  |
+        346  |
+        347  |__all__ = [
+
+
+
+>>> Lint for torch/xpu/streams.py:
+
+  Error (MYPY) [name-defined]
+    Name "torch._C._XpuStreamBase" is not defined
+
+        10  |    torch._C.__dict__["_XpuStreamBase"] = _dummy_type("_XpuStreamBase")
+        11  |
+        12  |
+    >>> 13  |class Stream(torch._C._XpuStreamBase, _StreamBase):
+        14  |    r"""Wrapper around a XPU stream.
+        15  |
+        16  |    A XPU stream is a linear sequence of execution that belongs to a specific
