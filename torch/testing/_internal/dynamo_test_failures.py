@@ -2056,15 +2056,9 @@ dynamo_expected_failures = {
     "TestQuantizePT2EQATModels.test_qat_resnet18",  # test_quantization.py
     "TestQuantizePT2EQATModels.test_qat_mobilenet_v2",  # test_quantization.py
     "TestObserver.test_per_channel_observers",  # test_quantization.py
-    "TestCustomOp.test_define_with_tags_single",  # test_custom_ops
-    "TestCustomOp.test_autogen_aten_ops_are_pt2_compliant",  # test_custom_ops
-    "TestCustomOp.test_define_with_tags_list",  # test_custom_ops
     "TestCustomOp.test_impl_device_cpu",  # test_custom_ops
     "TestCustomOp.test_impl_device_function",  # test_custom_ops
-    "TestCustomOp.test_builtin_torchscript_ops",  # test_custom_ops
     "TestCustomOpTestingCPU.test_missing_functionalization_cpu",  # test_custom_ops
-    "TestCustomOp.test_define_with_tags_tuple",  # test_custom_ops
-    "TestCustomOp.test_builtin_aten_ops_are_pt2_compliant",  # test_custom_ops
     "TestGenerateOpcheckTests.test_opcheck_bad_op",  # test_custom_ops
     "TestCustomOp.test_legacy_define",  # test_custom_ops
     "TestPythonRegistration.test_alias_analysis",  # test_python_dispatch
