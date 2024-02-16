@@ -449,15 +449,9 @@ static std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
         dilation, transposed, output_padding, groups, output_mask);
   }
 
-  Tensor grad_output;
-  optional<int64_t> grad_output_bdim;
-  std::tie(grad_output, grad_output_bdim) = unwrapTensorAtLevel(grad_output_, cur_level);
-  Tensor input;
-  optional<int64_t> input_bdim;
-  std::tie(input, input_bdim) = unwrapTensorAtLevel(input_, cur_level);
-  Tensor weight;
-  optional<int64_t> weight_bdim;
-  std::tie(weight, weight_bdim) = unwrapTensorAtLevel(weight_, cur_level);
+  auto [grad_output, grad_output_bdim] = unwrapTensorAtLevel(grad_output_, cur_level);
+  auto [input, input_bdim] = unwrapTensorAtLevel(input_, cur_level);
+  auto [weight, weight_bdim] = unwrapTensorAtLevel(weight_, cur_level);
 
   const auto grad_bias = compute_grad_bias(grad_output_, output_mask);
   output_mask[2] = false;

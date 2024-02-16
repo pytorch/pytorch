@@ -30,7 +30,9 @@ from .codegen.common import (
     get_wrapper_codegen_for_device,
     register_backend_for_device,
 )
-from .codegen.wrapper import CppWrapperCodeGen, CudaWrapperCodeGen, WrapperCodeGen
+from .codegen.cpp_wrapper_cpu import CppWrapperCodeGen
+from .codegen.cpp_wrapper_cuda import CudaWrapperCodeGen
+from .codegen.wrapper import WrapperCodeGen
 from .exc import (
     CppWrapperCodeGenError,
     LoweringException,
@@ -326,19 +328,19 @@ class GraphLowering(torch.fx.Interpreter):
         if nconv == 0:
             return False
 
-        # For cpu backend and mkldnn enabled, we always using channels_last for a better performance.
+        # For cpu backend and mkldnn enabled, we always use channels_last for better performance.
         if (
-            all(
+            torch.backends.mkldnn.enabled
+            and torch.backends.mkldnn.is_available()
+            and all(
                 n.args[idx].meta["val"].device == torch.device("cpu")
                 for n in conv_nodes
                 for idx in [0, 1]
             )
-            and torch.backends.mkldnn.enabled
-            and torch.backends.mkldnn.is_available()
         ):
             return True
 
-        # Followering models are skipped due to this:
+        # Following models are skipped due to this:
         # jx_nest_base
         # volo_d1_224
         if len(list(gm.graph.nodes)) >= 300 * nconv:
@@ -441,7 +443,7 @@ class GraphLowering(torch.fx.Interpreter):
         #
         # The following heuristics skip using channels-last if the model contains
         # grouped convolution with in-channels > 1.
-        if any(is_grouped(n) for n in conv_nodes):
+        if any(map(is_grouped, conv_nodes)):
             log.debug(
                 "Skip layout opt because found grouped convolution with >1 in_channels!"
             )
@@ -454,7 +456,7 @@ class GraphLowering(torch.fx.Interpreter):
         # - phlippe_densenet (slightly worse)
         # - Background_Matting (1.22x -> 0.821x)
         # - pytorch_CycleGAN_and_pix2pix (1.597x -> 1.294x)
-        if any(is_in_out_channel(n) for n in conv_nodes):
+        if any(map(is_in_out_channel, conv_nodes)):
             log.debug(
                 "Skip layout opt because some convolutions have smaller out_channel"
             )
@@ -462,7 +464,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         # Following models are skipped due to this:
         # - functorch_maml_omniglot
-        if all(is_small_channel(n) for n in conv_nodes):
+        if all(map(is_small_channel, conv_nodes)):
             log.debug("Skip layout opt because all convolution channels are too small")
             return False
 
@@ -1164,7 +1166,7 @@ class GraphLowering(torch.fx.Interpreter):
             node_runtimes.append((node, node.get_estimated_runtime()))
         return total_bytes, node_counts, node_runtimes
 
-    @dynamo_timed
+    @dynamo_timed(phase_name="code_gen")
     def compile_to_module(self):
         from .codecache import PyCodeCache
 
