@@ -29,8 +29,9 @@ from typing import (
 import sympy
 
 import torch
-
 import torch._logging
+
+from torch._inductor.metrics import is_metric_table_enabled, log_kernel_metadata
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -3512,6 +3513,12 @@ class TritonScheduling(BaseScheduling):
             wrapper.define_kernel(
                 kernel_name, compile_wrapper.getvalue(), metadata_comment
             )
+
+            # log kernel metadata for offline analysis.
+            # E.g. one can find all unaligned inner reduction and check if
+            # padding helps with the perf kernel by kernel.
+            if is_metric_table_enabled("kernel_metadata"):
+                log_kernel_metadata(kernel_name, kernel_path, src_code)
 
         return kernel_name
 

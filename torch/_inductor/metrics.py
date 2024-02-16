@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import csv
+import inspect
 import os
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -160,6 +162,139 @@ MetricTable.register_table(
         "speedup",
     ],
 )
+
+# Log metadata for pointwise/reduction kernels. E.g., model name, kernel path, numel, rnumel, reduction hint
+MetricTable.register_table(
+    "kernel_metadata",
+    [
+        "kernel_name",
+        "kernel_path",
+        "kernel_category",  # pointwise/reduction/foreach etc.
+        "size_hints",
+        "reduction_hint",
+        "line_of_code",
+        "num_load",
+        "num_store",
+        "num_for_loop",
+        "num_args",
+        # xyz numel can be different to size_hints since size_hints are rounded
+        # up to the nearest power of 2.
+        # Inductor kernel will burn in the xyz numel in kernel code for static
+        # shape kernels.
+        # Logging them will be helpful to find unaligned shape for reduction
+        "xnumel",
+        "ynumel",
+        "rnumel",
+    ],
+)
+
+
+def _parse_kernel_fn_code(kernel_module_code):
+    """
+    The kernel_module_code is the python module that contains kernel function code.
+    kernel function is the proper triton kernel function annotated with
+    @triton.jit
+    """
+    from .codecache import PyCodeCache
+    from .wrapper_benchmark import get_triton_kernel
+
+    mod = PyCodeCache.load(kernel_module_code)
+    kernel = get_triton_kernel(mod)
+    # kernel is a CachingAutotune; kernel.fn is the JITFunction;
+    # kernel.fn.fn is the function being decorate by triton.jit
+    return inspect.getsource(kernel.fn.fn)
+
+
+def _parse_kernel_line_of_code(proper_kernel_fn_code):
+    """
+    Return the line of code for the kernel excluding the decorators.
+    """
+    return len(proper_kernel_fn_code.splitlines())
+
+
+def _parse_size_hints(kernel_module_code, kernel_category):
+    if kernel_category == "foreach":
+        # foreach kernel does not have size_hints
+        return None
+    m = re.search(r"size_hints=(\[[0-9, ]*\]),", kernel_module_code)
+    assert m, "size_hints missing!"
+    return m.group(1)
+
+
+def _parse_reduction_hint(kernel_category, kernel_module_code):
+    if kernel_category not in ("reduction", "persistent_reduction"):
+        return None
+    m = re.search(r"reduction_hint=ReductionHint\.(\w*),", kernel_module_code)
+    assert m, "reduction_hint not found in kernel source code!"
+    return m.group(1)
+
+
+def _count_pattern(proper_kernel_fn_code, pattern):
+    return proper_kernel_fn_code.count(pattern)
+
+
+def _count_args(proper_kernel_fn_code):
+    def_line = proper_kernel_fn_code.splitlines()[0]
+    assert def_line.startswith("def ")
+    start_idx = def_line.index("(")
+    end_idx = def_line.index("):")
+    decl_csv = def_line[start_idx + 1 : end_idx]
+    comps = decl_csv.split(",")
+    return len(comps)
+
+
+def _parse_proper_kernel_fn_code(kernel_fn_code):
+    """
+    Skip decorators.
+    """
+    start_pos = kernel_fn_code.index("def ")
+    return kernel_fn_code[start_pos:]
+
+
+def _parse_numel(proper_kernel_fn_code, numel_arg_name):
+    m = re.search(f"{numel_arg_name} = ([\\d]+)", proper_kernel_fn_code)
+    if m:
+        return int(m.group(1))
+    else:
+        return None
+
+
+def log_kernel_metadata(kernel_name, kernel_path, kernel_module_code):
+    """
+    An utility to log kernel metadata. We may parse metadata from kernel source code here.
+
+    It's fine to parse the generated kernel code here since the logging is
+    disabled by default. It would hurt compilation time.
+    """
+    from .wrapper_benchmark import get_kernel_category_by_source_code
+
+    kernel_category = get_kernel_category_by_source_code(kernel_module_code)
+    reduction_hint = _parse_reduction_hint(kernel_category, kernel_module_code)
+    size_hints = _parse_size_hints(kernel_module_code, kernel_category)
+    kernel_fn_code = _parse_kernel_fn_code(kernel_module_code)
+
+    proper_kernel_fn_code = _parse_proper_kernel_fn_code(kernel_fn_code)
+
+    # the line of code excluding the decortors
+    kernel_line_of_code = _parse_kernel_line_of_code(proper_kernel_fn_code)
+
+    get_metric_table("kernel_metadata").add_row(
+        lambda: {
+            "kernel_name": kernel_name,
+            "kernel_path": kernel_path,
+            "kernel_category": kernel_category,
+            "size_hints": size_hints,
+            "reduction_hint": reduction_hint,
+            "line_of_code": kernel_line_of_code,
+            "num_load": _count_pattern(proper_kernel_fn_code, "tl.load"),
+            "num_store": _count_pattern(proper_kernel_fn_code, "tl.store"),
+            "num_for_loop": _count_pattern(proper_kernel_fn_code, "for "),
+            "num_args": _count_args(proper_kernel_fn_code),
+            "xnumel": _parse_numel(proper_kernel_fn_code, "xnumel"),
+            "ynumel": _parse_numel(proper_kernel_fn_code, "ynumel"),
+            "rnumel": _parse_numel(proper_kernel_fn_code, "rnumel"),
+        }
+    )
 
 
 def purge_old_log_files():
