@@ -335,11 +335,11 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = arg + 42
             # Expect in-place with inductor allocated buf
-            ar0 = torch.ops._c10d_functional.all_reduce(buf0, "avg", "default")
-            ar0 = torch.ops._c10d_functional.wait_tensor(ar0)
+            ar0 = funcol.all_reduce(buf0, "avg", "default")
+            ar0 = funcol.wait_tensor(ar0)
             # Expect no in-place with graph input
-            ar1 = torch.ops._c10d_functional.all_reduce(arg, "avg", "default")
-            ar1 = torch.ops._c10d_functional.wait_tensor(ar1)
+            ar1 = funcol.all_reduce(arg, "avg", "default")
+            ar1 = funcol.wait_tensor(ar1)
             return ar0, ar1
 
         arg = torch.rand(4, 4, device=self.device)
@@ -348,16 +348,16 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         code = run_and_get_triton_code(compiled, arg)
         (
             FileCheck()
-            .check("buf0 = empty(")
-            .check("buf5 = empty(")
+            .check("buf0 = empty")
+            .check("buf7 = empty")
             # Expect in-place with inductor allocated buf
             .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
             .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
             # Expect no in-place with graph input (buf5 is a clone)
-            .check("torch.ops._c10d_functional.all_reduce_.default(buf5")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf5")
+            .check("torch.ops._c10d_functional.all_reduce_.default(buf7")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf7")
             # Expect no extra copy on return
-            .check("return (buf0, buf5, )")
+            .check("return (buf0, buf7, )")
             .run(code)
         )
         out = compiled(arg)
@@ -377,15 +377,11 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         def func(args: List[torch.Tensor]) -> torch.Tensor:
             bufs = [arg + 42 for arg in args]
             # Expect in-place with inductor allocated buf
-            ar0 = torch.ops._c10d_functional.all_reduce_coalesced(
-                bufs, "avg", "default"
-            )
-            ar0 = [torch.ops._c10d_functional.wait_tensor(out) for out in ar0]
+            ar0 = funcol.all_reduce_coalesced(bufs, "avg", "default")
+            ar0 = [funcol.wait_tensor(out) for out in ar0]
             # Expect no in-place with graph input
-            ar1 = torch.ops._c10d_functional.all_reduce_coalesced(
-                args, "avg", "default"
-            )
-            ar1 = [torch.ops._c10d_functional.wait_tensor(out) for out in ar1]
+            ar1 = funcol.all_reduce_coalesced(args, "avg", "default")
+            ar1 = [funcol.wait_tensor(out) for out in ar1]
             return ar0, ar1
 
         args = [torch.rand(4, 4, device=self.device) for _ in range(2)]
@@ -393,10 +389,10 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         code = run_and_get_triton_code(compiled, args)
         (
             FileCheck()
-            .check("buf0 = empty(")
-            .check("buf5 = empty(")
-            .check("buf1 = empty(")
-            .check("buf6 = empty(")
+            .check("buf0 = empty")
+            .check("buf5 = empty")
+            .check("buf1 = empty")
+            .check("buf6 = empty")
             # Expect in-place with inductor allocated buf
             .check(
                 "torch.ops._c10d_functional.all_reduce_coalesced_"
@@ -431,8 +427,8 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
 
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = (arg + 10)[:2]
-            ar0 = torch.ops._c10d_functional.all_reduce(buf0, "avg", "default")
-            ar0 = torch.ops._c10d_functional.wait_tensor(ar0)
+            ar0 = funcol.all_reduce(buf0, "avg", "default")
+            ar0 = funcol.wait_tensor(ar0)
             return ar0
 
         arg = torch.rand(4, 4, device=self.device)
@@ -441,7 +437,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         code = run_and_get_triton_code(compiled, arg)
         (
             FileCheck()
-            .check("buf0 = empty(")
+            .check("buf0 = empty")
             # Ensure the all_reduce_ input is a view
             .check(
                 "torch.ops._c10d_functional.all_reduce_.default(reinterpret_tensor(buf0"
@@ -465,8 +461,8 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         def func(arg: torch.Tensor) -> torch.Tensor:
             # Expect allocation
             buf0 = arg + 42
-            ar0 = torch.ops._c10d_functional.all_reduce(buf0, "avg", "default")
-            ar0 = torch.ops._c10d_functional.wait_tensor(ar0)
+            ar0 = funcol.all_reduce(buf0, "avg", "default")
+            ar0 = funcol.wait_tensor(ar0)
             # Expect allocation
             buf1 = torch.mm(arg, ar0)
             # Expect buf0 to be reused
@@ -479,17 +475,17 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         (
             FileCheck()
             # Expect allocation
-            .check("buf0 = empty(")
+            .check("buf0 = empty")
             .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
             .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
             # Expect allocation
-            .check("buf5 = empty(")
-            .check("extern_kernels.mm(arg0_1, buf0, out=buf5")
+            .check("buf7 = empty")
+            .check("extern_kernels.mm(arg0_1, buf0, out=buf7")
             # Expect buf0 to be reused
-            .check("buf6 = buf0; del buf0  # reuse")
-            .check("extern_kernels.mm(arg0_1, buf5, out=buf6")
+            .check("buf8 = buf0; del buf0  # reuse")
+            .check("extern_kernels.mm(arg0_1, buf7, out=buf8")
             # Expect no extra copy on return
-            .check("return (buf5, buf6, )")
+            .check("return (buf7, buf8, )")
             .run(code)
         )
         out = compiled(arg)
@@ -503,10 +499,8 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         self._init_process_group()
 
         def func(arg: torch.Tensor) -> torch.Tensor:
-            ag0 = torch.ops._c10d_functional.all_gather_into_tensor(
-                arg, self.world_size, "default"
-            )
-            ag0 = torch.ops._c10d_functional.wait_tensor(ag0)
+            ag0 = funcol.all_gather_tensor(arg, 0, "default")
+            ag0 = funcol.wait_tensor(ag0)
             return ag0
 
         arg = torch.rand(4, 4, device=self.device)
@@ -537,10 +531,8 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         self._init_process_group()
 
         def func(args: List[torch.Tensor]) -> torch.Tensor:
-            ag0 = torch.ops._c10d_functional.all_gather_into_tensor_coalesced(
-                args, self.world_size, "default"
-            )
-            ag0 = [torch.ops._c10d_functional.wait_tensor(out) for out in ag0]
+            ag0 = funcol.all_gather_into_tensor_coalesced(args, "default")
+            ag0 = [funcol.wait_tensor(out) for out in ag0]
             return ag0
 
         args = [torch.rand(4, 4, device=self.device) for _ in range(4)]
@@ -579,10 +571,8 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         self._init_process_group()
 
         def func(arg: torch.Tensor) -> torch.Tensor:
-            rs0 = torch.ops._c10d_functional.reduce_scatter_tensor(
-                arg, "avg", self.world_size, "default"
-            )
-            rs0 = torch.ops._c10d_functional.wait_tensor(rs0)
+            rs0 = funcol.reduce_scatter_tensor(arg, "avg", 0, "default")
+            rs0 = funcol.wait_tensor(rs0)
             return rs0
 
         arg = torch.rand(4, 4, device=self.device)
@@ -613,10 +603,10 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         self._init_process_group()
 
         def func(args: List[torch.Tensor]) -> torch.Tensor:
-            rs0 = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(
-                args, "avg", self.world_size, "default"
+            rs0 = funcol.reduce_scatter_tensor_coalesced(
+                args, "avg", [0] * len(args), "default"
             )
-            rs0 = [torch.ops._c10d_functional.wait_tensor(out) for out in rs0]
+            rs0 = [funcol.wait_tensor(out) for out in rs0]
             return rs0
 
         args = [torch.rand(4, 4, device=self.device) for _ in range(4)]
@@ -666,13 +656,13 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             output_split_sizes: torch.Tensor,
             input_split_sizes: torch.Tensor,
         ) -> torch.Tensor:
-            output = torch.ops._c10d_functional.all_to_all_single(
+            output = funcol.all_to_all_single(
                 input,
                 _tolist_with_constrain_as_size(output_split_sizes),
                 _tolist_with_constrain_as_size(input_split_sizes),
                 "default",
             )
-            return torch.ops._c10d_functional.wait_tensor(output)
+            return funcol.wait_tensor(output)
 
         torch.manual_seed(42)
         send_sz_matrix = torch.randint(0, 20, (self.world_size, self.world_size))
@@ -694,7 +684,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             FileCheck()
             .check_regex(
                 "torch.ops._c10d_functional.all_to_all_single.default\\("
-                "arg\\d+_\\d+, \\[i\\d+, i\\d+\\], \\[i\\d+, i\\d+\\]"
+                "arg\\d+_\\d+, \\[u\\d+, u\\d+\\], \\[u\\d+, u\\d+\\]"
             )
             .check("torch.ops._c10d_functional.wait_tensor.default(")
             .run(code)

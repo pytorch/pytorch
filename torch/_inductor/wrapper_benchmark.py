@@ -7,11 +7,12 @@ from torch.autograd import DeviceType
 from .utils import create_bandwidth_info_str, do_bench, get_num_bytes
 
 _kernel_category_choices = [
+    "foreach",
+    "persistent_reduction",
     "pointwise",
     "reduction",
-    "persistent_reduction",
+    "split_scan",
     "template",
-    "foreach",
 ]
 
 
@@ -276,9 +277,7 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
     else:
         times = 10
         repeat = 10
-        wall_time_ms = (
-            benchmark_compiled_module_fn(times=times, repeat=repeat) / times * 1000
-        )
+        wall_time_ms = benchmark_compiled_module_fn(times=times, repeat=repeat) * 1000
 
         if not args.profile:
             return
