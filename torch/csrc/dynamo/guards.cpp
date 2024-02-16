@@ -1109,6 +1109,55 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
   long unsigned int _counter = 0;
 };
 
+class DYNAMIC_INDICES : public LeafGuard {
+  // C++ equivalent of
+  // if hasattr(value, "_dynamo_dynamic_indices"):
+  //     code.append(
+  //         f"(({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices}))
+  //         if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  #
+  //         noqa: B950
+  //     )
+  // else:
+  //     code.append(
+  //         f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
+  //     )
+ public:
+  DYNAMIC_INDICES(
+      bool has_attr,
+      py::set dynamic_indices,
+      py::object verbose_code_parts)
+      : LeafGuard(verbose_code_parts),
+        _has_attr(has_attr),
+        _dynamic_indices(dynamic_indices) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    py::handle handle = py::handle(value);
+
+    bool has_attr = py::hasattr(handle, "_dynamo_dynamic_indices");
+    // hasattr({tensor_name}, '_dynamo_dynamic_indices') == False
+    if (!_has_attr) {
+      return !has_attr;
+    }
+
+    // "((x._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices}))
+    //       if hasattr(x, '_dynamo_dynamic_indices') else True)
+    if (!has_attr) {
+      return true;
+    }
+
+    py::handle indices = py::getattr(handle, "_dynamo_dynamic_indices");
+    // py::set does not have issubset, so we have to manually get the method and
+    // do the call.
+    py::function is_subset =
+        py::cast<py::function>(py::getattr(indices, "issubset"));
+    return py::cast<bool>(is_subset(_dynamic_indices));
+  }
+
+ private:
+  bool _has_attr;
+  py::set _dynamic_indices;
+};
+
 class GuardManager;
 class RootGuardManager;
 class DictGuardManager;
@@ -1961,6 +2010,10 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DATA_PTR_MATCH")
       .def(py::init<py::object, py::list>())
       .def("__call__", &DATA_PTR_MATCH::check);
+  py::class_<DYNAMIC_INDICES, LeafGuard, std::shared_ptr<DYNAMIC_INDICES>>(
+      py_m, "DYNAMIC_INDICES")
+      .def(py::init<bool, py::set, py::list>())
+      .def("__call__", &DYNAMIC_INDICES::check);
   py::class_<TENSOR_ALIASING, LeafGuard, std::shared_ptr<TENSOR_ALIASING>>(
       py_m, "TENSOR_ALIASING");
   py::class_<
@@ -2076,6 +2129,15 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(
                 std::make_shared<DATA_PTR_MATCH>(data_ptr, verbose_code_parts));
+          })
+      .def(
+          "add_dynamic_indices_guard",
+          [](GuardManager& self,
+             bool has_attr,
+             py::set value,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<DYNAMIC_INDICES>(
+                has_attr, value, verbose_code_parts));
           })
       .def(
           "add_dict_version_guard",
