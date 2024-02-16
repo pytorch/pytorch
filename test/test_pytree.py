@@ -633,6 +633,18 @@ class TestGenericPytree(TestCase):
         "pytree_impl",
         [
             subtest(py_pytree, name="py"),
+            # cxx tree_map_only does not support passing predicate fn as filter
+        ],
+    )
+    def test_tree_map_only_predicate_fn(self, pytree_impl):
+        self.assertEqual(
+            pytree_impl.tree_map_only(lambda x: x == 0, lambda x: x + 2, [0, 1]), [2, 1]
+        )
+
+    @parametrize(
+        "pytree_impl",
+        [
+            subtest(py_pytree, name="py"),
             subtest(cxx_pytree, name="cxx"),
         ],
     )
