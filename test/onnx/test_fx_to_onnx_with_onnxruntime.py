@@ -432,10 +432,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail(
-        error_message=(
-            "Unsupported FX nodes: {'call_function': ['aten.sym_constrain_range.default', "
-            "'aten._assert_scalar.default']}."
-        )
+        error_message="Unsupported FX nodes: {'call_function': ['aten.sym_constrain_range.default', 'aten._assert_async.msg']}."
     )
     def test_squeeze_runtime_dim(self):
         class Squeeze(torch.nn.Module):
@@ -1085,8 +1082,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 # Original outputs.
                 # model_with_state_dict=real_model is used to create non-fake weights
                 ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
-                    real_model.module()(*args, **kwargs),
-                    model_with_state_dict=real_model,
+                    real_model(*args, **kwargs), model_with_state_dict=real_model
                 )
                 # ORT outputs.
                 # model_with_state_dict=real_model is used to create non-fake weights
