@@ -14,6 +14,7 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, _inline_everything
 from typing import List
 from torch import Tensor
+from torch.jit import Future
 
 class TestAsync(JitTestCase):
     def test_async_python(self):

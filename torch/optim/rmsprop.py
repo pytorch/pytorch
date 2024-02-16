@@ -336,6 +336,14 @@ def _multi_tensor_rmsprop(
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, square_avgs, grad_avgs, momentum_buffer_list])
     for (((grouped_params, grouped_grads, grouped_square_avgs, grouped_grad_avgs,
          grouped_momentum_buffer_list)), _) in grouped_tensors.values():
+        if has_complex:
+            state_and_grads = [grouped_grads, grouped_square_avgs]
+            if momentum > 0:
+                state_and_grads.append(grouped_momentum_buffer_list)
+            if centered:
+                state_and_grads.append(grouped_grad_avgs)
+            _view_as_real(grouped_params, *state_and_grads)
+
         if maximize:
             grouped_grads = torch._foreach_neg(grouped_grads)
 
@@ -345,16 +353,6 @@ def _multi_tensor_rmsprop(
                 torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
             else:
                 grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
-
-        grouped_grads = list(grouped_grads)
-
-        if has_complex:
-            state_and_grads = [grouped_grads, grouped_square_avgs]
-            if momentum > 0:
-                state_and_grads.append(grouped_momentum_buffer_list)
-            if centered:
-                state_and_grads.append(grouped_grad_avgs)
-            _view_as_real(grouped_params, *state_and_grads)
 
         torch._foreach_mul_(grouped_square_avgs, alpha)
         torch._foreach_addcmul_(grouped_square_avgs, grouped_grads, grouped_grads, value=1 - alpha)

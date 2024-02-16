@@ -1,5 +1,5 @@
-#include <c10/core/impl/cow/COW.h>
-#include <c10/core/impl/cow/COWDeleter.h>
+#include <c10/core/impl/COW.h>
+#include <c10/core/impl/COWDeleter.h>
 
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/StorageImpl.h>
@@ -165,6 +165,84 @@ TEST(lazy_clone_storage_test, already_copy_on_write) {
   ASSERT_THAT(*new_storage, is_copy_on_write());
   // But they share the same data!
   ASSERT_THAT(new_storage->data(), testing::Eq(original_storage.data()));
+}
+
+TEST(materialize_test, not_copy_on_write_context) {
+  StorageImpl storage(
+      {}, /*size_bytes=*/6, GetCPUAllocator(), /*resizable=*/false);
+  ASSERT_THAT(storage, testing::Not(is_copy_on_write()));
+
+  void const* original_data = storage.data();
+
+  // Nothing to materialize.
+  ASSERT_THAT(storage.mutable_data(), testing::Eq(original_data));
+}
+
+TEST(materialize_test, copy_on_write_single_reference) {
+  // A copy-on-write storage with only a single reference can just
+  // drop the copy-on-write context upon materialization.
+  std::unique_ptr<void, DeleterFnPtr> data(
+      new std::byte[4],
+      +[](void* bytes) { delete[] static_cast<std::byte*>(bytes); });
+  void* data_ptr = data.get();
+  StorageImpl storage(
+      {},
+      /*size_bytes=*/4,
+      at::DataPtr(
+          /*data=*/data_ptr,
+          /*ctx=*/new cow::COWDeleterContext(std::move(data)),
+          cow::cow_deleter,
+          Device(Device::Type::CPU)),
+      /*allocator=*/nullptr,
+      /*resizable=*/false);
+
+  ASSERT_THAT(storage, is_copy_on_write());
+
+  ASSERT_THAT(storage.data(), testing::Eq(data_ptr));
+
+  void const* original_data = storage.data();
+
+  // Materializes storage. Only reference, so no new allocation.
+  ASSERT_THAT(storage.mutable_data(), testing::Eq(original_data));
+  // But it is no longer copy-on-write.
+  ASSERT_THAT(storage, testing::Not(is_copy_on_write()));
+}
+
+bool buffers_are_equal(const void* a, const void* b, size_t nbytes) {
+  const char* a_ = static_cast<const char*>(a);
+  const char* b_ = static_cast<const char*>(b);
+
+  for (size_t idx = 0; idx < nbytes; idx++) {
+    if (a_[idx] != b_[idx]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+TEST(materialize_test, copy_on_write) {
+  StorageImpl original_storage(
+      {}, /*size_bytes=*/6, GetCPUAllocator(), /*resizable=*/false);
+  std::memcpy(original_storage.mutable_data(), "abcd", 4);
+  void const* original_data = original_storage.data();
+
+  auto new_storage = cow::lazy_clone_storage(original_storage);
+  ASSERT_THAT(new_storage, testing::NotNull());
+
+  auto context = new_storage->data_ptr().cast_context<cow::COWDeleterContext>(
+      cow::cow_deleter);
+  ASSERT_THAT(context, testing::NotNull());
+
+  // Materialized storage has new copy of data.
+  ASSERT_THAT(new_storage->mutable_data(), testing::Ne(original_data));
+
+  // But the original storage still has the original copy.
+  ASSERT_THAT(original_storage.data(), testing::Eq(original_data));
+
+  // And their data is the same
+  ASSERT_TRUE(new_storage->nbytes() == original_storage.nbytes());
+  ASSERT_TRUE(buffers_are_equal(
+      new_storage->data(), original_storage.data(), new_storage->nbytes()));
 }
 
 } // namespace

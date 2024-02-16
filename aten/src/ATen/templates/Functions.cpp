@@ -78,8 +78,8 @@ Tensor TensorMaker::make_tensor() {
    return storage_size;
  }
 
- inline DataPtr TensorMaker::makeDataPtrFromDeleter() const {
-   return InefficientStdFunctionContext::makeDataPtr(data_, deleter_, *device_);
+ inline DataPtr TensorMaker::makeDataPtrFromDeleter() noexcept {
+   return InefficientStdFunctionContext::makeDataPtr(data_, std::move(deleter_), *device_);
  }
 
  inline DataPtr TensorMaker::makeDataPtrFromContext() noexcept {

@@ -1,3 +1,4 @@
+import operator
 from collections import defaultdict
 from typing import Any, Callable, DefaultDict, Dict, Optional, Tuple, Type
 
@@ -5,6 +6,7 @@ import sympy
 
 import torch
 import torch.fx
+from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map
 from .virtualized import V
@@ -80,6 +82,9 @@ class FakeTensorUpdater:
         for node in self.graph.nodes:
             existing_storages[get_node_storage(node)] += 1
 
+        def is_intlist_same(new, old):
+            return statically_known_true(sym_eq(new, old))
+
         def is_fake_tensor_same(new, old):
             if type(new) != type(old):
                 return False
@@ -89,8 +94,6 @@ class FakeTensorUpdater:
                 return all(
                     is_fake_tensor_same(new_i, old_i) for new_i, old_i in zip(new, old)
                 )
-            if new is None:
-                return old is None
             if not isinstance(new, torch.Tensor):
                 assert isinstance(
                     new, (torch.SymInt, torch.SymBool, torch.SymFloat)
@@ -101,10 +104,16 @@ class FakeTensorUpdater:
                     )
                     == sympy.true
                 )
-            if new.shape != old.shape or new.layout != old.layout:
+            if not is_intlist_same(new.shape, old.shape) or new.layout != old.layout:
                 return False
-            if new.layout == torch.strided and new.stride() != old.stride():
+            if new.layout == torch.strided and (
+                not is_intlist_same(new.stride(), old.stride())
+                or not statically_known_true(
+                    new.storage_offset() == old.storage_offset()
+                )
+            ):
                 return False
+
             if get_storage(new) == get_storage(old):
                 return True
 
@@ -125,9 +134,8 @@ class FakeTensorUpdater:
                 continue
 
             def is_aten_node(node):
-                return (
-                    node.op == "call_function"
-                    and isinstance(node.target, torch._ops.OpOverload)
+                return node.op == "call_function" and isinstance(
+                    node.target, torch._ops.OpOverload
                 )
 
             if not is_aten_node(node):
@@ -183,3 +191,35 @@ def get_fake_args_kwargs(x: torch.fx.Node) -> Tuple[bool, Tuple[Any], Dict[str, 
     ):
         return False, args, kwargs
     return True, args, kwargs
+
+
+def is_node_realized(node: torch.fx.Node) -> bool:
+    """Returns true if a node is always realized when lowered to inductor IR.
+
+    NOTE: This may return some false negatives. e.g. it doesn't
+    handle buffers realized heuristically during lowering, or
+    buffers realized indirectly through view ops.
+    """
+    from torch._inductor.lowering import fallbacks, needs_realized_inputs
+
+    def is_buffer(node: torch.fx.Node) -> bool:
+        if node.op == "call_function" and node.target is operator.getitem:
+            # For nodes with multiple outputs, we get the fx graph:
+            #     foo = torch.ops.aten.foo(...)
+            #     getitem = foo[0]
+            #     getitem_1 = foo[1]
+            # where we need to check if foo is a fallback kernel
+            return is_buffer(node.args[0])  # type: ignore[arg-type]
+        return node.op in ("placeholder", "output") or node.target in fallbacks
+
+    if is_buffer(node):
+        return True
+
+    def realizes_inputs(node: torch.fx.Node) -> bool:
+        return node.op == "output" or node.target in needs_realized_inputs
+
+    if any(realizes_inputs(user) for user in node.users):
+        return True
+
+    # Otherwise, assume node isn't realized
+    return False

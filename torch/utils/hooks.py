@@ -218,6 +218,9 @@ class BackwardHook:
                                                f"got {actual_len}, but expected {expected_len}")
                         self.grad_outputs = hook_grad_outputs
 
+                # We need to be able to clear self.grad_outputs but also return it
+                local_grad_outputs = self.grad_outputs
+
                 # Special case if no input required gradients, this hook should call the user
                 # hook directly
                 if self.input_tensors_index is None:
@@ -229,9 +232,9 @@ class BackwardHook:
                                                "gradient should always return None or None for all gradients.")
                     self.grad_outputs = None
 
-                if self.grad_outputs is not None:
+                if local_grad_outputs is not None:
                     assert self.output_tensors_index is not None  # mypy
-                    return tuple(self.grad_outputs[i] for i in self.output_tensors_index)
+                    return tuple(local_grad_outputs[i] for i in self.output_tensors_index)
 
             grad_fn.register_hook(hook)
 

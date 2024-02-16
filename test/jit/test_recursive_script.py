@@ -76,7 +76,7 @@ class TestRecursiveScript(JitTestCase):
 
     def test_failed_function_compilation(self):
         def fn(x):
-            return i_dont_exist
+            return i_dont_exist  # noqa: F821
 
         class M(torch.nn.Module):
             def __init__(self, fn):

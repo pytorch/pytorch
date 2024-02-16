@@ -49,9 +49,9 @@ class TestException(TestCase):
         def foo(cond):
             a = 3
             if bool(cond):
-                raise ArbitraryError(a, "hi")
+                raise ArbitraryError(a, "hi")  # noqa: F821
                 if 1 == 2:
-                    raise ArbitraryError
+                    raise ArbitraryError  # noqa: F821
             return a
 
         with self.assertRaisesRegex(RuntimeError, "undefined value ArbitraryError"):

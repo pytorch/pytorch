@@ -148,12 +148,12 @@ EArrXXt<typename Derived1::Scalar> bbox_transform_rotated(
     // targets by bbox_transform_inv.
     const int period = angle_bound_hi - angle_bound_lo;
     CAFFE_ENFORCE(period > 0 && period % 180 == 0);
-    auto angles = pred_boxes.col(4);
-    for (const auto i : c10::irange(angles.size())) {
-      if (angles[i] < angle_bound_lo) {
-        angles[i] += T(period);
-      } else if (angles[i] > angle_bound_hi) {
-        angles[i] -= T(period);
+    auto angles_2 = pred_boxes.col(4);
+    for (const auto i : c10::irange(angles_2.size())) {
+      if (angles_2[i] < angle_bound_lo) {
+        angles_2[i] += T(period);
+      } else if (angles_2[i] > angle_bound_hi) {
+        angles_2[i] -= T(period);
       }
     }
   }

@@ -14,6 +14,7 @@ namespace at::native {
 
 TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const Tensor& result, const Tensor& info) {
   TORCH_CHECK(result.is_mps(), "Output tensor is not MPS");
+  TORCH_CHECK(!A.is_complex(), "linalg_inv: not supported for complex types yet!");
   if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS)) {
     TORCH_WARN_ONCE(
         "torch.linalg_inv_ex.inverse is supported by MPS on MacOS 13+, please upgrade. Falling back to CPU.");
@@ -52,13 +53,8 @@ TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const
     Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, A);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
-        @{inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData()};
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 

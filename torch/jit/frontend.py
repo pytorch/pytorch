@@ -365,7 +365,7 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     # for the arguments from type_trace_db
     type_trace_db = torch.jit._script._get_type_trace_db()
     pdt_arg_types = None
-    if monkeytype_trace and not isinstance(fn, _ParsedDef):
+    if monkeytype_trace and not isinstance(fn, _ParsedDef):  # type: ignore[truthy-function]
         qualname = get_qualified_name(fn)
         pdt_arg_types = type_trace_db.get_args_types(qualname)
 
@@ -817,7 +817,7 @@ class StmtBuilder(Builder):
         if is_torch_jit_ignore_context_manager(stmt):
             if not _IS_ASTUNPARSE_INSTALLED:
                 raise RuntimeError(
-                    "torch.jit._IgnoreContextManager requires installing Python library `astunparse`,\
+                    "torch.jit._IgnoreContextManager requires installing Python library `astunparse`, \
                                    please install it in your Python environment"
                 )
             assign_ast = build_ignore_context_manager(ctx, stmt)

@@ -42,15 +42,15 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
 try:
     try:
-        from .test_torchinductor import check_model, check_model_cuda
+        from .test_torchinductor import check_model, check_model_gpu
     except ImportError:
-        from test_torchinductor import check_model, check_model_cuda
+        from test_torchinductor import check_model, check_model_gpu
 except (unittest.SkipTest, ImportError) as e:
     sys.stderr.write(f"{type(e)}: {e}\n")
     if __name__ == "__main__":
@@ -67,9 +67,14 @@ i32 = torch.int32
 i64 = torch.int64
 b8 = torch.bool
 u8 = torch.uint8  # not tested except upsampling and interpolate ops
+u16 = torch.uint16  # not tested
+u32 = torch.uint32  # not tested
+u64 = torch.uint64  # not tested
 
 _ops = partial(
-    ops, dtypes=OpDTypes.supported, allowed_dtypes=[f16, f32, f64, i32, i64, b8, u8]
+    ops,
+    dtypes=OpDTypes.supported,
+    allowed_dtypes=[f16, f32, f64, i32, i64, b8, u8, u16, u32, u64],
 )
 
 # Success forces pass; failure forces fail; skip unconditionally skips testing
@@ -139,7 +144,7 @@ def print_seen():
                 f"    {format_op(op)}: {fmt_dtypes(failed_dtypes)},{reasons}"
             )
 
-    for device_type in ("cpu", "cuda"):
+    for device_type in ("cpu", GPU_TYPE):
         expected_failures[device_type]
         nl = "\n"
         print(
@@ -195,6 +200,7 @@ if not SM80OrLater:
 if TEST_WITH_ROCM:
     # Tensors are not alike
     inductor_skips["cuda"]["logcumsumexp"] = {f32}
+    inductor_skips["cuda"]["special.modified_bessel_i1"] = {f64}
 
 inductor_expected_failures_single_sample = defaultdict(dict)
 
@@ -205,11 +211,9 @@ inductor_expected_failures_single_sample["cpu"] = {
     "_upsample_bilinear2d_aa": {f32, f64},
     "cholesky": {f32, f64},
     "complex": {f16},
-    "cross": {f16},
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
     "histc": {f16},
-    "linalg.cross": {f16},
     "multinomial": {f16, f32, f64},
     "nn.functional.avg_pool1d": {i64},
     "nn.functional.avg_pool2d": {i64},
@@ -309,6 +313,8 @@ inductor_override_kwargs = {
     "empty_strided": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
+    ("cross", "cuda", f16): {"reference_in_float": True},
+    ("linalg.cross", "cuda", f16): {"reference_in_float": True},
     ("addr", "cuda", f16): {"reference_in_float": True},
     ("baddbmm", "cuda", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
     ("angle", "cuda", f64): {"reference_in_float": True},
@@ -316,7 +322,9 @@ inductor_override_kwargs = {
     ("atanh", "cuda", f16): {"reference_in_float": True},
     ("cauchy", "cuda"): {"reference_in_float": True},
     ("cummax", "cuda", f16): {"atol": 5e-4, "rtol": 0.002},
+    ("cumsum", "cuda", f16): {"reference_in_float": True},
     ("cumprod", "cuda"): {"reference_in_float": True, "atol": 7e-5, "rtol": 0.002},
+    ("logcumsumexp", "cuda"): {"grad_atol": 8e-4, "grad_rtol": 0.001},
     ("exponential", "cuda"): {"reference_in_float": True},
     ("geometric", "cuda"): {"reference_in_float": True},
     ("kron", "cuda", f16): {"reference_in_float": True},
@@ -344,6 +352,15 @@ inductor_override_kwargs = {
     ("softmax", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
     ("_softmax_backward_data", "cuda", f16): {"atol": 0.008, "rtol": 0.002},
     ("special.log_ndtr", "cuda", f64): {"atol": 1e-6, "rtol": 1e-5},
+    ("polygamma.polygamma_n_0", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("polygamma.polygamma_n_1", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("polygamma.polygamma_n_2", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("polygamma.polygamma_n_3", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("polygamma.polygamma_n_4", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("special.polygamma.special_polygamma_n_0", "cpu", f32): {
+        "atol": 1e-3,
+        "rtol": 1e-4,
+    },
     ("std_mean.unbiased", "cuda", f16): {"reference_in_float": True},
     ("uniform", "cuda"): {"reference_in_float": True},
     # Following tests are failing with strict comparision but atol=1 is acceptable due roundings errors
@@ -357,15 +374,6 @@ inductor_override_kwargs = {
         "check_gradient": False,
     },
 }
-
-
-if not TEST_WITH_ROCM:
-    inductor_override_kwargs.update(
-        {
-            # We have better precision than eager
-            ("cumsum", "cuda", f16): {"reference_in_float": True},
-        }
-    )
 
 
 # Always test with all sample for following ops
@@ -421,7 +429,7 @@ class TestInductorOpInfo(TestCase):
         torch._dynamo.reset()
 
     check_model = check_model
-    check_model_cuda = check_model_cuda
+    check_model_gpu = check_model_gpu
 
     @onlyNativeDeviceTypes
     @suppress_warnings
@@ -443,7 +451,9 @@ class TestInductorOpInfo(TestCase):
     def test_comprehensive(self, device, dtype, op):
         torch._dynamo.reset()
         with torch.no_grad():
-            torch.cuda.empty_cache()
+            # TODO: should we move empty_cache to the common device interface
+            if device == "cuda":
+                torch.cuda.empty_cache()
         op_name = op.name
         if op.variant_test_name:
             op_name += f".{op.variant_test_name}"
@@ -460,7 +470,7 @@ class TestInductorOpInfo(TestCase):
 
         device_type = torch.device(device).type
 
-        assert device_type in ("cuda", "cpu")
+        assert device_type in (GPU_TYPE, "cpu")
 
         # with open("test_output.txt", "a") as f:
         #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
@@ -490,7 +500,6 @@ class TestInductorOpInfo(TestCase):
             overridden_kwargs = inductor_override_kwargs[(op_name, device_type)]
         elif (op_name, device_type, dtype) in inductor_override_kwargs:
             overridden_kwargs = inductor_override_kwargs[(op_name, device_type, dtype)]
-
         func = op.get_op()
 
         def fn(*args, **kwargs):
@@ -582,9 +591,9 @@ class TestInductorOpInfo(TestCase):
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
                 rtol, atol = _get_tolerances(dtype)
-                if device_type == "cuda":
+                if device_type == GPU_TYPE:
                     # opinfo test case have already place the input on the correct device
-                    # so we don't need do additional copy by setting copy_to_cuda=False
+                    # so we don't need do additional copy by setting copy_to_gpu=False
 
                     no_python, has_rng_op = do_nopython_and_has_rng(fn, args, kwargs)
                     for context_fn, kwarg_overrides in get_contexts(has_rng_op):
@@ -592,7 +601,7 @@ class TestInductorOpInfo(TestCase):
                             adjusted_kwargs = {
                                 "check_lowp": False,
                                 "nopython": no_python,
-                                "copy_to_cuda": False,
+                                "copy_to_gpu": False,
                                 "reference_in_float": False,
                                 "check_gradient": requires_grad,
                                 "check_has_compiled": no_python,
@@ -602,7 +611,7 @@ class TestInductorOpInfo(TestCase):
                             }
                             adjusted_kwargs.update(overridden_kwargs)
                             adjusted_kwargs.update(kwarg_overrides)
-                            self.check_model_cuda(
+                            self.check_model_gpu(
                                 fn,
                                 args,
                                 kwargs,

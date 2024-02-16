@@ -3,6 +3,7 @@
 import torch
 import torch.utils.bundled_inputs
 import io
+from tempfile import TemporaryFileName
 from typing import Dict, List
 import inspect
 from torch.testing import FileCheck
@@ -81,7 +82,7 @@ class TestLiteScriptModule(TestCase):
             buffer = io.BytesIO(exported_module)
             buffer.seek(0)
 
-            assert(b"callstack_debug_map.pkl" in exported_module)
+            assert b"callstack_debug_map.pkl" in exported_module
 
             mobile_module = _load_for_lite_interpreter(buffer)
             with self.assertRaisesRegex(RuntimeError, r"Module hierarchy:top\(B\)::<unknown>.A0\(A\)::forward.aten::mul"):

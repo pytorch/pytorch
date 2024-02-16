@@ -340,7 +340,3 @@ def zeros(
         device_mesh=device_mesh,
         placements=placements,
     )
-
-
-if not torch._running_with_deploy():
-    import torch.distributed._tensor._dynamo_utils

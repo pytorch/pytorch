@@ -12,9 +12,13 @@ from torch import Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import lazy_format_graph_code
 from torch._logging import getArtifactLogger
+from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 
-from .functional_utils import assert_functional_graph
+from .functional_utils import (
+    assert_functional_graph,
+    propagate_input_mutation_stacktraces,
+)
 from .schemas import AOTConfig, SubclassMeta, ViewAndMutationMeta
 from .traced_function_transforms import (
     aot_dispatch_subclass,
@@ -28,8 +32,17 @@ aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 
 def _create_graph(f, args, *, aot_config: AOTConfig) -> torch.fx.GraphModule:
-    with enable_python_dispatcher():
-        fx_g = make_fx(f, decomposition_table=aot_config.decompositions)(*args)
+    # FunctionalTensorMode must be enabled here.
+    # See Note [Accessing .grad_fn on FunctionalTensor]
+    with enable_python_dispatcher(), FunctionalTensorMode(
+        pre_dispatch=aot_config.pre_dispatch, export=aot_config.is_export
+    ):
+        fx_g = make_fx(
+            f,
+            decomposition_table=aot_config.decompositions,
+            record_module_stack=True,
+            pre_dispatch=aot_config.pre_dispatch,
+        )(*args)
 
     return fx_g
 
@@ -88,6 +101,7 @@ def aot_dispatch_base_graph(
     fw_module.recompile()
 
     copy_count2 = assert_functional_graph(fw_module.graph)
+    propagate_input_mutation_stacktraces(fw_module.graph)
 
     assert copy_count == copy_count2
 

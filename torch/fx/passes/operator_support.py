@@ -188,9 +188,6 @@ class OpSupports:
             node: torch.fx.Node,
         ) -> bool:
             for arg in node.all_input_nodes:
-                # escape dtype check for get_attr node
-                if arg.op == "get_attr":
-                    continue
                 arg_dtype = _get_arg_dtype(arg)
                 if arg_dtype == dtype:
                     return False
