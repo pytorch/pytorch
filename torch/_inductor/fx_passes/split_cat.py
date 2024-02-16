@@ -163,6 +163,8 @@ def normalize_split_default(match: Match, *args, **kwargs):
     extra_check=config_flag("split_cat_fx_passes"),
 )
 def normalize_cat_default(match: Match, *args, **kwargs):
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     cat_node = match.nodes[0]
     graph = match.graph
     tensors = get_arg_value(cat_node, 0, "tensors")
@@ -187,7 +189,7 @@ def normalize_cat_default(match: Match, *args, **kwargs):
     def is_empty_tensor(x):
         # special case where torch.cat supports cat'ing with an empty tensor
         x_shape = x.meta["example_value"].shape
-        return len(x_shape) == 1 and x_shape[0] == 0
+        return len(x_shape) == 1 and guard_size_oblivious(x_shape[0] == 0)
 
     assert all(
         ndim == x.meta["example_value"].dim() or is_empty_tensor(x) for x in tensors

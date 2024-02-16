@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 from typing import List, Tuple
+import sys
+import unittest
 
 import torch
 from torch._export import (
@@ -61,6 +63,7 @@ from torch.testing._internal.common_utils import (
 
 
 @skipIfNoQNNPACK
+@unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
 class TestQuantizePT2E(PT2EQuantizationTestCase):
     def test_simple_quantizer(self):
         # TODO: use OP_TO_ANNOTATOR
@@ -1744,7 +1747,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
     def test_observer_callback(self):
         from torch.library import Library, impl
-        test_lib = Library("test_int4", "DEF")
+        test_lib = Library("test_int4", "DEF")  # noqa: TOR901
         test_lib.define("quantize_per_tensor_int4(Tensor input, float scale, int zero_point) -> Tensor")
 
         @impl(test_lib, "quantize_per_tensor_int4", "CompositeExplicitAutograd")
