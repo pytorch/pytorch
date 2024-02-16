@@ -206,7 +206,7 @@ class DistMathOpsTest(DTensorTestBase):
                     x.grad.zero_()
 
     @with_comms
-    def test_full_shard_math_ops(self):
+    def test_shard_math_ops(self):
         mesh_shape = (2, self.world_size // 2)
         mesh = DeviceMesh(
             self.device_type,
@@ -223,11 +223,11 @@ class DistMathOpsTest(DTensorTestBase):
         # for op in [torch.add, torch.sub, torch.mul, torch.div]:
         for op in [torch.add, torch.sub, torch.mul, torch.div]:
             expect_rs = op(global_tensor, 2)
-            actual_rs = op(double_shard_tensor, 2).redistribute(
-                mesh, [Replicate(), Replicate()]
-            )
-            actual_local_res = actual_rs.to_local()
-            self.assertEqual(actual_local_res, expect_rs)
+            double_shard_full_tensor = op(double_shard_tensor, 2).full_tensor()
+            self.assertEqual(double_shard_full_tensor, expect_rs)
+
+            fully_shard_full_tensor = op(fully_shard_tensor, 2).full_tensor()
+            self.assertEqual(fully_shard_full_tensor, expect_rs)
 
     @with_comms
     def test_layer_norm_fwd(self):
