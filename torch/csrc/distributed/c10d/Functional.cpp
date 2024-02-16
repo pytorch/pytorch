@@ -101,7 +101,7 @@ at::Tensor all_reduce(
     const at::Tensor& input,
     std::string reduce_op,
     std::string group_name) {
-  auto output = input.clone();
+  auto output = input.clone(at::MemoryFormat::Contiguous);
   return all_reduce_(output, reduce_op, group_name);
 }
 
@@ -126,7 +126,7 @@ std::vector<at::Tensor> all_reduce_coalesced(
     std::string group_name) {
   std::vector<at::Tensor> outputs;
   for (const auto& tensor : inputs) {
-    outputs.push_back(tensor.clone());
+    outputs.push_back(tensor.clone(at::MemoryFormat::Contiguous));
   }
   return all_reduce_coalesced_(outputs, reduce_op, group_name);
 }
