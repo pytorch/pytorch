@@ -17,6 +17,7 @@ from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import check_constant_args, get_first_attr, identity, istype, make_cell
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
+from .distributed import ProcessGroupVariable
 
 if TYPE_CHECKING:
     from torch._guards import Source
@@ -693,10 +694,18 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         # call_function must check any unsupported arguments and graph-break.
         # It's safe to assume args/kwargs from orig_fn map 1:1 to args/kwargs of remapped_fn,
         # since that's the contract for putting a mapping in `traceable_collective_remaps`
+        import torch.distributed as dist
+
         if "async_op" in kwargs and kwargs["async_op"].as_python_constant():
             unimplemented(
                 f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.fn}"
             )
+        group = kwargs.get("group")
+        if group is None or (
+            isinstance(group, variables.ConstantVariable)
+            and group.as_python_constant() is None
+        ):
+            kwargs["group"] = ProcessGroupVariable(dist.group.WORLD, source=self.source)
         return self.replacement_var.call_function(tx, args, kwargs)
 
 
