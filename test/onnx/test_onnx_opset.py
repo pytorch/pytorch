@@ -557,7 +557,7 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
     def test_grid_sample(self):
         class MyModule(torch.nn.Module):
             def __init__(self, mode, padding_mode, align_corners):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.mode = mode
                 self.padding_mode = padding_mode
                 self.align_corners = align_corners
