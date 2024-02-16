@@ -324,6 +324,24 @@ class TestInductorDynamic(TestCase):
         arg = torch.tensor(5, device=device)
         self.assertEqual(f(arg), cf(arg))
 
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_return_unbacked_view_split(self, device):
+        def f(values, length_per_key):
+            u0, u1 = length_per_key.tolist()
+            torch._check_is_size(u0)
+            torch._check_is_size(u1)
+            v1, v2 = torch.functional.split(values, [u0, u1])
+            return v1, v2
+
+        cf = torch.compile(fullgraph=True)(f)
+        args = (
+            torch.randn(8, requires_grad=True, device=device),
+            torch.tensor([3, 5], device=device),
+        )
+        self.assertEqual(f(*args), cf(*args))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked_matmul(self, device):
         def f(x):
