@@ -859,6 +859,25 @@ class EQUALS_MATCH : public LeafGuard {
   PyTypeObject* _value_type;
 };
 
+class DEFAULT_DEVICE : public LeafGuard {
+ public:
+  DEFAULT_DEVICE(py::object verbose_code_parts)
+      : LeafGuard(verbose_code_parts) {
+    _utils_device = py::module::import("torch.utils._device");
+    _current_device = _utils_device.attr("CURRENT_DEVICE");
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    py::object device = _utils_device.attr("CURRENT_DEVICE");
+    return PyObject_RichCompareBool(device.ptr(), _current_device.ptr(), Py_EQ);
+  }
+
+ private:
+  // Save the current device during the guard construction.
+  py::object _utils_device;
+  py::object _current_device;
+};
+
 class DICT_VERSION : public LeafGuard {
  public:
   DICT_VERSION(py::object value, py::object verbose_code_parts)
@@ -1486,6 +1505,10 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "EQUALS_MATCH")
       .def(py::init<py::object, py::list>())
       .def("__call__", &EQUALS_MATCH::check);
+  py::class_<DEFAULT_DEVICE, LeafGuard, std::shared_ptr<DEFAULT_DEVICE>>(
+      py_m, "DEFAULT_DEVICE")
+      .def(py::init<py::list>())
+      .def("__call__", &DEFAULT_DEVICE::check);
   py::class_<DICT_VERSION, LeafGuard, std::shared_ptr<DICT_VERSION>>(
       py_m, "DICT_VERSION")
       .def(py::init<py::object, py::list>())
@@ -1553,6 +1576,12 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(
                 std::make_shared<EQUALS_MATCH>(value, verbose_code_parts));
+          })
+      .def(
+          "add_default_device_guard",
+          [](GuardManager& self, py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(
+                std::make_shared<DEFAULT_DEVICE>(verbose_code_parts));
           })
       .def(
           "add_dict_version_guard",
