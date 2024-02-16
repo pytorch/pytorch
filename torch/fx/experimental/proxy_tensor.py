@@ -302,6 +302,7 @@ HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter, FakeTensor)
 
 def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     unrecognized_types = []
+    flat_args_kwargs, spec = pytree.tree_flatten((args, kwargs))
 
     def can_handle_tensor(x):
         r = type(x) in HANDLED_TYPES or has_proxy_slot(x, proxy_mode.tracer)
@@ -313,7 +314,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
 
     # If there are any tensor subclasses, we need to handle those tensor subclasses first
     # TODO: we could use types to test this
-    if not pytree.tree_all_only(torch.Tensor, can_handle_tensor, (args, kwargs)):
+    if not all(can_handle_tensor(x) for x in flat_args_kwargs if isinstance(x, torch.Tensor)):
         not_implemented_log.debug("ProxyTensorMode tensors without proxy had unrecognized subclasses: %s", unrecognized_types)
         return NotImplemented
 
@@ -331,24 +332,23 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
                 return r
 
     tracer = proxy_mode.tracer
-    f_args, f_kwargs = pytree.tree_map_only((torch.Tensor, torch.ScriptObject), fetch_object_proxy(tracer), (args, kwargs))
+    f_flat_args_kwargs = [fetch_object_proxy(tracer)(x) if isinstance(x, (torch.Tensor, torch.ScriptObject)) else x for x in flat_args_kwargs]
 
     # If there are SymInts, we also should not consider this constant.
     # However, fake tensor handling of SymInts is sufficiently broken that
     # I couldn't write a test for this case
     all_constant = (
-        pytree.tree_all_only(_ProxyTensor, lambda t: t.constant is not None, (f_args, f_kwargs))
+        not any(t.constant is None for t in f_flat_args_kwargs if isinstance(t, _ProxyTensor))
         # TODO: maybe constant SymInts should also be allowed?  Not sure if
         # this can happen
-        and pytree.tree_all_only((SymInt, SymFloat, SymBool), lambda _: False, (args, kwargs))
+        and not any(isinstance(x, (SymInt, SymFloat, SymBool)) for x in flat_args_kwargs)
     )
 
     if torch.Tag.data_dependent_output in func.tags:
         # Check if all of the Tensor inputs are constants
         if all_constant:
-            const_args, const_kwargs = pytree.tree_map_only(
-                _ProxyTensor, lambda t: t.constant, (f_args, f_kwargs)
-            )
+            const_flat_args_kwargs = [t.constant if isinstance(t, _ProxyTensor) else t for t in f_flat_args_kwargs]
+            const_args, const_kwargs = pytree.tree_unflatten(spec, const_flat_args_kwargs)
             with maybe_disable_fake_tensor_mode():
                 return func(*const_args, **const_kwargs)
         # If any of the Tensor inputs are "real" (not FakeTensor), we may
@@ -361,11 +361,10 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
                 "It may be possible to trace this with dynamic shapes; try setting tracing_mode='symbolic' "
                 "in your make_fx call."
             )
-    proxy_args, proxy_kwargs = pytree.tree_map_only(
-        (SymInt, SymFloat, SymBool),
-        fetch_sym_proxy(proxy_mode.tracer),
-        pytree.tree_map_only(_ProxyTensor, lambda e: e.proxy, (f_args, f_kwargs))
-    )
+
+    proxy_flat_args_kwargs = [e.proxy if isinstance(e, _ProxyTensor) else e for e in f_flat_args_kwargs]
+    proxy_flat_args_kwargs = [fetch_sym_proxy(proxy_mode.tracer)(e) if isinstance(e, (SymInt, SymFloat, SymBool)) else e for e in proxy_flat_args_kwargs]
+    proxy_args, proxy_kwargs = pytree.tree_unflatten(proxy_flat_args_kwargs, spec)
 
     # When we trace through a torch.tensor invocation, you never actually
     # see a torch.ops.aten.tensor call. Instead, the way this function is
@@ -442,7 +441,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     # element constant computation by testing the numel of the result before
     # propagating const-ness.  Similarly, we don't require the constant to
     # live on CPU, but we could.
-    any_constant = pytree.tree_any_only(_ProxyTensor, lambda t: t.constant is not None, (f_args, f_kwargs))
+    any_constant = any(t.constant is not None for t in f_flat_args_kwargs if isinstance(t, _ProxyTensor))
 
     constant = None
 
@@ -460,9 +459,8 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     ):
         # NB: do NOT include factories as constants
         with maybe_disable_fake_tensor_mode():
-            const_args, const_kwargs = pytree.tree_map_only(
-                _ProxyTensor, lambda t: t.constant, (f_args, f_kwargs)
-            )
+            const_flat_args_kwargs =[t.constant if isinstance(t, _ProxyTensor) else t for t in f_flat_args_kwargs]
+            const_args, const_kwargs = pytree.tree_unflatten(const_flat_args_kwargs, spec)
             constant = func(*const_args, **const_kwargs)
     else:
         constant = None
