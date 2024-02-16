@@ -143,6 +143,14 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         finally:
             torch.set_default_device(None)
 
+    def test_data_ptr_match_guard(self):
+        foo = torch.tensor([1, 2, 3])
+        guard = guards.DATA_PTR_MATCH(
+            foo.data_ptr(), ["x.data_ptr() == foo.data_ptr()"]
+        )
+        self.assertTrue(guard(foo))
+        self.assertFalse(guard(torch.tensor([1, 2, 3])))
+
     def test_guard_manager_leaf_guard(self):
         guard_manager = RootGuardManager()
         guard_manager.add_type_match_guard(id_type(5), ["type(x) == int"])

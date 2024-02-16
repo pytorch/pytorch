@@ -922,6 +922,26 @@ class GLOBAL_STATE : public LeafGuard {
   // TODO(jansel): we should guard on more state as inductor starts using it
 };
 
+class DATA_PTR_MATCH : public LeafGuard {
+ public:
+  DATA_PTR_MATCH(py::object data_ptr, py::object verbose_code_parts)
+      : LeafGuard(verbose_code_parts), _data_ptr(data_ptr) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    PyObject* data_ptr_method =
+        PyObject_GetAttrString(value, "data_ptr"); // new ref
+    PyObject* data_ptr = PyObject_CallNoArgs(data_ptr_method); // new ref
+    bool result = PyObject_RichCompareBool(data_ptr, _data_ptr.ptr(), Py_EQ);
+    Py_DECREF(data_ptr);
+    Py_DECREF(data_ptr_method);
+    return result;
+  }
+
+ private:
+  // Need to save the ptr so py::object.
+  py::object _data_ptr;
+};
+
 class DICT_VERSION : public LeafGuard {
  public:
   DICT_VERSION(py::object value, py::object verbose_code_parts)
@@ -1557,6 +1577,10 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "GLOBAL_STATE")
       .def(py::init<py::list>())
       .def("__call__", &GLOBAL_STATE::check);
+  py::class_<DATA_PTR_MATCH, LeafGuard, std::shared_ptr<DATA_PTR_MATCH>>(
+      py_m, "DATA_PTR_MATCH")
+      .def(py::init<py::object, py::list>())
+      .def("__call__", &DATA_PTR_MATCH::check);
   py::class_<DICT_VERSION, LeafGuard, std::shared_ptr<DICT_VERSION>>(
       py_m, "DICT_VERSION")
       .def(py::init<py::object, py::list>())
@@ -1636,6 +1660,14 @@ PyObject* torch_c_dynamo_guards_init() {
           [](GuardManager& self, py::object verbose_code_parts) -> void {
             self.add_leaf_guard(
                 std::make_shared<GLOBAL_STATE>(verbose_code_parts));
+          })
+      .def(
+          "add_data_ptr_guard",
+          [](GuardManager& self,
+             py::object data_ptr,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(
+                std::make_shared<DATA_PTR_MATCH>(data_ptr, verbose_code_parts));
           })
       .def(
           "add_dict_version_guard",
