@@ -689,24 +689,35 @@ class SchedulerNode(BaseSchedulerNode):
         self,
         scheduler: "Scheduler",
         node: Union[ir.ComputedBuffer, ir.TemplateBuffer],
-        group_fn,
     ):
         super().__init__(scheduler, node)
-        (
-            self._sizes,
-            self._body,
-        ) = node.simplify_and_reorder()
+        self._compute_attrs()
 
-        self.group = (node.get_device(), group_fn(self._sizes))
+    def _compute_attrs(
+        self,
+        extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
+    ):
+        assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
+        self._sizes, self._body = self.node.simplify_and_reorder(
+            extra_indexing_constraints=extra_indexing_constraints
+        )
 
-        if isinstance(node, ir.TemplateBuffer):
-            self.set_read_writes(node.normalized_read_writes())
+        group_fn = self.scheduler.get_backend(self.node.get_device()).group_fn
+        self.group = (self.node.get_device(), group_fn(self._sizes))
+
+        if isinstance(self.node, ir.TemplateBuffer):
+            self.set_read_writes(self.node.normalized_read_writes())
         else:
             self.set_read_writes(
                 dependencies.extract_read_writes(
                     self._body, *self._sizes, normalize=True
                 )
             )
+
+    def recompute_size_and_body(
+        self, extra_indexing_constraints: Tuple[Dict[Any, Any], List[Any]]
+    ):
+        self._compute_attrs(extra_indexing_constraints=extra_indexing_constraints)
 
     def debug_str_extra(self) -> str:
         name = self.get_name()
@@ -833,6 +844,16 @@ class FusedSchedulerNode(BaseSchedulerNode):
         assert isinstance(node1, (SchedulerNode, FusedSchedulerNode)) and isinstance(
             node2, (SchedulerNode, FusedSchedulerNode)
         )
+        _, (vars1, reduce1) = node1.group
+        _, (vars2, reduce2) = node2.group
+
+        if vars1 != vars2 and isinstance(vars1, tuple) and isinstance(vars2, tuple):
+            device = node1.get_device()
+            if device == torch.device("cpu"):
+                scheduler = node1.scheduler
+                backend = scheduler.get_backend(device)
+                node1, node2 = backend.recompute_nodes_for_fusion(node1, node2)
+
         return cls(node1.scheduler, list(node1.get_nodes()) + list(node2.get_nodes()))  # type: ignore[arg-type]
 
     def __init__(self, scheduler: "Scheduler", snodes: List[SchedulerNode]):
@@ -1269,7 +1290,7 @@ class Scheduler:
         }
         self.name_to_fused_node: Dict[
             str, BaseSchedulerNode
-        ] = dict()  # set in fuse_nods()
+        ] = dict()  # set in fuse_nodes()
 
         # mutation_real_name: Maps back to the original name for codegen
         # Example:
@@ -1348,8 +1369,7 @@ class Scheduler:
         if node.is_no_op():
             return NopKernelSchedulerNode(self, node)
         elif isinstance(node, (ir.ComputedBuffer, ir.TemplateBuffer)):
-            group_fn = self.get_backend(node.get_device()).group_fn
-            return SchedulerNode(self, node, group_fn)
+            return SchedulerNode(self, node)
         elif isinstance(node, ir.ExternKernel):
             return ExternKernelSchedulerNode(self, node)
         else:
@@ -2370,6 +2390,14 @@ class BaseScheduling:
     def can_fuse_horizontal(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         """
         Check whether node1 and node2 can be horizontally fused or not.
+        """
+        raise NotImplementedError()
+
+    def recompute_nodes_for_fusion(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ):
+        """
+        Recompute one of the input nodes to be able to fuse them together
         """
         raise NotImplementedError()
 

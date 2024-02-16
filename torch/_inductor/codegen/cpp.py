@@ -23,7 +23,7 @@ from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
 from ..optimize_indexing import range_expressable_in_32_bits
-from ..scheduler import BaseScheduling, SchedulerNode
+from ..scheduler import BaseScheduling, FusedSchedulerNode, SchedulerNode
 from ..utils import (
     cache_on_self,
     get_fused_kernel_name,
@@ -3477,6 +3477,85 @@ class CppScheduling(BaseScheduling):
         else:
             self.kernel_group = KernelGroup()
 
+    def recompute_nodes_for_fusion(self, node1, node2):
+        assert isinstance(node1, (SchedulerNode, FusedSchedulerNode))
+        assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
+
+        _, (vars1, reduce1) = node1.group
+        _, (vars2, reduce2) = node2.group
+
+        assert reduce1 == () and reduce2 == (), (reduce1, reduce2)
+
+        def get_indexing_ranges_exprs(node):
+            if isinstance(node, FusedSchedulerNode):
+                assert len(node.snodes) > 0
+                # use the last scheduler node from the list as it has the most
+                # relevant indexing expressions
+                return get_indexing_ranges_exprs(node.snodes[-1])
+            else:
+                assert isinstance(node, SchedulerNode)
+                comp_buffer = node.node
+                assert isinstance(comp_buffer, ir.ComputedBuffer)
+                _, body, _ = comp_buffer.get_default_sizes_body()
+                return body.var_ranges, [*body.indexing_exprs.values()]
+
+        node_to_recomp = node1 if len(vars1) < len(vars2) else node2
+        assert isinstance(node_to_recomp, SchedulerNode)
+
+        ref_node = node2 if len(vars1) < len(vars2) else node1
+
+        extra_indexing_constraints = get_indexing_ranges_exprs(ref_node)
+
+        node_to_recomp.recompute_size_and_body(
+            extra_indexing_constraints=extra_indexing_constraints
+        )
+
+        if len(vars1) < len(vars2):
+            node1 = node_to_recomp
+        else:
+            node2 = node_to_recomp
+
+        _, (vars1, _) = node1.group
+        _, (vars2, _) = node2.group
+        assert vars1 == vars2, (vars1, vars2)
+
+        return node1, node2
+
+    def _can_fuse_nodes_with_compatible_ranges(self, node1, node2):
+        # Here we try to fuse SchedulerNode/FusedSchedulerNode with compatible ranges
+        # e.g. (s0, s1, s2) and (s0 * s1 * s2)
+        _, (vars1, reduce1) = node1.group
+        _, (vars2, reduce2) = node2.group
+
+        c1 = reduce1 == () and reduce2 == ()
+        c2 = math.prod(vars1) == math.prod(vars2)
+        c3 = len(vars1) == 1 or len(vars2) == 1
+        if not (c1 and c2 and c3):
+            return False
+
+        node_to_recomp = node1 if len(vars1) < len(vars2) else node2
+        ref_node = node2 if len(vars1) < len(vars2) else node1
+
+        # We can recompute sizes and body for nodes other than SchedulerNode
+        if not isinstance(node_to_recomp, SchedulerNode):
+            return False
+
+        def has_computed_buffer(node):
+            if isinstance(node, FusedSchedulerNode):
+                assert len(node.snodes) > 0
+                # use the last scheduler node from the list as it has the most
+                # relevant indexing expressions
+                return has_computed_buffer(node.snodes[-1])
+            else:
+                assert isinstance(node, SchedulerNode)
+                comp_buffer = node.node
+                return isinstance(comp_buffer, ir.ComputedBuffer)
+
+        if not has_computed_buffer(ref_node):
+            return False
+
+        return True
+
     def _can_fuse_horizontal_impl(self, node1, node2):
         _, (vars1, reduce1) = node1.group
         _, (vars2, reduce2) = node2.group
@@ -3484,6 +3563,10 @@ class CppScheduling(BaseScheduling):
             return True
         if reduce1 == () and vars1 == vars2 + reduce2:
             return True
+
+        if self._can_fuse_nodes_with_compatible_ranges(node1, node2):
+            return True
+
         # TODO(jansel): allow fusion pointwise (vars1, ()) suffix?
         return False
 
