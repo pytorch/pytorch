@@ -692,9 +692,9 @@ def min_cut_rematerialization_partition(
                              if node.op != 'output'}
         unclaimed_nodes = {node for node in joint_module.graph.nodes
                            if node not in required_fw_nodes and node not in required_bw_nodes}
-        return fwd_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes
+        return fwd_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes, inputs
 
-    orig_fw_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes = classify_nodes(joint_module)
+    orig_fw_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes, inputs = classify_nodes(joint_module)
 
     # networkx blows up on graphs with no required backward nodes
     # Since there's nothing to partition anyway, and the default partitioner can "handle"
@@ -737,7 +737,7 @@ def min_cut_rematerialization_partition(
     recomputable_ops = set(recomputable_ops) if recomputable_ops is not None else set(default_recomputable_ops)
 
     random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like]
-    compute_intensive_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten.upsample_bilinear2d, aten._softmax, aten._softmax_backward_data, aten.native_layer_norm, aten.native_layer_norm_backward, aten.native_batch_norm, aten.native_batch_norm_backward, aten._native_batch_norm_legit]  # noqa: E501,B950
+    compute_intensive_ops = [aten.mm, aten.convolution, aten.convolution_backward, aten.bmm, aten.addmm, aten.upsample_bilinear2d, aten._softmax, aten._softmax_backward_data, aten.native_layer_norm, aten.native_layer_norm_backward, aten.native_batch_norm, aten.native_batch_norm_backward, aten._native_batch_norm_legit, aten.batch_norm_with_update, aten.batch_norm_backward]  # noqa: E501,B950
 
     fusible_ops = recomputable_ops | set(random_ops)
     if AOT_PARTITIONER_DEBUG:
@@ -834,8 +834,18 @@ def min_cut_rematerialization_partition(
             continue
 
         if node in required_bw_nodes:
-            nx_graph.add_edge(node.name + "_in", "sink", capacity=math.inf)
-            continue
+            if node not in inputs:
+                nx_graph.add_edge(node.name + "_in", "sink", capacity=math.inf)
+                continue
+            # If someone saves a input for backward as-is and backward
+            # returns that tensor as-is as a grad input, then the node x would
+            # be both a required_bw_node and an input. In this case we
+            # (1) connect x_in to to the source, (2) x_out to the sink, and
+            # (3) assign the proper weight to the x_in-x_out edge, so that
+            # x would be part of cut nodes. A case where this happens is if
+            # NestedTensor saves a offset tensor as part of the singleton int
+            # in sizes.
+            nx_graph.add_edge(node.name + "_out", "sink", capacity=math.inf)
 
         if _is_primal(node) or _is_fwd_seed_offset(node):
             nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)

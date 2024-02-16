@@ -6,8 +6,7 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
-#if (defined(CPU_CAPABILITY_AVX512))
-#define SLEEF_STATIC_LIBS
+#if (defined(CPU_CAPABILITY_AVX512)) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
 
@@ -16,7 +15,7 @@ namespace vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX512)
+#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 
 template <> class Vectorized<double> {
 private:
