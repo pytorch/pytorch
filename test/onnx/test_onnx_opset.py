@@ -483,7 +483,7 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
     def test_affine_grid(self):
         class MyModule(Module):
             def __init__(self, align_corners):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.align_corners = align_corners
 
             def forward(self, theta, size):

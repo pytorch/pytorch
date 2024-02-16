@@ -28,4 +28,4 @@ Size
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
-__all__ = [""]
+__all__ = []
