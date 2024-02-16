@@ -304,7 +304,6 @@ def batch_norm_backward(
     eps: float,
     output_mask: List[bool],
     reserve: Tensor,
-    cudnn_enabled: bool,
 ) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
     return native_batch_norm_backward(
         grad_out,
