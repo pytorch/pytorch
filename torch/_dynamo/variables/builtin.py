@@ -1324,7 +1324,7 @@ class BuiltinVariable(VariableTracker):
             # Get OpOverload from an OpOverloadPacket, e.g., torch.ops.aten.add.default.
             member = getattr(obj.value, name)
             if isinstance(
-                member, torch._ops.OpOverload
+                member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
             ) and trace_rules.is_aten_op_or_tensor_method(member):
                 return TorchInGraphFunctionVariable(member, **options)
         elif isinstance(obj, (PythonModuleVariable, DummyModule)):
