@@ -626,7 +626,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     inconsistent_side_effects: bool
     current_speculation: Optional[SpeculationEntry]
     # Used to track how big the graph is getting on loop backedges.
-    loop_backedge_trackers: Dict[tuple[int, int], BackedgeTracker]
+    loop_backedge_trackers: Dict[Tuple[int, int], BackedgeTracker]
 
     def mark_inconsistent_side_effects(self):
         """
