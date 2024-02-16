@@ -572,7 +572,7 @@ struct NCCLTraceBuffer {
     auto result = dump_entries();
     auto entries = new_list();
     c10::IValue entries_key = "entries";
-    c10::IValue nccl_dump_Key = "nccl_dump";
+    c10::IValue nccl_comm_key = "nccl_comm_state";
     c10::IValue version_key = "version";
     // Update whenever changing contents or formatting of the dump
     // (minor when adding fields, major when changing existing fields)
@@ -681,7 +681,7 @@ struct NCCLTraceBuffer {
     dict.insert(entries_key, entries);
     dict.insert(version_key, version_val);
     if (per_comm_dict.size() > 0) {
-      dict.insert(nccl_dump_Key, per_comm_dict);
+      dict.insert(nccl_comm_key, per_comm_dict);
     }
 
     return pickle_str(dict);

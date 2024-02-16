@@ -300,12 +300,18 @@ class NCCLComm {
   }
 #endif
 
+#ifdef IS_NCCL_EXP
 #ifdef NCCL_COMM_DUMP
   std::unordered_map<std::string, std::string> ncclCommDump() {
     std::unordered_map<std::string, std::string> dump;
+    if (isAborted()) {
+      LOG(INFO) << "Communicator was aborted before trying to dump its state.";
+      return dump;
+    }
     C10D_NCCL_CHECK(::ncclCommDump(ncclComm_, ret), c10::nullopt);
     return dump;
   }
+#endif
 #endif
 
   ncclUniqueId getNcclId() {

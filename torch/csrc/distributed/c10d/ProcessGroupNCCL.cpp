@@ -309,6 +309,7 @@ void cacheAllocatorDeregisterHook(
   }
 }
 
+#ifdef IS_NCCL_EXP
 #ifdef NCCL_COMM_DUMP
 std::string dump_nccl_trace() {
   std::unordered_map<
@@ -318,14 +319,21 @@ std::string dump_nccl_trace() {
   // dump_nccl_trace is only called from the default PG (uid_=0), but we want to
   // dump from all comms so we need to iterate over ncclCommDevIdxMap, which
   // is static
+  std::vector<std::shared_ptr<NCCLComm>> allNCCLComms;
+  // within the critical section, we don't want to dump while holding the lock
+  // as dump might hang
   ncclCommDevIdxMapMutex.lock();
   for (auto& [ncclComm, _] : ncclCommDevIdxMap) {
+    allNCCLComms.push_back(ncclComm);
+  }
+  ncclCommDevIdxMapMutex.unlock();
+  for (auto& ncclComm : allNCCLComms) {
     std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getUniqueId());
     ncclDumpMap[ncclUniqueIDStr] = ncclComm->ncclCommDump();
   }
-  ncclCommDevIdxMapMutex.unlock();
   return NCCLTraceBuffer::get()->dump(ncclDumpMap);
 }
+#endif
 #else
 std::string dump_nccl_trace() {
   return NCCLTraceBuffer::get()->dump(c10::nullopt);
