@@ -3540,7 +3540,7 @@ class GraphModule(torch.nn.Module):
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
 
-        maybe_current_level = torch._C._functorch.maybe_current_level()
+        count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
 
         _enter_dual_level = torch._C._enter_dual_level()
 
@@ -3597,7 +3597,7 @@ class GraphModule(torch.nn.Module):
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
 
-        maybe_current_level = torch._C._functorch.maybe_current_level()
+        count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
 
         _enter_dual_level = torch._C._enter_dual_level()
 
@@ -3658,7 +3658,7 @@ class GraphModule(torch.nn.Module):
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
 
-        maybe_current_level = torch._C._functorch.maybe_current_level()
+        count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
 
         _enter_dual_level = torch._C._enter_dual_level()
 
@@ -3722,7 +3722,7 @@ class GraphModule(torch.nn.Module):
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
         _set_fwd_grad_enabled_1 = torch._C._set_fwd_grad_enabled(True)
 
-        maybe_current_level = torch._C._functorch.maybe_current_level()
+        count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
 
         _enter_dual_level = torch._C._enter_dual_level()
 
@@ -3795,7 +3795,7 @@ class GraphModule(torch.nn.Module):
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
         _set_fwd_grad_enabled_3 = torch._C._set_fwd_grad_enabled(True)
 
-        maybe_current_level = torch._C._functorch.maybe_current_level()
+        count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
 
         _enter_dual_level = torch._C._enter_dual_level()
 

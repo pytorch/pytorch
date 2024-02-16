@@ -1505,6 +1505,7 @@ def wrap_fx_proxy_cls(
         torch.seed,
         operator.mod,
         torch._functorch.vmap._validate_and_get_batch_size,
+        torch._C._functorch.count_jvp_interpreters,
         torch._C._functorch.maybe_current_level,
         torch._C._is_fwd_grad_enabled,
         # some mac builds are missing torch.distributed.get_rank()

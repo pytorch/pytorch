@@ -212,7 +212,7 @@ manual_torch_name_rule_map = {
     "torch._C._functorch._remove_batch_dim": TorchInGraphFunctionVariable,
     "torch._C._functorch._wrap_for_grad": TorchInGraphFunctionVariable,
     "torch._C._functorch._unwrap_for_grad": TorchInGraphFunctionVariable,
-    "torch._C._functorch.count_interpreter": TorchInGraphFunctionVariable,
+    "torch._C._functorch.count_jvp_interpreters": TorchInGraphFunctionVariable,
     "torch._C._functorch.maybe_current_level": TorchInGraphFunctionVariable,
     "torch._C._functorch.is_batchedtensor": TorchInGraphFunctionVariable,
 }

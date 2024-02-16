@@ -379,11 +379,11 @@ static c10::optional<int64_t> maybe_current_level() {
   return nullopt;
 }
 
-static int64_t count_interpreters(TransformType key) {
+static int64_t count_jvp_interpreters() {
   const auto& stack = getDynamicLayerStack();
   int64_t cnt = 0;
   for (auto i : stack) {
-    cnt += i.interpreter().key() == key ? 1 : 0;
+    cnt += i.interpreter().key() == TransformType::Jvp ? 1 : 0;
   }
   return cnt;
 }
@@ -498,7 +498,7 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("_set_dynamic_layer_keys_included", &_set_dynamic_layer_keys_included);
   m.def("dump_dls", &dump_dls);
   m.def("dump_local_tls", &dump_local_tls);
-  m.def("count_interpreters", &count_interpreters);
+  m.def("count_jvp_interpreters", &count_jvp_interpreters);
   m.def("is_functorch_wrapped_tensor", [](const Tensor& tensor) {
     return maybe_get_level(tensor) != -1;
   });
