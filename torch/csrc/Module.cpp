@@ -2125,13 +2125,7 @@ Call this whenever a new thread is created in order to propagate values from
          bool training,
          double eps) {
         return at::native::_select_batch_norm_backend(
-            input,
-            weight,
-            bias,
-            running_mean,
-            running_var,
-            training,
-            eps);
+            input, weight, bias, running_mean, running_var, training, eps);
       },
       py::arg("input"),
       py::arg("weight"),
