@@ -17,7 +17,6 @@ To improve the performance we can move parts of the implementation to C++.
 
 import dataclasses
 import importlib
-import inspect
 import json
 import threading
 import warnings
@@ -994,10 +993,7 @@ def map_only(
 
     You can also directly use 'tree_map_only'
     """
-    if (
-        isinstance(__type_or_types_or_pred, tuple)
-        and all(inspect.isclass(t) for t in __type_or_types_or_pred)
-    ) or inspect.isclass(__type_or_types_or_pred):
+    if isinstance(__type_or_types_or_pred, (tuple, type)):
         return _map_only(lambda x: isinstance(x, __type_or_types_or_pred))
     elif callable(__type_or_types_or_pred):
         return _map_only(__type_or_types_or_pred)
