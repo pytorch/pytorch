@@ -432,7 +432,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail(
-        error_message="Unsupported FX nodes: {'call_function': ['aten.sym_constrain_range.default', 'aten._assert_async.msg']}."
+        error_message=("Unsupported FX nodes: {'call_function': [")
     )
     def test_squeeze_runtime_dim(self):
         class Squeeze(torch.nn.Module):
