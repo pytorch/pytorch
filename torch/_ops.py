@@ -281,8 +281,8 @@ class HigherOrderOperator(OperatorBase):
                     return self(*args, **kwargs)
             raise AssertionError(
                 """
-                Can't directly invoke cond_op implementation at PreDispatch key
-                if there are active modes.
+                Can't directly invoke HOP implementation at PreDispatch key
+                if there are active modes on PreDispatch mode stack.
                 """
             )
 

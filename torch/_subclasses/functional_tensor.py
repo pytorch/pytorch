@@ -226,6 +226,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         # Indicates to our torch_dispatch dispatching infra that
         # this is an "infra" mode with lower dispatching precedence.
         self._mode_key = torch._C._TorchDispatchModeKey.FUNCTIONAL
+        self.pre_dispatch = pre_dispatch
         # This will be turned off later for pre-dispatch functionalization
         self._dispatch_key = torch._C.DispatchKey.PreDispatch if pre_dispatch else None  # type: ignore[attr-defined]
 

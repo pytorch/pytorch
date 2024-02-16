@@ -2961,7 +2961,7 @@ def forward(self, arg0_1, arg1_1):
 
             def forward(self, x):
                 def true_fn(x):
-                    y = x
+                    y = x.sin()
                     y.add_(5)
 
                     def true_true_fn(x):
@@ -2975,7 +2975,7 @@ def forward(self, arg0_1, arg1_1):
                     return torch.cond(y.cos().shape[0] > 5, true_true_fn, true_false_fn, [y.cos()])
 
                 def false_fn(x):
-                    z = x
+                    z = x.cos()
                     z.add_(6)
                     return z.sin()
 
@@ -2999,7 +2999,8 @@ def forward(self, arg0_1):
 
         self.assertExpectedInline(str(gm.true_graph_0.code).strip(), """\
 def forward(self, arg0_1):
-    add = torch.ops.aten.add.Tensor(arg0_1, 5);  arg0_1 = None
+    sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(sin, 5);  sin = None
     cos = torch.ops.aten.cos.default(add)
     cos_1 = torch.ops.aten.cos.default(add);  add = None
     true_graph_0 = self.true_graph_0
@@ -3022,12 +3023,12 @@ def forward(self, arg0_1):
 
             def forward(self, x):
                 def true_fn(x):
-                    y = x
+                    y = x.sin()
                     y.add_(5)
                     return y.cos()
 
                 def false_fn(x):
-                    z = x
+                    z = x.cos()
                     z.add_(6)
                     return z.sin()
 
@@ -3050,7 +3051,8 @@ def forward(self, arg0_1):
     return (add, add_1)""")  # noqa: B950
         self.assertExpectedInline(str(gm.true_graph_0.code).strip(), """\
 def forward(self, arg0_1):
-    add = torch.ops.aten.add.Tensor(arg0_1, 5);  arg0_1 = None
+    sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(sin, 5);  sin = None
     cos = torch.ops.aten.cos.default(add);  add = None
     return (cos,)""")
 
