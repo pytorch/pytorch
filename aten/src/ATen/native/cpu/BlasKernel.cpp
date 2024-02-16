@@ -4,8 +4,34 @@
 #include <ATen/native/cpu/zmath.h>
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
+#include <iostream>
+#include <arm_neon.h>
 
 namespace at::native {
+namespace blas_impl {
+void fp16_gemv_notrans(
+    int m,
+    int n,
+    const float16_t alpha,
+    const float16_t* a,
+    const int lda,
+    const float16_t* x,
+    const int incx,
+    const float16_t beta,
+    float16_t* y,
+    int incy);
+void fp16_gemv_trans(
+    int m,
+    int n,
+    const float16_t alpha,
+    const float16_t* a,
+    const int lda,
+    const float16_t* x,
+    const int incx,
+    const float16_t beta,
+    float16_t* y,
+    int incy);
+}
 namespace cpublas {
 namespace {
 
@@ -241,6 +267,77 @@ void gemm_transab_(
     }
   }
 }
+
+#if defined(__ARM_FEATURE_FP16_SCALAR_ARITHMETIC) && !defined(C10_MOBILE)
+template <>
+void gemm_notrans_(
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    float alpha,
+    const at::Half* a,
+    int64_t lda,
+    const at::Half* b,
+    int64_t ldb,
+    float beta,
+    at::Half* c,
+    int64_t ldc) {
+  // c += alpha * (a @ b)
+  if (n == 1) {
+          at::native::blas_impl::fp16_gemv_notrans(m, k, alpha, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(b), 1, beta, reinterpret_cast<float16_t*>(c), 1);
+          return;
+  }
+  for (const auto i : c10::irange(m)) {
+    for (const auto j : c10::irange(n)) {
+      const auto dot = sum(k, [&](int64_t l) -> float {
+        return c10::detail::fp16_from_bits(a[l * lda + i].x) *
+            c10::detail::fp16_from_bits(b[j * ldb + l].x);
+      });
+      if (beta == 0) {
+        c[j * ldc + i] = alpha * dot;
+      } else {
+        c[j * ldc + i] = beta * c[j * ldc + i] + alpha * dot;
+      }
+    }
+  }
+}
+
+template <>
+void gemm_transa_(
+    TransposeType transa,
+    int64_t m, int64_t n, int64_t k,
+    float alpha,
+    const at::Half *a, int64_t lda,
+    const at::Half *b, int64_t ldb,
+    float beta,
+    at::Half *c, int64_t ldc) {
+  // std::cout << __func__ << " m,n,k=" << m << "," << n << "," << k << " alpha=" << alpha << " beta=" << beta << std::endl;
+  // c = alpha * (a.T @ b) + beta * c
+  if (n == 1) {
+      at::native::blas_impl::fp16_gemv_trans(k, m, alpha, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(b), 1, beta, reinterpret_cast<float16_t*>(c), 1);
+      return;
+  }
+  const auto *a_ = a;
+  for (const auto i : c10::irange(m)) {
+    const auto *b_ = b;
+    for (const auto j : c10::irange(n)) {
+      const auto dot = sum(k, [&](int64_t l) -> float {
+        return c10::detail::fp32_from_bits(a_[l].x) * c10::detail::fp32_from_bits(b_[l].x);
+      });
+      b_ += ldb;
+      if (beta == 0) {
+        c[j*ldc+i] = alpha*dot;
+      } else {
+        c[j*ldc+i] = beta*c[j*ldc+i]+alpha*dot;
+      }
+    }
+    a_ += lda;
+  }
+}
+
+#endif
+
+
 
 template <typename scalar_t, typename opmath_t>
 void gemm_core_(

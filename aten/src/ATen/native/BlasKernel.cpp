@@ -78,6 +78,29 @@ extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int 
 namespace at::native {
 
 namespace blas_impl {
+void fp16_gemv_notrans(
+    int m,
+    int n,
+    const float16_t alpha,
+    const float16_t* a,
+    const int lda,
+    const float16_t* x,
+    const int incx,
+    const float16_t beta,
+    float16_t* y,
+    int incy);
+void fp16_gemv_trans(
+    int m,
+    int n,
+    const float16_t alpha,
+    const float16_t* a,
+    const int lda,
+    const float16_t* x,
+    const int incx,
+    const float16_t beta,
+    float16_t* y,
+    int incy);
+
 
 template <typename scalar_t>
 bool scal_use_fast_path(int64_t n, int64_t incx) {
@@ -180,7 +203,7 @@ static inline float16_t reduce(float16x4_t x) {
         return vget_lane_f16(vpadd_f16(sum, sum), 0);
 }
 
-static void gemv_trans(
+void fp16_gemv_trans(
     int m,
     int n,
     const float16_t alpha,
@@ -200,7 +223,7 @@ static void gemv_trans(
       const auto row0 = a + lda * (i + 0);
       const auto row1 = a + lda * (i + 1);
       const auto row2 = a + lda * (i + 2);
-      const auto row3 = a + lda * (i + 333);
+      const auto row3 = a + lda * (i + 3);
       for (auto j = 0; j < m; j += 4) {
         float16x4_t a0Vec = vld1_f16(row0 + j);
         float16x4_t a1Vec = vld1_f16(row1 + j);
@@ -213,9 +236,9 @@ static void gemv_trans(
         sum3Vec = vadd_f16(sum3Vec, vmul_f16(a3Vec, xVec));
       }
       y[(i + 0) * incy] = reduce(sum0Vec);
-      y[(i + 1) * incy] = reduce(sum0Vec);
-      y[(i + 2) * incy] = reduce(sum0Vec);
-      y[(i + 3) * incy] = reduce(sum0Vec);
+      y[(i + 1) * incy] = reduce(sum1Vec);
+      y[(i + 2) * incy] = reduce(sum2Vec);
+      y[(i + 3) * incy] = reduce(sum3Vec);
     }
     return;
   }
@@ -233,7 +256,7 @@ static void gemv_trans(
   }
 }
 
-static void gemv_notrans(
+void fp16_gemv_notrans(
     int m,
     int n,
     const float16_t alpha,
@@ -245,14 +268,14 @@ static void gemv_notrans(
     float16_t* y,
     int incy) {
   if (incx == 1 && alpha == 1.0 && beta == 0.0 && m % 4 == 0 && incy == 1) {
-    for (auto j = 0; j < n; j += 4) {
-      auto vecCol = vld1_f16(x + j);
+    for (auto j = 0; j < n; j++) {
+      auto vecCol = vdup_n_f16(x[j]);
       const auto* column = a + lda * j;
       for (auto i = 0; i < m; i += 4) {
         auto yf16 = y + i;
         auto matRow = vld1_f16(column + i);
         auto resVec = j != 0 ? vld1_f16(yf16) : vdup_n_f16(0);
-        resVec = vfma_f16(resVec, matRow, vecCol);
+        resVec = vfma_lane_f16(resVec, matRow, vecCol, 0);
         vst1_f16(yf16, resVec);
       }
     }
@@ -289,7 +312,7 @@ void gemv_fast_path<at::Half>(
     const int* incy) {
   using namespace c10::detail;
   if ((trans[0] == 'T') || (trans[0] == 't')) {
-    gemv_trans(
+    fp16_gemv_trans(
         *m,
         *n,
         fp16_from_bits(alpha->x),
@@ -301,7 +324,7 @@ void gemv_fast_path<at::Half>(
         reinterpret_cast<float16_t*>(y),
         *incy);
   } else {
-    gemv_notrans(
+    fp16_gemv_notrans(
         *m,
         *n,
         fp16_from_bits(alpha->x),
