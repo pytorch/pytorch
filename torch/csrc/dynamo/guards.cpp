@@ -1063,6 +1063,7 @@ class GuardManager {
     for (const auto& accessor : _accessors) {
       if (!accessor->check_nopybind(value)) { // early exit
         _fail_count += 1;
+        result = false;
         // need to sort, so break the loop.
         break;
       }
