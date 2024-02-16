@@ -1473,6 +1473,7 @@ void initModule(PyObject* module);
 #ifdef USE_XPU
 PyMethodDef* THXPModule_methods();
 void THXPStream_init(PyObject* module);
+void THXPEvent_init(PyObject* module);
 namespace torch::xpu {
 void initModule(PyObject* module);
 } // namespace torch::xpu
@@ -1618,6 +1619,7 @@ PyObject* initModule() {
 
 #ifdef USE_XPU
   THXPStream_init(module);
+  THXPEvent_init(module);
 #endif
 
   auto set_module_attr =
@@ -2121,17 +2123,9 @@ Call this whenever a new thread is created in order to propagate values from
          const at::Tensor& running_mean,
          const at::Tensor& running_var,
          bool training,
-         double eps,
-         bool cudnn_enabled) {
+         double eps) {
         return at::native::_select_batch_norm_backend(
-            input,
-            weight,
-            bias,
-            running_mean,
-            running_var,
-            training,
-            eps,
-            cudnn_enabled);
+            input, weight, bias, running_mean, running_var, training, eps);
       },
       py::arg("input"),
       py::arg("weight"),
@@ -2139,8 +2133,7 @@ Call this whenever a new thread is created in order to propagate values from
       py::arg("running_mean"),
       py::arg("running_var"),
       py::arg("training"),
-      py::arg("eps"),
-      py::arg("cudnn_enabled"));
+      py::arg("eps"));
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
   THPDefaultCPUGenerator =

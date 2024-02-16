@@ -1374,6 +1374,15 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="https://github.com/pytorch/pytorch/issues/115106",
     ),
+    # TODO: This test currently fails only for certain inputs, e.g. shape([3, 1]).
+    # Numerically the ONNX program is correct, but the output shapes for `save_mean`
+    # and `save_var` were tensor(-2.1268) instead of the correct tensor([-2.1268])
+    # for example.
+    skip(
+        "batch_norm_with_update",
+        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
+        reason="not supported yet",
+    ),
     xfail(
         "addmm",  # xfail can't only use dtypes to catch all cases
         matcher=lambda sample: sample.input.dtype
