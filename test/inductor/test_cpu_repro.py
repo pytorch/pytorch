@@ -1194,6 +1194,61 @@ class CPUReproTests(TestCase):
     def test_per_tensor_fake_quant_int8(self):
         self._test_per_tensor_fake_quant_helper(torch.int8)
 
+    def _test_per_channel_fake_quant_helper(self, dtype, input_dtype=torch.float32):
+        def fn(input, scales, zero_points, axis, quant_min, quant_max, dtype):
+            input = torch.ops.quantized_decomposed.quantize_per_channel(
+                input, scales, zero_points, axis, quant_min, quant_max, dtype
+            )
+            input = torch.ops.quantized_decomposed.dequantize_per_channel(
+                input, scales, zero_points, axis, quant_min, quant_max, dtype
+            )
+            return input
+
+        assert dtype in [torch.uint8, torch.int8]
+        quant_min = 0 if dtype == torch.uint8 else -128
+        quant_max = 255 if dtype == torch.uint8 else 127
+        x = torch.clamp(
+            torch.randn((1, 3, 224, 224), dtype=torch.float32) * 100,
+            quant_min,
+            quant_max,
+        )
+        if input_dtype != torch.float32:
+            x = x.to(dtype=input_dtype)
+        scales = torch.ones((3,))
+        zero_points = torch.zeros((3,))
+        axis = 1
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x, scales, zero_points, axis, quant_min, quant_max, dtype))
+            assert metrics.generated_cpp_vec_kernel_count == 1
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_per_channel_fake_quant_uint8(self):
+        self._test_per_channel_fake_quant_helper(torch.uint8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_per_channel_fake_quant_int8(self):
+        self._test_per_channel_fake_quant_helper(torch.int8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_per_channel_fake_quant_uint8_bf16_input(self):
+        self._test_per_channel_fake_quant_helper(
+            torch.uint8, input_dtype=torch.bfloat16
+        )
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_per_channel_fake_quant_int8_bf16_input(self):
+        self._test_per_channel_fake_quant_helper(torch.int8, input_dtype=torch.bfloat16)
+
     def _test_non_contiguous_load_buf_quant_helper(self, dtype):
         def fn(
             x1,
