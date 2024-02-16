@@ -2340,6 +2340,7 @@ class ShapeEnv:
                 sym,
                 hint=hint,
                 source=TensorPropertySource(source, TensorProperty.SIZE, i),
+                symbolic_context=symbolic_context,
             )
             for i, (sym, hint) in enumerate(zip(size, ex_size))
         ]
@@ -2349,7 +2350,11 @@ class ShapeEnv:
             # we computed
             assert stride_expr is not None
             sym_stride.append(self.create_symintnode(
-                stride_expr, hint=ex_stride[i], source=TensorPropertySource(source, TensorProperty.STRIDE, i)))
+                stride_expr,
+                hint=ex_stride[i],
+                source=TensorPropertySource(source, TensorProperty.STRIDE, i),
+                symbolic_context=symbolic_context)
+            )
         sym_storage_offset = self.create_symintnode(
             self.create_symbol(
                 ex_storage_offset,
@@ -2359,7 +2364,9 @@ class ShapeEnv:
                 symbolic_context=symbolic_context
             ),
             hint=ex_storage_offset,
-            source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET))
+            source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
+            symbolic_context=symbolic_context,
+        )
         return tuple(sym_sizes), tuple(sym_stride), sym_storage_offset
 
     @record_shapeenv_event()
@@ -2369,6 +2376,7 @@ class ShapeEnv:
             *,
             hint: Optional[int],
             source: Optional[Source] = None,
+            symbolic_context: Optional[SymbolicContext] = None,
     ):
         """Create a SymInt value from a symbolic expression
 
@@ -2378,6 +2386,10 @@ class ShapeEnv:
 
         """
         source_name = source.name() if source else None
+        if (isinstance(symbolic_context, StatefulSymbolicContext)
+                and source_name
+                and (source_name in symbolic_context.shape_env_to_source_to_symbol_cache[id(self)]['symnode'])):
+            return symbolic_context.shape_env_to_source_to_symbol_cache[id(self)]['symnode'][source_name]
 
         if self._translation_validation_enabled and source is not None:
             # Create a new symbol for this source.
@@ -2398,6 +2410,8 @@ class ShapeEnv:
             out = int(sym)
         else:
             out = SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
+        if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
+            symbolic_context.shape_env_to_source_to_symbol_cache[id(self)]['symnode'][source_name] = out
         return out
 
     @record_shapeenv_event()
@@ -2521,11 +2535,13 @@ class ShapeEnv:
         if (isinstance(symbolic_context, StatefulSymbolicContext)
                 and id(self) not in symbolic_context.shape_env_to_source_to_symbol_cache):
             symbolic_context.shape_env_to_source_to_symbol_cache[id(self)] = {}
+            symbolic_context.shape_env_to_source_to_symbol_cache[id(self)]['symbol'] = {}
+            symbolic_context.shape_env_to_source_to_symbol_cache[id(self)]['symnode'] = {}
 
         if (isinstance(symbolic_context, StatefulSymbolicContext)
                 and source_name
-                and (source_name in symbolic_context.shape_env_to_source_to_symbol_cache[id(self)])):
-            return symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][source_name]
+                and (source_name in symbolic_context.shape_env_to_source_to_symbol_cache[id(self)]['symbol'])):
+            return symbolic_context.shape_env_to_source_to_symbol_cache[id(self)]['symbol'][source_name]
 
         if do_not_specialize_zero_one:
             specialize_zero_one = False
@@ -2543,7 +2559,7 @@ class ShapeEnv:
         if dynamic_dim is DimDynamic.STATIC:
             out = sympy.Integer(val)
             if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
-                symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][source_name] = out
+                symbolic_context.shape_env_to_source_to_symbol_cache[id(self)]['symbol'][source_name] = out
             return out
 
         elif dynamic_dim is DimDynamic.DUCK:
@@ -2629,7 +2645,7 @@ class ShapeEnv:
             self.symbol_guard_counter[r] = 0
 
         if isinstance(symbolic_context, StatefulSymbolicContext) and source_name:
-            symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][source_name] = r
+            symbolic_context.shape_env_to_source_to_symbol_cache[id(self)]['symbol'][source_name] = r
         return r
 
     def _debug_name(self, source):
