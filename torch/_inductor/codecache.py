@@ -26,7 +26,6 @@ import tempfile
 import textwrap
 import threading
 import warnings
-import types
 import platform
 import weakref
 from bisect import bisect_right
