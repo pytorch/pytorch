@@ -134,7 +134,7 @@ torch.ao.quantization.pt2e (quantization in pytorch 2.0 export implementation)
 torch.ao.quantization.pt2e.export_utils
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. currentmodule:: torch.ao.quantization.pt2te.export_utils
+.. currentmodule:: torch.ao.quantization.pt2e.export_utils
 
 .. autosummary::
     :toctree: generated
