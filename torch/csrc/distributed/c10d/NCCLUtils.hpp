@@ -300,6 +300,14 @@ class NCCLComm {
   }
 #endif
 
+#ifdef NCCL_COMM_DUMP
+  std::unordered_map<std::string, std::string> ncclCommDump() {
+    std::unordered_map<std::string, std::string> dump;
+    C10D_NCCL_CHECK(::ncclCommDump(ncclComm_, ret), c10::nullopt);
+    return dump;
+  }
+#endif
+
   ncclUniqueId getNcclId() {
     return ncclId_;
   }

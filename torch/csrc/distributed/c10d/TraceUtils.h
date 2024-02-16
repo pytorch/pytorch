@@ -565,10 +565,14 @@ struct NCCLTraceBuffer {
     entry->start_ = entry->end_ = nullptr;
   }
 
-  std::string dump() {
+  std::string dump(
+      const c10::optional<std::unordered_map<
+          std::string,
+          std::unordered_map<std::string, std::string>>>& ncclDumpMap) {
     auto result = dump_entries();
     auto entries = new_list();
     c10::IValue entries_key = "entries";
+    c10::IValue nccl_dump_Key = "nccl_dump";
     c10::IValue version_key = "version";
     // Update whenever changing contents or formatting of the dump
     // (minor when adding fields, major when changing existing fields)
@@ -661,9 +665,24 @@ struct NCCLTraceBuffer {
       entries.push_back(dict);
     }
 
+    // convert ncclDumpMap into a dictionary
+    auto per_comm_dict = new_dict();
+    if (ncclDumpMap.has_value()) {
+      for (const auto& [ncclId, ncclDump] : ncclDumpMap.value()) {
+        auto inner_dict = new_dict();
+        for (const auto& [key, value] : ncclDump) {
+          inner_dict.insert(key, value);
+        }
+        per_comm_dict.insert(ncclId, inner_dict);
+      }
+    }
+
     auto dict = new_dict();
     dict.insert(entries_key, entries);
     dict.insert(version_key, version_val);
+    if (per_comm_dict.size() > 0) {
+      dict.insert(nccl_dump_Key, per_comm_dict);
+    }
 
     return pickle_str(dict);
   }

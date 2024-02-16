@@ -309,9 +309,28 @@ void cacheAllocatorDeregisterHook(
   }
 }
 
+#ifdef NCCL_COMM_DUMP
 std::string dump_nccl_trace() {
-  return NCCLTraceBuffer::get()->dump();
+  std::unordered_map<
+      std::string /* ncclUniqueID */,
+      std::unordered_map<std::string, std::string> /* dump from this comm */>
+      ncclDumpMap;
+  // dump_nccl_trace is only called from the default PG (uid_=0), but we want to
+  // dump from all comms so we need to iterate over ncclCommDevIdxMap, which
+  // is static
+  ncclCommDevIdxMapMutex.lock();
+  for (auto& [ncclComm, _] : ncclCommDevIdxMap) {
+    std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getUniqueId());
+    ncclDumpMap[ncclUniqueIDStr] = ncclComm->ncclCommDump();
+  }
+  ncclCommDevIdxMapMutex.unlock();
+  return NCCLTraceBuffer::get()->dump(ncclDumpMap);
 }
+#else
+std::string dump_nccl_trace() {
+  return NCCLTraceBuffer::get()->dump(c10::nullopt);
+}
+#endif
 
 c10::optional<std::function<std::string()>>& get_cpp_trace_dumper() {
   static c10::optional<std::function<std::string()>> dumper(c10::nullopt);
