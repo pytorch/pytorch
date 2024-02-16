@@ -414,9 +414,7 @@ static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t
   if (!hasContiguousSubspace(indices)) {
     std::tie(self, indices, inversePerm) = transposeToFrontAndInvPerm(self, indices);
   }
-  int64_t nElemBefore, strideBefore, nElemAfter;
-  Tensor linearIndex;
-  std::tie(linearIndex, nElemBefore, strideBefore, nElemAfter) = computeLinearIndex(self, indices, check_range);
+  auto [linearIndex, nElemBefore, strideBefore, nElemAfter] = computeLinearIndex(self, indices, check_range);
   return std::make_tuple(linearIndex, self, nElemBefore, strideBefore, nElemAfter, inversePerm);
 }
 
