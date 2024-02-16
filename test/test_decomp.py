@@ -39,6 +39,7 @@ import itertools
 import functools
 from functools import partial
 import unittest
+import sys
 
 aten = torch.ops.aten
 
@@ -189,6 +190,7 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.bfloat16, torch.ops.aten._native_batch_norm_legit.no_stats): 1e-5,
         (torch.float16, torch.ops.aten._native_batch_norm_legit.default): 1e-5,
         (torch.float16, torch.ops.aten._native_batch_norm_legit.no_stats): 1e-5,
+        (torch.bfloat16, torch.ops.aten.batch_norm_backward.default): 5e-7,
         (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-4,
         (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-4,
         (torch.bfloat16, torch.ops.aten.var_mean.correction): 5e-7,
@@ -1046,6 +1048,7 @@ class HasDecompTest(TestCase):
         self.assertExpected("".join(sorted(op.name() + "\n" for op in core_aten_ops)))
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
+    @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
     def test_compile_rrelu(self):
         def f(x):
             return torch.rrelu(x)

@@ -53,6 +53,7 @@ from common_utils import (
 )
 import types
 import os
+import sys
 from collections import namedtuple
 import contextlib
 
@@ -2155,6 +2156,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
     @unittest.skipIf(IS_WINDOWS,
                      reason="Windows not yet supported for torch.compile")
+    @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
     def test_is_contiguous(self):
         def foo(x):
             if x.is_contiguous():
@@ -3623,6 +3625,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # which will be updated in place, were not batched.
         xfail('native_batch_norm'),
         xfail('_native_batch_norm_legit'),
+        xfail('batch_norm_with_update'),
         xfail('tril'),  # Exception not raised on error input
         xfail('triu'),  # Exception not raised on error input
         xfail('as_strided', 'partial_views'),
@@ -3662,6 +3665,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # which will be updated in place, were not batched.
         xfail('native_batch_norm'),
         xfail('_native_batch_norm_legit'),
+        xfail('batch_norm_with_update'),
         xfail('histogram'),
         xfail('scatter_reduce', 'sum'),
         xfail('scatter_reduce', 'mean'),
