@@ -24,7 +24,6 @@ from torch.utils._python_dispatch import (
     transform_subclass,
 )
 from .functional_utils import (
-    _get_mutation_type,
     are_all_mutations_hidden_from_autograd,
     are_all_mutations_under_no_grad_or_inference_mode,
     from_fun,
@@ -33,13 +32,7 @@ from .functional_utils import (
     has_same_metadata,
     to_fun,
 )
-from .schemas import (
-    InputAliasInfo,
-    MutationType,
-    OutputAliasInfo,
-    OutputType,
-    ViewAndMutationMeta,
-)
+from .schemas import InputAliasInfo, OutputAliasInfo, OutputType, ViewAndMutationMeta
 from .subclass_utils import create_subclass_meta
 
 from .utils import _get_autocast_states, KNOWN_TYPES, strict_zip
@@ -173,14 +166,7 @@ def run_functionalized_fw_and_collect_metadata(
                     mutates_storage_metadata=mutates_storage_metadata,
                     mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
                     requires_grad=requires_grad,
-                    mutation_type=_get_mutation_type(
-                        keep_input_mutations,
-                        mutates_data,
-                        mutates_metadata,
-                        mutations_hidden_from_autograd,
-                        mutations_under_no_grad_or_inference_mode,
-                        requires_grad,
-                    ),
+                    keep_input_mutations=keep_input_mutations,
                 )
             )
 
@@ -537,17 +523,7 @@ from a multi-output view call"
         f_input_tangents = [
             inp
             for inp, info in zip(flat_f_args, input_info)
-            if _get_mutation_type(
-                keep_input_mutations,
-                mutates_data=info.mutates_data,
-                mutates_metadata=info.mutates_metadata,
-                mutations_hidden_from_autograd=info.mutations_hidden_from_autograd,
-                mutations_under_no_grad_or_inference_mode=info.mutations_under_no_grad_or_inference_mode,
-                requires_grad=info.requires_grad
-                # MUTATED_OUT_GRAPH corresponds to any input mutations that happen outside the graph.
-                # this can also include metadata mutations, and inputs that do not require grad,
-            )
-            == MutationType.MUTATED_OUT_GRAPH
+            if info.should_return_for_external_mutation()
             and info.mutates_data
             and info.requires_grad
         ]
@@ -574,7 +550,7 @@ from a multi-output view call"
         f_mutated_inputs = [
             inp
             for inp, info in zip(flat_f_args, input_info)
-            if info.mutates_data or info.mutates_metadata
+            if info.should_return_for_external_mutation()
         ]
         f_metadata_mutated_inputs = [
             inp for inp, info in zip(flat_f_args, input_info) if info.mutates_metadata

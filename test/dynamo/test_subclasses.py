@@ -19,6 +19,7 @@ from torch.fx.experimental.symbolic_shapes import (
     StatelessSymbolicContext,
 )
 from torch.nested._internal.nested_tensor import (
+    buffer_from_jagged,
     jagged_from_list,
     jagged_from_tensor_and_lengths,
     ViewBufferFromNested,
@@ -1152,6 +1153,39 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
     @requires_cuda
     def test_basic_autograd_inductor(self):
         self._test_autograd("inductor")
+
+    def test_subclass_with_mutation_in_graph(self):
+        # In this graph, we have an in-graph mutation, i.e. a mutation that is allowed
+        # to remain in the graph. Normally this is allowed, but it's not allowed if
+        # the graph handles subclasses at all.
+        # Whether the mutation is allowed or not allowed in the graph alters the number
+        # of outputs from the forward graph. Previously, a bug in this handling meant
+        # that sometimes the expected number and actual number of outputs from the
+        # joint graph did not match, causing assertion failures.
+        def fn(x, y):
+            z = x.sin()
+            y.sin_()
+            return z.cos(), y.cos()
+
+        fn_c = torch.compile(fn, backend="inductor")
+
+        values = [torch.rand((i, 8), requires_grad=True) for i in range(1, 6)]
+        values_copy = [x.detach().clone().requires_grad_(True) for x in values]
+
+        nt, offsets = jagged_from_list(values, None)
+        nt_copy, offsets = jagged_from_list(values_copy, offsets)
+        y = torch.rand((4, 8))
+        y_copy = y.clone()
+
+        ret = fn_c(nt, y)[0]
+        ref = fn(nt_copy, y_copy)[0]
+
+        self.assertEqual(buffer_from_jagged(ret), buffer_from_jagged(ref))
+
+        buffer_from_jagged(ret).sum().backward()
+        buffer_from_jagged(ref).sum().backward()
+        for ref_v, res_v in zip(values_copy, values):
+            self.assertEqual(ref_v.grad, res_v.grad)
 
     def test_unbind(self):
         # NB: If we have shape e.g. (3, j0, 3), duck sizing will give us (s0, s1, s0).

@@ -576,6 +576,40 @@ def aot_dispatch_subclass(
         is_train=meta.is_train,
     )(*primals_unwrapped)
 
+    # Patch the input requires_grad information:
+    # Generally, if a subclass requires grad, its components will not require grad.
+    # But for downstream metadata computation, we need to make sure to keep track
+    # of the fact that these tensors should be treated as if they require grad, because
+    # their containing subclass tensor requires grad.
+    #
+    # e.g. generally if a tensor requires grad and is mutated, we might need to apply
+    # the mutation outside of the graph, and so we return the tensor as part of the
+    # forward pass in addition to the actual outputs. If that tensor is a subclass tensor,
+    # then we need to make sure to also return its components, even if they don't require
+    # grad themselves. To do that, we populate this subclass metadata ViewAndMutationMeta
+    # with information so that the component tensors match the properties of their
+    # outer subclass tensor.
+    #
+    # TODO: this should really be in a different class to clarify semantics.
+    updated_input_info = []
+    inner_idx = 0
+    for outer_idx, inp_meta in enumerate(meta.subclass_inp_meta):
+        if isinstance(inp_meta, int):
+            # TODO(dberard) add assert strings
+            assert inner_idx < len(meta_updated.input_info)
+            assert outer_idx < len(meta.input_info)
+            assert inner_idx == inp_meta
+            assert meta_updated.input_info[inner_idx] == meta.input_info[outer_idx]
+            updated_input_info.append(meta_updated.input_info[inner_idx])
+            inner_idx += 1
+        else:
+            for _ in range(inp_meta.arg_count):
+                updated_input_info.append(meta.input_info[outer_idx])
+                inner_idx += 1
+    assert len(meta_updated.input_info) == len(updated_input_info)
+    meta_updated.input_info = updated_input_info
+    meta_updated.__post_init__()
+
     subclass_meta.fw_metadata = meta_updated
 
     return SubclassTracingInfo(
