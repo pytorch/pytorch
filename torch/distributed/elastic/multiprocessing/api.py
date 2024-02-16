@@ -148,7 +148,7 @@ def to_map(
      to_map({0: Std.OUT, 1: Std.OUT}, local_world_size=2) # returns: {0: Std.OUT, 1: Std.OUT}
     """
     if isinstance(val_or_map, Std):
-        return {i: val_or_map for i in range(local_world_size)}
+        return dict.fromkeys(range(local_world_size), val_or_map)
     else:
         map = {}
         for i in range(local_world_size):
@@ -674,9 +674,7 @@ class SubprocessContext(PContext):
                 )
             else:
                 # Populate return with dummy values. This provides consistency with MultiprocessingHandler
-                result.return_values = {
-                    local_rank: None for local_rank in range(self.nprocs)
-                }
+                result.return_values = dict.fromkeys(range(self.nprocs))
 
             return result
         else:  # there are no failures and procs still running

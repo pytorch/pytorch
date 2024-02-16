@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 
-from typing import List, Set, Tuple, TYPE_CHECKING, Union
+from typing import Dict, List, Set, Tuple, TYPE_CHECKING, Union
 
 from torch._inductor import config
 from torch._inductor.utils import get_benchmark_name
@@ -60,7 +60,7 @@ def reset():
     disable_cpp_wrapper = 0
 
 
-REGISTERED_METRIC_TABLES = {}
+REGISTERED_METRIC_TABLES: Dict[str, MetricTable] = {}
 
 
 @dataclass

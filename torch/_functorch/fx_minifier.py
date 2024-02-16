@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import torch.fx as fx
 import copy
 import torch

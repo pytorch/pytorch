@@ -246,7 +246,7 @@ class OpSchema:
                 args_sharding.append(str(arg))
             else:
                 args_sharding.append(str(arg))
-        return f"Op(op={self.op}, args_sharding={', '.join(args_sharding)}@ mesh: {mesh_shape})"
+        return f"Op(op={self.op}, args_sharding={', '.join(args_sharding)} @ mesh: {mesh_shape})"
 
     def __post_init__(self) -> None:
         has_symints = False

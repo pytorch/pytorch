@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 from .base import VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
@@ -20,7 +22,9 @@ from .dicts import (
     SetVariable,
 )
 from .functions import (
+    FunctoolsPartialVariable,
     NestedUserFunctionVariable,
+    SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
@@ -62,9 +66,9 @@ from .misc import (
     NewGlobalVariable,
     NumpyVariable,
     PythonModuleVariable,
-    SkipFilesVariable,
     StringFormatVariable,
     SuperVariable,
+    TypingVariable,
     UnknownVariable,
 )
 from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
@@ -75,9 +79,14 @@ from .tensor import (
     SymNodeVariable,
     TensorVariable,
     UnspecializedPythonVariable,
+    UntypedStorageVariable,
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
-from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
+from .user_defined import (
+    RemovableHandleVariable,
+    UserDefinedClassVariable,
+    UserDefinedObjectVariable,
+)
 
 __all__ = [
     "AutogradFunctionContextVariable",
@@ -117,9 +126,11 @@ __all__ = [
     "PythonModuleVariable",
     "CannotConvertRangeToHigherOrder",
     "RangeVariable",
+    "RemovableHandleVariable",
     "RepeatIteratorVariable",
     "RestrictedListSubclassVariable",
-    "SkipFilesVariable",
+    "SDPAParamsVariable",
+    "SkipFunctionVariable",
     "SliceVariable",
     "StringFormatVariable",
     "SuperVariable",
@@ -130,11 +141,11 @@ __all__ = [
     "UnknownVariable",
     "UnspecializedNNModuleVariable",
     "UnspecializedPythonVariable",
+    "UntypedStorageVariable",
     "UserDefinedClassVariable",
     "UserDefinedObjectVariable",
     "UserFunctionVariable",
     "UserMethodVariable",
     "VariableTracker",
     "WithExitFunctionVariable",
-    "SDPAParamsVariable",
 ]

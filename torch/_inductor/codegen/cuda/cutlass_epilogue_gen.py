@@ -99,7 +99,7 @@ class CutlassEVTEpilogueTypeFormatter:
                 result = pnode.inner_fn(index)
                 # each epilogue node results in a single "using" statement and may refer to the previous steps by name
                 formatter.aliases[node.name] = result
-            res = formatter.getvalue(result)
+            res = formatter.getvalue(result)  # type: ignore[possibly-undefined]
             if _MAGIC_SYMPY_ERROR_STRING in res:
                 raise CUTLASSEVTOpNotImplementedError(
                     "sympy / indexing expressions not yet supported in EVT fusion"
@@ -266,7 +266,7 @@ class CutlassEVTEpilogueArgumentFormatter:
                 if node.name is not None:
                     formatter.aliases[node.name] = result
 
-            res: str = formatter.getvalue(result)
+            res: str = formatter.getvalue(result)  # type: ignore[possibly-undefined]
             if _MAGIC_SYMPY_ERROR_STRING in res:
                 raise CUTLASSEVTOpNotImplementedError(
                     "sympy / indexing expressions not yet supported in EVT fusion"

@@ -1250,7 +1250,7 @@ Tensor trace_cpu(const Tensor& self) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX(self.scalar_type(), "trace", [&] {
     using accscalar_t = at::acc_type<scalar_t, false>;
     accscalar_t sum = 0;
-    const auto* t_data = self.data_ptr<scalar_t>();
+    const auto* t_data = self.const_data_ptr<scalar_t>();
 
     int64_t t_stride_0, t_stride_1, t_diag_size;
 
@@ -1726,7 +1726,7 @@ static double std_var_all_cpu(const Tensor& self, double correction, bool take_s
 
   auto mean = self.mean().item<double>();
   auto iter = TensorIteratorConfig()
-      .add_input(self)
+      .add_const_input(self)
       .build();
 
   auto reduction = [&](int64_t begin, int64_t end, double thread_sum) {
@@ -2197,7 +2197,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
       return true;
     }
     std::atomic<bool> result{true};
-    auto iter = TensorIteratorConfig().add_input(self).build();
+    auto iter = TensorIteratorConfig().add_const_input(self).build();
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "equal_notnan_cpu", [&] {
       iter.for_each([&](char** data, const int64_t *strides, int64_t dim_size) {
         if (!result) {
@@ -2218,8 +2218,8 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
 
   std::atomic<bool> result{true};
   auto iter = TensorIteratorConfig()
-    .add_input(self)
-    .add_input(other)
+    .add_const_input(self)
+    .add_const_input(other)
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
     .build();

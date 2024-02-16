@@ -201,7 +201,7 @@ class Shard(Placement):
         )
 
         if is_padded:
-            output = self._unpad_tensor(output, pad_sizes[my_coordinate[mesh_dim]])
+            output = self._unpad_tensor(output, pad_sizes[my_coordinate[mesh_dim]])  # type: ignore[possibly-undefined]
         return output
 
     def _to_replicate_tensor(
@@ -236,7 +236,7 @@ class Shard(Placement):
             group=(mesh, mesh_dim),
         )
         if is_padded:
-            unpad_size = full_chunk_size * num_chunks - logical_dim_size
+            unpad_size = full_chunk_size * num_chunks - logical_dim_size  # type: ignore[possibly-undefined]
             result = self._unpad_tensor(result, unpad_size)
         return result
 
@@ -249,7 +249,7 @@ class Shard(Placement):
     ) -> torch.Tensor:
         """
         transform from replicated tensor to a sharded tensor on
-        the current rank
+        the current rank, which would perform a local chunk
         """
         num_chunks = mesh.size(mesh_dim=mesh_dim)
         shards, _ = self._split_tensor(

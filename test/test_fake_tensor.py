@@ -87,7 +87,7 @@ class FakeTensorTest(TestCase):
     def test_custom_op_fallback(self):
         from torch.library import Library, impl
 
-        test_lib = Library("my_test_op", "DEF")
+        test_lib = Library("my_test_op", "DEF")  # noqa: TOR901
         test_lib.define('foo(Tensor self) -> Tensor')
 
         @impl(test_lib, 'foo', 'CPU')
@@ -1067,6 +1067,23 @@ class FakeTensorOperatorInvariants(TestCase):
                 op = self.get_aten_op(schema)
                 self.assertIn(op, torch._subclasses.fake_tensor._like_tensor_constructors)
 
+    def test_str_storage(self):
+        x = torch.zeros(3)
+        with FakeTensorMode() as m:
+            y = m.from_tensor(x)
+            self.assertExpectedInline(str(x.storage()), '''\
+ 0.0
+ 0.0
+ 0.0
+[torch.storage.TypedStorage(dtype=torch.float32, device=cpu) of size 3]''')
+            self.assertExpectedInline(str(y.storage()), '''\
+...
+[torch.storage.TypedStorage(dtype=torch.float32, device=meta) of size 3]''')
+
+        self.assertExpectedInline(str(y.storage()), '''\
+...
+[torch.storage.TypedStorage(dtype=torch.float32, device=meta) of size 3]''')
+
     # at::_embedding_bag has no op info,
     # and returns extra tensors that at::embedding bag throws away
     def test_embedding_bag_private(self):
@@ -1548,6 +1565,46 @@ class FakeTensorDispatchCache(TestCase):
             y = torch._efficientzerotensor(3)
             self.assertTrue(y._is_zerotensor())
             self.assertBypasses("dispatch_key_set mismatch", 2)
+
+    def test_inference_mode(self):
+        """
+        Test that caching handles inference mode correctly.
+        """
+        with FakeTensorMode():
+            x = torch.randn(4, 3)
+            y = torch.randn(4, 3)
+
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+
+            # Expect a miss when the inference mode is different
+            res1 = x + y
+            with torch.inference_mode():
+                res2 = x + y
+
+            self.assertHitsMisses(0, 2)
+            self.assertFalse(res1.is_inference())
+            self.assertTrue(res2.is_inference())
+
+            # Second tries should see hits
+            res3 = x + y
+
+            self.assertHitsMisses(1, 2)
+            self.assertFalse(res3.is_inference())
+            self.assertEqual(
+                extract_tensor_metadata(res1),
+                extract_tensor_metadata(res3),
+            )
+
+            with torch.inference_mode():
+                res4 = x + y
+
+            self.assertHitsMisses(2, 2)
+            self.assertTrue(res4.is_inference())
+            self.assertEqual(
+                extract_tensor_metadata(res2),
+                extract_tensor_metadata(res4),
+            )
 
 
 instantiate_parametrized_tests(FakeTensorTest)
