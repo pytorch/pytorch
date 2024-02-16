@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
     TEST_WITH_ROCM,
 )
+from torch.testing._internal.two_tensor import TwoTensor
 
 
 _orig_module_call = torch.nn.Module.__call__
@@ -3914,6 +3915,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             metric.shape_env_guard_count for metric in all_metrics
         )
         self.assertLess(total_shape_env_guards, AMT * 8)
+
+    # https://github.com/pytorch/pytorch/issues/118799
+    def test_subclass_graph_output_repro(self):
+        @torch._dynamo.allow_in_graph
+        def to_subclass(x):
+            return TwoTensor(x.clone(), x.clone())
+
+        def f(x):
+            tmp_subclass = to_subclass(x)
+            return tmp_subclass.view(-1)
+
+        x = torch.ones(2)
+        out_ref = f(x)
+        out_test = torch.compile(f, backend="aot_eager")(x)
+        self.assertEqual(out_ref, out_test)
 
     def test_numpy_tobytes_no_error(self):
         def fn(x):
