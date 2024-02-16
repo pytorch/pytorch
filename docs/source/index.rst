@@ -8,25 +8,20 @@
 PyTorch documentation
 ===================================
 
-PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
+PyTorch is a tensor library optimized for deep learning on GPUs and CPUs. 
+Features in this documentation are classified by release status: 
 
-Features described in this documentation are classified by release status:
+            Stable, Beta, and Prototype. 
 
-  *Stable:*  These features will be maintained long-term and there should generally
-  be no major performance limitations or gaps in documentation.
-  We also expect to maintain backwards compatibility (although
-  breaking changes can happen and notice will be given one release ahead
-  of time).
+- **Stable**: These features are well-established and will be maintained long-term with comprehensive documentation and no major performance limitations.
+ Backwards compatibility is generally maintained, with notice given for any breaking changes.
 
-  *Beta:*  These features are tagged as Beta because the API may change based on
-  user feedback, because the performance needs to improve, or because
-  coverage across operators is not yet complete. For Beta features, we are
-  committing to seeing the feature through to the Stable classification.
-  We are not, however, committing to backwards compatibility.
+- **Beta**: Beta features are still in development, and their API may change based on user feedback.
+ Performance improvements and broader operator coverage are often goals for Beta features.
+  While there is a commitment to moving Beta features to Stable status, backwards compatibility is not guaranteed.
 
-  *Prototype:*  These features are typically not available as part of
-  binary distributions like PyPI or Conda, except sometimes behind run-time
-  flags, and are at an early stage for feedback and testing.
+- **Prototype**: Prototype features are in early stages and may not be included in binary distributions like PyPI or Conda, except possibly behind runtime flags.
+ They are available for feedback and testing to refine their functionality and usability.
 
 .. toctree::
    :glob:
