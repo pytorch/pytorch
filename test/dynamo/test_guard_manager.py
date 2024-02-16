@@ -442,6 +442,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         guard_manager = RootGuardManager()
         # Check a[3] which is tuple_iterator_getitem(foo, 2)
+        guard_manager.add_tuple_iterator_length_guard(5, ["len == 5"])
         guard_manager.tuple_iterator_getitem_manager(2, foo).add_equals_match_guard(
             a[3], ["x==4"]
         )
