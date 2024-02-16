@@ -1561,6 +1561,53 @@ class GetAttrGuardAccessor : public GuardAccessor {
   PyObject* _attr_name;
 };
 
+/**
+ * Represents __getitem__ acccessor.
+ */
+class GetItemGuardAccessor : public GuardAccessor {
+ public:
+  GetItemGuardAccessor(
+      RootGuardManager* root,
+      py::object name,
+      py::handle example_value)
+      : GuardAccessor(root, name, example_value), _attr_name(name.ptr()) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    PyObject* x = PyObject_GetItem(obj, _attr_name); // new ref
+    if (x == nullptr) {
+      PyErr_Clear();
+      return false;
+    }
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* x = PyObject_GetItem(obj, _attr_name); // new ref
+    if (x == nullptr) {
+      PyErr_Clear();
+      return GuardDebugInfo(false, std::string("KeyError ") + repr(), 0);
+    }
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+  std::string repr() const override {
+    return "GetItemGuardAccessor(" + py::str(_attr_name).cast<std::string>() +
+        ")";
+  }
+
+ private:
+  // no need of py::object here because the attr_name is already passed on to
+  // the base class as accessor_key which is a py::object.
+  PyObject* _attr_name;
+};
+
 void install_tensor_aliasing_guard(
     GuardManager* x,
     GuardManager* y,
@@ -1728,6 +1775,10 @@ PyObject* torch_c_dynamo_guards_init() {
       GetAttrGuardAccessor,
       GuardAccessor,
       std::unique_ptr<GetAttrGuardAccessor>>(py_m, "GetAttrGuardAccessor");
+  py::class_<
+      GetItemGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<GetItemGuardAccessor>>(py_m, "GetItemGuardAccessor");
 
   // Guard Manager - No constructor in python, python should use
   // RootGuardManager.
@@ -1809,6 +1860,12 @@ PyObject* torch_c_dynamo_guards_init() {
             self.add_leaf_guard(
                 std::make_shared<DICT_VERSION>(value, verbose_code_parts));
           })
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "getitem_manager",
+          &GuardManager::get_child_manager<GetItemGuardAccessor>,
+          py::return_value_policy::reference)
       // return by reference because C++ GuardManager has the ownership of
       // accessors and guard managers
       .def(
