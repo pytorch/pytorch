@@ -41,6 +41,11 @@ test:
     - llama
     - llama_v2_7b_16h
     - simple_gpt
+    # Model's DEFAULT_TRAIN_BSIZE is not implemented
+    - cm3leon_generate
+    - hf_T5_generate
+    - doctr_det_predictor
+    - doctr_reco_predictor
     # doesnt fit in memory
     - phi_1_5
     # detectron2 benchmarks
@@ -53,6 +58,7 @@ test:
     - detectron2_maskrcnn_r_101_c4
     - detectron2_maskrcnn_r_101_fpn
     - detectron2_maskrcnn_r_50_fpn
+    - detectron2_fcos_r_50_fpn
 
 control_flow:
   - cm3leon_generate
