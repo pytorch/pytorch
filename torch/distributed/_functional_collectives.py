@@ -159,8 +159,14 @@ def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
         group (ProcessGroup or List[int]): The process group to work on.
         tag (str, optional): A unique identifier for the collective. Default: empty string
     """
-    tag, rankset, group_size = _expand_group(group, tag)
-    tensor = torch.ops.c10d_functional.broadcast(self, src, tag, rankset, group_size)
+    if native_funcol_enabled():
+        group_name = _resolve_group_name(group, tag)
+        tensor = torch.ops._c10d_functional.broadcast(self, src, group_name)
+    else:
+        tag, rankset, group_size = _expand_group(group, tag)
+        tensor = torch.ops.c10d_functional.broadcast(
+            self, src, tag, rankset, group_size
+        )
     return _maybe_wrap_tensor(tensor)
 
 
@@ -812,6 +818,10 @@ def _all_reduce__meta(inp, *args):
     return inp
 
 
+def _broadcast__meta(inp, *args):
+    return inp
+
+
 def _all_reduce_coalesced__meta(inputs, *args):
     return inputs
 
@@ -926,6 +936,8 @@ if not torch._running_with_deploy():
         "Meta",
     )
     _c10_lib_impl.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
+    _c10_lib_impl.impl("broadcast", _broadcast_meta, "Meta")
+    _c10_lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
 else:
     warnings.warn(
         "PyTorch Distributed functional collectives do not work with torch::deploy."
