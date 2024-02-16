@@ -1300,7 +1300,7 @@ def with_native_funcol(use_native_funcol: bool, remove_arg: bool):
 
 
 run_with_native_funcol = with_native_funcol(True, remove_arg=False)
-run_with_legacy_funcol = with_native_funcol(True, remove_arg=False)
+run_with_legacy_funcol = with_native_funcol(False, remove_arg=False)
 
 
 run_with_both_funcol_impls = parametrize(

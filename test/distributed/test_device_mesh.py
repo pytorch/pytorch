@@ -21,11 +21,11 @@ from torch.distributed.distributed_c10d import (
     is_nccl_available,
     ProcessGroup,
 )
+from torch.testing._internal.common_distributed import run_with_both_funcol_impls
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     run_tests,
 )
-from torch.testing._internal.distributed import run_with_both_funcol_impls
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
