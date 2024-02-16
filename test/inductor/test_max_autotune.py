@@ -25,7 +25,7 @@ from torch._inductor.select_algorithm import (
     ChoiceCaller,
     TritonTemplateCaller,
 )
-from torch._inductor.util_autotuning_log_parser import AutotuningLogParser
+
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -688,118 +688,6 @@ class TestMaxAutotune(TestCase):
             expected = fn(*args)
             actual = torch.compile(fn)(*args)
             torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
-
-    def test_autotuning_log_parser(self):
-        example_log_lines = """{"backend": "extern", "kernel_call_name": "extern_kernels.bmm", "cuda_device_name": "NVIDIA H100", "cuda_device_count": 8, "input_nodes": [{"name": "bmm", "type": "StorageBox", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 1024, 72], stride=[73728, 72, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[73728, 72, 1]", "numel": "442368", "data": {"name": "bmm", "type": "ComputedBuffer", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 1024, 72], stride=[73728, 72, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[73728, 72, 1]", "numel": "442368", "data": {"name": "bmm", "type": "Pointwise", "dtype": "torch.float32", "device": "cuda:0", "numel": "442368"}}}, {"name": "bmm", "type": "StorageBox", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 72, 512], stride=[36864, 512, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[36864, 512, 1]", "numel": "221184", "data": {"name": "bmm", "type": "ComputedBuffer", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 72, 512], stride=[36864, 512, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[36864, 512, 1]", "numel": "221184", "data": {"name": "bmm", "type": "Pointwise", "dtype": "torch.float32", "device": "cuda:0", "numel": "221184"}}}], "autotuning_time": 3.0995004177093506, "benchmark_result": 0.0147141041931385}
-{"tile_shape": "(64, 32, 64)", "num_stages": 2, "num_warps": 4, "allow_tf32": "True", "acc_type": "tl.float32", "backend": "Triton", "grid": "(128, 6, 1)", "cuda_device_name": "NVIDIA H100", "cuda_device_count": 8, "input_nodes": [{"name": "bmm", "type": "StorageBox", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 1024, 72], stride=[73728, 72, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[73728, 72, 1]", "numel": "442368", "data": {"name": "bmm", "type": "ComputedBuffer", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 1024, 72], stride=[73728, 72, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[73728, 72, 1]", "numel": "442368", "data": {"name": "bmm", "type": "Pointwise", "dtype": "torch.float32", "device": "cuda:0", "numel": "442368"}}}, {"name": "bmm", "type": "StorageBox", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 72, 512], stride=[36864, 512, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[36864, 512, 1]", "numel": "221184", "data": {"name": "bmm", "type": "ComputedBuffer", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 72, 512], stride=[36864, 512, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[36864, 512, 1]", "numel": "221184", "data": {"name": "bmm", "type": "Pointwise", "dtype": "torch.float32", "device": "cuda:0", "numel": "221184"}}}], "autotuning_time": 3.0995004177093506, "benchmark_result": 0.01217997465145754}
-{"tile_shape": "(64, 32, 128)", "num_stages": 3, "num_warps": 4, "allow_tf32": "True", "acc_type": "tl.float32", "backend": "Triton", "grid": "(64, 6, 1)", "cuda_device_name": "NVIDIA H100", "cuda_device_count": 8, "input_nodes": [{"name": "bmm", "type": "StorageBox", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 1024, 72], stride=[73728, 72, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[73728, 72, 1]", "numel": "442368", "data": {"name": "bmm", "type": "ComputedBuffer", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 1024, 72], stride=[73728, 72, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[73728, 72, 1]", "numel": "442368", "data": {"name": "bmm", "type": "Pointwise", "dtype": "torch.float32", "device": "cuda:0", "numel": "442368"}}}, {"name": "bmm", "type": "StorageBox", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 72, 512], stride=[36864, 512, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[36864, 512, 1]", "numel": "221184", "data": {"name": "bmm", "type": "ComputedBuffer", "layout": "FlexibleLayout('cuda', torch.float32, size=[6, 72, 512], stride=[36864, 512, 1])", "dtype": "torch.float32", "device": "cuda:0", "stride": "[36864, 512, 1]", "numel": "221184", "data": {"name": "bmm", "type": "Pointwise", "dtype": "torch.float32", "device": "cuda:0", "numel": "221184"}}}], "autotuning_time": 3.0995004177093506, "benchmark_result": 0.01012531017369727}
-"""  # noqa: B950
-        example_input = io.StringIO(example_log_lines)
-        try:
-            parser = AutotuningLogParser(example_input)
-            records = list(parser.get_records())
-            assert len(records) == 3
-            expected_json_records = '[{"backend": "extern", "name": "ATen", "problem_hash": "ef279ba8a6739a088efd1fdca60f0c31", "kernel_schedule": "", "tile_shape": "[]", "benchmark_result": 0.0147141041931385, "device": "unknown", "cuda_device_name": "NVIDIA H100", "problem_shape_MNK": [1024, 512, 72], "A_size": [6, 1024, 72], "A_stride": [73728, 72, 1], "A_type": "row_major", "A_dtype": "float32", "A_shape": ["6", "1024", "!72"], "B_size": [6, 72, 512], "B_stride": [36864, 512, 1], "B_type": "row_major", "B_dtype": "float32", "B_shape": ["6", "72", "!512"], "BATCHSIZE": 6, "M": 1024, "N": 512, "K": 72}, {"backend": "Triton", "name": "ATen", "problem_hash": "ef279ba8a6739a088efd1fdca60f0c31", "kernel_schedule": "", "tile_shape": "(64, 32, 64)", "benchmark_result": 0.01217997465145754, "device": "unknown", "cuda_device_name": "NVIDIA H100", "problem_shape_MNK": [1024, 512, 72], "A_size": [6, 1024, 72], "A_stride": [73728, 72, 1], "A_type": "row_major", "A_dtype": "float32", "A_shape": ["6", "1024", "!72"], "B_size": [6, 72, 512], "B_stride": [36864, 512, 1], "B_type": "row_major", "B_dtype": "float32", "B_shape": ["6", "72", "!512"], "BATCHSIZE": 6, "M": 1024, "N": 512, "K": 72}, {"backend": "Triton", "name": "ATen", "problem_hash": "ef279ba8a6739a088efd1fdca60f0c31", "kernel_schedule": "", "tile_shape": "(64, 32, 128)", "benchmark_result": 0.01012531017369727, "device": "unknown", "cuda_device_name": "NVIDIA H100", "problem_shape_MNK": [1024, 512, 72], "A_size": [6, 1024, 72], "A_stride": [73728, 72, 1], "A_type": "row_major", "A_dtype": "float32", "A_shape": ["6", "1024", "!72"], "B_size": [6, 72, 512], "B_stride": [36864, 512, 1], "B_type": "row_major", "B_dtype": "float32", "B_shape": ["6", "72", "!512"], "BATCHSIZE": 6, "M": 1024, "N": 512, "K": 72}]'  # noqa: B950
-            assert json.dumps(records) == expected_json_records, "Record parser failed"
-            pd = None
-            # The rest of this test requires pandas, which might not be installed.
-            try:
-                import pandas
-
-                pd = pandas
-            except ImportError:
-                pass
-            if pd is not None:
-                df = parser.get_dataframe()
-                assert len(df) == 3
-                assert set(df.columns) == {
-                    "A_dtype",
-                    "A_shape",
-                    "A_size",
-                    "A_stride",
-                    "A_type",
-                    "BATCHSIZE",
-                    "B_dtype",
-                    "B_shape",
-                    "B_size",
-                    "B_stride",
-                    "B_type",
-                    "Bias_shape",
-                    "K",
-                    "M",
-                    "N",
-                    "backend",
-                    "benchmark_result",
-                    "cuda_device_name",
-                    "device",
-                    "kernel_schedule",
-                    "name",
-                    "problem_hash",
-                    "problem_shape_MNK",
-                    "tile_shape",
-                }
-                analysis = parser.get_analysis()
-                assert set(analysis.columns) == {
-                    "A_shape",
-                    "BATCHSIZE",
-                    "B_shape",
-                    "Bias_shape",
-                    "K",
-                    "M",
-                    "N",
-                    "backend",
-                    "benchmark_result",
-                    "kernel_schedule",
-                    "problem_hash",
-                    "tile_shape",
-                }
-        finally:
-            if example_input:
-                example_input.close()
-
-    @unittest.skipIf(not SM75OrLater, "need sm_75")
-    @skipIfRocm
-    @parametrize("dynamic", (False, True))
-    def test_autotuning_log_parser_does_not_throw_for_default_backends(self, dynamic):
-        import glob
-        import tempfile
-
-        from torch._inductor.debug import DebugContext
-
-        def mm(a, b):
-            return a @ b
-
-        a = torch.randn((128, 256), dtype=torch.float16, device="cuda")
-        b = torch.randn((256, 128), dtype=torch.float16, device="cuda")
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            conf_patch = {
-                "max_autotune": True,
-                "autotune_in_subproc": False,
-                "benchmark_fusion": False,
-                "max_autotune_gemm_backends": "Triton,ATen",
-                "cuda.cutlass_dir": _CUTLASS_DIR,
-                "cuda.version": "12.1",  # required to enable the Kernels we need
-                "trace.enabled": True,
-                "trace.debug_dir": tmpdir,
-                "trace.info_log": True,
-                "force_same_precision": True,
-                "trace.output_code": True,
-                "trace.log_autotuning_results": True,
-            }
-            with config.patch(conf_patch):
-                with DebugContext():
-                    Y = mm(a, b)
-                    Y_jit = torch.compile(mm, dynamic=dynamic)(a, b)
-                    assert torch.allclose(
-                        Y, Y_jit
-                    ), f"Incorrect results, {Y.max()=}, {Y_jit.max()=}, {Y.min()=}, {Y_jit.min()=}, {Y.mean()=}, {Y_jit.mean()=}, {Y.size()=}, {Y_jit.size()=}"  # noqa: B950
-
-            autotuning_logs = glob.glob(tmpdir + "/*/*/autotuning_result_json_list.txt")
-            assert len(autotuning_logs) >= 1
-            parser = AutotuningLogParser(autotuning_logs)
-            records = list(parser.get_records())
-            assert len(records) >= 1
 
     def test_triton_template_with_epilogues_and_dynamic_shape(self):
         def fn(
