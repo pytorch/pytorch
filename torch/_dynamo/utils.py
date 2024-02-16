@@ -101,6 +101,7 @@ from torch.utils._pytree import tree_map_only
 
 
 counters: DefaultDict[str, Counter[str]] = collections.defaultdict(collections.Counter)
+optimus_scuba_log: Dict[str, Any] = {}
 troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
 nnmodule_doc_url = "https://pytorch.org/docs/master/compile/nn-module.html"
 nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
@@ -1154,10 +1155,7 @@ def dict_keys_repr(const_keys, *, local) -> str:
 GLOBAL_KEY_PREFIX = "__dict_key"
 
 
-from torch._subclasses import (  # noqa: F401
-    FakeTensorMode,
-    UnsupportedFakeTensorException,
-)
+from torch._subclasses import UnsupportedFakeTensorException  # noqa: F401
 
 
 def wrap_fake_exception(fn):
