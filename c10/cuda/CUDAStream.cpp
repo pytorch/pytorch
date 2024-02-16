@@ -44,8 +44,9 @@ static std::atomic<uint32_t>
 static cudaStream_t streams[c10::cuda::max_compile_time_stream_priorities]
                            [C10_COMPILE_TIME_MAX_GPUS][kStreamsPerPool];
 #ifdef USE_ROCM
-static c10::once_flag stream_flags[c10::cuda::max_compile_time_stream_priorities]
-                                  [C10_COMPILE_TIME_MAX_GPUS][kStreamsPerPool];
+static c10::once_flag
+    stream_flags[c10::cuda::max_compile_time_stream_priorities]
+                [C10_COMPILE_TIME_MAX_GPUS][kStreamsPerPool];
 #endif
 
 // Note [HIP Lazy Streams]
@@ -195,8 +196,7 @@ static void initSingleStream(int p, DeviceIndex device_index, int i) {
   C10_CUDA_CHECK(cudaStreamCreateWithPriority(&stream, kDefaultFlags, pri));
   const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
   if (C10_UNLIKELY(interp)) {
-    (*interp)->trace_gpu_stream_creation(
-        reinterpret_cast<uintptr_t>(stream));
+    (*interp)->trace_gpu_stream_creation(reinterpret_cast<uintptr_t>(stream));
     priority_counters[p][device_index] = 0;
   }
 }
@@ -285,8 +285,12 @@ cudaStream_t CUDAStream::stream() const {
         ")");
 #ifdef USE_ROCM
     // See Note [HIP Lazy Streams]
-    c10::call_once(stream_flags[st.getStreamType() - 1][device_index][si],
-        initSingleStream, st.getStreamType() - 1, device_index, si);
+    c10::call_once(
+        stream_flags[st.getStreamType() - 1][device_index][si],
+        initSingleStream,
+        st.getStreamType() - 1,
+        device_index,
+        si);
 #endif
     return streams[st.getStreamType() - 1][device_index][si];
   }
