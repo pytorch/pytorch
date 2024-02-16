@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import functools
+import weakref
 
 import torch
 import torch._dynamo
@@ -14,6 +15,10 @@ TENSOR_ALIASING = guards.TENSOR_ALIASING
 install_tensor_aliasing_guard = guards.install_tensor_aliasing_guard
 NO_TENSOR_ALIASING = guards.NO_TENSOR_ALIASING
 install_no_tensor_aliasing_guard = guards.install_no_tensor_aliasing_guard
+
+
+x = torch.tensor(4)
+weakref_x = weakref.ref(x)
 
 
 class Pair:
@@ -415,6 +420,21 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         b = (1, 2)
         b_foo = iter(b)
         self.assertFalse(guard_manager.check(b_foo))
+
+    def test_global_weakref(self):
+        guard_manager = RootGuardManager()
+        weakref_manager = guard_manager.globals_dict_manager(
+            globals(), None
+        ).global_weakref_manager("weakref_x", None)
+        weakref_manager.add_lambda_guard(
+            lambda x: isinstance(x, torch.Tensor),
+            "global weakref fail",
+        )
+
+        self.assertTrue(guard_manager.check(None))
+        global x
+        del x
+        self.assertFalse(guard_manager.check(None))
 
 
 if __name__ == "__main__":
