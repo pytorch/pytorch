@@ -86,7 +86,11 @@ class ShapeEnvEvent:
 
     # Replay itself, but using shape_env as self.
     def run(self, shape_env=None) -> Any:
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymTypes, is_symbolic
+        from torch.fx.experimental.symbolic_shapes import (
+            is_symbolic,
+            ShapeEnv,
+            SymTypes,
+        )
 
         # Special handling for the constructor event.
         if self.f is ShapeEnv:
@@ -172,7 +176,7 @@ class ShapeEnvEvent:
 # If we find more than one object of any of the above types, we
 # also check that the ShapeEnv instance is the same for all of them.
 def _extract_shape_env_and_assert_equal(args, kwargs):
-    from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymTypes, is_symbolic
+    from torch.fx.experimental.symbolic_shapes import is_symbolic, ShapeEnv, SymTypes
 
     def assert_equal(old: Optional[ShapeEnv], new: ShapeEnv) -> ShapeEnv:
         if old is not None:
