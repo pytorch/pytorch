@@ -177,6 +177,14 @@ MetricTable.register_table(
         "num_store",
         "num_for_loop",
         "num_args",
+        # xyz numel can be different to size_hints since size_hints are rounded
+        # up to the nearest power of 2.
+        # Inductor kernel will burn in the xyz numel in kernel code for static
+        # shape kernels.
+        # Logging them will be helpful to find unaligned shape for reduction
+        "xnumel",
+        "ynumel",
+        "rnumel",
     ],
 )
 
@@ -240,6 +248,14 @@ def _parse_proper_kernel_fn_code(kernel_fn_code):
     return kernel_fn_code[start_pos:]
 
 
+def _parse_numel(proper_kernel_fn_code, numel_arg_name):
+    m = re.search(f"{numel_arg_name} = ([\\d]+)", proper_kernel_fn_code)
+    if m:
+        return int(m.group(1))
+    else:
+        return None
+
+
 def log_kernel_metadata(kernel_name, kernel_path, kernel_module_code):
     """
     An utility to log kernel metadata. We may parse metadata from kernel source code here.
@@ -271,6 +287,9 @@ def log_kernel_metadata(kernel_name, kernel_path, kernel_module_code):
             "num_store": _count_pattern(proper_kernel_fn_code, "tl.store"),
             "num_for_loop": _count_pattern(proper_kernel_fn_code, "for "),
             "num_args": _count_args(proper_kernel_fn_code),
+            "xnumel": _parse_numel(proper_kernel_fn_code, "xnumel"),
+            "ynumel": _parse_numel(proper_kernel_fn_code, "ynumel"),
+            "rnumel": _parse_numel(proper_kernel_fn_code, "rnumel"),
         }
     )
 
