@@ -16,7 +16,7 @@
 
 /* Implement a numpy like searchsorted and a TF like bucketize function running on cpu
  *
- * - torch.searchsorted(sorted_sequence, values, right=False, side='left', out_int32=False, sorter=None)
+ * - torch.searchsorted(sorted_sequence, values, right=False, side=None, out_int32=False, sorter=None)
  *   sorted_sequence - N*D or 1D (apply to all values) tensor containing sorted sequences in last dimension
  *   values          - N*D tensor or a Scalar (when sorted_sequence is 1D) containing the search values
  *   right           - corresponding to lower bound if False and upper bound if True
