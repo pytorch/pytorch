@@ -1956,7 +1956,7 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Scalar& sourc
     NoNamesGuard guard;
     c10::MaybeOwned<Tensor> _mask, _self;
     std::tie(_mask, _self) = expand_outplace(mask, self);
-    result = _self->clone(at::MemoryFormat::Contiguous);
+    result = _self->clone(at::MemoryFormat::Preserve);
     result.masked_fill_(mask, source);
   }
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
@@ -1970,7 +1970,7 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & sour
     NoNamesGuard guard;
     c10::MaybeOwned<Tensor> _mask, _self;
     std::tie(_mask, _self) = expand_outplace(mask, self);
-    result = _self->clone(at::MemoryFormat::Contiguous);
+    result = _self->clone(at::MemoryFormat::Preserve);
     result.masked_fill_(mask, source);
   }
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
