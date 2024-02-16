@@ -7,6 +7,8 @@ import operator
 import types
 from typing import Dict, List
 
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
 from ..bytecode_transformation import create_call_method
 
 try:
@@ -174,6 +176,31 @@ class TensorVariable(VariableTracker):
         return props
 
     def dynamic_getattr(self, tx, name):
+        fake_val = self.proxy.node.meta["example_value"]
+        # For getattrs on tensors without sources,
+        # we can do better than the default (creating a GetAttrVariable)
+        # if:
+        # (1) the tensor is a traceable tensor subclass
+        # (2) We are getattr'ing an inner tensor from that subclass
+        if not self.source and is_traceable_wrapper_subclass(fake_val):
+            fake_val = self.proxy.node.meta["example_value"]
+            attrs, ctx = fake_val.__tensor_flatten__()
+            if name in attrs or name in ctx:
+                proxy = getattr(self.as_proxy(), name)
+                example_value = getattr(fake_val, name)
+                if name in attrs:
+                    # attrs returned from tensor_flatten are always tensors
+                    assert isinstance(example_value, torch.Tensor)
+                    from .builder import wrap_fx_proxy
+
+                    return wrap_fx_proxy(
+                        tx=tx, proxy=proxy, example_value=example_value
+                    )
+                else:
+                    # attributes in the ctx returned by tensor_flatten are assumed to be constants
+                    from . import ConstantVariable
+
+                    return ConstantVariable(example_value)
         if not self.source:
             raise NotImplementedError()
 
