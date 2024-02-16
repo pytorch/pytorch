@@ -15,16 +15,26 @@ class TwoTensor(torch.Tensor):
             and a.requires_grad == b.requires_grad
             and a.dtype == b.dtype
         )
-        # I guess it would be more accurate to represent the shape as torch.cat(a, b).shape
-        shape = a.shape
-        kwargs = {}
-        kwargs["strides"] = a.stride()
-        kwargs["storage_offset"] = a.storage_offset()
-        kwargs["device"] = a.device
-        kwargs["layout"] = a.layout
-        kwargs["requires_grad"] = a.requires_grad
-        kwargs["dtype"] = a.dtype
-        out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+
+        out = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+            cls,
+            # Set clearly incorrect size / stride / storage offset here and set
+            # dispatch_sizes_strides_policy to dispatch for these instead.
+            (0,),
+            (0,),
+            0,
+            None,  # memory_format
+            a.dtype,
+            a.layout,
+            a.device,
+            False,
+            a.requires_grad,
+            # NB: dispatch to get size / stride / storage offset from underlying components
+            "sizes",
+            False,  # dispatch_device
+            False,  # dispatch_layout
+            None,  # _extra_dispatch_keys
+        )
 
         assert a.shape == b.shape
         assert a.stride() == b.stride()
