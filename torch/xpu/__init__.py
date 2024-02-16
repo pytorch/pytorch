@@ -13,7 +13,7 @@ import torch
 import torch._C
 from .. import device as _device
 from ._utils import _dummy_type, _get_device_index
-from .streams import Stream
+from .streams import Event, Stream
 
 _initialized = False
 _initialization_lock = threading.Lock()
@@ -345,6 +345,7 @@ def synchronize(device: _device_t = None) -> None:
 
 
 __all__ = [
+    "Event",
     "Stream",
     "StreamContext",
     "current_device",
