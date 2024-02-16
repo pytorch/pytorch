@@ -45,7 +45,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
         # rebuild the state dict from the metadata
         for k, v in metadata.state_dict_metadata.items():
             if isinstance(v, TensorStorageMetadata):
-                v = torch.empty(v.size, dtype=v.properties.dtype)
+                v = torch.empty(v.size, dtype=v.properties.dtype)  # type: ignore[assignment]
             if k in metadata.planner_data:
                 set_element(state_dict, metadata.planner_data[k], v)
             else:
