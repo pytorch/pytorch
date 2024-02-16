@@ -1568,7 +1568,7 @@ def check_pt2_compliant_op(output_graph, kind, target, args, kwargs):
             return
 
         args, kwargs = torch._dynamo.utils.get_fake_values_from_nodes(
-            output_graph.current_tx, (args, kwargs)
+            output_graph.current_tx, (args, kwargs), False
         )
         try:
             overload = torch._C._jit_resolve_packet(

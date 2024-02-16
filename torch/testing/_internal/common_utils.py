@@ -1867,6 +1867,16 @@ def skipIfTBB(message="This test makes TBB sad"):
     return dec_fn
 
 
+def skip_if_pytest(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            raise unittest.SkipTest("does not work under pytest")
+        return fn(*args, **kwargs)
+
+    return wrapped
+
+
 def slowTest(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):

@@ -123,9 +123,7 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
   auto arguments = torch::jit::pop(*stack, num_arguments);
 
   TORCH_INTERNAL_ASSERT(arguments[0].isTensor());
-  Tensor self;
-  optional<int64_t> self_bdim;
-  std::tie(self, self_bdim) = unwrapTensorAtLevel(arguments[0].toTensor(), cur_level);
+  auto [self, self_bdim] = unwrapTensorAtLevel(arguments[0].toTensor(), cur_level);
 
   self = moveBatchDimToFront(self, self_bdim);
 
