@@ -321,7 +321,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
 
         _compare_pytorch_onnx_with_ort(
             onnx_program,
-            ref_model.module(),
+            ref_model,
             input_args,
             input_kwargs,
             atol,
