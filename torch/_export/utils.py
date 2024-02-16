@@ -9,6 +9,7 @@ from torch.export import ExportedProgram
 from torch.utils._pytree import (
     _register_pytree_node,
     Context,
+    DumpableContext,
     FlattenFunc,
     FromDumpableContextFn,
     KeyPath,
@@ -18,6 +19,9 @@ from torch.utils._pytree import (
     ToDumpableContextFn,
     UnflattenFunc,
 )
+
+
+SERIALIZED_DATACLASS_TO_PYTHON_DATACLASS: Dict[str, Type[Any]] = {}
 
 
 def _check_input_constraints_for_graph(
@@ -125,6 +129,9 @@ def register_dataclass_as_pytree_node(
         cls
     ), f"Only dataclasses can be registered with this function: {cls}"
 
+    serialized_type = f"{cls.__module__}.{cls.__qualname__}"
+    SERIALIZED_DATACLASS_TO_PYTHON_DATACLASS[serialized_type] = cls
+
     def default_flatten_fn(obj: Any) -> Tuple[List[Any], Context]:
         flattened = []
         flat_names = []
@@ -136,11 +143,21 @@ def register_dataclass_as_pytree_node(
                 flat_names.append(name)
             else:
                 none_names.append(name)
-        return flattened, [flat_names, none_names]
+        return flattened, (cls, flat_names, none_names)
 
     def default_unflatten_fn(values: Iterable[Any], context: Context) -> Any:
-        flat_names, none_names = context
-        return cls(**dict(zip(flat_names, values)), **dict.fromkeys(none_names))
+        typ, flat_names, none_names = context
+        return typ(**dict(zip(flat_names, values)), **dict.fromkeys(none_names))
+
+    def default_to_dumpable_context(context: Context) -> DumpableContext:
+        return (serialized_type, context[1], context[2])
+
+    def default_from_dumpable_context(dumpable_context: DumpableContext) -> Context:
+        return (
+            SERIALIZED_DATACLASS_TO_PYTHON_DATACLASS[dumpable_context[0]],
+            dumpable_context[1],
+            dumpable_context[2],
+        )
 
     flatten_fn = flatten_fn if flatten_fn is not None else default_flatten_fn
     unflatten_fn = unflatten_fn if unflatten_fn is not None else default_unflatten_fn
@@ -150,6 +167,17 @@ def register_dataclass_as_pytree_node(
             f"Both to_dumpable_context and from_dumpable_context for {cls} must "
             "be None or registered."
         )
+
+    to_dumpable_context = (
+        to_dumpable_context
+        if to_dumpable_context is not None
+        else default_to_dumpable_context
+    )
+    from_dumpable_context = (
+        from_dumpable_context
+        if from_dumpable_context is not None
+        else default_from_dumpable_context
+    )
 
     _register_pytree_node(
         cls,
