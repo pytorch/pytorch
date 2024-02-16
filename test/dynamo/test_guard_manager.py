@@ -8,6 +8,8 @@ from torch._C._dynamo import guards
 
 RootGuardManager = guards.RootGuardManager
 GetAttrGuardAccessor = guards.GetAttrGuardAccessor
+TENSOR_ALIASING = guards.TENSOR_ALIASING
+install_tensor_aliasing_guard = guards.install_tensor_aliasing_guard
 
 
 def id_type(x):
@@ -150,6 +152,39 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         )
         self.assertTrue(guard(foo))
         self.assertFalse(guard(torch.tensor([1, 2, 3])))
+
+    def test_tensor_aliasing_guard(self):
+        guard_manager = RootGuardManager()
+
+        a = torch.randn(3, 4)
+
+        class Foo:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        f_locals = Foo(a, a)
+
+        x_guard_mgr = guard_manager.getattr_manager("x", a)
+        y_guard_mgr = guard_manager.getattr_manager("y", a)
+        install_tensor_aliasing_guard(x_guard_mgr, y_guard_mgr, ["x is y"])
+
+        # Check structure
+        x_guards = x_guard_mgr.get_leaf_guards()
+        y_guards = y_guard_mgr.get_leaf_guards()
+        self.assertEqual(len(x_guards), 1)
+        self.assertEqual(len(y_guards), 1)
+        self.assertTrue(isinstance(x_guards[0], TENSOR_ALIASING))
+        self.assertTrue(isinstance(y_guards[0], TENSOR_ALIASING))
+        # Check that the two guards are the same object
+        self.assertTrue(x_guards[0] is y_guards[0])
+
+        f_locals_unaliased = Foo(torch.randn(3, 4), torch.randn(3, 4))
+        self.assertEqual(len(x_guard_mgr.get_leaf_guards()), 1)
+        self.assertEqual(len(y_guard_mgr.get_leaf_guards()), 1)
+        self.assertTrue(guard_manager.check(f_locals))
+
+        self.assertFalse(guard_manager.check(f_locals_unaliased))
 
     def test_guard_manager_leaf_guard(self):
         guard_manager = RootGuardManager()

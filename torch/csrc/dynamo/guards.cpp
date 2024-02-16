@@ -996,6 +996,34 @@ class RelationalGuard : public LeafGuard {
   virtual void reset_state() = 0;
 };
 
+/**
+ * Checks that tensor x is tensor y.
+ */
+class TENSOR_ALIASING : public RelationalGuard {
+ public:
+  TENSOR_ALIASING(py::object verbose_code_parts)
+      : RelationalGuard(verbose_code_parts), _is_first_call(true) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    if (_is_first_call) {
+      _first_tensor = value;
+      _is_first_call = false;
+      return true;
+    }
+    bool result = _first_tensor == value;
+    reset_state();
+    return result;
+  }
+
+  void reset_state() override {
+    _is_first_call = true;
+  }
+
+ private:
+  bool _is_first_call;
+  PyObject* _first_tensor;
+};
+
 class GuardManager;
 class RootGuardManager;
 class DictGuardManager;
@@ -1471,6 +1499,22 @@ class GetAttrGuardAccessor : public GuardAccessor {
   PyObject* _attr_name;
 };
 
+void install_tensor_aliasing_guard(
+    GuardManager* x,
+    GuardManager* y,
+    py::object verbose_code_parts) {
+  // Adds tensor X is tensor Y guard. This is a an example of relational guard.
+  // There is one guard object that is shared between two guard managers.
+  std::shared_ptr<RelationalGuard> guard =
+      std::make_shared<TENSOR_ALIASING>(verbose_code_parts);
+
+  // Register the resetter on the toor gaurd mananger, so that it can reset
+  // the newly added relational guard when the guard eval fails.
+  x->get_root()->add_relational_guard_resetter(guard);
+  x->add_leaf_guard(guard);
+  y->add_leaf_guard(guard);
+}
+
 } // namespace
 
 static void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj) {
@@ -1581,6 +1625,8 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DATA_PTR_MATCH")
       .def(py::init<py::object, py::list>())
       .def("__call__", &DATA_PTR_MATCH::check);
+  py::class_<TENSOR_ALIASING, LeafGuard, std::shared_ptr<TENSOR_ALIASING>>(
+      py_m, "TENSOR_ALIASING");
   py::class_<DICT_VERSION, LeafGuard, std::shared_ptr<DICT_VERSION>>(
       py_m, "DICT_VERSION")
       .def(py::init<py::object, py::list>())
@@ -1704,6 +1750,8 @@ PyObject* torch_c_dynamo_guards_init() {
             self.add_epilogue_lambda_guard(
                 std::make_unique<LAMBDA_GUARD>(lambda, verbose_code_parts));
           });
+
+  py_m.def("install_tensor_aliasing_guard", install_tensor_aliasing_guard);
 
   return m;
 }
