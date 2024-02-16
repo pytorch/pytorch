@@ -1,5 +1,5 @@
 from ._ops import OpOverload
-from typing import Any, Optional, Set, List
+from typing import Any, Optional, Set, List, Dict
 import traceback
 import torch
 import weakref
@@ -472,6 +472,25 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
     if func is None:
         return inner
     return inner(func)
+
+registered_class: Dict[str, Any] = {}
+
+def impl_abstract_class(qualname, fake_class=None, *, lib=None, _stacklevel=1):
+
+    def inner(fake_class):
+        from torch._library.utils import parse_namespace
+        ns, name = parse_namespace(qualname)
+        full_qualname = "__torch__.torch.classes." + ns + "." + name
+        registered_class[full_qualname] = fake_class
+        return fake_class
+
+    if fake_class is None:
+        return inner
+    return inner(fake_class)
+
+
+
+
 
 
 # If the op was defined in C++, then we want to make sure there was an

@@ -99,6 +99,24 @@ class TestExportTorchbind(TestCase):
             def forward(self, x, cc):
                 return x + torch.ops._TorchScriptTesting.takes_foo(cc, x)
 
+        @torch.library.impl_abstract_class("_TorchScriptTesting::_Foo")
+        class FakeFoo:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+            @staticmethod
+            def from_real(obj):
+                (x, y), classname = obj.__getstate__()
+                return FakeFoo(x, y)
+
+            def add_tensor(self, z):
+                return (self.x + self.y) * z
+
+        @torch.library.impl_abstract("_TorchScriptTesting::takes_foo")
+        def fake_takes_foo(foo, z):
+            return foo.add_tensor(z)
+
         cc = torch.classes._TorchScriptTesting._Foo(10, 20)
         self._test_export_same_as_eager(
             MyModule(), (torch.ones(2, 3), cc), strict=False

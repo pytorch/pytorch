@@ -1196,6 +1196,14 @@ class FakeTensorMode(TorchDispatchMode):
             # NOTE: incr is intentionally unused for a RAII pattern
             incr = IncrementRecursionCount()
 
+        def _wrap_script_object(x):
+            fake_class = torch.library.registered_class[x._type().qualified_name()]
+            return fake_class.from_real(x)
+
+        args, kwargs = pytree.tree_map_only(
+            torch.ScriptObject, lambda x: _wrap_script_object(x), (args, kwargs)
+        )
+
         # Some attribute queries that can be serviced directly
         # See Note [is_coalesced is dispatched]
         if func in _DISPATCH_HANDLE_DIRECTLY:
