@@ -1,6 +1,7 @@
 #pragma once
 #include <ATen/xpu/XPUContext.h>
-#include <c10/util/Optional.h>
+
+#include <optional>
 
 namespace at::xpu {
 
@@ -18,38 +19,30 @@ namespace at::xpu {
  */
 struct TORCH_XPU_API XPUEvent {
   // Constructors
-  XPUEvent() noexcept = default;
-  XPUEvent(bool enable_timing) noexcept : enable_timing_{enable_timing} {}
+  XPUEvent(bool enable_timing = false) noexcept
+      : enable_timing_{enable_timing} {}
 
-  ~XPUEvent() {}
+  ~XPUEvent() = default;
 
   XPUEvent(const XPUEvent&) = delete;
   XPUEvent& operator=(const XPUEvent&) = delete;
 
-  XPUEvent(XPUEvent&& other) noexcept {
-    moveHelper(std::move(other));
-  }
-
-  XPUEvent& operator=(XPUEvent&& other) noexcept {
-    if (this != &other) {
-      moveHelper(std::move(other));
-    }
-    return *this;
-  }
+  XPUEvent(XPUEvent&& other) = default;
+  XPUEvent& operator=(XPUEvent&& other) = default;
 
   operator sycl::event&() const {
     return event();
   }
 
-  optional<at::Device> device() const {
+  std::optional<at::Device> device() const {
     if (isCreated()) {
       return at::Device(at::kXPU, device_index_);
     } else {
-      return {};
+      return std::nullopt;
     }
   }
 
-  bool isCreated() const {
+  inline bool isCreated() const {
     return (event_.get() != nullptr);
   }
 
@@ -134,12 +127,6 @@ struct TORCH_XPU_API XPUEvent {
   // Only need to track the last event, as events in an in-order queue are
   // executed sequentially.
   std::unique_ptr<sycl::event> event_;
-
-  void moveHelper(XPUEvent&& other) {
-    std::swap(enable_timing_, other.enable_timing_);
-    std::swap(device_index_, other.device_index_);
-    std::swap(event_, other.event_);
-  }
 };
 
 } // namespace at::xpu
