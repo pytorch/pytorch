@@ -1874,6 +1874,10 @@ class SourcelessBuilder:
             return cls([self(tx, x) for x in value], mutable_local=MutableLocal())
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)
+        elif PlacementVariable.is_placement(value):
+            return PlacementVariable(value)
+        elif DeviceMeshVariable.is_device_mesh(value):
+            return DeviceMeshVariable(value)
         unimplemented(f"Unexpected type in sourceless builder {type(value)}")
 
     @staticmethod

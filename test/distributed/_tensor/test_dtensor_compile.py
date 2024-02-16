@@ -175,6 +175,23 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
+    def test_dtensor_attribute_access_on_intermediate(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x):
+            tmp = x * 2
+            if tmp.placements[0].is_shard():
+                return tmp._local_tensor + 2
+            else:
+                return tmp._local_tensor + 3
+
+        x = DTensor.from_local(torch.ones(4), mesh, [Shard(0)], run_check=False)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
     def test_dynamo_dtensor_from_local(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
