@@ -11243,25 +11243,25 @@
     MPS: bucketize_mps
   autogen: bucketize.Scalar_out
 
-- func: searchsorted.Tensor(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False, str? side=None, Tensor? sorter=None) -> Tensor
+- func: searchsorted.Tensor(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False, str? side="left", Tensor? sorter=None) -> Tensor
   dispatch:
     CPU: searchsorted_cpu
     CUDA: searchsorted_cuda
     MPS: searchsorted_mps
 
-- func: searchsorted.Tensor_out(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False, str? side=None, Tensor? sorter=None, Tensor(a!) out) -> Tensor(a!)
+- func: searchsorted.Tensor_out(Tensor sorted_sequence, Tensor self, *, bool out_int32=False, bool right=False, str? side="left", Tensor? sorter=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: searchsorted_out_cpu
     CUDA: searchsorted_out_cuda
     MPS: searchsorted_out_mps
 
-- func: searchsorted.Scalar(Tensor sorted_sequence, Scalar self, *, bool out_int32=False, bool right=False, str? side=None, Tensor? sorter=None) -> Tensor
+- func: searchsorted.Scalar(Tensor sorted_sequence, Scalar self, *, bool out_int32=False, bool right=False, str? side="left", Tensor? sorter=None) -> Tensor
   dispatch:
     CPU: searchsorted_cpu
     CUDA: searchsorted_cuda
     MPS: searchsorted_mps
 
-- func: searchsorted.Scalar_out(Tensor sorted_sequence, Scalar self, *, bool out_int32=False, bool right=False, str? side=None, Tensor? sorter=None, Tensor(a!) out) -> Tensor(a!)
+- func: searchsorted.Scalar_out(Tensor sorted_sequence, Scalar self, *, bool out_int32=False, bool right=False, str? side="left", Tensor? sorter=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: searchsorted_out_cpu
     CUDA: searchsorted_out_cuda
