@@ -332,7 +332,8 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
                 return r
 
     tracer = proxy_mode.tracer
-    f_flat_args_kwargs = [fetch_object_proxy(tracer)(x) if isinstance(x, (torch.Tensor, torch.ScriptObject)) else x for x in flat_args_kwargs]
+    f_flat_args_kwargs = [fetch_object_proxy(tracer)(x) if isinstance(x, (torch.Tensor, torch.ScriptObject))
+                          else x for x in flat_args_kwargs]
 
     # If there are SymInts, we also should not consider this constant.
     # However, fake tensor handling of SymInts is sufficiently broken that
@@ -363,7 +364,8 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
             )
 
     proxy_flat_args_kwargs = [e.proxy if isinstance(e, _ProxyTensor) else e for e in f_flat_args_kwargs]
-    proxy_flat_args_kwargs = [fetch_sym_proxy(proxy_mode.tracer)(e) if isinstance(e, (SymInt, SymFloat, SymBool)) else e for e in proxy_flat_args_kwargs]
+    proxy_flat_args_kwargs = [fetch_sym_proxy(proxy_mode.tracer)(e) if isinstance(e, (SymInt, SymFloat, SymBool))
+                              else e for e in proxy_flat_args_kwargs]
     proxy_args, proxy_kwargs = pytree.tree_unflatten(proxy_flat_args_kwargs, spec)
 
     # When we trace through a torch.tensor invocation, you never actually
@@ -459,7 +461,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     ):
         # NB: do NOT include factories as constants
         with maybe_disable_fake_tensor_mode():
-            const_flat_args_kwargs =[t.constant if isinstance(t, _ProxyTensor) else t for t in f_flat_args_kwargs]
+            const_flat_args_kwargs = [t.constant if isinstance(t, _ProxyTensor) else t for t in f_flat_args_kwargs]
             const_args, const_kwargs = pytree.tree_unflatten(const_flat_args_kwargs, spec)
             constant = func(*const_args, **const_kwargs)
     else:
