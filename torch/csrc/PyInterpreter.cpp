@@ -287,17 +287,17 @@ void ConcretePyInterpreterVTable::reportErrorCallback(
 }
 
 static PyObject* _get_nested_tensor_cls() {
-  static PyObject* nt_cls = nullptr;
-  if (nt_cls == nullptr) {
-    nt_cls = py::module::import("torch")
+  static PyObject* py_cls_ptr = nullptr;
+  if (py_cls_ptr == nullptr) {
+    py::object py_cls = py::module::import("torch")
                  .attr("nested")
                  .attr("_internal")
                  .attr("nested_tensor")
-                 .attr("NestedTensor")
-                 .ptr();
-    TORCH_INTERNAL_ASSERT(nt_cls);
+                 .attr("NestedTensor");
+    PyObject* py_cls_ptr = py_cls.release().ptr();
+    TORCH_INTERNAL_ASSERT(py_cls_ptr);
   }
-  return nt_cls;
+  return py_cls_ptr;
 }
 
 void ConcretePyInterpreterVTable::dispatch(
@@ -338,6 +338,11 @@ void ConcretePyInterpreterVTable::dispatch(
         }
         if (nv.isSymInt()) {
           if (nv.toSymNodeImplUnowned()->is_nested_int()) {
+            // The more generalized version of this is to test if the SymNode
+            // has Python key set, and if so, we append_overloaded_object of the
+            // Python object bound in the SymNode. The concept here is that
+            // SymNode subclasses support __torch_dispatch__ in the same way
+            // that Tensors support overriding dispatch.
             append_overloaded_type(&overloaded_args, _get_nested_tensor_cls());
           }
         }
