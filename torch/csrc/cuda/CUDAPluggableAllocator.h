@@ -29,9 +29,12 @@ void changeCurrentAllocator(
 
 struct _AllocationMetadata {
   _AllocationMetadata();
-  _AllocationMetadata(size_t size, int device_idx, cudaStream_t stream);
+  _AllocationMetadata(
+      size_t size,
+      c10::DeviceIndex device_idx,
+      cudaStream_t stream);
   size_t size;
-  int device_idx;
+  c10::DeviceIndex device_idx;
   cudaStream_t stream;
 };
 
