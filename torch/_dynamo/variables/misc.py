@@ -483,6 +483,9 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             assert self.source and not kwargs
             tx.output.side_effects.track_save_for_backward(self, args)
 
+        # In eager mode, multiple calls to .save_for_backward() will overwrite previous calls.
+        if len(self.saved_tensors.tensors) > 0:
+            self.saved_tensors.tensors = []
         for arg in args:
             self.saved_tensors.tensors.append(arg)
         return variables.ConstantVariable.create(None)
