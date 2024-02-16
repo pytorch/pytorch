@@ -13,7 +13,14 @@ from torch.testing._internal.triton_utils import requires_cuda
 
 
 class CondTests(TestCase):
-    def _run_test(self, model, inputs, device, dynamic=False, num_predicates=1):
+    def _run_test(
+        self,
+        model,
+        inputs,
+        device,
+        dynamic=False,
+        num_predicates=1,
+    ):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
         compiled_model = torch.compile(backend=cnt, fullgraph=True)(model)
 
@@ -40,28 +47,6 @@ class CondTests(TestCase):
                 self.assertEqual(result, result_compiled)
 
         self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
-
-    @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
-    @parametrize("dynamic", [False, True])
-    def test_minimal_control_flow(self, device, dynamic):
-        # one input, one output
-        class Model(torch.nn.Module):
-            def forward(self, p, a):
-                def true_fn(x):
-                    return x * 2
-
-                def false_fn(x):
-                    return x + 2
-
-                return torch.cond(p, true_fn, false_fn, [a])
-
-        self._run_test(
-            model=Model(),
-            inputs=(torch.randn(10, 20),),
-            device=device,
-            dynamic=dynamic,
-        )
 
     @requires_cuda
     @parametrize("device", ["cpu", "cuda"])

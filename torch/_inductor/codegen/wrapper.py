@@ -246,18 +246,22 @@ class MemoryPlanningState:
         self.reuse_pool[key].append(item)
 
 
-class IndentLine:
+class WrapperLine:
+    pass
+
+
+class IndentLine(WrapperLine):
     def codegen(self, code: IndentedBuffer) -> None:
         code.do_indent()
 
 
-class UnindentLine:
+class UnindentLine(WrapperLine):
     def codegen(self, code: IndentedBuffer) -> None:
         code.do_unindent()
 
 
 @dataclasses.dataclass
-class EnterDeviceContextManagerLine:
+class EnterDeviceContextManagerLine(WrapperLine):
     device_idx: int
     last_seen_device_guard_index: Optional[int]
 
@@ -297,14 +301,14 @@ class EnterDeviceContextManagerLine:
             code.writeline(V.graph.device_ops.set_device(self.device_idx))
 
 
-class ExitDeviceContextManagerLine:
+class ExitDeviceContextManagerLine(WrapperLine):
     def codegen(self, code: IndentedBuffer) -> None:
         if not V.graph.cpp_wrapper:
             code.do_unindent()
 
 
 @dataclasses.dataclass
-class MemoryPlanningLine:
+class MemoryPlanningLine(WrapperLine):
     wrapper: "WrapperCodeGen"
 
     def plan(self, state: MemoryPlanningState) -> "MemoryPlanningLine":
@@ -719,16 +723,7 @@ class WrapperCodeGen(CodeGen):
                 self.memory_plan_reuse()
 
             for line in self.lines:
-                if isinstance(
-                    line,
-                    (
-                        MemoryPlanningLine,
-                        EnterDeviceContextManagerLine,
-                        ExitDeviceContextManagerLine,
-                        IndentLine,
-                        UnindentLine,
-                    ),
-                ):
+                if isinstance(line, WrapperLine):
                     line.codegen(self.wrapper_call)
                 else:
                     self.wrapper_call.writeline(line)

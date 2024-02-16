@@ -5448,6 +5448,12 @@ def triton_kernel_wrap(*, kernel_idx, grid, kwargs, tensors_to_clone):
 
 @register_lowering(torch.ops.higher_order.cond)
 def cond(pred, true_fn, false_fn, operands):
+    if is_triton(pred) or any(map(is_triton, operands)):
+        msg = "control flow operator: torch.cond."
+        if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
+            msg = f"{msg} Found from : \n {stack_trace}"
+        V.graph.disable_cudagraphs_reason = msg
+
     result = ir.Conditional.create(pred, true_fn, false_fn, operands)
     return list(map(TensorBox.create, result))
 
