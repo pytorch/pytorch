@@ -22,7 +22,11 @@ from torch.testing._internal.common_distributed import (
     run_with_both_funcol_impls_with_arg,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import instantiate_parametrized_tests, requires_cuda
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    requires_cuda,
+)
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch.utils._triton import has_triton
 from torch._inductor.utils import run_and_get_triton_code
@@ -802,7 +806,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert same(outputs, correct_outputs)
 
     @run_with_both_funcol_impls
-    def test_dynamo_rewrite_dist_allreduce(self):
+    @parametrize("explicit_group", [True, False])
+    def test_dynamo_rewrite_dist_allreduce(self, explicit_group):
 
         def func(tensor, pg):
             torch.distributed.all_reduce(
@@ -816,8 +821,10 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         inputs_compiled = torch.ones(2, device=self.device)
         inputs_eager = torch.ones(2, device=self.device)
 
-        compiled(inputs_compiled, GroupMember.WORLD)
-        func(inputs_eager, GroupMember.WORLD)
+        group = GroupMember.WORLD if explicit_group else None
+
+        compiled(inputs_compiled, group)
+        func(inputs_eager, group)
 
         assert counter.frame_count == 1
         # should test more precisely, but the 3 is supposed to be (all_reduce, wait, copy_)
