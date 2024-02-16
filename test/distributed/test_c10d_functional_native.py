@@ -330,6 +330,32 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         assert output.eq(expect).all()
         assert output.completed
 
+    @skip_if_lt_x_gpu(2)
+    def test_broadcast(self) -> None:
+        self._init_process_group()
+
+        input = torch.full((10, 10), float(self.rank), device=self.device)
+        output = torch.ops._c10d_functional.broadcast(
+            input,
+            1,
+            "default",
+        )
+        output = torch.ops._c10d_functional.wait_tensor(output)
+        assert id(output) != id(input)
+        expect = 1
+        assert output.eq(expect).all()
+
+        # Test Python API and AsyncCollectiveTensor
+        output = funcol.broadcast(
+            input,
+            1,
+            "default",
+        )
+        assert isinstance(output, AsyncCollectiveTensor)
+        assert not output.completed
+        assert output.eq(expect).all()
+        assert output.completed
+
 
 class C10DFunctionalNativeCompileTest(TestCase):
     def setUp(self):
@@ -665,6 +691,42 @@ class C10DFunctionalNativeCompileTest(TestCase):
             .check("torch.ops._c10d_functional.wait_tensor.default(")
             .run(code)
         )
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @fresh_inductor_cache()
+    def test_inductor_broadcast(self):
+        def func(arg: torch.Tensor) -> torch.Tensor:
+            buf0 = arg + 42
+            # Expect in-place with inductor allocated buf
+            br0 = funcol.broadcast(buf0, 1, "0")
+            br0 = funcol.wait_tensor(br0)
+            # Expect no in-place with graph input
+            br1 = funcol.broadcast(arg, 0, "0")
+            br1 = funcol.wait_tensor(br1)
+            return br0, br1
+
+        arg = torch.rand(4, 4, device="cuda")
+        compiled = torch.compile(func)
+
+        code = run_and_get_triton_code(compiled, arg)
+        (
+            FileCheck()
+            .check("buf0 = empty")
+            .check("buf7 = empty")
+            # Expect in-place with inductor allocated buf
+            .check("torch.ops._c10d_functional.broadcast_.default(buf0")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
+            # Expect no in-place with graph input (buf5 is a clone)
+            .check("torch.ops._c10d_functional.broadcast_.default(buf7")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf7")
+            # Expect no extra copy on return
+            .check("return (buf0, buf7, )")
+            .run(code)
+        )
+
+        # Test aoti
+        out = AOTIRunnerUtil.run("cuda", func, (arg,))
+        torch.cuda.synchronize()
 
 
 if __name__ == "__main__":
