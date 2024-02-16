@@ -171,11 +171,15 @@ std::vector<Tensor> split_with_sizes_nested(
 }
 
 Tensor get_nested_sizes_from_sym_sizes(const c10::SymIntArrayRef& size) {
-  if (size.size() == 1) {
-    auto out = at::ones({}, TensorOptions().dtype(at::kLong));
-    return out;
+  // Given sym_sizes_ produce _nested_tensor_sizes, such that
+  // nested_sizes_from_sym_sizes(nt.sym_size()) == nt._nested_tensor_sizes()
+  TORCH_INTERNAL_ASSERT(!size.empty(), "Expected non-empty size.");
+  const int64_t B = size[0].expect_int();
+  if (B == 0) {
+    TORCH_INTERNAL_ASSERT(size.size() == 1);
+    // Mirrors logic in ctor when NT is created from empty list
+    return at::ones({}, TensorOptions().dtype(at::kLong));
   }
-  const int64_t B = static_cast<int64_t>(size[0].expect_int());
   auto nt_sizes = at::empty({B, static_cast<int64_t>(size.size() - 1)},
                             TensorOptions().dtype(at::kLong));
   for (const auto i : c10::irange(size.size())) {

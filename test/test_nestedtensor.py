@@ -394,23 +394,28 @@ class TestNestedTensor(TestCase):
             reconstructed = torch._C._nested_sizes_from_sym_sizes(nt.size())
             self.assertEqual(reconstructed, nt._nested_tensor_size())
 
+        check([5, None])
         check([5, None, 10])
+        check([5, 10, None])
         check([5, None, None])
 
         nt = torch.nested.nested_tensor([])
         reconstructed = torch._C._nested_sizes_from_sym_sizes(nt.size())
-        # TODO: figure out why we are returning floating point sizes
-        self.assertEqual(reconstructed, nt._nested_tensor_size().to(torch.int64))
+        self.assertEqual(reconstructed, nt._nested_tensor_size())
+
+        nt = torch.nested.nested_tensor([torch.tensor(0.), torch.tensor(1.), torch.tensor(1.)])
+        reconstructed = torch._C._nested_sizes_from_sym_sizes(nt.size())
+        self.assertEqual(reconstructed, nt._nested_tensor_size())
 
         # Only C++ NestedTensor is supported for this path
-        nt = torch.nested.nested_tensor([
+        nt_size_from_jagged = torch.nested.nested_tensor([
             torch.randn(2, 5),
             torch.randn(3, 5),
             torch.randn(4, 5),
-        ], layout=torch.jagged)
+        ], layout=torch.jagged).size()
 
         with self.assertRaisesRegex(RuntimeError, r"created from C\+\+ NestedTensor"):
-            torch._C._nested_sizes_from_sizes(nt.size())
+            torch._C._nested_sizes_from_sym_sizes(nt_size_from_jagged)
 
     def test_size_dim(self):
         a = torch.nested.nested_tensor([])
