@@ -393,7 +393,9 @@ def merge_splits(
                 next_split_num_to_user = {
                     user.args[1]: user for user in node.users.keys()
                 }
-                for next_split_num in range(len(next_split_sections)):
+                # It is not necessary all getitems from the split node are used.
+                # We use the num of users to check the getitems to be merged.
+                for next_split_num in range(len(node.users.keys())):
                     with graph.inserting_after(new_split):
                         new_getitem = graph.call_function(
                             operator.getitem, args=(new_split, new_split_num)
