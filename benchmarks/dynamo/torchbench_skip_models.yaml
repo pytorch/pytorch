@@ -1,18 +1,10 @@
 skip:
-  # https://github.com/pytorch/torchdynamo/issues/101
+  # OOMs (A100 40G)
   - detectron2_maskrcnn
-  # https://github.com/pytorch/torchdynamo/issues/145
-  - fambench_xlmr
   # TIMEOUT, https://github.com/pytorch/pytorch/issues/98467
   - tacotron2
-  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
-  - hf_Bert
-  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
-  - hf_Bert_large
-  # takes too long, extreme slowdown (< .001)
-  - maml
   # Failing in eager mode
-  - clip
+  - hf_clip
   # multi gpu not always available in benchmark runners
   - simple_gpt_tp_manual
 
@@ -37,11 +29,7 @@ device:
     - hf_Whisper
     - stable_diffusion_text_encoder
 
-  cuda:
-    # only works on CPU
-    - gat
-    - gcn
-    - sage
+  cuda: []
 
 test:
   train:
