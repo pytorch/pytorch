@@ -328,7 +328,7 @@ std::string dump_nccl_trace() {
   }
   ncclCommDevIdxMapMutex.unlock();
   for (auto& ncclComm : allNCCLComms) {
-    std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getUniqueId());
+    std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getNcclId());
     ncclDumpMap[ncclUniqueIDStr] = ncclComm->ncclCommDump();
   }
   return NCCLTraceBuffer::get()->dump(ncclDumpMap);

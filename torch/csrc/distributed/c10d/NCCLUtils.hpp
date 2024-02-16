@@ -308,7 +308,7 @@ class NCCLComm {
       LOG(INFO) << "Communicator was aborted before trying to dump its state.";
       return dump;
     }
-    C10D_NCCL_CHECK(::ncclCommDump(ncclComm_, ret), c10::nullopt);
+    C10D_NCCL_CHECK(::ncclCommDump(ncclComm_, dump), c10::nullopt);
     return dump;
   }
 #endif
