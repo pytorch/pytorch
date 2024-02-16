@@ -1,5 +1,5 @@
 import os
-from typing import List, Optional, Union
+from typing import cast, Dict, List, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -13,6 +13,7 @@ from torch.distributed.checkpoint.metadata import (
     ChunkStorageMetadata,
     Metadata,
     STATE_DICT_TYPE,
+    STORAGE_TYPES,
     TensorProperties,
     TensorStorageMetadata,
 )
@@ -58,7 +59,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
         # rebuild the state dict from the metadata
         for k, v in metadata.state_dict_metadata.items():
             if isinstance(v, TensorStorageMetadata):
-                v = torch.empty(v.size, dtype=v.properties.dtype)
+                v = torch.empty(v.size, dtype=v.properties.dtype)  # type: ignore[assignment]
             if k in metadata.planner_data:
                 set_element(state_dict, metadata.planner_data[k], v)
             else:
@@ -101,10 +102,13 @@ class BroadcastingTorchSaveReader(StorageReader):
         return Metadata(state_dict_metadata={})
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
+        planner = cast(DefaultLoadPlanner, planner)
+
         # data is read in on the coordinator rank, and broadcast afterwards
         # this incurrs a communication cost, but it avoids having to load
         # the entire checkpoint on each rank, hopefully preventing OOM issues
         if self.is_coordinator:
+            assert self.checkpoint_id is not None
             torch_state_dict = torch.load(self.checkpoint_id, map_location="cpu")
             if planner.flatten_state_dict:
                 torch_state_dict, _ = flatten_state_dict(torch_state_dict)
@@ -185,7 +189,7 @@ class DynamicMetaLoadPlanner(DefaultLoadPlanner):
     ) -> None:
         super().set_up_planner(state_dict, metadata, is_coordinator)
 
-        state_dict_metadata = {}
+        state_dict_metadata: Dict[str, STORAGE_TYPES] = {}
         for key, value in self.state_dict.items():
             if not torch.is_tensor(value):
                 raise RuntimeError(
@@ -197,11 +201,7 @@ class DynamicMetaLoadPlanner(DefaultLoadPlanner):
             state_dict_metadata[key] = TensorStorageMetadata(
                 TensorProperties(dtype=value.dtype),
                 size,
-                [
-                    ChunkStorageMetadata(
-                        offsets=torch.Size([0] * len(value.size())), sizes=value.size()
-                    )
-                ],
+                [ChunkStorageMetadata(offsets=torch.Size([0] * len(size)), sizes=size)],
             )
         self.metadata = Metadata(state_dict_metadata=state_dict_metadata)
 
