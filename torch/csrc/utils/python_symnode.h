@@ -278,8 +278,8 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return dispatch_common_(__func__);
   }
 
-  py::handle getPyObj() {
-    return py::handle(pyobj_.get()->ptr(getPyInterpreter()));
+  py::handle getPyObj() const {
+    return py::handle(pyobj_->ptr(getPyInterpreter()));
   }
   std::shared_ptr<c10::SafePyObject> pyobj_ = nullptr;
 };
