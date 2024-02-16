@@ -314,19 +314,12 @@ def load(
     )
 
 
-def register_dataclass(
-    cls: Type[Any],
-    *,
-    serialized_type_name: Optional[str] = None,
-) -> None:
+def register_dataclass(cls: Type[Any]) -> None:
     """
     Registers a dataclass as a valid input/output type for :func:`torch.export.export`.
 
     Args:
         cls: the dataclass type to register
-        serialized_type_name: The serialized name for the dataclass. This is
-        required if you want to serialize the pytree TreeSpec containing this
-        dataclass.
 
     Example::
 
@@ -352,6 +345,4 @@ def register_dataclass(
 
     from torch._export.utils import register_dataclass_as_pytree_node
 
-    return register_dataclass_as_pytree_node(
-        cls, serialized_type_name=serialized_type_name
-    )
+    return register_dataclass_as_pytree_node(cls)

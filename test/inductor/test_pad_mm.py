@@ -16,10 +16,10 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 class PadMMTest(TestCase):
     @inductor_config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
     def test_pad_mm_dyn_m(self):
-        M = 2048
-        K1 = 3581
-        K2 = 1949
-        N = 2432
+        M = 40
+        K1 = 581
+        K2 = 49
+        N = 30
 
         class Model(torch.nn.Module):
             def __init__(self):
