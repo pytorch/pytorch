@@ -77,6 +77,7 @@ class TORCH_API Context {
   Device getDeviceFromPtr(void* data, c10::DeviceType device_type) {
     initCUDAIfNeeded(device_type);
     initHIPIfNeeded(device_type);
+    initXPUIfNeeded(device_type);
     if (device_type == at::kCPU) {
       return c10::DeviceType::CPU;
     } else if (device_type == at::kCUDA) {
@@ -148,6 +149,9 @@ class TORCH_API Context {
   }
   void lazyInitHIP() {
     c10::call_once(thh_init, [&] { detail::getHIPHooks().initHIP(); });
+  }
+  void lazyInitXPU() {
+    c10::call_once(thx_init, [&] { detail::getXPUHooks().initXPU(); });
   }
   void lazyInitPrivateUse1() {
     c10::call_once(thp_init, [&] {
@@ -328,9 +332,15 @@ class TORCH_API Context {
       lazyInitHIP();
     }
   }
+  void initXPUIfNeeded(c10::DeviceType p) {
+    if (p == c10::DeviceType::XPU) {
+      lazyInitXPU();
+    }
+  }
   static bool checkCuBLASConfigDeterministic();
   c10::once_flag thc_init;
   c10::once_flag thh_init;
+  c10::once_flag thx_init;
   c10::once_flag thp_init;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
