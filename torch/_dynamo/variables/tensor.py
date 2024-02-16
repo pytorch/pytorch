@@ -185,22 +185,20 @@ class TensorVariable(VariableTracker):
         if not self.source and is_traceable_wrapper_subclass(fake_val):
             fake_val = self.proxy.node.meta["example_value"]
             attrs, ctx = fake_val.__tensor_flatten__()
-            if name in attrs or name in ctx:
-                proxy = getattr(self.as_proxy(), name)
-                example_value = getattr(fake_val, name)
-                if name in attrs:
-                    # attrs returned from tensor_flatten are always tensors
-                    assert isinstance(example_value, torch.Tensor)
-                    from .builder import wrap_fx_proxy
+            proxy = getattr(self.as_proxy(), name)
+            example_value = getattr(fake_val, name)
+            if name in attrs:
+                # attrs returned from tensor_flatten are always tensors
+                assert isinstance(example_value, torch.Tensor)
+                from .builder import wrap_fx_proxy
 
-                    return wrap_fx_proxy(
-                        tx=tx, proxy=proxy, example_value=example_value
-                    )
-                else:
-                    # attributes in the ctx returned by tensor_flatten are assumed to be constants
-                    from . import ConstantVariable
+                return wrap_fx_proxy(tx=tx, proxy=proxy, example_value=example_value)
+            # any other attributes on the subclass (that are not methods)
+            # are assumed to be constant metadata.
+            elif not callable(example_value):
+                from .builder import SourcelessBuilder
 
-                    return ConstantVariable(example_value)
+                return SourcelessBuilder()(tx, example_value)
         if not self.source:
             raise NotImplementedError()
 
