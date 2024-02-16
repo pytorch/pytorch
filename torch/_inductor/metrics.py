@@ -212,9 +212,12 @@ def _parse_kernel_line_of_code(proper_kernel_fn_code):
     return len(proper_kernel_fn_code.splitlines())
 
 
-def _parse_size_hints(kernel_module_code):
+def _parse_size_hints(kernel_module_code, kernel_category):
+    if kernel_category == "foreach":
+        # foreach kernel does not have size_hints
+        return None
     m = re.search(r"size_hints=(\[[0-9, ]*\]),", kernel_module_code)
-    assert m, "size_hints not found in kernel source code!"
+    assert m, "size_hints missing!"
     return m.group(1)
 
 
@@ -267,7 +270,7 @@ def log_kernel_metadata(kernel_name, kernel_path, kernel_module_code):
 
     kernel_category = get_kernel_category_by_source_code(kernel_module_code)
     reduction_hint = _parse_reduction_hint(kernel_category, kernel_module_code)
-    size_hints = _parse_size_hints(kernel_module_code)
+    size_hints = _parse_size_hints(kernel_module_code, kernel_category)
     kernel_fn_code = _parse_kernel_fn_code(kernel_module_code)
 
     proper_kernel_fn_code = _parse_proper_kernel_fn_code(kernel_fn_code)
