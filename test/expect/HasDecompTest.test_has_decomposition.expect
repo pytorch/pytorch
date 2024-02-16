@@ -472,6 +472,7 @@ aten::_resize_output.out
 aten::_resize_output_
 aten::_sample_dirichlet
 aten::_sample_dirichlet.out
+aten::_scaled_dot_product_cudnn_attention
 aten::_scaled_dot_product_efficient_attention
 aten::_scaled_dot_product_efficient_attention_backward
 aten::_scaled_dot_product_flash_attention
@@ -830,12 +831,6 @@ aten::int_repr.out
 aten::is_coalesced
 aten::is_pinned
 aten::is_set_to
-aten::isin.Scalar_Tensor
-aten::isin.Scalar_Tensor_out
-aten::isin.Tensor_Scalar
-aten::isin.Tensor_Scalar_out
-aten::isin.Tensor_Tensor
-aten::isin.Tensor_Tensor_out
 aten::kaiser_window
 aten::kaiser_window.beta
 aten::kaiser_window.beta_out
@@ -848,8 +843,6 @@ aten::lift_fresh_copy
 aten::lift_fresh_copy.out
 aten::linalg_cholesky_ex
 aten::linalg_cholesky_ex.L
-aten::linalg_cross
-aten::linalg_cross.out
 aten::linalg_eig
 aten::linalg_eig.out
 aten::linalg_householder_product
