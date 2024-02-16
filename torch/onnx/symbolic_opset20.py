@@ -31,9 +31,7 @@ from torch.onnx._internal import _beartype, jit_utils, registration
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
-__all__ = ["grid_sampler", "affine_grid"]
-
-# string_conversion.py
+__all__ = ["grid_sampler", "affine_grid_generator"]
 
 
 def convert_grid_sample_mode(mode_s):
@@ -73,7 +71,7 @@ def grid_sampler(
 @_onnx_symbolic("aten::affine_grid_generator")
 @symbolic_helper.parse_args("v", "v", "b")
 @_beartype.beartype
-def affine_grid(
+def affine_grid_generator(
     g: jit_utils.GraphContext,
     theta: _C.Value,
     size: _C.Value,
