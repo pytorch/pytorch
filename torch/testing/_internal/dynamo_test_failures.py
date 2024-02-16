@@ -400,18 +400,6 @@ dynamo_expected_failures = {
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_7_float64_cpu_float64",
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_0_float16_cpu_float16",
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_7_bfloat16_cpu_bfloat16",
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape0_cpu",  # Can't construct an AttrSource without a valid base source
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape1_cpu",  # Can't construct an AttrSource without a valid base source
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape2_cpu",  # Can't construct an AttrSource without a valid base source
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape3_cpu",  # Can't construct an AttrSource without a valid base source
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape0_cuda",  # Can't construct an AttrSource without a valid base source
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape1_cuda",  # Can't construct an AttrSource without a valid base source
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape2_cuda",  # Can't construct an AttrSource without a valid base source
-    "TestAttnMasksCPU.test_is_causal_equals_upper_left_shape3_cuda",  # Can't construct an AttrSource without a valid base source
-    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape2_cpu",  # Can't construct an AttrSource without a valid base source
-    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape3_cpu",  # Can't construct an AttrSource without a valid base source
-    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape1_cpu",  # Can't construct an AttrSource without a valid base source
-    "TestAttnBiasCPU.test_is_causal_equals_upper_left_shape0_cpu",  # Can't construct an AttrSource without a valid base source
     "TestAssertCloseSparseCOO.test_matching_coalesced",  # test_testing
     "TestImports.test_circular_dependencies",  # test_testing
     "TestAssertCloseSparseCSR.test_mismatching_crow_indices_msg",  # test_testing
@@ -1200,7 +1188,6 @@ dynamo_expected_failures = {
     "TestTorchFunctionMode.test_nested_modes_with_python_has_torch_function",  # test_overrides
     "TestPickle.test_pickle",  # test_overrides
     "TestGradNewOnesOverride.test_newones",  # test_overrides
-    "TestTorchFunctionOverride.test_precedence_semantics",  # test_overrides
     "TestNamedTupleAPI.test_namedtuple_return",  # test_namedtuple_return_api
     "TestVmapAPILegacy.test_accepts_nested_inputs",  # test_legacy_vmap
     "TestVmapAPILegacy.test_nested_out_dims",  # test_legacy_vmap
@@ -2069,15 +2056,9 @@ dynamo_expected_failures = {
     "TestQuantizePT2EQATModels.test_qat_resnet18",  # test_quantization.py
     "TestQuantizePT2EQATModels.test_qat_mobilenet_v2",  # test_quantization.py
     "TestObserver.test_per_channel_observers",  # test_quantization.py
-    "TestCustomOp.test_define_with_tags_single",  # test_custom_ops
-    "TestCustomOp.test_autogen_aten_ops_are_pt2_compliant",  # test_custom_ops
-    "TestCustomOp.test_define_with_tags_list",  # test_custom_ops
     "TestCustomOp.test_impl_device_cpu",  # test_custom_ops
     "TestCustomOp.test_impl_device_function",  # test_custom_ops
-    "TestCustomOp.test_builtin_torchscript_ops",  # test_custom_ops
     "TestCustomOpTestingCPU.test_missing_functionalization_cpu",  # test_custom_ops
-    "TestCustomOp.test_define_with_tags_tuple",  # test_custom_ops
-    "TestCustomOp.test_builtin_aten_ops_are_pt2_compliant",  # test_custom_ops
     "TestGenerateOpcheckTests.test_opcheck_bad_op",  # test_custom_ops
     "TestCustomOp.test_legacy_define",  # test_custom_ops
     "TestPythonRegistration.test_alias_analysis",  # test_python_dispatch
