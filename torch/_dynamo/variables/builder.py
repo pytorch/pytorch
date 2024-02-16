@@ -1598,9 +1598,9 @@ def _automatic_dynamic(
 
     # We preserve the dynamism of inputs. For example, when users call
     # make_fx(torch.cond, tracing_mode="symbolic")(*args), inputs have SymInt sizes.
-    from torch.fx.experimental.symbolic_shapes import is_singleton
+    from torch.fx.experimental.symbolic_shapes import is_nested_int
 
-    if any(isinstance(s, SymInt) and not is_singleton(s) for s in e.size()):
+    if any(isinstance(s, SymInt) and not is_nested_int(s) for s in e.size()):
         return StatefulSymbolicContext(
             dynamic_sizes=[
                 DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
@@ -1729,7 +1729,7 @@ def _automatic_dynamic(
             constraint_dim is not None
             or marked_dynamic
             or marked_weak_dynamic
-            or is_singleton(e.shape[i])
+            or is_nested_int(e.shape[i])
         ):
             # NB: We could assert static_shapes is False here, but it
             # seems better to allow the user to override symbolic_context in this
