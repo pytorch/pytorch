@@ -16,8 +16,7 @@ class TORCH_API Logger {
       int output_device,
       bool broadcast_buffers,
       bool has_sync_bn,
-      bool static_graph
-  );
+      bool static_graph);
 
   void set_static_graph();
 
@@ -62,11 +61,7 @@ class TORCH_API Logger {
       Timer::Event end_event);
 
   // Set the absolute time of the event that has been recorded in reducer.
-  void set_event_time(
-    int64_t& event_time,
-    Timer& timer,
-    Timer::Event event
-  );
+  void set_event_time(int64_t& event_time, Timer& timer, Timer::Event event);
   // Set stats that can be collected only during
   // training loop. It is called at the beginning of forward call
   // to record the run time stats of sampled iterations that previously ran.
@@ -96,7 +91,6 @@ class TORCH_API Logger {
   // if graph was actually static and is a candidate for static graph
   // optimization.
   void log_if_graph_static(bool is_static);
-
 
  private:
   // ddp_logging_data_ is used to hold all the ddp related logging

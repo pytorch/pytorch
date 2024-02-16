@@ -153,3 +153,18 @@ See the :doc:`documentation <cuda._sanitizer>` for information on how to use it.
     :hidden:
 
     cuda._sanitizer
+
+
+.. This module needs to be documented. Adding here in the meantime
+.. for tracking purposes
+.. py:module:: torch.cuda.comm
+.. py:module:: torch.cuda.error
+.. py:module:: torch.cuda.graphs
+.. py:module:: torch.cuda.jiterator
+.. py:module:: torch.cuda.memory
+.. py:module:: torch.cuda.nccl
+.. py:module:: torch.cuda.nvtx
+.. py:module:: torch.cuda.profiler
+.. py:module:: torch.cuda.random
+.. py:module:: torch.cuda.sparse
+.. py:module:: torch.cuda.streams

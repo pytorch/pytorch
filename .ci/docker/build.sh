@@ -46,9 +46,7 @@ if [[ "$image" == *xla* ]]; then
   exit 0
 fi
 
-if [[ "$image" == *-bionic* ]]; then
-  UBUNTU_VERSION=18.04
-elif [[ "$image" == *-focal* ]]; then
+if [[ "$image" == *-focal* ]]; then
   UBUNTU_VERSION=20.04
 elif [[ "$image" == *-jammy* ]]; then
   UBUNTU_VERSION=22.04
@@ -73,6 +71,11 @@ if [[ "$image" == *cuda* && "$UBUNTU_VERSION" != "22.04" ]]; then
   DOCKERFILE="${OS}-cuda/Dockerfile"
 elif [[ "$image" == *rocm* ]]; then
   DOCKERFILE="${OS}-rocm/Dockerfile"
+elif [[ "$image" == *xpu* ]]; then
+  DOCKERFILE="${OS}-xpu/Dockerfile"
+elif [[ "$image" == *cuda*linter* ]]; then
+  # Use a separate Dockerfile for linter to keep a small image size
+  DOCKERFILE="linter-cuda/Dockerfile"
 elif [[ "$image" == *linter* ]]; then
   # Use a separate Dockerfile for linter to keep a small image size
   DOCKERFILE="linter/Dockerfile"
@@ -88,8 +91,8 @@ _UCC_COMMIT=7cb07a76ccedad7e56ceb136b865eb9319c258ea
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$image" in
-  pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc9)
-    CUDA_VERSION=12.1.0
+  pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9)
+    CUDA_VERSION=12.1.1
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
@@ -102,8 +105,8 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc9-inductor-benchmarks)
-    CUDA_VERSION=12.1.0
+  pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9-inductor-benchmarks)
+    CUDA_VERSION=12.1.1
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
@@ -117,7 +120,7 @@ case "$image" in
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc9)
+  pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc9)
     CUDA_VERSION=11.8.0
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.10
@@ -130,38 +133,9 @@ case "$image" in
     UCC_COMMIT=${_UCC_COMMIT}
     CONDA_CMAKE=yes
     TRITON=yes
-    ;;
-  pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7)
-    CUDA_VERSION=11.8.0
-    CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
-    TRITON=yes
-    ;;
-    pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7-inductor-benchmarks)
-    CUDA_VERSION=11.8.0
-    CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    CONDA_CMAKE=yes
-    TRITON=yes
-    INDUCTOR_BENCHMARKS=yes
     ;;
   pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9)
-    CUDA_VERSION=12.1.0
+    CUDA_VERSION=12.1.1
     CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
@@ -183,19 +157,19 @@ case "$image" in
     CONDA_CMAKE=yes
     ONNX=yes
     ;;
-  pytorch-linux-focal-py3-clang7-android-ndk-r19c)
+  pytorch-linux-focal-py3-clang9-android-ndk-r21e)
     ANACONDA_PYTHON_VERSION=3.8
-    CLANG_VERSION=7
+    CLANG_VERSION=9
     LLVMDEV=yes
     PROTOBUF=yes
     ANDROID=yes
-    ANDROID_NDK_VERSION=r19c
+    ANDROID_NDK_VERSION=r21e
     GRADLE_VERSION=6.8.3
     NINJA_VERSION=1.9.0
     ;;
-  pytorch-linux-bionic-py3.8-clang9)
+  pytorch-linux-focal-py3.8-clang10)
     ANACONDA_PYTHON_VERSION=3.8
-    CLANG_VERSION=9
+    CLANG_VERSION=10
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -204,9 +178,9 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-bionic-py3.11-clang9)
+  pytorch-linux-focal-py3.11-clang10)
     ANACONDA_PYTHON_VERSION=3.11
-    CLANG_VERSION=9
+    CLANG_VERSION=10
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -215,7 +189,7 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-bionic-py3.8-gcc9)
+  pytorch-linux-focal-py3.8-gcc9)
     ANACONDA_PYTHON_VERSION=3.8
     GCC_VERSION=9
     PROTOBUF=yes
@@ -230,7 +204,7 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=5.4.2
+    ROCM_VERSION=5.7
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
@@ -241,25 +215,24 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ROCM_VERSION=5.6
+    ROCM_VERSION=6.0
     NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-focal-py3.8-gcc7)
+  pytorch-linux-jammy-xpu-2024.0-py3)
     ANACONDA_PYTHON_VERSION=3.8
-    GCC_VERSION=7
+    GCC_VERSION=11
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    KATEX=yes
+    BASEKIT_VERSION=2024.0.0-49522
+    NINJA_VERSION=1.9.0
     CONDA_CMAKE=yes
-    TRITON=yes
-    DOCS=yes
     ;;
-    pytorch-linux-focal-py3.8-gcc7-inductor-benchmarks)
+    pytorch-linux-jammy-py3.8-gcc11-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.8
-    GCC_VERSION=7
+    GCC_VERSION=11
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -288,11 +261,40 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
+  pytorch-linux-jammy-py3-clang15-asan)
+    ANACONDA_PYTHON_VERSION=3.10
+    CLANG_VERSION=15
+    CONDA_CMAKE=yes
+    VISION=yes
+    ;;
+  pytorch-linux-jammy-py3.8-gcc11)
+    ANACONDA_PYTHON_VERSION=3.8
+    GCC_VERSION=11
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    CONDA_CMAKE=yes
+    TRITON=yes
+    DOCS=yes
+    UNINSTALL_DILL=yes
+    ;;
+  pytorch-linux-jammy-py3-clang12-executorch)
+    ANACONDA_PYTHON_VERSION=3.10
+    CLANG_VERSION=12
+    CONDA_CMAKE=yes
+    EXECUTORCH=yes
+    ;;
   pytorch-linux-focal-linter)
     # TODO: Use 3.9 here because of this issue https://github.com/python/mypy/issues/13627.
     # We will need to update mypy version eventually, but that's for another day. The task
     # would be to upgrade mypy to 1.0.0 with Python 3.11
     ANACONDA_PYTHON_VERSION=3.9
+    CONDA_CMAKE=yes
+    ;;
+  pytorch-linux-jammy-cuda11.8-cudnn8-py3.9-linter)
+    ANACONDA_PYTHON_VERSION=3.9
+    CUDA_VERSION=11.8
     CONDA_CMAKE=yes
     ;;
   *)
@@ -312,6 +314,9 @@ case "$image" in
       extract_version_from_image_name rocm ROCM_VERSION
       NINJA_VERSION=1.9.0
       TRITON=yes
+      # To ensure that any ROCm config will build using conda cmake
+      # and thus have LAPACK/MKL enabled
+      CONDA_CMAKE=yes
     fi
     if [[ "$image" == *centos7* ]]; then
       NINJA_VERSION=1.10.2
@@ -345,14 +350,11 @@ if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
 fi
 
 # Build image
-# TODO: build-arg THRIFT is not turned on for any image, remove it once we confirm
-# it's no longer needed.
-docker build \
+DOCKER_BUILDKIT=1 docker build \
        --no-cache \
        --progress=plain \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "PROTOBUF=${PROTOBUF:-}" \
-       --build-arg "THRIFT=${THRIFT:-}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
        --build-arg "DB=${DB:-}" \
        --build-arg "VISION=${VISION:-}" \
@@ -375,7 +377,7 @@ docker build \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
-       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx906}" \
+       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx906;gfx90a}" \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
        --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
        --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
@@ -384,6 +386,8 @@ docker build \
        --build-arg "ONNX=${ONNX}" \
        --build-arg "DOCS=${DOCS}" \
        --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
+       --build-arg "EXECUTORCH=${EXECUTORCH}" \
+       --build-arg "BASEKIT_VERSION=${BASEKIT_VERSION}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \

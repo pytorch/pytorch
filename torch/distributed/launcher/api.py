@@ -8,7 +8,7 @@
 import sys
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Set
 
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
 from torch.distributed.elastic import events, metrics
@@ -63,6 +63,7 @@ class LaunchConfig:
         metrics_cfg: configuration to initialize metrics.
         local_addr: address of the local node if any. If not set, a lookup on the local
                 machine's FQDN will be performed.
+        local_ranks_filter: ranks for which to show logs in console. If not set, show from all.
     ..note:
         `rdzv_timeout` is a legacy argument that will be removed in future.
         Set the timeout via `rdzv_configs['timeout']`
@@ -82,10 +83,12 @@ class LaunchConfig:
     monitor_interval: float = 30
     start_method: str = "spawn"
     log_dir: Optional[str] = None
+    log_line_prefix_template: Optional[str] = None
     redirects: Union[Std, Dict[int, Std]] = Std.NONE
     tee: Union[Std, Dict[int, Std]] = Std.NONE
     metrics_cfg: Dict[str, str] = field(default_factory=dict)
     local_addr: Optional[str] = None
+    local_ranks_filter: Optional[Set[int]] = None
 
     def __post_init__(self):
         default_timeout = 900
@@ -245,7 +248,11 @@ def launch_agent(
     )
 
     agent = LocalElasticAgent(
-        spec=spec, start_method=config.start_method, log_dir=config.log_dir
+        spec=spec,
+        start_method=config.start_method,
+        log_dir=config.log_dir,
+        log_line_prefix_template=config.log_line_prefix_template,
+        local_ranks_filter=config.local_ranks_filter,
     )
 
     shutdown_rdzv = True

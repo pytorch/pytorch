@@ -359,9 +359,9 @@ def export(
 
                     Models exported this way are probably runnable only by Caffe2.
 
-        opset_version (int, default 14): The version of the
+        opset_version (int, default 17): The version of the
             `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
-            to target. Must be >= 7 and <= 16.
+            to target. Must be >= 7 and <= 17.
         do_constant_folding (bool, default True): Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
             with pre-computed constant nodes.
@@ -909,7 +909,6 @@ def _trace_and_get_graph_from_model(model, args):
     # Disable Autocast cache because it replaces kernel's weight and bias
     # by (undesired) constants.
     # No perf impact for when there are reused weights since https://github.com/pytorch/pytorch/pull/85665
-    # TODO: https://github.com/pytorch/pytorch/issues/84092
     prev_autocast_cache_enabled = torch.is_autocast_cache_enabled()
     torch.set_autocast_cache_enabled(False)
     trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(
@@ -1471,7 +1470,24 @@ def _get_module_attributes(module):
     annotations = typing.get_type_hints(type(module))
     base_m_annotations = typing.get_type_hints(torch.nn.Module)
     [annotations.pop(k, None) for k in base_m_annotations]
-    return {k: getattr(module, k) for k in annotations}
+    # Check whether module attributes can be accessed. Some classes
+    # define attributes but don't provide access to them in their
+    # constructor.
+    #
+    # For example, torch.nn.Embedding has the `freeze` variable and its
+    # type specified in the class but the attribute is not created in the
+    # constructor. In other words, there is no `self.freeze = <True | False>`
+    # in the constructor.
+    #
+    # Reference: https://github.com/pytorch/pytorch/blob/92de1d322223fb5584e384971b32c46b93bc2f4b/torch/nn/modules/sparse.py#L120
+    attrs = {}
+    for k in annotations:
+        try:
+            attrs[k] = getattr(module, k)
+        except AttributeError:
+            torch.onnx.log(f"Skipping module attribute '{k}'")
+            continue
+    return attrs
 
 
 @_beartype.beartype
@@ -1523,6 +1539,20 @@ def _export(
 
     if opset_version is None:
         opset_version = _constants.ONNX_DEFAULT_OPSET
+
+    # torch.onnx.export does not support opset versions >=18
+    if opset_version > _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET:
+        # We do not want to fail because we should still allow users to create
+        # custom symbolic functions for opset>17
+        warnings.warn(
+            f"Exporting to ONNX opset version {opset_version} is not supported. "
+            f"by 'torch.onnx.export()'. "
+            f"The highest opset version supported is {_constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET}. "
+            f"To use a newer opset version, consider 'torch.onnx.dynamo_export()'. "
+            f"Note that dynamo_export() is in preview. Please report errors with "
+            f"dynamo_export() as Github issues to https://github.com/pytorch/pytorch/issues.",
+            category=errors.OnnxExporterWarning,
+        )
 
     if export_modules_as_functions and opset_version < 15:
         raise ValueError(

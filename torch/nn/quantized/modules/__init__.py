@@ -1,4 +1,4 @@
-r"""Quantized Modules
+r"""Quantized Modules.
 
 Note::
     The `torch.nn.quantized` namespace is in the process of being deprecated.

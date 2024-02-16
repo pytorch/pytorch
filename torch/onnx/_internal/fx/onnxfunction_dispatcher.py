@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import operator
+import types
 from typing import (
     Any,
     Callable,
@@ -30,6 +32,7 @@ if TYPE_CHECKING:
     import onnxscript  # type: ignore[import]
 
     from torch.onnx import OnnxRegistry
+
 
 # For beartype
 from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
@@ -67,7 +70,7 @@ def _find_operator_overloads_in_onnx_registry_disagnostic_message_formatter(
 
 
 class OnnxFunctionDispatcher:
-    """A dispatcher that finds the best ONNX Function for ATen operators.
+    """A dispatcher that finds the best ONNX Function for ATen/Custom operators.
 
     It uses the `torch.ops` name to find the function. If not found, it falls back to default.
     Otherwise, the best match is found among all function overloads. An exact match has
@@ -84,6 +87,9 @@ class OnnxFunctionDispatcher:
         b. Otherwise, find the nearest one with the highest matching score. Because of
             the potential wrongly annotated dtypes and attributes matching, we use
             nearest match to find the best function once the aten name is targeted.
+
+    3. Tie-breaker: If there are multiple nearest matches, we will select the one with
+        the highest matching score.
 
     NOTE: The nearest match `doesn't guarantee` a correct match, and a warning message is logged.
     """
@@ -107,7 +113,9 @@ class OnnxFunctionDispatcher:
         self,
         node: torch.fx.Node,
         onnx_args: Sequence[
-            Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
+            Optional[
+                Union[fx_type_utils.TensorLike, str, int, float, bool, list, complex]
+            ]
         ],
         onnx_kwargs: Dict[str, fx_type_utils.Argument],
         diagnostic_context: diagnostics.DiagnosticContext,
@@ -146,13 +154,10 @@ class OnnxFunctionDispatcher:
         default_and_custom_functions: List[registration.ONNXFunction],
         diagnostic_context: diagnostics.DiagnosticContext,
     ) -> List[registration.ONNXFunction]:
-        if any(
-            torch.is_complex(arg.meta["val"])
-            for arg in node.args
-            if isinstance(arg, torch.fx.Node)
-            and "val" in arg.meta
-            and isinstance(arg.meta["val"], torch.Tensor)
-        ):
+        """Filter the complex functions if the input has complex dtype."""
+
+        args_with_complex_dtype = [_is_arg_with_complex_dtype(arg) for arg in node.args]
+        if any(args_with_complex_dtype):
             default_and_custom_functions = [
                 func for func in default_and_custom_functions if func.is_complex
             ]
@@ -200,7 +205,9 @@ class OnnxFunctionDispatcher:
         node: torch.fx.Node,  # this is used in diagnostic_message_formatter
         default_and_custom_functions: List[registration.ONNXFunction],
         onnx_args: Sequence[
-            Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
+            Optional[
+                Union[fx_type_utils.TensorLike, str, int, float, bool, list, complex]
+            ]
         ],
         onnx_kwargs: Dict[str, fx_type_utils.Argument],
         diagnostic_context: diagnostics.DiagnosticContext,
@@ -219,8 +226,7 @@ class OnnxFunctionDispatcher:
             Raises:
                 RuntimeError: If there are no overloaded functions available for the given FX node.
         """
-        # TODO(justinchuby): Cache the OnnxSchemaChecker  so we don't need to run the init logic everytime
-        overload_match_ranking: Dict[registration.ONNXFunction, int] = {}
+        overload_match_ranking: Dict[registration.ONNXFunction, Optional[int]] = {}
         diagnostic = diagnostic_context.inflight_diagnostic()
 
         # Iterate the overloaded functions in reverse order to prioritize the custom ones
@@ -228,23 +234,42 @@ class OnnxFunctionDispatcher:
         for symbolic_function in reversed(default_and_custom_functions):
             function_opschema = _OnnxSchemaChecker(symbolic_function.onnx_function)
 
+            # NOTE: 1. If the perfect match is found, return the function
             if function_opschema.perfect_match_inputs(
                 diagnostic, onnx_args, onnx_kwargs
             ):
-                # If the perfect match is found, return the function
                 return symbolic_function.onnx_function
             # Record the match score for the nearest match if it's not the perfect match
             overload_match_ranking[symbolic_function] = function_opschema.match_score
 
-        # NOTE: If the perfect match is not found, find the nearest match
-        diagnostic.with_additional_message(
+        # NOTE: 2. If there is no perfect match, find the nearest match among the nearest matche candidates
+        # If there is no nearest match, raise an error
+        overload_match_ranking = {
+            k: v for k, v in overload_match_ranking.items() if v is not None
+        }
+        if not overload_match_ranking:
+            # If there are no overloaded functions available for the given FX node, raise an
+            # unsupported error
+            op_full_name = self._get_aten_name(
+                node, diagnostic_context
+            ).qualified_name()
+            diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
+                diagnostics.rules.no_symbolic_function_for_call_function,
+                diagnostics.levels.ERROR,
+                f"Cannot find any perfect/nearest match of symbolic function for {op_full_name},"
+                f"which should be registered under {node.target}.",
+                unsupported_fx_node=node,
+            )
+            diagnostic_context.log(diagnostic)
+            raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
+
+        diagnostic.warning(
             "### Exact match is not found!\n"
             "Cannot find a perfect match of symbolic overload, "
             "a nearest match is found. Please check the ONNX output carefully. \n",
         )
         diagnostic.level = diagnostics.levels.WARNING
-
-        # NOTE: Tie breaker: if there are multiple nearest matches, we will choose the one
+        # NOTE: 3. Tie breaker: if there are multiple nearest matches, we will choose the one
         # that is custom first. If there are multiple custom ones, we will choose the one
         # that is added lastly in the list.
         symbolic_function_list: List[registration.ONNXFunction] = sorted(
@@ -293,19 +318,13 @@ class OnnxFunctionDispatcher:
             aten_op_default = node.target.default
             return registration.OpName.from_op_overload(op_overload=aten_op_default)  # type: ignore[no-any-return]
 
-        if (
-            aten_op := _symint_symfloat_builtin_to_exporter_key_table(node.target)
-        ) is not None:
+        if isinstance(node.target, types.BuiltinFunctionType):
             # Make sure it's symint/symfloat consuming builtin ops.
             for node_arg in node.args:
                 if (not isinstance(node_arg, (torch.fx.Node, int, float))) or (
                     isinstance(node_arg, torch.fx.Node)
-                    and not isinstance(
-                        node_arg.meta["val"], (torch.SymInt, torch.SymFloat)
-                    )
+                    and not fx_type_utils.is_torch_symbolic_type(node_arg.meta["val"])
                 ):
-                    # TODO: reduce number of explicit initializations.
-                    # TODO: Log location, stack.
                     diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
                         diagnostics.rules.no_symbolic_function_for_call_function,
                         diagnostics.levels.ERROR,
@@ -315,7 +334,7 @@ class OnnxFunctionDispatcher:
                     )
                     diagnostic_context.log(diagnostic)
                     raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
-            return registration.OpName.from_op_overload(op_overload=aten_op)
+            return registration.OpName.from_builtin_function(node.target)
 
         if isinstance(node.target, torch._ops.OpOverload):
             return registration.OpName.from_op_overload(op_overload=node.target)
@@ -355,8 +374,8 @@ class OnnxFunctionDispatcher:
             node=node, diagnostic_context=diagnostic_context
         )
 
-        # NOTE: If the ATen/Custom operators are not registered, the group will be None.
-        # And non-registerd ATen/Custom operators will trigger error in the next step.
+        # If the ATen/Custom operators are not registered, the group will be None.
+        # And non-registered ATen/Custom operators will trigger error in the next step.
         function_group: Optional[List[registration.ONNXFunction]] = None
 
         function_group = self.onnx_registry.get_op_functions(
@@ -366,7 +385,6 @@ class OnnxFunctionDispatcher:
         )
 
         # NOTE: Fall back to default overload if the ONNX registry doesn't have the overload.
-        # TODO: Should we have a better fallback mechanism?
         if function_group is None:
             function_group = self.onnx_registry.get_op_functions(
                 namespace=internal_opname.namespace,
@@ -374,28 +392,22 @@ class OnnxFunctionDispatcher:
                 overload=None,
             )
             if function_group is not None:
-                # NOTE: Currently, most of torchlib functions are not registered with overload
-                # in ONNX registry. So we will only log a warning in SARIF if we can't find the overload
-                # to avoid spammy warnings in printout.
-                # TODO: https://github.com/microsoft/onnxscript/issues/828
                 op_full_name = internal_opname.qualified_name()
                 diagnostic = diagnostic_context.inflight_diagnostic()
-                diagnostic.with_additional_message(
+                diagnostic.warning(
                     "### The operator overload is not found in onnx registry!\n"
                     "Cannot find the operator overload in onnx registry, but "
                     "the default overload is found. Please check the ONNX output carefully. \n",
                 )
                 diagnostic.level = diagnostics.levels.WARNING
 
-        # NOTE: If the ATen/Custom operators are not registered, the group will be None.
         if function_group is not None:
-            # If the input has complex dtype, we will only dispatch to the complex functions.
+            # NOTE: If the input has complex dtype, we will only dispatch to the complex functions.
             function_group = self._filter_or_keep_complex(
                 node, function_group, diagnostic_context
             )
             return function_group  # type: ignore[return-value]
 
-        # If we can't find the function group, raise error.
         op_full_name = internal_opname.qualified_name()
         diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
             diagnostics.rules.no_symbolic_function_for_call_function,
@@ -408,61 +420,90 @@ class OnnxFunctionDispatcher:
         raise diagnostics.RuntimeErrorWithDiagnostic(diagnostic)
 
 
-@_beartype.beartype
-def _symint_symfloat_builtin_to_exporter_key_table(
-    target,
-) -> Optional[torch._ops.OpOverload]:
-    """Maps builtin ops to exporter key table."""
-
-    _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE: Dict[
-        Union[Callable[..., Any], str], torch._ops.OpOverload
-    ] = {
-        operator.mul: torch.ops.aten.mul.default,  # type: ignore[has-type]
-        operator.add: torch.ops.aten.add.default,  # type: ignore[has-type]
-        operator.pow: torch.ops.aten.pow.int,  # type: ignore[has-type]
-        operator.sub: torch.ops.aten.sub.default,  # type: ignore[has-type]
-    }
-    return _SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE.get(target)
-
-
 class _OnnxSchemaChecker:
     """
     The OnnxSchemaChecker class is a checker for ONNX OpSchema and param schema.
 
     It provides methods to check for input compatibility based on the OpSchema. It also
     provides a matching score to indicate how well the OpSchema matches the input and
-    kwargs types.
+    kwargs types. A function will be evaluated as perfect match, nearest match eligible,
+    or no match.
 
-    There are three types of ONNX overloads in torchlib:
+    Here are some common examples in categories:
 
-    1. Different types: Caused by the difference between the ONNX spec and PyTorch.The
-        matching system finds the correct one.
-
-        ```python
-        @torch_op("aten::mul")
-        def aten_mul(self: TReal, other: TReal) -> TReal:
-            ...
-
-        @torch_op("aten::mul")
-        def aten_mul_bool(self: BOOL, other: BOOL) -> BOOL:
-            ...
-    ```
-
-    2. Optional dtype: dtype could be "unprovided". The difference from 2 is that dtype
-        would not be None.
+    1. [NOTE: Perfect match]: The number of inputs and attributes are exactly the same as
+        the OpSchema. The types of inputs and attributes are exactly the same as the
+        OpSchema.
 
         ```python
-        @torch_op("aten::new_full")
-        def aten_new_full(self: TTensor, size: INT64, fill_value: TTensor) -> TTensor:
+        inputs = (Tensor[2, 3], Tensor[2, 3])
+        attributes = {"alpha": 1.0}
+
+        @torch_op("aten::op")
+        def aten_op(self: TReal, other: TReal, alpha: float = 1) -> TReal:
             ...
 
-        @torch_op("aten::new_full")
-        def aten_new_full_dtype(self: TTensor, size: INT64, fill_value: TTensor, dtype: int) -> TTensor:
+        ```
+        Result: Perfect match.
+
+    2. [NOTE: Optional input]: The dispatcher recognizes optional inputs. However,
+        the input can't be ignored. None must be provided.
+
+        ```python
+        inputs = (Tensor([2, 3]), None)
+        attributes = {}
+
+        aten_op(X: TTensor, Y: Optional[INT64]):
             ...
         ```
+        Result: Perfect match.
+        Real example: `aten::convolution`.
 
-        Depends on dtype is provided or not, matching system will dispatch the ATen op to
-        the correct one.
+    3. [NOTE: Different attributes]: If an attribute is provided with value, it's
+        a must to match the attribute in function signature.
+        ```python
+        inputs = (Tensor([2, 3]),)
+        attributes = {"a":1, "b":2}
+
+        aten_op(X: TTensor, a: int):
+            ...
+        ```
+        Result: No match.
+        Real example: `aten::div` vs `aten::div.Tensor_mode`.
+
+    4. [NOTE: Default attributes]: Default attribute will fill in the value into
+        inputs/attributes.
+        ```python
+        inputs = (Tensor([2, 3]),)
+        attributes = {}
+
+        aten_op(X: TTensor, a: int = 3):
+            ...
+        ```
+        Result: Perfect match.
+        Real example: `aten::clone`
+
+    5. [NOTE: Ignore attribute with None value]: The attributes with None value
+        will be ignored in matching.
+        ```python
+        inputs = (Tensor([2, 3]),)
+        attributes = {"a": None}
+
+        aten_op(X: TTensor):
+            ...
+        ```
+        Result: Perfect match.
+
+        ```python
+        inputs = (Tensor([2, 3]),)
+        attributes = {"a": None}
+
+        aten_op(X: TTensor, a: int = 3):
+            ...
+        ```
+        Result: Nearest match eligible.
+
+        Real example: `aten::div` vs `aten::div.Tensor_mode`.
 
     Attributes:
         onnxfunction: The OnnxFunction.
@@ -496,11 +537,14 @@ class _OnnxSchemaChecker:
             for constraint in self.op_schema.type_constraints
         }
         self.attributes = self.op_schema.attributes
-        self._matching_score: int = 0
+        self._matching_score: Optional[int] = None
 
     @property
-    def match_score(self) -> int:
+    def match_score(self) -> Optional[int]:
         """The matching score of the OnnxSchemaChecker .
+
+        If this remains None, it means the matching score has not been calculated,
+        and it's not a nearest match candidate.
 
         Returns:
             The matching score of the OnnxSchemaChecker .
@@ -512,7 +556,9 @@ class _OnnxSchemaChecker:
         self,
         diagnostic: diagnostics.Diagnostic,
         args: Sequence[
-            Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
+            Optional[
+                Union[fx_type_utils.TensorLike, str, int, float, bool, list, complex]
+            ]
         ],
         kwargs: Dict[str, fx_type_utils.Argument],
     ) -> bool:
@@ -521,6 +567,13 @@ class _OnnxSchemaChecker:
         The definition of perfect match is that the input types are all in the type
         constraints and the number of inputs matches the number of inputs in the
         OpSchema.
+
+        Checking steps:
+        1. The function signature matches the inputs number, and attribute names.
+        2. The input/attribute types are all in the type constraints.
+
+        A function should at least pass the first step to be eligible for the
+        nearest matching.
 
         Args:
             diagnostic: The diagnostic to use for logging detailed info.
@@ -540,61 +593,98 @@ class _OnnxSchemaChecker:
             self.param_schema,
             args,
             kwargs,
-            fill_defaults=False,  # NOTE: We don't want to change inputs
+            fill_defaults=True,  # fill defaults for optional arguments to match
         )
-
-        # TODO(titaiwang): Currently the functions in torchlib are manully annotated,
-        # so there are quite a few functions that wrongly annotated or strctly annotated.
-        # The matching system relax the match while we fix them in the future.
-        self._record_matching_score(function_inputs, function_attributes)
-
-        diagnostic.with_additional_message("### Checking perfect match...\n")
-        diagnostic.with_additional_message(
-            f"{diagnostics.format_argument(self.onnxfunction)}"
-        )
-        diagnostic.with_additional_message(f"match score: {self.match_score}\n")
-
-        if len(function_inputs) != len(self.op_schema.inputs):
-            diagnostic.with_additional_message(
-                f"#### Failed: input number mismatch! \n"
-                f"Actual {len(function_inputs)} vs expected {len(self.op_schema.inputs)}\n"
+        with diagnostic.log_section(logging.INFO, "Checking perfect match..."):
+            diagnostic.info(
+                "%s",
+                diagnostics.LazyString(diagnostics.format_argument, self.onnxfunction),
             )
-            return False
-        for schema_input, torch_input in zip(self.op_schema.inputs, function_inputs):
-            torch_input_compatible_types = _find_onnx_data_type(torch_input)
-            allowed_types = self.type_constraints[schema_input.type_str]
-            if not allowed_types.intersection(torch_input_compatible_types):
-                # If torch_input_compatible_types isn't in allowed_types
-                # of this input defined in the OpSchema, we know the function
-                # and the input are not compatible
-                diagnostic.with_additional_message(
-                    f"#### Failed: input type mismatch for input '{schema_input.name}'! \n"
-                    f"Actual {torch_input_compatible_types} vs\n"
-                    f"expected {allowed_types}\n"
-                )
+            # NOTE: 1. Check if the input number and attribute names match the
+            # OpSchema. If it's not, we know the function is not eligible to be a perfect
+            # match, nor a nearest match.
+            # We use is_perfect_match to postpone the return value to the end
+            # of the function, as we want to log all the mismatch info.
+            is_perfect_match = True
+            if len(function_inputs) != len(self.op_schema.inputs):
+                with diagnostic.log_section(
+                    logging.INFO, "Failed: input number mismatch!"
+                ):
+                    diagnostic.info(
+                        "Actual %d vs expected %d",
+                        len(function_inputs),
+                        len(self.op_schema.inputs),
+                    )
+                diagnostic.info("The function is not a nearest match candidate.")
+                is_perfect_match = False
+
+            if set(function_attributes) != set(self.attributes):
+                with diagnostic.log_section(
+                    logging.INFO, "Failed: attribute mismatch!"
+                ):
+                    diagnostic.info(
+                        "%s",
+                        diagnostics.LazyString(
+                            lambda: f"Actual {set(function_attributes)} vs expected {set(self.attributes)}",
+                        ),
+                    )
+                diagnostic.info("The function is not a nearest match candidate.")
+                is_perfect_match = False
+
+            # If it's already not a perfect match, we can return False directly. Further
+            # checking is only for the functions that are eligible for nearest match.
+            if not is_perfect_match:
                 return False
-        # Check attributes keys are the same
-        if set(function_attributes) != set(self.attributes):
-            # If the attributes of the OpSchema and the attributes don't match,
-            # we know the function and the input are not compatible
-            diagnostic.with_additional_message(
-                f"#### Failed: attribute mismatch! \n"
-                f"Actual {set(function_attributes)} vs\n"
-                f"expected {set(self.attributes)}\n"
-            )
-            return False
-        # Check attribute dtypes
-        for attribute_name, attribute in function_attributes.items():
-            if not self._match_onnx_attribute_type(attribute_name, attribute):
-                # If the attribute type of the OpSchema and the attribute type don't match,
-                # we know the function and the input are not compatible
-                diagnostic.with_additional_message(
-                    f"#### Failed: attribute '{attribute_name}' type mismatch! \n"
-                    f"Actual {type(attribute)} vs\n"
-                    f"expected {self.attributes[attribute_name].type}\n"
-                )
-                return False
-        return True
+
+            # NOTE: 2. The dtypes of inputs and attributes should be in the
+            # type constraints of the OpSchema. If they are not, we know the function is not
+            # eligible to be a perfect match, but can be a nearest match candidate.
+            for schema_input, torch_input in zip(
+                self.op_schema.inputs, function_inputs
+            ):
+                torch_input_compatible_types = _find_onnx_data_type(torch_input)
+                allowed_types = self.type_constraints[schema_input.type_str]
+                if not allowed_types.intersection(
+                    torch_input_compatible_types
+                ) and not any(
+                    fx_type_utils.is_optional_onnx_dtype_str(onnx_type_str)
+                    for onnx_type_str in allowed_types
+                ):
+                    # If torch_input_compatible_types isn't in allowed_types
+                    # of this input defined in the OpSchema, we know the function
+                    # and the input are not compatible
+                    with diagnostic.log_section(
+                        logging.INFO,
+                        "Failed: input type mismatch for input '%s'!",
+                        schema_input.name,
+                    ):
+                        diagnostic.info(
+                            "Actual %s vs\nExpected %s",
+                            torch_input_compatible_types,
+                            allowed_types,
+                        )
+                    is_perfect_match = False
+
+            for attribute_name, attribute in function_attributes.items():
+                if not self._match_onnx_attribute_type(attribute_name, attribute):
+                    # If the attribute type of the OpSchema and the attribute type don't match,
+                    # we know the function and the input are not compatible
+                    with diagnostic.log_section(
+                        logging.INFO,
+                        "Failed: attribute '%s' type mismatch!",
+                        attribute_name,
+                    ):
+                        diagnostic.info(
+                            "Actual %s vs\nExpected %s",
+                            type(attribute),
+                            self.attributes[attribute_name].type,
+                        )
+                    is_perfect_match = False
+
+            # NOTE: This is still a candidate for nearest match, as it only mismatches attributes on dtype.
+            self._record_matching_score(function_inputs, function_attributes)
+            diagnostic.info("match score: %d", self.match_score)
+            return is_perfect_match
 
     @_beartype.beartype
     def _match_onnx_attribute_type(
@@ -626,19 +716,24 @@ class _OnnxSchemaChecker:
     def _record_matching_score(
         self,
         inputs: Sequence[
-            Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
+            Optional[
+                Union[fx_type_utils.TensorLike, str, int, float, bool, list, complex]
+            ]
         ],
         attributes: Dict[str, fx_type_utils.Argument],
     ):
         """Calculate the inputs matching score of the OpSchema requirements to find the nearest match.
 
+        Only the functions which have the same number of inputs and attributes as the
+        OpSchema are eligible to be a nearest match candidate. Thus, we don't need to
+        check the length of inputs and attributes here, and only check the types of
+        inputs and attributes.
+
         How the matchsing score is calculated:
-        1. score += 1 if one input type is in the type constraints.
-        2. score -= 1 if one kwarg is not symmetrically the same.
+            score += 1 if one input/attribute type is in the type constraints.
 
         Limitations:
-        1. An Overload is punished if it doesn't have `default` attributes.
-        2. None/NoeType/[] could result in zero matches, and the same score of overloads,
+            None/NoeType/[] could result in zero matches, and the same score of overloads,
             which will be recorded in SARIF.
 
         Args:
@@ -648,7 +743,7 @@ class _OnnxSchemaChecker:
         Returns:
             True if the inputs match the requirements, False otherwise.
         """
-
+        self._matching_score = 0
         # If they have different length of arguments, the score would be lower to those
         # functions which have the same length of arguments.
         for schema_input, torch_input in zip(self.op_schema.inputs, inputs):
@@ -661,11 +756,6 @@ class _OnnxSchemaChecker:
                 self._matching_score += 1
         # NOTE: The penalty is applied to those functions which have different attributes.
         for attribute_name, attribute_proto in self.attributes.items():
-            if attribute_name not in attributes:
-                # If the attribute of the OpSchema and the attribute don't match,
-                # we know the function and the input are not compatible
-                self._matching_score -= 1
-                continue
             attribute = attributes[attribute_name]
             attribute_onnx_type = fx_type_utils.from_python_type_to_onnx_attribute_type(
                 type(attribute)
@@ -674,10 +764,6 @@ class _OnnxSchemaChecker:
                 # If the attribute type of the OpSchema and the attribute type don't match,
                 # we know the function and the input are not compatible
                 self._matching_score -= 1
-        # If there is any unexpected attribute in attributes, we know the function
-        # and the input are not compatible
-        extra_attrbute_counts = set(attributes).difference(set(self.attributes))
-        self._matching_score -= len(extra_attrbute_counts)
 
     # NOTE: Referenced from onnxscript internal function.
     # Importing this function makes the code less robust, as it is not a public API.
@@ -686,12 +772,20 @@ class _OnnxSchemaChecker:
         self,
         param_schemas: Sequence["onnxscript.values.ParamSchema"],
         args: Sequence[
-            Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
+            Optional[
+                Union[fx_type_utils.TensorLike, str, int, float, bool, list, complex]
+            ]
         ],
         kwargs: Dict[str, fx_type_utils.Argument],
         fill_defaults: bool = True,
     ) -> Tuple[List[Any], Dict[str, Any]]:
         """Separate Python args and kwargs into ONNX inputs and attributes.
+
+        Extra_kwargs are ignored if their values are None. For example, if the
+        OpSchema has an attribute "rounding_mode" and the caller provides
+        "rounding_mode=None", the attribute "rounding_mode" will not be included
+        in the returned attributes when the OnnxFunction signature doesn't have
+        "rounding_mode" as an attribute.
 
         Args:
             param_schemas: The parameter schemas of an Op or a OnnxFunction.
@@ -711,9 +805,12 @@ class _OnnxSchemaChecker:
         # args, kwargs and param_schemas should be all in order
         # user may not specify all inputs or attributes
 
+        import onnx
+
         onnx_inputs: List[Any] = []
         onnx_attributes: Dict[str, Any] = dict()
-
+        # NOTE: We need to copy kwargs because we will mutate it
+        copy_kwargs = kwargs.copy()
         for i, param in enumerate(param_schemas):
             if param.is_variadic_input:
                 # Exhaust all remaining args
@@ -725,23 +822,54 @@ class _OnnxSchemaChecker:
                     onnx_inputs.append(args[i])
                 else:
                     onnx_attributes[param.name] = args[i]
-            elif param.name in kwargs:
+            elif param.name in copy_kwargs:
                 if param.is_input:
-                    onnx_inputs.append(kwargs[param.name])
+                    # Move the input from kwargs to inputs
+                    onnx_inputs.append(copy_kwargs[param.name])
+                    copy_kwargs.pop(param.name)
                 else:
-                    onnx_attributes[param.name] = kwargs[param.name]
-            elif param.is_attribute and param.default is not object():
+                    onnx_attributes[param.name] = copy_kwargs[param.name]
+            elif (
+                param.is_attribute
+                and self.attributes[param.name].default_value.type
+                != onnx.AttributeProto.UNDEFINED  # type: ignore[attr-defined]
+            ):
                 # User did not provide the attribute
                 if fill_defaults:
                     onnx_attributes[param.name] = param.default
+            # optional input
+            elif param.is_input:
+                if fill_defaults:
+                    onnx_inputs.append(None)
 
+        # NOTE: Pick up extra kwargs if it's not None. None is not expected
+        # as an attribute value in torchlib.
+        for k, v in copy_kwargs.items():
+            if k not in onnx_attributes and v is not None:
+                onnx_attributes[k] = v
         return onnx_inputs, onnx_attributes
+
+
+@_beartype.beartype
+def _is_arg_with_complex_dtype(arg: fx_type_utils.Argument) -> bool:
+    """Check if the node has complex dtype recursively."""
+    if (
+        isinstance(arg, torch.fx.Node)
+        and "val" in arg.meta
+        and isinstance(arg.meta["val"], torch.Tensor)
+        and torch.is_complex(arg.meta["val"])
+    ):
+        return True
+    elif isinstance(arg, list):
+        for item in arg:
+            return _is_arg_with_complex_dtype(item)
+    return False
 
 
 @_beartype.beartype
 def _find_onnx_data_type(
     torch_input: Optional[
-        Union[fx_type_utils.TensorLike, str, int, float, bool, list, tuple]
+        Union[fx_type_utils.TensorLike, str, int, float, bool, list, tuple, complex]
     ]
 ) -> Set[str]:
     """Convert inputs data type from torch acceptable dtype to the compatible onnx dtype string."""
@@ -750,7 +878,7 @@ def _find_onnx_data_type(
         and torch_input.dtype is not None
     ):
         return fx_type_utils.from_torch_dtype_to_onnx_dtype_str(torch_input.dtype)
-    if isinstance(torch_input, (int, float, bool, str)):
+    if isinstance(torch_input, (int, float, bool, str, complex)):
         return fx_type_utils.from_torch_dtype_to_onnx_dtype_str(type(torch_input))
     if isinstance(torch_input, (list, tuple)) and torch_input:  # [Tensor, Tensor]
         set_dtype = _find_onnx_data_type(torch_input[0])

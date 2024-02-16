@@ -4,9 +4,7 @@
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/native/CanUse32BitIndexMath.h>
 
-namespace at {
-namespace cuda {
-namespace detail {
+namespace at::cuda::detail {
 
 TORCH_CUDA_CU_API bool maybeOverlappingIndices(const at::TensorBase &t);
 using at::native::canUse32BitIndexMath;
@@ -23,10 +21,16 @@ getTensorInfo(const at::TensorBase &t) {
     st[i] = t.stride(i);
   }
 
+  scalar* data_ptr = nullptr;
+
+  if constexpr (std::is_const<scalar>::value) {
+    data_ptr = t.const_data_ptr<scalar>();
+  } else {
+    data_ptr = t.mutable_data_ptr<scalar>();
+  }
+
   return TensorInfo<scalar, IndexType>(
-    t.data_ptr<scalar>(), dims, sz, st);
+    data_ptr, dims, sz, st);
 }
 
-} // detail
-} // cuda
-} // at
+} // namespace at::cuda::detail

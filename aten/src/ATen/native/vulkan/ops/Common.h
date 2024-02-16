@@ -2,6 +2,8 @@
 
 #ifdef USE_VULKAN_API
 
+#include <c10/util/ArrayRef.h>
+
 #include <ATen/core/List.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/vulkan/api/api.h>
@@ -47,6 +49,13 @@ struct Layout final {
   struct Parameter final {
     static constexpr size_t height = 0u;
     static constexpr size_t width = 1u;
+  };
+
+  // Parameters (Pooling Kernels, Dilation, Padding, Stride, etc.)
+  struct BatchMatrices final {
+    static constexpr size_t batch = 0u;
+    static constexpr size_t height = 1u;
+    static constexpr size_t width = 2u;
   };
 };
 

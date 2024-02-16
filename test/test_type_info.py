@@ -1,6 +1,6 @@
 # Owner(s): ["module: typing"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_NUMPY, load_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_NUMPY, load_tests, set_default_dtype
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -38,7 +38,6 @@ class TestDTypeInfo(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_finfo(self):
-        initial_default_type = torch.get_default_dtype()
         for dtype in [torch.float16, torch.float32, torch.float64, torch.complex64, torch.complex128]:
             x = torch.zeros((2, 2), dtype=dtype)
             xinfo = torch.finfo(x.dtype)
@@ -52,8 +51,8 @@ class TestDTypeInfo(TestCase):
             self.assertEqual(xinfo.resolution, xninfo.resolution)
             self.assertEqual(xinfo.dtype, xninfo.dtype)
             if not dtype.is_complex:
-                torch.set_default_dtype(dtype)
-                self.assertEqual(torch.finfo(dtype), torch.finfo())
+                with set_default_dtype(dtype):
+                    self.assertEqual(torch.finfo(dtype), torch.finfo())
 
         # Special test case for BFloat16 type
         x = torch.zeros((2, 2), dtype=torch.bfloat16)
@@ -66,11 +65,29 @@ class TestDTypeInfo(TestCase):
         self.assertEqual(xinfo.tiny, xinfo.smallest_normal)
         self.assertEqual(xinfo.resolution, 0.01)
         self.assertEqual(xinfo.dtype, "bfloat16")
-        torch.set_default_dtype(x.dtype)
-        self.assertEqual(torch.finfo(x.dtype), torch.finfo())
+        with set_default_dtype(x.dtype):
+            self.assertEqual(torch.finfo(x.dtype), torch.finfo())
 
-        # Restore the default type to ensure that the test has no side effect
-        torch.set_default_dtype(initial_default_type)
+        # Special test case for Float8_E5M2
+        xinfo = torch.finfo(torch.float8_e5m2)
+        self.assertEqual(xinfo.bits, 8)
+        self.assertEqual(xinfo.max, 57344.0)
+        self.assertEqual(xinfo.min, -57344.0)
+        self.assertEqual(xinfo.eps, .25)
+        self.assertEqual(xinfo.tiny, 6.10352e-05)
+        self.assertEqual(xinfo.resolution, 1.0)
+        self.assertEqual(xinfo.dtype, "float8_e5m2")
+
+        # Special test case for Float8_E4M3FN
+        xinfo = torch.finfo(torch.float8_e4m3fn)
+        self.assertEqual(xinfo.bits, 8)
+        self.assertEqual(xinfo.max, 448.0)
+        self.assertEqual(xinfo.min, -448.0)
+        self.assertEqual(xinfo.eps, .125)
+        self.assertEqual(xinfo.tiny, 0.015625)
+        self.assertEqual(xinfo.resolution, 1.0)
+        self.assertEqual(xinfo.dtype, "float8_e4m3fn")
 
 if __name__ == '__main__':
+    TestCase._default_dtype_check_enabled = True
     run_tests()

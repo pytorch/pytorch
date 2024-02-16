@@ -1,8 +1,12 @@
-from typing import Any, Optional
+from typing import Any
 
 import torch
 
-from torch.utils._contextlib import _DecoratorContextManager
+from torch.utils._contextlib import (
+    _DecoratorContextManager,
+    _NoParamDecoratorContextManager,
+    F,
+)
 
 __all__ = [
     "no_grad",
@@ -13,7 +17,7 @@ __all__ = [
 ]
 
 
-class no_grad(_DecoratorContextManager):
+class no_grad(_NoParamDecoratorContextManager):
     r"""Context-manager that disables gradient calculation.
 
     Disabling gradient calculation is useful for inference, when you are sure
@@ -29,7 +33,7 @@ class no_grad(_DecoratorContextManager):
     This context manager is thread local; it will not affect computation
     in other threads.
 
-    Also functions as a decorator. (Make sure to instantiate with parenthesis.)
+    Also functions as a decorator.
 
     .. note::
         No-grad is one of several mechanisms that can enable or
@@ -54,6 +58,12 @@ class no_grad(_DecoratorContextManager):
         >>> z = doubler(x)
         >>> z.requires_grad
         False
+        >>> @torch.no_grad
+        ... def tripler(x):
+        ...     return x * 3
+        >>> z = tripler(x)
+        >>> z.requires_grad
+        False
         >>> # factory function exception
         >>> with torch.no_grad():
         ...     a = torch.nn.Parameter(torch.rand(10))
@@ -74,7 +84,7 @@ class no_grad(_DecoratorContextManager):
         torch.set_grad_enabled(self.prev)
 
 
-class enable_grad(_DecoratorContextManager):
+class enable_grad(_NoParamDecoratorContextManager):
     r"""Context-manager that enables gradient calculation.
 
     Enables gradient calculation, if it has been disabled via :class:`~no_grad`
@@ -83,7 +93,7 @@ class enable_grad(_DecoratorContextManager):
     This context manager is thread local; it will not affect computation
     in other threads.
 
-    Also functions as a decorator. (Make sure to instantiate with parenthesis.)
+    Also functions as a decorator.
 
     .. note::
         enable_grad is one of several mechanisms that can enable or
@@ -109,6 +119,13 @@ class enable_grad(_DecoratorContextManager):
         ...     return x * 2
         >>> with torch.no_grad():
         ...     z = doubler(x)
+        >>> z.requires_grad
+        True
+        >>> @torch.enable_grad
+        ... def tripler(x):
+        ...     return x * 3
+        >>> with torch.no_grad():
+        ...     z = tripler(x)
         >>> z.requires_grad
         True
 
@@ -165,21 +182,28 @@ class set_grad_enabled(_DecoratorContextManager):
 
     def __init__(self, mode: bool) -> None:
         self.prev = torch.is_grad_enabled()
-        torch._C._set_grad_enabled(mode)
         self.mode = mode
+        torch._C._set_grad_enabled(mode)
+
+    def __call__(self, orig_func: F) -> F:
+        torch._C._set_grad_enabled(self.prev)
+        return super().__call__(orig_func)
 
     def __enter__(self) -> None:
-        pass
+        torch._C._set_grad_enabled(self.mode)
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_grad_enabled(self.prev)
 
     def clone(self) -> "set_grad_enabled":
+        r"""
+        Create a copy of this class
+        """
         return self.__class__(self.mode)
 
 
 class inference_mode(_DecoratorContextManager):
-    r"""Context-manager that enables or disables inference mode
+    r"""Context-manager that enables or disables inference mode.
 
     InferenceMode is a new context manager analogous to :class:`~no_grad`
     to be used when you are certain your operations will have no interactions
@@ -191,7 +215,7 @@ class inference_mode(_DecoratorContextManager):
     This context manager is thread local; it will not affect computation
     in other threads.
 
-    Also functions as a decorator. (Make sure to instantiate with parenthesis.)
+    Also functions as a decorator.
 
     .. note::
         Inference mode is one of several mechanisms that can enable or
@@ -199,7 +223,9 @@ class inference_mode(_DecoratorContextManager):
         more information on how they compare.
 
     Args:
-        mode (bool): Flag whether to enable or disable inference mode
+        mode (bool or function): Either a boolean flag whether to enable or
+            disable inference mode or a Python function to decorate with
+            inference mode enabled
 
     Example::
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
@@ -220,15 +246,24 @@ class inference_mode(_DecoratorContextManager):
         >>> out = func(x)
         >>> out.requires_grad
         False
+        >>> @torch.inference_mode
+        ... def doubler(x):
+        ...     return x * 2
+        >>> out = doubler(x)
+        >>> out.requires_grad
+        False
 
     """
 
     def __init__(self, mode: bool = True) -> None:
         if not torch._jit_internal.is_scripting():
             super().__init__()
-        # Holds a context manager that can enable or disable inference mode
-        self._inference_mode_raii_context: Optional[torch._C._InferenceMode] = None
         self.mode = mode
+
+    def __new__(cls, mode=True):
+        if isinstance(mode, bool):
+            return super().__new__(cls)
+        return cls()(mode)
 
     def __enter__(self) -> None:
         self._inference_mode_context = torch._C._InferenceMode(self.mode)
@@ -238,7 +273,20 @@ class inference_mode(_DecoratorContextManager):
         self._inference_mode_context.__exit__(exc_type, exc_value, traceback)
 
     def clone(self) -> "inference_mode":
+        r"""
+        Create a copy of this class
+        """
         return self.__class__(self.mode)
+
+
+def _enter_inference_mode(mode):
+    mode_context = torch._C._InferenceMode(mode)
+    mode_context.__enter__()
+    return mode_context
+
+
+def _exit_inference_mode(mode):
+    mode.__exit__(None, None, None)
 
 
 class set_multithreading_enabled(_DecoratorContextManager):
@@ -271,6 +319,9 @@ class set_multithreading_enabled(_DecoratorContextManager):
         torch._C._set_multithreading_enabled(self.prev)
 
     def clone(self) -> "set_multithreading_enabled":
+        r"""
+        Create a copy of this class
+        """
         return self.__class__(self.mode)
 
 
@@ -312,7 +363,7 @@ class _force_original_view_tracking(_DecoratorContextManager):
 
 
 class _unsafe_preserve_version_counter(_DecoratorContextManager):
-    r"""DO NOT USE THIS UNLESS YOU KNOW EXACTLY WHAT YOU'RE DOING!
+    r"""DO NOT USE THIS UNLESS YOU KNOW EXACTLY WHAT YOU'RE DOING.
 
     This context manager can lead to arbitrary silent-correctness issues in any other part of your code
     (even the ones not touched directly by the context manager)!

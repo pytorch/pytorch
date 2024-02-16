@@ -1,10 +1,12 @@
+r"""This package adds support for device memory management implemented in CUDA."""
+
 import collections
 import contextlib
 import ctypes
-import os
 import pickle
 import sys
 import warnings
+from inspect import signature
 
 from typing import Any, Dict, Optional, Tuple, Union
 
@@ -14,12 +16,7 @@ from torch import _C
 from torch.types import Device
 from . import _get_device_index, _get_nvml_device_index, _lazy_init, is_initialized
 
-from ._memory_viz import (
-    memory as _memory,
-    segment_plot,
-    segments as _segments,
-    trace_plot,
-)
+from ._memory_viz import memory as _memory, segments as _segments
 from ._utils import _dummy_type
 
 __all__ = [
@@ -69,7 +66,7 @@ def _free_mutex():
 
 
 def caching_allocator_alloc(size, device: Union[Device, int] = None, stream=None):
-    r"""Performs a memory allocation using the CUDA memory allocator.
+    r"""Perform a memory allocation using the CUDA memory allocator.
 
     Memory is allocated for a given device and a stream, this
     function is intended to be used for interoperability with other
@@ -105,7 +102,7 @@ def caching_allocator_alloc(size, device: Union[Device, int] = None, stream=None
 
 
 def caching_allocator_delete(mem_ptr):
-    r"""Deletes memory allocated using the CUDA memory allocator.
+    r"""Delete memory allocated using the CUDA memory allocator.
 
     Memory allocated with :func:`~torch.cuda.caching_allocator_alloc`.
     is freed here. The associated device and stream are tracked inside
@@ -125,6 +122,7 @@ def set_per_process_memory_fraction(
     fraction, device: Union[Device, int] = None
 ) -> None:
     r"""Set memory fraction for a process.
+
     The fraction is used to limit an caching allocator to allocated memory on a CUDA device.
     The allowed value equals the total visible memory multiplied fraction.
     If trying to allocate more than the allowed value in a process, will raise an out of
@@ -150,7 +148,7 @@ def set_per_process_memory_fraction(
 
 
 def empty_cache() -> None:
-    r"""Releases all unoccupied cached memory currently held by the caching
+    r"""Release all unoccupied cached memory currently held by the caching
     allocator so that those can be used in other GPU application and visible in
     `nvidia-smi`.
 
@@ -165,8 +163,7 @@ def empty_cache() -> None:
 
 
 def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
-    r"""Returns a dictionary of CUDA memory allocator statistics for a
-    given device.
+    r"""Return a dictionary of CUDA memory allocator statistics for a given device.
 
     The return value of this function is a dictionary of statistics, each of
     which is a non-negative integer.
@@ -266,7 +263,7 @@ def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
 
 
 def memory_stats_as_nested_dict(device: Union[Device, int] = None) -> Dict[str, Any]:
-    r"""Returns the result of :func:`~torch.cuda.memory_stats` as a nested dictionary."""
+    r"""Return the result of :func:`~torch.cuda.memory_stats` as a nested dictionary."""
     if not is_initialized():
         return {}
     device = _get_device_index(device, optional=True)
@@ -274,7 +271,7 @@ def memory_stats_as_nested_dict(device: Union[Device, int] = None) -> Dict[str, 
 
 
 def reset_accumulated_memory_stats(device: Union[Device, int] = None) -> None:
-    r"""Resets the "accumulated" (historical) stats tracked by the CUDA memory allocator.
+    r"""Reset the "accumulated" (historical) stats tracked by the CUDA memory allocator.
 
     See :func:`~torch.cuda.memory_stats` for details. Accumulated stats correspond to
     the `"allocated"` and `"freed"` keys in each individual stat dict, as well as
@@ -294,7 +291,7 @@ def reset_accumulated_memory_stats(device: Union[Device, int] = None) -> None:
 
 
 def reset_peak_memory_stats(device: Union[Device, int] = None) -> None:
-    r"""Resets the "peak" stats tracked by the CUDA memory allocator.
+    r"""Reset the "peak" stats tracked by the CUDA memory allocator.
 
     See :func:`~torch.cuda.memory_stats` for details. Peak stats correspond to the
     `"peak"` key in each individual stat dict.
@@ -313,8 +310,7 @@ def reset_peak_memory_stats(device: Union[Device, int] = None) -> None:
 
 
 def reset_max_memory_allocated(device: Union[Device, int] = None) -> None:
-    r"""Resets the starting point in tracking maximum GPU memory occupied by
-    tensors for a given device.
+    r"""Reset the starting point in tracking maximum GPU memory occupied by tensors for a given device.
 
     See :func:`~torch.cuda.max_memory_allocated` for details.
 
@@ -340,8 +336,7 @@ def reset_max_memory_allocated(device: Union[Device, int] = None) -> None:
 
 
 def reset_max_memory_cached(device: Union[Device, int] = None) -> None:
-    r"""Resets the starting point in tracking maximum GPU memory managed by the
-    caching allocator for a given device.
+    r"""Reset the starting point in tracking maximum GPU memory managed by the caching allocator for a given device.
 
     See :func:`~torch.cuda.max_memory_cached` for details.
 
@@ -367,8 +362,7 @@ def reset_max_memory_cached(device: Union[Device, int] = None) -> None:
 
 
 def memory_allocated(device: Union[Device, int] = None) -> int:
-    r"""Returns the current GPU memory occupied by tensors in bytes for a given
-    device.
+    r"""Return the current GPU memory occupied by tensors in bytes for a given device.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
@@ -385,8 +379,7 @@ def memory_allocated(device: Union[Device, int] = None) -> int:
 
 
 def max_memory_allocated(device: Union[Device, int] = None) -> int:
-    r"""Returns the maximum GPU memory occupied by tensors in bytes for a given
-    device.
+    r"""Return the maximum GPU memory occupied by tensors in bytes for a given device.
 
     By default, this returns the peak allocated memory since the beginning of
     this program. :func:`~torch.cuda.reset_peak_memory_stats` can be used to
@@ -407,8 +400,7 @@ def max_memory_allocated(device: Union[Device, int] = None) -> int:
 
 
 def memory_reserved(device: Union[Device, int] = None) -> int:
-    r"""Returns the current GPU memory managed by the caching allocator in bytes
-    for a given device.
+    r"""Return the current GPU memory managed by the caching allocator in bytes for a given device.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
@@ -423,8 +415,7 @@ def memory_reserved(device: Union[Device, int] = None) -> int:
 
 
 def max_memory_reserved(device: Union[Device, int] = None) -> int:
-    r"""Returns the maximum GPU memory managed by the caching allocator in bytes
-    for a given device.
+    r"""Return the maximum GPU memory managed by the caching allocator in bytes for a given device.
 
     By default, this returns the peak cached memory since the beginning of this
     program. :func:`~torch.cuda.reset_peak_memory_stats` can be used to reset
@@ -463,7 +454,7 @@ def max_memory_cached(device: Union[Device, int] = None) -> int:
 
 
 def memory_snapshot():
-    r"""Returns a snapshot of the CUDA memory allocator state across all devices.
+    r"""Return a snapshot of the CUDA memory allocator state across all devices.
 
     Interpreting the output of this function requires familiarity with the
     memory allocator internals.
@@ -476,8 +467,7 @@ def memory_snapshot():
 
 
 def memory_summary(device: Union[Device, int] = None, abbreviated: bool = False) -> str:
-    r"""Returns a human-readable printout of the current memory allocator
-    statistics for a given device.
+    r"""Return a human-readable printout of the current memory allocator statistics for a given device.
 
     This can be useful to display periodically during training, or when
     handling out-of-memory exceptions.
@@ -614,8 +604,7 @@ def memory_summary(device: Union[Device, int] = None, abbreviated: bool = False)
 
 
 def list_gpu_processes(device: Union[Device, int] = None) -> str:
-    r"""Returns a human-readable printout of the running processes
-    and their GPU memory use for a given device.
+    r"""Return a human-readable printout of the running processes and their GPU memory use for a given device.
 
     This can be useful to display periodically during training, or when
     handling out-of-memory exceptions.
@@ -625,7 +614,6 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
             printout for the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
     """
-
     try:
         import pynvml  # type: ignore[import]
     except ModuleNotFoundError:
@@ -650,8 +638,7 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
 
 
 def mem_get_info(device: Union[Device, int] = None) -> Tuple[int, int]:
-    r"""Returns the global free and total GPU memory for a given
-    device using cudaMemGetInfo.
+    r"""Return the global free and total GPU memory for a given device using cudaMemGetInfo.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
@@ -676,18 +663,17 @@ def _record_memory_history_legacy(
     device: Union[Device, int] = None,
     record_context_cpp=False,
 ):
-    with torch.cuda.device(device):
-        _C._cuda_recordMemoryHistory(
-            enabled,
-            record_context,
-            record_context_cpp,
-            trace_alloc_max_entries,
-            trace_alloc_record_context,
-        )
+    _C._cuda_record_memory_history_legacy(
+        enabled,
+        record_context,
+        trace_alloc_max_entries,
+        trace_alloc_record_context,
+        record_context_cpp,
+    )
 
 
 def _record_memory_history(enabled="all", *args, **kwargs):
-    """Enables recording of stack traces associated with memory
+    """Enable recording of stack traces associated with memory
     allocations, so you can tell what allocated any piece of memory in
     :func:`torch.cuda.memory._snapshot()`.
 
@@ -705,26 +691,23 @@ def _record_memory_history(enabled="all", *args, **kwargs):
     works out to ~2us per trace, but can vary depending on stack depth.
 
     Args:
-        enabled (Optional[str], optional):
-            None - disable recording memory history.
-            "state" - keep information for currenly allocated memory.
-            "all" - additionally keep a history of all alloc/free calls
+        enabled (Literal[None, "state", "all"], optional):
+            `None`, disable recording memory history.
+            `"state"`, keep information for currenly allocated memory.
+            `"all"`, additionally keep a history of all alloc/free calls.
             Defaults to "all".
-        context (Optional[str], optional):
-            None - Do not record any tracebacks.
-            "state" - Record tracebacks for currently allocated memory.
-            "all" - additionally keep tracebacks for alloc/free calls
-             Defaults to "all".
-        stacks (str, optional):
-            "python" - include Python, TorchScript, and inductor frames in tracebacks
-            "all" - additionally include C++ frames
+        context (Literal[None, "state", "alloc", "all"], optional):
+            `None`, Do not record any tracebacks.
+            `"state"`, Record tracebacks for currently allocated memory.
+            `"alloc"`, additionally keep tracebacks for alloc calls.
+            `"all"`, additionally keep tracebacks for free calls.
+            Defaults to "all".
+        stacks (Literal["python", "all"], optional):
+            `"python"`, include Python, TorchScript, and inductor frames in tracebacks
+            `"all"`, additionally include C++ frames
             Defaults to "all".
         max_entries (int, optional): Keep a maximum of `max_entries`
             alloc/free events in the recorded history recorded.
-            Defaults to sys.maxsize.
-
-        device (Union[Device, int], optional): Which CUDA device to enable recording.
-            Defaults to the current device.
     """
     if isinstance(enabled, bool):
         return _record_memory_history_legacy(enabled, *args, **kwargs)
@@ -739,42 +722,101 @@ def _record_memory_history_impl(
     max_entries: int = sys.maxsize,
     device: Union[Device, int] = None,
 ):
-    if enabled not in ["state", "all", None]:
-        raise TypeError("expected state to be 'state', 'all', or None")
-    if context not in ["state", "all", None]:
-        raise TypeError("expected context to be 'state', 'all', or None")
-    if stacks not in ["python", "all"]:
-        raise TypeError("expected stacks to be 'python', or 'all'")
+    _C._cuda_record_memory_history(enabled, context, stacks, max_entries)
 
-    enabled_ = enabled is not None
-    record_context = context is not None
-    trace_alloc_max_entries = max_entries if enabled == "all" else 1
-    trace_alloc_record_context = context == "all"
-    record_context_cpp = stacks == "all"
-    with torch.cuda.device(device):
-        _C._cuda_recordMemoryHistory(
-            enabled_,
-            record_context,
-            record_context_cpp,
-            trace_alloc_max_entries,
-            trace_alloc_record_context,
-        )
+
+_record_memory_history.__signature__ = signature(_record_memory_history_impl)  # type: ignore[attr-defined]
 
 
 def _snapshot(device: Union[Device, int] = None):
-    with torch.cuda.device(device):
-        return _C._cuda_memorySnapshot()
+    """Save a snapshot of CUDA memory state at the time it was called.
+
+    The state is represented as a dictionary with the following structure.
+
+    .. code-block:: python
+
+        class Snapshot(TypedDict):
+            segments : List[Segment]
+            device_traces: List[List[TraceEntry]]
+
+        class Segment(TypedDict):
+            # Segments are memory returned from a cudaMalloc call.
+            # The size of reserved memory is the sum of all Segments.
+            # Segments are cached and reused for future allocations.
+            # If the reuse is smaller than the segment, the segment
+            # is split into more then one Block.
+            # empty_cache() frees Segments that are entirely inactive.
+            address: int
+            total_size: int #  cudaMalloc'd size of segment
+            stream: int
+            segment_type: Literal['small', 'large'] # 'large' (>1MB)
+            allocated_size: int # size of memory in use
+            active_size: int # size of memory in use or in active_awaiting_free state
+            blocks : List[Block]
+
+        class Block(TypedDict):
+            # A piece of memory returned from the allocator, or
+            # current cached but inactive.
+            size: int
+            requested_size: int # size requested during malloc, may be smaller than
+                                # size due to rounding
+            address: int
+            state: Literal['active_allocated', # used by a tensor
+                        'active_awaiting_free', # waiting for another stream to finish using
+                                                # this, then it will become free
+                        'inactive',] # free for reuse
+            frames: List[Frame] # stack trace from where the allocation occurred
+
+        class Frame(TypedDict):
+                filename: str
+                line: int
+                name: str
+
+        class TraceEntry(TypedDict):
+            # When `torch.cuda.memory._record_memory_history()` is enabled,
+            # the snapshot will contain TraceEntry objects that record each
+            # action the allocator took.
+            action: Literal[
+            'alloc'  # memory allocated
+            'free_requested', # the allocated received a call to free memory
+            'free_completed', # the memory that was requested to be freed is now
+                            # able to be used in future allocation calls
+            'segment_alloc', # the caching allocator ask cudaMalloc for more memory
+                            # and added it as a segment in its cache
+            'segment_free',  # the caching allocator called cudaFree to return memory
+                            # to cuda possibly trying free up memory to
+                            # allocate more segments or because empty_caches was called
+            'oom',          # the allocator threw an OOM exception. 'size' is
+                            # the requested number of bytes that did not succeed
+            'snapshot'      # the allocator generated a memory snapshot
+                            # useful to coorelate a previously taken
+                            # snapshot with this trace
+            ]
+            addr: int # not present for OOM
+            frames: List[Frame]
+            size: int
+            stream: int
+            device_free: int # only present for OOM, the amount of
+                            # memory cuda still reports to be free
+
+    Returns:
+        The Snapshot dictionary object
+    """
+    return _C._cuda_memorySnapshot()
 
 
-def _dump_snapshot(filename="snapshot_dump", device: Union[Device, int] = None):
-    os.makedirs(filename, exist_ok=True)
-    s = _snapshot(device)
-    with open(f"{filename}/snapshot.pickle", "wb") as f:
+def _dump_snapshot(filename="dump_snapshot.pickle"):
+    """
+    Save a pickled version of the `torch.memory._snapshot()` dictionary to a file.
+
+    This file can be opened by the interactive snapshot viewer at pytorch.org/memory_viz
+
+    Args:
+        filename (str, optional): Name of the file to create. Defaults to "dump_snapshot.pickle".
+    """
+    s = _snapshot()
+    with open(filename, "wb") as f:
         pickle.dump(s, f)
-    with open(f"{filename}/trace_plot.html", "w") as f:
-        f.write(trace_plot(s))
-    with open(f"{filename}/segment_plot.html", "w") as f:
-        f.write(segment_plot(s))
 
 
 def _save_segment_usage(filename="output.svg", snapshot=None):
@@ -796,7 +838,7 @@ def _set_allocator_settings(env: str):
 
 
 def get_allocator_backend() -> str:
-    r"""Returns a string describing the active allocator backend as set by
+    r"""Return a string describing the active allocator backend as set by
     ``PYTORCH_CUDA_ALLOC_CONF``. Currently available backends are
     ``native`` (PyTorch's native caching allocator) and `cudaMallocAsync``
     (CUDA's built-in asynchronous allocator).
@@ -818,30 +860,29 @@ class _CUDAAllocator:
 
 
 class CUDAPluggableAllocator(_CUDAAllocator):
-    r"""CUDA memory allocator loaded from a so file.
-
-    Memory allocators are compiled in .so files and loaded dynamically using ctypes.
-    To change the active allocator use the :func:`torch.memory.cuda.change_current_allocator`
-    function.
-
-    Args:
-        path_to_so_file(str): Path in the filesystem to the `.so` file containing
-            the allocator functions
-        alloc_fn_name(str): Name of the function to perform the memory allocation
-            in the so file. The signature must be:
-            void* alloc_fn_name(ssize_t size, int device, cudaStream_t stream);
-        free_fn_name(str): Name of the function to perform the memory release
-            in the so file. The signature must be:
-            void free_fn_name(void* ptr, size_t size, cudaStream_t stream);
-
-    .. warning::
-        This is currently supported only in unix OSs
-
-    .. note::
-        See :ref:`cuda-memory-management` for details on creating and using a custom allocator
-    """
+    r"""CUDA memory allocator loaded from a so file."""
 
     def __init__(self, path_to_so_file: str, alloc_fn_name: str, free_fn_name: str):
+        r"""Memory allocators are compiled in .so files and loaded dynamically using ctypes.
+
+        To change the active allocator use the :func:`torch.memory.cuda.change_current_allocator` function.
+
+        Args:
+            path_to_so_file(str): Path in the filesystem to the `.so` file containing
+                the allocator functions
+            alloc_fn_name(str): Name of the function to perform the memory allocation
+                in the so file. The signature must be:
+                void* alloc_fn_name(ssize_t size, int device, cudaStream_t stream);
+            free_fn_name(str): Name of the function to perform the memory release
+                in the so file. The signature must be:
+                void free_fn_name(void* ptr, size_t size, cudaStream_t stream);
+
+        .. warning::
+            This is currently supported only in unix OSs
+
+        .. note::
+            See :ref:`cuda-memory-management` for details on creating and using a custom allocator
+        """
         allocator = ctypes.CDLL(path_to_so_file)
         alloc_fn = ctypes.cast(getattr(allocator, alloc_fn_name), ctypes.c_void_p).value
         free_fn = ctypes.cast(getattr(allocator, free_fn_name), ctypes.c_void_p).value
@@ -851,7 +892,8 @@ class CUDAPluggableAllocator(_CUDAAllocator):
 
 
 def change_current_allocator(allocator: _CUDAAllocator) -> None:
-    r"""Changes the currently used memory allocator to be the one provided.
+    r"""Change the currently used memory allocator to be the one provided.
+
     If the current allocator has already been used/initialized, this function will error.
 
 
@@ -864,7 +906,7 @@ def change_current_allocator(allocator: _CUDAAllocator) -> None:
 
 
 def _get_current_allocator() -> _CUDAAllocator:
-    r"""Returns the allocator being currently used.
+    r"""Return the allocator being currently used.
 
     .. note::
         See :ref:`cuda-memory-management` for details on creating and using a custom allocator

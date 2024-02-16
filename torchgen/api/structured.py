@@ -38,7 +38,7 @@ from torchgen.utils import assert_never
 # API have been fixed.
 
 
-# Translation of types occuring in JIT arguments to a C++ argument type.
+# Translation of types occurring in JIT arguments to a C++ argument type.
 # NB: For now, mutable doesn't do anything; but it could if we make
 # some more nominal types
 def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
@@ -129,8 +129,7 @@ def impl_arguments(g: NativeFunctionsGroup) -> List[Binding]:
             if isinstance(a, Argument) and a.name in g.out.precomputed.replace:
                 # If a is in precompute.replace, append the parameters
                 # that should replace it onto non_out_args_replaced.
-                for replacement in g.out.precomputed.replace[a.name]:
-                    non_out_args_replaced.append(replacement)
+                non_out_args_replaced.extend(g.out.precomputed.replace[a.name])
             else:
                 # If not, push a as it is.
                 non_out_args_replaced.append(a)

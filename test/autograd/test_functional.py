@@ -43,7 +43,7 @@ FIXME_base_and_xfail_logging_tensor = parametrize("ctors", [subtest(base_ctors, 
                                                             subtest(logging_tensor_ctors, name="logging_tensor",
                                                                     decorators=[unittest.expectedFailure])])
 
-# NB: This is equivalent to having both @parmetrize("vectorized", [True, False]) and
+# NB: This is equivalent to having both @parametrize("vectorized", [True, False]) and
 #     FIXME_base_and_xfail_logging_tensor, except the non-vectorized logging_tensor case is
 #     actually expected to succeed
 FIXME_xfail_vectorized_logging_tensor = (

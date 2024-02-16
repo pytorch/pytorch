@@ -3,6 +3,7 @@
 import torch
 
 from torch.testing._internal.common_utils import TestCase
+from torch import float32, float16
 import torch._lazy
 import torch._lazy.ts_backend
 
@@ -32,3 +33,7 @@ class TestMetaKernel(TestCase):
         fc_bias = torch.nn.Linear(2, 2, bias=True, dtype=float16).to("lazy")
         out_bias = fc_bias(input)
         self.assertEqual(out_bias.dtype, torch.float16)
+
+    def test_add_invalid_device(self):
+        with self.assertRaisesRegex(RuntimeError, '.*not a lazy tensor.*'):
+            _ = torch.tensor([1], device="cpu") + torch.tensor([1], device="lazy")

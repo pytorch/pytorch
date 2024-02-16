@@ -40,7 +40,7 @@ static DispatchKeySet keysForEnteringDynamicLayer(TransformType key) {
     // NB: Does not include DispatchKey::FuncTorchVmapMode. We may modulate the key when
     // constructing the DynamicLayer, but we don't control it when entering/exiting
     // the DynamicLayer.
-    return DispatchKeySet({DispatchKey::FuncTorchBatched});
+    return DispatchKeySet({DispatchKey::FuncTorchBatched, DispatchKey::BatchedNestedTensor});
   } else if (key == TransformType::Grad || key == TransformType::Jvp) {
     return autograd_dispatch_keyset.add(DispatchKey::ADInplaceOrView);
   } else if (key == TransformType::Functionalize) {
@@ -106,16 +106,16 @@ void sanityCheckStack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
 #define INTERPRETER_DISPATCH(type, method) \
   switch (key()) { \
     case TransformType::Vmap: \
-      TORCH_INTERNAL_ASSERT(c10::holds_alternative<VmapInterpreterMeta>(this->meta()));\
+      TORCH_INTERNAL_ASSERT(std::holds_alternative<VmapInterpreterMeta>(this->meta()));\
       return VmapInterpreterPtr(this). method; \
     case TransformType::Grad: \
-      TORCH_INTERNAL_ASSERT(c10::holds_alternative<GradInterpreterMeta>(this->meta()));\
+      TORCH_INTERNAL_ASSERT(std::holds_alternative<GradInterpreterMeta>(this->meta()));\
       return GradInterpreterPtr(this). method; \
     case TransformType::Jvp: \
-      TORCH_INTERNAL_ASSERT(c10::holds_alternative<JvpInterpreterMeta>(this->meta()));\
+      TORCH_INTERNAL_ASSERT(std::holds_alternative<JvpInterpreterMeta>(this->meta()));\
       return JvpInterpreterPtr(this). method; \
     case TransformType::Functionalize: \
-      TORCH_INTERNAL_ASSERT(c10::holds_alternative<FunctionalizeInterpreterMeta>(this->meta()));\
+      TORCH_INTERNAL_ASSERT(std::holds_alternative<FunctionalizeInterpreterMeta>(this->meta()));\
       return FunctionalizeInterpreterPtr(this). method; \
     default: \
       TORCH_INTERNAL_ASSERT(false, "Unrecognized transform"); \

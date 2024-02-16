@@ -25,8 +25,7 @@
 #include <tuple>
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 static void layer_norm_with_mean_rstd_out(
     at::Tensor& out,
@@ -259,5 +258,4 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   rstd = rstd.view(stat_shape);
   return std::make_tuple(out, mean, rstd);
 }
-} // namespace native
-} // namespace at
+} // namespace at::native

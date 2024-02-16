@@ -6,10 +6,7 @@ import torch
 
 @contextlib.contextmanager
 def optimized_execution(should_optimize):
-    """
-    A context manager that controls whether the JIT's executor will run
-    optimizations before executing a function.
-    """
+    """Context manager that controls whether the JIT's executor will run optimizations before executing a function."""
     stored_flag = torch._C._get_graph_executor_optimize()
     torch._C._set_graph_executor_optimize(should_optimize)
     try:
@@ -20,9 +17,7 @@ def optimized_execution(should_optimize):
 
 @contextlib.contextmanager
 def fuser(name):
-    """
-    A context manager that facilitates switching between
-    backend fusers.
+    """Context manager that facilitates switching between backend fusers.
 
     Valid names:
     * ``fuser0`` - enables only legacy fuser
@@ -75,8 +70,8 @@ def fuser(name):
         yield
     finally:
         if name in ["fuser1", "fuser3"]:  # NNC or oneDNN Graph
-            torch._C._jit_set_profiling_executor(old_profiling_executor)
-            torch._C._get_graph_executor_optimize(old_profiling_mode)
+            torch._C._jit_set_profiling_executor(old_profiling_executor)  # type: ignore[possibly-undefined]
+            torch._C._get_graph_executor_optimize(old_profiling_mode)  # type: ignore[possibly-undefined]
         # recover the previous values
         torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuse)
         torch._C._jit_override_can_fuse_on_gpu(old_gpu_fuse)
@@ -133,8 +128,7 @@ def _script_method_graph_for(self, parent, *args, **kwargs):
 
 
 def set_fusion_strategy(strategy: List[Tuple[str, int]]):
-    """
-    Sets the type and number of specializations that can occur during fusion.
+    """Set the type and number of specializations that can occur during fusion.
 
     Usage: provide a list of pairs (type, depth) where type is one of "STATIC" or "DYNAMIC"
     and depth is an integer.

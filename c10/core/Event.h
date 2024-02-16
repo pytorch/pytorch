@@ -1,5 +1,9 @@
 #pragma once
 
+#include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
+#include <c10/core/Stream.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/core/impl/InlineEvent.h>
 #include <c10/core/impl/VirtualGuardImpl.h>
 
@@ -50,11 +54,8 @@ struct Event final {
   Event& operator=(const Event&) = delete;
 
   // Move constructor and move assignment operator
-  Event(Event&& other) noexcept : impl_{std::move(other.impl_)} {}
-  Event& operator=(Event&& other) noexcept {
-    impl_.swap(std::move(other.impl_));
-    return *this;
-  }
+  Event(Event&&) noexcept = default;
+  Event& operator=(Event&&) noexcept = default;
 
   // Destructor
   ~Event() = default;

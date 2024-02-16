@@ -2,7 +2,9 @@
 
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Export.h>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <ostream>
 #include <string>
 
@@ -17,7 +19,7 @@ namespace c10 {
 // a DispatchKeySet. The bits in the DispatchKeySet are split between the bottom
 // ~12 "BackendComponent" bits, while the remaining upper bits are assigned to
 // functionalities. When we encounter a functionality bit that is known to be
-// customizeable per-backend, then we also look at the lower BackendComponent
+// customizable per-backend, then we also look at the lower BackendComponent
 // bits and take the highest bit to determine which backend's implementation to
 // use.
 
@@ -369,6 +371,10 @@ enum class DispatchKey : uint16_t {
   // go here.
 
   FuncTorchBatched, // See Note [Out-of-tree vmap+grad prototype]
+
+  // Dispatch key for BatchedTensorImpl wrapping a nested tensor.
+  BatchedNestedTensor,
+
   FuncTorchVmapMode, // See Note [Out-of-tree vmap+grad prototype]
 
   // This is the dispatch key for BatchedTensorImpl, which is used to implement
@@ -710,6 +716,7 @@ constexpr DispatchKey toRuntimePerBackendFunctionalityKey(
 namespace torch {
 // Expose the constant, but not the TYPE (DispatchKey is an implementation
 // detail!)
+// NOLINTNEXTLINE(misc-unused-using-decls)
 using c10::kAutograd;
 } // namespace torch
 

@@ -194,8 +194,8 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   std::vector<WorkerInfo> getWorkerInfos() const override;
   void updateGroupMembership(
       const WorkerInfo& workerInfo,
-      const std::vector<c10::Device> devices,
-      const std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
+      const std::vector<c10::Device>& devices,
+      const std::unordered_map<std::string, DeviceMap>& reverseDeviceMaps,
       bool isJoin);
 
   std::unordered_map<std::string, std::string> getMetrics() override;

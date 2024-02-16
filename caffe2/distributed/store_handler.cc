@@ -6,9 +6,6 @@
 
 namespace caffe2 {
 
-constexpr std::chrono::milliseconds StoreHandler::kDefaultTimeout;
-constexpr std::chrono::milliseconds StoreHandler::kNoTimeout;
-
 // NOLINTNEXTLINE(modernize-use-equals-default)
 StoreHandler::~StoreHandler() {
   // NOP; definition is here to make sure library contains

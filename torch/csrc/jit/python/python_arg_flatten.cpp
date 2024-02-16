@@ -55,12 +55,13 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
       flatten_rec(item.ptr(), args);
     structure.push_back(D::ListClose);
   } else if (PyDict_Check(obj)) {
-    auto dict_items = PyDict_Items(obj);
+    auto* dict_items = PyDict_Items(obj);
     structure.push_back(D::DictOpen);
     for (auto item : py::reinterpret_borrow<py::list>(dict_items)) {
       flatten_rec(item.ptr(), args);
     }
     structure.push_back(D::DictClose);
+    Py_DECREF(dict_items);
   } else if (THPUtils_checkString(obj)) {
     string str = THPUtils_unpackString(obj);
     args.desc.strings.emplace_back(str);

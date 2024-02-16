@@ -5,18 +5,21 @@
 #include <c10/macros/Export.h>
 #include <c10/util/Optional.h>
 #include <c10/util/SmallVector.h>
-#include <c10/util/variant.h>
 
 #include <array>
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <variant>
 
 namespace c10 {
 class TORCH_API OperatorHandle;
 }
 
 namespace at {
+
+// Function name to record NCCL metadata
+extern TORCH_API const std::string kParamCommsCallName;
 
 // Kind of record function scope;
 enum class C10_API_ENUM RecordScope : uint8_t {
@@ -94,7 +97,7 @@ struct ObserverContext {
   virtual ~ObserverContext() = default;
 
  protected:
-  ObserverContext() {}
+  ObserverContext() = default;
 };
 
 typedef c10::SmallVector<uint64_t, kSoftLimitCallbacks> CallbackHandles;
@@ -392,8 +395,14 @@ struct TORCH_API RecordFunction {
   // profiling.
   void _setAsync();
 
-  // Returns whether this RecordFunction corresponds to an async event orn ot.
+  // Returns whether this RecordFunction corresponds to an async event or not.
   bool isAsync() const;
+
+  // Returns whether this RecordFunction corresponds to NCCL metadata collection
+  // or not.
+  bool isNcclMeta() const {
+    return is_nccl_meta_;
+  }
 
   // Internal-only, used to denote out variant used for Static Runtime execution
   void _setStaticRuntimeOutVariant();
@@ -456,13 +465,13 @@ struct TORCH_API RecordFunction {
   // Stores various ObserverContext objects with event metadata for callbacks.
   ObserverContextList ctx_;
 
-  c10::variant<std::string, schema_ref_t> fn_;
+  std::variant<std::string, schema_ref_t> fn_;
 
   int64_t sequence_nr_ = -1;
   c10::ArrayRef<const IValue> inputs_;
   std::vector<c10::IValue> outputs_;
 
-  // For backward functions - thread id of the the forward function
+  // For backward functions - thread id of the forward function
   uint64_t fwd_thread_id_ = 0;
 
   // Unique id for this RecordFunction, used in callbacks to track start
@@ -483,6 +492,9 @@ struct TORCH_API RecordFunction {
   // Whether this RecordFunction is used for an out variant run with
   // Static Runtime
   bool is_static_runtime_out_variant_{false};
+
+  // Whether this RecordFunction is used for NCCL metadata collection
+  bool is_nccl_meta_{false};
 };
 
 TORCH_API StepCallbacks getStepCallbacks(RecordScope scope);

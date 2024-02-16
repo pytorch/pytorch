@@ -1,14 +1,15 @@
 #pragma once
 
-#include <c10/util/C++17.h>
 #include <c10/util/ConstexprCrc.h>
 #include <c10/util/IdWrapper.h>
 #include <c10/util/string_view.h>
-#include <cinttypes>
-#include <functional>
+#include <cstdint>
+#include <ostream>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
 
-namespace c10 {
-namespace util {
+namespace c10::util {
 
 // TODO Make it work for more compilers
 
@@ -167,7 +168,7 @@ inline constexpr type_index get_type_index() {
 #if !defined(TORCH_PEDANTIC)
 // Use precomputed hashsum for std::string
 // Needed to workaround ambiguity in class name resolution
-// into __PRETTY_FUNCION__ when abovementioned class is defined in inlined
+// into __PRETTY_FUNCTION__ when abovementioned class is defined in inlined
 // namespace. In multi-ABI C++ library, `std::string` is an alias to
 // `std::__cxx11::basic_string<char>` which depending on compiler flags can be
 // resolved to `basic_string<char>` either in `std` namespace or in
@@ -190,7 +191,6 @@ get_fully_qualified_type_name() noexcept {
       string_view name = detail::fully_qualified_type_name_impl<T>();
   return name;
 }
-} // namespace util
-} // namespace c10
+} // namespace c10::util
 
 C10_DEFINE_HASH_FOR_IDWRAPPER(c10::util::type_index);

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check whether a PR has required labels."""
 
+import sys
 from typing import Any
 
 from github_utils import gh_delete_comment, gh_post_pr_comment
@@ -46,7 +47,7 @@ def main() -> None:
     except Exception as e:
         pass
 
-    exit(0)
+    sys.exit(0)
 
 
 if __name__ == "__main__":

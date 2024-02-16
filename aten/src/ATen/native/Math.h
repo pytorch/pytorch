@@ -6,7 +6,6 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/MathConstants.h>
-#include <c10/util/math_compat.h>
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
@@ -484,6 +483,14 @@ static inline float calc_digamma(float x) {
     y = z * polevl(z, A, 6);
   }
   return result + logf(x) - (0.5f / x) - y;
+}
+
+static inline c10::BFloat16 calc_digamma(c10::BFloat16 a) {
+  return calc_digamma(static_cast<float>(a));
+}
+
+static inline c10::Half calc_digamma(c10::Half a) {
+  return calc_digamma(static_cast<float>(a));
 }
 
 template <typename scalar_t, bool is_cuda=false>

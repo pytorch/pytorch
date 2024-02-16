@@ -8,6 +8,8 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <ATen/Parallel.h>
+#include <c10/core/GradMode.h>
+#include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/irange.h>
 
 namespace torch {
@@ -41,7 +43,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
     for (const auto thread_id : c10::irange(config.num_calling_threads)) {
       // Just in case we generate num_iters inputs for each of the threads
       // This was if one thread does all the work we will be fine
-      for (const auto i :
+      for (const auto i [[maybe_unused]] :
            c10::irange(config.num_iters + config.num_warmup_iters)) {
         thread_inputs[thread_id].push_back(cloneInput(inputs_[dist(engine)]));
       }
@@ -60,10 +62,18 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
   std::vector<std::thread> callers;
 
   callers.reserve(config.num_calling_threads);
+
+  bool tls_grad_enabled = c10::GradMode::is_enabled();
+  c10::impl::LocalDispatchKeySet tls_key_set =
+      c10::impl::tls_local_dispatch_key_set();
+
   for (const auto thread_id : c10::irange(config.num_calling_threads)) {
     callers.emplace_back([&, thread_id]() {
       // We use conditional variable as a barrier to make sure each thread
       // performs required warmeup iterations before we start measuring
+      c10::GradMode::set_enabled(tls_grad_enabled);
+      c10::impl::_force_tls_local_dispatch_key_set(tls_key_set);
+
       for (const auto j : c10::irange(config.num_warmup_iters)) {
         (void)j;
         runOnce(std::move(thread_inputs[thread_id][input_iters[thread_id]]));

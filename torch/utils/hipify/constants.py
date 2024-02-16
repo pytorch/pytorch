@@ -1,4 +1,5 @@
-""" Constants for annotations in the mapping.
+"""Constants for annotations in the mapping.
+
 The constants defined here are used to annotate the mapping tuples in cuda_to_hip_mappings.py.
 They are based on
 https://github.com/ROCm-Developer-Tools/HIP/blob/master/hipify-clang/src/Statistics.h

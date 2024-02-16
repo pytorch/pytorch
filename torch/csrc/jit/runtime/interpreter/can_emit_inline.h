@@ -4,9 +4,7 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
-namespace interpreter {
+namespace torch::jit::interpreter {
 /*
 This is an optimization that reduces the number of store/load/move nodes needed
 by recognizing that parts of the graph are simple trees like a*x + b*y. When
@@ -105,6 +103,4 @@ struct CanEmitInline {
   std::unordered_map<Node*, bool> can_emit_inline_;
 };
 
-} // namespace interpreter
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::interpreter

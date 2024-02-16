@@ -1,7 +1,5 @@
 #pragma once
 
-#include <iostream>
-
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 

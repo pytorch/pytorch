@@ -82,10 +82,8 @@ class TestQuantizationDocs(QuantizationTestCase):
 
             # want to make sure we are actually getting some code,
             assert last_line_num - line_num_start > 3 or short_snippet, (
-                "The code in {} identified by {} seems suspiciously short:"
-                "\n\n###code-start####\n{}###code-end####".format(
-                    path_to_file, unique_identifier, code
-                )
+                f"The code in {path_to_file} identified by {unique_identifier} seems suspiciously short:"
+                f"\n\n###code-start####\n{code}###code-end####"
             )
             return code
 

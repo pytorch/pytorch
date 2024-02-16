@@ -41,6 +41,11 @@ android {
         buildConfigField("long[]", "INPUT_TENSOR_SHAPE", "new long[]{1, 3, 224, 224}")
         buildConfigField("boolean", "NATIVE_BUILD", 'false')
         buildConfigField("boolean", "USE_VULKAN_DEVICE", 'false')
+        buildConfigField(
+                "int",
+                "BUILD_LITE_INTERPRETER",
+                System.env.BUILD_LITE_INTERPRETER != null ? System.env.BUILD_LITE_INTERPRETER : "1"
+        )
         addManifestPlaceholders([APP_NAME: "@string/app_name", MAIN_ACTIVITY: "org.pytorch.testapp.MainActivity"])
     }
     buildTypes {
@@ -63,14 +68,15 @@ android {
         mnet {
             dimension "model"
             applicationIdSuffix ".mnet"
-            buildConfigField("String", "MODULE_ASSET_NAME", "\"mnet.pt\"")
+            buildConfigField("String", "MODULE_ASSET_NAME", "\"mobilenet_v2.ptl\"")
             addManifestPlaceholders([APP_NAME: "MNET"])
             buildConfigField("String", "LOGCAT_TAG", "\"pytorch-mnet\"")
         }
+        // NB: This is not working atm https://github.com/pytorch/pytorch/issues/102966
         mnetVulkan {
             dimension "model"
             applicationIdSuffix ".mnet_vulkan"
-            buildConfigField("String", "MODULE_ASSET_NAME", "\"mnet_vulkan.pt\"")
+            buildConfigField("String", "MODULE_ASSET_NAME", "\"mobilenet_v2_vulkan.ptl\"")
             buildConfigField("boolean", "USE_VULKAN_DEVICE", 'true')
             addManifestPlaceholders([APP_NAME: "MNET_VULKAN"])
             buildConfigField("String", "LOGCAT_TAG", "\"pytorch-mnet-vulkan\"")
@@ -78,7 +84,7 @@ android {
         resnet18 {
             dimension "model"
             applicationIdSuffix ".resnet18"
-            buildConfigField("String", "MODULE_ASSET_NAME", "\"resnet18.pt\"")
+            buildConfigField("String", "MODULE_ASSET_NAME", "\"resnet18.ptl\"")
             addManifestPlaceholders([APP_NAME: "RN18"])
             buildConfigField("String", "LOGCAT_TAG", "\"pytorch-resnet18\"")
         }
@@ -149,8 +155,8 @@ dependencies {
     //nativeBuildImplementation(name: 'pytorch_android_torchvision-release', ext: 'aar')
     //extractForNativeBuild(name: 'pytorch_android-release', ext: 'aar')
 
-    nightlyImplementation 'org.pytorch:pytorch_android:1.12.0-SNAPSHOT'
-    nightlyImplementation 'org.pytorch:pytorch_android_torchvision:1.12.0-SNAPSHOT'
+    nightlyImplementation 'org.pytorch:pytorch_android:2.2.0-SNAPSHOT'
+    nightlyImplementation 'org.pytorch:pytorch_android_torchvision:2.2.0-SNAPSHOT'
 
     aarImplementation(name:'pytorch_android', ext:'aar')
     aarImplementation(name:'pytorch_android_torchvision', ext:'aar')

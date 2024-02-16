@@ -50,6 +50,8 @@ MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
 FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "_assert_async",  # no return
     "_assert_async.msg",  # no return
+    "_cslt_sparse_mm_search",  # returns an int
+    "_assert_scalar",  # no return
     "_dimI",  # returns an int
     "_dimV",  # returns an int
     "_has_same_storage_numel",  # returns a boolean
@@ -74,6 +76,7 @@ FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "record_stream",  # no return
     "sparse_dim",  # returns an int
     "sym_constrain_range",  # no return
+    "sym_constrain_range_for_size",  # no return
     "_nested_tensor_storage_offsets",  # returns a vector of ints
     "_chunk_grad_outputs_efficient_attention",  # returns a bool
     "_fused_sdp_choice",  # returns an int
@@ -322,7 +325,9 @@ def generate_function(
             )
         }
     }
-    tags = {"generated"} | set(f.tags & {"nondeterministic_seeded", "view_copy"})
+    tags = {"generated"} | set(
+        f.tags & {"nondeterministic_seeded", "view_copy", "pt2_compliant_tag"}
+    )
 
     return (
         NativeFunction(
@@ -370,8 +375,8 @@ def add_generated_native_functions(
     rs: List[NativeFunction],
     indices: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]],
 ) -> None:
-    # The main code for gnerating new NativeFunctions
-    # First we group of NaitveFunctions by schema kind,
+    # The main code for generating new NativeFunctions
+    # First we group of NativeFunctions by schema kind,
     # then we detect which ones are missing and generate them.
     pre_grouped_native_functions = pre_group_native_functions(rs)
     for d in pre_grouped_native_functions.values():
@@ -390,7 +395,11 @@ def add_generated_native_functions(
             # Don't bother generating functions trio's for native functions that bypass the dispatcher.
             are_manual = all(f.manual_cpp_binding for f in d.values())
             # Don't bother generating functional + out= variants for view operators
-            has_view_ops = any(f.is_view_op for f in d.values())
+            # set_ is technically an inplace_view, but for now it is treated
+            # as a normal inplace op in the codegen
+            has_view_ops = any(
+                f.is_view_op and str(f.func.name.name) != "set_" for f in d.values()
+            )
             # Don't generate the other variants for CompositeImplicitAutograd operators.
             # We could probably do this, but the main benefit of generating the function triplets
             # is for transforms that need them, and transforms don't need to act directly
@@ -495,7 +504,7 @@ def return_str(rets: Tuple[Return, ...], names: List[str]) -> str:
         return f"return {dispatcher.returns_type(rets).cpp_type()}({', '.join(names)});"
 
 
-# Given a function, and the name of a variable correponding to the output of that function,
+# Given a function, and the name of a variable corresponding to the output of that function,
 # gather up all of the individual returns that are not aliased
 def gather_nonaliased_inner_rets(func: FunctionSchema, out_var: str) -> List[str]:
     aliased_rets = func.aliased_return_names()

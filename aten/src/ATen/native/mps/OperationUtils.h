@@ -10,6 +10,7 @@
 #include <c10/util/Optional.h>
 #include <c10/core/ScalarType.h>
 #include <torch/library.h>
+#include <exception>
 #include <unordered_map>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -22,15 +23,17 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
-#ifdef __OBJC__
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
-#endif
 
+// Fwd declarations
+namespace at {
+  struct TensorIteratorBase;
+}
 using namespace at::mps;
 
-namespace at {
-namespace native {
-namespace mps {
+namespace at::native::mps {
+
+void dispatch_sync_with_rethrow(dispatch_queue_t queue, void (^block)());
 
 struct MPSScalar {
   id<MTLBuffer> getMTLBuffer() const { return __builtin_bit_cast(id<MTLBuffer>, buffer.get()); }
@@ -43,11 +46,13 @@ struct MPSScalar {
     at::Half h;
     int64_t i;
     bool b;
+    c10::complex<float> cf;
+    c10::complex<at::Half> ch;
+    at::BFloat16 bf16;
   } value {};
 };
 
-void runMPSGraph(
-    MPSStream* mpsStream,
+void runMPSGraph(MPSStream* mpsStream,
     MPSGraph* mpsGraph,
     NSDictionary* feeds,
     NSDictionary* results);
@@ -226,8 +231,7 @@ struct MPSGraphCache
 
     MPSCacheKey hash = std::hash<std::string>{}(key);
 
-    dispatch_sync(serialQueue_, ^() {
-
+    dispatch_sync_with_rethrow(serialQueue_, ^() {
       // verify the cached entry doesn't already exist
       if (cache_.count(hash) != 0) {
         auto& entry = cache_.at(hash);
@@ -325,6 +329,66 @@ inline bool is_dense_in_storage(const at::Tensor& t) {
   return compute_storage_numel_distance(t) == static_cast<size_t>(t.numel());
 }
 
-} // namespace mps
-} // namespace native
-} // namespace at
+static inline void mtl_setBuffer(id<MTLComputeCommandEncoder> encoder, const Tensor& t, unsigned idx) {
+  [encoder setBuffer:getMTLBufferStorage(t)
+              offset:t.storage_offset() * t.element_size()
+             atIndex:idx];
+}
+
+static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,
+                                     id<MTLComputePipelineState> cplState,
+                                     uint32_t length) {
+  const uint32_t maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
+  auto size = MTLSizeMake(length, 1, 1);
+  auto threadGroupSize = MTLSizeMake(std::min(maxThreadsPerGroup, length), 1, 1);
+  [encoder dispatchThreads:size threadsPerThreadgroup:threadGroupSize];
+}
+
+id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEncoder, const TensorIteratorBase& iter, bool use_64bit_index = false);
+
+inline NSDictionary* dictionaryFromPlaceholders(Placeholder& p1) {
+        return @{ p1.getMPSGraphTensor(): p1.getMPSGraphTensorData() };
+}
+
+inline NSDictionary* dictionaryFromPlaceholders(Placeholder& p1, Placeholder& p2) {
+        return @{
+                p1.getMPSGraphTensor(): p1.getMPSGraphTensorData(),
+                p2.getMPSGraphTensor(): p2.getMPSGraphTensorData(),
+         };
+}
+
+inline NSDictionary* dictionaryFromPlaceholders(Placeholder& p1, Placeholder& p2, Placeholder& p3) {
+        return @{
+                p1.getMPSGraphTensor(): p1.getMPSGraphTensorData(),
+                p2.getMPSGraphTensor(): p2.getMPSGraphTensorData(),
+                p3.getMPSGraphTensor(): p3.getMPSGraphTensorData(),
+         };
+}
+
+inline NSDictionary* dictionaryFromPlaceholders(Placeholder& p1, Placeholder& p2, Placeholder& p3, Placeholder& p4) {
+        return @{
+                p1.getMPSGraphTensor(): p1.getMPSGraphTensorData(),
+                p2.getMPSGraphTensor(): p2.getMPSGraphTensorData(),
+                p3.getMPSGraphTensor(): p3.getMPSGraphTensorData(),
+                p4.getMPSGraphTensor(): p4.getMPSGraphTensorData(),
+         };
+}
+
+inline void runMPSGraph(MPSStream* stream, MPSGraph* graph, NSDictionary* feeds, Placeholder& result) {
+        runMPSGraph(stream, graph, feeds, dictionaryFromPlaceholders(result));
+}
+
+inline bool supportsComplex() {
+  return is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS);
+}
+
+// MPS yet to support double types, but starting from MacOS 14, supports bfloat16
+inline bool supportedFloatingType(ScalarType dtype) {
+  return dtype == kFloat || dtype == kHalf || dtype == kBFloat16;
+}
+
+inline bool supportedFloatingType(const Tensor& t) {
+  return supportedFloatingType(t.scalar_type());
+}
+
+} // namespace at::native::mps

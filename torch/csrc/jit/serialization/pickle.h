@@ -71,7 +71,8 @@ TORCH_API IValue unpickle(
     TypeResolver type_resolver,
     c10::ArrayRef<at::Tensor> tensor_table,
     c10::TypePtr (*type_parser)(const std::string&) =
-        Unpickler::defaultTypeParser);
+        Unpickler::defaultTypeParser,
+    ObjLoader obj_loader = nullptr);
 
 /// Decode a chunk of memory containing pickled data into its `torch::IValue`s.
 ///
@@ -87,5 +88,36 @@ TORCH_API IValue unpickle(
     c10::TypePtr (*type_parser)(const std::string&) =
         Unpickler::defaultTypeParser);
 
+/// Decode a chunk of memory containing pickled data into its `torch::IValue`s.
+///
+/// If any `torch::IValue`s in the pickled data are `Object`s, then a
+/// `class_resolver` function must be provided.
+///
+/// See `torch::pickle` for details.
+TORCH_API IValue unpickle(
+    const char* data,
+    size_t size,
+    ObjLoader obj_loader,
+    TypeResolver type_resolver = nullptr,
+    c10::ArrayRef<at::Tensor> tensor_table = {},
+    c10::TypePtr (*type_parser)(const std::string&) =
+        Unpickler::defaultTypeParser);
+
+#ifndef C10_MOBILE
+class VectorReader : public caffe2::serialize::ReadAdapterInterface {
+ public:
+  VectorReader(std::vector<char> data) : data_(std::move(data)) {}
+
+  size_t size() const override {
+    return data_.size();
+  }
+
+  size_t read(uint64_t pos, void* buf, size_t n, const char* what)
+      const override;
+
+ private:
+  std::vector<char> data_;
+};
+#endif
 } // namespace jit
 } // namespace torch

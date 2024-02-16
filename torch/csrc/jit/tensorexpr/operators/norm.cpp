@@ -14,11 +14,11 @@ Tensor computeBatchNorm(
   bool hasWeight = true;
   bool hasBias = true;
 
-  if (c10::get_if<ArgNone>(&inputs[1])) {
+  if (std::holds_alternative<ArgNone>(inputs[1])) {
     hasWeight = false;
   }
 
-  if (c10::get_if<ArgNone>(&inputs[2])) {
+  if (std::holds_alternative<ArgNone>(inputs[2])) {
     hasBias = false;
   }
 

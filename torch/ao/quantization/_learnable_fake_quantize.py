@@ -5,7 +5,9 @@ from typing import List
 __all__: List[str] = []
 
 class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
-    r""" This is an extension of the FakeQuantize module in fake_quantize.py, which
+    r"""Generalized extension of the FakeQuantize module in fake_quantize.py.
+
+    This is an extension of the FakeQuantize module in fake_quantize.py, which
     supports more generalized lower-bit quantization and support learning of the scale
     and zero point parameters through backpropagation. For literature references,
     please see the class _LearnableFakeQuantizePerTensorOp.
@@ -65,7 +67,9 @@ class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
 
     @torch.jit.export
     def enable_param_learning(self):
-        r"""Enables learning of quantization parameters and
+        r"""Enable parameter learning over static observer estimates.
+
+        Enables learning of quantization parameters and
         disables static observer estimates. Forward path returns fake quantized X.
         """
         self.toggle_qparam_learning(enabled=True) \
@@ -75,7 +79,9 @@ class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
 
     @torch.jit.export
     def enable_static_estimate(self):
-        r"""Enables static observer estimates and disables learning of
+        """Enable static estimates of quantization parameters.
+
+        Enables static observer estimates and disables learning of
         quantization parameters. Forward path returns fake quantized X.
         """
         self.toggle_qparam_learning(enabled=False) \
@@ -84,7 +90,9 @@ class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
 
     @torch.jit.export
     def enable_static_observation(self):
-        r"""Enables static observer accumulating data from input but doesn't
+        """Enable accumulation of data without updating quantization parameters.
+
+        Enables static observer accumulating data from input but doesn't
         update the quantization parameters. Forward path returns the original X.
         """
         self.toggle_qparam_learning(enabled=False) \

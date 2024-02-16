@@ -29,6 +29,11 @@ class RendezvousConnectionError(RendezvousError):
 class RendezvousStateError(RendezvousError):
     """Raised when the state of a rendezvous is corrupt."""
 
+class RendezvousGracefulExitError(RendezvousError):
+    """Raised when node wasn't not included in rendezvous and gracefully exits.
+
+    Exception is a mechanism to exit the stack, however does not mean a failure.
+    """
 
 class RendezvousHandler(ABC):
     """Main rendezvous interface.
@@ -41,7 +46,7 @@ class RendezvousHandler(ABC):
 
     @abstractmethod
     def get_backend(self) -> str:
-        """Returns the name of the rendezvous backend."""
+        """Return the name of the rendezvous backend."""
 
     @abstractmethod
     def next_rendezvous(
@@ -70,7 +75,7 @@ class RendezvousHandler(ABC):
 
     @abstractmethod
     def is_closed(self) -> bool:
-        """Checks whether the rendezvous has been closed.
+        """Check whether the rendezvous has been closed.
 
         A closed rendezvous means all future attempts to re-rendezvous within
         same job will fail.
@@ -84,11 +89,11 @@ class RendezvousHandler(ABC):
 
     @abstractmethod
     def set_closed(self):
-        """Marks the rendezvous as closed."""
+        """Mark the rendezvous as closed."""
 
     @abstractmethod
     def num_nodes_waiting(self) -> int:
-        """Returns the number of nodes who arrived late at the rendezvous
+        """Return the number of nodes who arrived late at the rendezvous
         barrier, hence were not included in the current worker group.
 
         Callers should periodically call this method to check whether new
@@ -98,7 +103,7 @@ class RendezvousHandler(ABC):
 
     @abstractmethod
     def get_run_id(self) -> str:
-        """Returns the run id of the rendezvous.
+        """Return the run id of the rendezvous.
 
         The run id is a user-defined id that uniquely identifies an instance of
         a distributed application. It typically maps to a job id and is used to
@@ -107,7 +112,7 @@ class RendezvousHandler(ABC):
 
     @abstractmethod
     def shutdown(self) -> bool:
-        """Closes all resources that were open for the rendezvous.
+        """Close all resources that were open for the rendezvous.
 
         Example::
 
@@ -120,7 +125,7 @@ class RendezvousHandler(ABC):
 
 
 class RendezvousParameters:
-    """Holds the parameters to construct a :py:class:`RendezvousHandler`.
+    """Hold the parameters to construct a :py:class:`RendezvousHandler`.
 
     Args:
         backend:
@@ -171,11 +176,11 @@ class RendezvousParameters:
         self.local_addr = local_addr
 
     def get(self, key: str, default: Any = None) -> Any:
-        """Returns the value for ``key`` if ``key`` exists, else ``default``."""
+        """Return the value for ``key`` if ``key`` exists, else ``default``."""
         return self.config.get(key, default)
 
     def get_as_bool(self, key: str, default: Optional[bool] = None) -> Optional[bool]:
-        """Returns the value for ``key`` as a ``bool``."""
+        """Return the value for ``key`` as a ``bool``."""
         value = self.get(key, default)
         if value is None or isinstance(value, bool):
             return value
@@ -194,7 +199,7 @@ class RendezvousParameters:
         )
 
     def get_as_int(self, key: str, default: Optional[int] = None) -> Optional[int]:
-        """Returns the value for ``key`` as an ``int``."""
+        """Return the value for ``key`` as an ``int``."""
         value = self.get(key, default)
         if value is None:
             return value
@@ -211,7 +216,7 @@ RendezvousHandlerCreator = Callable[[RendezvousParameters], RendezvousHandler]
 
 
 class RendezvousHandlerRegistry:
-    """Represents a registry of :py:class:`RendezvousHandler` backends."""
+    """Represent a registry of :py:class:`RendezvousHandler` backends."""
 
     _registry: Dict[str, RendezvousHandlerCreator]
 
@@ -219,7 +224,7 @@ class RendezvousHandlerRegistry:
         self._registry = {}
 
     def register(self, backend: str, creator: RendezvousHandlerCreator) -> None:
-        """Registers a new rendezvous backend.
+        """Register a new rendezvous backend.
 
         Args:
             backend:
@@ -246,7 +251,7 @@ class RendezvousHandlerRegistry:
         self._registry[backend] = creator
 
     def create_handler(self, params: RendezvousParameters) -> RendezvousHandler:
-        """Creates a new :py:class:`RendezvousHandler`."""
+        """Create a new :py:class:`RendezvousHandler`."""
         try:
             creator = self._registry[params.backend]
         except KeyError as e:

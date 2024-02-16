@@ -3,9 +3,9 @@
 import inspect
 import os
 import tempfile
-import unittest
 
 import torch
+from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
 
 
@@ -19,7 +19,7 @@ class ToyModel(torch.nn.Module):
         return self.relu(self.linear(x))
 
 
-class InPlaceCompilationTests(unittest.TestCase):
+class InPlaceCompilationTests(TestCase):
     def test_compilation(self):
         torch._dynamo.reset()
         model = ToyModel()
@@ -74,7 +74,7 @@ class InPlaceCompilationTests(unittest.TestCase):
 
 # The private variants of the below functions are extensively tested
 # So as long as the signatures match we're good
-class PublicTorchCompilerTests(unittest.TestCase):
+class PublicTorchCompilerTests(TestCase):
     def check_signature(self, public_fn_name, private_fn_name, private_namespace):
         public_fn = getattr(torch.compiler, public_fn_name)
         private_fn = getattr(private_namespace, private_fn_name)
@@ -99,3 +99,7 @@ class PublicTorchCompilerTests(unittest.TestCase):
 
         for fn_name in function_names:
             self.check_signature(fn_name, fn_name, torch._dynamo)
+
+
+if __name__ == "__main__":
+    run_tests()

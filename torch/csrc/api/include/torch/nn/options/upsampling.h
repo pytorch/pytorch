@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/util/variant.h>
 #include <torch/arg.h>
 #include <torch/csrc/Export.h>
 #include <torch/enum.h>
@@ -28,7 +27,7 @@ struct TORCH_API UpsampleOptions {
 
   /// the upsampling algorithm: one of "nearest", "linear", "bilinear",
   /// "bicubic" and "trilinear". Default: "nearest"
-  typedef c10::variant<
+  typedef std::variant<
       enumtype::kNearest,
       enumtype::kLinear,
       enumtype::kBilinear,
@@ -55,7 +54,7 @@ namespace functional {
 /// F::InterpolateFuncOptions().size(std::vector<int64_t>({4})).mode(torch::kNearest));
 /// ```
 struct TORCH_API InterpolateFuncOptions {
-  typedef c10::variant<
+  typedef std::variant<
       enumtype::kNearest,
       enumtype::kLinear,
       enumtype::kBilinear,
@@ -81,8 +80,8 @@ struct TORCH_API InterpolateFuncOptions {
   /// at the corner pixels. If set to "False", the input and output tensors
   /// are aligned by the corner points of their corner pixels, and the
   /// interpolation uses edge value padding for out-of-boundary values, making
-  /// this operation *independent* of input size when :attr:`scale_factor` is
-  /// kept the same. This only has an effect when :attr:`mode` is "linear",
+  /// this operation *independent* of input size when `scale_factor` is
+  /// kept the same.  It is *required* when interpolating mode is "linear",
   /// "bilinear", "bicubic" or "trilinear". Default: "False"
   TORCH_ARG(c10::optional<bool>, align_corners) = c10::nullopt;
 

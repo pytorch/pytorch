@@ -26,13 +26,13 @@
 #cmakedefine CAFFE2_USE_NVTX
 #cmakedefine CAFFE2_USE_ITT
 #cmakedefine CAFFE2_USE_TRT
-#cmakedefine TORCH_DISABLE_GPU_ASSERTS
 
 #ifndef EIGEN_MPL2_ONLY
 #cmakedefine EIGEN_MPL2_ONLY
 #endif
 
 // Useful build settings that are recorded in the compiled binary
+// torch.__build__.show()
 #define CAFFE2_BUILD_STRINGS { \
   {"TORCH_VERSION", "${TORCH_VERSION}"}, \
   {"CXX_COMPILER", "${CMAKE_CXX_COMPILER}"}, \
@@ -50,7 +50,7 @@
   {"USE_MPI", "${USE_MPI}"}, \
   {"USE_GFLAGS", "${USE_GFLAGS}"}, \
   {"USE_GLOG", "${USE_GLOG}"}, \
-  {"USE_GLOO", "${USE_GLOI}"}, \
+  {"USE_GLOO", "${USE_GLOO}"}, \
   {"USE_NNPACK", "${USE_NNPACK}"}, \
   {"USE_OPENMP", "${USE_OPENMP}"}, \
   {"FORCE_FALLBACK_CUDA_MPI", "${CAFFE2_FORCE_FALLBACK_CUDA_MPI}"}, \
@@ -68,5 +68,6 @@
   {"USE_NVTX", "${CAFFE2_USE_NVTX}"}, \
   {"USE_ITT", "${CAFFE2_USE_ITT}"}, \
   {"USE_TRT", "${CAFFE2_USE_TRT}"}, \
-  {"TORCH_DISABLE_GPU_ASSERTS", "${TORCH_DISABLE_GPU_ASSERTS}"}, \
+  {"USE_ROCM_KERNEL_ASSERT", "${USE_ROCM_KERNEL_ASSERT}"}, \
+  {"USE_CUSPARSELT", "${USE_CUSPARSELT}"}, \
 }

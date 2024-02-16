@@ -452,11 +452,11 @@ class ElasticLaunchTest(unittest.TestCase):
 
     def test_min_max_nodes_parse(self):
         min_nodes, max_nodes = launch.parse_min_max_nnodes("1")
-        self.assertTrue(min_nodes, max_nodes)
-        self.assertTrue(1, min_nodes)
+        self.assertEqual(min_nodes, max_nodes)
+        self.assertEqual(1, min_nodes)
         min_nodes, max_nodes = launch.parse_min_max_nnodes("2:20")
-        self.assertTrue(2, min_nodes)
-        self.assertTrue(20, max_nodes)
+        self.assertEqual(2, min_nodes)
+        self.assertEqual(20, max_nodes)
         with self.assertRaises(RuntimeError):
             launch.parse_min_max_nnodes("2:20:30")
 

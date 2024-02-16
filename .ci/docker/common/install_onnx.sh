@@ -4,31 +4,35 @@ set -ex
 
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
+retry () {
+    "$@" || (sleep 10 && "$@") || (sleep 20 && "$@") || (sleep 40 && "$@")
+}
+
 # A bunch of custom pip dependencies for ONNX
 pip_install \
-  beartype==0.10.4 \
+  beartype==0.15.0 \
   filelock==3.9.0 \
   flatbuffers==2.0 \
   mock==5.0.1 \
   ninja==1.10.2 \
   networkx==2.0 \
-  numpy==1.22.4
+  numpy==1.24.2
 
-# Using 1.15dev branch for the following not yet released features and fixes.
-# - Segfault fix for shape inference.
-# - Inliner to workaround ORT segfault.
-pip_install onnx-weekly==1.15.0.dev20230717
-
+# ONNXRuntime should be installed before installing
+# onnx-weekly. Otherwise, onnx-weekly could be
+# overwritten by onnx.
 pip_install \
-  onnxruntime==1.15.1 \
   parameterized==0.8.1 \
   pytest-cov==4.0.0 \
   pytest-subtests==0.10.0 \
   tabulate==0.9.0 \
-  transformers==4.25.1
+  transformers==4.36.2
 
-# TODO: change this when onnx-script is on testPypi
-pip_install onnxscript-preview==0.1.0.dev20230801 --no-deps
+pip_install coloredlogs packaging
+
+pip_install onnxruntime==1.17.0
+pip_install onnx==1.15.0
+pip_install onnxscript==0.1.0.dev20240205 --no-deps
 
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers
 # package to download the model. By default, the model is cached at ~/.cache/huggingface/hub/

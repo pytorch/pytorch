@@ -156,13 +156,17 @@ static std::atomic<int> barrierId(0);
 
 static std::tuple<std::string, std::string, std::string> getNextKeyIds() {
   barrierId++;
-  std::string processCountKey =
-      fmt::format("{}{}{}", storeKeyProcessCount, storeKeyBarrierId, barrierId);
+  auto newBarrierId = barrierId.load();
+  std::string processCountKey = fmt::format(
+      "{}{}{}", storeKeyProcessCount, storeKeyBarrierId, newBarrierId);
   std::string activeCallCountKey = fmt::format(
-      "{}{}{}", storeKeyActiveCallCount, storeKeyBarrierId, barrierId);
+      "{}{}{}", storeKeyActiveCallCount, storeKeyBarrierId, newBarrierId);
   std::string barrierKey =
-      fmt::format("{}{}{}", storeKeyReady, storeKeyBarrierId, barrierId);
-  return std::make_tuple(processCountKey, activeCallCountKey, barrierKey);
+      fmt::format("{}{}{}", storeKeyReady, storeKeyBarrierId, newBarrierId);
+  return std::make_tuple(
+      std::move(processCountKey),
+      std::move(activeCallCountKey),
+      std::move(barrierKey));
 }
 
 // Synchronize process with all other agent processes strictly using store
@@ -172,8 +176,7 @@ int syncCallCount(
     ::c10d::PrefixStore store,
     const int worldSize,
     int activeCalls) {
-  std::string processCountKey, activeCallCountKey, readyKey;
-  std::tie(processCountKey, activeCallCountKey, readyKey) = getNextKeyIds();
+  auto [processCountKey, activeCallCountKey, readyKey] = getNextKeyIds();
 
   // Add to keys which will record the number of processes and active calls
   store.add(activeCallCountKey, activeCalls);

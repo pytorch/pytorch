@@ -2,7 +2,6 @@ import itertools
 from typing import Dict, List, Sequence, Union
 
 from torchgen.api import cpp
-
 from torchgen.api.types import DispatcherSignature
 from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function
@@ -144,7 +143,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
             name = "options"
             return [
                 ADD_TRACE_INPUT.substitute(
-                    name=name, input="optTypeMetaToScalarType(options.dtype_opt())"
+                    name=name, input="c10::optTypeMetaToScalarType(options.dtype_opt())"
                 ),
                 ADD_TRACE_INPUT.substitute(name=name, input="options.layout()"),
                 ADD_TRACE_INPUT.substitute(name=name, input="options.device()"),
@@ -205,7 +204,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
             outplace = [
                 ADD_TRACE_INPUT.substitute(
                     name="out",
-                    input="optTypeMetaToScalarType(out.options().dtype_opt())",
+                    input="c10::optTypeMetaToScalarType(out.options().dtype_opt())",
                 ),
                 ADD_TRACE_INPUT.substitute(name="out", input="out.options().layout()"),
                 ADD_TRACE_INPUT.substitute(name="out", input="out.options().device()"),
@@ -376,22 +375,11 @@ def format_postrecord_trace(f: NativeFunction) -> str:
         return POST_RECORD_TRACE.substitute(add_trace_outputs=outputs)
 
 
-def declare_returned_variables(f: NativeFunction) -> str:
-    modifies_arguments = f.func.kind() in (SchemaKind.inplace, SchemaKind.out)
-    if modifies_arguments:
-        return ""
-    if len(f.func.returns) == 1:
-        return ""
-    types = [cpp.return_type(r, symint=True) for r in f.func.returns]
-    names = cpp.return_names(f)
-    return "\n".join(f"{type.cpp_type()} {name};" for type, name in zip(types, names))
-
-
 def tie_return_values(f: NativeFunction) -> str:
     if len(f.func.returns) == 1:
         return f'auto {f.func.returns[0].name or "result"}'
     names = cpp.return_names(f)
-    return f'std::tie({", ".join(names)})'
+    return f'auto [{", ".join(names)}]'
 
 
 def get_return_value(f: NativeFunction) -> str:
@@ -415,7 +403,6 @@ def emit_trace_body(f: NativeFunction) -> List[str]:
     trace_body: List[str] = []
 
     trace_body.append(format_prerecord_trace(f))
-    trace_body.append(declare_returned_variables(f))
 
     dispatcher_sig = DispatcherSignature.from_schema(f.func)
     dispatcher_exprs = dispatcher_sig.exprs()
@@ -433,7 +420,8 @@ def emit_trace_body(f: NativeFunction) -> List[str]:
     )
 
     # Note that this calls the slow, dispatching variants of manual_cpp_binding ops.
-    # We could probably work harder to ensure that the fast variants are called instead, but the perf benefit would be minimal.
+    # We could probably work harder to ensure that the fast variants are
+    # called instead, but the perf benefit would be minimal.
     trace_body.append(
         TRACE_DISPATCH.substitute(
             assign_return_values=assign_return_values,

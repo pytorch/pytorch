@@ -154,9 +154,9 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             output_ref = func(input0, input1)
             for i in range(2):
                 output = jit_f(input0, input1)
-                assert(output_ref[0].requires_grad == output[0].requires_grad)
-                assert(output_ref[1][0].requires_grad == output[1][0].requires_grad)
-                assert(output_ref[1][1].requires_grad == output[1][1].requires_grad)
+                assert output_ref[0].requires_grad == output[0].requires_grad
+                assert output_ref[1][0].requires_grad == output[1][0].requires_grad
+                assert output_ref[1][1].requires_grad == output[1][1].requires_grad
 
     @unittest.skip("disable until we property handle tensor lists with undefined gradients")
     def test_differentiable_graph_ops_requires_grad(self):

@@ -29,13 +29,24 @@ struct TORCH_API CapturedTraceback : public c10::GatheredContext {
   CapturedTraceback() = default;
   CapturedTraceback(const CapturedTraceback&) = delete;
   CapturedTraceback& operator=(const CapturedTraceback&) = delete;
-  ~CapturedTraceback();
+  CapturedTraceback(CapturedTraceback&&) noexcept = default;
+  CapturedTraceback& operator=(CapturedTraceback&&) noexcept = delete;
+  ~CapturedTraceback() override;
+
+  using visitproc = int (*)(void* self, void* arg);
+
   struct Python {
     virtual std::vector<PyFrame> gather() = 0;
     virtual void release(std::vector<PyFrame>& frames) = 0;
     virtual void appendSymbolized(
         const std::vector<PyFrame>& to_symbolize,
         SymbolizedTracebacks& st) = 0;
+    // tp_traverse/tp_clear implementations
+    virtual int traverse(
+        std::vector<PyFrame>& frames,
+        visitproc visit,
+        void* arg) = 0;
+    virtual int clear(std::vector<PyFrame>& frames) = 0;
     virtual ~Python() = default;
     Python* next_ = nullptr;
   };
@@ -43,6 +54,9 @@ struct TORCH_API CapturedTraceback : public c10::GatheredContext {
   // register python stack recording functionality
   // p cannot be deleted once added.
   static void addPythonUnwinder(Python* p);
+
+  int traversePython(visitproc visit, void* arg);
+  int clearPython();
 
  private:
   std::vector<PyFrame> frames_;

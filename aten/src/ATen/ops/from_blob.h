@@ -63,6 +63,18 @@ class TORCH_API TensorMaker {
     return *this;
   }
 
+  TensorMaker& resizeable_storage() noexcept {
+    resizeable_ = true;
+
+    return *this;
+  }
+
+  TensorMaker& allocator(c10::Allocator* allocator) noexcept {
+    allocator_ = allocator;
+
+    return *this;
+  }
+
   Tensor make_tensor();
 
  private:
@@ -71,7 +83,7 @@ class TORCH_API TensorMaker {
 
   std::size_t computeStorageSize() const noexcept;
 
-  DataPtr makeDataPtrFromDeleter() const;
+  DataPtr makeDataPtrFromDeleter() noexcept;
 
   DataPtr makeDataPtrFromContext() noexcept;
 
@@ -85,6 +97,8 @@ class TORCH_API TensorMaker {
   std::unique_ptr<void, ContextDeleter> ctx_{nullptr, detail::noopDelete};
   c10::optional<Device> device_{};
   TensorOptions opts_{};
+  bool resizeable_{};
+  c10::Allocator* allocator_{};
 };
 
 inline TensorMaker for_blob(void* data, IntArrayRef sizes) noexcept {

@@ -23,11 +23,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/MaybeOwned.h>
 
-namespace at {
-namespace native {
-namespace sparse {
-namespace impl {
-namespace cuda {
+namespace at::native::sparse::impl::cuda {
 
 namespace {
 
@@ -464,6 +460,7 @@ void block_sparse_mv(
 }
 
 void block_sparse_mm(
+    const Tensor& input,
     const at::sparse_csr::SparseCsrTensor& mat1,
     const Tensor& mat2,
     const Scalar& beta,
@@ -484,9 +481,11 @@ void block_sparse_mm(
   // NOTE: the code below allows arbitrary block sizes
   // and might be potentially faster than cuSPARSE implementation
   // especially for not very sparse inputs.
-  if (mat1.scalar_type() == ScalarType::Half || mat1.scalar_type() == ScalarType::BFloat16) {
+  if (mat1.scalar_type() == ScalarType::Half
+      || mat1.scalar_type() == ScalarType::BFloat16
+      || mat1.scalar_type() == ScalarType::Float) {
     at::native::sparse::impl::_compressed_row_strided_addmm_out(
-        result,
+        input,
         mat1,
         mat2,
         /*beta=*/beta,
@@ -495,6 +494,10 @@ void block_sparse_mm(
         // but let's keep the interface intact, hence the const cast.
         const_cast<Tensor&>(result));
     return;
+  }
+
+  if (beta.toComplexDouble() != 0. && !result.is_same(input)) {
+    result.copy_(input);
   }
 
   const cusparseDirection_t block_layout = mat1.values().is_contiguous()
@@ -579,7 +582,7 @@ void spmm(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-#if !(AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_52_API())
+#if !(AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API())
   addmm_out_legacy(mat1, mat2, beta, alpha, result);
 #else
   c10::MaybeOwned<Tensor> result_ = prepare_dense_matrix_for_cusparse(result);
@@ -806,8 +809,7 @@ void spgemm(
             buffer2.get()));
 
         // Get how many specified elements are there in C
-        int64_t C_num_rows, C_num_cols, C_nnz;
-        std::tie(C_num_rows, C_num_cols, C_nnz) = descC.get_size();
+        auto [C_num_rows, C_num_cols, C_nnz] = descC.get_size();
 
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(C_num_rows == m);
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(C_num_cols == n);
@@ -838,6 +840,7 @@ void spgemm(
 } // anonymous namespace
 
 void addmm_out_sparse_csr(
+    const Tensor& input,
     const Tensor& mat1,
     const Tensor& mat2,
     const Scalar& beta,
@@ -853,6 +856,39 @@ void addmm_out_sparse_csr(
   // Valid combinations terminate in a return
   // Invalid combinations are omitted and will fall though to the TORCH check
   // generating an informative error message
+
+  // mm functions that copy input to result when needed (e.g. mm
+  // triton kernels do not require result being initialized with
+  // input):
+  if (mat1.layout() == kSparseBsr) {
+    if (mat2.layout() == kStrided) {
+      if (result.layout() == kStrided)
+        return block_sparse_mm(input, mat1, mat2, beta, alpha, result);
+    }
+  }
+
+  if (mat1.layout() == kStrided) {
+    if (mat2.layout() == kSparseBsc) {
+      if (result.layout() == kStrided) {
+        auto result_t = result.transpose(-2, -1);
+        auto input_t = (result.is_same(input) ? result_t : input.transpose(-2, -1));
+        return block_sparse_mm(
+            input_t,
+            mat2.transpose(-2, -1),
+            mat1.transpose(-2, -1),
+            beta,
+            alpha,
+            result_t);
+      }
+    }
+  }
+
+  // copy input to result:
+  if (beta.toComplexDouble() != 0. && !result.is_same(input)) {
+    result.copy_(input);
+  }
+
+  // mm functions that assume that result contains input:
   if (mat1.layout() == kStrided) {
     if (mat2.layout() == kSparseCsr) {
       if (result.layout() == kStrided) {
@@ -868,16 +904,6 @@ void addmm_out_sparse_csr(
     if (mat2.layout() == kSparseCsc) {
       if (result.layout() == kStrided) {
         return spmm(
-            mat2.transpose(-2, -1),
-            mat1.transpose(-2, -1),
-            beta,
-            alpha,
-            result.transpose(-2, -1));
-      }
-    }
-    if (mat2.layout() == kSparseBsc) {
-      if (result.layout() == kStrided) {
-        return block_sparse_mm(
             mat2.transpose(-2, -1),
             mat1.transpose(-2, -1),
             beta,
@@ -931,12 +957,6 @@ void addmm_out_sparse_csr(
             alpha,
             result.transpose(-2, -1));
       }
-    }
-  }
-  if (mat1.layout() == kSparseBsr) {
-    if (mat2.layout() == kStrided) {
-      if (result.layout() == kStrided)
-        return block_sparse_mm(mat1, mat2, beta, alpha, result);
     }
   }
   TORCH_CHECK(
@@ -1406,7 +1426,7 @@ void sampled_addmm_out_sparse_csr(
     const Scalar& beta,
     const Scalar& alpha,
     const at::sparse_csr::SparseCsrTensor& C) {
-#if !(AT_USE_CUSPARSE_GENERIC_SDDMM() || AT_USE_HIPSPARSE_GENERIC_52_API())
+#if !(AT_USE_CUSPARSE_GENERIC_SDDMM() || AT_USE_HIPSPARSE_GENERIC_API())
   TORCH_CHECK(
       false,
       "Calling sampled_addmm with sparse GPU tensors requires compiling ",
@@ -1490,8 +1510,4 @@ void sampled_addmm_out_sparse_csr(
 #endif
 }
 
-} // namespace cuda
-} // namespace impl
-} // namespace sparse
-} // namespace native
-} // namespace at
+} // namespace at::native::sparse::impl::cuda

@@ -8,19 +8,19 @@ import torch.autograd
 class _SnapshotState(Enum):
     r"""
     These are the snapshotting-related states that IterDataPipes can be in.
+
     `NotStarted` - allows you to restore a snapshot and create an iterator with reset
     `Restored` - cannot restore again, allows you to create an iterator without resetting the DataPipe
     `Iterating` - can restore, will reset if you create a new iterator
     """
+
     NotStarted = 0
     Restored = 1
     Iterating = 2
 
 
 def _simplify_obj_name(obj) -> str:
-    """
-    Simplify the display strings of objects for the purpose of rendering within DataPipe error messages.
-    """
+    """Simplify the display strings of objects for the purpose of rendering within DataPipe error messages."""
     if inspect.isfunction(obj):
         return obj.__name__
     else:
@@ -32,17 +32,15 @@ def _strip_datapipe_from_name(name: str) -> str:
 
 
 def _generate_input_args_string(obj):
-    """
-    Generate a string for the input arguments of an object.
-    """
+    """Generate a string for the input arguments of an object."""
     signature = inspect.signature(obj.__class__)
     input_param_names = set()
     for param_name in signature.parameters.keys():
         input_param_names.add(param_name)
     result = []
-    for name, obj in inspect.getmembers(obj):
+    for name, value in inspect.getmembers(obj):
         if name in input_param_names:
-            result.append((name, _simplify_obj_name(obj)))
+            result.append((name, _simplify_obj_name(value)))
     return ', '.join([f'{name}={value}' for name, value in result])
 
 
@@ -67,6 +65,7 @@ _feedback_msg = ("\nFor feedback regarding this single iterator per IterDataPipe
 def _check_iterator_valid(datapipe, iterator_id, next_method_exists=False) -> None:
     r"""
     Given an instance of a DataPipe and an iterator ID, check if the IDs match, and if not, raises an exception.
+
     In the case of ChildDataPipe, the ID gets compared to the one stored in `main_datapipe` as well.
     """
     if next_method_exists:
@@ -89,9 +88,7 @@ def _check_iterator_valid(datapipe, iterator_id, next_method_exists=False) -> No
 
 
 def _set_datapipe_valid_iterator_id(datapipe):
-    r"""
-    Given a DataPipe, updates its valid iterator ID and reset the DataPipe.
-    """
+    """Given a DataPipe, updates its valid iterator ID and reset the DataPipe."""
     if hasattr(datapipe, "_is_child_datapipe") and datapipe._is_child_datapipe is True:
         if hasattr(datapipe, "_set_main_datapipe_valid_iterator_id"):
             datapipe._set_main_datapipe_valid_iterator_id()  # reset() is called within this method when appropriate
@@ -108,8 +105,9 @@ def _set_datapipe_valid_iterator_id(datapipe):
 
 def hook_iterator(namespace):
     r"""
-    Hook that is applied to all `__iter__` of metaclass `_DataPipeMeta`. This is done for the purpose of
-    profiling and checking if an iterator is still valid.
+    Define a hook that is applied to all `__iter__` of metaclass `_DataPipeMeta`.
+
+    This is done for the purpose of profiling and checking if an iterator is still valid.
     """
 
     def profiler_record_fn_context(datapipe):
@@ -119,10 +117,12 @@ def hook_iterator(namespace):
 
     class IteratorDecorator:
         r"""
-        Wrap the iterator and modifying its `__next__` method. This decorator is applied to
-        DataPipes of which `__iter__` method is NOT a generator function. Those `__iter__`
-        method commonly returns `self` but not necessarily.
+        Wrap the iterator and modifying its `__next__` method.
+
+        This decorator is applied to DataPipes of which `__iter__` method is NOT a generator function.
+        Those `__iter__` method commonly returns `self` but not necessarily.
         """
+
         def __init__(self, iterator, datapipe, iterator_id, has_next_method):
             self.iterator = iterator
             self.datapipe = datapipe
@@ -135,9 +135,7 @@ def hook_iterator(namespace):
             return self
 
         def _get_next(self):
-            r"""
-            Return next with logic related to iterator validity, profiler, and incrementation of samples yielded.
-            """
+            """Return next with logic related to iterator validity, profiler, and incrementation of samples yielded."""
             _check_iterator_valid(self.datapipe, self.iterator_id)
             result = next(self.iterator)
             if not self.self_and_has_next_method:

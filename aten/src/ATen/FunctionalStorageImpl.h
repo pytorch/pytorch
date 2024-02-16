@@ -2,8 +2,7 @@
 
 #include <ATen/Tensor.h>
 
-namespace at {
-namespace functionalization {
+namespace at::functionalization {
 
 // See Note [Functionalization Pass In Core]
 
@@ -32,15 +31,20 @@ struct ViewMeta {
   ViewMeta(
       std::function<Tensor(const Tensor&, int64_t)> forward,
       std::function<Tensor(const Tensor&, const Tensor&, int64_t)> reverse,
+      bool is_multi_output = false,
       int64_t out_idx = 0)
       : forward_fn(std::move(forward)),
         reverse_fn(std::move(reverse)),
-        out_index(out_idx) {}
+        out_index(out_idx),
+        is_multi_output(is_multi_output) {}
 
   std::function<Tensor(const Tensor&, int64_t)> forward_fn;
   std::function<Tensor(const Tensor&, const Tensor&, int64_t)> reverse_fn;
   // See Note [out_idx in ViewMeta]
   int64_t out_index;
+
+  // Tells us if this is a multi-output view
+  bool is_multi_output;
 
   // Returns a copy of the current ViewMeta, if out_idx matches the current
   // out_index. Otherwise, returns a new ViewMeta with the same forward/reverse
@@ -117,5 +121,4 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   bool frozen_ = false;
 };
 
-} // namespace functionalization
-} // namespace at
+} // namespace at::functionalization

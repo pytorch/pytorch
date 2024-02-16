@@ -1,9 +1,11 @@
+#ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
 #include <ATen/core/IListRef.h>
-#include <ATen/core/Tensor.h>
 #include <gtest/gtest.h>
 #include <algorithm>
-#include <iterator>
 
 using namespace c10;
 
@@ -238,6 +240,7 @@ TEST(IOptTensorListRefTest, Boxed_Iterate) {
   for (const auto t : list) {
     EXPECT_EQ(boxed[i].has_value(), t.has_value());
     if (t.has_value()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       EXPECT_TRUE((*boxed[i]).is_same(*t));
     }
     i++;

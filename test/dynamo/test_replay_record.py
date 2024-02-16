@@ -7,13 +7,7 @@ import unittest
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-
-try:
-    import dill
-except ImportError:
-    dill = None
-
-requires_dill = unittest.skipIf(dill is None, "requires dill")
+from torch.testing._internal.common_utils import skipIfNoDill
 
 
 class ReplayRecordTests(torch._dynamo.test_case.TestCase):
@@ -26,10 +20,9 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
             )
         )
         torch._logging.set_logs(graph_breaks=True, dynamo=logging.ERROR)
-        # Most of the tests are checking to see if errors got logged, so we
-        # ask for errors to be suppressed
+        # These tests require dynamo exceptions to be propagated up to the caller
         cls._exit_stack.enter_context(
-            unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", True)
+            unittest.mock.patch.object(torch._dynamo.config, "suppress_errors", False)
         )
         cls._exit_stack.enter_context(
             unittest.mock.patch.object(
@@ -47,47 +40,46 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
 
     def check_replay(self, fn, *args, exp_exc_name=None):
         fn_opt = torch._dynamo.optimize("eager")(fn)
-        with self.assertLogs(logger="torch._dynamo", level=logging.ERROR) as log_orig:
-            try:
-                fn_opt(*args)
-            except Exception:
-                pass  # we'll check the logs for the raised exception
+        try:
+            fn_opt(*args)
+        except Exception as e:
+            if exp_exc_name is not None:
+                self.assertIn(exp_exc_name, str(e))
+            expected_error = str(e)
+        else:
+            self.fail("opt_fn didn't raise an exception")
 
-        with self.assertLogs(
-            logger="torch._dynamo", level=logging.ERROR
-        ) as log_replayed:
-            file_name_match = re.search(
-                r"torch._dynamo\.replay\('(.*)'\)", log_orig.output[-1]
-            )
-            self.assertTrue(
-                file_name_match is not None,
-                "No record file name found in generated logs.",
-            )
+        file_name_match = re.search(r"torch._dynamo\.replay\('(.*)'\)", expected_error)
 
-            torch._dynamo.replay(file_name_match.groups()[0])
+        # Remove replay message from expected error
+        expected_error = expected_error.split("\n")
+        for i, line in enumerate(expected_error):
+            if "torch._dynamo.replay" in line:
+                del expected_error[i + 1]  # Empty line
+                del expected_error[i]  # Replay message
+                break
+        expected_error = "\n".join(expected_error)
 
-        def get_error_name(log):
-            error_name = re.search(r"\w+Error", log.output[-1])
-            self.assertIsNotNone(error_name, "No error name found in logs.")
-            return error_name[0]
-
-        orig_error = get_error_name(log_orig)
-        replayed_error = get_error_name(log_replayed)
-        if exp_exc_name is not None:
-            self.assertEqual(orig_error, exp_exc_name)
-
-        self.assertEqual(
-            orig_error,
-            replayed_error,
-            "Error logs for recorded execution and replayed execution should match.",
+        self.maxDiff = None
+        self.assertTrue(
+            file_name_match is not None,
+            "No record file name found in generated logs.",
         )
+        try:
+            torch._dynamo.replay(file_name_match.groups()[0])
+        except Exception as e:
+            actual_error = str(e)
+            if actual_error != expected_error:
+                raise e
+        else:
+            self.fail("Replayed frame didn't raise an exception")
 
-    @requires_dill
+    @skipIfNoDill
     def test_unsuccessful_inline(self):
         def level2():
-            z = torch.ones(2, 2)
-            a = {z: 10}  # Error here, tensor as key to dict
-            return a[z] * torch.ones(1)
+            a = {10}
+            z = a["z"]  # RuntimeError, Illegal to getitem on a set
+            return z * torch.ones(1)
 
         def level1():
             y = torch.ones(1, 1)
@@ -97,9 +89,9 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
             x = torch.ones(1, 1)
             return level1() + x
 
-        self.check_replay(level0, exp_exc_name="AssertionError")
+        self.check_replay(level0, exp_exc_name="RuntimeError")
 
-    @requires_dill
+    @skipIfNoDill
     def test_successful_inline(self):
         def test_fn():
             x = torch.ones(2, 2)
@@ -113,7 +105,7 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
 
         self.check_replay(test_fn, exp_exc_name="RuntimeError")
 
-    @requires_dill
+    @skipIfNoDill
     def test_nonlocal_fn_call(self):
         def nonlocal_fn(x):
             return x + torch.ones(2, 2)
@@ -125,7 +117,7 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
 
         self.check_replay(test_fn, exp_exc_name="RuntimeError")
 
-    @requires_dill
+    @skipIfNoDill
     def test_nonlocal_module_fn_call(self):
         # replay when we use a module
         # not defined in the replay env
@@ -141,7 +133,7 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
 
         self.check_replay(test_fn, exp_exc_name="RuntimeError")
 
-    @requires_dill
+    @skipIfNoDill
     def test_nonlocal_module_class(self):
         try:
             from .mock_modules import mock_module2
@@ -153,9 +145,9 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
             y = z.method2(torch.ones(3, 3))
             return y + torch.zeros(3, 5)
 
-        self.check_replay(test_fn, exp_exc_name="TypeError")
+        self.check_replay(test_fn, exp_exc_name="RuntimeError")
 
-    @requires_dill
+    @skipIfNoDill
     def test_local_module(self):
         try:
             from .mock_modules import mock_module3 as _  # noqa: F401
@@ -176,8 +168,8 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
 
         self.check_replay(test_fn, torch.ones(1, 1), exp_exc_name="RuntimeError")
 
-    # Verfiy that we replay when we have tensor arguments to the frame being replayed
-    @requires_dill
+    # Verify that we replay when we have tensor arguments to the frame being replayed
+    @skipIfNoDill
     def test_fn_call_args(self):
         def test_fn(x, y):
             return x + y + torch.zeros(2, 2)
@@ -185,6 +177,16 @@ class ReplayRecordTests(torch._dynamo.test_case.TestCase):
         self.check_replay(
             test_fn, torch.ones(3, 3), torch.ones(2, 2), exp_exc_name="RuntimeError"
         )
+
+    # Verify that accessing torch.nn works when frame replaying is enabled
+    @skipIfNoDill
+    def test_torch_nn(self):
+        def fn(x):
+            y = torch.nn.functional.pad(x, (10, 10, 10, 10))
+            return y + torch.ones(3, 3)  # dimension mismatch
+
+        x = torch.ones(4, 4, 4, 4)
+        self.check_replay(fn, x, exp_exc_name="RuntimeError")
 
 
 if __name__ == "__main__":

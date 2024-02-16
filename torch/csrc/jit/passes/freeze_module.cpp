@@ -10,7 +10,6 @@
 #include <torch/csrc/jit/passes/eliminate_no_ops.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
-#include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 #include <stack>
@@ -344,7 +343,7 @@ class AttributePropagator {
   void recordMutableAttrs(std::shared_ptr<Graph>& graph) {
     std::stack<Block*> blocks({graph->block()});
     std::unique_ptr<AliasDb> aliasDb =
-        torch::make_unique<AliasDb>(graph, /* isFrozen */ true);
+        std::make_unique<AliasDb>(graph, /* isFrozen */ true);
     while (!blocks.empty()) {
       Block* block = blocks.top();
       blocks.pop();

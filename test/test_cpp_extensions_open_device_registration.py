@@ -8,14 +8,14 @@ import tempfile
 import unittest
 
 import torch.testing._internal.common_utils as common
-from torch.testing._internal.common_utils import IS_ARM64
+from torch.testing._internal.common_utils import IS_ARM64, TEST_CUDA
 import torch
 import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 
 
-TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
-TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None and ROCM_HOME is not None
+TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
+TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
 
 
 def remove_build_path():
@@ -51,6 +51,7 @@ class DummyModule:
         return 0
 
 @unittest.skipIf(IS_ARM64, "Does not work on arm")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionOpenRgistration(common.TestCase):
     """Tests Open Device Registration with C++ extensions.
     """
@@ -183,6 +184,13 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertFalse(self.module.custom_abs_called())
             torch.abs(foo_input_data)
             self.assertTrue(self.module.custom_abs_called())
+
+        def test_open_device_quantized():
+            torch.utils.rename_privateuse1_backend('foo')
+            input_data = torch.randn(3, 4, 5, dtype=torch.float32, device="cpu").to("foo")
+            quantized_tensor = torch.quantize_per_tensor(input_data, 0.1, 10, torch.qint8)
+            self.assertEqual(quantized_tensor.device, torch.device('foo:0'))
+            self.assertEqual(quantized_tensor.dtype, torch.qint8)
 
         def test_open_device_random():
             with torch.random.fork_rng(device_type="foo"):
@@ -444,17 +452,21 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         def test_open_device_tensor_type_fallback():
             torch.utils.rename_privateuse1_backend('foo')
             # create tensors located in custom device
-            x = torch.Tensor([1, 2, 3]).to('foo')
+            x = torch.Tensor([[1, 2, 3], [2, 3, 4]]).to('foo')
             y = torch.Tensor([1, 0, 2]).to('foo')
             # create result tensor located in cpu
-            z_cpu = torch.Tensor([0, 2, 1])
+            z_cpu = torch.Tensor([[0, 2, 1], [1, 3, 2]])
             # Check that our device is correct.
             device = self.module.custom_device()
             self.assertTrue(x.device == device)
             self.assertFalse(x.is_cpu)
             # call sub op, which will fallback to cpu
             z = torch.sub(x, y)
-
+            self.assertEqual(z_cpu, z)
+            # call index op, which will fallback to cpu
+            z_cpu = torch.Tensor([3, 1])
+            y = torch.Tensor([1, 0]).long().to('foo')
+            z = x[y, y]
             self.assertEqual(z_cpu, z)
 
         def test_open_device_tensorlist_type_fallback():
@@ -491,6 +503,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_open_device_storage_type()
         test_open_device_faketensor()
         test_open_device_named_tensor()
+        test_open_device_quantized()
 
         test_compile_autograd_function_returns_self()
         test_compile_autograd_function_aliasing()

@@ -354,10 +354,7 @@ std::ostream& Node::print(
       }
     }
     if (auto file_line_col = r.file_line_col()) {
-      std::string filename;
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      size_t line, col;
-      std::tie(filename, line, col) = *file_line_col;
+      auto [filename, line, col] = *file_line_col;
       out << " # " << filename << ":" << line << ":" << col;
     }
   }
@@ -876,7 +873,7 @@ Value* Value::setDebugName(const std::string& name) {
     if (last_dot_pos != std::string::npos && last_dot_pos + 1 != name.size()) {
       if (name.find_first_not_of("0123456789", last_dot_pos + 1) ==
           std::string::npos) {
-        suffix = c10::stoll(name.substr(last_dot_pos + 1));
+        suffix = std::stoll(name.substr(last_dot_pos + 1));
         name_base = name.substr(0, last_dot_pos);
       }
     }

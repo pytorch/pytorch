@@ -11,20 +11,20 @@ namespace c10d {
 // Macro to generate the error message on a non-successful UCC return value.
 #define TORCH_UCC_GET_ERROR_MSG(_err, _error_msg, _result) \
   do {                                                     \
-      _err = c10::str(                                     \
-          "[",                                             \
-          std::string(__FILE__),                           \
-          ":",                                             \
-          std::to_string(__LINE__),                        \
-          "] ",                                            \
-          logger->getLogPrefix(),                          \
-          _error_msg,                                      \
-          ", error code ",                                 \
-          _result,                                         \
-          ": ",                                            \
-          ucc_status_string(_result),                      \
-          ", system error code ",                          \
-          errno);                                          \
+    _err = c10::str(                                       \
+        "[",                                               \
+        std::string(__FILE__),                             \
+        ":",                                               \
+        std::to_string(__LINE__),                          \
+        "] ",                                              \
+        logger->getLogPrefix(),                            \
+        _error_msg,                                        \
+        ", error code ",                                   \
+        _result,                                           \
+        ": ",                                              \
+        ucc_status_string(_result),                        \
+        ", system error code ",                            \
+        errno);                                            \
   } while (0)
 
 // Macro to throw on a non-successful UCC return value.

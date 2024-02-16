@@ -115,7 +115,7 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
 
   auto orig_arguments = torch::jit::last(*stack, num_arguments);
   if (std::none_of(orig_arguments.begin(), orig_arguments.end(), ivalueParticipatesInCurrentLevel)) {
-    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
+    c10::impl::ExcludeDispatchKeyGuard guard_2(DispatchKey::FuncTorchBatched);
     op.callBoxed(stack);
     return;
   }
@@ -123,9 +123,7 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
   auto arguments = torch::jit::pop(*stack, num_arguments);
 
   TORCH_INTERNAL_ASSERT(arguments[0].isTensor());
-  Tensor self;
-  optional<int64_t> self_bdim;
-  std::tie(self, self_bdim) = unwrapTensorAtLevel(arguments[0].toTensor(), cur_level);
+  auto [self, self_bdim] = unwrapTensorAtLevel(arguments[0].toTensor(), cur_level);
 
   self = moveBatchDimToFront(self, self_bdim);
 
@@ -458,8 +456,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   REDUCTION_WITH_KEEPDIM_ARG(aminmax);
   m.impl("all", all_decomp);
   REDUCTION_WITH_KEEPDIM_ARG(all.dim);
+  REDUCTION_WITH_KEEPDIM_ARG(all.dims);
   m.impl("any", any_decomp);
   REDUCTION_WITH_KEEPDIM_ARG(any.dim);
+  REDUCTION_WITH_KEEPDIM_ARG(any.dims);
   REDUCTION_WITH_KEEPDIM_ARG(argmax);
   REDUCTION_WITH_KEEPDIM_ARG(argmin);
   m.impl("bucketize.Tensor", bucketize_decomp_Tensor);
@@ -472,7 +472,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("dist", dist_decomp);
   REDUCTION_BOXED_ARGS(kthvalue, 2, KEEPDIM_CASE_VARIABLE, 3);
   REDUCTION_BOXED_ARGS(linalg_vector_norm, 2, KEEPDIM_CASE_VARIABLE, 3);
-  REDUCTION_NO_KEEPDIM_ARG(log_softmax.int);
   REDUCTION_NO_KEEPDIM_ARG(logcumsumexp);
   REDUCTION_WITH_KEEPDIM_ARG(logsumexp);
   m.impl("max", max_decomp);

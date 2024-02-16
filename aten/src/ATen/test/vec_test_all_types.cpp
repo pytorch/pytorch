@@ -66,6 +66,8 @@ namespace {
     class FunctionalTests : public ::testing::Test {};
     template <typename T>
     class FunctionalTestsReducedFloat : public ::testing::Test {};
+    template <typename T>
+    class InfiniteTests : public ::testing::Test {};
     using RealFloatTestedTypes = ::testing::Types<vfloat, vdouble>;
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
     using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
@@ -106,6 +108,7 @@ namespace {
     TYPED_TEST_SUITE(BitwiseFloatsAdditional, RealFloatTestedTypes);
     TYPED_TEST_SUITE(BitwiseFloatsAdditional2, FloatTestedTypes);
     TYPED_TEST_SUITE(QuantizationTests, QuantTestedTypes);
+    TYPED_TEST_SUITE(InfiniteTests, RealFloatTestedTypes);
 #if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
     TYPED_TEST_SUITE(
         Quantization8BitWithTailTests,
@@ -1126,8 +1129,7 @@ namespace {
         float minv = static_cast<float>(static_cast<double>(min_val) * 2.0);
         float maxv = static_cast<float>(static_cast<double>(max_val) * 2.0);
         ValueGen<float> gen(minv, maxv, seed.add(2));
-        for (const auto i : c10::irange(trials)) {
-            (void)i; // Suppress unused variable warning
+        for (C10_UNUSED const auto i : c10::irange(trials)) {
             float scale = generator_sc.get();
             float inv_scale = 1.0f / static_cast<float>(scale);
             auto zero_point_val = generator_zp.get();
@@ -1173,8 +1175,7 @@ namespace {
       float minv = static_cast<float>(static_cast<double>(min_val) * 2.0);
       float maxv = static_cast<float>(static_cast<double>(max_val) * 2.0);
       ValueGen<float> gen(minv, maxv, seed.add(2));
-      for (const auto i : c10::irange(trials)) {
-        (void)i; // Suppress unused variable warning
+      for (C10_UNUSED const auto i : c10::irange(trials)) {
         float scale = generator_sc.get();
         float inv_scale = 1.0f / static_cast<float>(scale);
         auto zero_point_val = generator_zp.get();
@@ -1233,8 +1234,7 @@ namespace {
         ValueGen<int> generator(min_val, max_val, seed.add(1));
         //scale
         ValueGen<float> generator_sc(1.f, 15.f, seed.add(2));
-        for (const auto i : c10::irange(trials)) {
-            (void)i; // Suppress unused variable warning
+        for (C10_UNUSED const auto i : c10::irange(trials)) {
             float scale = generator_sc.get();
             int32_t zero_point_val = generator.get();
             float scale_zp_premul = -(scale * zero_point_val);
@@ -1281,8 +1281,7 @@ namespace {
         ValueGen<int32_t> generator(min_val, max_val, seed);
         //scale
         ValueGen<float> generator_sc(1.f, 15.f, seed.add(1));
-        for (const auto i : c10::irange(trials)) {
-            (void)i; // Suppress unused variable warning
+        for (C10_UNUSED const auto i : c10::irange(trials)) {
             float multiplier = 1.f / (generator_sc.get());
             auto zero_point_val = generator.get();
             int index = 0;
@@ -1319,8 +1318,7 @@ namespace {
         typename vec::int_vec_return_type  expected_int_ret;
         auto seed = TestSeed();
         ValueGen<underlying> generator(min_val, max_val, seed);
-        for (const auto i : c10::irange(trials)) {
-            (void)i; // Suppress unused variable warning
+        for (C10_UNUSED const auto i : c10::irange(trials)) {
             //generate vals
             for (int j = 0; j < vec::size(); j++) {
                 qint_vals[j] = generator.get();
@@ -1532,6 +1530,15 @@ namespace {
               << "\nmap, Length: " << len << "; index: " << i << "; fp32 reference: " << y_f[i] << "; bf16 value: " << RT(y_b[i]);
         }
       }
+      // Map - For float32 in, reduced floating points out
+      for (int64_t len = 1; len <= N; len++) {
+        at::vec::map<RT>([](auto x) { return x; }, y_f, x_f1, len);
+        at::vec::map<VT>([](auto x) { return x; }, y_b, x_f1, len);
+        for (const auto i : c10::irange(len)) {
+          ASSERT_TRUE(cmp(y_f[i], y_b[i])) << "Failure Details:\nTest Seed to reproduce: " << seed
+              << "\nmap, Length: " << len << "; index: " << i << "; fp32 reference: " << y_f[i] << "; bf16 value: " << RT(y_b[i]);
+        }
+      }
       // Map2
       for (int64_t len = 1; len <= N; len++) {
         at::vec::map2<RT>([](auto x, auto y) { return x + y; }, y_f, x_f1, x_f2, len);
@@ -1559,6 +1566,59 @@ namespace {
                << "\nmap4, Length: " << len << "; index: " << i << "; fp32 reference: " << y_f[i] << "; bf16 value: " << RT(y_b[i]);
          }
       }
+    }
+    TEST(HalfConversionTest, HalfFloat) {
+      float f32s[100];
+      for (const auto i : c10::irange(100)) {
+        f32s[i] = i + 0.3;
+      }
+      uint16_t u16;
+      float x;
+      for (const auto i : c10::irange(100)) {
+      #if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && \
+          !defined(__APPLE__)
+        u16 = at::vec::float2half_scalar(f32s[i]);
+        x = at::vec::half2float_scalar(u16);
+      #else
+        u16 = c10::detail::fp16_ieee_from_fp32_value(f32s[i]);
+        x = c10::detail::fp16_ieee_to_fp32_value(u16);
+      #endif
+
+        EXPECT_EQ(u16, c10::detail::fp16_ieee_from_fp32_value(f32s[i]))
+            << "Test failed for float to uint16 " << f32s[i] << "\n";
+        EXPECT_EQ(x, c10::detail::fp16_ieee_to_fp32_value(u16))
+            << "Test failed for uint16 to float " << u16 << "\n";
+      }
+    }
+    TYPED_TEST(InfiniteTests, HasInfNan) {
+      using vec = TypeParam;
+      using VT = UholdType<TypeParam>;
+      auto vec_size = vec::size();
+      VT values[20];
+      for (const auto i : c10::irange(20)) {
+        values[i] = i + 0.3;
+      }
+      auto vec_val = vec::loadu(values);
+      auto seed = TestSeed();
+      ValueGen<int> generator(int(0), int(vec_size - 1), seed);
+      int index = generator.get();
+      int nanBits = 0x7FC00000;
+      VT v_nan = static_cast<VT>(*(float *)&nanBits);
+      values[index] = v_nan;
+      auto vec_nan = vec::loadu(values);
+      int infBits = 0x7F800000;
+      VT v_pinf = static_cast<VT>(*(float *)&infBits);
+      values[index] = v_pinf;
+      auto vec_pinf = vec::loadu(values);
+      int negInfBits = 0xFF800000;
+      VT v_ninf  = static_cast<VT>(*(float *)&negInfBits);
+      values[index] = v_ninf;
+      auto vec_ninf = vec::loadu(values);
+
+      ASSERT_TRUE(!(vec_val.has_inf_nan())) << "Test failed for normal value\n";
+      ASSERT_TRUE(vec_nan.has_inf_nan()) << "Test failed for NAN\n";
+      ASSERT_TRUE(vec_pinf.has_inf_nan()) << "Test failed for positive Infinity\n";
+      ASSERT_TRUE(vec_ninf.has_inf_nan()) << "Test failed for negative Infinity\n";
     }
 
 #else

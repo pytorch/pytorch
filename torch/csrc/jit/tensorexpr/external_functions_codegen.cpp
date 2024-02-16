@@ -4,7 +4,6 @@
 
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
-#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 
 namespace torch::jit::tensorexpr {

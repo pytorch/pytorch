@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import torch
 from copy import deepcopy
 from torch.utils._pytree import tree_map
@@ -73,7 +75,7 @@ class DiagTensorBelow(WrapperTensor):
         # For everything else, call the handler:
         fn = cls.handled_ops.get(func.__name__, None)
         if fn:
-            return fn(*args, **kwargs or {})
+            return fn(*args, **(kwargs or {}))
         else:
             # Note that here, because we don't need to provide the autograd formulas
             # we can have a default "fallback" that creates a plain Tensor based
@@ -197,7 +199,7 @@ class SubclassInfo:
 
 subclass_db = {
     torch.Tensor: SubclassInfo(
-        'base_tensor', create_fn=lambda shape: torch.randn(shape)
+        'base_tensor', create_fn=torch.randn
     ),
     NonWrapperTensor: SubclassInfo(
         'non_wrapper_tensor',

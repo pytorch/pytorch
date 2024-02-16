@@ -1529,7 +1529,7 @@ def softmax(g: jit_utils.GraphContext, input, dim, dtype=None):
             )
 
         if is_transpose_required:
-            softmax = g.op("Transpose", softmax, perm_i=axes)
+            softmax = g.op("Transpose", softmax, perm_i=axes)  # type: ignore[possibly-undefined]
         return softmax
 
     # Apply max normalization.
@@ -1655,7 +1655,7 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
         # To convert the indices to the same format used by Pytorch,
         # we first execute a maxpool with a kernel and stride of 1 on the same input.
         # This will result in a tensor of indices in which each index will have it's own value.
-        # Using this tensor as a reference, we extract the first index of each axis and substract
+        # Using this tensor as a reference, we extract the first index of each axis and subtract
         # it from each index of this axis in the indices to convert.
         # This step will result in a tensor were each dimension has values of indices within
         # the dimension it is in.
@@ -2467,7 +2467,7 @@ def log_softmax(g: jit_utils.GraphContext, input, dim, dtype=None):
             "Cast", return_op, to_i=_type_utils.JitScalarType(parsed_dtype).onnx_type()
         )
     if is_transpose_required:
-        return_op = g.op("Transpose", return_op, perm_i=axes)
+        return_op = g.op("Transpose", return_op, perm_i=axes)  # type: ignore[possibly-undefined]
     return return_op
 
 
@@ -2978,7 +2978,7 @@ def native_layer_norm(
     # mean and normalized, so we need to Cast it back
     if is_type_half:
         denominator = g.op(
-            "Cast", denominator, to_i=_type_utils.JitScalarType(input_dtype).onnx_type()
+            "Cast", denominator, to_i=_type_utils.JitScalarType(input_dtype).onnx_type()  # type: ignore[possibly-undefined]
         )
         rdenominator = g.op("Reciprocal", denominator)
     else:
@@ -3785,7 +3785,7 @@ def new_empty(
     g: jit_utils.GraphContext, self, sizes, dtype, layout, device, pin_memory=False
 ):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
-    if dtype is None and self_dtype is not None:
+    if symbolic_helper._is_none(dtype) and self_dtype is not None:
         dtype = self_dtype
     return empty(g, sizes, dtype, layout, device, pin_memory)
 
@@ -3867,7 +3867,7 @@ def zeros_like(
     memory_format=None,
 ):
     shape = g.op("Shape", input)
-    if dtype is None:
+    if symbolic_helper._is_none(dtype):
         scalar_type = _type_utils.JitScalarType.from_value(
             input, _type_utils.JitScalarType.FLOAT
         )
@@ -3886,7 +3886,8 @@ def new_zeros(
     g: jit_utils.GraphContext, self, sizes, dtype, layout, device, pin_memory=False
 ):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
-    if dtype is None and self_dtype is not None:
+
+    if symbolic_helper._is_none(dtype) and self_dtype is not None:
         dtype = self_dtype
     return zeros(g, sizes, dtype, layout, device, pin_memory)
 
@@ -3929,7 +3930,7 @@ def ones_like(
     memory_format=None,
 ):
     shape = g.op("Shape", input)
-    if dtype is None:
+    if symbolic_helper._is_none(dtype):
         scalar_type = _type_utils.JitScalarType.from_value(
             input, _type_utils.JitScalarType.FLOAT
         )
@@ -3948,7 +3949,7 @@ def new_ones(
     g: jit_utils.GraphContext, self, sizes, dtype, layout, device, pin_memory=False
 ):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
-    if dtype is None and self_dtype is not None:
+    if symbolic_helper._is_none(dtype) and self_dtype is not None:
         dtype = self_dtype
     return ones(g, sizes, dtype, layout, device, pin_memory)
 
@@ -4025,7 +4026,7 @@ def new_full(
     pin_memory=False,
 ):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
-    if dtype is None and self_dtype is not None:
+    if symbolic_helper._is_none(dtype) and self_dtype is not None:
         dtype = self_dtype
     return full(g, size, fill_value, dtype, layout, device, pin_memory)
 
@@ -4399,35 +4400,34 @@ def repeat(g: jit_utils.GraphContext, self, repeats):
 def repeat_interleave(
     g: jit_utils.GraphContext, self, repeats, dim=None, output_size=None
 ):
-    input = self
+    repeats_dim = symbolic_helper._get_tensor_rank(repeats)
+    repeats_sizes = symbolic_helper._get_tensor_sizes(repeats)
+    input_sizes = symbolic_helper._get_tensor_sizes(self)
+    if repeats_dim is None:
+        raise errors.SymbolicValueError(
+            "Unsupported: ONNX export of repeat_interleave for unknown repeats rank.",
+            self,
+        )
+    if repeats_sizes is None:
+        raise errors.SymbolicValueError(
+            "Unsupported: ONNX export of repeat_interleave for unknown repeats size.",
+            self,
+        )
+    if input_sizes is None:
+        raise errors.SymbolicValueError(
+            "Unsupported: ONNX export of repeat_interleave for unknown input size.",
+            self,
+        )
+
     # if dim is None flatten
     # By default, use the flattened input array, and return a flat output array
     if symbolic_helper._is_none(dim):
-        input = symbolic_helper._reshape_helper(
+        self = symbolic_helper._reshape_helper(
             g, self, g.op("Constant", value_t=torch.tensor([-1]))
         )
         dim = torch.tensor(0, dtype=torch.int64)
     else:
         dim = symbolic_helper._maybe_get_scalar(dim)
-
-    repeats_dim = symbolic_helper._get_tensor_rank(repeats)
-    repeats_sizes = symbolic_helper._get_tensor_sizes(repeats)
-    input_sizes = symbolic_helper._get_tensor_sizes(input)
-    if repeats_dim is None:
-        raise errors.SymbolicValueError(
-            "Unsupported: ONNX export of repeat_interleave for unknown repeats rank.",
-            input,
-        )
-    if repeats_sizes is None:
-        raise errors.SymbolicValueError(
-            "Unsupported: ONNX export of repeat_interleave for unknown repeats size.",
-            input,
-        )
-    if input_sizes is None:
-        raise errors.SymbolicValueError(
-            "Unsupported: ONNX export of repeat_interleave for unknown input size.",
-            input,
-        )
 
     # Handle cases where dim is negative
     if dim < 0:
@@ -4479,7 +4479,7 @@ def repeat_interleave(
 
     final_splits = list()
     r_splits = symbolic_helper._repeat_interleave_split_helper(g, repeats, reps, 0)
-    i_splits = symbolic_helper._repeat_interleave_split_helper(g, input, reps, dim)
+    i_splits = symbolic_helper._repeat_interleave_split_helper(g, self, reps, dim)
     input_sizes[dim], input_sizes_temp[dim] = -1, 1
     for idx, r_split in enumerate(r_splits):
         i_split = unsqueeze(g, i_splits[idx], dim + 1)
@@ -4754,7 +4754,7 @@ def _generic_rnn(
                 reform_weights(g, w, hidden_size, reform_permutation) for w in weights
             )
         return tuple(
-            symbolic_helper._unsqueeze_helper(g, x, [0]) for x in (weight_ih, weight_hh)
+            symbolic_helper._unsqueeze_helper(g, x, [0]) for x in (weight_ih, weight_hh)  # type: ignore[possibly-undefined]
         )
 
     @_beartype.beartype
@@ -4766,10 +4766,10 @@ def _generic_rnn(
             weight_ih, weight_hh, bias_ih, bias_hh = (
                 reform_weights(g, w, hidden_size, reform_permutation) for w in weights
             )
-        bias_concat = g.op("Concat", bias_ih, bias_hh, axis_i=0)
+        bias_concat = g.op("Concat", bias_ih, bias_hh, axis_i=0)  # type: ignore[possibly-undefined]
         return tuple(
             symbolic_helper._unsqueeze_helper(g, x, [0])
-            for x in (weight_ih, weight_hh, bias_concat)
+            for x in (weight_ih, weight_hh, bias_concat)  # type: ignore[possibly-undefined]
         )
 
     @_beartype.beartype
@@ -4808,16 +4808,16 @@ def _generic_rnn(
 
         inputs = [prev_output, weight_ih, weight_hh, bias_concat, sequence_lens]
 
-        inputs.append(retrieve_state(h0, *state_indices))
+        inputs.append(retrieve_state(h0, *state_indices))  # type: ignore[possibly-undefined]
         if variant == "LSTM":
-            inputs.append(retrieve_state(c0, *state_indices))
+            inputs.append(retrieve_state(c0, *state_indices))  # type: ignore[possibly-undefined]
 
         extra_kwargs = {} if unidirectional else {"direction_s": "bidirectional"}
         if variant == "RNN":
             if bidirectional:
-                activation = [nonlinearity, nonlinearity]
+                activation = [nonlinearity, nonlinearity]  # type: ignore[possibly-undefined]
             else:
-                activation = [nonlinearity]
+                activation = [nonlinearity]  # type: ignore[possibly-undefined]
 
             prev_output, h_out = g.op(
                 "RNN",
@@ -4859,17 +4859,17 @@ def _generic_rnn(
         else:
             prev_output = symbolic_helper._squeeze_helper(g, prev_output, [1])
 
-        h_outs.append(h_out)
+        h_outs.append(h_out)  # type: ignore[possibly-undefined]
         if variant == "LSTM":
-            c_outs.append(c_out)
+            c_outs.append(c_out)  # type: ignore[possibly-undefined]
     if batch_first:
         # seq, batch, num_directions * hidden_size -> batch, seq, num_directions * hidden_size
         prev_output = g.op("Transpose", prev_output, perm_i=[1, 0, 2])
-    h_outs = h_out if num_layers == 1 else g.op("Concat", *h_outs, axis_i=0)
+    h_outs = h_out if num_layers == 1 else g.op("Concat", *h_outs, axis_i=0)  # type: ignore[possibly-undefined]
     if variant == "RNN" or variant == "GRU":
         return prev_output, h_outs
     elif variant == "LSTM":
-        c_outs = c_out if num_layers == 1 else g.op("Concat", *c_outs, axis_i=0)
+        c_outs = c_out if num_layers == 1 else g.op("Concat", *c_outs, axis_i=0)  # type: ignore[possibly-undefined]
         return prev_output, h_outs, c_outs
 
 
@@ -5415,10 +5415,12 @@ def _any(g: jit_utils.GraphContext, *args):
     if len(args) == 1:
         input = args[0]
         dim, keepdim = None, 0
-    # aten::any(Tensor self, int dim, bool keepdim)
+    # aten::any(Tensor self, int[]? dim, bool keepdim)
     else:
         input, dim, keepdim = args
-        dim = [symbolic_helper._parse_arg(dim, "i")]
+        # Can be int list or single int
+        dim = symbolic_helper._parse_arg(dim, "t")
+        dim = [int(d) for d in dim.view(-1)]
         keepdim = symbolic_helper._parse_arg(keepdim, "i")
     input = g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT64)
     input_sum = symbolic_helper._reducesum_helper(
@@ -5434,7 +5436,7 @@ def _all(g: jit_utils.GraphContext, *args):
     # aten::all(Tensor self)
     if len(args) == 1:
         return g.op("Not", _any(g, input))
-    # aten::all(Tensor self, int dim, bool keepdim)
+    # aten::all(Tensor self, int[]? dim, bool keepdim)
     else:
         return g.op("Not", _any(g, input, args[1], args[2]))
 
@@ -5993,7 +5995,7 @@ def linalg_vector_norm(
     dtype: torch._C.Value,
 ):
     # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.vector_norm.html
-    if dim is None:
+    if symbolic_helper._is_none(dim):
         self = symbolic_helper._reshape_helper(g, self, [-1])
         keepdim = False
 
@@ -6005,6 +6007,10 @@ def linalg_vector_norm(
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "linalg_vector_norm", 9, 11, "ord=0 not supported", self
         )
+    elif ord == 1:
+        result = _reduce_op_symbolic("ReduceL1")(g, self, dim=dim, keepdim=keepdim)
+    elif ord == 2:
+        result = _reduce_op_symbolic("ReduceL2")(g, self, dim=dim, keepdim=keepdim)
     else:
         ord_op = g.op("Constant", value_t=torch.tensor(ord, dtype=torch.float32))
         result = symbolic_helper._reducesum_helper(
@@ -6019,6 +6025,10 @@ def linalg_vector_norm(
                 ord_op,
             ),
         )
+
+    if not symbolic_helper._is_none(dtype):
+        dtype = symbolic_helper._get_const(dtype, "i", "dtype")
+        result = g.op("Cast", result, to_i=_type_utils.JitScalarType(dtype).onnx_type())  # type: ignore[arg-type]
     return result
 
 
@@ -6047,7 +6057,7 @@ def linalg_matrix_norm(
             # ord = 2/-2 unimplemented due to lack of operators
             # used to calculate singular values
             return symbolic_helper._unimplemented("linalg.matrix_norm", "ord==2", self)
-        # Wrap the dim vector to handle neagtive dim values
+        # Wrap the dim vector to handle negative dim values
         self_dim = symbolic_helper._get_tensor_rank(self)
         if self_dim is None:
             return symbolic_helper._unimplemented(
@@ -6154,13 +6164,14 @@ def meshgrid(g: jit_utils.GraphContext, tensor_list, indexing: Optional[str] = N
         raise errors.SymbolicValueError(
             f"Unsupported indexing: {indexing}", tensor_list
         )
+    unpacked_tensor_list = symbolic_helper._unpack_list(tensor_list)
     if indexing == "xy":
-        tensor_list[0], tensor_list[1] = tensor_list[1], tensor_list[0]
+        unpacked_tensor_list[:2] = unpacked_tensor_list[1::-1]
     tensors = [
         symbolic_helper._reshape_helper(
             g, t, g.op("Constant", value_t=torch.LongTensor([-1]))
         )
-        for t in symbolic_helper._unpack_list(tensor_list)
+        for t in unpacked_tensor_list
     ]
     tensors_shape = [g.op("Shape", t) for t in tensors]
     out_shape = g.op("Concat", *tensors_shape, axis_i=0)
@@ -7161,7 +7172,7 @@ def unsupported_complex_operators(g: jit_utils.GraphContext, input: _C.Value):
     # However, a few torch APIs (e.g. .tolist()) use complex operations when input is real,
     # which results in failures due to missing operators for complex numbers
 
-    # While `aten::_conj` and `aten::conj_phisical` raise exception when input is complex
+    # While `aten::_conj` and `aten::conj_physical` raise exception when input is complex
     if symbolic_helper.is_complex_value(input):
         # FIXME(justinchuby): report correct name for symbolic being executed
         return symbolic_helper._onnx_unsupported(

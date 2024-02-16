@@ -6,8 +6,7 @@
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -186,5 +185,4 @@ RegisterOperators const reg({
         aliasAnalysisFromSchema()),
 });
 } // namespace
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

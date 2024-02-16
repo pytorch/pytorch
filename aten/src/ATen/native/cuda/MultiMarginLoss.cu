@@ -4,7 +4,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/Resize.h>
 #include <c10/cuda/CUDAStream.h>
-#include <c10/cuda/CUDADeviceAssertion.h>
 #include <c10/cuda/CUDAException.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -24,14 +23,14 @@ constexpr int MULTIMARGIN_THREADS = 128;
 template <int P, typename scalar_t>
 __global__ void MultiMarginLoss_forward_kernel(
     scalar_t *output, const scalar_t *input, const int64_t *target, const scalar_t *weights,
-    int nframe, int dim, bool sizeAverage, scalar_t margin, TORCH_DSA_KERNEL_ARGS) {
+    int nframe, int dim, bool sizeAverage, scalar_t margin) {
   using acc_t = at::acc_type<scalar_t, true>;
   __shared__ acc_t buffer[MULTIMARGIN_THREADS];
   int k = blockIdx.x;
   const scalar_t *input_k = input + k*dim;
   scalar_t *output_k = output + k;
   int target_k = static_cast<int>(target[k]);
-  CUDA_KERNEL_ASSERT2(target_k >= 0 && target_k < dim && "target index is out of bounds");
+  CUDA_KERNEL_ASSERT(target_k >= 0 && target_k < dim && "target index is out of bounds");
   scalar_t input_target_k = input_k[target_k];
 
   int i_start = threadIdx.x;
@@ -200,12 +199,7 @@ Tensor& multi_margin_loss_cuda_out(
       dim3 blocks(1);
       dim3 threads(MULTIMARGIN_THREADS);
       if (p == 1) {
-        TORCH_DSA_KERNEL_LAUNCH(
-            (MultiMarginLoss_forward_kernel<1>),
-            blocks,
-            threads,
-            0,
-            stream,
+        MultiMarginLoss_forward_kernel<1> <<<blocks, threads, 0, stream>>>(
             out.mutable_data_ptr<scalar_t>(),
             input.const_data_ptr<scalar_t>(),
             target.const_data_ptr<int64_t>(),
@@ -214,12 +208,9 @@ Tensor& multi_margin_loss_cuda_out(
             input.dim() < 1 ? input.numel() : input.sizes()[0],
             reduction == at::Reduction::Mean,
             margin);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else if (p == 2) {
-        TORCH_DSA_KERNEL_LAUNCH((MultiMarginLoss_forward_kernel<2>),
-            blocks,
-            threads,
-            0,
-            stream,
+        MultiMarginLoss_forward_kernel<2> <<<blocks, threads, 0, stream>>>(
             out.mutable_data_ptr<scalar_t>(),
             input.const_data_ptr<scalar_t>(),
             target.const_data_ptr<int64_t>(),
@@ -228,6 +219,7 @@ Tensor& multi_margin_loss_cuda_out(
             input.dim() < 1 ? input.numel() : input.sizes()[0],
             reduction == at::Reduction::Mean,
             margin);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     } else {
       auto in_sizes = input.sizes();
@@ -240,11 +232,7 @@ Tensor& multi_margin_loss_cuda_out(
 
       if (reduction == at::Reduction::None) {
         if (p == 1) {
-          TORCH_DSA_KERNEL_LAUNCH(MultiMarginLoss_forward_kernel<1>,
-              blocks,
-              threads,
-              0,
-              stream,
+          MultiMarginLoss_forward_kernel<1> <<<blocks, threads, 0, stream>>>(
               out.mutable_data_ptr<scalar_t>(),
               input.const_data_ptr<scalar_t>(),
               target.const_data_ptr<int64_t>(),
@@ -252,12 +240,9 @@ Tensor& multi_margin_loss_cuda_out(
               nframe, in_sizes[1],
               false,
               margin);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
         } else if (p == 2) {
-          TORCH_DSA_KERNEL_LAUNCH(MultiMarginLoss_forward_kernel<2>,
-              blocks,
-              threads,
-              0,
-              stream,
+          MultiMarginLoss_forward_kernel<2> <<<blocks, threads, 0, stream>>>(
               out.mutable_data_ptr<scalar_t>(),
               input.const_data_ptr<scalar_t>(),
               target.const_data_ptr<int64_t>(),
@@ -265,15 +250,12 @@ Tensor& multi_margin_loss_cuda_out(
               nframe, in_sizes[1],
               false,
               margin);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
         }
       } else {
         auto tmp_output = at::empty({nframe}, input.options());
         if (p == 1) {
-          TORCH_DSA_KERNEL_LAUNCH(MultiMarginLoss_forward_kernel<1>,
-              blocks,
-              threads,
-              0,
-              stream,
+          MultiMarginLoss_forward_kernel<1> <<<blocks, threads, 0, stream>>>(
               tmp_output.mutable_data_ptr<scalar_t>(),
               input.const_data_ptr<scalar_t>(),
               target.const_data_ptr<int64_t>(),
@@ -281,12 +263,9 @@ Tensor& multi_margin_loss_cuda_out(
               nframe, in_sizes[1],
               reduction == Reduction::Mean,
               margin);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
         } else if (p == 2) {
-          TORCH_DSA_KERNEL_LAUNCH(MultiMarginLoss_forward_kernel<2>,
-              blocks,
-              threads,
-              0,
-              stream,
+          MultiMarginLoss_forward_kernel<2> <<<blocks, threads, 0, stream>>>(
               tmp_output.mutable_data_ptr<scalar_t>(),
               input.const_data_ptr<scalar_t>(),
               target.const_data_ptr<int64_t>(),
@@ -294,6 +273,7 @@ Tensor& multi_margin_loss_cuda_out(
               nframe, in_sizes[1],
               reduction == Reduction::Mean,
               margin);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
         }
         at::sum_out(out, tmp_output, IntArrayRef{});
       }

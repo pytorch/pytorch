@@ -2,6 +2,7 @@
 
 torch.overrides
 ---------------
+.. py:module:: torch.overrides
 
 This module exposes various helper functions for the ``__torch_function__``
 protocol. See :ref:`extending-torch-python` for more details on the

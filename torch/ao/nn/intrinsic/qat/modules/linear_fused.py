@@ -159,6 +159,7 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
 
     def to_float(self):
         linear = torch.nn.Linear(self.in_features, self.out_features)
+        assert self.bn.running_var is not None and self.bn.running_mean is not None
         linear.weight, linear.bias = fuse_linear_bn_weights(
             self.weight,
             self.bias,

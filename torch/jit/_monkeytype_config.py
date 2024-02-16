@@ -37,9 +37,7 @@ def is_torch_native_class(cls):
 
 
 def get_type(type):
-    """
-    Helper function which converts the given type to a torchScript acceptable format.
-    """
+    """Convert the given type to a torchScript acceptable format."""
     if isinstance(type, str):
         return type
     elif inspect.getmodule(type) == typing:
@@ -59,7 +57,8 @@ def get_type(type):
 
 
 def get_optional_of_element_type(types):
-    """
+    """Extract element type, return as `Optional[element type]` from consolidated types.
+
     Helper function to extracts the type of the element to be annotated to Optional
     from the list of consolidated types and returns `Optional[element type]`.
     TODO: To remove this check once Union support lands.
@@ -145,10 +144,7 @@ if _IS_MONKEYTYPE_INSTALLED:
             self.s = s
 
         def trace_logger(self) -> JitTypeTraceStoreLogger:
-            """
-            Returns a JitCallTraceStoreLogger that logs to the configured
-            trace store.
-            """
+            """Return a JitCallTraceStoreLogger that logs to the configured trace store."""
             return JitTypeTraceStoreLogger(self.trace_store())
 
         def trace_store(self) -> CallTraceStore:
@@ -172,12 +168,12 @@ else:
         def __init__(self):
             pass
 
-    monkeytype_trace = None  # noqa: F811
+    monkeytype_trace = None  # type: ignore[assignment]  # noqa: F811
 
 
 def jit_code_filter(code: CodeType) -> bool:
-    """
-    Custom CodeFilter for Torchscript to trace forward calls.
+    """Codefilter for Torchscript to trace forward calls.
+
     The custom CodeFilter is required while scripting a FX Traced forward calls.
     FX Traced forward calls have `code.co_filename` start with '<' which is used
     to exclude tracing of stdlib and site-packages in the default code filter.

@@ -8,8 +8,7 @@
 #include <ATen/mps/MPSStream.h>
 #include <c10/util/Logging.h>
 
-namespace at {
-namespace mps {
+namespace at::mps {
 
 void MPSHooks::initMPS() const {
   C10_LOG_API_USAGE_ONCE("aten.init.mps");
@@ -20,7 +19,16 @@ bool MPSHooks::hasMPS() const {
   return at::mps::is_available();
 }
 
-bool MPSHooks::isOnMacOS13orNewer(unsigned minor) const {
+bool MPSHooks::isOnMacOSorNewer(unsigned major, unsigned minor) const {
+  if (major >= 14) {
+    if (major > 14) {
+      TORCH_WARN("Can't check whether running on ", major, ".", minor, "+ returning one for 14.0+");
+    } else if (minor > 0) {
+      TORCH_WARN("Can't check whether running on 14.", minor, "+ returning one for 14.0+");
+    }
+    return is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS);
+  }
+  TORCH_CHECK(major == 13, "Trying to check for unexpected MacOS major ", major);
   switch (minor) {
     case 0:
       return is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_0_PLUS);
@@ -117,5 +125,4 @@ using at::RegistererMPSHooksRegistry;
 
 REGISTER_MPS_HOOKS(MPSHooks);
 
-} // namespace mps
-} // namespace at
+} // namespace at::mps

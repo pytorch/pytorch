@@ -2,8 +2,7 @@
 #include <c10/util/Exception.h>
 #include <stdexcept>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct ExceptionMessage {
   ExceptionMessage(const std::exception& e) : e_(e) {}
@@ -27,5 +26,4 @@ inline std::ostream& operator<<(
   return out;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

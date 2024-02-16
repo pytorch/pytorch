@@ -1,8 +1,9 @@
-# Owner(s): ["module: inductor"]
+# Owner(s): ["oncall: cpu inductor"]
 import contextlib
 import copy
 import itertools
 import math
+import platform
 import sys
 import unittest
 from typing import Callable
@@ -32,7 +33,12 @@ from torch._inductor.utils import timed
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import IS_MACOS, slowTest
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_MACOS,
+    parametrize,
+    slowTest,
+)
 from torch.utils._python_dispatch import TorchDispatchMode
 
 try:
@@ -55,6 +61,14 @@ run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 TestCase = test_torchinductor.TestCase
 aten = torch.ops.aten
 check_model = test_torchinductor.check_model
+
+
+@contextlib.contextmanager
+def set_num_threads(num_threads):
+    orig_num_threads = torch.get_num_threads()
+    torch.set_num_threads(num_threads)
+    yield
+    torch.set_num_threads(orig_num_threads)
 
 
 class LstmModule(torch.nn.Module):
@@ -82,6 +96,7 @@ class LstmModule(torch.nn.Module):
         return x, h
 
 
+@instantiate_parametrized_tests
 class CPUReproTests(TestCase):
     common = check_model
 
@@ -246,21 +261,89 @@ class CPUReproTests(TestCase):
                 res = self.linear(res)
                 return res
 
+        dtypes = []
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+        for dtype in dtypes:
             with torch.no_grad():
-                m = M(224, 224).bfloat16().eval()
+                m = M(224, 224).to(dtype).eval()
                 m_opt = torch.compile(m)
-                x = torch.randn(224, 224, dtype=torch.bfloat16)
+                x = torch.randn(224, 224, dtype=dtype)
                 m_opt(x)
                 self.assertEqual(m(x), m_opt(x))
+
+    @config.patch(implicit_fallbacks=True)
+    def test_multihead_attention_cpu(self):
+        def fn(
+            q,
+            k,
+            v,
+            embed_dim,
+            num_heads,
+            qkv_weight,
+            qkv_bias,
+            proj_weight,
+            proj_bias,
+            mask,
+            need_weights,
+        ):
+            return torch._native_multi_head_attention(
+                q,
+                k,
+                v,
+                embed_dim,
+                num_heads,
+                qkv_weight,
+                qkv_bias,
+                proj_weight,
+                proj_bias,
+                mask,
+                need_weights,
+            )
+
+        B = 1
+        T = 3
+        embed_dim = 6
+        num_heads = 2
+        q = torch.randn([B, T, embed_dim])
+        k = torch.randn([B, T, embed_dim])
+        v = torch.randn([B, T, embed_dim])
+        qkv_weight = torch.randn([3 * embed_dim, embed_dim])
+        qkv_bias = torch.randn([3 * embed_dim])
+        proj_weight = torch.randn([3 * embed_dim, embed_dim])
+        proj_bias = torch.randn([3 * embed_dim])
+        mask = None
+        need_weights = False
+
+        inps = [
+            q,
+            k,
+            v,
+            embed_dim,
+            num_heads,
+            qkv_weight,
+            qkv_bias,
+            proj_weight,
+            proj_bias,
+            mask,
+            need_weights,
+        ]
+        self.common(fn, inps)
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     def test_linear_packed(self):
+        dtypes = []
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
         options = itertools.product(
-            [[2, 3, 10], [2, 10], [10], [2, 0]], [3, 0], [True, False]
+            [[2, 3, 10], [2, 10], [10], [2, 0]], [3, 0], [True, False], dtypes
         )
-        for input_shape, out_dim, bias in options:
+        for input_shape, out_dim, bias, dtype in options:
             mod = torch.nn.Sequential(
                 torch.nn.Linear(input_shape[-1], out_dim, bias=bias)
             ).eval()
@@ -268,17 +351,9 @@ class CPUReproTests(TestCase):
             v = torch.randn(input_shape)
             with torch.no_grad():
                 self.common(
-                    mod,
-                    (v,),
+                    mod.to(dtype),
+                    (v.to(dtype),),
                 )
-            if torch.ops.mkldnn._is_mkldnn_bf16_supported() and len(input_shape) > 1:
-                mod = mod.to(torch.bfloat16)
-                v = v.to(torch.bfloat16)
-                with torch.no_grad():
-                    self.common(
-                        mod,
-                        (v,),
-                    )
 
     @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
@@ -319,6 +394,8 @@ class CPUReproTests(TestCase):
             dtypes = [torch.float]
             if torch.ops.mkldnn._is_mkldnn_bf16_supported():
                 dtypes.append(torch.bfloat16)
+            if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+                dtypes.append(torch.float16)
             for dtype in dtypes:
                 counters.clear()
                 num_directions = 2 if bidirectional else 1
@@ -363,7 +440,7 @@ class CPUReproTests(TestCase):
                         inps.append((h, c))
 
                     fn_opt = torch._dynamo.optimize("inductor")(mod)
-                    code = run_and_get_cpp_code(fn_opt, *inps)
+                    _, code = run_and_get_cpp_code(fn_opt, *inps)
 
                     # Check that _flat_weights are not functional_tensor, otherwise
                     # deepcopy will fail during recompilation.
@@ -385,22 +462,23 @@ class CPUReproTests(TestCase):
                         inps_var = [v_var]
                         self.assertEqual(fn_opt(*inps_var), mod(*inps_var))
 
+    @slowTest
     def test_lstm_packed(self):
         params_dict = {
             "unbatched": [True, False],
             "input_size": [1, 2],
-            "hidden_size": [5, 32],
-            "num_layers": [1, 3],
+            "hidden_size": [2],
+            "num_layers": [1, 2],
             "bidirectional": [False, True],
             "bias": [False, True],
             "empty_state": [False, True],
             "batch_first": [True, False],
             "batch_size": [1, 2],
-            "seq_len": [1, 3],
+            "seq_len": [1, 2],
         }
         self._test_lstm_packed(params_dict)
 
-    def test_lstm_packed_change_input_sizes(self):
+    def test_lstm_packed_change_input_sizes_cpu(self):
         params_dict = {
             "unbatched": [False],
             "input_size": [2],
@@ -456,7 +534,7 @@ class CPUReproTests(TestCase):
         with torch.no_grad():
             inps = [embeds, (hidden_0, hidden_1)]
             fn_opt = torch._dynamo.optimize("inductor")(mod)
-            code = run_and_get_cpp_code(fn_opt, *inps)
+            _, code = run_and_get_cpp_code(fn_opt, *inps)
             # This case is unsupported
             self.assertFalse("torch.ops.mkldnn._lstm" in code)
             self.assertEqual(fn_opt(*inps), mod(*inps))
@@ -511,6 +589,54 @@ class CPUReproTests(TestCase):
                 fn,
                 (value, mask),
             )
+
+    def test_relu_with_inf_value(self):
+        # https://github.com/pytorch/pytorch/issues/117544.
+
+        def fn(out):
+            out = torch.sinh(input=out)
+            out = torch.relu(input=out)
+            return out
+
+        x = torch.Tensor([-572373.5000, 755109.1250, 330995.5625])
+        with torch.no_grad():
+            self.common(
+                fn,
+                (x,),
+            )
+
+    def test_acosh_with_negative_large_input(self):
+        # https://github.com/pytorch/pytorch/issues/118267.
+
+        def fn(input):
+            out = torch.acosh(input)
+            return out
+
+        x = torch.Tensor(
+            [
+                [
+                    -8493.9854,
+                    431654.1250,
+                    71741.5859,
+                    608234.5000,
+                    -103814.7500,
+                    -699397.0000,
+                    -910685.8125,
+                    -832737.1875,
+                    875343.5000,
+                ]
+            ]
+        ).repeat(3, 9)
+
+        for dtype in [torch.float32, torch.bfloat16, torch.double]:
+            with torch.no_grad():
+                torch._dynamo.reset()
+                metrics.reset()
+                _x = x.to(dtype)
+                self.common(
+                    fn,
+                    (_x,),
+                )
 
     @config.patch(implicit_fallbacks=True)
     def test_repeat_interleave(self):
@@ -733,12 +859,10 @@ class CPUReproTests(TestCase):
                 self.common(fn, (x,))
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
-    @unittest.skipIf(
-        not codecache.valid_vec_isa_list(), "Does not support vectorization"
-    )
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_decomposed_dequant_relu_quant(self):
-        def fn(x, scale, zero_point, use_dequant, use_quant):
+    def _test_decomposed_dequant_relu_quant_helper(self, dtype):
+        def fn(
+            x, scale, zero_point, use_dequant, use_quant, quant_min, quant_max, dtype
+        ):
             # For quantized_decomposed.dequantize_per_tensor
             # Refer to torch/ao/quantization/fx/_decomposed.py
             if use_dequant:
@@ -750,10 +874,14 @@ class CPUReproTests(TestCase):
             # Refer to torch/ao/quantization/fx/_decomposed.py
             if use_quant:
                 inv_scale = 1.0 / scale
-                x = torch.clamp(torch.round(x * inv_scale) + zero_point, 0, 255).to(
-                    torch.uint8
-                )
+                x = torch.clamp(
+                    torch.round(x * inv_scale) + zero_point, quant_min, quant_max
+                ).to(dtype)
             return x
+
+        assert dtype in [torch.uint8, torch.int8]
+        quant_min = 0 if dtype == torch.uint8 else -128
+        quant_max = 255 if dtype == torch.uint8 else 127
 
         use_dequant_list = [False, True]
         use_quant_list = [False, True]
@@ -761,48 +889,79 @@ class CPUReproTests(TestCase):
             use_dequant_list, use_quant_list
         ):
             x = torch.clamp(
-                torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100, 0, 255
+                torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100,
+                quant_min,
+                quant_max,
             )
             if use_dequant:
-                x = x.to(torch.uint8)
+                x = x.to(dtype)
             zero_point = 100
             scale = 0.01
             with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
                 metrics.reset()
-                self.common(fn, (x, scale, zero_point, use_dequant, use_quant))
+                self.common(
+                    fn,
+                    (
+                        x,
+                        scale,
+                        zero_point,
+                        use_dequant,
+                        use_quant,
+                        quant_min,
+                        quant_max,
+                        dtype,
+                    ),
+                )
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_dequant_quant_lowering(self):
-        def fn(x, scale, zero_point, use_dequant, use_quant):
+    def test_decomposed_dequant_relu_quant_uint8(self):
+        self._test_decomposed_dequant_relu_quant_helper(torch.uint8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_decomposed_dequant_relu_quant_int8(self):
+        self._test_decomposed_dequant_relu_quant_helper(torch.int8)
+
+    def _test_dequant_quant_lowering_helper(self, dtype):
+        def fn(
+            x, scale, zero_point, use_dequant, use_quant, quant_min, quant_max, dtype
+        ):
             if use_dequant:
                 x = torch.ops.quantized_decomposed.dequantize_per_tensor(
-                    x, scale, zero_point, 0, 255, torch.uint8
+                    x, scale, zero_point, quant_min, quant_max, dtype
                 )
 
             x = torch.relu(x)
 
             if use_quant:
                 x = torch.ops.quantized_decomposed.quantize_per_tensor(
-                    x, scale, zero_point, 0, 255, torch.uint8
+                    x, scale, zero_point, quant_min, quant_max, dtype
                 )
             return x
 
         use_dequant_list = [False, True]
         use_quant_list = [False, True]
         use_tensor_overload_list = [False, True]
+
+        assert dtype in [torch.uint8, torch.int8]
+        quant_min = 0 if dtype == torch.uint8 else -128
+        quant_max = 255 if dtype == torch.uint8 else 127
+
         for use_dequant, use_quant, use_tensor_overload in itertools.product(
             use_dequant_list, use_quant_list, use_tensor_overload_list
         ):
             x = torch.clamp(
-                torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100, 0, 255
+                torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100,
+                quant_min,
+                quant_max,
             )
             if use_dequant:
-                x = x.to(torch.uint8)
+                x = x.to(dtype)
             zero_point = 100
             scale = 0.01
             if use_tensor_overload:
@@ -811,17 +970,37 @@ class CPUReproTests(TestCase):
             with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
                 metrics.reset()
-                self.common(fn, (x, scale, zero_point, use_dequant, use_quant))
+                self.common(
+                    fn,
+                    (
+                        x,
+                        scale,
+                        zero_point,
+                        use_dequant,
+                        use_quant,
+                        quant_min,
+                        quant_max,
+                        dtype,
+                    ),
+                )
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_dequant_maxpool2d_lowering(self):
-        def fn(x, scale, zero_point):
+    def test_dequant_quant_lowering_uint8(self):
+        self._test_dequant_quant_lowering_helper(torch.uint8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_dequant_quant_lowering_int8(self):
+        self._test_dequant_quant_lowering_helper(torch.int8)
+
+    def _test_dequant_maxpool2d_lowering_helper(self, dtype):
+        def fn(x, scale, zero_point, quant_min, quant_max, dtype):
             x = torch.ops.quantized_decomposed.dequantize_per_tensor(
-                x, scale, zero_point, 0, 255, torch.uint8
+                x, scale, zero_point, quant_min, quant_max, dtype
             )
             max_pool2d_with_indices_default = (
                 torch.ops.aten.max_pool2d_with_indices.default(
@@ -830,13 +1009,19 @@ class CPUReproTests(TestCase):
             )
             return max_pool2d_with_indices_default
 
+        assert dtype in [torch.uint8, torch.int8]
+        quant_min = 0 if dtype == torch.uint8 else -128
+        quant_max = 255 if dtype == torch.uint8 else 127
+
         use_tensor_overload_list = [False, True]
         for use_tensor_overload in use_tensor_overload_list:
             x = (
                 torch.clamp(
-                    torch.randn((3, 16, 8, 8), dtype=torch.float32) * 100, 0, 255
+                    torch.randn((3, 16, 8, 8), dtype=torch.float32) * 100,
+                    quant_min,
+                    quant_max,
                 )
-                .to(torch.uint8)
+                .to(dtype)
                 .contiguous(memory_format=torch.channels_last)
             )
             zero_point = 100
@@ -847,14 +1032,22 @@ class CPUReproTests(TestCase):
             with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
                 metrics.reset()
-                self.common(fn, (x, scale, zero_point))
+                self.common(fn, (x, scale, zero_point, quant_min, quant_max, dtype))
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_tile2d_load_decomposed_dequant_add_relu_quant(self):
+    def test_dequant_maxpool2d_lowering_uint8(self):
+        self._test_dequant_maxpool2d_lowering_helper(torch.uint8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_dequant_maxpool2d_lowering_int8(self):
+        self._test_dequant_maxpool2d_lowering_helper(torch.int8)
+
+    def _test_tile2d_load_decomposed_dequant_add_relu_quant_helper(self, dtype):
         def fn(
             x,
             scale,
@@ -867,40 +1060,52 @@ class CPUReproTests(TestCase):
             use_dequant,
             use_dequant2,
             use_quant,
+            quant_min,
+            quant_max,
+            dtype,
         ):
             if use_dequant:
                 x = torch.ops.quantized_decomposed.dequantize_per_tensor(
-                    x, scale, zero_point, 0, 255, torch.uint8
+                    x, scale, zero_point, quant_min, quant_max, dtype
                 )
             if use_dequant2:
                 x2 = torch.ops.quantized_decomposed.dequantize_per_tensor(
-                    x2, scale2, zero_point2, 0, 255, torch.uint8
+                    x2, scale2, zero_point2, quant_min, quant_max, dtype
                 )
             temp = x + x2
             y = torch.relu(temp)
 
             if use_quant:
                 y = torch.ops.quantized_decomposed.quantize_per_tensor(
-                    y, output_scale, output_zero_point, 0, 255, torch.uint8
+                    y, output_scale, output_zero_point, quant_min, quant_max, dtype
                 )
             return y.contiguous()
+
+        assert dtype in [torch.uint8, torch.int8]
+        quant_min = 0 if dtype == torch.uint8 else -128
+        quant_max = 255 if dtype == torch.uint8 else 127
 
         use_dequant_list = [False, True]
         use_dequant_list2 = [False, True]
         use_quant_list = [False, True]
+
         for use_dequant, use_dequant2, use_quant in itertools.product(
             use_dequant_list, use_dequant_list2, use_quant_list
         ):
             x = torch.clamp(
-                torch.randn((1, 1024, 14, 14), dtype=torch.float32) * 100, 0, 255
+                torch.randn((1, 1024, 14, 14), dtype=torch.float32) * 100,
+                quant_min,
+                quant_max,
             ).contiguous(memory_format=torch.channels_last)
             x2 = torch.clamp(
-                torch.randn((1, 1024, 14, 14), dtype=torch.float32) * 100, 0, 255
+                torch.randn((1, 1024, 14, 14), dtype=torch.float32) * 100,
+                quant_min,
+                quant_max,
             ).contiguous(memory_format=torch.channels_last)
             if use_dequant:
-                x = x.to(torch.uint8).contiguous(memory_format=torch.channels_last)
+                x = x.to(dtype).contiguous(memory_format=torch.channels_last)
             if use_dequant2:
-                x2 = x2.to(torch.uint8).contiguous(memory_format=torch.channels_last)
+                x2 = x2.to(dtype).contiguous(memory_format=torch.channels_last)
             zero_point = 1
             scale = 0.01
             zero_point2 = 2
@@ -924,6 +1129,9 @@ class CPUReproTests(TestCase):
                         use_dequant,
                         use_dequant2,
                         use_quant,
+                        quant_min,
+                        quant_max,
+                        dtype,
                     ),
                 )
                 assert metrics.generated_cpp_vec_kernel_count == 2
@@ -931,18 +1139,143 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_tile2d_store_channel_shuffle_cl_quant_output(self):
-        def channel_shuffle(x, groups, output_scale, output_zero_point):
+    def test_tile2d_load_decomposed_dequant_add_relu_quant_uint8(self):
+        self._test_tile2d_load_decomposed_dequant_add_relu_quant_helper(torch.uint8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_tile2d_load_decomposed_dequant_add_relu_quant_int8(self):
+        self._test_tile2d_load_decomposed_dequant_add_relu_quant_helper(torch.int8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def _test_per_tensor_fake_quant_helper(self, dtype):
+        def fn(input, scales, zero_points, quant_min, quant_max, dtype):
+            input = torch.ops.quantized_decomposed.quantize_per_tensor(
+                input, scales, zero_points, quant_min, quant_max, dtype
+            )
+            input = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                input, scales, zero_points, quant_min, quant_max, dtype
+            )
+            return input
+
+        use_tensor_overload_list = [False, True]
+        for use_tensor_overload in use_tensor_overload_list:
+            assert dtype in [torch.uint8, torch.int8]
+            quant_min = 0 if dtype == torch.uint8 else -128
+            quant_max = 255 if dtype == torch.uint8 else 127
+            x = torch.clamp(
+                torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100,
+                quant_min,
+                quant_max,
+            )
+            zero_point = 100
+            scale = 0.01
+            if use_tensor_overload:
+                zero_point = torch.tensor(zero_point, dtype=torch.int64)
+                scale = torch.tensor(scale)
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(fn, (x, scale, zero_point, quant_min, quant_max, dtype))
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_per_tensor_fake_quant_uint8(self):
+        self._test_per_tensor_fake_quant_helper(torch.uint8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_per_tensor_fake_quant_int8(self):
+        self._test_per_tensor_fake_quant_helper(torch.int8)
+
+    def _test_non_contiguous_load_buf_quant_helper(self, dtype):
+        def fn(
+            x1,
+            x2,
+            groups,
+            quant_min,
+            quant_max,
+            dtype,
+        ):
+            x = torch.cat((x1, x2), dim=1)
+            batchsize, num_channels, height, width = x.size()
+            channels_per_group = num_channels // groups
+            x = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                x, 1.0, 0, quant_min, quant_max, dtype
+            )
+            x = x.view(batchsize, groups, channels_per_group, height, width)
+            x = torch.ops.quantized_decomposed.quantize_per_tensor(
+                x, 1.0, 0, quant_min, quant_max, dtype
+            )
+            x = torch.ops.quantized_decomposed.dequantize_per_tensor(
+                x, 1.0, 0, quant_min, quant_max, dtype
+            )
+            x = torch.transpose(x, 1, 2).contiguous()
+            x = x.view(batchsize, num_channels, height, width)
+            return x
+
+        assert dtype in [torch.uint8, torch.int8]
+        quant_min = 0 if dtype == torch.uint8 else -128
+        quant_max = 255 if dtype == torch.uint8 else 127
+
+        x = torch.randint(0, 8, (1, 116, 28, 28), dtype=dtype).contiguous(
+            memory_format=torch.channels_last
+        )
+        x2 = torch.randint(0, 8, (1, 116, 28, 28), dtype=dtype).contiguous(
+            memory_format=torch.channels_last
+        )
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(
+                fn,
+                (
+                    x,
+                    x2,
+                    2,
+                    quant_min,
+                    quant_max,
+                    dtype,
+                ),
+            )
+            assert metrics.generated_cpp_vec_kernel_count == 2
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_non_contiguous_load_buf_quant_uint8(self):
+        self._test_non_contiguous_load_buf_quant_helper(torch.uint8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_non_contiguous_load_buf_quant_int8(self):
+        self._test_non_contiguous_load_buf_quant_helper(torch.int8)
+
+    def _test_tile2d_store_channel_shuffle_cl_quant_output_helper(self, dtype):
+        def channel_shuffle(
+            x, groups, output_scale, output_zero_point, quant_min, quant_max, dtype
+        ):
             batchsize, num_channels, height, width = x.size()
             channels_per_group = num_channels // groups
             x = x.view(batchsize, groups, channels_per_group, height, width)
             x = torch.transpose(x, 1, 2).contiguous()
             x = x.view(batchsize, -1, height, width)
             x = torch.ops.quantized_decomposed.quantize_per_tensor(
-                x, output_scale, output_zero_point, 0, 255, torch.uint8
+                x, output_scale, output_zero_point, quant_min, quant_max, dtype
             )
             return x.contiguous(memory_format=torch.channels_last)
+
+        assert dtype in [torch.uint8, torch.int8]
+        quant_min = 0 if dtype == torch.uint8 else -128
+        quant_max = 255 if dtype == torch.uint8 else 127
 
         with config.patch({"cpp.simdlen": None}):
             torch._dynamo.reset()
@@ -950,35 +1283,63 @@ class CPUReproTests(TestCase):
             x = torch.randn(64, 58, 28, 28)
             output_zero_point = 3
             output_scale = 0.03
-            self.common(channel_shuffle, (x, 2, output_scale, output_zero_point))
+            self.common(
+                channel_shuffle,
+                (x, 2, output_scale, output_zero_point, quant_min, quant_max, dtype),
+            )
             assert metrics.generated_cpp_vec_kernel_count == 2
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_dequant_relu_quant_dequant_relu_quant_lowering(self):
-        def fn(x, scale, zero_point, scale2, zero_point2, scale3, zero_point3):
+    def test_tile2d_store_channel_shuffle_cl_quant_output_uint8(self):
+        self._test_tile2d_store_channel_shuffle_cl_quant_output_helper(torch.uint8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_tile2d_store_channel_shuffle_cl_quant_output_int8(self):
+        self._test_tile2d_store_channel_shuffle_cl_quant_output_helper(torch.int8)
+
+    def _test_dequant_relu_quant_dequant_relu_quant_lowering_helper(self, dtype):
+        def fn(
+            x,
+            scale,
+            zero_point,
+            scale2,
+            zero_point2,
+            scale3,
+            zero_point3,
+            quant_min,
+            quant_max,
+            dtype,
+        ):
             x = torch.ops.quantized_decomposed.dequantize_per_tensor(
-                x, scale, zero_point, 0, 255, torch.uint8
+                x, scale, zero_point, quant_min, quant_max, dtype
             )
             x = torch.relu(x)
             x = torch.ops.quantized_decomposed.quantize_per_tensor(
-                x, scale2, zero_point2, 0, 255, torch.uint8
+                x, scale2, zero_point2, quant_min, quant_max, dtype
             )
             x = torch.ops.quantized_decomposed.dequantize_per_tensor(
-                x, scale2, zero_point2, 0, 255, torch.uint8
+                x, scale2, zero_point2, quant_min, quant_max, dtype
             )
             x = torch.relu(x)
             x = torch.ops.quantized_decomposed.quantize_per_tensor(
-                x, scale3, zero_point3, 0, 255, torch.uint8
+                x, scale3, zero_point3, quant_min, quant_max, dtype
             )
             return x
 
+        assert dtype in [torch.uint8, torch.int8]
+        quant_min = 0 if dtype == torch.uint8 else -128
+        quant_max = 255 if dtype == torch.uint8 else 127
+
         for use_tensor_overload in [True, False]:
             x = torch.clamp(
-                torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100, 0, 255
-            ).to(torch.uint8)
+                torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100,
+                quant_min,
+                quant_max,
+            ).to(dtype)
             zero_point_list = [100, 101, 102]
             scale_list = [0.01, 0.02, 0.03]
             if use_tensor_overload:
@@ -994,11 +1355,34 @@ class CPUReproTests(TestCase):
                 metrics.reset()
                 self.common(
                     fn,
-                    (x, scale, zero_point, scale2, zero_point2, scale3, zero_point3),
+                    (
+                        x,
+                        scale,
+                        zero_point,
+                        scale2,
+                        zero_point2,
+                        scale3,
+                        zero_point3,
+                        quant_min,
+                        quant_max,
+                        dtype,
+                    ),
                     rtol=1e-2,
                     atol=1e-2,
                 )
                 assert metrics.generated_cpp_vec_kernel_count == 1
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_dequant_relu_quant_dequant_relu_quant_lowering_uint8(self):
+        self._test_dequant_relu_quant_dequant_relu_quant_lowering_helper(torch.uint8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_dequant_relu_quant_dequant_relu_quant_lowering_int8(self):
+        self._test_dequant_relu_quant_dequant_relu_quant_lowering_helper(torch.int8)
 
     def test_inplace_add_alpha(self):
         def fn(x, y):
@@ -1038,13 +1422,6 @@ class CPUReproTests(TestCase):
         @torch._dynamo.optimize("inductor")
         def fn(x1, x2):
             return x1 + x2
-
-        @contextlib.contextmanager
-        def set_num_threads(num_threads):
-            orig_num_threads = torch.get_num_threads()
-            torch.set_num_threads(num_threads)
-            yield
-            torch.set_num_threads(orig_num_threads)
 
         x1 = torch.randn((10, 20))
         x2 = torch.randn((10, 20))
@@ -1088,7 +1465,8 @@ class CPUReproTests(TestCase):
             self.common(fn, (value,))
 
     @unittest.skipIf(
-        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        platform.machine() != "x86_64" or not codecache.valid_vec_isa_list(),
+        "Does not support vectorization or not x86_64 machine",
     )
     @patch("torch.cuda.is_available", lambda: False)
     def test_auto_simd(self):
@@ -1190,6 +1568,43 @@ class CPUReproTests(TestCase):
                 cpp_op_list.append(k)
 
         diff = [
+            "airy_ai",
+            "bessel_j0",
+            "bessel_j1",
+            "bessel_y0",
+            "bessel_y1",
+            "modified_bessel_i0",
+            "modified_bessel_i1",
+            "modified_bessel_k0",
+            "modified_bessel_k1",
+            "scaled_modified_bessel_k0",
+            "scaled_modified_bessel_k1",
+            "spherical_bessel_j0",
+            "i1",
+            "i1e",
+            "ndtr",
+            "ndtri",
+            "log_ndtr",
+            "erfcx",
+            "gammainc",
+            "gammaincc",
+            "igamma",
+            "igammac",
+            "polygamma",
+            "zeta",
+            "shifted_chebyshev_polynomial_u",
+            "chebyshev_polynomial_u",
+            "chebyshev_polynomial_t",
+            "shifted_chebyshev_polynomial_w",
+            "chebyshev_polynomial_w",
+            "shifted_chebyshev_polynomial_t",
+            "chebyshev_polynomial_v",
+            "shifted_chebyshev_polynomial_v",
+            "hermite_polynomial_he",
+            "laguerre_polynomial_l",
+            "hermite_polynomial_h",
+            "legendre_polynomial_p",
+            "constant",
             "index_expr",
             "signbit",
             "isinf",
@@ -1258,6 +1673,53 @@ class CPUReproTests(TestCase):
             ref_grad = test_args_for_ref["input"].grad
             res_grad = test_args_for_opt["input"].grad
             self.assertEqual(ref_grad, res_grad)
+
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_scatter_using_atomic_add(self):
+        def fn(a, dim, index, b):
+            return aten.scatter(a, dim, index, b, reduce="add")
+
+        inps = (
+            torch.randn(5, 29, 13),
+            2,
+            torch.tensor([[[3, 5, 7, 9]]]),
+            torch.randn(1, 1, 10),
+        )
+
+        def _internal_check(
+            _fn,
+            _inps,
+            _target_code_check=None,
+            _target_code_check_not=None,
+        ):
+            torch._dynamo.reset()
+            metrics.reset()
+            _fn_opt = torch.compile()(_fn)
+            _, code = run_and_get_cpp_code(_fn_opt, *inps)
+            if _target_code_check:
+                FileCheck().check(_target_code_check).run(code)
+            if _target_code_check_not:
+                FileCheck().check_not(_target_code_check_not).run(code)
+
+            self.assertEqual(
+                _fn(*_inps),
+                _fn_opt(*_inps),
+            )
+
+        with config.patch({"cpp.fallback_scatter_reduce_sum": False}):
+            _internal_check(fn, inps, "atomic_add")
+
+        with config.patch({"cpp.fallback_scatter_reduce_sum": True}):
+            _internal_check(fn, inps, "aten.scatter_reduce_")
+
+        if "ATen parallel backend: OpenMP" in torch.__config__.parallel_info():
+            # Fix https://github.com/pytorch/pytorch/issues/118518
+            # which fails to change thread number with native thread pool
+            with set_num_threads(1):
+                _internal_check(fn, inps, _target_code_check_not="aten.scatter_reduce_")
+
+            with config.patch({"cpp.dynamic_threads": True}), set_num_threads(1):
+                _internal_check(fn, inps, "aten.scatter_reduce_")
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -1425,7 +1887,7 @@ class CPUReproTests(TestCase):
 
             f_opt = torch.compile()(f)
 
-            code = run_and_get_cpp_code(f_opt, inps[0], inps[1])
+            _, code = run_and_get_cpp_code(f_opt, inps[0], inps[1])
             FileCheck().check_not("void kernel").run(code)
 
             self.assertEqual(
@@ -1438,7 +1900,7 @@ class CPUReproTests(TestCase):
                 return x[torch.tensor(1) :] * 2
 
             f_opt = torch.compile()(f)
-            code = run_and_get_cpp_code(f_opt, inps[0])
+            _, code = run_and_get_cpp_code(f_opt, inps[0])
             FileCheck().check_not("void kernel").run(code)
             self.assertEqual(f_opt(inps[0]), f(inps[0]))
 
@@ -1623,14 +2085,14 @@ class CPUReproTests(TestCase):
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.min - 1, f32_iinfo.min
                 )
-                self.assertFalse(vec_checker.simd_vec)
+                self.assertTrue(vec_checker.simd_vec)
 
                 vec_checker.simd_vec = True
                 set_opt_dtype(_graph)
                 InterpreterShim(_graph, submodules).run(
                     V.get_ops_handler(), i32_iinfo.max + 1, f32_iinfo.max
                 )
-                self.assertFalse(vec_checker.simd_vec)
+                self.assertTrue(vec_checker.simd_vec)
 
                 vec_checker.simd_vec = True
                 set_opt_dtype(_graph)
@@ -1689,7 +2151,7 @@ class CPUReproTests(TestCase):
             itervars = [sympy.Symbol("i"), sympy.Symbol("j"), sympy.Symbol("k")]
 
             tiling_factor = codecache.pick_vec_isa().nelements(dtype=torch.float)
-            # The moset inner loop variable is used in the index_expr
+            # The most inner loop variable is used in the index_expr
             with CppVecKernelChecker(
                 args=None, num_threads=1, tiling_factor=tiling_factor
             ) as vec_checker:
@@ -1702,7 +2164,7 @@ class CPUReproTests(TestCase):
                 vec_checker.ranges = ranges[:2]
                 submodules = {"get_index": get_index}
                 InterpreterShim(_graph, submodules).run(V.get_ops_handler())
-                self.assertFalse(vec_checker.simd_vec)
+                self.assertTrue(vec_checker.simd_vec)
 
             # Most inner loop variable irrevalant
             with CppVecKernelChecker(
@@ -1758,7 +2220,7 @@ class CPUReproTests(TestCase):
     @patch("torch.cuda.is_available", lambda: False)
     def test_maxpool2d_cpu_only(self):
         for dtype in vec_dtypes:
-            input = torch.randn(10, 32, 20, 20, dtype=dtype).to(
+            input = torch.randn(26, 32, 112, 112, dtype=dtype).to(
                 memory_format=torch.channels_last
             )
             maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
@@ -1826,6 +2288,47 @@ class CPUReproTests(TestCase):
                 metrics.reset()
                 self.common(fn, (x,))
                 assert metrics.generated_cpp_vec_kernel_count == 0
+
+    def test_argmin(self):
+        def fn(x):
+            return torch.argmin(x, -1)
+
+        for dtype in vec_dtypes:
+            x = torch.randn((10, 10), dtype=dtype)
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            assert metrics.generated_cpp_vec_kernel_count == 0
+
+    def test_argmax_argmin_with_nan_value(self):
+        def fn(x):
+            return torch.argmax(x)
+
+        def fn2(x):
+            return torch.argmin(x)
+
+        inputs = [
+            torch.Tensor([-755832.1250, 100]),
+            torch.Tensor([-755832.1250, 100, 200]),
+            torch.Tensor([100, -755832.1250]),
+            torch.Tensor([100, 200, -755832.1250]),
+        ]
+
+        for x in inputs:
+            x = x.repeat(16, 16)
+            x = torch.log1p(x)
+
+            # Test argmax
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            assert metrics.generated_cpp_vec_kernel_count == 0
+
+            # Test argmin
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn2, (x,))
+            assert metrics.generated_cpp_vec_kernel_count == 0
 
     # Currently, we enabled AVX2 and AVX512 for vectorization. If the platform is not
     # supported, the vectorization will not work and skip this test case. For ARM or
@@ -1984,7 +2487,7 @@ class CPUReproTests(TestCase):
                     m = Model().eval() if eval_mode else Model()
                     self.common(m, (x,))
                     if simdlen != 1:
-                        assert metrics.generated_cpp_vec_kernel_count == 6
+                        assert metrics.generated_cpp_vec_kernel_count == 8
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -2127,8 +2630,10 @@ class CPUReproTests(TestCase):
         metrics.reset()
         x = torch.randn(1, 32, 16, 68)
         opt_fn = torch._dynamo.optimize("inductor")(fn)
+        _, code = run_and_get_cpp_code(opt_fn, x)
         self.assertTrue(same(fn(x), opt_fn(x)))
-        assert metrics.generated_cpp_vec_kernel_count == 2
+        # def and use
+        FileCheck().check_count("cpp_fused", 2, exactly=True).run(code)
 
     def test_invalid_index_of_empty_tensor(self):
         def fn(a):
@@ -2182,6 +2687,28 @@ class CPUReproTests(TestCase):
         y = torch.randn(100, 50, 50).transpose(1, 2)
         self.common(fn, (x, y))
         assert metrics.generated_cpp_vec_kernel_count == 2
+
+    def test_transpose_mxn_16_16_bf16_fp16(self):
+        def fn(a, b):
+            c = a * b
+            return c.sum(dim=1)
+
+        for dtype in [torch.bfloat16, torch.float16]:
+            metrics.reset()
+            x = torch.randn(100, 50, 50).to(dtype)
+            y = torch.randn(100, 50, 50).to(dtype).transpose(1, 2)
+            self.common(fn, (x, y))
+            assert metrics.generated_cpp_vec_kernel_count == 2
+
+    def test_transpose_mxn_32_32_bf16_fp16(self):
+        def fn(a):
+            return a.permute(0, 2, 1).contiguous()
+
+        for dtype in [torch.bfloat16, torch.float16]:
+            metrics.reset()
+            x = torch.randn(2, 9216, 9216).to(dtype)
+            self.common(fn, (x,))
+            assert metrics.generated_cpp_vec_kernel_count == 2
 
     def test_transpose_sum2d_cpu_only(self):
         def fn(a, b):
@@ -2276,9 +2803,24 @@ class CPUReproTests(TestCase):
                 return mod(*ex, **kwargs)
 
             run = torch._dynamo.optimize(compile_fx_wrapper)(run)
-            code = run_and_get_cpp_code(run, v)
+            _, code = run_and_get_cpp_code(run, v)
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
+
+    def test_invalid_dropout_args(self):
+        class MyModel(torch.nn.Module):
+            def forward(self, x):
+                x = x * 2
+                x = torch.nn.functional.dropout(x, p=0.5)
+                x = torch.relu(x)
+                return x
+
+        example_inputs = torch.tensor([[1, 2, 3], [4, 5, 6]])
+
+        func = MyModel()
+        jit_func = torch.compile(func)
+        self.assertRaises(RuntimeError, lambda: func(example_inputs))
+        self.assertRaises(RuntimeError, lambda: jit_func(example_inputs))
 
     @config.patch(inplace_buffers=True)
     def test_in_out_buffer(self):
@@ -2288,7 +2830,7 @@ class CPUReproTests(TestCase):
 
         inps = [torch.randn(1, 2, 8, 4), torch.randn(1, 2, 8, 4)]
         fn_opt = torch._dynamo.optimize("inductor")(fn)
-        code = run_and_get_cpp_code(fn_opt, *inps)
+        _, code = run_and_get_cpp_code(fn_opt, *inps)
         self.assertTrue("in_out_ptr" in code)
         self.assertEqual(fn_opt(*inps), fn(*inps))
 
@@ -2320,6 +2862,55 @@ class CPUReproTests(TestCase):
         )
         self.assertEqual(metrics.generated_kernel_count, 1)
 
+    def test_attention_size_mismatch(self):
+        class Attention(torch.nn.Module):
+            def __init__(self, hidden_size, num_heads):
+                super().__init__()
+                self.hidden_size = hidden_size
+                self.num_heads = num_heads
+                self.head_size = hidden_size // num_heads
+                self.query = torch.nn.Linear(hidden_size, hidden_size)
+                self.key = torch.nn.Linear(hidden_size, hidden_size)
+                self.value = torch.nn.Linear(hidden_size, hidden_size)
+                self.inv_scale = torch.nn.Parameter(
+                    torch.Tensor([1 / self.head_size**0.5]), requires_grad=False
+                )
+
+            def forward(self, x):
+                query = self.query(x)
+                key = self.key(x)
+                value = self.value(x)
+                (batch_size, seq_len, hidden_size) = query.size()
+                query = query.view(
+                    batch_size, seq_len, self.num_heads, self.head_size
+                ).permute(0, 2, 1, 3)
+                key = key.view(
+                    batch_size, seq_len, self.num_heads, self.head_size
+                ).permute(0, 2, 3, 1)
+                value = value.view(
+                    batch_size, seq_len, self.num_heads, self.head_size
+                ).permute(0, 2, 1, 3)
+                attention_weights = (
+                    torch.matmul(query, key).div(self.inv_scale).softmax(dim=-1)
+                )
+                output = torch.matmul(attention_weights, value)
+                return output
+
+        torch.manual_seed(123)
+        hidden_size = 16
+        num_heads = 1
+        seq_len = 4
+        batch_size = 1
+        x = torch.randn(batch_size, seq_len, hidden_size)
+
+        func = Attention(hidden_size, num_heads).to("cpu")
+
+        with torch.no_grad():
+            res1 = func(x)
+            jit_func = torch.compile(func)
+            res2 = jit_func(x)
+        self.assertEqual(res1, res2)
+
     def test_scalar_mul_bfloat16(self):
         def f(x):
             return torch.ops.aten.mul.Tensor(x, 1.7015043497085571)
@@ -2335,6 +2926,404 @@ class CPUReproTests(TestCase):
             return x
 
         self.common(fn, ())
+
+    def test_select_tiliing_with_index_expr(self):
+        def fn(x, y):
+            x = torch.ops.aten.view.default(x, [8, 8, 8, 3136])
+            x = torch.ops.aten.permute.default(x, [0, 1, 3, 2])
+            y = torch.ops.aten.mul.Tensor(y, x)
+            return torch.ops.aten.constant_pad_nd.default(y, [0, 0, 1, 0, 0, 0], 0.0)
+
+        x = torch.randn(8, 64, 56, 56)
+        y = torch.randn(8, 8, 3136, 8)
+        self.common(fn, (x, y))
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    @patch("torch.cuda.is_available", lambda: False)
+    @config.patch(freezing=True)
+    def test_linear_with_no_default_contiguous_input(self):
+        dtypes = [
+            torch.float32,
+        ]
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+        mod = torch.nn.Sequential(torch.nn.Linear(16, 16)).eval()
+        temp = torch.randn(1, 16, 1, 1)
+        v = torch.as_strided(temp, [1, 16], [0, 1], 0)
+        self.assertTrue(v.is_contiguous())
+        for dtype in dtypes:
+            with torch.no_grad():
+                self.common(
+                    mod.to(dtype),
+                    (v.to(dtype),),
+                )
+
+    @patch("torch.cuda.is_available", lambda: False)
+    @config.patch(freezing=True)
+    def test_linear_with_reshape(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(16, 16, bias=False)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return x.view(4, 4, 4)
+
+        mod = M().eval()
+        v = torch.randn(4, 16)
+        with torch.no_grad():
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(
+                mod,
+                (v,),
+            )
+            assert metrics.generated_kernel_count == 0
+
+    @config.patch(implicit_fallbacks=True)
+    def test_aten_normal_dtype(self):
+        for dtype in [torch.float64, torch.float16, None]:
+
+            def fn():
+                return torch.normal(2, 3, (10, 10), dtype=dtype, device="cpu")
+
+            self.assertEqual(
+                torch.compile(fn, backend="aot_eager_decomp_partition")().dtype,
+                dtype if dtype else torch.float32,
+            )
+            self.assertEqual(
+                torch.compile(fn, backend="inductor")().dtype,
+                dtype if dtype else torch.float32,
+            )
+
+    def test_group_norm_vec(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.group_norm = torch.nn.GroupNorm(32, 32)
+
+            def forward(self, x):
+                return self.group_norm(x)
+
+        metrics.reset()
+        mod = M().eval()
+        x = torch.randn(2, 32, 32, 32)
+        with torch.no_grad():
+            self.common(mod, (x,))
+            # 2 generated kernels (one for var_mean, the other for result)
+            assert metrics.generated_cpp_vec_kernel_count == 2
+
+    def test_int_div_vec(self):
+        def fn(x, y, mode):
+            return torch.div(x, y, rounding_mode=mode)
+
+        x = torch.randint(1, 100, (32, 32))
+        y = torch.randint(1, 100, (32, 32))
+        for mode in [None, "trunc", "floor"]:
+            with torch.no_grad():
+                metrics.reset()
+                self.common(fn, (x, y, mode))
+                assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_uint8_add(self):
+        # https://github.com/pytorch/pytorch/issues/113016
+        def fn(x, y):
+            return torch.add(x, y).neg().to(torch.int32)
+
+        x = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
+        y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
+        self.common(fn, (x, y))
+
+    def test_uint8_sub(self):
+        # https://github.com/pytorch/pytorch/issues/113016
+        def fn(x, y):
+            return torch.sub(x, y).neg().to(torch.int32)
+
+        x = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
+        y = torch.randint(0, 255, (3, 3), dtype=torch.uint8)
+        self.common(fn, (x, y))
+
+    def test_non_contiguous_reduction_store(self):
+        # https://github.com/pytorch/pytorch/issues/113018
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(39, 1, kernel_size=(1, 17), stride=(2, 2))
+
+            def forward(self, x):
+                return self.conv(x.max(3).values)
+
+        m = M()
+        x = torch.randn(1, 39, 1, 18, 17)
+        self.common(m, (x,))
+
+    def test_embedding_vec(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(64, 128)
+
+            def forward(self, idx, x):
+                return self.emb(idx) + x
+
+        idx = torch.randint(0, 64, (4, 32))
+        x = torch.randn(4, 32, 128)
+        m = M().eval()
+        with torch.no_grad():
+            metrics.reset()
+            self.common(m, (idx, x))
+            assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_embedding_vec_bf16(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(64, 128)
+
+            def forward(self, idx, x):
+                return self.emb(idx)
+
+        idx = torch.randint(0, 64, (4, 32))
+        x = torch.randn(4, 32, 128).to(torch.bfloat16)
+        m = M().eval()
+        with torch.no_grad():
+            metrics.reset()
+            self.common(m, (idx, x))
+            assert metrics.generated_cpp_vec_kernel_count == 1
+
+        # we are doing direct load/store, make sure we do not generate
+        # redundant type casts
+        m_opt = torch.compile(m)
+        _, code = run_and_get_cpp_code(m_opt, idx, x)
+        self.assertTrue("Vectorized" in code)
+        self.assertTrue("cvt_lowp_fp_to_fp32" not in code)
+        self.assertTrue("cvt_fp32_to_lowp_fp" not in code)
+
+    def test_concat_inner_vec(self):
+        def fn(x, y):
+            return F.relu(torch.cat([x, y], dim=1))
+
+        x = torch.randn(32, 35)
+        y = torch.randn(32, 120)
+        metrics.reset()
+        self.common(fn, (x, y))
+        assert metrics.generated_cpp_vec_kernel_count == 3
+
+    def test_expr_vec_non_contiguous(self):
+        def fn(x):
+            # the pattern from sebotnet33ts_256
+            y = torch.nn.functional.pad(x, (0, 31)).reshape(-1, 33, 63)
+            y = y[:, :32, 31:].reshape(4, 32, 1, 32, 32).expand(-1, -1, 32, -1, -1)
+            y = y.permute(0, 3, 1, 4, 2).clone(memory_format=torch.contiguous_format)
+            y = y.view(4, 1024, 1024)
+            return y.softmax(dim=-1)
+
+        x = torch.randn(128, 2048)
+        opt_fn = torch.compile(fn)
+        metrics.reset()
+        _, code = run_and_get_cpp_code(opt_fn, x)
+        self.assertTrue(same(fn(x), opt_fn(x)))
+        # 4 kernels for max, exp, sum and div
+        assert metrics.generated_cpp_vec_kernel_count == 4
+        FileCheck().check_count(
+            "Vectorized<int>::loadu(tmpbuf.data())", 0, exactly=True
+        ).run(code)
+
+    def test_vec_contiguous_ModularIndexing(self):
+        # https://github.com/pytorch/pytorch/issues/114488
+        class M(torch.nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.norm = torch.nn.LayerNorm(dim * 4)
+
+            def forward(self, x):
+                # the pattern from swin_base_patch4_window7_224
+                B, H, W, C = x.shape
+                x = (
+                    x.reshape(B, H // 2, 2, W // 2, 2, C)
+                    .permute(0, 1, 3, 4, 2, 5)
+                    .flatten(3)
+                )
+                x = self.norm(x)
+                return x
+
+        x = torch.randn(1, 56, 56, 128)
+        m = M(128)
+        opt_m = torch.compile(m)
+        with torch.no_grad():
+            metrics.reset()
+            _, code = run_and_get_cpp_code(opt_m, x)
+            self.assertTrue(same(m(x), opt_m(x)))
+            # Two kernels: one for reduction, one pointwises
+            assert metrics.generated_cpp_vec_kernel_count == 2
+            FileCheck().check_count(
+                "Vectorized<float>::loadu(tmpbuf.data())", 0, exactly=True
+            ).run(code)
+
+    @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float))
+    @parametrize("shape", ("15,3,13", "4,2048,4096"))
+    def test_fp8_cast(self, dtype: torch.dtype, shape: str):
+        def fp8_cast(x):
+            y0 = x.to(dtype=torch.float8_e4m3fn).to(dtype)
+            y1 = x.to(dtype=torch.float8_e5m2).to(dtype)
+            return y0, y1
+
+        shape = [int(dim) for dim in shape.split(",")]
+        x = torch.rand(*shape, device="cpu", dtype=dtype)
+        self.common(fp8_cast, (x,))
+
+    def test_logical_op_store_to_lowp_data_dtype(self):
+        # https://github.com/pytorch/pytorch/issues/117624
+        # https://github.com/pytorch/pytorch/issues/117627
+        def fn(out1, out2, input, other):
+            o1 = torch.logical_or(out=out1, input=input, other=other)
+            o2 = torch.logical_xor(out=out2, input=input, other=other)
+            return o1, o2
+
+        x = torch.rand([3, 3, 2, 8, 9, 2], dtype=torch.float)
+        y = torch.rand([3, 3, 2, 8, 9, 2], dtype=torch.float)
+        for dtype in _lowp_fp_dtypes:
+            o1 = torch.rand([3, 3, 2, 8, 9, 2], dtype=dtype)
+            o2 = torch.rand([3, 3, 2, 8, 9, 2], dtype=dtype)
+            with torch.no_grad():
+                self.common(fn, (o1, o2, x, y))
+
+    def test_constant_bool_vec(self):
+        def fn(x):
+            mask = torch.zeros(1, dtype=torch.bool)
+            return torch.where(mask, x, -1.0)
+
+        x = torch.rand(1000)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_symbolic_shape_scalar_value_reduction(self):
+        def fn(x, y):
+            return y + torch.ones(x).sum()
+
+        with torch.no_grad():
+            metrics.reset()
+            y = torch.randn(100)
+            self.common(fn, (100, y))
+            assert metrics.generated_cpp_vec_kernel_count == 2
+
+    def test_int32_pointwise_vec(self):
+        def fn(x):
+            return x * x
+
+        x = torch.randint(0, 100, (32, 32), dtype=torch.int32)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_int32_reduction_vec(self):
+        def fn(x):
+            return x.sum(dim=1)
+
+        x = torch.randint(0, 100, (32, 32), dtype=torch.int32)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_uint32_pointwise_vec(self):
+        def fn(x):
+            return x * x
+
+        x = torch.randint(0, 100, (32, 32), dtype=torch.uint32)
+        metrics.reset()
+        self.common(fn, (x,))
+        # TODO(jgong5): change to 1 with vectorized uint32 load
+        assert metrics.generated_cpp_vec_kernel_count == 0
+
+    def test_uint32_reduction_vec(self):
+        def fn(x):
+            return x.sum(dim=1)
+
+        x = torch.randint(0, 100, (32, 32), dtype=torch.uint32)
+        metrics.reset()
+        self.common(fn, (x,))
+        # TODO(jgong5): change to 1 with vectorized uint32/uint64 load
+        assert metrics.generated_cpp_vec_kernel_count == 0
+
+    def test_int64_pointwise_vec(self):
+        def fn(x):
+            return x * x
+
+        x = torch.randint(0, 100, (32, 32), dtype=torch.int64)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_int64_reduction_vec(self):
+        def fn(x):
+            return x.sum(dim=1)
+
+        x = torch.randint(0, 100, (32, 32), dtype=torch.int64)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_uint64_pointwise_vec(self):
+        def fn(x):
+            return x * x
+
+        x = torch.randint(0, 100, (32, 32), dtype=torch.uint64)
+        metrics.reset()
+        self.common(fn, (x,))
+        # TODO(jgong5): change to 1 with vectorized uint64 load
+        assert metrics.generated_cpp_vec_kernel_count == 0
+
+    def test_uint64_reduction_vec(self):
+        def fn(x):
+            return x.sum(dim=1)
+
+        x = torch.randint(0, 100, (32, 32), dtype=torch.uint64)
+        metrics.reset()
+        self.common(fn, (x,))
+        # TODO(jgong5): change to 1 with vectorized uint64 load
+        assert metrics.generated_cpp_vec_kernel_count == 0
+
+    def test_convert_int32_to_int64_vec(self):
+        def fn(x):
+            return x.to(torch.int64)
+
+        x = torch.randint(0, 100, (32, 32), dtype=torch.int32)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_convert_int64_to_int32_vec(self):
+        def fn(x):
+            return x.to(torch.int32)
+
+        x = torch.randint(0, 100, (32, 32), dtype=torch.int64)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_convert_fp32_to_int64_vec(self):
+        def fn(x):
+            return x.to(torch.int64)
+
+        x = torch.rand(32, 32)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_convert_int64_to_fp32_vec(self):
+        def fn(x):
+            return x.to(torch.float32)
+
+        x = torch.randint(0, 100, (32, 32), dtype=torch.int64)
+        metrics.reset()
+        self.common(fn, (x,))
+        assert metrics.generated_cpp_vec_kernel_count == 1
 
 
 if __name__ == "__main__":

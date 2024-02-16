@@ -47,6 +47,16 @@ def layer_norm(
     # layer_norm normalizes on the last D dimensions,
     # where D is the size of normalized_shape
     axis = -len(normalized_shape)
+    scalar_type = _type_utils.JitScalarType.from_value(
+        input, _type_utils.JitScalarType.FLOAT
+    )
+    dtype = scalar_type.dtype()
+    if symbolic_helper._is_none(weight):
+        weight_value = torch.ones(normalized_shape, dtype=dtype)
+        weight = g.op("Constant", value_t=weight_value)
+    if symbolic_helper._is_none(bias):
+        bias_value = torch.zeros(normalized_shape, dtype=dtype)
+        bias = g.op("Constant", value_t=bias_value)
     return g.op(
         "LayerNormalization",
         input,

@@ -1,5 +1,4 @@
 import torch
-from functools import reduce
 from .optimizer import Optimizer
 
 __all__ = ['LBFGS']
@@ -182,7 +181,9 @@ def _strong_wolfe(obj_func,
 
 
 class LBFGS(Optimizer):
-    """Implements L-BFGS algorithm, heavily inspired by `minFunc
+    """Implements L-BFGS algorithm.
+
+    Heavily inspired by `minFunc
     <https://www.cs.ubc.ca/~schmidtm/Software/minFunc.html>`_.
 
     .. warning::
@@ -199,6 +200,7 @@ class LBFGS(Optimizer):
         try reducing the history size, or use a different algorithm.
 
     Args:
+        params (iterable): iterable of parameters to optimize. Parameters must be real.
         lr (float): learning rate (default: 1)
         max_iter (int): maximal number of iterations per optimization step
             (default: 20)
@@ -242,7 +244,8 @@ class LBFGS(Optimizer):
 
     def _numel(self):
         if self._numel_cache is None:
-            self._numel_cache = reduce(lambda total, p: total + p.numel(), self._params, 0)
+            self._numel_cache = sum(2 * p.numel() if torch.is_complex(p) else p.numel() for p in self._params)
+
         return self._numel_cache
 
     def _gather_flat_grad(self):
@@ -254,12 +257,16 @@ class LBFGS(Optimizer):
                 view = p.grad.to_dense().view(-1)
             else:
                 view = p.grad.view(-1)
+            if torch.is_complex(view):
+                view = torch.view_as_real(view).view(-1)
             views.append(view)
         return torch.cat(views, 0)
 
     def _add_grad(self, step_size, update):
         offset = 0
         for p in self._params:
+            if torch.is_complex(p):
+                p = torch.view_as_real(p)
             numel = p.numel()
             # view as to avoid deprecated pointwise semantics
             p.add_(update[offset:offset + numel].view_as(p), alpha=step_size)
@@ -282,7 +289,7 @@ class LBFGS(Optimizer):
 
     @torch.no_grad()
     def step(self, closure):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable): A closure that reevaluates the model

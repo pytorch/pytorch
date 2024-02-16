@@ -18,7 +18,7 @@
 
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 static void checkLongTensor(const Tensor& tensor) {
   TORCH_CHECK(tensor.dim() == 1 && tensor.device().type() == at::kCPU && tensor.scalar_type() == at::kLong,
@@ -188,8 +188,7 @@ std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor
     }
     int64_t dec = prev_batch_size - batch_size;
     if (dec > 0) {
-      for (const auto j : c10::irange(dec)) {
-        (void)j; //Suppress unused variable warning
+      for (C10_UNUSED const auto j : c10::irange(dec)) {
         (*lengths--) = i;
       }
     }
@@ -238,4 +237,4 @@ Tensor pad_sequence(TensorList sequences, bool batch_first, double padding_value
   return out;
 }
 
-}} // namespace at::native
+} // namespace at::native

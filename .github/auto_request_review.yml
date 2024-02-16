@@ -6,14 +6,11 @@ reviewers:
       - albanD
       - miladm
       - bdhirsh
-      - voznesenskym
-      - jbschlosser
 
   per_author:
     symbolic-shapes:
       - symbolic-shapes
       - antoniojkim
-      - wconstab
       - SherlockNoMad
     Chillee:
       - ezyang

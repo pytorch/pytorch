@@ -13,6 +13,7 @@
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/utils.h>
 
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -45,7 +46,7 @@ void _foreach_tensor(
   }
 }
 
-AutogradFallbackMode kAutogradFallbackMode = AutogradFallbackMode::Nothing;
+AutogradFallbackMode kAutogradFallbackMode = AutogradFallbackMode::Warn;
 
 } // namespace
 
@@ -74,19 +75,19 @@ static void warnAutogradNotImplemented(const std::string& op_name) {
 struct WarnNotImplemented : public Node {
   WarnNotImplemented(
       std::string op_name,
-      int64_t num_outputs,
+      size_t num_outputs,
       edge_list&& next_edges)
       : Node(std::move(next_edges)),
         op_name(std::move(op_name)),
         num_outputs(num_outputs) {}
 
-  WarnNotImplemented(std::string op_name, int64_t num_outputs)
+  WarnNotImplemented(std::string op_name, size_t num_outputs)
       : op_name(std::move(op_name)), num_outputs(num_outputs) {}
 
   variable_list apply(variable_list&& inputs) override;
 
   std::string op_name;
-  int64_t num_outputs;
+  size_t num_outputs;
 };
 
 auto WarnNotImplemented::apply(variable_list&& inputs) -> variable_list {
@@ -250,7 +251,7 @@ static void autogradNotImplementedFallbackImpl(
   std::vector<bool> is_inplace_output(num_returns, false);
   bool any_is_inplace_output = false;
   std::vector<bool> is_aliased_output(num_returns, false);
-  int aliased_output_idx = -1;
+  std::optional<size_t> aliased_output_idx;
 
   for (const auto i : c10::irange(num_returns)) {
     if (schema.is_aliasing({c10::SchemaArgType::output, i})) {
@@ -259,7 +260,7 @@ static void autogradNotImplementedFallbackImpl(
         any_is_inplace_output = true;
       } else {
         TORCH_CHECK(
-            aliased_output_idx == -1,
+            !aliased_output_idx.has_value(),
             "Expected only a single output in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
             "Non-composite functions where multiple outputs are aliased with inputs aren't supported."
             "Please rewrite your function as a composite function.");
@@ -269,7 +270,7 @@ static void autogradNotImplementedFallbackImpl(
     }
   }
 
-  int aliased_input_idx = -1;
+  int64_t aliased_input_idx = -1;
   for (const auto i : c10::irange(num_arguments)) {
     if (schema.is_aliasing({c10::SchemaArgType::input, i}) &&
         !schema.is_mutable({c10::SchemaArgType::input, i})) {
@@ -278,7 +279,7 @@ static void autogradNotImplementedFallbackImpl(
           "Expected only a single input in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
           "Non-composite functions where multiple inputs are aliased with outputs aren't supported. "
           "Please rewrite your function as a composite function.");
-      aliased_input_idx = i;
+      aliased_input_idx = static_cast<int64_t>(i);
     }
   }
 
@@ -385,10 +386,10 @@ static void autogradNotImplementedFallbackImpl(
       num_returns);
   // There should be only a single base-view pair, make sure their storage is
   // aliased.
-  if (aliased_input_idx != -1 && aliased_output_idx != -1) {
+  if (aliased_input_idx != -1 && aliased_output_idx.has_value()) {
     const c10::IValue& aliased_input_iv = stack_args_copy[aliased_input_idx];
     const c10::IValue& aliased_output_iv =
-        (*stack)[stack->size() - num_returns + aliased_output_idx];
+        (*stack)[stack->size() - num_returns + *aliased_output_idx];
     TORCH_INTERNAL_ASSERT(aliased_input_iv.isTensor(), op_name);
     TORCH_INTERNAL_ASSERT(
         aliased_output_iv.isTensor() || aliased_output_iv.isTensorList(),
@@ -478,16 +479,16 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
           "non-write alias annotation (i.e., 'Tensor(a)'). "
           "Non-composite functions where multiple outputs are aliased with inputs aren't supported."
           "Please rewrite your function as a composite function.");
-      aliased_output_idx = i;
+      aliased_output_idx = static_cast<int64_t>(i);
     }
   }
 
-  int64_t aliased_input_idx = -1;
+  std::optional<size_t> aliased_input_idx;
   for (const auto i : c10::irange(num_arguments)) {
     if (schema.is_aliasing({c10::SchemaArgType::input, i}) &&
         !schema.is_mutable({c10::SchemaArgType::input, i})) {
       TORCH_CHECK(
-          aliased_input_idx == -1,
+          !aliased_input_idx.has_value(),
           "Fallback ADInplaceOrView kernel expects only a single input in the operator schema to have a "
           "non-write alias annotation (i.e., 'Tensor(a)'). "
           "Non-composite functions where multiple inputs are aliased with outputs aren't supported. "
@@ -504,12 +505,13 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
   }
   // See NOTE [ Limitations of ADInplaceOrView boxed kernel ] above
   TORCH_CHECK(
-      (aliased_input_idx == -1 && aliased_output_idx == -1) ||
-          (aliased_input_idx == 0 && aliased_output_idx == 0),
+      (!aliased_input_idx.has_value() && aliased_output_idx == -1) ||
+          (aliased_input_idx.has_value() && aliased_input_idx.value() == 0 &&
+           aliased_output_idx == 0),
       "Fallback ADInplaceOrView kernel can only create view relationships between the first "
       "input and the first output (the output can be a vector of tensors). Please change the "
       "order of your operator's parameters so that this is the case.");
-  const bool is_view = aliased_input_idx != -1;
+  const bool is_view = aliased_input_idx.has_value();
 
   {
     at::AutoDispatchBelowADInplaceOrView guard;
@@ -526,24 +528,43 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
   if (is_view) {
     c10::IValue& aliased_output_iv =
         (*stack)[stack->size() - num_returns + aliased_output_idx];
+
+    // See NOTE [ View + Inplace detection ] for more details about this logic
+    // We always need this view_func because otherwise if we do in-place
+    // on this view, we would implicitly use AsStridedBackward instead
+    // of the NotImplemented node. For the cross-dtype/non-strided
+    // cases, we would create something like this anyway
+    auto error_msg =
+        ("Mutating the view " + op_name +
+         "which does not have a derivative implemented is forbidden.");
+    auto erroring_view_func = std::make_unique<ErroringViewFunc>(error_msg);
+
+    const auto erroring_rev_view_func = [op_name = op_name](const at::Tensor&) {
+      TORCH_CHECK(
+          false,
+          "Accessing the reverse view for ",
+          op_name,
+          " which does not have a derivative implemented is forbidden.");
+      return at::Tensor();
+    };
+
     if (aliased_output_iv.isTensorList()) {
       auto aliased_output = aliased_output_iv.toTensorVector();
-      // Only allow rebasing of the history if we return a single Tensor that is
-      // why we don't have to care about the view_func logic below.
-      // See NOTE [ View + Inplace detection ] for more details about this logic
-      auto result = as_view(
-          /* base=*/aliased_input,
-          /* tensors=*/aliased_output,
-          /* is_bw_differentiable=*/true,
-          /* is_fw_differentiable=*/true,
-          /* creation_meta=*/
-          InferenceMode::is_enabled()
-              ? CreationMeta::INFERENCE_MODE
-              : (at::GradMode::is_enabled() ? CreationMeta::MULTI_OUTPUT_NODE
-                                            : CreationMeta::NO_GRAD_MODE));
-      // ^ pass in creation meta unnecessarily even if not isDifferentiableType,
-      // but we don't have that
-      //   information here anyway.
+      for (auto& sub_output : aliased_output) {
+        as_view(
+            /* base=*/aliased_input,
+            /* tensor=*/sub_output,
+            /* is_bw_differentiable=*/true,
+            /* is_fw_differentiable=*/true,
+            /* view_func=*/std::move(erroring_view_func),
+            /* rev_view_func=*/erroring_rev_view_func,
+            /* creation_meta=*/
+            InferenceMode::is_enabled()
+                ? CreationMeta::INFERENCE_MODE
+                : (at::GradMode::is_enabled() ? CreationMeta::MULTI_OUTPUT_NODE
+                                              : CreationMeta::NO_GRAD_MODE));
+      }
+      auto result = std::move(aliased_output);
       stack->at(stack->size() - num_returns + aliased_output_idx) = result;
     } else {
       TORCH_CHECK(aliased_output_iv.isTensor());
@@ -552,19 +573,8 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
           /* tensor=*/std::move(aliased_output_iv).toTensor(),
           /* is_bw_differentiable=*/true,
           /* is_fw_differentiable=*/true,
-          /* view_func=*/
-          [op_name = op_name](const at::Tensor&) {
-            // We always need this view_func because otherwise if we do in-place
-            // on this view, we would implicitly use AsStridedBackward instead
-            // of the NotImplemented node. For the cross-dtype/non-strided
-            // cases, we would create something like this anyway
-            TORCH_CHECK(
-                false,
-                "Mutating the view ",
-                op_name,
-                " which does not have a derivative implemented is forbidden.");
-            return at::Tensor();
-          },
+          /* view_func=*/std::move(erroring_view_func),
+          /* rev_view_func=*/erroring_rev_view_func,
           /* creation_meta=*/
           InferenceMode::is_enabled()
               ? CreationMeta::INFERENCE_MODE

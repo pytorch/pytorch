@@ -26,13 +26,13 @@ tools and their typical usage. For additional help see
      - Find smallest subgraph which reproduces errors for any backend
      - set environment variable ``TORCHDYNAMO_REPRO_AFTER="dynamo"``
    * - Minifier for ``TorchInductor``
-     - If the error is known to occur after `AOTAutograd`` find
-       smallest subgraph which reproduces errors during TorchInductor lowering
+     - If the error is known to occur after ``AOTAutograd`` find
+       smallest subgraph which reproduces errors during ``TorchInductor`` lowering
      - set environment variable ``TORCHDYNAMO_REPRO_AFTER="aot"``
    * - Dynamo accuracy minifier
      - Finds the smallest subgraph which reproduces an accuracy issue
        between an eager mode model and optimized model, when you
-       suspect the problem is in AOTAutograd
+       suspect the problem is in ``AOTAutograd``
      - ``TORCHDYNAMO_REPRO_AFTER="dynamo" TORCHDYNAMO_REPRO_LEVEL=4``
    * - Inductor accuracy minifier
      - Finds the smallest subgraph which reproduces an accuracy issue
@@ -76,7 +76,7 @@ the stack and will provide full stack traces.
 To determine in which component an error occurred,
 you may use info-level logging
 ``torch._logging.set_logs(dynamo = logging.INFO)`` or ``TORCH_LOGS="dynamo"``
-and look for``Step #: ...`` outputs. Logs are made at the beginning and end of
+and look for ``Step #: ...`` outputs. Logs are made at the beginning and end of
 each step, so the step that an error should correspond to is the most recently
 logged step whose end has not yet been logged. The steps correspond to the
 following parts of the stack:
@@ -171,9 +171,9 @@ As the message suggests you can set
 ``torch._dynamo.config.verbose=True`` to get a full stack trace to both
 the error in TorchDynamo and the user code. In addition to this flag,
 you can also set the ``log_level`` of TorchDynamo through
-``torch._dynamo.config.log_level``. These levels include:
+``torch._logging.set_logs(dynamo = logging.INFO)`` or ``TORCH_LOGS="dynamo"``. These levels include:
 
-- ``logging.DEBUG``: Print every instruction that is
+- ``logging.DEBUG`` or ``TORCH_LOGS="+dynamo"``: Print every instruction that is
   encountered in addition to all the log levels listed below.
 - ``logging.INFO``:
   Print each function that is compiled (original and modified bytecode)
@@ -202,7 +202,7 @@ If the error does not occur with the ``"eager"`` backend, then the
 backend compiler is the source of the error (`example
 error <https://gist.github.com/mlazos/2f13681e3cc6c43b3911f336327032de%5D>`__).
 There are `different choices <./torch.compiler.rst>`__
-for backend compilers for TorchDynamo, with TorchInductor or nvfuser
+for backend compilers for TorchDynamo, with TorchInductor
 fitting the needs of most users. This section focuses on TorchInductor
 as the motivating example, but some tools can also be used with other
 backend compilers.
@@ -274,7 +274,7 @@ Minifying TorchInductor Errors
 ------------------------------
 
 From here, let’s run the minifier to get a minimal repro. Setting the
-environment variable ``TORCHDYNAMO_REPRO_AFTER=“aot”`` (or setting
+environment variable ``TORCHDYNAMO_REPRO_AFTER="aot"`` (or setting
 ``torch._dynamo.config.repro_after="aot"`` directly) will generate a
 Python program which reduces the graph produced by AOTAutograd to the
 smallest subgraph which reproduces the error. (See below for an example
@@ -376,7 +376,7 @@ through an example.
 
 In order to run the code after TorchDynamo has traced the forward graph,
 you can use the ``TORCHDYNAMO_REPRO_AFTER`` environment variable. Running
-this program with ``TORCHDYNAMO_REPRO_AFTER=“dynamo”`` (or
+this program with ``TORCHDYNAMO_REPRO_AFTER="dynamo"`` (or
 ``torch._dynamo.config.repro_after="dynamo"``) should produce `this
 output <https://gist.github.com/mlazos/244e3d5b53667e44078e194762c0c92b>`__\ and
 the following code in ``{torch._dynamo.config.base_dir}/repro.py``.

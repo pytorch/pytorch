@@ -133,11 +133,11 @@ class AbstractTimeoutTest:
 class TimeoutTest(TestCase):
     @retry_on_connect_failures
     def test_store_based_barrier(self):
-        f = tempfile.NamedTemporaryFile()
+        f = tempfile.NamedTemporaryFile(delete=False)
         port = common.find_free_port()
 
         def thread_work(timeout, init_type, world_size, rank, error_list):
-            # we need to create a seperate store just for the store barrier test
+            # we need to create a separate store just for the store barrier test
             if init_type == "file":
                 barrier_store = dist.FileStore(f.name)
             elif init_type == "tcp":
@@ -155,7 +155,8 @@ class TimeoutTest(TestCase):
                         timeout=timeout,
                         logging_interval=timeout / 2
                     )
-            except RuntimeError as e:
+            except torch.distributed.DistStoreError as e:
+                self.assertTrue(isinstance(e, torch.distributed.DistError))
                 error_list.append(e)
 
         world_size = 4
@@ -571,7 +572,7 @@ class CommonDistributedDataParallelTest:
     @parametrize("use_reentrant", [True, False])
     def test_ddp_checkpointing_twice(self, use_reentrant):
         """
-        Checkpoitning twice fails for non-static graph with reentrant checkpoint
+        Checkpointing twice fails for non-static graph with reentrant checkpoint
         implementation, succeeds with non-reentrant checkpoint implementation.
         """
         process_group = self._get_process_group()
@@ -683,7 +684,7 @@ class CommonDistributedDataParallelTest:
     def test_ddp_checkpointing_twice_weight_sharing(self):
         """
         Checkpointing should work with static graph in the case of checkpointing
-        same layer twice and having weights shared acrosss layers.
+        same layer twice and having weights shared across layers.
         """
         process_group = self._get_process_group()
         torch.cuda.set_device(self.rank)
@@ -1248,15 +1249,15 @@ class AbstractCommTest:
 
         group = dist.new_group(ranks=[1])
         self.assertEqual(dist.get_group_rank(group, 1), 0)
-        with self.assertRaisesRegex(RuntimeError, "not part of group"):
+        with self.assertRaisesRegex(ValueError, "not part of group"):
             dist.get_group_rank(group, 0)
-        with self.assertRaisesRegex(RuntimeError, "not registered"):
+        with self.assertRaisesRegex(ValueError, "not registered"):
             dist.get_group_rank(DummyProcessGroup(self.rank, self.world_size), 0)
 
         self.assertEqual(dist.get_global_rank(group, 0), 1)
-        with self.assertRaisesRegex(RuntimeError, "not part of group"):
+        with self.assertRaisesRegex(ValueError, "not part of group"):
             dist.get_global_rank(group, 1)
-        with self.assertRaisesRegex(RuntimeError, "not registered"):
+        with self.assertRaisesRegex(ValueError, "not registered"):
             dist.get_global_rank(DummyProcessGroup(self.rank, self.world_size), 0)
 
         self.assertEqual(dist.get_process_group_ranks(group), [1])
@@ -1277,44 +1278,44 @@ class AbstractCommTest:
         tensor_list_h[1] = tensor_list_h[1].half()
 
 
-        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+        with self.assertRaisesRegex(ValueError, "tensors with different dtypes"):
             dist.all_gather(tensor_list_h, tensor)
 
-        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+        with self.assertRaisesRegex(ValueError, "tensors with different dtypes"):
             dist.all_gather(tensor_list, tensor_h)
 
-        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+        with self.assertRaisesRegex(ValueError, "tensors with different dtypes"):
             dist.all_gather_coalesced([tensor_list_h], tensor_list)
             dist.all_gather_coalesced([tensor_list], tensor_list_h)
 
-        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+        with self.assertRaisesRegex(ValueError, "tensors with different dtypes"):
             dist.all_reduce_coalesced(tensor_list_h)
 
-        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+        with self.assertRaisesRegex(ValueError, "tensors with different dtypes"):
             dist.reduce_scatter(tensor, tensor_list_h)
 
-        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+        with self.assertRaisesRegex(ValueError, "tensors with different dtypes"):
             dist.reduce_scatter(tensor_h, tensor_list)
 
-        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+        with self.assertRaisesRegex(ValueError, "tensors with different dtypes"):
             dist.all_to_all_single(tensor_h, tensor)
 
-        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+        with self.assertRaisesRegex(ValueError, "tensors with different dtypes"):
             dist.all_to_all(tensor_list_h, tensor_list)
 
-        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+        with self.assertRaisesRegex(ValueError, "tensors with different dtypes"):
             dist.all_to_all(tensor_list, tensor_list_h)
 
-        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+        with self.assertRaisesRegex(ValueError, "tensors with different dtypes"):
             dist.scatter(tensor, tensor_list_h)
 
-        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+        with self.assertRaisesRegex(ValueError, "tensors with different dtypes"):
             dist.gather(tensor_h, tensor_list)
 
-        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+        with self.assertRaisesRegex(ValueError, "tensors with different dtypes"):
             dist.gather(tensor, tensor_list_h)
 
-        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+        with self.assertRaisesRegex(ValueError, "tensors with different dtypes"):
             dist.scatter(tensor_h, tensor_list)
 
     def _test_tensor_dtype_complex(self, backend):
@@ -1506,7 +1507,7 @@ class CommTest(AbstractCommTest, MultiProcessTestCase):
 
         for mode in invalid_debug_modes:
             os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
-            with self.assertRaisesRegex(RuntimeError, "The value of TORCH_DISTRIBUTED_DEBUG must"):
+            with self.assertRaisesRegex(ValueError, "The value of TORCH_DISTRIBUTED_DEBUG must"):
                 dist.set_debug_level_from_env()
 
 
@@ -1624,7 +1625,7 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         backend_config_strings_and_expected_values = [
             (dist.Backend.GLOO, "cpu:gloo,cuda:gloo"),
             (dist.Backend.NCCL, "cuda:nccl"),
-            (dist.Backend.MPI, "cpu:mpi"),
+            (dist.Backend.MPI, "cpu:mpi,cuda:mpi"),
             (dist.Backend.UCC, "cpu:ucc,cuda:ucc"),
             (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy"),
             ("DUMMY", "cpu:dummy,cuda:dummy"),
@@ -1755,7 +1756,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
             pass
 
     def test_init_process_group_optional_backend(self):
-        with tempfile.NamedTemporaryFile() as f:
+        with tempfile.NamedTemporaryFile(delete=False) as f:
             store = dist.FileStore(f.name, self.world_size)
             # creates both gloo and nccl backend
             if dist.is_gloo_available() and dist.is_nccl_available():
@@ -1784,7 +1785,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
                 if not dist.is_ucc_available():
                     continue
 
-            with tempfile.NamedTemporaryFile() as f:
+            with tempfile.NamedTemporaryFile(delete=False) as f:
                 store = dist.FileStore(f.name, self.world_size)
                 dist.init_process_group(
                     backend=backend,

@@ -5,6 +5,7 @@
 #include <structmember.h>
 
 #include <ATen/core/GeneratorForPrivateuseone.h>
+#include <ATen/detail/XPUHooksInterface.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/THP.h>
@@ -71,7 +72,11 @@ static PyObject* THPGenerator_pynew(
     self->cdata = make_generator<MPSGeneratorImpl>();
   }
 #endif
-  else if (device.type() == at::kPrivateUse1) {
+  else if (device.type() == at::kXPU) {
+    self->cdata = at::detail::getXPUHooks().getXPUGenerator(device.index());
+  } else if (device.type() == at::kIPU) {
+    self->cdata = at::detail::getIPUHooks().newIPUGenerator(device.index());
+  } else if (device.type() == at::kPrivateUse1) {
     self->cdata = at::GetGeneratorForPrivateuse1(device.index());
   } else {
     AT_ERROR(
@@ -119,8 +124,7 @@ static PyObject* THPGenerator_setState(PyObject* _self, PyObject* _new_state) {
 }
 
 uint64_t unpack_uint64(PyObject* pyobj) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  uint64_t unsigned_obj;
+  uint64_t unsigned_obj = 0;
   try {
     // First try to interpret as unsigned long
     unsigned_obj = THPUtils_unpackUInt64(pyobj);
@@ -143,10 +147,10 @@ static PyObject* THPGenerator_manualSeed(PyObject* _self, PyObject* seed) {
   HANDLE_TH_ERRORS
   auto self = (THPGenerator*)_self;
   auto generator = self->cdata;
-  THPUtils_assert(
+  TORCH_CHECK(
       THPUtils_checkLong(seed),
       "manual_seed expected a long, "
-      "but got %s",
+      "but got ",
       THPUtils_typename(seed));
   uint64_t unsigned_seed = unpack_uint64(seed);
   // See Note [Acquire lock when using random generators]
@@ -161,10 +165,10 @@ static PyObject* THPGenerator_setOffset(PyObject* _self, PyObject* offset) {
   HANDLE_TH_ERRORS
   auto self = (THPGenerator*)_self;
   auto generator = self->cdata;
-  THPUtils_assert(
+  TORCH_CHECK(
       THPUtils_checkLong(offset),
       "manual_offset expected a long, "
-      "but got %s",
+      "but got ",
       THPUtils_typename(offset));
   uint64_t unsigned_offset = unpack_uint64(offset);
   // See Note [Acquire lock when using random generators]
@@ -223,11 +227,7 @@ static PyMethodDef THPGenerator_methods[] = {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMemberDef THPGenerator_members[] = {
-    {(char*)"_cdata",
-     T_ULONGLONG,
-     offsetof(THPGenerator, cdata),
-     READONLY,
-     nullptr},
+    {"_cdata", T_ULONGLONG, offsetof(THPGenerator, cdata), READONLY, nullptr},
     {nullptr}};
 
 PyTypeObject THPGeneratorType = {
@@ -249,6 +249,7 @@ PyTypeObject THPGeneratorType = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
+    // NOLINTNEXTLINE(misc-redundant-expression)
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
     nullptr, /* tp_doc */
     nullptr, /* tp_traverse */

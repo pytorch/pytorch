@@ -23,8 +23,7 @@
 #define NAME "sparse_binary_op_intersection_cpu"
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -133,7 +132,7 @@ void _sparse_binary_op_intersection_kernel_impl(
     Tensor& res,
     const Tensor& x_,
     const Tensor& y_,
-    const std::vector<int64_t> broadcasted_shape,
+    const std::vector<int64_t>& broadcasted_shape,
     const c10::optional<Tensor>& x_hash_opt_ = c10::nullopt,
     const c10::optional<Tensor>& y_hash_opt_ = c10::nullopt,
     const bool accumulate_matches = true,
@@ -445,7 +444,7 @@ void _sparse_binary_op_intersection_kernel_out(
       return;
     }
 
-    const auto t_hash = *t_hash_opt;
+    const auto &t_hash = *t_hash_opt;
     TORCH_INTERNAL_ASSERT(
         t_hash.dim() == 1 && t_hash.scalar_type() == kLong && t_hash.size(-1) == t._indices().size(-1),
         NAME, "(): explicit hash values need to be a 1-dim Long tensor with the ",
@@ -478,4 +477,4 @@ void _sparse_binary_op_intersection_kernel_out(
 
 } // anonymous namespace
 
-}} // at::native
+} // at::native

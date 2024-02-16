@@ -6,6 +6,7 @@ from numbers import Number
 import pytest
 
 import torch
+from torch.autograd import grad
 from torch.autograd.functional import jacobian
 from torch.distributions import Dirichlet, Independent, Normal, TransformedDistribution, constraints
 from torch.distributions.transforms import (AbsTransform, AffineTransform, ComposeTransform,
@@ -25,6 +26,8 @@ def get_transforms(cache_size):
         AbsTransform(cache_size=cache_size),
         ExpTransform(cache_size=cache_size),
         PowerTransform(exponent=2,
+                       cache_size=cache_size),
+        PowerTransform(exponent=-2,
                        cache_size=cache_size),
         PowerTransform(exponent=torch.tensor(5.).normal_(),
                        cache_size=cache_size),
@@ -252,7 +255,7 @@ base_dist1 = Dirichlet(torch.ones(4, 4))
 base_dist2 = Normal(torch.zeros(3, 4, 4), torch.ones(3, 4, 4))
 
 
-@pytest.mark.parametrize('batch_shape, event_shape, dist', [
+@pytest.mark.parametrize(('batch_shape', 'event_shape', 'dist'), [
     ((4, 4), (), base_dist0),
     ((4,), (4,), base_dist1),
     ((4, 4), (), TransformedDistribution(base_dist0, [transform0])),
@@ -418,7 +421,7 @@ def test_compose_affine(event_dims):
     if transform.domain.event_dim > 1:
         base_dist = base_dist.expand((1,) * (transform.domain.event_dim - 1))
     dist = TransformedDistribution(base_dist, transforms)
-    assert dist.support.event_dim == max(1, max(event_dims))
+    assert dist.support.event_dim == max(1, *event_dims)
 
 
 @pytest.mark.parametrize("batch_shape", [(), (6,), (5, 4)], ids=str)
@@ -493,6 +496,19 @@ def test_save_load_transform():
     stream.seek(0)
     other = torch.load(stream)
     assert torch.allclose(log_prob, other.log_prob(x))
+
+
+@pytest.mark.parametrize('transform', ALL_TRANSFORMS, ids=transform_id)
+def test_transform_sign(transform: Transform):
+    try:
+        sign = transform.sign
+    except NotImplementedError:
+        pytest.skip('Not implemented.')
+
+    x = generate_data(transform).requires_grad_()
+    y = transform(x).sum()
+    derivatives, = grad(y, [x])
+    assert torch.less(torch.as_tensor(0.), derivatives * sign).all()
 
 
 if __name__ == "__main__":

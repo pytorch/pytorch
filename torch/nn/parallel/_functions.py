@@ -112,7 +112,7 @@ class Scatter(Function):
 _streams: Optional[List[Optional[torch.Stream]]] = None
 
 def _get_stream(device: torch.device):
-    """Gets a background stream for copying between CPU and target device"""
+    """Get a background stream for copying between CPU and target device."""
     global _streams
     if device.type == "cpu":
         return None

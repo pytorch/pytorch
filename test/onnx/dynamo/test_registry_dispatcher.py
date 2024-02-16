@@ -2,7 +2,6 @@
 """Unit tests for the internal registration wrapper module."""
 from __future__ import annotations
 
-import logging
 import operator
 from typing import TypeVar, Union
 
@@ -14,7 +13,12 @@ from onnxscript import BFLOAT16, DOUBLE, FLOAT, FLOAT16  # type: ignore[import]
 from onnxscript.function_libs.torch_lib import ops  # type: ignore[import]
 from onnxscript.onnx_opset import opset15 as op  # type: ignore[import]
 from torch.onnx._internal.diagnostics import infra
-from torch.onnx._internal.fx import diagnostics, onnxfunction_dispatcher, registration
+from torch.onnx._internal.fx import (
+    analysis,
+    diagnostics,
+    onnxfunction_dispatcher,
+    registration,
+)
 from torch.testing._internal import common_utils
 
 # TODO: this can only be global. https://github.com/microsoft/onnxscript/issues/805
@@ -78,14 +82,66 @@ class TestRegistration(common_utils.TestCase):
             [test_original, test_custom],
         )
 
+    def test_unsupported_nodes_analysis_with_missing_aten_op(self):
+        # NOTE: simulate unsupported nodes
+        aten_mul_tensor = registration.OpName.from_name_parts(
+            namespace="aten", op_name="mul", overload="Tensor"
+        )
+        aten_mul_default = registration.OpName.from_name_parts(
+            namespace="aten", op_name="mul"
+        )
+        aten_add_tensor = registration.OpName.from_name_parts(
+            namespace="aten", op_name="add", overload="Tensor"
+        )
+        aten_add_default = registration.OpName.from_name_parts(
+            namespace="aten", op_name="add"
+        )
+
+        self.registry._registry.pop(aten_mul_tensor)
+        self.registry._registry.pop(aten_mul_default)
+        self.registry._registry.pop(aten_add_tensor)
+        self.registry._registry.pop(aten_add_default)
+
+        diagnostic_context = diagnostics.DiagnosticContext(
+            "torch.onnx.dynamo_export", torch.__version__
+        )
+        dispatcher = onnxfunction_dispatcher.OnnxFunctionDispatcher(
+            self.registry, diagnostic_context
+        )
+
+        graph: torch.fx.Graph = torch.fx.Graph()
+        x: torch.fx.Node = graph.create_node("placeholder", "x")
+        x.meta["val"] = torch.tensor(3.0)
+        b: torch.fx.Node = graph.create_node(
+            "call_function", target=torch.ops.aten.mul.Tensor, args=(x, x)
+        )
+        c: torch.fx.Node = graph.create_node(
+            "call_function", target=torch.ops.aten.add.Tensor, args=(b, b)
+        )
+        output: torch.fx.Node = graph.output(c)
+        module = torch.fx.GraphModule(torch.nn.Module(), graph)
+
+        with self.assertRaises(infra.RuntimeErrorWithDiagnostic):
+            analysis.UnsupportedFxNodesAnalysis(
+                diagnostic_context, module, dispatcher
+            ).analyze(infra.levels.ERROR)
+
+        try:
+            analysis.UnsupportedFxNodesAnalysis(
+                diagnostic_context, module, dispatcher
+            ).analyze(infra.levels.ERROR)
+        except infra.RuntimeErrorWithDiagnostic as e:
+            self.assertIn(
+                "Unsupported FX nodes: {'call_function': ['aten.mul.Tensor', 'aten.add.Tensor']}.",
+                e.diagnostic.message,
+            )
+
 
 @common_utils.instantiate_parametrized_tests
 class TestDispatcher(common_utils.TestCase):
     def setUp(self):
         self.registry = torch.onnx.OnnxRegistry()
-        # TODO: remove this once we have a better way to do this
-        logger = logging.getLogger("TestDispatcher")
-        self.diagnostic_context = infra.DiagnosticContext(
+        self.diagnostic_context = diagnostics.DiagnosticContext(
             "torch.onnx.dynamo_export", torch.__version__
         )
         self.dispatcher = onnxfunction_dispatcher.OnnxFunctionDispatcher(
@@ -133,7 +189,7 @@ class TestDispatcher(common_utils.TestCase):
                         args=(1, 2),
                         kwargs={},
                     ),
-                    ("aten", "add", None),
+                    ("_operator", "add", None),
                 ),
                 name="get_builtin_op_name",
             ),
@@ -220,9 +276,6 @@ class TestDispatcher(common_utils.TestCase):
         )
 
         # Non-registered op
-        internal_opname_class_unsupported = registration.OpName.from_name_parts(
-            namespace="aten", op_name="made_up_node", overload=None
-        )
         unsupported_op_node = torch.fx.Node(
             graph=torch.fx.Graph(),
             name="aten::made_up_node",
@@ -246,7 +299,7 @@ class TestDispatcher(common_utils.TestCase):
                     name="aten::add.Tensor",
                     op="call_function",
                     target=torch.ops.aten.add.Tensor,  # type: ignore[attr-defined]
-                    args=(torch.tensor(3), torch.tensor(4)),
+                    args=(torch.tensor(3.0), torch.tensor(4.0)),
                     kwargs={},
                 ),
                 name="nearest_match",
@@ -257,7 +310,7 @@ class TestDispatcher(common_utils.TestCase):
                     name="aten::add.Tensor",
                     op="call_function",
                     target=torch.ops.aten.add.Tensor,  # type: ignore[attr-defined]
-                    args=(torch.tensor(3), torch.tensor(4)),
+                    args=(torch.tensor(3.0), torch.tensor(4.0)),
                     kwargs={"alpha": 1},
                 ),
                 name="perfect_match_with_kwargs",
@@ -270,11 +323,15 @@ class TestDispatcher(common_utils.TestCase):
         custom_domain = onnxscript.values.Opset(domain="custom", version=1)
 
         @onnxscript.script(custom_domain)
-        def test_custom_op(x: TCustomFloat, y: TCustomFloat) -> TCustomFloat:
+        def test_custom_op(
+            x: TCustomFloat, y: TCustomFloat, alpha: int = 1
+        ) -> TCustomFloat:
             return op.Add(x, y)
 
         @onnxscript.script(custom_domain)
-        def test_default_op(x: TCustomFloat, y: TCustomFloat) -> TCustomFloat:
+        def test_default_op(
+            x: TCustomFloat, y: TCustomFloat, alpha: int = 1
+        ) -> TCustomFloat:
             return op.Add(x, y)
 
         op_full_name = "test::test_op"
@@ -306,7 +363,65 @@ class TestDispatcher(common_utils.TestCase):
                     name="aten::add.Tensor",
                     op="call_function",
                     target=torch.ops.aten.add.Tensor,  # type: ignore[attr-defined]
-                    args=(torch.tensor(3), torch.tensor(4)),
+                    args=(torch.tensor(3.0), torch.tensor(4.0)),
+                    kwargs={"attr": None},
+                ),
+                name="perfect_match_with_ignoring_none_attribute",
+            ),
+            common_utils.subtest(
+                torch.fx.Node(
+                    graph=torch.fx.Graph(),
+                    name="aten::add.Tensor",
+                    op="call_function",
+                    target=torch.ops.aten.add.Tensor,  # type: ignore[attr-defined]
+                    args=(torch.tensor(3.0), torch.tensor(4.0)),
+                    kwargs={"unrelated": None},
+                ),
+                name="perfect_match_with_ignoring_unrelated_none_attribute",
+            ),
+        ],
+    )
+    def test_find_the_perfect_or_nearest_match_onnxfunction_ignores_attribute_with_none(
+        self, node
+    ):
+        custom_domain = onnxscript.values.Opset(domain="custom", version=1)
+
+        @onnxscript.script(custom_domain)
+        def test_op_attribute(
+            x: TCustomFloat, y: TCustomFloat, attr: int
+        ) -> TCustomFloat:
+            return op.Add(x, y)
+
+        @onnxscript.script(custom_domain)
+        def test_op(x: TCustomFloat, y: TCustomFloat) -> TCustomFloat:
+            return op.Add(x, y)
+
+        op_full_name = "test::test_op"
+
+        function_overloads = [
+            registration.ONNXFunction(test_op_attribute, op_full_name=op_full_name),
+            registration.ONNXFunction(test_op, op_full_name=op_full_name),
+        ]
+
+        symbolic_fn = self.dispatcher._find_the_perfect_or_nearest_match_onnxfunction(
+            node,
+            function_overloads,
+            node.args,
+            node.kwargs,
+            self.diagnostic_context,
+        )
+        self.assertEqual(symbolic_fn, test_op)
+
+    @common_utils.parametrize(
+        "node",
+        [
+            common_utils.subtest(
+                torch.fx.Node(
+                    graph=torch.fx.Graph(),
+                    name="aten::add.Tensor",
+                    op="call_function",
+                    target=torch.ops.aten.add.Tensor,  # type: ignore[attr-defined]
+                    args=(torch.tensor(3.0), torch.tensor(4.0)),
                     kwargs={},
                 ),
                 name="nearest_match",
@@ -317,7 +432,7 @@ class TestDispatcher(common_utils.TestCase):
                     name="aten::add.Tensor",
                     op="call_function",
                     target=torch.ops.aten.add.Tensor,  # type: ignore[attr-defined]
-                    args=(torch.tensor(3), torch.tensor(4)),
+                    args=(torch.tensor(3.0), torch.tensor(4.0)),
                     kwargs={"alpha": 1},
                 ),
                 name="perfect_match_with_kwargs",
@@ -330,15 +445,21 @@ class TestDispatcher(common_utils.TestCase):
         custom_domain = onnxscript.values.Opset(domain="custom", version=1)
 
         @onnxscript.script(custom_domain)
-        def test_second_custom_op(x: TCustomFloat, y: TCustomFloat) -> TCustomFloat:
+        def test_second_custom_op(
+            x: TCustomFloat, y: TCustomFloat, alpha: int = 1
+        ) -> TCustomFloat:
             return op.Add(x, y)
 
         @onnxscript.script(custom_domain)
-        def test_third_custom_op(x: TCustomFloat, y: TCustomFloat) -> TCustomFloat:
+        def test_third_custom_op(
+            x: TCustomFloat, y: TCustomFloat, alpha: int = 1
+        ) -> TCustomFloat:
             return op.Add(x, y)
 
         @onnxscript.script(custom_domain)
-        def test_first_custom_op(x: TCustomFloat, y: TCustomFloat) -> TCustomFloat:
+        def test_first_custom_op(
+            x: TCustomFloat, y: TCustomFloat, alpha: int = 1
+        ) -> TCustomFloat:
             return op.Add(x, y)
 
         op_full_name = "aten::add"
@@ -457,24 +578,6 @@ class TestOpSchemaWrapper(common_utils.TestCase):
             common_utils.subtest(
                 ([torch.randn(3, 4), torch.tensor(3)], {}, ops.core.aten_new_full, 2),
                 name="match_2_inputs",
-            ),
-            common_utils.subtest(
-                (
-                    [torch.randn(3, 4), torch.tensor(3)],
-                    {"dtype": 2},  # at this point, dtype should be converted to int
-                    ops.core.aten_new_full,
-                    1,
-                ),
-                name="match_2_inputs_and_mismatch_1_kwarg",
-            ),
-            common_utils.subtest(
-                (
-                    [torch.randn(3, 4), torch.tensor(3)],
-                    {},
-                    ops.core.aten_new_full_dtype,
-                    1,
-                ),
-                name="match_2_input_and_mismatch_1_kwargs_optional",
             ),
             common_utils.subtest(
                 (

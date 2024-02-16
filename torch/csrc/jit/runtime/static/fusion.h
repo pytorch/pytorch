@@ -2,8 +2,7 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 TORCH_API void fuseStaticSubgraphs(
     std::shared_ptr<Graph> graph,
@@ -13,5 +12,4 @@ TORCH_API void performTensorExprFusion(
     std::shared_ptr<Graph> graph,
     std::vector<IValue> sample_inputs);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

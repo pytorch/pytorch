@@ -17,9 +17,8 @@
 #include <ATen/ops/sigmoid.h>
 #endif
 
-namespace at {
+namespace at::meta {
 
-namespace meta {
 TORCH_META_FUNC(glu) (
     const Tensor& self, int64_t dim
 ) {
@@ -37,9 +36,9 @@ TORCH_META_FUNC(glu) (
   Tensor secondHalf = self.narrow(wrap_dim, selfSize, selfSize);
   build_borrowing_binary_op(maybe_get_output(), firstHalf, secondHalf);
 }
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(glu_stub);
@@ -153,5 +152,4 @@ Tensor glu_backward_jvp(
 }
 
 
-} // at::native
-} // at
+} // namespace at::native

@@ -1,4 +1,4 @@
-ir_version: 7
+ir_version: 8
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
@@ -34,7 +34,7 @@ graph {
     name: "Neg_4"
     op_type: "Neg"
   }
-  name: "torch_jit"
+  name: "main_graph"
   initializer {
     dims: 2
     dims: 2
@@ -76,5 +76,5 @@ graph {
   }
 }
 opset_import {
-  version: 14
+  version: 17
 }

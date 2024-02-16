@@ -9,6 +9,7 @@ Global flags for aot autograd
 """
 import os
 import sys
+from typing import TYPE_CHECKING
 
 # Converts torch rng ops to their functional philox rng equivalents. Note that
 # we functionalize only CUDA rng ops today.
@@ -33,8 +34,15 @@ cse = True
 # Restricts the amount of computation AOTAutograd can do.
 max_dist_from_bw = 3
 
+# Enable aggressive_recomputation in the min-cut algorithm in partitioners to reduce
+# memory usage with some penalty of performance. It allows more ops to be considered
+# as recomputable except random ops and compute-intensive ops.
+aggressive_recomputation = False
 
-from .._dynamo.config_utils import install_config_module
+if TYPE_CHECKING:
+    from torch.utils._config_typing import *  # noqa: F401, F403
+
+from torch.utils._config_module import install_config_module
 
 # adds patch, save_config, invalid config checks, etc
 install_config_module(sys.modules[__name__])

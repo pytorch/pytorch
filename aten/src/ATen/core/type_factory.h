@@ -22,7 +22,7 @@ struct TORCH_API TypeFactoryBase<c10::DynamicType> {
             {std::move(ty), std::forward<Args>(args)...})));
   }
   template <typename T>
-  static c10::DynamicTypePtr create(std::vector<c10::TypePtr> types) {
+  static c10::DynamicTypePtr create(const std::vector<c10::TypePtr>& types) {
     return std::make_shared<c10::DynamicType>(
         c10::DynamicTypeTrait<T>::tagValue(),
         c10::DynamicType::Arguments(types));

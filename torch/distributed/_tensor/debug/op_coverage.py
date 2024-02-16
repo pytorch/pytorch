@@ -1,8 +1,10 @@
 from operator import itemgetter
+from typing import List
 
 from functorch.compile import make_boxed_func
 
 import torch
+import torch.fx
 import torch.nn as nn
 from torch._functorch.compilers import aot_module
 from torch._inductor.decomposition import select_decomp_table
@@ -11,7 +13,7 @@ from torch.distributed._tensor import DTensor
 
 inductor_decomps = select_decomp_table()
 
-graphs = []
+graphs: List[torch.fx.GraphModule] = []
 
 
 def fwd_bwd_compiler(fx_g, _):
@@ -21,6 +23,8 @@ def fwd_bwd_compiler(fx_g, _):
 
 def get_inductor_decomp_graphs(model: nn.Module, args, kwargs):
     """
+    Obtain forward and backward graphs of a model with inductor decompositions using tracing and aot_module.
+
     Convenient util to get the fwd and bwd graphs of an arbitrary model
     with inductor decompositions. Note that this would simply do tracing
     with aot_module and don't ensure correctness. This is useful to track
@@ -45,8 +49,9 @@ def get_inductor_decomp_graphs(model: nn.Module, args, kwargs):
 
 def print_op_coverage_summary(model: nn.Module, args, kwargs, *, output_csv=False):
     """
-    Util to print the operator coverage summary of a certain model with tabulute,
-    must have tabulate module installed
+    Util to print the operator coverage summary of a certain model with tabulute.
+
+    Must have tabulate module installed.
     """
     # python module required for summary
     import csv
@@ -78,7 +83,7 @@ def print_op_coverage_summary(model: nn.Module, args, kwargs, *, output_csv=Fals
     op_infos = []
 
     for op, count in op_counts.items():
-        supported = op in DTensor._propagator.op_to_rules
+        supported = op in DTensor._op_dispatcher.sharding_propagator.op_to_rules
         op_infos.append([op, str(op._schema), count, supported])
 
     # sort the op info base on the total count index

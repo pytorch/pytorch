@@ -21,7 +21,7 @@ else:
     DimOrDims = Optional[Tuple[int]]
 
 
-__all__ = []
+__all__: List[str] = []
 
 # All masked reduction/normalization operations have the same
 # signatures. Here we introduce docstring templates that are applied
@@ -405,7 +405,7 @@ def _reduction_identity(op_name: str, input: Tensor, *args):
     The identity value of the operation is defined as the initial
     value to reduction operation that has a property ``op(op_identity,
     value) == value`` for any value in the domain of the operation.
-    Or put it another way, including or exlucing the identity value in
+    Or put it another way, including or excluding the identity value in
     a list of operands will not change the reduction result.
 
     See https://github.com/pytorch/rfcs/pull/27 for more information.
@@ -463,7 +463,7 @@ def _canonical_dim(dim: DimOrDims, ndim: int) -> Tuple[int, ...]:
     if dim is None:
         return tuple(range(ndim))
     ndim = max(ndim, 1)
-    dim_ = (dim,) if isinstance(dim, int) else dim
+    dim_ = (dim,) if isinstance(dim, (int, torch.SymInt)) else dim
     for d in dim_:
         if d in dims:
             raise RuntimeError(f"dim={d} appears multiple times in the list of dims")
@@ -1476,8 +1476,7 @@ def logsumexp(
         )
 
 
-# TODO: Add docstring; currently they're only set up for reductions and normalizations
-# @_apply_docstring_templates
+# Cannot use _apply_docstring_templates as it is only set up for reductions and normalizations
 def logaddexp(
     input: Union[Tensor, MaskedTensor],
     other: Union[Tensor, MaskedTensor],
@@ -1486,6 +1485,48 @@ def logaddexp(
     input_mask: Optional[Tensor] = None,
     other_mask: Optional[Tensor] = None,
 ) -> Tensor:
+    """logaddexp(input, other, *, dtype=None, input_mask=None, other_mask=None) -> Tensor
+
+Returns logaddexp of all the elements in the :attr:`input` and the :attr:`other`
+tensor. The :attr:`input` elements are masked out according to the boolean tensor
+:attr:`input_mask` and the attr:`other` elements are masked out according to the boolean tensor
+:attr:`other_mask`.
+
+The shapes of a mask tensor and the tensor to be masked
+don't need to match, but they must be :ref:`broadcastable
+<broadcasting-semantics>` and the dimensionality of the mask
+tensor must not be greater than of the tensor to be masked.
+
+Args:
+    input (Tensor): the input tensor
+    other (Tensor): the second input tensor
+
+Keyword args:
+    dtype (:class:`torch.dtype`, optional): the desired data type
+      of returned tensor.  If specified, the output tensor is
+      casted to :attr:`dtype` after the operation is
+      performed. Default: None.
+    input_mask (:class:`torch.Tensor`, optional): the boolean tensor
+      containing the binary mask of validity of :attr:`input` tensor elements.
+      Default: None that is equivalent to ``torch.ones(input.shape, dtype=torch.bool)``.
+    other_mask (:class:`torch.Tensor`, optional): the boolean tensor
+      containing the binary mask of validity of :attr:`other` tensor elements.
+      Default: None that is equivalent to ``torch.ones(other.shape, dtype=torch.bool)``.
+
+Example::
+
+    >>> input = torch.tensor([-100.0, -200, -300])
+    >>> input
+    tensor([-100., -200., -300.])
+    >>> other = torch.tensor([-1.0, -2, -3])
+    >>> other
+    tensor([-1., -2., -3.])
+    >>> mask = torch.tensor([True, False, True])
+    >>> mask
+    tensor([ True, False,  True])
+    >>> torch.masked._ops.logaddexp(input, other, input_mask=mask, other_mask=mask)
+    tensor([-1., -inf, -3.])
+"""
     if dtype is None:
         dtype = input.dtype
     if input.layout == torch.strided and other.layout == torch.strided:
@@ -1586,7 +1627,7 @@ def _std_var(
             total = sum(x * x.conj(), dim, keepdim=keepdim, dtype=compute_dtype)
         else:
             total = sum(
-                x * x.conj(), dim, keepdim=keepdim, dtype=compute_dtype, mask=inmask
+                x * x.conj(), dim, keepdim=keepdim, dtype=compute_dtype, mask=inmask  # type: ignore[possibly-undefined]
             )
         if not keepdim:
             count = count.reshape(total.shape)

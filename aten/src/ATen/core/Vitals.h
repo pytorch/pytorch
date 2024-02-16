@@ -41,6 +41,8 @@ struct TORCH_API TorchVital {
   std::unordered_map<std::string, TorchVitalAttr> attrs;
 
   explicit TorchVital(std::string n) : name(std::move(n)) {}
+  TorchVital(const TorchVital&) = default;
+  TorchVital(TorchVital&&) = default;
   TorchVital() = delete;
 
   TorchVitalAttr& create(const std::string& attr);

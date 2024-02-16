@@ -2,13 +2,14 @@ r'''
 **This file is EXPERIMENTAL and is mostly used for testing purposes! Do not
 rely on it for anything!**
 '''
-from torch.fx import Graph, GraphModule
+from torch.fx import Graph, GraphModule, Node
 from torch.fx.graph import map_arg
 from torch.fx.proxy import Proxy
 import sys
 import torch
 from torch.nn.utils import fuse_conv_bn_weights
 import operator
+from typing import Optional
 
 # can be a
 #  module type, a builtin function, or a string to match target
@@ -263,10 +264,10 @@ class Quantizer:
 
         def copy_recursive(node):
             def load_or_emit(n):
-                if n.name in env or e.name in quant_env:
+                if n.name in env or e.name in quant_env:  # noqa: F821
                     return load_arg(n, quantized=False)
                 else:
-                    return copy_recusive(n)
+                    return copy_recursive(n)
             r = env[node.name] = self.quantized_graph.node_copy(node, lambda n: load_arg(n, quantized=False))
             return r
 

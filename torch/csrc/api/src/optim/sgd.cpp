@@ -1,7 +1,6 @@
 #include <torch/optim/sgd.h>
 
 #include <torch/csrc/autograd/variable.h>
-#include <torch/nn/pimpl.h>
 #include <torch/optim/optimizer.h>
 #include <torch/optim/serialize.h>
 #include <torch/types.h>
@@ -84,14 +83,12 @@ Tensor SGD::step(LossClosure closure) {
       }
       if (momentum != 0) {
         Tensor buf;
-        auto param_state =
-            state_.find(c10::guts::to_string(p.unsafeGetTensorImpl()));
+        auto param_state = state_.find(p.unsafeGetTensorImpl());
         if (param_state == state_.end()) {
           buf = torch::clone(d_p).detach();
           auto state = std::make_unique<SGDParamState>();
           state->momentum_buffer(buf);
-          state_[c10::guts::to_string(p.unsafeGetTensorImpl())] =
-              std::move(state);
+          state_[p.unsafeGetTensorImpl()] = std::move(state);
         } else {
           buf = static_cast<SGDParamState&>(*param_state->second)
                     .momentum_buffer();
@@ -130,8 +127,7 @@ void SGD::load(serialize::InputArchive& archive) {
     for (const auto idx : c10::irange(momentum_buffers.size())) {
       auto state = std::make_unique<SGDParamState>();
       state->momentum_buffer(momentum_buffers[idx]);
-      state_[c10::guts::to_string(params[idx].unsafeGetTensorImpl())] =
-          std::move(state);
+      state_[params[idx].unsafeGetTensorImpl()] = std::move(state);
     }
   }
 }

@@ -17,58 +17,34 @@ from typing import (
     Sequence,
     Tuple,
     Type,
+    TYPE_CHECKING,
     Union,
 )
 
-import sympy
+from typing_extensions import TypeAlias
+
+
+if TYPE_CHECKING:
+    # Import the following modules during type checking to enable code intelligence features,
+    # such as auto-completion in tools like pylance, even when these modules are not explicitly
+    # imported in user code.
+
+    import sympy
 
 import torch
 from torch import sym_float, sym_int, sym_max
 
-try:
-    try:
-        from nvfuser import DataType  # type: ignore[import, attr-defined]
-    except ImportError:
-        from nvfuser._C import DataType  # type: ignore[import]
 
-    _torch_dtype_to_nvfuser_dtype_map = {
-        torch.cdouble: DataType.ComplexDouble,
-        torch.cfloat: DataType.ComplexFloat,
-        torch.double: DataType.Double,
-        torch.float: DataType.Float,
-        torch.half: DataType.Half,
-        torch.bfloat16: DataType.BFloat16,
-        torch.long: DataType.Int,
-        torch.int: DataType.Int32,
-        torch.uint8: DataType.Int32,
-        torch.bool: DataType.Bool,
-        # Python scalars
-        complex: DataType.ComplexDouble,
-        float: DataType.Double,
-        int: DataType.Int,
-        bool: DataType.Bool,
-    }
-except ImportError:
-    _torch_dtype_to_nvfuser_dtype_map = {}
-
-
-def getnvFuserDtype(dtype: Union[torch.dtype, NumberTypeType]):
-    """
-    Translates from torch.dtype to nvFuser's DataType enum
-    """
-    return _torch_dtype_to_nvfuser_dtype_map[dtype]
-
-
-ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
-StrideType = Union[List[int], Tuple[int, ...]]
-DimsType = Union[int, List[int], Tuple[int, ...]]
-DimsSequenceType = Union[List[int], Tuple[int, ...]]
+ShapeType: TypeAlias = Union[torch.Size, List[int], Tuple[int, ...]]
+StrideType: TypeAlias = Union[List[int], Tuple[int, ...]]
+DimsType: TypeAlias = Union[int, List[int], Tuple[int, ...]]
+DimsSequenceType: TypeAlias = Union[List[int], Tuple[int, ...]]
 # TODO: Type[torch.SymInt], Type[torch.SymFloat]
-NumberTypeType = Union[Type[bool], Type[int], Type[float], Type[complex]]
+NumberTypeType: TypeAlias = Union[Type[bool], Type[int], Type[float], Type[complex]]
 # TODO: This needs a lot more type annotations
 # NumberType = Union[bool, int, float, complex, torch.SymInt, torch.SymFloat]
-NumberType = Union[bool, int, float, complex]
-RealNumberType = Union[bool, int, float]
+NumberType: TypeAlias = Union[bool, int, float, complex]
+RealNumberType: TypeAlias = Union[bool, int, float]
 
 Number = (bool, int, float, complex, torch.SymInt, torch.SymFloat)
 # I don't call it Integral because numbers.Integral includes bool, but IntLike
@@ -78,12 +54,19 @@ IntLike = (int, torch.SymInt)
 FloatLike = (float, torch.SymFloat)
 IntWithoutSymInt = int
 FloatWithoutSymFloat = float
-DeviceLikeType = Union[str, torch.device]
+DeviceLikeType: TypeAlias = Union[str, torch.device, int]
 Tensor = torch.Tensor
 
 
 torch_function_passthrough = {
     torch.device,
+    torch.sym_not,
+    torch.sym_float,
+    torch.sym_int,
+    torch.sym_max,
+    torch.sym_min,
+    torch._sym_sqrt,  # type: ignore[attr-defined]
+    torch.sym_ite,
     torch.Tensor.dim,
     torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
     torch.Tensor.numel,
@@ -106,24 +89,57 @@ torch_function_passthrough = {
 
 TensorLikeType = torch.Tensor
 TensorLike = torch.Tensor
-TensorSequenceType = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
-TensorOrNumberLikeType = Union[TensorLikeType, NumberType]
+TensorSequenceType: TypeAlias = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
+TensorOrNumberLikeType: TypeAlias = Union[TensorLikeType, NumberType]
+
+CustomOutParamAnnotation = "__custom_out_param__"
 
 
-def same_shape(a: ShapeType, b: ShapeType) -> bool:
+def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     if len(a) != len(b):
         return False
 
     for x, y in zip(a, b):
-        if x != y:
+        if allow_rhs_unbacked:
+            # TODO: We should check that the symbols are consistent
+            # with each other
+            if isinstance(y, torch.SymInt):
+                continue
+        # NB: Naively, you would not expect to have to do an oblivious guard
+        # here because there is seemingly no broadcasting here, but in fact we
+        # use this in some situations to determine if we need to do an expand
+        # on the tensor because they don't line up, so you can definitely end
+        # up trying to prove u0 != 1 in this situation.  See
+        # python test/test_proxy_tensor.py -k test_cumsum_unbacked
+        if guard_size_oblivious(x != y):
             return False
 
     return True
 
 
+def _maybe_get_pytype(t):
+    if t is torch.SymFloat:
+        return float
+    elif t is torch.SymInt:
+        return int
+    elif t is torch.SymBool:
+        return bool
+    else:
+        return t
+
+
 # TODO: look at using torch.testing.assert_close instead with an option
 #   to just compare metadata
-def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=False):
+def compare_tensor_meta(
+    a: TensorLikeType,
+    b: TensorLikeType,
+    check_strides=False,
+    *,
+    allow_rhs_unbacked=False,
+    check_conj=True,
+):
     """
     Checks that two tensor likes have the same shape,
     dtype and device.
@@ -134,7 +150,7 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
     assert isinstance(a, TensorLike)
     assert isinstance(b, TensorLike)
 
-    if not same_shape(a.shape, b.shape):
+    if not same_shape(a.shape, b.shape, allow_rhs_unbacked=allow_rhs_unbacked):
         msg = f"Shapes {a.shape} and {b.shape} are not equal!"
         raise AssertionError(msg)
 
@@ -164,10 +180,11 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
             msg = f"Storage offset mismatch! Storage offsets are {a.storage_offset()} and {b.storage_offset()}!"
             raise RuntimeError(msg)
 
-    if a.is_conj() != b.is_conj():
-        raise RuntimeError(
-            f"Conj mismatch! is_conj is set to {a.is_conj()} and {b.is_conj()}"
-        )
+    if check_conj:
+        if a.is_conj() != b.is_conj():
+            raise RuntimeError(
+                f"Conj mismatch! is_conj is set to {a.is_conj()} and {b.is_conj()}"
+            )
 
     if a.is_neg() != b.is_neg():
         raise RuntimeError(
@@ -213,13 +230,15 @@ def is_contiguous(a: TensorLikeType) -> bool:
     Tensors are contiguous when they have no elements,
     one element, or when they have "nested" strides.
     """
-    if a.numel() < 2:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+    if guard_size_oblivious(a.numel() < 2):
         return True
 
     expected_stride = 1
     for x, y in reversed(tuple(zip(a.shape, a.stride()))):
         # Skips checking strides when a dimension has length 1
-        if x == 1:
+        if guard_size_oblivious(x == 1):
             continue
 
         if y != expected_stride:
@@ -328,6 +347,8 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
     its dimensions that is contiguous.
     """
 
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     if a.is_sparse:
         return False
 
@@ -348,7 +369,7 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 
     expected_stride = 1
     for length, stride in lengths_and_strides:
-        if length == 1:
+        if guard_size_oblivious(length == 1):
             continue
 
         if stride != expected_stride:
@@ -370,6 +391,8 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 def compute_elementwise_output_logical_to_physical_perm(
     *tensors, _skip_checks=False
 ) -> List[int]:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     if not _skip_checks and len(tensors) == 0:
         msg = "Can't compute elementwise output strides for zero tensors!"
         raise ValueError(msg)
@@ -416,17 +439,19 @@ def compute_elementwise_output_logical_to_physical_perm(
             stride_a = tensor.stride()[idx_a]
             stride_b = tensor.stride()[idx_b]
 
-            if stride_a == 0 or stride_b == 0:
+            if guard_size_oblivious(stride_a == 0) or guard_size_oblivious(
+                stride_b == 0
+            ):
                 continue
 
-            if stride_a < stride_b:
+            if guard_size_oblivious(stride_a < stride_b):
                 return -1
 
-            if stride_a > stride_b:
+            if guard_size_oblivious(stride_a > stride_b):
                 return 1
 
             # stride_a == stride_b
-            if shape[idx_a] > shape[idx_b]:
+            if guard_size_oblivious(shape[idx_a] > shape[idx_b]):
                 return 1
 
         # Note: this case is hit if all strides are zero,
@@ -522,7 +547,11 @@ def validate_dim_length(length: int):
     dimension length.
     """
 
-    assert length >= 0
+    if isinstance(length, (int, torch.SymInt)):
+        torch._check_is_size(length)
+    else:
+        # sometimes called with sympy expression by inductor
+        assert length >= 0
 
 
 def validate_shape(shape: ShapeType):
@@ -802,6 +831,31 @@ def extract_shape_from_varargs(
     return shape  # type: ignore[return-value]
 
 
+def infer_size_shapes(a: ShapeType, b: ShapeType) -> Tuple[int, ...]:
+    ndim = max(len(a), len(b))
+    expandedSizes = [0] * ndim
+
+    for i in range(ndim - 1, -1, -1):
+        offset = ndim - 1 - i
+        dimA = len(a) - 1 - offset
+        dimB = len(b) - 1 - offset
+        sizeA = a[dimA] if dimA >= 0 else 1
+        sizeB = b[dimB] if dimB >= 0 else 1
+
+        torch._check(
+            (sizeA == sizeB) or (sizeA == 1) or (sizeB == 1),
+            lambda: (
+                f"The size of tensor a ({sizeA}) must match the size of "
+                f"tensor b ({sizeB}) at non-jagged dimension {i}"
+            ),
+        )
+
+        # 1s map to the other size (even 0)
+        expandedSizes[i] = sizeB if sizeA == 1 else sizeA
+
+    return tuple(expandedSizes)
+
+
 def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
     """
     Infers the size of a dim with size -1, if it exists.
@@ -817,28 +871,52 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
             newsize *= d
         else:
             torch._check(False, lambda: f"invalid shape dimension {d}")
-    torch._check(
-        numel == newsize or (dim is not None and newsize > 0 and numel % newsize == 0),
-        lambda: f"shape '{list(shape)}' is invalid for input of size {numel}",
-    )
-    if dim is not None:
-        # Convert to list to produce a compatible error message with core
-        # PyTorch, which prints sequences in square brackets.
-        shape = list(shape)
+    if dim is None:
+        torch._check(
+            numel == newsize,
+            lambda: f"shape '{list(shape)}' is invalid for input of size {numel}",
+        )
+    else:
+        from torch.fx.experimental.symbolic_shapes import definitely_true
+
         torch._check(
             newsize != 0,
             lambda: (
-                f"cannot reshape tensor of 0 elements into shape {shape} because the "
+                f"cannot reshape tensor of 0 elements into shape {list(shape)} because the "
                 f"unspecified dimension size -1 can be any value and is ambiguous"
+                if definitely_true(numel == 0)
+                else f"shape '{list(shape)}' is invalid for input of size {numel}"
             ),
         )
+        torch._check(
+            numel % newsize == 0,
+            lambda: f"shape '{list(shape)}' is invalid for input of size {numel}",
+        )
+        # Convert to list to produce a compatible error message with core
+        # PyTorch, which prints sequences in square brackets.
+        shape = list(shape)
         shape[dim] = numel // newsize
+        # NB: This is pretty important when you have unbacked SymInts.
+        # Suppose you have (i0, 12) resizing into (2, -1, 12).  The old
+        # range for i0 is typically [2, inf], which means if you divide
+        # by two the new range should be [1, inf].  But this is bad news
+        # if you have an unbacked SymInt: we need to reapply the unsound
+        # assumption that the size is >= 2.
+        torch._check_is_size(shape[dim])
     return tuple(shape)
 
 
-_integer_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+_integer_dtypes = (
+    torch.uint8,
+    torch.uint16,
+    torch.uint32,
+    torch.uint64,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+)
 _low_precision_dtypes = (torch.float16, torch.bfloat16, torch.complex32)
-_float_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
 _complex_dtypes = (torch.complex32, torch.complex64, torch.complex128)
 
 
@@ -859,7 +937,7 @@ def is_low_precision_dtype(dtype: torch.dtype) -> bool:
 
 def is_float_dtype(dtype: torch.dtype) -> bool:
     assert isinstance(dtype, torch.dtype)
-    return dtype in _float_dtypes
+    return dtype.is_floating_point
 
 
 def is_complex_dtype(dtype: torch.dtype) -> bool:
@@ -871,7 +949,7 @@ def is_grad_dtype(dtype: torch.dtype) -> bool:
     """
     Checks if the dtype can require a gradient.
     """
-    return is_float_dtype(dtype) or is_complex_dtype(dtype)
+    return dtype.is_floating_point or is_complex_dtype(dtype)
 
 
 _complex_to_real_dtype_map = {
@@ -907,7 +985,7 @@ def dtype_to_type(dtype: torch.dtype) -> type:
         return bool
     if dtype in _integer_dtypes:
         return int
-    if dtype in _float_dtypes:
+    if dtype.is_floating_point:
         return float
     if dtype in _complex_dtypes:
         return complex
@@ -926,7 +1004,7 @@ def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]
         return lambda x: bool(x)
     if dtype in _integer_dtypes:
         return sym_int
-    if dtype in _float_dtypes:
+    if dtype.is_floating_point:
         return sym_float
     if dtype in _complex_dtypes:
         # TODO: type error here is real, replace with sym_complex
@@ -995,9 +1073,10 @@ def get_higher_type(a: type, b: type) -> type:
 
     The types are ordered bool -> int -> float -> complex.
     """
+    a, b = _maybe_get_pytype(a), _maybe_get_pytype(b)
     # Type checking
-    assert a in _ordered_types
-    assert b in _ordered_types
+    if a not in _ordered_types or b not in _ordered_types:
+        raise RuntimeError(f"Expected builtin numeric types, found {a}, {b}")
 
     if a is b:
         return a
@@ -1096,17 +1175,13 @@ def is_weakly_lesser_type(a: type, b: type) -> bool:
 
     The comparison is determined by the following type ordering: bool, int, float, complex.
     """
-    ordered_types = (
-        bool,
-        int,
-        float,
-        complex,
-    )
 
-    assert a in ordered_types
-    assert b in ordered_types
+    a, b = _maybe_get_pytype(a), _maybe_get_pytype(b)
 
-    for typ in ordered_types:
+    if a not in _ordered_types or b not in _ordered_types:
+        raise RuntimeError(f"Expected builtin numeric types, found {a}, {b}")
+
+    for typ in _ordered_types:
         if a == typ:
             return True
         if b == typ:
@@ -1257,7 +1332,7 @@ def number_type(x: Union[NumberType, torch.SymInt, torch.SymFloat]) -> Type:
         return type(x)
 
 
-def symbol_type(x: sympy.Symbol) -> Type:
+def expr_type(x: sympy.Expr) -> Type:
     if x.is_integer:  # type: ignore[attr-defined]
         return int
     else:
@@ -1330,7 +1405,7 @@ def elementwise_dtypes(
     computation dtype the same as the result dtype when it's selected. NO_OPMATH is appropriate for kernels
     which perform no mathematical operations on their tensors (see below for examples).
 
-    The INT_TO_FLOAT type promotion kind maps boolean and integer maps result dtypes to the default floating point dtype,
+    The INT_TO_FLOAT type promotion kind maps boolean and integer result dtypes to the default floating point dtype,
     and computation dtypes to the appropriate op math dtype.
 
     The COMPLEX_TO_FLOAT type promotion kind maps complex result dtypes to the corresponding float dtype, following this
@@ -1359,15 +1434,20 @@ def elementwise_dtypes(
     args = tuple(x for x in _args if x is not None)
 
     highest_type: type = bool
+
+    # Import sympy locally, as importing it eagerly at a module level is too slow
+    # See https://dev-discuss.pytorch.org/t/delving-into-what-happens-when-you-import-torch/1589
+    import sympy
+
     for x in args:
-        if not isinstance(x, (Number, TensorLike, sympy.Symbol)):
+        if not isinstance(x, (Number, TensorLike, sympy.Expr)):
             msg = f"Unexpected type {str(type(x))} when computing elementwise type promotion!"
             raise ValueError(msg)
 
         if isinstance(x, Number):
             highest_type = get_higher_type(highest_type, number_type(x))
-        elif isinstance(x, sympy.Symbol):
-            highest_type = get_higher_type(highest_type, symbol_type(x))
+        elif isinstance(x, sympy.Expr):
+            highest_type = get_higher_type(highest_type, expr_type(x))
         else:
             # x is a TensorLike
             highest_type = get_higher_type(highest_type, dtype_to_type(x.dtype))
@@ -1486,11 +1566,13 @@ def make_contiguous_strides_for(
     if not shape:
         return ()
 
+    from torch.fx.experimental.symbolic_shapes import is_nested_int
+
     multiplier = 1
     strides = []
     for l in reversed(shape):
         strides.append(multiplier)
-        multiplier *= sym_max(l, 1)
+        multiplier *= l if is_nested_int(l) else sym_max(l, 1)
 
     result = tuple(reversed(strides))
 
@@ -1797,7 +1879,7 @@ def dtype_or_default(dtype: Optional[torch.dtype]) -> torch.dtype:
     return dtype if dtype is not None else torch.get_default_dtype()
 
 
-def device_or_default(device: Optional[torch.device]) -> torch.device:
+def device_or_default(device: Optional[DeviceLikeType]) -> DeviceLikeType:
     return device if device is not None else torch.device("cpu")
 
 

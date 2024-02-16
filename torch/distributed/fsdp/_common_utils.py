@@ -1,7 +1,7 @@
 """
 This file includes private common utilities for FSDP.
 """
-
+import logging
 import traceback
 import warnings
 import weakref
@@ -20,17 +20,19 @@ from typing import (
     Set,
     Tuple,
     Type,
+    TYPE_CHECKING,
 )
 
 import torch
 import torch.distributed as dist
-import torch.distributed.fsdp.flat_param as flat_param_file
+import torch.distributed.fsdp._flat_param as flat_param_file
 import torch.nn as nn
 from torch.distributed._composable_state import _get_module_state, _State
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
+from torch.distributed.fsdp._fsdp_extensions import FSDPExtensions
 from torch.distributed.utils import _apply_to_tensors
 from torch.utils._mode_utils import no_dispatch
 
@@ -42,6 +44,9 @@ from .api import (
     StateDictConfig,
     StateDictType,
 )
+
+if TYPE_CHECKING:
+    from ._flat_param import FlatParamHandle
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
@@ -69,10 +74,10 @@ class _FSDPDeviceHandle:
             try:
                 self.__backend = getattr(torch, device.type)
                 self.__device = device
-            except AttributeError:
+            except AttributeError as exc:
                 raise AttributeError(
                     f"Device '{device}' does not have a corresponding backend registered as 'torch.{device.type}'."
-                )
+                ) from exc
         else:
             self.__backend = backend
 
@@ -91,10 +96,10 @@ class _FSDPDeviceHandle:
     def __getattr__(self, __name: str) -> Any:
         try:
             return getattr(self.__backend, __name)
-        except AttributeError:
+        except AttributeError as exc:
             raise AttributeError(
                 f"Custom backend '{self.__device.type}' not implement 'torch.{self.__device.type}.{__name}'"
-            )
+            ) from exc
 
 
 class _UninitializedDeviceHandle(_FSDPDeviceHandle):
@@ -111,6 +116,8 @@ class _FSDPState(_State):
         # FSDP/fully_shard.
         self._ignored_modules: Set[nn.Module] = set()
         self._ignored_params: Set[nn.Parameter] = set()
+        # Buffer names are cleaned (without wrapper prefixes)
+        self._ignored_buffer_names: Set[str] = set()
         self.process_group: Optional[dist.ProcessGroup] = None
         self.rank: int = -1
         self.world_size: int = -1
@@ -139,6 +146,7 @@ class _FSDPState(_State):
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: List[_FSDPState] = []
         self._all_handles: List[flat_param_file.FlatParamHandle] = []
+        self._fsdp_extension: Optional[FSDPExtensions] = None
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
@@ -349,6 +357,32 @@ def _get_param_to_fqns(
     )
 
 
+@no_type_check
+def _log_post_backward_hook(
+    state: _FSDPState, handle: "FlatParamHandle", log: logging.Logger
+) -> None:
+    # Under TORCH_DISTRIBUTED_DEBUG=INFO, log the module names this hook fires for.
+    # Below logging of module names this post-bwd hook fires for can help debug certain
+    # cases where hooks don't fire, such as under certain activation checkpoint configs.
+    if state._use_orig_params and handle._debug_level == dist.DebugLevel.INFO:
+        param_fqns = _get_handle_fqns_from_root(state, handle)
+        log.warning("FSDP firing post-backward hooks for parameters %s", param_fqns)
+
+
+@no_type_check
+def _get_handle_fqns_from_root(
+    state: _FSDPState, handle: "FlatParamHandle"
+) -> Optional[List[str]]:
+    if handle is None:
+        return None
+    param_to_fqn = state._exec_order_data.param_to_fqn
+    handle_params = handle.flat_param._params  # only populated for use_orig_params
+    param_fqns = [
+        fqn for fqn_list in [param_to_fqn[p] for p in handle_params] for fqn in fqn_list
+    ]
+    return param_fqns
+
+
 def _apply_to_modules(
     root_module: torch.nn.Module,
     module_fn: Callable,
@@ -390,12 +424,16 @@ def _apply_to_modules(
                         submodule_name == "_fsdp_wrapped_module"
                         or submodule_name == "_dmp_wrapped_module"
                     ):
-                        warnings.warn(
-                            "An unexpected prefix is detected. This case "
-                            " should only happen when using DMP with FSDP. "
-                            f"prefix = {prefix}, "
-                            f"submodule_name = {submodule_name}"
-                        )
+                        if (
+                            not torch.distributed._functional_collectives.is_torchdynamo_compiling()
+                        ):
+                            # TODO(voz): Don't graph break on this
+                            warnings.warn(
+                                "An unexpected prefix is detected. This case "
+                                " should only happen when using DMP with FSDP. "
+                                f"prefix = {prefix}, "
+                                f"submodule_name = {submodule_name}"
+                            )
                         new_prefix = prefix
                     elif submodule_name == "module":
                         warnings.warn(
@@ -509,9 +547,17 @@ def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.Stream) -> No
     # FIXME record_stream doesn't work with non-cuda tensors
     if tensor.device.type not in ["cuda", torch._C._get_privateuse1_backend_name()]:
         return
-    with no_dispatch():
+
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        return
+        # from @ezyang:
+        # The no_dispatch was added in https://github.com/pytorch/pytorch/pull/88014 cc @fegin
+        # Looking over the PR, it looks like this is because we don't actually support Stream arguments
+        # in torch dispatch, so it just chokes.
+        # If Dynamo is able to answer "are there any torch dispatch modes" active (it should answer False),
+        # a better version of this would just be to check if there are any modes before disabling dispatch.
+        # TODO(voz): Extend a dynamo util to answer the above, unify the codepaths here.
         tensor.record_stream(stream)
-
-
-def _same_storage_as_data_ptr(x: torch.Tensor, data_ptr: int) -> bool:
-    return x._typed_storage()._data_ptr() == data_ptr
+    else:
+        with no_dispatch():
+            tensor.record_stream(stream)

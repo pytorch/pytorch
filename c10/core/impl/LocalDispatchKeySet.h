@@ -20,8 +20,7 @@
 // set, but TLS is defined to be zero-initialized, so this doesn't actually work
 // (if it's inverted, you want the set to be -1 initialized).
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 // POD version of LocalDispatchKeySet.  Declared here just so that
 // we can put it in the guards.
@@ -51,7 +50,7 @@ struct C10_API PODLocalDispatchKeySet {
   }
 };
 static_assert(
-    std::is_trivial<PODLocalDispatchKeySet>::value,
+    std::is_trivial_v<PODLocalDispatchKeySet>,
     "PODLocalDispatchKeySet must be a POD type.");
 
 struct C10_API LocalDispatchKeySet {
@@ -122,6 +121,15 @@ struct C10_API ForceDispatchKeyGuard {
       : saved_keyset_(c10::impl::tls_local_dispatch_key_set()) {
     c10::impl::_force_tls_local_dispatch_key_set(key_set);
   }
+  ForceDispatchKeyGuard(
+      c10::DispatchKeySet include,
+      c10::DispatchKeySet exclude)
+      : saved_keyset_(c10::impl::tls_local_dispatch_key_set()) {
+    auto updated_set = saved_keyset_;
+    updated_set.included_ = include;
+    updated_set.excluded_ = exclude;
+    c10::impl::_force_tls_local_dispatch_key_set(updated_set);
+  }
   ~ForceDispatchKeyGuard() {
     c10::impl::_force_tls_local_dispatch_key_set(saved_keyset_);
   }
@@ -151,5 +159,4 @@ C10_API void tls_set_dispatch_key_included(DispatchKey x, bool desired_state);
 C10_API bool tls_is_dispatch_keyset_excluded(DispatchKeySet ks);
 C10_API bool tls_is_dispatch_keyset_included(DispatchKeySet ks);
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

@@ -58,6 +58,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
                                           // use the custom class mechanism
                                           // instead. @jerryzh
       {"Device", c10::TypeFactory::get<DeviceObjType>()},
+      {"DeviceIndex", c10::TypeFactory::get<IntType>()},
       {"Stream", c10::TypeFactory::get<StreamObjType>()},
       {"Scalar", c10::TypeFactory::get<NumberType>()},
       {"str", c10::TypeFactory::get<StringType>()},
@@ -137,7 +138,7 @@ c10::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
     L.expect(')');
   } else if (L.nextIf('!')) {
     alias_info.addBeforeSet(
-        Symbol::fromQualString("alias::$" + c10::guts::to_string(next_id++)));
+        Symbol::fromQualString("alias::$" + std::to_string(next_id++)));
     alias_info.setIsWrite(true);
   } else {
     return c10::nullopt;
@@ -176,7 +177,7 @@ c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       std::string::size_type num_len;
       try {
-        device_idx = c10::stoi(num, &num_len);
+        device_idx = std::stoi(num, &num_len);
       } catch (const std::invalid_argument& e) {
         throw ErrorReport(L.cur())
             << "Device index cannot be converted to integer";
@@ -201,7 +202,7 @@ c10::optional<bool> SchemaTypeParser::tryToParseRequiresGrad() {
   std::string::size_type num_len;
 
   try {
-    return (bool)c10::stoi(num, &num_len);
+    return (bool)std::stoi(num, &num_len);
   } catch (const std::invalid_argument& e) {
     throw ErrorReport(L.cur())
         << "Field requires_grad cannot be converted to integer";
@@ -261,7 +262,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::string::size_type num_len;
           try {
-            auto stride = c10::stoll(num, &num_len);
+            auto stride = std::stoll(num, &num_len);
             strides.push_back(stride);
           } catch (const std::invalid_argument& e) {
             throw ErrorReport(L.cur())
@@ -301,7 +302,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     std::string::size_type num_len;
     int64_t dim = 0;
     try {
-      dim = c10::stoll(num, &num_len);
+      dim = std::stoll(num, &num_len);
     } catch (const std::invalid_argument& e) {
       throw ErrorReport(L.cur()) << "The number can't be converted to int";
     } catch (const std::out_of_range& e) {

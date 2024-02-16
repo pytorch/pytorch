@@ -16,16 +16,8 @@ Tensor sum_dim(
     bool keepdim,
     const optional<ScalarType> dtype) {
   TORCH_CHECK(
-      self.dim() >= 2 || self.dim() <= 4,
-      "Vulkan sum.dim_IntList supports 2d, 3d, 4d tensors as input!");
-  TORCH_CHECK(
-      dim >= -self.dim() - 1 && dim <= self.dim(),
-      "Vulkan sum.dim_IntList dimension out of range expected to be in range of [",
-      -self.dim() - 1,
-      ",",
-      self.dim(),
-      "], but got ",
-      dim);
+      self.dim() >= 1 && self.dim() <= 4,
+      "Vulkan sum.dim_IntList supports 1d, 2d, 3d, 4d tensors as input!");
 
   // Get the global Vulkan context
   api::Context* const context = api::context();
@@ -34,11 +26,8 @@ Tensor sum_dim(
   const Tensor input = self.is_vulkan() ? self : self.vulkan();
   const vTensor& v_input = convert(input);
 
-  // Normalize dim into range [0, self.dim()]
-  dim = utils::normalize(dim, self.dim());
-
   // Create the output texture
-  std::vector<int64_t> output_size = self.sizes().vec();
+  std::vector<int64_t> output_size = v_input.sizes();
   uint32_t dim_size = output_size[dim];
   if (keepdim) {
     output_size[dim] = 1;
@@ -54,7 +43,7 @@ Tensor sum_dim(
   vTensor v_output{
       context,
       output_size,
-      type,
+      convert_dtype(type),
   };
 
   // Required to determine how to insert memory barriers in the command buffer
@@ -110,10 +99,31 @@ Tensor sum_dim_IntList(
   std::set<int64_t> dims_set;
   if (opt_dim.has_value()) {
     auto dims = opt_dim.value();
-    for (const auto& d : dims) {
-      dims_set.insert(d);
+    for (const auto& dim : dims) {
+      // Do dim check before normalization to report to specified wrong dim
+      // value to user
+      TORCH_CHECK(
+          dim >= -self.dim() && dim <= self.dim() - 1,
+          "Vulkan sum.dim_IntList dimension out of range expected to be in range of [",
+          -self.dim(),
+          ",",
+          self.dim() - 1,
+          "], but got ",
+          dim);
+      // Normalize dim into range [0, self.dim() - 1]
+      int64_t dim_normalized = utils::normalize(dim, self.dim());
+      if (dims_set.find(dim_normalized) != dims_set.end()) {
+        TORCH_CHECK(
+            false,
+            "dim ",
+            dim_normalized,
+            " appears multiple times in the list of dims")
+      }
+      dims_set.insert(dim_normalized);
     }
     Tensor result = self;
+    // Reduce the higher dimensionalities first, otherwise when keepdim is
+    // false, it will be reducing the wrong dimension.
     for (auto it = dims_set.rbegin(); it != dims_set.rend(); ++it) {
       result = sum_dim(result, *it, keepdim, dtype);
     }
@@ -122,11 +132,26 @@ Tensor sum_dim_IntList(
   return self;
 }
 
+Tensor sum(const Tensor& self, const c10::optional<ScalarType> dtype) {
+  std::vector<int64_t> dims;
+  for (int64_t d = 0; d < self.dim(); d++) {
+    // If any dimension has zero elements, we will shortcut to a zero-dim.
+    if (self.size(d) == 0) {
+      return self.new_zeros({}, at::device(at::kVulkan).dtype(self.dtype()));
+    }
+
+    dims.push_back(d);
+  }
+
+  return sum_dim_IntList(self, dims, false, dtype);
+}
+
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("aten::sum.dim_IntList"), TORCH_FN(sum_dim_IntList));
+  m.impl(TORCH_SELECTIVE_NAME("aten::sum"), TORCH_FN(sum));
 }
 
 #endif /* USE_VULKAN_API */

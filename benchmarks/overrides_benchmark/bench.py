@@ -57,10 +57,8 @@ def main():
 
         bench_min, bench_std = bench(tensor_1, tensor_2)
         print(
-            "Type {} had a minimum time of {} us"
-            " and a standard deviation of {} us.".format(
-                t.__name__, (10**6 * bench_min), (10**6) * bench_std
-            )
+            f"Type {t.__name__} had a minimum time of {10**6 * bench_min} us"
+            f" and a standard deviation of {(10**6) * bench_std} us."
         )
 
 

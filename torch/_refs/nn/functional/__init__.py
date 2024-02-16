@@ -65,6 +65,7 @@ __all__ = [
 
 Tensor = torch.Tensor
 aten = torch._ops.ops.aten
+DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 
 
 def _dropout_helper(
@@ -176,7 +177,6 @@ def celu(
     return torch.where(a > 0, a, rhs)
 
 
-@register_decomposition(aten.dropout)
 @_inplace_wrapper
 @out_wrapper()
 def dropout(
@@ -445,6 +445,7 @@ def softplus(
     return torch.where(scaled_input > threshold, a, rhs)
 
 
+@aten.hardshrink.default.py_impl(DispatchKey.Autograd)
 @register_decomposition(aten.hardshrink)
 @out_wrapper()
 def hardshrink(a: TensorLikeType, lambd: float = 0.5):
@@ -452,9 +453,10 @@ def hardshrink(a: TensorLikeType, lambd: float = 0.5):
     # hardshrink(x) = x if x > lambd
     #               = x if x < -lambd
     #               = 0 otherwise
-    return torch.where(torch.logical_and(a >= -lambd, a <= lambd), 0, a)
+    return torch.where(torch.abs(a) <= lambd, 0, a)
 
 
+@aten.softshrink.default.py_impl(DispatchKey.Autograd)
 @register_decomposition(aten.softshrink)
 @out_wrapper()
 def softshrink(a: TensorLikeType, lambd: float = 0.5):
@@ -466,12 +468,9 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
         lambd >= 0,
         lambda: f"lambda must be greater or equal to 0, but found to be {lambd}",
     )
-    ge_mask = a > lambd
-    le_mask = a < -lambd
-    zero_mask = torch.logical_not(torch.logical_or(ge_mask, le_mask))
-    result = torch.where(ge_mask, a - lambd, a)
-    result = torch.where(le_mask, a + lambd, result)
-    return torch.where(zero_mask, 0, result)
+    # We implement this in one torch.where to generate better code in the backward
+    # see https://github.com/pytorch/pytorch/pull/107052#discussion_r1293748211
+    return torch.where(torch.abs(a) > lambd, a - torch.sign(a) * lambd, 0)
 
 
 # Losses
@@ -605,9 +604,7 @@ def margin_ranking_loss(
     if input1.ndim != input2.ndim or input1.ndim != target.ndim:
         raise RuntimeError(
             "margin_ranking_loss : All input tensors should have same dimension but got sizes: "
-            "input1: {}, input2: {}, target: {} ".format(
-                input1.shape, input2.shape, target.shape
-            )
+            f"input1: {input1.shape}, input2: {input2.shape}, target: {target.shape} "
         )
     _check_reduction_value(reduction)
     loss = torch.clamp_min(-target * (input1 - input2) + margin, 0)
@@ -1167,6 +1164,62 @@ def pdist(a: TensorLikeType, p: float = 2) -> TensorLikeType:
         t = torch.linalg.vector_norm(a.unsqueeze(1) - a, ord=p, dim=2)
     i = torch.triu_indices(t.shape[0], t.shape[1], offset=1, device=a.device)
     return t.flatten().index_select(0, i[0] * t.shape[0] + i[1])
+
+
+@register_decomposition(aten.pixel_shuffle)
+@out_wrapper()
+def pixel_shuffle(self: Tensor, upscale_factor: int):
+    torch._check(
+        self.dim() >= 3,
+        lambda: f"pixel_shuffle expects input to have at least 3 dimensions, but got input with {self.dim} dimension(s)",
+    )
+    batch = self.shape[:-3]
+    C_out = self.shape[-3] // upscale_factor**2
+    HW_out = (self.shape[-2] * upscale_factor, self.shape[-1] * upscale_factor)
+    n = len(batch)
+    B_dims = range(n)
+    C_dim, r1_dim, r2_dim, H_dim, W_dim = range(n, n + 5)
+    return (
+        self.view(
+            *batch,
+            C_out,
+            upscale_factor,
+            upscale_factor,
+            self.shape[-2],
+            self.shape[-1],
+        )
+        .permute(*B_dims, C_dim, H_dim, r1_dim, W_dim, r2_dim)
+        .reshape(*batch, C_out, *HW_out)
+        .clone(memory_format=utils.suggest_memory_format(self))
+    )
+
+
+@register_decomposition(aten.pixel_unshuffle)
+@out_wrapper()
+def pixel_unshuffle(self: Tensor, downscale_factor: int):
+    torch._check(
+        self.dim() >= 3,
+        lambda: f"pixel_unshuffle expects input to have at least 3 dimensions, but got input with {self.dim} dimension(s)",
+    )
+    batch = self.shape[:-3]
+    C_out = self.shape[-3] * downscale_factor**2
+    HW_out = (self.shape[-2] // downscale_factor, self.shape[-1] // downscale_factor)
+    n = len(batch)
+    B_dims = range(n)
+    C_dim, H_dim, r1_dim, W_dim, r2_dim = range(n, n + 5)
+    return (
+        self.view(
+            *batch,
+            self.shape[-3],
+            HW_out[0],
+            downscale_factor,
+            HW_out[1],
+            downscale_factor,
+        )
+        .permute(*B_dims, C_dim, r1_dim, r2_dim, H_dim, W_dim)
+        .reshape(*batch, C_out, *HW_out)
+        .clone(memory_format=utils.suggest_memory_format(self))
+    )
 
 
 # Needed as aten.{celu_,elu_...} exist (even if they don't have the in-place kwarg)

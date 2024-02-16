@@ -3,8 +3,7 @@
 
 #include <c10/util/flat_hash_map.h>
 
-namespace at {
-namespace caching {
+namespace at::caching {
 
 
 using weakref_type = c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
@@ -45,5 +44,4 @@ size_t adjusted_use_count(const at::Tensor& t) {
   return t.use_count() - (is_cached_tensor(t) ? 1 : 0);
 }
 
-}
-}
+} // namespace at::caching

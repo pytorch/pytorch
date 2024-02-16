@@ -1,7 +1,7 @@
 #pragma once
 
 #if defined(__ELF__) && (defined(__x86_64__) || defined(__i386__)) && \
-    !TORCH_DISABLE_SDT
+    !(defined(TORCH_DISABLE_SDT) && TORCH_DISABLE_SDT)
 
 #define TORCH_HAVE_SDT 1
 

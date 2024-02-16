@@ -362,7 +362,7 @@ struct PythonPrintImpl {
     std::string name = candidate;
     while (used.count(name) || reserved_names.count(name)) {
       // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-      name = candidate + c10::to_string(next_id[name]++);
+      name = candidate + std::to_string(next_id[name]++);
     }
     used.insert(name);
     return name;
@@ -1676,8 +1676,6 @@ const SourceRangeRecords& PythonPrint::ranges() const {
 uint64_t PythonPrint::minVersion() const {
   return pImpl->min_version_;
 }
-
-PythonPrint::~PythonPrint() = default;
 
 static std::vector<IValue> traverseIValueAndGetObjects(IValue ivalue) {
   std::vector<IValue> result;

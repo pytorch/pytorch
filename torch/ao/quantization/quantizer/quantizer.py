@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -17,23 +17,10 @@ __all__ = [
     "SharedQuantizationSpec",
     "DerivedQuantizationSpec",
     "QuantizationAnnotation",
-    "QuantizationConfig",
-    "OperatorPatternType",
-    "OperatorConfig",
-]
-
-# TODO: maybe remove torch.float32
-SUPPORTED_DTYPES = [torch.uint8, torch.int8, torch.int32, torch.float16, torch.float32]
-SUPPORTED_QSCHEMES = [
-    torch.per_tensor_affine,
-    torch.per_tensor_symmetric,
-    torch.per_channel_affine,
-    torch.per_channel_symmetric,
-    torch.per_channel_affine_float_qparams,
 ]
 
 
-class QuantizationSpecBase(ABC):
+class QuantizationSpecBase(ABC):  # noqa: B024
     """Base class for different types of quantization specs that allows users to
     specify how to quantize a Tensor (input/output of a Node) in the model
     """
@@ -60,10 +47,6 @@ class QuantizationSpec(QuantizationSpecBase):
     is_dynamic: bool = False
 
     def __post_init__(self):
-        # check dtype is one of the supported types
-        if self.dtype not in SUPPORTED_DTYPES:
-            raise TypeError(f"Unsupported dtype {self.dtype}.")
-
         # quant_min must be less than quant_max
         if (
             self.quant_min is not None
@@ -73,10 +56,6 @@ class QuantizationSpec(QuantizationSpecBase):
             raise ValueError(
                 f"quant_min {self.quant_min} must be <= quant_max {self.quant_max}."
             )
-
-        # check qscheme is on of the supported ones
-        if self.qscheme is not None and self.qscheme not in SUPPORTED_QSCHEMES:
-            raise ValueError(f"Unsupported qscheme {self.qscheme}.")
 
         # ch_axis must be less than the number of channels
         # but no way to check here. Just check that it is not < 0.
@@ -110,6 +89,7 @@ class SharedQuantizationSpec(QuantizationSpecBase):
     Quantization spec for the Tensors whose quantization parameters are shared with other Tensors
     """
 
+    # the edge or node to share observer or fake quant instances with
     edge_or_node: EdgeOrNode
 
 
@@ -123,34 +103,7 @@ class DerivedQuantizationSpec(QuantizationSpecBase):
     quant_min: Optional[int] = None
     quant_max: Optional[int] = None
     qscheme: Optional[torch.qscheme] = None
-
-
-# In the absence of better name, just winging it with QuantizationConfig
-@dataclass(eq=True, frozen=True)
-class QuantizationConfig:
-    input_activation: Optional[QuantizationSpec]
-    output_activation: Optional[QuantizationSpec]
-    weight: Optional[QuantizationSpec]
-    bias: Optional[QuantizationSpec]
-    # TODO: remove, since we can use observer_or_fake_quant_ctr to express this
-    is_qat: bool = False
-
-
-OperatorPatternType = List[Callable]
-OperatorPatternType.__module__ = "torch.ao.quantization.quantizer.quantizer"
-
-
-class OperatorConfig(NamedTuple):
-    # fix List[str] with List[List[Union[nn.Module, FunctionType, BuiltinFunctionType]]]
-    # Basically we are mapping a quantization config to some list of patterns.
-    # a pattern is defined as a list of nn module, function or builtin function names
-    # e.g. [nn.Conv2d, torch.relu, torch.add]
-    # We have not resolved whether fusion can be considered internal details of the
-    # quantizer hence it does not need communication to user.
-    # Note this pattern is not really informative since it does not really
-    # tell us the graph structure resulting from the list of ops.
-    config: QuantizationConfig
-    operators: List[OperatorPatternType]
+    ch_axis: Optional[int] = None
 
 
 @dataclass
@@ -161,17 +114,38 @@ class QuantizationAnnotation:
     """
 
     # a map from torch.fx.Node to a type of QuantizationSpecBase
-    input_qspec_map: Dict[Node, QuantizationSpecBase] = field(default_factory=dict)
+    input_qspec_map: Dict[Node, Optional[QuantizationSpecBase]] = field(
+        default_factory=dict
+    )
 
     # How the output of this node is quantized, expressed as QuantizationSpec
     # TODO: change the value to QuantizationSpec in a separate PR
     output_qspec: Optional[QuantizationSpecBase] = None
+
+    # For a Node: node1 and edge: (node1, node2), since they are observing the same
+    # Tensor, we may want to implicitly share observers, this flag allows people to
+    # turn off this behavior for the output of the node
+    allow_implicit_sharing: bool = True
 
     # whether the node is annotated or not
     _annotated: bool = False
 
 
 class Quantizer(ABC):
+    def transform_for_annotation(
+        self, model: torch.fx.GraphModule
+    ) -> torch.fx.GraphModule:
+        """Allows for user defined transforms to run before annotating the graph.
+        This allows quantizer to allow quantizing part of the model that are otherwise not quantizable.
+        For example quantizer can
+        a) decompose a compound operator like scaled dot product attention,
+        into bmm and softmax if quantizer knows how to quantize bmm/softmax but not sdpa
+        or b) transform scalars to tensor to allow quantizing scalares.
+
+        Note: this is an optional method
+        """
+        return model
+
     # annotate nodes in the graph with observer or fake quant constructors
     # to convey the desired way of quantization
     @abstractmethod
@@ -181,11 +155,4 @@ class Quantizer(ABC):
     # validate the annotated graph is supported by the backend
     @abstractmethod
     def validate(self, model: torch.fx.GraphModule) -> None:
-        pass
-
-    # annotate nodes in the graph with observer or fake quant constructors
-    # to convey the desired way of quantization
-    @classmethod
-    @abstractmethod
-    def get_supported_operators(cls) -> List[OperatorConfig]:
         pass

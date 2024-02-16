@@ -249,7 +249,7 @@ def main() -> None:
             ),
         )
         print(json.dumps(err_msg._asdict()), flush=True)
-        exit(0)
+        sys.exit(0)
 
     abs_build_dir = Path(args.build_dir).resolve()
 

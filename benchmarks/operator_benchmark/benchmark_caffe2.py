@@ -5,6 +5,8 @@ from benchmark_test_generator import _register_test
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 
+from .benchmark_core import TestConfig
+
 """Caffe2 performance microbenchmarks.
 
 This module contains Caffe2-specific functionalities for performance

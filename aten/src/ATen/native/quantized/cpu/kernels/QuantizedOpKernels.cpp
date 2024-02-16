@@ -836,7 +836,6 @@ void qsigmoid_kernel(
   float scale = qx.q_scale();
   auto scale_vec = Vectorized<float>(scale);
   auto zero_point_vec = Vectorized<float>((float)zero_point);
-  auto scale_neg_zp_premul_vec = scale_vec * zero_point_vec.neg();
 
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qsigmoid", [&]() {
     float inv_output_scale = 1.0 / output_scale;
@@ -861,8 +860,7 @@ void qsigmoid_kernel(
               output_scale, output_zero_point, value_dy);
         },
         [&](Vec value_qx) -> Vec {
-          auto value_dx = value_qx.dequantize(
-              scale_vec, zero_point_vec, scale_neg_zp_premul_vec);
+          auto value_dx = value_qx.dequantize(scale_vec, zero_point_vec);
           for (auto & value : value_dx) {
             value = value.neg();
             value = value.exp();
@@ -1460,7 +1458,8 @@ void qmul_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
   });
 }
 
-void qmaxpool_2d_nhwc_kernel(
+template <typename scalar_t, typename scalar_t_underlying>
+void _qmaxpool_2d_nhwc_kernel(
     const Tensor& qx,
     int64_t iC, // input/output channels
     int64_t iH,
@@ -1476,7 +1475,6 @@ void qmaxpool_2d_nhwc_kernel(
     int64_t dH,
     int64_t dW, // dilation
     Tensor& qy) {
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "max_pool2d_nhwc", [&]() {
     scalar_t* idata = static_cast<scalar_t*>(qx.data_ptr());
     scalar_t* odata = static_cast<scalar_t*>(qy.data_ptr());
 
@@ -1486,8 +1484,8 @@ void qmaxpool_2d_nhwc_kernel(
       data_index_init(begin, b, nBatch, row, oH, col, oW);
 
       for (const auto i : c10::irange(begin, end)) {
-        auto* i_p = reinterpret_cast<scalar_t::underlying*>(idata + b * iW * iH * iC);
-        auto* o_p = reinterpret_cast<scalar_t::underlying*>(odata + i * iC);
+        auto* i_p = reinterpret_cast<scalar_t_underlying*>(idata + b * iW * iH * iC);
+        auto* o_p = reinterpret_cast<scalar_t_underlying*>(odata + i * iC);
 
         // Loop over reduction block
         int64_t h_start = row * sH - pH;
@@ -1505,7 +1503,7 @@ void qmaxpool_2d_nhwc_kernel(
         constexpr auto vec_width = Vectorized<scalar_t>::size();
         for (; c + 4 * vec_width <= iC; c += 4 * vec_width) {
           Vectorized<scalar_t> acc{
-              scalar_t(std::numeric_limits<scalar_t::underlying>::lowest())};
+              scalar_t(std::numeric_limits<scalar_t_underlying>::lowest())};
           // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
           Vectorized<scalar_t> accs[4] = {acc, acc, acc, acc};
           int64_t tcntr = 0;
@@ -1528,7 +1526,7 @@ void qmaxpool_2d_nhwc_kernel(
         // Vector loop
         for (; c + vec_width <= iC; c += vec_width) {
           Vectorized<scalar_t> acc{
-              scalar_t(std::numeric_limits<scalar_t::underlying>::lowest())};
+              scalar_t(std::numeric_limits<scalar_t_underlying>::lowest())};
           int64_t tcntr = 0;
           int64_t x, y;
           for (y = h_start; y < h_end; y += dH) {
@@ -1542,7 +1540,7 @@ void qmaxpool_2d_nhwc_kernel(
         } // for c
 
         for (; c < iC; ++c) {
-          auto max_val = std::numeric_limits<scalar_t::underlying>::lowest();
+          auto max_val = std::numeric_limits<scalar_t_underlying>::lowest();
           int64_t tcntr = 0;
           int64_t x, y;
           for (y = h_start; y < h_end; y += dH) {
@@ -1559,7 +1557,33 @@ void qmaxpool_2d_nhwc_kernel(
         data_index_step(b, nBatch, row, oH, col, oW);
       }
     });
-  });
+}
+
+void qmaxpool_2d_nhwc_kernel(
+    const Tensor& qx,
+    int64_t iC, // input/output channels
+    int64_t iH,
+    int64_t iW, // input sizes
+    int64_t oH,
+    int64_t oW, // output sizes
+    int64_t kH,
+    int64_t kW, // kernel size
+    int64_t sH,
+    int64_t sW, // strides
+    int64_t pH,
+    int64_t pW, // padding
+    int64_t dH,
+    int64_t dW, // dilation
+    Tensor& qy) {
+  if (qx.scalar_type() == ScalarType::Byte) {
+    AT_DISPATCH_INTEGRAL_TYPES(qx.scalar_type(), "max_pool2d_nhwc", [&]() {
+      _qmaxpool_2d_nhwc_kernel<scalar_t, scalar_t>(qx, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
+    });
+  } else {
+    AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "max_pool2d_nhwc", [&]() {
+      _qmaxpool_2d_nhwc_kernel<scalar_t, scalar_t::underlying>(qx, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
+    });
+  }
 }
 
 void qmaxpool_3d_nthwc_kernel(
@@ -2281,8 +2305,7 @@ void qupsample_bilinear2d_nhwc_kernel(
       int64_t b{0}, h2{0}, w2{0};
       data_index_init(begin, b, nbatch, h2, output_height, w2, output_width);
 
-      for (const auto i : c10::irange(begin, end)) {
-        (void)i; //Suppress unused variable warning
+      for (C10_UNUSED const auto i : c10::irange(begin, end)) {
         auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(
             idata + b * input_height * input_width * channels);
         auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(
@@ -2372,6 +2395,8 @@ void qtopk_kernel(Tensor& values,
   auto mode_values_stride = values.strides()[dim];
   auto mode_indices_stride = indices.strides()[dim];
   auto tmp_values_stride = self.strides()[dim];
+  // If sizes is empty, the tensor is scalar. This prevents accessing an empty array.
+  auto dim_size = sizes.empty() ? 1 : sizes[dim];
 
   AT_DISPATCH_QINT_TYPES(self.scalar_type(), "qtopk_cpu", [&] {
     auto loop = [&](char** data, const int64_t* strides, int64_t n) {
@@ -2379,7 +2404,7 @@ void qtopk_kernel(Tensor& values,
       static_assert(sizeof(scalar_t) == sizeof(underlying_t), "");
       return topk_impl_loop<underlying_t, underlying_t>(
           mode_values_stride, mode_indices_stride, tmp_values_stride,
-          k, sizes[dim], largest, sorted, data, strides, n);
+          k, dim_size, largest, sorted, data, strides, n);
     };
 
     int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, sizes[dim]);
@@ -4233,67 +4258,33 @@ void index_put_kernel_quantized_cpu(TensorIterator& iter, IntArrayRef index_size
 // If the second test is also skipped, a third one fails.
 // So, until Quantization support for Windows is fixed for AVX512,
 // AVX2 kernels would be used instead. Ref: GH 56992.
-#if defined(CPU_CAPABILITY_AVX512) && defined(_WIN32)
-REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_channel_affine_stub);
-REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_tensor_affine_stub);
-REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_channel_float_qparams_stub);
-REGISTER_NO_AVX512_DISPATCH(fake_quant_grad_learnable_tensor_stub);
-REGISTER_NO_AVX512_DISPATCH(fake_quant_per_channel_cachemask_stub);
-REGISTER_NO_AVX512_DISPATCH(fake_quant_tensor_cachemask_stub);
-REGISTER_NO_AVX512_DISPATCH(fake_quant_tensor_cachemask_tensor_qparams_stub);
-REGISTER_NO_AVX512_DISPATCH(qadaptive_avg_pool2d_nhwc_stub);
-REGISTER_NO_AVX512_DISPATCH(qadaptive_avg_pool3d_ndhwc_stub);
-REGISTER_NO_AVX512_DISPATCH(qadd_relu_stub);
-REGISTER_NO_AVX512_DISPATCH(qadd_scalar_relu_stub);
-REGISTER_NO_AVX512_DISPATCH(qadd_scalar_stub);
-REGISTER_NO_AVX512_DISPATCH(qadd_stub);
-REGISTER_NO_AVX512_DISPATCH(qavg_pool2d_nhwc_stub);
-REGISTER_NO_AVX512_DISPATCH(qavg_pool3d_nhwc_stub);
-REGISTER_NO_AVX512_DISPATCH(qbatch_norm_relu_stub);
-REGISTER_NO_AVX512_DISPATCH(qbatch_norm_stub);
-REGISTER_NO_AVX512_DISPATCH(qcat_nhwc_stub);
-REGISTER_NO_AVX512_DISPATCH(qcat_relu_nhwc_stub);
-REGISTER_NO_AVX512_DISPATCH(qclamp_stub);
-REGISTER_NO_AVX512_DISPATCH(qclamp_min_stub);
-REGISTER_NO_AVX512_DISPATCH(qclamp_max_stub);
-REGISTER_NO_AVX512_DISPATCH(qelu_stub);
-REGISTER_NO_AVX512_DISPATCH(qhardsigmoid_stub);
-REGISTER_NO_AVX512_DISPATCH(qhardswish_stub);
-REGISTER_NO_AVX512_DISPATCH(qmaxpool_2d_nhwc_stub);
-REGISTER_NO_AVX512_DISPATCH(qmaxpool_3d_nthwc_stub);
-REGISTER_NO_AVX512_DISPATCH(qmul_relu_stub);
-REGISTER_NO_AVX512_DISPATCH(qmul_stub);
-REGISTER_NO_AVX512_DISPATCH(qrelu_leaky_stub);
-REGISTER_NO_AVX512_DISPATCH(qrelu_stub);
-REGISTER_NO_AVX512_DISPATCH(qprelu_stub);
-REGISTER_NO_AVX512_DISPATCH(qgelu_stub);
-REGISTER_NO_AVX512_DISPATCH(qsigmoid_stub);
-REGISTER_NO_AVX512_DISPATCH(qtanh_stub);
-REGISTER_NO_AVX512_DISPATCH(qthreshold_stub);
-REGISTER_NO_AVX512_DISPATCH(qtopk_stub);
-REGISTER_NO_AVX512_DISPATCH(fake_quant_grad_learnable_channel_stub);
-REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_tensor_affine_stub);
-REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_channel_affine_stub);
-REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_channel_float_qparams_stub);
-REGISTER_NO_AVX512_DISPATCH(quantized_normalize_stub);
-REGISTER_NO_AVX512_DISPATCH(quantized_groupnorm_nhwc_stub);
-REGISTER_NO_AVX512_DISPATCH(qupsample_bilinear2d_nhwc_stub);
-REGISTER_NO_AVX512_DISPATCH(quantize_tensor_per_tensor_affine_sub_byte_stub);
-REGISTER_NO_AVX512_DISPATCH(dequantize_tensor_per_tensor_affine_sub_byte_stub);
-REGISTER_NO_AVX512_DISPATCH(masked_fill_kernel_quantized_stub);
-REGISTER_NO_AVX512_DISPATCH(index_put_kernel_quantized_stub);
-REGISTER_NO_AVX512_DISPATCH(qmean_inner_dim_stub);
-REGISTER_NO_AVX512_DISPATCH(qstd_inner_dim_stub);
-#else
+#if defined(_WIN32)
 REGISTER_DISPATCH(dequantize_tensor_per_channel_affine_stub,
                   &dequantize_tensor_per_channel_affine_cpu);
-REGISTER_DISPATCH(dequantize_tensor_per_tensor_affine_stub,
-                  &dequantize_tensor_per_tensor_affine_cpu);
 REGISTER_DISPATCH(dequantize_tensor_per_channel_float_qparams_stub,
                   &dequantize_tensor_per_channel_float_qparams_cpu);
+REGISTER_DISPATCH(fake_quant_per_channel_cachemask_stub,
+                  &fake_quant_per_channel_cachemask_cpu);
+REGISTER_DISPATCH(qavg_pool2d_nhwc_stub, &qavg_pool2d_nhwc_kernel);
+REGISTER_DISPATCH(qavg_pool3d_nhwc_stub, &qavg_pool3d_nhwc_kernel);
+#else
+// These kernels are dispatched to AVX512
+ALSO_REGISTER_AVX512_DISPATCH(dequantize_tensor_per_channel_affine_stub,
+                  &dequantize_tensor_per_channel_affine_cpu);
+ALSO_REGISTER_AVX512_DISPATCH(dequantize_tensor_per_channel_float_qparams_stub,
+                  &dequantize_tensor_per_channel_float_qparams_cpu);
+ALSO_REGISTER_AVX512_DISPATCH(fake_quant_per_channel_cachemask_stub,
+                  &fake_quant_per_channel_cachemask_cpu);
+ALSO_REGISTER_AVX512_DISPATCH(qavg_pool2d_nhwc_stub, &qavg_pool2d_nhwc_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(qavg_pool3d_nhwc_stub, &qavg_pool3d_nhwc_kernel);
+#endif // CPU_CAPABILITY_AVX512 && _WIN32
+
+// The kernels below are dispatched to AVX2 because they don't perform as well
+// with AVX512. We might revisit this decision in the near future.
+REGISTER_DISPATCH(dequantize_tensor_per_tensor_affine_stub,
+                  &dequantize_tensor_per_tensor_affine_cpu);
 REGISTER_DISPATCH(fake_quant_grad_learnable_tensor_stub,
                   &fake_quantize_learnable_tensor_grad_kernel_cpu);
-REGISTER_DISPATCH(fake_quant_per_channel_cachemask_stub, &fake_quant_per_channel_cachemask_cpu);
 REGISTER_DISPATCH(fake_quant_tensor_cachemask_stub,
                   &fake_quantize_tensor_cachemask_kernel);
 REGISTER_DISPATCH(fake_quant_tensor_cachemask_tensor_qparams_stub,
@@ -4306,8 +4297,7 @@ REGISTER_DISPATCH(qadd_relu_stub, &qadd_kernel<true>);
 REGISTER_DISPATCH(qadd_scalar_relu_stub, &qadd_scalar_kernel<true>);
 REGISTER_DISPATCH(qadd_scalar_stub, &qadd_scalar_kernel<false>);
 REGISTER_DISPATCH(qadd_stub, &qadd_kernel<false>);
-REGISTER_DISPATCH(qavg_pool2d_nhwc_stub, &qavg_pool2d_nhwc_kernel);
-REGISTER_DISPATCH(qavg_pool3d_nhwc_stub, &qavg_pool3d_nhwc_kernel);
+
 REGISTER_DISPATCH(qbatch_norm_relu_stub, &q_batch_norm_kernel<true>);
 REGISTER_DISPATCH(qbatch_norm_stub, &q_batch_norm_kernel<false>);
 REGISTER_DISPATCH(qcat_nhwc_stub, &qcat_nhwc_kernel<false>);
@@ -4359,7 +4349,5 @@ REGISTER_DISPATCH(
     &index_put_kernel_quantized_cpu);
 REGISTER_DISPATCH(qmean_inner_dim_stub, &qmean_inner_dim_kernel);
 REGISTER_DISPATCH(qstd_inner_dim_stub, &qstd_inner_dim_kernel);
-#endif // CPU_CAPABILITY_AVX512 && _WIN32
-
 } // namespace native
 } // namespace at

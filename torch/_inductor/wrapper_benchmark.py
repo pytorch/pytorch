@@ -7,9 +7,12 @@ from torch.autograd import DeviceType
 from .utils import create_bandwidth_info_str, do_bench, get_num_bytes
 
 _kernel_category_choices = [
+    "foreach",
+    "persistent_reduction",
     "pointwise",
     "reduction",
-    "persistent_reduction",
+    "split_scan",
+    "template",
 ]
 
 
@@ -28,7 +31,7 @@ def get_kernel_category_by_source_code(src_code):
 def get_kernel_category(kernel_mod):
     """
     Given the module defining a triton kernel, return the category of the kernel.
-    Cateogry can be one of:
+    Category can be one of:
     - pointwise
     - reduction
     - persistent_reduction
@@ -81,7 +84,9 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
                 if arg_name.startswith("in_out_ptr")
             ]
         )
-        num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
+        num_gb = triton_kernel.inductor_meta.get("kernel_num_gb", None)
+        if num_gb is None:
+            num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
 
         def get_info_str(ms, n_regs, n_spills, shared, prefix=""):
             if not any(x is None for x in [n_regs, n_spills, shared]):
@@ -96,7 +101,6 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
                 ms, num_gb, gb_per_s, prefix=prefix, suffix=kernel_detail_str
             )
 
-        bench_result = []
         kernel_desc = (
             f"{benchmark_name:20} {kernel_category[:3].upper()} {kernel_key[:10]}"
         )
@@ -273,9 +277,7 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
     else:
         times = 10
         repeat = 10
-        wall_time_ms = (
-            benchmark_compiled_module_fn(times=times, repeat=repeat) / times * 1000
-        )
+        wall_time_ms = benchmark_compiled_module_fn(times=times, repeat=repeat) * 1000
 
         if not args.profile:
             return

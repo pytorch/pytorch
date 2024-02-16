@@ -18,8 +18,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(_segment_reduce_lengths_stub);
 DEFINE_DISPATCH(_segment_reduce_offsets_stub);
@@ -565,5 +564,4 @@ REGISTER_ZVECTOR_DISPATCH(
     _segment_reduce_offsets_backward_stub,
     &_segment_reduce_cpu_offsets_backward_kernel);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

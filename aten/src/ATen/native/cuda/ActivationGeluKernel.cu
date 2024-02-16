@@ -57,7 +57,7 @@ void GeluBackwardCUDAKernelImpl(TensorIteratorBase& it, GeluType approximate) {
             auto left = opmath_t(0.5) * static_cast<opmath_t>(x);
             auto right = opmath_t(1) + tanh_inner;
 
-            auto left_derivative = 0.5 * right;
+            auto left_derivative = opmath_t(0.5) * right;
 
             auto tanh_derivative = opmath_t(1) - tanh_inner * tanh_inner;
             auto inner_derivative = kBeta * (opmath_t(1) + opmath_t(3) * kKappa * x_sq);

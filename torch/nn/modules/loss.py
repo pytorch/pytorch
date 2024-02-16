@@ -660,7 +660,7 @@ class BCEWithLogitsLoss(_Loss):
     :math:`p_c > 1` increases the recall, :math:`p_c < 1` increases the precision.
 
     For example, if a dataset contains 100 positive and 300 negative examples of a single class,
-    then `pos_weight` for the class should be equal to :math:`\frac{300}{100}=3`.
+    then ``pos_weight`` for the class should be equal to :math:`\frac{300}{100}=3`.
     The loss would act as if the dataset contains :math:`3\times 100=300` positive examples.
 
     Examples::
@@ -671,6 +671,12 @@ class BCEWithLogitsLoss(_Loss):
         >>> criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
         >>> criterion(output, target)  # -log(sigmoid(1.5))
         tensor(0.20...)
+
+    In the above example, the ``pos_weight`` tensor's elements correspond to the 64 distinct classes
+    in a multi-label binary classification scenario. Each element in ``pos_weight`` is designed to adjust the
+    loss function based on the imbalance between negative and positive samples for the respective class.
+    This approach is useful in datasets with varying levels of class imbalance, ensuring that the loss
+    calculation accurately accounts for the distribution in each class.
 
     Args:
         weight (Tensor, optional): a manual rescaling weight given to the loss
@@ -1106,7 +1112,7 @@ class CrossEntropyLoss(_WeightedLoss):
 
     Args:
         weight (Tensor, optional): a manual rescaling weight given to each class.
-            If given, has to be a Tensor of size `C`
+            If given, has to be a Tensor of size `C` and floating point dtype
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
             some losses, there are multiple elements per sample. If the field :attr:`size_average`
@@ -1216,7 +1222,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
 
     Shape:
         - Input: :math:`(N, C)` where `N` is the batch size and `C` is the number of classes.
-        - Target: :math:`(N, C)`, label targets padded by -1 ensuring same shape as the input.
+        - Target: :math:`(N, C)`, label targets must have the same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N)`.
     """
     __constants__ = ['reduction']
@@ -1231,8 +1237,8 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
 class CosineEmbeddingLoss(_Loss):
     r"""Creates a criterion that measures the loss given input tensors
     :math:`x_1`, :math:`x_2` and a `Tensor` label :math:`y` with values 1 or -1.
-    This is used for measuring whether two inputs are similar or dissimilar,
-    using the cosine similarity, and is typically used for learning nonlinear
+    Use (:math:`y=1`) to maximize the cosine similarity of two inputs, and (:math:`y=-1`) otherwise.
+    This is typically used for learning nonlinear
     embeddings or semi-supervised learning.
 
     The loss function for each sample is:
@@ -1269,6 +1275,15 @@ class CosineEmbeddingLoss(_Loss):
         - Input2: :math:`(N, D)` or :math:`(D)`, same shape as Input1.
         - Target: :math:`(N)` or :math:`()`.
         - Output: If :attr:`reduction` is ``'none'``, then :math:`(N)`, otherwise scalar.
+
+    Examples::
+
+        >>> loss = nn.CosineEmbeddingLoss()
+        >>> input1 = torch.randn(3, 5, requires_grad=True)
+        >>> input2 = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.ones(3)
+        >>> output = loss(input1, input2, target)
+        >>> output.backward()
     """
     __constants__ = ['margin', 'reduction']
     margin: float
