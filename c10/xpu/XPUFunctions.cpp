@@ -166,16 +166,16 @@ void set_device(DeviceIndex device) {
   curDeviceIndex = device;
 }
 
-int exchange_device(int to_device) {
-  auto cur_device = static_cast<int>(current_device());
+c10::DeviceIndex exchange_device(c10::DeviceIndex to_device) {
+  auto cur_device = current_device();
   if (to_device == cur_device) {
     return cur_device;
   }
-  set_device(static_cast<DeviceIndex>(to_device));
+  set_device(to_device);
   return cur_device;
 }
 
-int maybe_exchange_device(int to_device) {
+c10::DeviceIndex maybe_exchange_device(c10::DeviceIndex to_device) {
   return exchange_device(to_device);
 }
 

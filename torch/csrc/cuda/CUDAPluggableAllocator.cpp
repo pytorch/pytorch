@@ -17,7 +17,7 @@ _AllocationMetadata::_AllocationMetadata()
 
 _AllocationMetadata::_AllocationMetadata(
     size_t size,
-    int device_idx,
+    c10::DeviceIndex device_idx,
     cudaStream_t stream)
     : size(size), device_idx(device_idx), stream(stream) {}
 
@@ -127,7 +127,7 @@ void* CUDAPluggableAllocator::raw_alloc_with_stream(
 
 void CUDAPluggableAllocator::raw_delete(void* ptr) {
   cudaStream_t stream{};
-  int device_idx = -1;
+  c10::DeviceIndex device_idx = -1;
   size_t size = 0;
   {
     const std::lock_guard<std::mutex> lock(allocator_mutex_);

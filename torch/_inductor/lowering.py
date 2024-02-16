@@ -2249,7 +2249,6 @@ make_fallback(aten.fractional_max_pool3d)
 make_fallback(aten.frexp)
 make_fallback(aten.geqrf)
 make_fallback(aten.histc)
-make_fallback(aten.isin)
 make_fallback(aten.kthvalue)
 make_fallback(aten.linalg_cholesky_ex)
 make_fallback(aten.linalg_cross)
@@ -5341,9 +5340,11 @@ register_inplace(aten.__ixor__, aten.__xor__)
 
 
 @register_lowering(aten.sym_constrain_range)
-def sym_constrain_range(a, min, max):
-    tracing_context = torch._guards.TracingContext.get()
-    assert a in tracing_context.fake_mode.shape_env.var_to_range
+def sym_constrain_range(a, min=None, max=None):
+    tracing_context = torch._guards.TracingContext.try_get()
+    assert (
+        tracing_context is None or a in tracing_context.fake_mode.shape_env.var_to_range
+    )
     return a
 
 
@@ -5398,6 +5399,13 @@ def accumulate_grad_(variable, new_grad):
     variable.realize()
     new_grad.realize()
     ir.AccumulateGrad(variable, new_grad)
+    return variable
+
+
+@register_lowering(torch.ops.inductor.resize_storage_bytes_)
+def resize_storage_bytes_(variable, new_size):
+    variable.realize()
+    ir.ResizeStorageBytes(variable, new_size)
     return variable
 
 
