@@ -27,6 +27,30 @@ TEST(XpuEventTest, testXPUEventBehavior) {
   EXPECT_TRUE(event.query());
 }
 
+TEST(XpuEventTest, testXPUEventCrossDevice) {
+  if (at::xpu::device_count() <= 1) {
+    return;
+  }
+
+  const auto stream0 = at::xpu::getStreamFromPool();
+  at::xpu::XPUEvent event0;
+
+  const auto stream1 = at::xpu::getStreamFromPool(false, 1);
+  at::xpu::XPUEvent event1;
+
+  event0.record(stream0);
+  event1.record(stream1);
+
+  event0 = std::move(event1);
+
+  EXPECT_EQ(event0.device(), at::Device(at::kXPU, 1));
+
+  event0.block(stream0);
+
+  stream0.synchronize();
+  ASSERT_TRUE(event0.query());
+}
+
 void eventSync(sycl::event& event) {
   event.wait();
 }
