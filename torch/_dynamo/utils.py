@@ -254,10 +254,10 @@ def dynamo_timed(original_function=None, phase_name=None):
                 frame_key = str(curr_frame)
                 if frame_key not in frame_phase_timing:
                     frame_phase_timing[frame_key] = {}
-                assert (
-                    phase_name not in frame_phase_timing[frame_key]
-                ), f"Duplicate phase name {phase_name} for frame {frame_key}"
-                frame_phase_timing[frame_key][phase_name] = time_spent
+                if phase_name not in frame_phase_timing[frame_key]:
+                    frame_phase_timing[frame_key][phase_name] = time_spent
+                else:
+                    frame_phase_timing[frame_key][phase_name] += time_spent
             return r
 
         return time_wrapper
@@ -620,6 +620,8 @@ class CompilationMetrics:
     graph_input_count: Optional[int]
     entire_frame_compile_time_s: Optional[float]
     backend_compile_time_s: Optional[float]
+    inductor_compile_time_s: Optional[float]
+    code_gen_time_s: Optional[float]
     fail_type: Optional[str]
     fail_reason: Optional[str]
     fail_user_frame_filename: Optional[str]
@@ -1563,10 +1565,10 @@ def ensure_graph_fake(e, tx):
     return e
 
 
-def get_fake_values_from_nodes(tx, nodes):
+def get_fake_values_from_nodes(tx, nodes, allow_non_graph_fake):
     def visit(n: torch.fx.Node):
         if n.op == "call_function" and "example_value" not in n.meta:
-            return get_fake_value(n, tx)
+            return get_fake_value(n, tx, allow_non_graph_fake)
 
         return n.meta["example_value"]
 
@@ -1600,7 +1602,9 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     if "example_value" in node.meta and is_fake(node.meta["example_value"]):
         return node.meta["example_value"]
 
-    args, kwargs = get_fake_values_from_nodes(tx, (node.args, node.kwargs))
+    args, kwargs = get_fake_values_from_nodes(
+        tx, (node.args, node.kwargs), allow_non_graph_fake
+    )
 
     nnmodule = None
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):

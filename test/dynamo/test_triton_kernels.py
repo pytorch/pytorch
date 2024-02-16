@@ -1115,6 +1115,240 @@ class MutationTests(torch._dynamo.test_case.TestCase):
             ["out_ptr"],
         )
 
+    @make_mutation_test
+    def test_add_for_loop():
+        @triton.jit
+        def add_4_times_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = tl.zeros((n_elements,), dtype=tl.float32)
+            for i in range(4):
+                output += x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        t = torch.randn(4)
+        return (
+            add_4_times_kernel,
+            {
+                "in_ptr0": t,
+                "in_ptr1": t,
+                "out_ptr": t,
+                "n_elements": 4,
+                "BLOCK_SIZE": 4,
+            },
+            ["out_ptr"],
+        )
+
+    @make_mutation_test
+    def test_add_for_loop2():
+        @triton.jit
+        def add_1_time_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            for i in range(0, BLOCK_SIZE):
+                i = tl.multiple_of(i, 1)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        t = torch.randn(4)
+        return (
+            add_1_time_kernel,
+            {
+                "in_ptr0": t,
+                "in_ptr1": t,
+                "out_ptr": t,
+                "n_elements": 4,
+                "BLOCK_SIZE": 4,
+            },
+            ["out_ptr"],
+        )
+
+    @make_mutation_test
+    def test_add_nested_for_loop():
+        @triton.jit
+        def add_4_times_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = tl.zeros((n_elements,), dtype=tl.float32)
+            for i in range(2):
+                for j in range(2):
+                    output += x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        t = torch.randn(4)
+        return (
+            add_4_times_kernel,
+            {
+                "in_ptr0": t,
+                "in_ptr1": t,
+                "out_ptr": t,
+                "n_elements": 4,
+                "BLOCK_SIZE": 4,
+            },
+            ["out_ptr"],
+        )
+
+    @make_mutation_test
+    def test_add_nested_for_loop_multi_return():
+        @triton.jit
+        def add_4_times_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output1 = tl.zeros((n_elements,), dtype=tl.float32)
+            output2 = tl.zeros((n_elements,), dtype=tl.float32)
+            for i in range(2):
+                for j in range(2):
+                    output1 += y
+                    output2 += x
+            output = output1 + output2
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        t = torch.randn(4)
+        return (
+            add_4_times_kernel,
+            {
+                "in_ptr0": t,
+                "in_ptr1": t,
+                "out_ptr": t,
+                "n_elements": 4,
+                "BLOCK_SIZE": 4,
+            },
+            ["out_ptr"],
+        )
+
+    @make_mutation_test
+    def test_labels():
+        @triton.jit
+        def kernel_with_label(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            if pid > 1:
+                return
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        t = torch.randn(4)
+        return (
+            kernel_with_label,
+            {
+                "in_ptr0": t,
+                "in_ptr1": t,
+                "out_ptr": t,
+                "n_elements": 4,
+                "BLOCK_SIZE": 4,
+            },
+            ["out_ptr"],
+        )
+
+    @make_mutation_test
+    def test_for_loop_arg():
+        @triton.jit
+        def fwd_kernel(
+            X_ptr,
+            W1_ptr,
+            b1_ptr,
+            O_ptr,
+            M: tl.constexpr,
+            C1: tl.constexpr,
+            C2: tl.constexpr,
+            BLOCK_SIZE_M: tl.constexpr,
+            BLOCK_SIZE_C2: tl.constexpr,
+        ):
+            # Get program ids
+            pid_m = tl.program_id(0)
+
+            # Compute offsets
+            offs_c1 = tl.arange(0, C1)
+            offs_m = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+
+            # Load input data
+            x_block_ptr = X_ptr + offs_m[:, None] * C1 + offs_c1[None, :]
+            x = tl.load(x_block_ptr)
+
+            # Compute gating
+            for c2 in range(0, tl.cdiv(C2, BLOCK_SIZE_C2)):
+                # Compute block pointers
+                offs_c2 = c2 * BLOCK_SIZE_C2 + tl.arange(0, BLOCK_SIZE_C2)
+                o_block_ptr = O_ptr + offs_m[:, None] * C2 + offs_c2[None, :]
+                w1_block_ptr = W1_ptr + offs_c1[:, None] * C2 + offs_c2[None, :]
+                b1_block_ptr = b1_ptr + offs_c2
+
+                # Compute output
+                w = tl.load(w1_block_ptr)
+                b = tl.load(b1_block_ptr)
+                o = tl.dot(x, w, allow_tf32=False)
+                o += b[None, :]
+
+                # Store output
+                tl.store(o_block_ptr, o)
+
+        t = torch.randn(64)
+        return (
+            fwd_kernel,
+            {
+                "X_ptr": t,
+                "W1_ptr": t,
+                "b1_ptr": t,
+                "O_ptr": t,
+                "M": 64,
+                "C1": 64,
+                "C2": 64,
+                "BLOCK_SIZE_M": 64,
+                "BLOCK_SIZE_C2": 64,
+            },
+            ["O_ptr"],
+        )
+
 
 if HAS_CUDA and HAS_LARK:
     t = torch.randn(4)
@@ -1216,8 +1450,7 @@ if HAS_CUDA and HAS_LARK:
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
-            # TODO(oulgen): For loops not implemented yet
-            ["in_ptr0", "in_ptr1", "out_ptr"],
+            ["out_ptr"],
         ],
         [
             cond_op_kernel,
