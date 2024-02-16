@@ -388,6 +388,8 @@ aten::normal.float_float_out
 aten::normal.out
 aten::normal_
 aten::permute
+aten::pixel_shuffle
+aten::pixel_shuffle.out
 aten::polar
 aten::polar.out
 aten::pow.Scalar
