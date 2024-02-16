@@ -1450,6 +1450,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 source_target=self.func,
                 allow_constant_outputs=True,
                 log_error_on_graph_break=False,
+                set_subgraph_inputs="manual",
             )
         except Unsupported as e:
             raise CannotConvertRangeToHigherOrder("graph break in function") from e
