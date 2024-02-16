@@ -391,12 +391,8 @@ def check_exception_table(tab: List[ExceptionTableEntry]) -> None:
     Verifies that a list of ExceptionTableEntries will make a well-formed
     jump table: entries are non-empty, sorted, and do not overlap.
     """
-    for i in range(len(tab) - 1):
-        assert (
-            tab[i].start <= tab[i].end
-            and tab[i].end < tab[i + 1].start
-            and tab[i + 1].start <= tab[i + 1].end
-        )
+    for cur, nxt in zip(tab, tab[1:]):
+        assert cur.start <= cur.end < nxt.start <= nxt.end
 
 
 def parse_exception_table(exntab: bytes) -> List[ExceptionTableEntry]:
