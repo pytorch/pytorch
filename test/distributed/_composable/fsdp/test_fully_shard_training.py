@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import contextlib
 import copy
 import functools
 import unittest
@@ -31,6 +32,7 @@ from torch.testing._internal.common_fsdp import (
     MLP,
     patch_all_gather,
     patch_reduce_scatter,
+    test_compiled_fsdp,
 )
 from torch.testing._internal.common_utils import get_cycles_per_ms, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -46,6 +48,7 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
         return 2
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @test_compiled_fsdp()
     def test_root_move_forward_input_to_device(self):
         device = torch.device("cuda", 0)
 
@@ -79,6 +82,7 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
         return 4
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @test_compiled_fsdp()
     def test_param_registration_after_forward(self):
         """Tests the parameter registration after forward."""
         device = torch.device("cuda", 0)
@@ -133,6 +137,7 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             self._assert_same_params(model.parameters(), ref_model.parameters())
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @test_compiled_fsdp()
     def test_param_registration_after_backward(self):
         """Tests the parameter registration after backward."""
         device = torch.device("cuda", 0)
@@ -184,6 +189,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         return min(8, torch.cuda.device_count())
 
     @skip_if_lt_x_gpu(2)
+    @test_compiled_fsdp()
     def test_train_parity_single_group(self):
         """Tests train parity with DDP for a single FSDP group."""
         self.run_subtests(
@@ -215,7 +221,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
-    def test_train_parity_multi_group(self):
+    def test_train_parity_multi_group_eager(self):
         """
         Tests train parity against DDP when using multiple parameter groups for
         communication (for communication and computation overlap plus memory
@@ -228,6 +234,21 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 "delay_after_forward": [False, True],
                 "delay_before_all_gather": [False, True],
                 "delay_before_reduce_scatter": [False, True],
+                "delay_before_optim": [False, True],
+            },
+            self._test_train_parity_multi_group,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    @test_compiled_fsdp()
+    def test_train_parity_multi_group_compile(self):
+        self.run_subtests(
+            {
+                "reshard_after_forward": [True, False],
+                "device_type": ["cuda"],
+                "delay_after_forward": [False, True],
+                "delay_before_all_gather": [False],
+                "delay_before_reduce_scatter": [False],
                 "delay_before_optim": [False, True],
             },
             self._test_train_parity_multi_group,
@@ -273,19 +294,25 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         orig_reduce_scatter = dist.reduce_scatter_tensor
 
         def delayed_all_gather(*args, **kwargs):
-            if delay_before_all_gather:
-                torch.cuda._sleep(int(delay_in_ms * get_cycles_per_ms()))
+            torch.cuda._sleep(int(delay_in_ms * get_cycles_per_ms()))
             return orig_all_gather(*args, **kwargs)
 
         def delayed_reduce_scatter(*args, **kwargs):
-            if delay_before_reduce_scatter:
-                torch.cuda._sleep(int(delay_in_ms * get_cycles_per_ms()))
+            torch.cuda._sleep(int(delay_in_ms * get_cycles_per_ms()))
             return orig_reduce_scatter(*args, **kwargs)
 
         torch.manual_seed(42 + self.rank + 1)
-        with patch_all_gather(delayed_all_gather), patch_reduce_scatter(
-            delayed_reduce_scatter
-        ):
+        patch_all_gather_ctx = (
+            patch_all_gather(delayed_all_gather)
+            if delay_before_all_gather
+            else contextlib.nullcontext()
+        )
+        patch_reduce_scatter_ctx = (
+            patch_reduce_scatter(delayed_reduce_scatter)
+            if delay_before_reduce_scatter
+            else contextlib.nullcontext()
+        )
+        with patch_all_gather_ctx, patch_reduce_scatter_ctx:
             for iter_idx in range(10):
                 inp = torch.randn((8, lin_dim), device=torch.device(device_type))
                 losses: List[torch.Tensor] = []
@@ -301,6 +328,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
+    @test_compiled_fsdp()
     def test_non_root_forward_backward(self):
         """
         Tests running forward/backward through the root and then through a
@@ -346,6 +374,8 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         self.assertEqual(ref_nonroot_loss, nonroot_loss)
         self.assertEqual(ref_model(inp).sum(), model(inp).sum())
 
+    @skip_if_lt_x_gpu(2)
+    @test_compiled_fsdp()
     def test_multi_forward_module(self):
         """
         Tests parity with DDP when running a module that participates multiple
@@ -483,11 +513,22 @@ class TestFullyShardSharedParams(FSDPTest):
         return min(4, torch.cuda.device_count())
 
     @skip_if_lt_x_gpu(2)
-    def test_train_parity_with_shared_params(self):
+    @test_compiled_fsdp(compile_compute_on_module=TransformerBlock)
+    def test_train_parity_with_shared_params_no_ac(self):
         self.run_subtests(
             {
                 "reshard_after_forward": [False, True],
-                "use_activation_checkpointing": [False, True],
+                "use_activation_checkpointing": [False],
+            },
+            self._test_train_shared_params,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_train_parity_with_shared_params_ac(self):
+        self.run_subtests(
+            {
+                "reshard_after_forward": [False, True],
+                "use_activation_checkpointing": [True],
             },
             self._test_train_shared_params,
         )
