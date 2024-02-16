@@ -490,9 +490,6 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
                 return torch.nn.functional.affine_grid(
                     theta, size, align_corners=self.align_corners
                 )
-                # return torch.affine_grid_generator(
-                #     theta, size, align_corners=self.align_corners
-                # )
 
         opset_version = 20
         ops_2d = {

@@ -49,7 +49,6 @@ import pytorch_test_common
 
 import torch
 from onnx_test_common import skip, skip_slow, xfail
-
 from torch.onnx._internal.diagnostics import _rules
 from torch.testing._internal import (
     common_device_type,
