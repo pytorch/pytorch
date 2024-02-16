@@ -33,6 +33,7 @@
 #pragma once
 
 #include <c10/macros/Export.h>
+#include <cstdint>
 #include <iosfwd>
 
 namespace c10 {

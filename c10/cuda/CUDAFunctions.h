@@ -12,8 +12,7 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <cuda_runtime_api.h>
-namespace c10 {
-namespace cuda {
+namespace c10::cuda {
 
 // NB: In the past, we were inconsistent about whether or not this reported
 // an error if there were driver problems are not.  Based on experience
@@ -37,15 +36,15 @@ C10_CUDA_API void warn_or_error_on_sync();
 // Raw CUDA device management functions
 C10_CUDA_API cudaError_t GetDeviceCount(int* dev_count);
 
-C10_CUDA_API cudaError_t GetDevice(int* device);
+C10_CUDA_API cudaError_t GetDevice(DeviceIndex* device);
 
-C10_CUDA_API cudaError_t SetDevice(int device);
+C10_CUDA_API cudaError_t SetDevice(DeviceIndex device);
 
-C10_CUDA_API cudaError_t MaybeSetDevice(int device);
+C10_CUDA_API cudaError_t MaybeSetDevice(DeviceIndex device);
 
-C10_CUDA_API int ExchangeDevice(int device);
+C10_CUDA_API DeviceIndex ExchangeDevice(DeviceIndex device);
 
-C10_CUDA_API int MaybeExchangeDevice(int device);
+C10_CUDA_API DeviceIndex MaybeExchangeDevice(DeviceIndex device);
 
 C10_CUDA_API void SetTargetDevice();
 
@@ -114,5 +113,4 @@ C10_CUDA_API void __inline__ stream_synchronize(cudaStream_t stream) {
 C10_CUDA_API bool hasPrimaryContext(DeviceIndex device_index);
 C10_CUDA_API c10::optional<DeviceIndex> getDeviceIndexWithPrimaryContext();
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda

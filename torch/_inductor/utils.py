@@ -6,6 +6,7 @@ import enum
 import functools
 import getpass
 import inspect
+import io
 import itertools
 import logging
 import math
@@ -19,6 +20,7 @@ import tempfile
 import textwrap
 import time
 import unittest
+from datetime import datetime
 from io import StringIO
 from typing import (
     Any,
@@ -45,7 +47,6 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
-
 from . import config
 
 log = logging.getLogger(__name__)
@@ -331,7 +332,7 @@ def timed(
         synchronize(device)
     t1 = time.perf_counter()
     # GC the result after timing
-    assert result is not None
+    assert result is not None  # type: ignore[possibly-undefined]
     return t1 - t0
 
 
@@ -440,7 +441,9 @@ def get_fused_kernel_name(node_schedule, descriptive_names):
         sources = [
             origin.meta["original_aten"]._overloadpacket.__name__
             for origin in all_origins
-            if origin.op == "call_function" and "original_aten" in origin.meta
+            if origin.op == "call_function"
+            and "original_aten" in origin.meta
+            and origin.meta["original_aten"] is not None
         ]
         sources = sorted(set(sources))
     elif descriptive_names == "torch":
@@ -471,7 +474,7 @@ def get_kernel_metadata(node_schedule, wrapper):
     from_node_dict = collections.defaultdict(list)
     original_aten_dict = collections.defaultdict(list)
     for node in inductor_nodes:
-        if "original_aten" in node.meta:
+        if "original_aten" in node.meta and node.meta["original_aten"] is not None:
             key = str(node.meta["original_aten"]._overloadpacket)
             original_aten_dict[key].append(node.name)
         if "from_node" in node.meta:
@@ -544,7 +547,10 @@ def sympy_str(expr: sympy.Expr) -> str:
     return str(expr)
 
 
-def sympy_symbol(name: str) -> sympy.Symbol:
+def sympy_index_symbol(name: str) -> sympy.Symbol:
+    """
+    Used to generate an integer-nonnegative symbol.
+    """
     # This should never be used for creating shape/stride symbols, as those
     # should all be allocated before Inductor.
     assert name[0] != "s"
@@ -553,27 +559,46 @@ def sympy_symbol(name: str) -> sympy.Symbol:
     return sympy.Symbol(name, integer=True, nonnegative=True)
 
 
-def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]) -> sympy.Expr:
+def sympy_subs(expr: sympy.Expr, replacements: Dict[sympy.Expr, Any]) -> sympy.Expr:
     """
-    xreplace is faster than subs, but is way more picky
+    When the passed replacement symbol v is a string, it is converted to a symbol with name v that
+    have the same replaced expression integer and nonnegative properties.
     """
 
-    def promote_strings(key):
-        if isinstance(key, str):
-            return sympy_symbol(key)
-        return key
+    def to_symbol(replaced, replacement):
+        assert isinstance(replaced, sympy.Expr)
+        if isinstance(replacement, str):
+            return sympy.Symbol(
+                replacement,
+                integer=replaced.is_integer,  # type: ignore[attr-defined]
+                nonnegative=replaced.is_nonnegative,  # type: ignore[attr-defined]
+            )
+        else:
+            return replacement
 
+    # xreplace is faster than subs, but is way more picky
     return sympy.sympify(expr).xreplace(
-        {promote_strings(k): promote_strings(v) for k, v in replacements.items()}
+        {k: to_symbol(k, v) for k, v in replacements.items()}
     )
 
 
 def free_symbol_startswith(index: sympy.Expr, prefix: str):
-    return any(v.name.startswith(prefix) for v in index.free_symbols)
+    return any(v.name.startswith(prefix) for v in index.free_symbols)  # type: ignore[attr-defined]
 
 
 def free_symbol_has(index: sympy.Expr, pattern: str):
-    return any(pattern in v.name for v in index.free_symbols)
+    return any(pattern in v.name for v in index.free_symbols)  # type: ignore[attr-defined]
+
+
+def is_symbolic(a: Any) -> bool:
+    return isinstance(a, torch.SymInt) or (
+        isinstance(a, torch.Tensor)
+        and any(is_symbolic(x) for x in itertools.chain(a.size(), a.stride()))
+    )
+
+
+def any_is_symbolic(*args: Any) -> bool:
+    return any(is_symbolic(a) for a in args)
 
 
 def has_incompatible_cudagraph_ops(gm):
@@ -762,6 +787,12 @@ class IndentedBuffer:
 
         return ctx()
 
+    def do_indent(self, offset=1):
+        self._indent += offset
+
+    def do_unindent(self, offset=1):
+        self._indent -= offset
+
     def splice(self, other_code, strip=False):
         if isinstance(other_code, IndentedBuffer):
             dedent = float("inf")
@@ -784,6 +815,9 @@ class IndentedBuffer:
             other_code = other_code.rstrip()
             for line in other_code.split("\n"):
                 self.writeline(line)
+
+    def __repr__(self):
+        return f"{type(self)}({self.getvalue()})"
 
 
 class DeferredLineBase:
@@ -1057,7 +1091,7 @@ def get_sympy_Expr_dtype(val: sympy.Expr) -> torch.dtype:
     assert isinstance(
         val, sympy.Expr
     ), "only support sympy.Expr as input to get_sympy_Expr_dtype"
-    if val.is_integer:
+    if val.is_integer:  # type: ignore[attr-defined]
         return torch.int64
     else:
         return torch.float64
@@ -1081,6 +1115,13 @@ def triton_config_to_hashable(cfg):
     items.append(("num_warps", cfg.num_warps))
     items.append(("num_stages", cfg.num_stages))
     return tuple(items)
+
+
+def parallel_num_threads():
+    threads = config.cpp.threads
+    if threads < 1:
+        threads = torch.get_num_threads()
+    return threads
 
 
 HAS_COLORAMA = True
@@ -1121,16 +1162,16 @@ def get_device_tflops(dtype):
 
     if inspect.signature(get_max_simd_tflops).parameters.get("clock_rate"):
         # Triton API change in https://github.com/openai/triton/pull/2293
-        from triton.testing import nvsmi
+        from torch._utils_internal import max_clock_rate
 
-        cur_sm_clock = nvsmi(["clocks.current.sm"])[0]
+        sm_clock = max_clock_rate()
         if dtype in (torch.float16, torch.bfloat16):
-            return get_max_tensorcore_tflops(dtype, cur_sm_clock)
+            return get_max_tensorcore_tflops(dtype, sm_clock)
 
         if torch.backends.cuda.matmul.allow_tf32:
-            return get_max_tensorcore_tflops(torch.float32, cur_sm_clock)
+            return get_max_tensorcore_tflops(torch.float32, sm_clock)
         else:
-            return get_max_simd_tflops(torch.float32, cur_sm_clock)
+            return get_max_simd_tflops(torch.float32, sm_clock)
     else:
         if dtype in (torch.float16, torch.bfloat16):
             return get_max_tensorcore_tflops(dtype)
@@ -1196,35 +1237,45 @@ class Placeholder(enum.Enum):
     DESCRIPTIVE_NAME = "DESCRIPTIVE_NAME"
 
 
-# A utility function for easier AOTInductor testing
-def aot_inductor_launcher(so_path: str, device: str):
-    if device == "cuda":
-        return f"""
-            #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
+def pass_execution_and_save(func, gm, msg):
+    from .pattern_matcher import stable_topological_sort
 
-            torch::inductor::AOTIModelContainerRunnerCuda runner("{so_path}");
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        delete=False,
+    ) as f:
+        before_io = io.StringIO()
+        after_io = io.StringIO()
+        print(f"Before:\n{gm.graph}", file=f)
+        print(gm.graph, file=before_io)
+        start_time = datetime.now()
+        func(gm.graph)
+        time_elapsed = datetime.now() - start_time
+        # recompile graph
+        stable_topological_sort(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
 
-            std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
-                return runner.run(input_tensors);
-            }}
+        print(f"After:\n{gm.graph}", file=f)
+        print(gm.graph, file=after_io)
+        t = before_io.getvalue() == after_io.getvalue()
+        log.info(
+            "%s, save before/after graph to %s, graph before/after are the same = %s, time elapsed = %s",
+            msg,
+            f.name,
+            t,
+            time_elapsed,
+        )
 
-            std::vector<std::string> get_call_spec() {{
-                return runner.get_call_spec();
-            }}
-        """
-    elif device == "cpu":
-        return f"""
-            #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 
-            torch::inductor::AOTIModelContainerRunnerCpu runner("{so_path}");
+def is_collective(node):
+    from . import ir
 
-            std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {{
-                return runner.run(input_tensors);
-            }}
+    return isinstance(node, ir.CollectiveKernel) or type(node) == ir._CollectiveKernel
 
-            std::vector<std::string> get_call_spec() {{
-                return runner.get_call_spec();
-            }}
-        """
-    else:
-        raise RuntimeError(f"Unsupported device: {device}")
+
+def is_wait(node):
+    from . import ir
+
+    return isinstance(node, ir.Wait) or type(node) == ir._WaitKernel

@@ -75,6 +75,7 @@ def run_functionalized_fw_and_collect_metadata(
     # TODO: refactor to kill this flag
     is_train: bool = False,
     requires_subclass_dispatch: bool = False,
+    pre_dispatch: bool = False,
 ) -> Callable[..., ViewAndMutationMeta]:
     memo: Dict[Tensor, Tensor] = {}
 
@@ -91,12 +92,10 @@ def run_functionalized_fw_and_collect_metadata(
     @wraps(f)
     def inner(*flat_args):
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
-        assert all(isinstance(a, KNOWN_TYPES) for a in flat_args)
+        assert all(isinstance(a, tuple(KNOWN_TYPES)) for a in flat_args)
 
         input_info: List[InputAliasInfo] = []
         output_info: List[OutputAliasInfo] = []
-
-        flat_f_args = pytree.tree_map(_to_fun, flat_args)
 
         prior_grad_enabled = torch.is_grad_enabled()
         prior_autocast_states = _get_autocast_states()
@@ -105,8 +104,12 @@ def run_functionalized_fw_and_collect_metadata(
         disable_above = torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
+
+        # It doesn't matter if we run this under predispatch or not because it is
+        # only for figuring out metadata
         with disable_above, FunctionalTensorMode():
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
+            flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_outs = f(*flat_f_args)
 
         if prior_autocast_states != _get_autocast_states():
@@ -349,20 +352,31 @@ def run_functionalized_fw_and_collect_metadata(
                     and o is not curr
                 ]
             )
-            is_result_of_custom_autograd_fn = False
+
+            # See Note [Accessing .grad_fn on FunctionalTensor]
+            # In-place operations on views will trigger a lazy rebase of the autograd graph;
+            # this runs during access to the .grad_fn. The rebase logic will invoke view ops
+            # on FunctionalTensors, so we must enable a FunctionalTensorMode here to ensure
+            # these op calls succeed.
+            grad_fn = None
             if isinstance(o, Tensor):
-                # Need to check for both custom cpp (CppFunction) and python (BackwardCFunction) autograd fns
-                if type(o.grad_fn).__name__ == "CppFunction":
-                    is_result_of_custom_autograd_fn = True
-                if isinstance(o.grad_fn, torch.autograd.function.BackwardCFunction):
-                    is_result_of_custom_autograd_fn = True
+                with FunctionalTensorMode():
+                    grad_fn = o.grad_fn
+
+            is_result_of_custom_autograd_fn = False
+            # Need to check for both custom cpp (CppFunction) and python (BackwardCFunction)
+            # autograd fns
+            if type(grad_fn).__name__ == "CppFunction":
+                is_result_of_custom_autograd_fn = True
+            if isinstance(grad_fn, torch.autograd.function.BackwardCFunction):
+                is_result_of_custom_autograd_fn = True
 
             if not isinstance(o, Tensor):
                 output_type = OutputType.non_alias
                 base_idx = None
             elif (
                 curr_storage in inp_storage_refs
-                and o.grad_fn is not None
+                and grad_fn is not None
                 and is_result_of_custom_autograd_fn
             ):
                 output_type = OutputType.custom_function_view
@@ -381,7 +395,7 @@ def run_functionalized_fw_and_collect_metadata(
                     num_aliased_outs - num_multi_output_view_outs
                 )
                 if (
-                    o.grad_fn is not None
+                    grad_fn is not None
                     and num_aliased_outs_that_are_not_multi_output_views == 0
                 ):
                     # See Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]

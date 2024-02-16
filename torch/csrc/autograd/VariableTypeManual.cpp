@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
+#include <torch/csrc/autograd/generated/ViewFuncs.h>
 #include <torch/library.h>
 
 #include <utility>
@@ -48,6 +49,12 @@ std::vector<at::DeprecatedTypeProperties*> allCUDATypes() {
 
 std::vector<at::DeprecatedTypeProperties*> allXPUTypes() {
   return allTypesForBackends({Backend::XPU, Backend::SparseXPU});
+}
+
+std::vector<at::DeprecatedTypeProperties*> allPrivateUser1Types() {
+  at::globalContext().lazyInitPrivateUse1();
+  return allTypesForBackends(
+      {Backend::PrivateUse1, Backend::SparsePrivateUse1});
 }
 
 namespace {
@@ -453,6 +460,7 @@ static Tensor detach(c10::DispatchKeySet ks, const Tensor& self) {
       /* is_bw_differentiable */ false,
       /* is_fw_differentiable */ false,
       /* view_func */ nullptr,
+      /* rev_view_func */ nullptr,
       /* creation_meta */ CreationMeta::DEFAULT,
       /*allow_tensor_metadata_change=*/false);
 
@@ -467,11 +475,15 @@ static Tensor _fw_primal(
     at::AutoDispatchBelowADInplaceOrView guard;
     return at::alias(self);
   })();
-  std::function<at::Tensor(const at::Tensor&)> func = nullptr;
+  std::unique_ptr<torch::autograd::ViewFunc> func(nullptr);
+  std::function<at::Tensor(const at::Tensor&)> rev_func = nullptr;
   if (!self.unsafeGetTensorImpl()->support_as_strided()) {
-    auto size_vec = self.sizes().vec();
-    func = [=](const at::Tensor& input_base) {
-      return input_base.view(size_vec);
+    func = std::make_unique<ViewViewFunc>(self.sym_sizes());
+    rev_func = [=](const at::Tensor& input_view) {
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Reverse view_func for _fw_primal() is not currently supported");
+      return Tensor();
     };
   }
   auto result = as_view(
@@ -480,6 +492,7 @@ static Tensor _fw_primal(
       /* is_bw_differentiable */ true,
       /* is_fw_differentiable */ false,
       /* view_func */ std::move(func),
+      /* rev_view_func */ std::move(rev_func),
       /* creation_meta */ CREATION_META_DEFINITION);
 
   return result;
@@ -495,11 +508,15 @@ static Tensor _make_dual(
     at::AutoDispatchBelowADInplaceOrView guard;
     return at::alias(primal);
   })();
-  std::function<at::Tensor(const at::Tensor&)> func = nullptr;
+  std::unique_ptr<torch::autograd::ViewFunc> func(nullptr);
+  std::function<at::Tensor(const at::Tensor&)> rev_func = nullptr;
   if (!primal.unsafeGetTensorImpl()->support_as_strided()) {
-    auto size_vec = primal.sizes().vec();
-    func = [=](const at::Tensor& input_base) {
-      return input_base.view(size_vec);
+    func = std::make_unique<ViewViewFunc>(primal.sym_sizes());
+    rev_func = [=](const at::Tensor& input_view) {
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Reverse view_func for _make_dual() is not currently supported");
+      return Tensor();
     };
   }
   auto result = as_view(
@@ -508,6 +525,7 @@ static Tensor _make_dual(
       /* is_bw_differentiable */ true,
       /* is_fw_differentiable */ false,
       /* view_func */ std::move(func),
+      /* rev_view_func */ std::move(rev_func),
       /* creation_meta */ CREATION_META_DEFINITION);
 
   return result;

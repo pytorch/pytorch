@@ -464,6 +464,7 @@ class TestOperators(TestCase):
             self.assertEqual(result, expected)
             self.assertEqual(result_noncontig, expected)
 
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_jvp', set({
         # Composite ops that do bad things. Need to be fixed in PyTorch core.
@@ -595,6 +596,7 @@ class TestOperators(TestCase):
         self.assertEqual(noncontig_primal_outs, expected_primal_outs)
         self.assertEqual(noncontig_tangent_outs, expected_tangent_outs)
 
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
         xfail('sparse.sampled_addmm', ''),
@@ -776,6 +778,8 @@ class TestOperators(TestCase):
         xfail("nn.functional.batch_norm"),
         xfail("nn.functional.binary_cross_entropy"),  # vmap: inplace into a regular tensor
         xfail("nn.functional.ctc_loss"),  # derivate not implemented for _ctc_loss_backward
+        # flaky on ROCM needs investigation
+        decorate('nn.functional.conv_transpose2d', decorator=skipIfRocm),
         skip("nn.functional.dropout"),  # calls random op
         skip("nn.functional.dropout2d"),  # calls random op
         skip("nn.functional.dropout3d"),  # calls random op

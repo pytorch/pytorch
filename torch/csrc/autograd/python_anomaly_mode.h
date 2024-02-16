@@ -14,6 +14,7 @@ struct PyAnomalyMetadata : public AnomalyMetadata {
 
   PyAnomalyMetadata() {
     pybind11::gil_scoped_acquire gil;
+    // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
     dict_ = PyDict_New();
   }
   ~PyAnomalyMetadata() override {
@@ -32,7 +33,7 @@ struct PyAnomalyMetadata : public AnomalyMetadata {
   }
 
  private:
-  PyObject* dict_;
+  PyObject* dict_{nullptr};
 };
 void _print_stack(
     PyObject* trace_stack,

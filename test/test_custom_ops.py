@@ -7,6 +7,7 @@ import collections
 import itertools
 import os
 import re
+import sys
 import typing
 
 import torch._custom_ops as custom_ops
@@ -46,7 +47,7 @@ class CustomOpTestCaseBase(TestCase):
         return getattr(torch.ops, self.test_ns)
 
     def lib(self):
-        result = torch.library.Library(self.test_ns, "FRAGMENT")
+        result = torch.library.Library(self.test_ns, "FRAGMENT")  # noqa: TOR901
         self.libraries.append(result)
         return result
 
@@ -55,6 +56,9 @@ class CustomOpTestCaseBase(TestCase):
 
 
 @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+@unittest.skipIf(
+    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+)
 class TestCustomOpTesting(CustomOpTestCaseBase):
     @parametrize("check_gradients", (False, "auto"))
     @parametrize("dynamic", (True, False))
@@ -1476,6 +1480,9 @@ def forward(self, x_1):
         )
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work on windows")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
     def test_data_dependent_compile(self):
         import torch._dynamo.testing
         from torch._dynamo.utils import counters
@@ -1491,7 +1498,9 @@ def forward(self, x_1):
 
         self.assertEqual(
             dict(counters["graph_break"]),
-            {"dynamic shape operator: _torch_testing.numpy_nonzero.default": 1},
+            {
+                "dynamic shape operator: _torch_testing.numpy_nonzero.default; to enable, set torch._dynamo.config.capture_dynamic_output_shape_ops = True": 1  # noqa: B950
+            },
         )
 
     # pre-existing problem: torch.compile(dynamic=True) will, by default,
