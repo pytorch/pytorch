@@ -2113,7 +2113,7 @@ class PyCodeCache:
             regex = r'File "(.+)", line (\d+), in (.+)\n'
             matches = re.findall(regex, stack_trace)
             return [
-                {"filename": f, "line": int(l), "name": n}
+                {"filename": f, "lineno": int(l), "name": n}
                 for f, l, n in reversed(matches)
             ]
 

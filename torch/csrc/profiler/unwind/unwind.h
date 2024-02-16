@@ -14,6 +14,7 @@ struct Frame {
   std::string filename;
   std::string funcname;
   uint64_t lineno;
+  std::string line;
 };
 
 // note: symbolize is really slow
