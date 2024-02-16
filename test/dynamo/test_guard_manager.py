@@ -15,6 +15,15 @@ NO_TENSOR_ALIASING = guards.NO_TENSOR_ALIASING
 install_no_tensor_aliasing_guard = guards.install_no_tensor_aliasing_guard
 
 
+class Pair:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+
+global_pair = Pair(torch.randn(4), 1)
+
+
 def id_type(x):
     return id(type(x))
 
@@ -331,6 +340,24 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(guard_manager.check(foo))
         self.assertFalse(guard_manager.check([3, 4]))
         self.assertFalse(guard_manager.check("foo"))
+
+    def test_globals(self):
+        global global_pair, Pair
+        guard_manager = RootGuardManager()
+        gpair_mgr = guard_manager.globals_dict_manager(globals(), None).getitem_manager(
+            "global_pair", global_pair
+        )
+
+        gpair_mgr.add_lambda_guard(
+            lambda x: isinstance(x, Pair)
+            and isinstance(x.x, torch.Tensor)
+            and isinstance(x.y, int),
+            "global guard fail",
+        )
+
+        self.assertTrue(guard_manager.check(global_pair))
+        global_pair.y = "foo"
+        self.assertFalse(guard_manager.check(global_pair))
 
 
 if __name__ == "__main__":

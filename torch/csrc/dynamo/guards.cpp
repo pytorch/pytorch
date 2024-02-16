@@ -1608,6 +1608,44 @@ class GetItemGuardAccessor : public GuardAccessor {
   PyObject* _attr_name;
 };
 
+/**
+ * Represents f_globals acccessor. This sits as a child accessor of the
+ * RootGuardManager.
+ */
+class GlobalsGuardAccessor : public GuardAccessor {
+ public:
+  GlobalsGuardAccessor(
+      RootGuardManager* root,
+      py::dict globals_dict,
+      py::handle example_value)
+      : GuardAccessor(root, globals_dict, example_value),
+        _globals_dict(globals_dict.ptr()) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    // Ignore the obj arg. This is required to satisfy the function signature.
+    // Just pass on the globals dict to the child manager.
+    return _guard_manager->check_nopybind(_globals_dict);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    // Ignore the obj arg. This is required to satisfy the function signature.
+    // Just pass on the globals dict to the child manager.
+    return _guard_manager->check_verbose_nopybind(_globals_dict);
+  }
+
+  std::string repr() const override {
+    return "GlobalsGuardAccessor";
+  }
+
+ private:
+  // no need of py::object here because the globals_dict is already passed on to
+  // the base class as accessor_key which is a py::object.
+  PyObject* _globals_dict;
+};
+
 void install_tensor_aliasing_guard(
     GuardManager* x,
     GuardManager* y,
@@ -1779,6 +1817,10 @@ PyObject* torch_c_dynamo_guards_init() {
       GetItemGuardAccessor,
       GuardAccessor,
       std::unique_ptr<GetItemGuardAccessor>>(py_m, "GetItemGuardAccessor");
+  py::class_<
+      GlobalsGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<GlobalsGuardAccessor>>(py_m, "GlobalsGuardAccessor");
 
   // Guard Manager - No constructor in python, python should use
   // RootGuardManager.
@@ -1865,6 +1907,12 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "getitem_manager",
           &GuardManager::get_child_manager<GetItemGuardAccessor>,
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "globals_dict_manager",
+          &GuardManager::get_child_manager<GlobalsGuardAccessor>,
           py::return_value_policy::reference)
       // return by reference because C++ GuardManager has the ownership of
       // accessors and guard managers
