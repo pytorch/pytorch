@@ -203,6 +203,8 @@ else:
                 if isinstance(mesh, torch.Tensor)
                 else torch.tensor(mesh, dtype=torch.int)
             )
+            if self.mesh.device.type != "cpu":
+                raise RuntimeError(f"`mesh` must be a CPU tensor, got {self.mesh}")
             self.mesh_dim_names = mesh_dim_names
 
             # private field to pre-generate DeviceMesh's hash
