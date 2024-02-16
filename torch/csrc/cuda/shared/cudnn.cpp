@@ -66,8 +66,7 @@ version_tuple getRuntimeVersion() {
 
 size_t getVersionInt() {
   // miopen version is MAJOR*1000000 + MINOR*1000 + PATCH
-  size_t major, minor, patch;
-  std::tie(major, minor, patch) = getRuntimeVersion();
+  auto [major, minor, patch] = getRuntimeVersion();
   return major * 1000000 + minor * 1000 + patch;
 }
 
