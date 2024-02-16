@@ -50,7 +50,7 @@ def load(
     planner: Optional[LoadPlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
-    no_dist: bool = False,
+    no_dist: Optional[bool] = None,
 ) -> None:
     """
     Load a distributed ``state_dict`` in SPMD style.
@@ -99,8 +99,8 @@ def load(
             (Default: ``None``)
         coordinator_rank (int): Rank to use to coordinate the checkpoint.
             rank0 is used by default. (Default: ``0``)
-        no_dist (bool): If ``True``, distributed checkpoint will not save
-            in SPMD style. (Default: ``False``)
+        no_dist (Optional[bool]): If ``True``, distributed checkpoint will not save
+            in SPMD style. (Default: ``False`` when torch.distributed is available and initialized)
 
     Returns:
         None.
@@ -130,6 +130,14 @@ def load(
         and it is the user's responsibility to ensure that this is set so that each
         rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
+
+    if no_dist is None:
+        no_dist = not (dist.is_available() and dist.is_initialized())
+        if no_dist:
+            warnings.warn(
+                "Loading with `no_dist` set to True because torch.distributed"
+                " is unavailable or uninitialized."
+            )
 
     with _profile():
         storage_reader = cast(
