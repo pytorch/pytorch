@@ -1080,7 +1080,7 @@ def quantized_decomposed_quantize_per_channel(
     assert len(zero_points.get_size()) == 1, "expect zero_points 1 dim"
 
     if input.get_dtype() == torch.bfloat16:
-        input = input.to(torch.float32)
+        input = to_dtype(input, torch.float32)
     assert (
         input.get_dtype() == torch.float32
     ), f"Expecting input to have dtype torch.float32, but got dtype: {input.get_dtype()}"

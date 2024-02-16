@@ -1194,7 +1194,7 @@ class CPUReproTests(TestCase):
     def test_per_tensor_fake_quant_int8(self):
         self._test_per_tensor_fake_quant_helper(torch.int8)
 
-    def _test_per_channel_fake_quant_helper(self, dtype):
+    def _test_per_channel_fake_quant_helper(self, dtype, input_dtype=torch.float32):
         def fn(input, scales, zero_points, axis, quant_min, quant_max, dtype):
             input = torch.ops.quantized_decomposed.quantize_per_channel(
                 input, scales, zero_points, axis, quant_min, quant_max, dtype
@@ -1212,6 +1212,8 @@ class CPUReproTests(TestCase):
             quant_min,
             quant_max,
         )
+        if input_dtype != torch.float32:
+            x = x.to(dtype=input_dtype)
         scales = torch.ones((3,))
         zero_points = torch.zeros((3,))
         axis = 1
@@ -1232,6 +1234,20 @@ class CPUReproTests(TestCase):
     )
     def test_per_channel_fake_quant_int8(self):
         self._test_per_channel_fake_quant_helper(torch.int8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_per_channel_fake_quant_uint8_bf16_input(self):
+        self._test_per_channel_fake_quant_helper(
+            torch.uint8, input_dtype=torch.bfloat16
+        )
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_per_channel_fake_quant_int8_bf16_input(self):
+        self._test_per_channel_fake_quant_helper(torch.int8, input_dtype=torch.bfloat16)
 
     def _test_non_contiguous_load_buf_quant_helper(self, dtype):
         def fn(
