@@ -438,6 +438,7 @@ def meta__cslt_sparse_mm(
     transpose_result: bool = False,
 ):
     assert dense_B.dtype in {
+        torch.float32,
         torch.float16,
         torch.bfloat16,
         torch.int8,
@@ -454,9 +455,11 @@ def meta__cslt_sparse_mm(
         assert m == bias.size(0)
 
     if out_dtype is not None:
-        assert (
-            is_int8_input_type and out_dtype == torch.float16
-        ), "out_dtype is only supported for i8i8->fp16 matmul"
+        assert is_int8_input_type and out_dtype in {
+            torch.float16,
+            torch.bfloat16,
+            torch.int32,
+        }, "out_dtype is only supported for i8i8->fp16, bf16, or i32 matmul"
     output_shape = (n, m) if transpose_result else (m, n)
     result = dense_B.new_empty(output_shape, dtype=out_dtype)
     return result
@@ -1147,7 +1150,7 @@ def _parse_qr_mode(mode: str) -> Tuple[bool, bool]:
                 f"but expected one of 'reduced' (default), 'r', or 'complete'"
             ),
         )
-    return compute_q, reduced
+    return compute_q, reduced  # type: ignore[possibly-undefined]
 
 
 @register_meta([aten.linalg_qr.default, aten.linalg_qr.out])
@@ -1412,7 +1415,7 @@ def triangular_solve_meta(
         cloned_coefficient = self.new_empty([0])
     else:
         torch._check(False, lambda: "triangular_solve: Got an unexpected layout.")
-    return solution, cloned_coefficient
+    return solution, cloned_coefficient  # type: ignore[possibly-undefined]
 
 
 # From aten/src/ATen/native/LinearAlgebra.cpp
@@ -1809,7 +1812,7 @@ def _pad3d_common(input, padding, *, is_reflection):
     )
 
     if batch_mode:
-        return input.new_empty((nbatch, nplane, output_d, output_h, output_w))
+        return input.new_empty((nbatch, nplane, output_d, output_h, output_w))  # type: ignore[possibly-undefined]
     else:
         return input.new_empty((nplane, output_d, output_h, output_w))
 
@@ -3070,6 +3073,7 @@ def register_meta_foreach(ops):
         aten._foreach_log1p,
         aten._foreach_log2,
         aten._foreach_neg,
+        aten._foreach_norm,
         aten._foreach_reciprocal,
         aten._foreach_round,
         aten._foreach_sigmoid,
@@ -3876,8 +3880,11 @@ def pooling_output_shape(inputSize, kernelSize, pad, stride, dilation, ceil_mode
     torch._check(stride != 0, lambda: "stride should not be zero")
     torch._check(pad >= 0, lambda: f"pad must be non-negative, but got pad: {pad}")
     torch._check(
-        pad <= kernelSize // 2,
-        lambda: f"pad should be at most half of kernel size, but got pad={pad} and kernel_size={kernelSize}",
+        pad <= ((kernelSize - 1) * dilation + 1) // 2,
+        lambda: (
+            f"pad should be at most half of effective kernel size, but got pad={pad}, "
+            f"kernel_size={kernelSize} and dilation={dilation}"
+        ),
     )
     return pooling_output_shape_pad_lr(
         inputSize, kernelSize, pad, pad, stride, dilation, ceil_mode
@@ -5348,12 +5355,15 @@ def meta__flash_attention_forward(
     return_debug_mask: bool,
     scale: Optional[float] = None,
 ):
-    batch_size = query.size(0)
-    max_seqlen_batch_q = query.size(1)
-    num_heads = query.size(2)
-    head_dim = query.size(3)
-
-    max_seqlen_batch_k = key.size(1)
+    # NB: there are two underlying paths:
+    # 1. normal dense path; expect 4D inputs of shape (batch_size, seqlen, num_heads, head_dim)
+    # 2. varseqlen path; expect 3D inputs of shape (total, num_heads, head_dim) where total
+    #    includes all batch item sequences. cum_seq_q / cum_seq_k contain offsets into total
+    batch_size = query.size(0) if cum_seq_q is None else cum_seq_q.numel() - 1
+    max_seqlen_batch_q = query.size(1) if cum_seq_q is None else max_q
+    max_seqlen_batch_k = key.size(1) if cum_seq_k is None else max_k
+    num_heads = query.size(-2)
+    head_dim = query.size(-1)
 
     # Cuda Path
     attention = torch.empty_like(query)
@@ -5447,9 +5457,10 @@ def meta__efficient_attention_forward(
 
     res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
 
+    logsumexp_batch_dim = cu_seqlens_q.size(0) - 1 if (cu_seqlens_q is not None) else B
     logsumexp_dim = math.ceil(M / 32) * 32 if compute_log_sumexp else 0
     logsum_exp = torch.empty(
-        (B, num_heads, logsumexp_dim),
+        (logsumexp_batch_dim, num_heads, logsumexp_dim),
         dtype=torch.float,
         device=query.device,
     )
@@ -5520,7 +5531,12 @@ def meta_scaled_mm(
         return stride[0] == 1 and stride[1] == shape[0]
 
     def is_fp8_type(dtype):
-        return dtype in (torch.float8_e4m3fn, torch.float8_e5m2)
+        return dtype in (
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2fnuz,
+        )
 
     torch._check(
         self.dim() == 2 and mat2.dim() == 2,
@@ -6049,8 +6065,10 @@ def meta_bucketize(self, boundaries, *, out_int32=False, right=False):
     ).contiguous()
 
 
-@register_meta(aten._upsample_bilinear2d_aa.default)
-def meta_upsample_bilinear2d_aa(
+@register_meta(
+    [aten._upsample_bilinear2d_aa.default, aten._upsample_bicubic2d_aa.default]
+)
+def meta_upsample_bimode2d_aa(
     input, output_size, align_corners, scales_h=None, scales_w=None
 ):
     full_output_size = upsample_common_check(
@@ -6195,9 +6213,16 @@ _create_unary_float_meta_func(aten.special_scaled_modified_bessel_k1)
 
 _create_binary_float_meta_func(aten.special_chebyshev_polynomial_t)
 _create_binary_float_meta_func(aten.special_chebyshev_polynomial_u)
+_create_binary_float_meta_func(aten.special_chebyshev_polynomial_v)
+_create_binary_float_meta_func(aten.special_chebyshev_polynomial_w)
+_create_binary_float_meta_func(aten.special_shifted_chebyshev_polynomial_t)
+_create_binary_float_meta_func(aten.special_shifted_chebyshev_polynomial_u)
+_create_binary_float_meta_func(aten.special_shifted_chebyshev_polynomial_v)
+_create_binary_float_meta_func(aten.special_shifted_chebyshev_polynomial_w)
 _create_binary_float_meta_func(aten.special_hermite_polynomial_h)
 _create_binary_float_meta_func(aten.special_hermite_polynomial_he)
 _create_binary_float_meta_func(aten.special_laguerre_polynomial_l)
+_create_binary_float_meta_func(aten.special_legendre_polynomial_p)
 
 
 # We must also trigger meta registrations from PrimTorch ref

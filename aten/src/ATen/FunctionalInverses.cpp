@@ -224,48 +224,48 @@ Tensor FunctionalInverses::slice_Tensor_inverse(const Tensor& base, const Tensor
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
-      return mutated_view.as_strided_symint(
-          base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
+      return mutated_view.slice_inverse_symint(
+          base, dim, std::move(start), std::move(end), std::move(step));
     } else {
       return base.slice_scatter_symint(mutated_view, dim, std::move(start), std::move(end), std::move(step));
     }
 }
 
 Tensor FunctionalInverses::split_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t mutated_view_idx, c10::SymInt split_size, int64_t dim) {
+    // It would be nice if this logic could be re-used from autograd's split_backward(), but I don't think it can.
+    // For functionalization, we have only have one of the tensors from the TensorList outputed by split(), and we want to layer i
+    // on top of the base tensor.
+    // For autograd, we have all of the tensors outputted by split() and we just want to stack them.
+    dim = at::maybe_wrap_dim(dim, base.dim());
+    auto dim_size = base.sym_size(dim);
+    auto start = split_size * mutated_view_idx;
+    auto end = split_size + start;
+    if (end > dim_size) end = dim_size;
+
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
-      return mutated_view.as_strided_symint(
-          base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
+      return mutated_view.slice_inverse_symint(base, dim, start, end, 1);
     } else {
-      // It would be nice if this logic could be re-used from autograd's split_backward(), but I don't think it can.
-      // For functionalization, we have only have one of the tensors from the TensorList outputed by split(), and we want to layer i
-      // on top of the base tensor.
-      // For autograd, we have all of the tensors outputted by split() and we just want to stack them.
-      dim = at::maybe_wrap_dim(dim, base.dim());
-      auto dim_size = base.sym_size(dim);
-      auto start = split_size * mutated_view_idx;
-      auto end = split_size + start;
-      if (end > dim_size) end = dim_size;
       return base.slice_scatter_symint(mutated_view, dim, start, end, 1);
     }
 }
 
 Tensor FunctionalInverses::split_with_sizes_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t mutated_view_idx, c10::SymIntArrayRef split_sizes, int64_t dim) {
+    dim = at::maybe_wrap_dim(dim, base.dim());
+    auto dim_size = base.sym_size(dim);
+    c10::SymInt start = 0;
+    for (auto i = 0; i < mutated_view_idx; ++i) {
+        start += split_sizes[i];
+    }
+    auto end = start + split_sizes[mutated_view_idx];
+    if (end > dim_size) end = dim_size;
+
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
-      return mutated_view.as_strided_symint(
-          base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
+      return mutated_view.slice_inverse_symint(base, dim, start, end, 1);
     } else {
-      dim = at::maybe_wrap_dim(dim, base.dim());
-      auto dim_size = base.sym_size(dim);
-      c10::SymInt start = 0;
-      for (auto i = 0; i < mutated_view_idx; ++i) {
-          start += split_sizes[i];
-      }
-      auto end = start + split_sizes[mutated_view_idx];
-      if (end > dim_size) end = dim_size;
       return base.slice_scatter_symint(mutated_view, dim, start, end, 1);
     }
 }
@@ -428,11 +428,21 @@ Tensor FunctionalInverses::narrow_inverse(const at::Tensor & base, const at::Ten
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
-      return mutated_view.as_strided_symint(
-          base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
+      return mutated_view.slice_inverse_symint(base, dim, std::move(start), start + length, 1);
     } else {
       return base.slice_scatter_symint(
           mutated_view, dim, std::move(start), start + length, 1);
+    }
+}
+
+Tensor FunctionalInverses::slice_inverse_inverse(const at::Tensor & base, const at::Tensor & mutated_view, InverseReturnMode inverse_return_mode, const at::Tensor & src, int64_t dim, std::optional<c10::SymInt> start, std::optional<c10::SymInt> end, c10::SymInt step) {
+    // slice_inverse() inverse is just slice()
+    if (inverse_return_mode == InverseReturnMode::NeverView) {
+      return at::slice_copy_symint(
+          mutated_view, dim, std::move(start), std::move(end), std::move(step));
+    } else {
+      return mutated_view.slice_symint(
+          dim, std::move(start), std::move(end), std::move(step));
     }
 }
 

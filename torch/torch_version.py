@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 from typing import Any, Iterable
 from .version import __version__ as internal_version
 from ._vendor.packaging.version import Version, InvalidVersion

@@ -1,11 +1,13 @@
 #pragma once
 
 #include <ATen/CPUGeneratorImpl.h>
+#include <ATen/DeviceAccelerator.h>
 #include <ATen/LinalgBackend.h>
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/Generator.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/detail/AcceleratorHooksInterface.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
 #include <ATen/detail/IPUHooksInterface.h>
@@ -56,13 +58,32 @@ class TORCH_API Context {
       AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
     }
   }
+  const AcceleratorHooksInterface& getAcceleratorHooksInterface(
+      c10::optional<c10::DeviceType> opt_device_type = c10::nullopt) {
+    c10::DeviceType device_type = opt_device_type.has_value()
+        ? opt_device_type.value()
+        : at::getAccelerator(true).value();
+    if (device_type == at::kCUDA) {
+      return at::detail::getCUDAHooks();
+    } else if (device_type == at::kMPS) {
+      return at::detail::getMPSHooks();
+    } else if (device_type == at::kPrivateUse1) {
+      return at::detail::getPrivateUse1Hooks();
+    } else {
+      AT_ERROR(
+          c10::DeviceTypeName(device_type), " device type not an accelerator.");
+    }
+  }
   Device getDeviceFromPtr(void* data, c10::DeviceType device_type) {
     initCUDAIfNeeded(device_type);
     initHIPIfNeeded(device_type);
+    initXPUIfNeeded(device_type);
     if (device_type == at::kCPU) {
       return c10::DeviceType::CPU;
     } else if (device_type == at::kCUDA) {
       return at::detail::getCUDAHooks().getDeviceFromPtr(data);
+    } else if (device_type == at::kXPU) {
+      return at::detail::getXPUHooks().getDeviceFromPtr(data);
     } else if (device_type == at::kPrivateUse1) {
       return at::GetPrivateUse1HooksInterface()->getDeviceFromPtr(data);
     } else {
@@ -129,6 +150,9 @@ class TORCH_API Context {
   void lazyInitHIP() {
     c10::call_once(thh_init, [&] { detail::getHIPHooks().initHIP(); });
   }
+  void lazyInitXPU() {
+    c10::call_once(thx_init, [&] { detail::getXPUHooks().initXPU(); });
+  }
   void lazyInitPrivateUse1() {
     c10::call_once(thp_init, [&] {
       if (isPrivateUse1HooksRegistered()) {
@@ -178,6 +202,9 @@ class TORCH_API Context {
 
   void setSDPUseMath(bool);
   bool userEnabledMathSDP() const;
+
+  void setSDPUseCuDNN(bool);
+  bool userEnabledCuDNNSDP() const;
 
   at::LinalgBackend linalgPreferredBackend() const;
   void setLinalgPreferredBackend(at::LinalgBackend);
@@ -305,9 +332,15 @@ class TORCH_API Context {
       lazyInitHIP();
     }
   }
+  void initXPUIfNeeded(c10::DeviceType p) {
+    if (p == c10::DeviceType::XPU) {
+      lazyInitXPU();
+    }
+  }
   static bool checkCuBLASConfigDeterministic();
   c10::once_flag thc_init;
   c10::once_flag thh_init;
+  c10::once_flag thx_init;
   c10::once_flag thp_init;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
@@ -317,6 +350,7 @@ class TORCH_API Context {
   bool enabled_flashSDP = true;
   bool enabled_mem_efficientSDP = true;
   bool enabled_mathSDP = true;
+  bool enabled_cudnnSDP = false;
 #ifdef USE_ROCM
   bool benchmark_cudnn = true;
 #else
@@ -473,19 +507,6 @@ static inline void manual_seed(uint64_t seed) {
         // See Note [Acquire lock when using random generators]
         std::lock_guard<std::mutex> lock(cuda_gen.mutex());
         cuda_gen.set_current_seed(seed);
-      }
-    }
-  }
-
-  const auto xpu_num_gpus = detail::getXPUHooks().getNumGPUs();
-  if (hasXPU() && xpu_num_gpus > 0) {
-    for (const auto i : c10::irange(xpu_num_gpus)) {
-      auto xpu_gen = globalContext().defaultGenerator(
-          Device(at::kXPU, static_cast<c10::DeviceIndex>(i)));
-      {
-        // See Note [Acquire lock when using random generators]
-        std::lock_guard<std::mutex> lock(xpu_gen.mutex());
-        xpu_gen.set_current_seed(seed);
       }
     }
   }

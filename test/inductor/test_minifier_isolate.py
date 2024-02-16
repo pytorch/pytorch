@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-import functools
 import unittest
 
 import torch._inductor.config as inductor_config
@@ -13,7 +12,7 @@ from torch.testing._internal.common_utils import (
 from torch.utils._triton import has_triton
 
 _HAS_TRITON = has_triton()
-requires_cuda = functools.partial(unittest.skipIf, not _HAS_TRITON, "requires cuda")
+requires_cuda = unittest.skipUnless(_HAS_TRITON, "requires cuda")
 
 
 # These minifier tests are slow, because they must be run in separate
@@ -38,7 +37,7 @@ inner(torch.randn(2, 2).to("{device}"))
         self._test_after_aot_runtime_error("cpu", "")
 
     @skipIfRocm
-    @requires_cuda()
+    @requires_cuda
     @inductor_config.patch("triton.inject_relu_bug_TESTING_ONLY", "runtime_error")
     def test_after_aot_cuda_runtime_error(self):
         self._test_after_aot_runtime_error("cuda", "device-side assert")

@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import collections
 import dataclasses
 import functools
@@ -21,12 +23,8 @@ from ..utils import (
     is_tensor_base_attr_getter,
     proxy_args_kwargs,
 )
-from .base import MutableLocal, VariableTracker
-from .functions import (
-    NestedUserFunctionVariable,
-    UserFunctionVariable,
-    UserMethodVariable,
-)
+from .base import VariableTracker
+from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -408,38 +406,6 @@ class AutogradFunctionVariable(VariableTracker):
                 )
             else:
                 return self.call_apply(tx, args, kwargs)
-        elif name == "backward":
-            with tx.strict_translation_mode():
-                if isinstance(self.fn_cls.backward, types.FunctionType):
-                    backward = UserFunctionVariable(self.fn_cls.backward)
-                elif isinstance(self.fn_cls.backward, types.MethodType):
-                    backward = UserMethodVariable(
-                        self.fn_cls.backward.__func__,
-                        variables.UserDefinedClassVariable(self.fn_cls),
-                    )
-                    args = [backward.obj] + args
-                else:
-                    unimplemented(
-                        f"backward is a non-function or method: {self.fn_cls.backward}"
-                    )
-
-                return tx.inline_call(tx, backward, args, kwargs)
-
-        elif name == "forward":
-            if isinstance(self.fn_cls.forward, types.FunctionType):
-                forward = UserFunctionVariable(self.fn_cls.forward)
-            elif isinstance(self.fn_cls.forward, types.MethodType):
-                forward = UserMethodVariable(
-                    self.fn_cls.forward.__func__,
-                    variables.UserDefinedClassVariable(self.fn_cls),
-                )
-                args = [forward.obj] + args
-            else:
-                unimplemented(
-                    f"forward is a non-function or method: {self.fn_cls.forward}"
-                )
-
-            return tx.inline_call(tx, forward, args, kwargs)
 
         else:
             unimplemented(f"Unsupported method: {name}")
@@ -649,80 +615,6 @@ class PythonModuleVariable(VariableTracker):
         return super().call_hasattr(tx, name)
 
 
-class SkipFilesVariable(VariableTracker):
-    def __init__(self, value, reason=None, **kwargs):
-        super().__init__(**kwargs)
-        self.value = value
-        self.reason = reason
-
-    def python_type(self):
-        return type(self.value)
-
-    def as_python_constant(self):
-        return self.value
-
-    @classmethod
-    def create_with_source(cls, value, source):
-        install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
-        return cls(
-            value,
-            source=source,
-        )
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def fold_through_function_to_wrapper():
-        return {
-            collections.namedtuple: variables.UserDefinedClassVariable,
-        }
-
-    def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-    ) -> "VariableTracker":
-        if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
-            unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
-        # Fold through the functions(e.g, collections.namedtuple)
-        # that inputs & outputs are all python constants
-        elif (
-            self.value in self.fold_through_function_to_wrapper().keys()
-            and check_constant_args(args, kwargs)
-        ):
-            value = self.value(
-                *[x.as_python_constant() for x in args],
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
-            )
-            return self.fold_through_function_to_wrapper().get(self.value)(
-                value, mutable_local=MutableLocal()
-            )
-        elif (
-            self.value is functools.wraps
-            and not kwargs
-            and len(args) == 1
-            and (
-                args[0].source is not None or args[0].can_reconstruct(tx.output.root_tx)
-            )
-        ):
-
-            def wraps(fn):
-                if isinstance(fn, variables.NestedUserFunctionVariable):
-                    if args[0].source:
-                        reconstructible = args[0].source
-                    else:
-                        reconstructible = args[0]
-                    return fn.clone(wrapped_reconstructible=reconstructible)
-                unimplemented(f"functools.wraps({fn})")
-
-            return variables.LambdaVariable(wraps)
-        else:
-            try:
-                path = inspect.getfile(self.value)
-            except TypeError:
-                path = f"Builtin {self.value.__name__}"
-            msg = f"'skip function {self.value.__qualname__} in file {path}'"
-            msg += f"', {self.reason}'" if self.reason else ""
-            unimplemented(msg)
-
-
 class TypingVariable(VariableTracker):
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
@@ -812,6 +704,8 @@ class NumpyVariable(VariableTracker):
                 msg = f"delegate '{func.__qualname__}' to NumPy itself via "
                 msg += f"confg.use_numpy_random_stream={config.use_numpy_random_stream}"
                 unimplemented(msg)
+
+            args, kwargs = NumpyNdarrayVariable.patch_args(func.__name__, args, kwargs)
 
             constant_args = check_constant_args(args, kwargs)
             unspec_python_args = check_unspec_python_args(args, kwargs)

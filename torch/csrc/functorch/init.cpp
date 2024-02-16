@@ -370,6 +370,15 @@ static int64_t currentLevel() {
   return current_level;
 }
 
+static c10::optional<int64_t> maybe_current_level() {
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  if (maybe_layer.has_value()) {
+    int current_level = maybe_layer->layerId();
+    return current_level;
+  }
+  return nullopt;
+}
+
 static void tls_set_vmap_excluded(bool excluded) {
   c10::impl::tls_set_dispatch_key_excluded(
       c10::DispatchKey::FuncTorchBatched, excluded);
@@ -474,6 +483,7 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("get_unwrapped", &get_unwrapped);
   m.def("maybe_get_level", &maybe_get_level);
   m.def("maybe_get_bdim", &maybe_get_bdim);
+  m.def("maybe_current_level", &maybe_current_level);
   m.def("current_level", &currentLevel);
   m.def("tls_set_vmap_excluded", &tls_set_vmap_excluded);
   m.def("_set_dynamic_layer_keys_included", &_set_dynamic_layer_keys_included);
@@ -482,6 +492,18 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("is_functorch_wrapped_tensor", [](const Tensor& tensor) {
     return maybe_get_level(tensor) != -1;
   });
+  m.def(
+      "get_interpreter_stack", []() -> c10::optional<std::vector<Interpreter>> {
+        const auto& stack = getDynamicLayerStack();
+        if (stack.empty()) {
+          return c10::nullopt;
+        }
+        std::vector<Interpreter> result;
+        for (auto i : stack) {
+          result.push_back(i.interpreter());
+        }
+        return result;
+      });
   m.def("peek_interpreter_stack", []() -> c10::optional<Interpreter> {
     const auto& stack = getDynamicLayerStack();
     if (stack.empty()) {
