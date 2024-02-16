@@ -514,9 +514,6 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 if device.type == "cuda" and use_foreach and realize_outputs:
                     buffer_list.append(output.realize())
 
-            if buffer_list:
-                V.graph.register_list(buffer_list)
-
         assert all(x is not None for x in outputs)
         return outputs
 
