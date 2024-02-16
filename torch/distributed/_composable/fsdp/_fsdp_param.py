@@ -321,14 +321,14 @@ class FSDPParam:
             self._sharded_post_forward_param_data = None  # free
         self.sharded_state = ShardedState.UNSHARDED
 
-    def _setattr_on_modules(self, tensor: torch.Tensor) -> None:
+    def _setattr_on_modules(self, param: nn.Parameter) -> None:
         unsafe_setattr_param(
-            self._module_info.module, self._module_info.param_name, tensor
+            self._module_info.module, self._module_info.param_name, param
         )
         for shared_module, shared_param_name in zip(
             self._module_info.shared_modules, self._module_info.shared_param_names
         ):
-            unsafe_setattr_param(shared_module, shared_param_name, tensor)
+            unsafe_setattr_param(shared_module, shared_param_name, param)
 
     def to_sharded_dtensor(self, tensor: torch.Tensor) -> DTensor:
         """
@@ -424,10 +424,10 @@ def unsafe_free_storage(tensor: torch.Tensor) -> None:
 # CPU overhead, if the module did not override it. For FSDP, we know we do not
 # need those checks when transitioning between sharded/unsharded parameters.
 def unsafe_setattr_param(
-    module: nn.Module, param_name: str, param: torch.Tensor
+    module: nn.Module, param_name: str, param: nn.Parameter
 ) -> None:
     if getattr(module.__setattr__, "__func__", None) is nn.Module.__setattr__:
-        module._parameters[param_name] = cast(nn.Parameter, param)
+        module._parameters[param_name] = param
         super(nn.Module, module).__setattr__(param_name, param)
     else:  # slow path
         setattr(module, param_name, param)

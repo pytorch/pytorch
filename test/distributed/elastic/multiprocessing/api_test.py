@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    skip_if_pytest,
 )
 
 
@@ -663,6 +664,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
 if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
 
     class StartProcessesNotCITest(StartProcessesTest):
+        @skip_if_pytest
         def test_wrap_bad(self):
             none = ""
             stdout_log = os.path.join(self.test_dir, "stdout.log")
