@@ -1316,7 +1316,7 @@ class GraphModuleDeserializer:
                 else None
             )
             fx_node = self.graph.create_node(
-                "call_function", target, args, kwargs, None
+                "call_function", target, args, kwargs, name
             )
             self.deserialize_outputs(serialized_node, fx_node)
             fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))
