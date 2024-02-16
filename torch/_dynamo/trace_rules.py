@@ -491,7 +491,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_privateuse1_backend_name",
         "torch._C._get_qengine",
         "torch._C._get_schema",
-        "torch._C._get_singleton_int",
+        "torch._C._get_nested_int",
         "torch._C._get_tensor_metadata",
         "torch._C._get_tracing_state",
         "torch._C._get_upgrader_ranges",

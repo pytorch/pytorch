@@ -426,7 +426,7 @@ class SymNode:
     def is_symbolic(self):
         return True
 
-    def singleton_int(self):
+    def nested_int(self):
         return None
 
     def is_constant(self):

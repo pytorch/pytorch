@@ -16,9 +16,9 @@ namespace c10 {
 // allows us to simply return [B, j0, D] if someone queries for the size of our
 // tensor.
 //
-// Morally we define comparison between two singleton ints to return true if
+// Morally we define comparison between two nested ints to return true if
 // that comparison holds for all corresponding elements of the arrays they
-// represent. Comparison between a singleton int and a plain int is defined
+// represent. Comparison between a nested int and a plain int is defined
 // similarly.
 //
 // To simulate this desired behavior but also avoid the O(N) cost of checking,
@@ -32,13 +32,13 @@ namespace c10 {
 // differentiate the two cases.
 //
 // During tracing the strides of the outputs need to be a function of the size
-// and strides of the inputs so it is important that SingletonSymNode itself is
+// and strides of the inputs so it is important that NestedIntSymNode itself is
 // able to express this.
-class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
+class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
  public:
   // CAUTION: you should probably not be constructing these directly; please
   // the higher-level API in python instead (TODO: actually introduce that).
-  explicit SingletonSymNodeImpl(int64_t val, int64_t coeff)
+  explicit NestedIntSymNodeImpl(int64_t val, int64_t coeff)
       : val_(val), coeff_(coeff) {}
 
   bool bool_() override {
@@ -88,9 +88,9 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
     return std::to_string(coeff_) + "*j" + std::to_string(val_);
   }
 
-  // NOTE [ Inequalities with SingletonInt ]
+  // NOTE [ Inequalities with nested int ]
   //
-  // The semantics of SingletonInt when it comes to relations is that it is
+  // The semantics of nested int when it comes to relations is that it is
   // treated as integer known to be within a certain range,
   //
   //     j0 \in [2, int64_t::max]
@@ -117,7 +117,7 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
   // [ Coefficient are assumed positive ]
   //
   // For the purpose of computing inequalities, we consider the coefficient of
-  // the SingletonInt to be a positive integer.
+  // the nested int to be a positive integer.
   //
   // Thus, no modifications are needed to the logic since
   // j0 >= k implies coeff * j0 >= k
@@ -130,11 +130,11 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
   c10::SymNode le(const c10::SymNode& other) override;
   c10::SymNode mul(const c10::SymNode& other) override;
 
-  c10::optional<int64_t> singleton_int() override {
+  c10::optional<int64_t> nested_int() override {
     return val_;
   }
 
-  c10::optional<int64_t> singleton_coeff() override {
+  c10::optional<int64_t> nested_int_coeff() override {
     return coeff_;
   }
 
@@ -144,7 +144,7 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
 
 #define DEFINE_BINARY_NOT_SUPPORTED(name)                           \
   c10::SymNode name(const c10::SymNode& other) override {           \
-    TORCH_CHECK(false, #name " not supported by SingletonSymNode"); \
+    TORCH_CHECK(false, #name " not supported by NestedIntSymNode"); \
   }
 
   DEFINE_BINARY_NOT_SUPPORTED(add)
@@ -162,7 +162,7 @@ class TORCH_API SingletonSymNodeImpl : public SymNodeImpl {
 
 #define DEFINE_NOT_SUPPORTED(name)                                     \
   c10::SymNode name() override {                                       \
-    TORCH_CHECK(false, #name " is not supported by SingletonSymNode"); \
+    TORCH_CHECK(false, #name " is not supported by NestedIntSymNode"); \
   }
 
   DEFINE_NOT_SUPPORTED(sym_not)

@@ -1290,14 +1290,14 @@ void initJITBindings(PyObject* module) {
             return node->is_symbolic();
           })
       .def(
-          "singleton_int",
+          "nested_int",
           [](const c10::SymNode& node) {
-            return node->singleton_int();
+            return node->nested_int();
           })
       .def(
-          "singleton_coeff",
+          "nested_int_coeff",
           [](const c10::SymNode& node) {
-            return node->singleton_coeff();
+            return node->nested_int_coeff();
           });
 
   // clang-format on

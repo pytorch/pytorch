@@ -301,12 +301,12 @@ class SymInt:
         return str(self.node)
 
     def __hash__(self) -> builtins.int:
-        ret = self.node.singleton_int()
+        ret = self.node.nested_int()
         if ret is not None:
             return hash(ret)
         else:
             # We could support constant SymInts as well, but not doing it for now
-            raise TypeError("unhashable type: non-singleton SymInt")
+            raise TypeError("unhashable type: non-nested SymInt")
 
 class SymFloat:
     """
