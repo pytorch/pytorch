@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/xpu/XPUContext.h>
 #include <c10/util/CallOnce.h>
+#include <c10/xpu/XPUCachingAllocator.h>
 #include <c10/xpu/XPUFunctions.h>
 #include <torch/csrc/Module.h>
 #include <torch/csrc/THP.h>
@@ -179,6 +180,13 @@ PyObject* THXPModule_xpuSynchronize(PyObject* self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THXPModule_emptyCache(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  c10::xpu::XPUCachingAllocator::emptyCache();
+  END_HANDLE_TH_ERRORS
+  Py_RETURN_NONE;
+}
+
 // XPU module initialization
 
 static void registerXpuDeviceProperties(PyObject* module) {
@@ -258,6 +266,7 @@ static PyObject* THXPModule_initExtension(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   TORCH_INTERNAL_ASSERT(!in_bad_fork); // Handled at python level
   poison_fork();
+  at::globalContext().lazyInitXPU();
 
   auto m = THPObjectPtr(PyImport_ImportModule("torch.xpu"));
   if (!m)
@@ -299,6 +308,7 @@ static struct PyMethodDef _THXPModule_methods[] = {
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_xpu_synchronize", THXPModule_xpuSynchronize, METH_O, nullptr},
+    {"_xpu_emptyCache", THXPModule_emptyCache, METH_NOARGS, nullptr},
     {nullptr}};
 
 PyMethodDef* THXPModule_methods() {
