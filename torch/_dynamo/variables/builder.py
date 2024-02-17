@@ -202,8 +202,8 @@ class GraphArg:
             self._example = TensorWeakRef(self._example)
             assert is_fake(self.fake_tensor)
 
-    def load(self, tx):
-        return self.source.reconstruct(tx)
+    def reconstruct(self, codegen):
+        self.source.reconstruct(codegen)
 
     def erase(self):
         self._example = None

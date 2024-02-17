@@ -133,7 +133,9 @@ class BaseTorchVariable(VariableTracker):
         except Exception:
             name = f"torch_obj_{id(self.value)}"
         unique_var_name = "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
-        return codegen.setup_globally_cached(unique_var_name, self.value, False)
+        codegen.extend_output(
+            codegen.setup_globally_cached(unique_var_name, self.value, False)
+        )
 
     def as_proxy(self):
         return self.value
