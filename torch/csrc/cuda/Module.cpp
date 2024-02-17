@@ -782,9 +782,43 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
     traces.append(trace);
   }
 
+  py::dict allocator_settings;
+  py::str last_allocator_settings_s = "PYTORCH_CUDA_ALLOC_CONF";
+  py::str max_split_size_s = "max_split_size";
+  py::str garbage_collection_threshold_s = "garbage_collection_threshold";
+  py::str expandable_segments_s = "expandable_segments";
+  py::str pinned_num_register_threads_s = "pinned_num_register_threads";
+  py::str release_lock_on_malloc_s = "release_lock_on_cudamalloc";
+  py::str pinned_use_host_register_s = "pinned_use_cuda_host_register";
+  py::str roundup_power2_divisions_s = "roundup_power2_divisions";
+
+  allocator_settings[last_allocator_settings_s] =
+      snapshot.config_metadata.last_allocator_settings;
+  allocator_settings[max_split_size_s] =
+      int64_t(snapshot.config_metadata.max_split_size);
+  allocator_settings[garbage_collection_threshold_s] =
+      snapshot.config_metadata.garbage_collection_threshold;
+  allocator_settings[expandable_segments_s] =
+      snapshot.config_metadata.expandable_segments;
+  allocator_settings[pinned_num_register_threads_s] =
+      int64_t(snapshot.config_metadata.pinned_num_register_threads);
+  allocator_settings[release_lock_on_malloc_s] =
+      snapshot.config_metadata.release_lock_on_malloc;
+  allocator_settings[pinned_use_host_register_s] =
+      snapshot.config_metadata.pinned_use_host_register;
+  unsigned int roundup_key = 1;
+  py::dict roundup_settings;
+  for (const auto& v : snapshot.config_metadata.roundup_power2_divisions) {
+    py::str roundup_key_s = std::to_string(roundup_key);
+    roundup_settings[roundup_key_s] = int64_t(v);
+    roundup_key *= 2;
+  }
+  allocator_settings[roundup_power2_divisions_s] = roundup_settings;
+
   py::dict result;
   result["segments"] = segments;
   result["device_traces"] = traces;
+  result["allocator_settings"] = allocator_settings;
 
   auto frames = py_symbolize(to_gather_frames);
   for (auto i : c10::irange(frames.size())) {
