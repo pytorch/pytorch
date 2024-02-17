@@ -411,15 +411,15 @@ class GuardBuilder(GuardBuilderBase):
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
+            self.TYPE_MATCH(guard)
             code = list()
-            code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
             code.append(f"__math_isnan({ref})")
             self._produce_guard_code(guard, code)
             return
         # Python math library doesn't support complex nan, so we need to use numpy
         elif istype(val, complex) and np.isnan(val):
+            self.TYPE_MATCH(guard)
             code = list()
-            code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
             code.append(f"__numpy_isnan({ref})")
             self._produce_guard_code(guard, code)
             return
@@ -438,7 +438,7 @@ class GuardBuilder(GuardBuilderBase):
                 )
         else:
             # Add type check to prevent equality check between tensor and non-tensor.
-            code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
+            self.TYPE_MATCH(guard)
 
         if istype(val, torch.Size):
             val = tuple(val)
@@ -504,8 +504,8 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard.name)
         t = type(value)
 
+        self.TYPE_MATCH(guard)
         code = list()
-        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         if len(value) == 0:
             code.append(f"not {ref}")
         else:
@@ -518,8 +518,8 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard.name)
         t = type(value)
 
+        self.TYPE_MATCH(guard)
         code = list()
-        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
 
         self._produce_guard_code(guard, code)
@@ -538,8 +538,8 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard.name)
         t = type(value)
 
+        self.TYPE_MATCH(guard)
         code = list()
-        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         any_key_is_id = any(key_is_id(k) for k in value.keys())
         const_keys_repr = dict_keys_repr(
             key_to_id(value),
@@ -561,8 +561,8 @@ class GuardBuilder(GuardBuilderBase):
         t = type(value)
         keys = {k for k, v in value.named_parameters()}
 
+        self.TYPE_MATCH(guard)
         code = list()
-        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         code.append(f"{{k for k, v in {ref}.named_parameters()}} == {keys!r}")
 
         self._produce_guard_code(guard, code)
@@ -573,8 +573,8 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard.name)
         t = type(value)
 
+        self.TYPE_MATCH(guard)
         code = list()
-        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         code.append(f"list({ref}.keys()) == {list(value.keys())!r}")
 
         self._produce_guard_code(guard, code)
