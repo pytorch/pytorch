@@ -2640,8 +2640,6 @@ class TritonKernel(Kernel):
         return "pointwise"
 
     def codegen_kernel(self, name=None):
-        from triton import next_power_of_2
-
         code = IndentedBuffer()
 
         size_hints = []
@@ -2661,7 +2659,7 @@ class TritonKernel(Kernel):
                 # use that here.
                 size_hint = 8192
             else:
-                size_hint = next_power_of_2(int(numel_hint))
+                size_hint = next_power_of_2(int(numel_hint), allow_64bit=True)
             size_hints.append(size_hint)
 
         if not self.inside_reduction:
