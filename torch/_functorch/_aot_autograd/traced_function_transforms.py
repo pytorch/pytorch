@@ -595,7 +595,6 @@ def aot_dispatch_subclass(
     inner_idx = 0
     for outer_idx, inp_meta in enumerate(meta.subclass_inp_meta):
         if isinstance(inp_meta, int):
-            # TODO(dberard) add assert strings
             assert inner_idx < len(meta_updated.input_info)
             assert outer_idx < len(meta.input_info)
             assert inner_idx == inp_meta
