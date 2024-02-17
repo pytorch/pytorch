@@ -128,7 +128,7 @@ def get_device_op_overrides(device: str):
         from .cuda import device_op_overrides
     
     if device in device_op_overrides_dict.keys():
-        return device_op_overrides_dict["device"]
+        return device_op_overrides_dict[device]
 
     return DeviceOpOverrides()
 
