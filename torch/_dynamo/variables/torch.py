@@ -433,6 +433,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return ConstantVariable.create(
                 torch.backends.cudnn.is_acceptable(tensor_inp)
             )
+        elif self.value is torch.nn.Parameter:
+            assert len(args) == 1
+            assert not kwargs
+            return variables.ParameterVariable(args[0])
         elif (
             self.value == torch.numel
             and len(args) == 1

@@ -9,7 +9,7 @@ from typing import Dict, List
 
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from ..bytecode_transformation import create_call_method
+from ..bytecode_transformation import create_call_function, create_call_method
 
 try:
     import numpy as np
@@ -1153,3 +1153,21 @@ class UntypedStorageVariable(VariableTracker):
         codegen(self.from_tensor)
         codegen.append_output(codegen.create_load_method("untyped_storage"))
         codegen.extend_output(create_call_method(0))
+
+
+class ParameterVariable(VariableTracker):
+    """Represents a call to torch.nn.Parameter"""
+
+    def __init__(self, tensor, **kwargs):
+        super().__init__(**kwargs)
+        assert isinstance(tensor, TensorVariable)
+        self.tensor = tensor
+
+    def as_proxy(self):
+        # torch.nn.Parameter is not traceable, so doesn't belong in graph
+        return self.tensor.as_proxy()
+
+    def reconstruct(self, codegen):
+        codegen.load_import_from("torch.nn", "Parameter")
+        codegen(self.tensor)
+        codegen.extend_output(create_call_function(1, True))
