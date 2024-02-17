@@ -40,9 +40,9 @@ class SuperVariable(VariableTracker):
         codegen(self.typevar)
         if self.objvar is not None:
             codegen(self.objvar)
-            return create_call_function(2, True)
+            codegen.extend_output(create_call_function(2, True))
         else:
-            return create_call_function(1, True)
+            codegen.extend_output(create_call_function(1, True))
 
     def _resolved_getattr_and_source(self, tx, name):
         assert self.objvar, "1-arg super not implemented"
@@ -233,7 +233,7 @@ class ClosureVariable(UnknownVariable):
         self.name = name
 
     def reconstruct(self, codegen):
-        return [codegen.create_load_closure(self.name)]
+        codegen.append_output(codegen.create_load_closure(self.name))
 
 
 # closure variable created by an inlined function
@@ -243,7 +243,7 @@ class InlinedClosureVariable(UnknownVariable):
         self.name = name
 
     def reconstruct(self, codegen):
-        return [codegen.create_load_closure(self.name)]
+        codegen.append_output(codegen.create_load_closure(self.name))
 
 
 class NewCellVariable(VariableTracker):
@@ -542,7 +542,7 @@ class GetAttrVariable(VariableTracker):
 
     def reconstruct(self, codegen):
         codegen(self.obj)
-        return codegen.create_load_attrs(self.name)
+        codegen.extend_output(codegen.create_load_attrs(self.name))
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -768,7 +768,7 @@ class NullVariable(VariableTracker):
     def reconstruct(self, codegen):
         if sys.version_info < (3, 11):
             unimplemented("cannot reconstruct NullVariable in < Python 3.11")
-        return [create_instruction("PUSH_NULL")]
+        codegen.append_output(create_instruction("PUSH_NULL"))
 
 
 class DeletedVariable(VariableTracker):
@@ -811,12 +811,9 @@ class StringFormatVariable(VariableTracker):
             codegen.append_output(create_instruction("PUSH_NULL"))
         codegen.append_output(codegen.create_load_const(self.format_string))
         codegen.append_output(codegen.create_load_attr("format"))
-        codegen.extend_output(
-            variables.TupleVariable(self.sym_args).reconstruct(codegen)
-        )
+        codegen(variables.TupleVariable(self.sym_args))
         kwargs = {
             variables.ConstantVariable.create(k): v for k, v in self.sym_kwargs.items()
         }
-        codegen.extend_output(variables.ConstDictVariable(kwargs).reconstruct(codegen))
+        codegen(variables.ConstDictVariable(kwargs))
         codegen.append_output(create_instruction("CALL_FUNCTION_EX", arg=1))
-        return []
