@@ -40,7 +40,6 @@ except unittest.SkipTest:
         sys.exit(0)
     raise
 
-
 TestCase = test_torchinductor.TestCase
 ToTuple = test_torchinductor.ToTuple
 check_model_cuda = test_torchinductor.check_model_cuda
@@ -52,12 +51,12 @@ class CudaReproTests(TestCase):
 
     def test_index_put_issue(self):
         def forward(
-            self,
-            arg76_1,
-            expand_default,
-            full_like_default,
-            _to_copy_default_67,
-            zeros,
+                self,
+                arg76_1,
+                expand_default,
+                full_like_default,
+                _to_copy_default_67,
+                zeros,
         ):
             sum_sym_int_19 = torch.ops.aten.sum(_to_copy_default_67, [0], True)
             view_default_57 = torch.ops.aten.view.default(sum_sym_int_19, [512, 768])
@@ -199,7 +198,6 @@ class CudaReproTests(TestCase):
     def test_dynamic_to_static_cudagraphs(self):
         for b in [False, True]:
             with config.patch({"triton.cudagraph_trees": b}):
-
                 @torch._dynamo.optimize("inductor")
                 def fn(x, y):
                     r = x + y
@@ -580,7 +578,7 @@ class CudaReproTests(TestCase):
                 super().__init__()
                 nheads = 16
                 start = math.log2(0.5)
-                end = math.log2(1 / (2**8))
+                end = math.log2(1 / (2 ** 8))
 
                 self.register_buffer(
                     "scales",
@@ -970,7 +968,6 @@ class CudaReproTests(TestCase):
     @config.patch({"fx_graph_cache": True})
     def test_index_put_cudagraph(self):
         for _ in range(2):
-
             def fn(x, y, z):
                 x = torch.zeros_like(x)
                 return x.index_put([y], z, True)
@@ -1024,7 +1021,7 @@ class CudaReproTests(TestCase):
         model = torch.compile(model, backend=cnts, dynamic=True)
 
         with torch.backends.cuda.sdp_kernel(
-            enable_flash=True, enable_math=False, enable_mem_efficient=False
+                enable_flash=True, enable_math=False, enable_mem_efficient=False
         ):
             input1 = torch.rand(5, 512, 1024, device="cuda", dtype=torch.float16)
             input2 = torch.rand(5, 513, 1024, device="cuda", dtype=torch.float16)
@@ -1119,6 +1116,19 @@ class CudaReproTests(TestCase):
         ]
         fn(*args)
         torch.cuda.synchronize()  # shake out Triton Error [CUDA]: misaligned address
+
+    def test_compile_debug(self, records):
+
+        @torch.compile(dynamic=True)
+        def model(x):
+            y = x.sin()
+            z = y.cos()
+            return y, z
+
+        try:
+            expected_y, expected_z = model(torch.randn([8192, 1024], device="cuda"))
+        except Exception as e:
+            self.fail(f"failed with exception: {e}")
 
 
 if __name__ == "__main__":

@@ -666,20 +666,6 @@ L['zs'][0] == 3.0                                             # for y, z in zip(
             len([r for r in records if "return a + 1" in r.getMessage()]), 0
         )
 
-    @requires_cuda
-    @make_logging_test
-    def test_compile_debug(self, records):
-
-        @torch.compile(dynamic=True)
-        def model(x):
-            y = x.sin()
-            z = y.cos()
-            return y, z
-        try:
-            expected_y, expected_z = model(torch.randn([8192, 1024], device="cuda"))
-        except Exception as e:
-            self.fail(f"failed with exception: {e}")
-
     def test_logs_out(self):
         import tempfile
 
