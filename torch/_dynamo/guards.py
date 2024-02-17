@@ -263,6 +263,14 @@ class GuardBuilder(GuardBuilderBase):
 
         return name
 
+    def _guard_on_attribute(self, guard: Guard, attr_name: str, guard_fn):
+        attr_source = AttrSource(guard.originating_source, attr_name)
+        # Copy the stack info
+        new_guard = Guard(
+            attr_source, guard_fn, stack=guard.stack, user_stack=guard.user_stack
+        )
+        guard_fn(new_guard)
+
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         t = type(self.get(guard.name))
@@ -327,9 +335,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def NAME_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
-        self.EQUALS_MATCH(
-            Guard(AttrSource(guard.originating_source, "__name__"), GuardBuilder.EQUALS_MATCH)  # type: ignore[arg-type]
-        )
+        self._guard_on_attribute(guard, "__name__", self.EQUALS_MATCH)
 
     def DATA_PTR_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
@@ -457,8 +463,7 @@ class GuardBuilder(GuardBuilderBase):
 
         def setup_guard():
             assert istype(val.training, bool)
-            training_source = AttrSource(guard.originating_source, "training")
-            self.EQUALS_MATCH(Guard(training_source, GuardBuilder.EQUALS_MATCH))  # type: ignore[arg-type]
+            self._guard_on_attribute(guard, "training", self.EQUALS_MATCH)
 
         if hasattr(val, "training"):
             # There are cases where a monkeypatched object has a guard made between __new__ and __init__
@@ -477,9 +482,8 @@ class GuardBuilder(GuardBuilderBase):
             val = self.get(guard.name)
             # Strictly only want user-defined functions
             if type(val) == types.FunctionType and hasattr(val, "__code__"):
-                code_source = AttrSource(guard.originating_source, "__code__")
-                self.HASATTR(Guard(code_source, GuardBuilder.HASATTR))  # type: ignore[arg-type]
-                self.FUNCTION_MATCH(Guard(code_source, GuardBuilder.FUNCTION_MATCH))  # type: ignore[arg-type]
+                self._guard_on_attribute(guard, "__code__", self.HASATTR)
+                self._guard_on_attribute(guard, "__code__", self.FUNCTION_MATCH)
             else:
                 self.FUNCTION_MATCH(guard)
 
