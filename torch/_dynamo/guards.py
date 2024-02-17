@@ -479,11 +479,9 @@ class GuardBuilder(GuardBuilderBase):
             val = self.get(guard.name)
             # Strictly only want user-defined functions
             if type(val) == types.FunctionType and hasattr(val, "__code__"):
-                ref = self.arg_ref(guard)
-                code = [
-                    f"___check_obj_id(getattr({ref}, '__code__', None), {self.id_ref(val.__code__)})",
-                ]
-                self._produce_guard_code(guard, code)
+                code_source = AttrSource(guard.originating_source, "__code__")
+                self.HASATTR(Guard(code_source, GuardBuilder.HASATTR))  # type: ignore[arg-type]
+                self.FUNCTION_MATCH(Guard(code_source, GuardBuilder.FUNCTION_MATCH))  # type: ignore[arg-type]
             else:
                 self.FUNCTION_MATCH(guard)
 
