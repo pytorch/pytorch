@@ -269,7 +269,7 @@ class GuardBuilder(GuardBuilderBase):
         new_guard = Guard(
             attr_source, guard_fn, stack=guard.stack, user_stack=guard.user_stack
         )
-        guard_fn(new_guard)
+        new_guard.create(self)
 
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
@@ -335,7 +335,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def NAME_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
-        self._guard_on_attribute(guard, "__name__", self.EQUALS_MATCH)
+        self._guard_on_attribute(guard, "__name__", GuardBuilder.EQUALS_MATCH)
 
     def DATA_PTR_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
@@ -485,11 +485,8 @@ class GuardBuilder(GuardBuilderBase):
             val = self.get(guard.name)
             # Strictly only want user-defined functions
             if type(val) == types.FunctionType and hasattr(val, "__code__"):
-                ref = self.arg_ref(guard)
-                code = [
-                    f"___check_obj_id(getattr({ref}, '__code__', None), {self.id_ref(val.__code__)})",
-                ]
-                self._produce_guard_code(guard, code)
+                self._guard_on_attribute(guard, "__code__", GuardBuilder.HASATTR)
+                self._guard_on_attribute(guard, "__code__", GuardBuilder.FUNCTION_MATCH)
             else:
                 self.FUNCTION_MATCH(guard)
 
