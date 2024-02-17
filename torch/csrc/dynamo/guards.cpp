@@ -955,28 +955,6 @@ class DATA_PTR_MATCH : public LeafGuard {
   py::object _data_ptr;
 };
 
-class DICT_VERSION : public LeafGuard {
- public:
-  DICT_VERSION(py::object value, py::object verbose_code_parts)
-      : LeafGuard(verbose_code_parts) {
-    if (!PyDict_Check(value.ptr())) {
-      throw py::type_error("DICT_VERSION expects a dict");
-    }
-    _tag = get_dict_version(value.ptr());
-  }
-  bool check_nopybind(PyObject* value) override { // borrowed ref
-    return PyDict_Check(value) && get_dict_version(value) == _tag;
-  }
-
- private:
-  int64_t get_dict_version(PyObject* dict) {
-    return ((PyDictObject*)dict)->ma_version_tag;
-  }
-
-  // Saved dict version.
-  int64_t _tag;
-};
-
 /**
  * Relational guards compare more than one value. We implement Relational
  * guards by capturing some state in the guard object. For example for tensor
@@ -1811,10 +1789,6 @@ PyObject* torch_c_dynamo_guards_init() {
       NO_TENSOR_ALIASING,
       LeafGuard,
       std::shared_ptr<NO_TENSOR_ALIASING>>(py_m, "NO_TENSOR_ALIASING");
-  py::class_<DICT_VERSION, LeafGuard, std::shared_ptr<DICT_VERSION>>(
-      py_m, "DICT_VERSION")
-      .def(py::init<py::object, py::list>())
-      .def("__call__", &DICT_VERSION::check);
 
   // Guard Accessors - These are present so that we can iterate over the
   // GuardManager hierarchy. We intentionally do not provide even an init
@@ -1906,14 +1880,6 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(
                 std::make_shared<DATA_PTR_MATCH>(data_ptr, verbose_code_parts));
-          })
-      .def(
-          "add_dict_version_guard",
-          [](GuardManager& self,
-             py::object value,
-             py::object verbose_code_parts) -> void {
-            self.add_leaf_guard(
-                std::make_shared<DICT_VERSION>(value, verbose_code_parts));
           })
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
