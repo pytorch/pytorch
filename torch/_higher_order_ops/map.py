@@ -229,7 +229,9 @@ def trace_map(proxy_mode, func_overload, f, xs, pos_args):
     example_input = _unstack_pytree(xs)[0]
     body_graph = f
     if not isinstance(body_graph, torch.fx.GraphModule):
-        body_graph = make_fx(body_graph)(*example_input, *pos_args)
+        body_graph = make_fx(body_graph, pre_dispatch=proxy_mode.pre_dispatch)(
+            *example_input, *pos_args
+        )
 
     next_name = None
     i = 0
@@ -242,7 +244,7 @@ def trace_map(proxy_mode, func_overload, f, xs, pos_args):
 
     proxy_mode.tracer.root.register_module(next_name, body_graph)
 
-    with disable_proxy_modes_tracing():
+    with disable_proxy_modes_tracing(pre_dispatch=proxy_mode.pre_dispatch):
         example_outs = body_graph(*example_input, *pos_args)
 
         def expand_tensor(t):
@@ -339,9 +341,9 @@ def map_functionalize(ctx, f, xs, pos_args):
     wrapped_fn = ctx.functionalize(f)
 
     with ctx.redispatch_to_next():
-        with disable_proxy_modes_tracing():
-            example_inputs = (*_unstack_pytree(unwrapped_xs)[0], *unwrapped_args)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
+        with disable_proxy_modes_tracing(pre_dispatch=pre_dispatch):
+            example_inputs = (*_unstack_pytree(unwrapped_xs)[0], *unwrapped_args)
         if _has_potential_branch_input_mutation(
             f, example_inputs, pre_dispatch=pre_dispatch
         ):
@@ -351,6 +353,5 @@ def map_functionalize(ctx, f, xs, pos_args):
             f, example_inputs, pre_dispatch=pre_dispatch
         ):
             raise UnsupportedAliasMutationException("torch.map is aliasing the input!")
-
         map_return = map_impl(wrapped_fn, unwrapped_xs, unwrapped_args)
         return ctx.wrap_tensors(map_return)

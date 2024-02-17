@@ -379,6 +379,7 @@ class HigherOrderOperator(OperatorBase):
                 )
 
             dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
+            print(self, dispatch_key_set.highestPriorityTypeId())
             return self.dispatch(
                 dispatch_key_set.highestPriorityTypeId(), *args, **kwargs
             )
