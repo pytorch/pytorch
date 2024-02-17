@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.functional import scaled_dot_product_attention
 from torch.nn.attention import sdpa_kernel, SDPBackend
-from torch.nn.attention.bias import CausalVariant, causal_lower_right, causal_upper_left
+from torch.nn.attention.bias import CausalVariant, causal_lower_right, causal_upper_left, SlidingWindowBias
 from torch.nn.parameter import Parameter
 import unittest
 from unittest.mock import patch, MagicMock, ANY
@@ -3554,11 +3554,7 @@ class TestAttnBias(NNTestCase):
         else:
             attn_bias = causal_lower_right(seq_len_q, seq_len_kv)
 
-        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION,
-                                   SDPBackend.FLASH_ATTENTION,
-                                   SDPBackend.MATH,
-                                   SDPBackend.CUDNN_ATTENTION]):
-            self.run_test(device, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol, backend=None)
+        self.run_test(device, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol, backend=None)
 
     @skipIfRocm  # CausalVariant
     @parametrize("causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT])
@@ -3588,12 +3584,7 @@ class TestAttnBias(NNTestCase):
             attn_bias = causal_upper_left(seq_len_q, seq_len_kv)
         else:
             attn_bias = causal_lower_right(seq_len_q, seq_len_kv)
-
-        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION,
-                                   SDPBackend.FLASH_ATTENTION,
-                                   SDPBackend.MATH,
-                                   SDPBackend.CUDNN_ATTENTION]):
-            self.run_test(device, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol, backend=cnts)
+        self.run_test(device, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol, backend=cnts)
         self.assertEqual(cnts.frame_count, 1, "Compiled graph should have 1 frame!")
 
     @parametrize("shape", [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)])
@@ -3632,6 +3623,65 @@ class TestAttnBias(NNTestCase):
 
         with self.assertRaisesRegex(ValueError, "CausalBias should not be used with causal=True"):
             scaled_dot_product_attention(query, key, value, attn_mask=attn_bias, is_causal=True, dropout_p=0.0)
+
+    @parametrize("causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT])
+    @parametrize(
+        "shape_window",
+        [
+            # Sqaure seq_len_q and seq_len_kv
+            (16, 16, 128, 128, 16, 4, 4),
+            (16, 16, 128, 128, 16, 0, 8),
+            (16, 16, 128, 128, 16, 8, 0),
+            (16, 16, 128, 128, 16, 2, 4),
+            (16, 16, 128, 128, 16, 4, 2),
+
+            # Seqlen_q < seq_len_kv
+            (16, 16, 128, 164, 32, 100, 100),
+
+            # Seqlen_q > seq_len_kv
+            (16, 16, 16, 8, 8, 4, 3),
+            (16, 16, 16, 8, 8, 2, 5),
+
+            # Unaligned shapes
+            (1, 1, 23, 56, 15, 15, 15),
+        ],
+    )
+    def test_sliding_window_attention(
+        self,
+        device,
+        causal_variant: CausalVariant,
+        shape_window: List[Tuple[int]],
+    ):
+        make_tensor = partial(torch.rand, device=device, dtype=torch.float16, requires_grad=True)
+
+        bsz, num_heads, seq_len_q, seq_len_kv, head_dim, window_size_left, window_size_right = shape_window
+        make_q_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_q, head_dim))
+        make_kv_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_kv, head_dim))
+        look_back = window_size_left + 1
+        look_forward = window_size_right + 1
+        if seq_len_q > seq_len_kv:
+            if causal_variant == CausalVariant.LOWER_RIGHT:
+                if look_back < seq_len_q - seq_len_kv:
+                    self.skipTest(
+                        "There will exist fully masked out row at the end of the matrix"
+                    )
+            if causal_variant == CausalVariant.UPPER_LEFT:
+                if look_forward < seq_len_q - seq_len_kv:
+                    self.skipTest(
+                        "There will exist fully masked out row at the start of the matrix"
+                    )
+
+        attn_bias = SlidingWindowBias(
+            causal_variant, window_size_left, window_size_right, seq_len_q, seq_len_kv
+        )
+
+        forw_tol = Tolerances(4e-3, 4e-3)
+        grad_tol = Tolerances(5e-3, 5e-3)
+
+        self.run_test(
+            device, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol, backend=None
+        )
+
 
 @unittest.skipIf(IS_FBCODE, "Ninja is required to load C++ extensions and it's not compatible with Buck ")
 class TestSDPAPrivateUse1Only(NNTestCase):

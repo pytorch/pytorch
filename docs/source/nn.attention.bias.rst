@@ -13,15 +13,17 @@ CausalBias
 .. autosummary::
     :toctree: generated
     :nosignatures:
-    :template: classnoinheritance.rst
 
     CausalBias
+    causal_lower_right
+    causal_upper_left
+    CausalVariant
 
+SlidingWindowBias
+=================
 
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
-    causal_lower_right
-    causal_upper_left
-    CausalVariant
+    SlidingWindowBias

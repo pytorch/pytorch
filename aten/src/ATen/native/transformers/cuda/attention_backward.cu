@@ -89,11 +89,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   std::optional<at::Tensor> dk{c10::nullopt};
   std::optional<at::Tensor> dv{c10::nullopt};
 
-  //  The kernel computes irregardless we will drop for this functions return
-  Tensor grad_softmax;
-
   // Currently unused args:
-  std::optional<at::Tensor> alibi_slopes{c10::nullopt};
+  std::optional<at::Tensor> alibi_slopes{std::nullopt};
 
   bool determinisitic{false};
   auto& ctx = at::globalContext();
@@ -133,6 +130,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         non_null_window_left,
         non_null_window_right,
         determinisitic,
+
         philox_seed,
         philox_offset);
     return std::make_tuple(std::move(dQuery), std::move(dKey), std::move(dValue));
@@ -719,7 +717,9 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     bool is_causal,
     const at::Tensor& philox_seed,
     const at::Tensor& philox_offset,
-    std::optional<double> scale){
+    c10::optional<double> scale,
+    c10::optional<int64_t> window_size_left,
+    c10::optional<int64_t> window_size_right){
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }
@@ -746,7 +746,9 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     is_causal,
     philox_seed,
     philox_offset,
-    scale);
+    scale,
+    window_size_left,
+    window_size_right);
 
   grad_q = grad_q.transpose(1,2);
   grad_k = grad_k.transpose(1,2);
