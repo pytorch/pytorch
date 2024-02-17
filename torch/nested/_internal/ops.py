@@ -23,14 +23,18 @@ def _outer_to_inner_dim(ndim, dim):
 
 
 def _wrap_jagged_dim(
-    ndim, dim, op_name, convert_to_inner_dim=True, allow_dim_zero=False
+    ndim, dim, op_name, convert_to_inner_dim=True, allow_batch_dim=False
 ):
     from torch._prims_common import canonicalize_dims
 
     wrapped = canonicalize_dims(ndim, dim)
-    if wrapped == 1 or (wrapped == 0 and not allow_dim_zero):
+    if wrapped == 1:
         raise RuntimeError(
-            f"{op_name}(): not supported for NestedTensor on dim=0 or dim=1"
+            f"{op_name}(): not supported for NestedTensor on dim=1"
+        )
+    elif wrapped == 0 and not allow_batch_dim:
+        raise RuntimeError(
+            f"{op_name}(): not supported for NestedTensor on dim=0"
         )
     return _outer_to_inner_dim(ndim, wrapped) if convert_to_inner_dim else wrapped
 
