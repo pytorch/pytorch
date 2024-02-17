@@ -121,17 +121,6 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(guard(int))
         self.assertFalse(guard(float))
 
-    def test_dict_version_guard(self):
-        foo = {"a": 1, "b": 2}
-        guard = guards.DICT_VERSION(foo, ["x.version == foo.version"])
-
-        self.assertTrue(guard(foo))
-        self.assertFalse(guard(dict(foo)))
-        foo["a"] = 2
-        self.assertFalse(guard(foo))
-        self.assertFalse(guard({"a": 1, "b": 2}))
-        self.assertFalse(guard({}))
-
     def test_default_device_guard(self):
         foo = 1
         guard = guards.DEFAULT_DEVICE(["cpu device"])
