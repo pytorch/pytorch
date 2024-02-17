@@ -341,13 +341,14 @@ def map_functionalize(ctx, f, xs, pos_args):
     with ctx.redispatch_to_next():
         with disable_proxy_modes_tracing():
             example_inputs = (*_unstack_pytree(unwrapped_xs)[0], *unwrapped_args)
+        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         if _has_potential_branch_input_mutation(
-            f, example_inputs, pre_dispatch=ctx.pre_dispatch
+            f, example_inputs, pre_dispatch=pre_dispatch
         ):
             raise UnsupportedAliasMutationException("torch.map is mutating the input!")
 
         if _has_potential_branch_input_alias(
-            f, example_inputs, pre_dispatch=ctx.pre_dispatch
+            f, example_inputs, pre_dispatch=pre_dispatch
         ):
             raise UnsupportedAliasMutationException("torch.map is aliasing the input!")
 
