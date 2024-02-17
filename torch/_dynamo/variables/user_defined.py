@@ -929,6 +929,6 @@ class RemovableHandleVariable(VariableTracker):
             # Hook has already been removed, return a dummy handle
             codegen.load_import_from("torch._dynamo.utils", "invalid_removeable_handle")
             codegen.extend_output(create_call_function(0, True))
-            return ()
+            return
         # unreachable due to codegen.add_cache() when the hook is installed
         super().reconstruct(codegen)
