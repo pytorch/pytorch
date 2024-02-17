@@ -310,8 +310,7 @@ Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, doub
   auto x2_is_int = c10::isIntegralType(x2_.scalar_type(), /*încludeBool=*/true);
   auto x1_t = x1_is_int ? x1_.to(commonDtype) : x1_;
   auto x2_t = x2_is_int ? x2_.to(commonDtype) : x2_;
-  c10::MaybeOwned<Tensor> x1, x2;
-  std::tie(x1, x2) = expand_outplace(x1_t, x2_t);
+  auto [x1, x2] = expand_outplace(x1_t, x2_t);
 
 
   // We want to divide each tensor by its norm first, as it's more numerically stable.
