@@ -4141,8 +4141,12 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             nonlocal num_shape_guards
             nonlocal num_aot_guards
             nonlocal num_compiles
-            num_shape_guards = len(torch._guards.TracingContext.try_get().fake_mode.shape_env.guards)
-            num_aot_guards = len(torch._guards.TracingContext.try_get().guards_context.aotautograd_guards)
+            num_shape_guards = len(
+                torch._guards.TracingContext.try_get().fake_mode.shape_env.guards
+            )
+            num_aot_guards = len(
+                torch._guards.TracingContext.try_get().guards_context.aotautograd_guards
+            )
             num_compiles += 1
             return gm
 
@@ -4152,6 +4156,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         def f(*args):
             for a in args:
                 a.add_(1)
+
         x = torch.ones(1000, requires_grad=True)
         args = x.split(10)
 
