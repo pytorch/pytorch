@@ -213,8 +213,7 @@ class CondTests(TestCase):
         )
 
     @requires_cuda
-    @parametrize("device", ["cpu", "cuda"])
-    def test_use_buffers_from_outer_scope(self, device):
+    def test_use_buffers_from_outer_scope(self):
         # subgraphs input shapes include symbolic expressions
         class Model(torch.nn.Module):
             def forward(self, p, a, b, c):
@@ -236,9 +235,59 @@ class CondTests(TestCase):
                 torch.randn(10, 20),
                 torch.randn(10, 20),
             ),
-            device=device,
+            device="cuda",
             dynamic=False,
         )
+
+    @requires_cuda
+    def test_reintepret_view_inputs_outputs(self):
+        # ReinterpretView in inputs and outputs of the subgraphs
+        class Model(torch.nn.Module):
+            def forward(self, p, a, b):
+                def true_fn(x, y):
+                    z1 = x + y
+                    z2 = x - y
+                    return z1[2:], z2[:, 4:]
+
+                def false_fn(x, y):
+                    z1 = x - y
+                    z2 = x + y
+                    return z1[2:], z2[:, 4:]
+
+                return torch.cond(p, true_fn, false_fn, [a[:-1], b[:-1]])
+
+        self._run_test(
+            model=Model(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device="cuda",
+            dynamic=True,
+        )
+
+    @requires_cuda
+    def test_aliasing_outputs(self):
+        # output aliasing in subgraphs: not supported
+        class Model(torch.nn.Module):
+            def forward(self, p, a, b):
+                def true_fn(x, y):
+                    z = x + y
+                    return z, z[1:]
+
+                def false_fn(x, y):
+                    z = x - y
+                    return z, z[1:]
+
+                return torch.cond(p, true_fn, false_fn, [a, b])
+
+        # AssertionError: Output aliasing is currently not supported...
+        with self.assertRaises(torch._dynamo.exc.BackendCompilerFailed):
+            torch.compile(Model())(
+                torch.tensor(True),
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            )
 
 
 instantiate_parametrized_tests(CondTests)

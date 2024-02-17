@@ -59,6 +59,7 @@ from .dependencies import (
     extract_read_writes,
     var_builder,
 )
+from .ops_handler import OpCounterCSE
 from .utils import (
     argsort,
     cache_on_self,
@@ -339,31 +340,6 @@ class IRNode:
     get_unbacked_symbol_uses: Callable[[], Set[sympy.Symbol]]
 
 
-class _OpCounterCSE:
-    """Shim to count how many ops are used"""
-
-    def __init__(self, inner):
-        super().__init__()
-        self.parent_handler = inner
-        self.op_count = 0
-        self.var_names = {}
-
-    def __getattr__(self, name):
-        def inner(*args, **kwargs):
-            val = getattr(self.parent_handler, name)(*args, **kwargs)
-            if name == "indirect_indexing":
-                return val
-            if val not in self.var_names:
-                varname = f"tmp{self.op_count}"
-                self.op_count += 1
-                self.var_names[val] = varname
-                return varname
-            else:
-                return self.var_names[val]
-
-        return inner
-
-
 @dataclasses.dataclass
 class Loops(IRNode):
     device: torch.device
@@ -434,7 +410,7 @@ class Loops(IRNode):
     def inner_fn_opcount(self):
         from .ir import FlexibleLayout
 
-        opcounter = _OpCounterCSE(V.MockHandler())
+        opcounter = OpCounterCSE(V.MockHandler())
 
         with V.set_ops_handler(opcounter), patch.object(
             FlexibleLayout, "allow_indexing", True
@@ -6787,6 +6763,21 @@ class Conditional(ExternKernel):
         true_outputs = true_fn.graph.graph_outputs  # type: ignore[union-attr]
         false_outputs = true_fn.graph.graph_outputs  # type: ignore[union-attr]
 
+        def _aliased_buffers(outputs):
+            buffers = [
+                output.unwrap_view() if isinstance(output, ReinterpretView) else output
+                for output in outputs
+            ]
+            # assuming the same buffer is represented by the same IRNode object
+            return len({id(buffer) for buffer in buffers}) < len(outputs)
+
+        for name, outputs in (("true_fn", true_outputs), ("false_fn", false_outputs)):
+            if _aliased_buffers(true_outputs):
+                raise AssertionError(
+                    "Output aliasing is currently not supported in compiled torch.cond. "
+                    f"The outputs of the {name} subgraph of torch.cond are aliased: {outputs}"
+                )
+
         # make sure true and false outputs are structurally equivalent
         assert len(true_outputs) == len(false_outputs), (true_outputs, false_outputs)
         for i, (to, fo) in enumerate(zip(true_outputs, false_outputs)):
@@ -6794,6 +6785,7 @@ class Conditional(ExternKernel):
             assert to.get_stride() == fo.get_stride(), (i, to, fo)
             assert to.get_device() == fo.get_device(), (i, to, fo)
             assert to.get_dtype() == fo.get_dtype(), (i, to, fo)
+            assert to.get_layout().offset == fo.get_layout().offset, (i, to, fo)
 
         conditional = Conditional(
             predicate=predicate,
@@ -6807,10 +6799,11 @@ class Conditional(ExternKernel):
         outputs = [
             MultiOutput(
                 FixedLayout(
-                    output.get_device(),
-                    output.get_dtype(),
-                    output.get_size(),
-                    output.get_stride(),
+                    device=output.get_device(),
+                    dtype=output.get_dtype(),
+                    size=output.get_size(),
+                    stride=output.get_stride(),
+                    offset=output.get_layout().offset,
                 ),
                 conditional,
                 [(list, i)],
