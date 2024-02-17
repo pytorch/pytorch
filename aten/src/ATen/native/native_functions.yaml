@@ -4463,6 +4463,7 @@
     MPS: pixel_shuffle_mps
     CompositeExplicitAutogradNonFunctional: math_pixel_shuffle
   autogen: pixel_shuffle.out
+  tags: core
 
 - func: pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
   dispatch:
@@ -6047,7 +6048,6 @@
     CPU, MPS: roll
     CUDA: roll_cuda
   autogen: roll.out
-  tags: core
 
 # default int[] value [0,1] should not add space after comma, since codegen parser uses ', ' to split args
 
@@ -12874,7 +12874,7 @@
     SparseMeta: isinf_sparse_meta
     SparseCsrCPU, SparseCsrCUDA: isinf_sparse_csr
   autogen: isinf.out
-  tags: core
+  tags: [core, pointwise]
 
 - func: record_stream(Tensor(a!) self, Stream s) -> ()
   variants: method
