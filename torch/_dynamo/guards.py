@@ -457,10 +457,8 @@ class GuardBuilder(GuardBuilderBase):
 
         def setup_guard():
             assert istype(val.training, bool)
-            # TODO: Why doesn't this use produce_guard_code?
-            self.code.append(
-                GuardCodeList([f"{ref}.training == {val.training}"], guard)
-            )
+            training_source = AttrSource(guard.originating_source, "training")
+            self.EQUALS_MATCH(Guard(training_source, GuardBuilder.EQUALS_MATCH))  # type: ignore[arg-type]
 
         if hasattr(val, "training"):
             # There are cases where a monkeypatched object has a guard made between __new__ and __init__
