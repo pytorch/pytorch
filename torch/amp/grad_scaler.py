@@ -136,7 +136,7 @@ class GradScaler:
     ) -> None:
         self._device = device
         self._enabled = enabled
-        assert self._device in gradscaler_devices, f"GradScaler only supports {}".format(gradscaler_devices)
+        assert self._device in gradscaler_devices, "GradScaler only supports {}".format(gradscaler_devices)
         if self._device == "cuda":
             if enabled and torch.cuda.amp.common.amp_definitely_not_available():
                 warnings.warn(
