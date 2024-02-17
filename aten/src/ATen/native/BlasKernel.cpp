@@ -78,6 +78,7 @@ extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int 
 namespace at::native {
 
 namespace blas_impl {
+#if defined(__ARM_FEATURE_FP16_SCALAR_ARITHMETIC) && !defined(C10_MOBILE)
 void fp16_gemv_notrans(
     int m,
     int n,
@@ -89,6 +90,7 @@ void fp16_gemv_notrans(
     const float16_t beta,
     float16_t* y,
     int incy);
+
 void fp16_gemv_trans(
     int m,
     int n,
@@ -100,7 +102,7 @@ void fp16_gemv_trans(
     const float16_t beta,
     float16_t* y,
     int incy);
-
+#endif
 
 template <typename scalar_t>
 bool scal_use_fast_path(int64_t n, int64_t incx) {

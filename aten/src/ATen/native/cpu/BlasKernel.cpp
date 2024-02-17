@@ -5,10 +5,10 @@
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
 #include <iostream>
+#if defined(__ARM_FEATURE_FP16_SCALAR_ARITHMETIC) && !defined(C10_MOBILE)
 #include <arm_neon.h>
 
-namespace at::native {
-namespace blas_impl {
+namespace at::native::blas_impl {
 void fp16_gemv_notrans(
     int m,
     int n,
@@ -20,6 +20,7 @@ void fp16_gemv_notrans(
     const float16_t beta,
     float16_t* y,
     int incy);
+
 void fp16_gemv_trans(
     int m,
     int n,
@@ -32,6 +33,9 @@ void fp16_gemv_trans(
     float16_t* y,
     int incy);
 }
+#endif
+
+namespace at::native {
 namespace cpublas {
 namespace {
 
@@ -284,8 +288,8 @@ void gemm_notrans_(
     int64_t ldc) {
   // c += alpha * (a @ b)
   if (n == 1) {
-          at::native::blas_impl::fp16_gemv_notrans(m, k, alpha, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(b), 1, beta, reinterpret_cast<float16_t*>(c), 1);
-          return;
+    at::native::blas_impl::fp16_gemv_notrans(m, k, alpha, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(b), 1, beta, reinterpret_cast<float16_t*>(c), 1);
+    return;
   }
   for (const auto i : c10::irange(m)) {
     for (const auto j : c10::irange(n)) {
@@ -311,11 +315,10 @@ void gemm_transa_(
     const at::Half *b, int64_t ldb,
     float beta,
     at::Half *c, int64_t ldc) {
-  // std::cout << __func__ << " m,n,k=" << m << "," << n << "," << k << " alpha=" << alpha << " beta=" << beta << std::endl;
   // c = alpha * (a.T @ b) + beta * c
   if (n == 1) {
-      at::native::blas_impl::fp16_gemv_trans(k, m, alpha, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(b), 1, beta, reinterpret_cast<float16_t*>(c), 1);
-      return;
+    at::native::blas_impl::fp16_gemv_trans(k, m, alpha, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(b), 1, beta, reinterpret_cast<float16_t*>(c), 1);
+    return;
   }
   const auto *a_ = a;
   for (const auto i : c10::irange(m)) {
@@ -336,8 +339,6 @@ void gemm_transa_(
 }
 
 #endif
-
-
 
 template <typename scalar_t, typename opmath_t>
 void gemm_core_(
