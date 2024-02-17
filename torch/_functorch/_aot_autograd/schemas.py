@@ -4,6 +4,7 @@ input/output types, metadata, config, function signatures etc.
 """
 
 import collections
+import functools
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Dict, List, NewType, Optional, Set, Tuple, Union
@@ -16,6 +17,7 @@ from torch._subclasses.fake_tensor import is_fake
 
 from .. import config
 
+from .functional_utils import _check_if_mutation_can_be_in_graph
 from .utils import strict_zip
 
 zip = strict_zip
@@ -100,7 +102,7 @@ class InputAliasInfo:
     mutations_under_no_grad_or_inference_mode: bool
     mutates_storage_metadata: bool
     requires_grad: bool
-    mutation_type: MutationType
+    keep_input_mutations: bool
 
     def __post_init__(self):
         if self.mutates_storage_metadata:
@@ -109,6 +111,33 @@ class InputAliasInfo:
             # to additionally fix  up the tensor metadata, since our runtime
             # call to inp.set_(updated_inp) will already have the right metadata
             assert self.mutates_metadata
+
+    @functools.cached_property
+    def mutation_type(self) -> MutationType:
+        if (not self.mutates_data) and (not self.mutates_metadata):
+            return MutationType.NOT_MUTATED
+
+        if _check_if_mutation_can_be_in_graph(
+            self.keep_input_mutations,
+            self.mutates_data,
+            self.mutates_metadata,
+            self.mutations_hidden_from_autograd,
+            self.mutations_under_no_grad_or_inference_mode,
+            self.requires_grad,
+        ):
+            return MutationType.MUTATED_IN_GRAPH
+
+        return MutationType.MUTATED_OUT_GRAPH
+
+    def should_return_for_external_mutation(self):
+        # Should we also include this input in from the forward graph because the
+        # input is mutated?
+        # MUTATED_IN_GRAPH means we'll keep the mutation in the graph.
+        # MUTATED_OUT_GRAPH means we won't, and we'll apply the mutation afterwards.
+        val = self.mutation_type == MutationType.MUTATED_OUT_GRAPH
+        if val:
+            assert self.mutates_data or self.mutates_metadata
+        return
 
 
 @dataclass
@@ -232,9 +261,6 @@ class ViewAndMutationMeta:
     # TODO: we should kill this
     # (need to default it to not break internal)
     is_train: bool = False
-    # We're plumbing this requires_subclass_dispatch here is because it's painful to support input mutations
-    # on subclasses, and that info isn't easily available.
-    requires_subclass_dispatch: bool = False
 
     num_symints_saved_for_bw: Optional[int] = None
 
@@ -256,28 +282,16 @@ class ViewAndMutationMeta:
         # When keep_input_mutations is set, we don't need to worry about our epilogue
         # handling data-only mutations, because we keep them directly in the graph.
 
-        # TODO (tmanlaibaatar) Ideally input mutation type should be calculated
-        # based on requires_subclass_dispatch argument but this is not easy to do because you would
-        # have to pass around this argument multiple level down.
-        if not self.requires_subclass_dispatch:
-            mutated_inp_runtime_indices = [
-                i
-                for i, m in enumerate(self.input_info)
-                if (m.mutation_type == MutationType.MUTATED_OUT_GRAPH)
-            ]
-        else:
-            mutated_inp_runtime_indices = [
-                i
-                for i, m in enumerate(self.input_info)
-                if m.mutation_type
-                in (MutationType.MUTATED_IN_GRAPH, MutationType.MUTATED_OUT_GRAPH)
-            ]
+        mutated_inp_runtime_indices = [
+            i
+            for i, m in enumerate(self.input_info)
+            if m.should_return_for_external_mutation()
+        ]
 
         mutated_graph_handled_indices = [
             i
             for i, m in enumerate(self.input_info)
             if m.mutation_type == MutationType.MUTATED_IN_GRAPH
-            and not self.requires_subclass_dispatch
         ]
         self.mutated_graph_handled_indices = mutated_graph_handled_indices
         self.num_mutated_graph_handled_indices = len(self.mutated_graph_handled_indices)

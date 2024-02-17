@@ -148,7 +148,11 @@ def wrap_tensor_subclasses(
     # but `subclass_metas` will only correspond to subclass metatadata on `user_fw_outs`.
     # We then need to make sure that we return (*wrapped_user_fw_outs, *activations).
     if num_fw_outs_saved_for_bw is not None:
-        assert len(unwrapped_args) == num_args_tallied + num_fw_outs_saved_for_bw
+        assert len(unwrapped_args) == num_args_tallied + num_fw_outs_saved_for_bw, (
+            f"Expected the number actual unwrapped-subclass outputs {len(unwrapped_args)} to equal "
+            f"the number of args calculated from subclasses ({num_args_tallied}) plus the number of "
+            f"additional activations saved for the backward pass ({num_fw_outs_saved_for_bw})"
+        )
         activations = unwrapped_args[num_args_tallied:]
         if isinstance(wrapped_args, tuple) and isinstance(activations, tuple):
             return wrapped_args + activations
@@ -237,3 +241,52 @@ def create_metadata_for_subclass(meta: ViewAndMutationMeta) -> ViewAndMutationMe
         subclass_tangent_meta=subclass_tangent_meta,  # type: ignore[arg-type]
     )
     return metadata
+
+
+def compute_inner_mutated_inp_indices_from_subclass_meta(
+    fw_metadata: ViewAndMutationMeta,
+    inner_metadata: Optional[ViewAndMutationMeta] = None,  # used for sanity check
+) -> List[int]:
+    # Note: [Recomputing subclass mutation handling]
+    #
+    # Generally, if a subclass requires grad, its components will not require grad.
+    # But for the purposes of tracking returned tensors, we should treat those component
+    # tensors as if they require grad.
+    #
+    # For example, if the subclass tensor requires grad and will be mutated in a way that
+    # requires us to handle the mutation outside of the graph, we need to return it
+    # from the forward graph. The inner_meta data won't consider the component tensors
+    # as if they need to be returned, because they don't require grad; but really, we
+    # should handle those tensors the same way we handle the subclass tensor itself; i.e.
+    # if we'd include the subclass tensor as part of the outputs, then we should also
+    # include the component tensors.
+    #
+    # To do this, we patch num_mutated_inp_runtime_indices below by expanding the inputs
+    # from the outer subclass tensors and propagating
+
+    updated_input_info = []
+    inner_idx = 0
+    assert len(fw_metadata.subclass_inp_meta) == len(fw_metadata.input_info)
+    for outer_idx, inp_meta in enumerate(fw_metadata.subclass_inp_meta):
+        if isinstance(inp_meta, int):
+            assert outer_idx < len(fw_metadata.input_info)
+            if inner_metadata is not None:
+                assert inner_idx < len(inner_metadata.input_info)
+                assert (
+                    inner_metadata.input_info[inner_idx]
+                    == fw_metadata.input_info[outer_idx]
+                )
+            updated_input_info.append(fw_metadata.input_info[outer_idx])
+            inner_idx += 1
+        else:
+            for _ in range(inp_meta.arg_count):
+                updated_input_info.append(fw_metadata.input_info[outer_idx])
+                inner_idx += 1
+    if inner_metadata is not None:
+        assert len(inner_metadata.input_info) == len(updated_input_info)
+
+    return [
+        i
+        for i, inp in enumerate(updated_input_info)
+        if inp.should_return_for_external_mutation()
+    ]
