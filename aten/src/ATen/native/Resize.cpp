@@ -292,7 +292,7 @@ void resize_bytes_nocuda(const Storage& storage, c10::SymInt newsize) {
   } else if (device_type == at::kPrivateUse1) {
     at::GetPrivateUse1HooksInterface()->resizePrivateUse1Bytes(
         storage, newsize.expect_int());
-  } else if (device_type == at::kXPU) {
+  } else if (device_type == at::kXPU || device_type == at::kHPU) {
     ptrdiff_t size_bytes_i = newsize.expect_int();
     TORCH_CHECK(
         !c10::overflows<int64_t>(size_bytes_i),

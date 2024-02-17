@@ -5,8 +5,8 @@
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+#include <ATen/core/NestedIntSymNodeImpl.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
-#include <ATen/core/SingletonSymNodeImpl.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
 #include <ATen/functorch/BatchedTensorImpl.h>
@@ -823,9 +823,9 @@ void initDispatchBindings(PyObject* module) {
         include_set.has(c10::DispatchKey::FuncTorchDynamicLayerBackMode));
   });
 
-  m.def("_get_singleton_int", [](int64_t data, int64_t coeff) {
+  m.def("_get_nested_int", [](int64_t data, int64_t coeff) {
     return c10::SymInt(c10::SymNode(
-        c10::make_intrusive<c10::SingletonSymNodeImpl>(data, coeff)));
+        c10::make_intrusive<c10::NestedIntSymNodeImpl>(data, coeff)));
   });
 
   m.def("_get_constant_bool_symnode", [](int64_t data) {
