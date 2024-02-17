@@ -9,7 +9,7 @@ from typing import Any, cast, Dict, Iterable, List, Optional, overload, Tuple, U
 import torch
 
 
-__all__ = ["OptState", "GradScaler", "registe_gradscaler_device"]
+__all__ = ["OptState", "GradScaler"]
 
 
 class _MultiDeviceReplicator:
@@ -19,11 +19,6 @@ class _MultiDeviceReplicator:
     """
 
     def __init__(self, master_tensor: torch.Tensor) -> None:
-        assert (
-            master_tensor.is_cuda
-            or master_tensor.device.type == "xla"
-            or master_tensor.device.type == "cpu"
-        )
         self.master = master_tensor
         self._per_device_tensors: Dict[torch.device, torch.Tensor] = {}
 
@@ -49,11 +44,6 @@ class OptState(Enum):
 def _refresh_per_optimizer_state() -> Dict[str, Any]:
     return {"stage": OptState.READY, "found_inf_per_device": {}}
 
-gradscaler_devices: List[str] = []
-gradscaler_devices.extend(["cuda", "cpu"])
-
-def registe_gradscaler_device(device: str):
-    gradscaler_devices.append(device)
 
 class GradScaler:
     """An instance ``scaler`` of :class:`GradScaler`.
@@ -136,7 +126,6 @@ class GradScaler:
     ) -> None:
         self._device = device
         self._enabled = enabled
-        assert self._device in gradscaler_devices, "GradScaler only supports {}".format(gradscaler_devices)
         if self._device == "cuda":
             if enabled and torch.cuda.amp.common.amp_definitely_not_available():
                 warnings.warn(
@@ -214,10 +203,6 @@ class GradScaler:
 
         # Short-circuit for the common case.
         if isinstance(outputs, torch.Tensor):
-            if self._device == "cuda":
-                assert outputs.is_cuda or outputs.device.type == "xla"
-            else:
-                assert outputs.device.type == "cpu"
             if self._scale is None:
                 self._lazy_init_scale_growth_tracker(outputs.device)
             assert self._scale is not None
@@ -230,10 +215,6 @@ class GradScaler:
 
         def apply_scale(val: Union[torch.Tensor, Iterable[torch.Tensor]]):
             if isinstance(val, torch.Tensor):
-                if self._device == "cuda":
-                    assert val.is_cuda or val.device.type == "xla"
-                else:
-                    assert val.device.type == "cpu"
                 if len(stash) == 0:
                     if self._scale is None:
                         self._lazy_init_scale_growth_tracker(val.device)
@@ -294,11 +275,15 @@ class GradScaler:
 
             for device, per_dtype_grads in per_device_and_dtype_grads.items():
                 for grads in per_dtype_grads.values():
-                    torch._amp_foreach_non_finite_check_and_unscale_(
-                        grads,
-                        per_device_found_inf.get(device),
-                        per_device_inv_scale.get(device),
-                    )
+                    try:
+                        torch._amp_foreach_non_finite_check_and_unscale_(
+                            grads,
+                            per_device_found_inf.get(device),
+                            per_device_inv_scale.get(device),
+                        )
+                    except Exception as e:
+                        raise NotImplementedError(f"grad scaler required op function(torch._amp_foreach_non_finite_check_and_unscale_)"
+                                                  f"is not implemented on {device}")
 
         return per_device_found_inf._per_device_tensors
 
@@ -532,15 +517,19 @@ class GradScaler:
             if len(found_infs) > 1:
                 for i in range(1, len(found_infs)):
                     found_inf_combined += found_infs[i]
-
-            torch._amp_update_scale_(
-                _scale,
-                _growth_tracker,
-                found_inf_combined,
-                self._growth_factor,
-                self._backoff_factor,
-                self._growth_interval,
-            )
+            
+            try:
+                torch._amp_update_scale_(
+                    _scale,
+                    _growth_tracker,
+                    found_inf_combined,
+                    self._growth_factor,
+                    self._backoff_factor,
+                    self._growth_interval,
+                )
+            except Exception as e:
+                raise NotImplementedError(f"grad scaler required op function(torch._amp_update_scale_)"
+                                          f"is not implemented on {_scale.device.type}")
 
         # To prepare for next iteration, clear the data collected from optimizers this iteration.
         self._per_optimizer_states = defaultdict(_refresh_per_optimizer_state)
