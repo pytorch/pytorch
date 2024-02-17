@@ -54,7 +54,7 @@ from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc, mutation_guard
 from .eval_frame import set_guard_error_hook
-from .source import DefaultsSource, LocalSource, TypeSource
+from .source import AttrSource, DefaultsSource, LocalSource, TypeSource
 from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     common_constant_types,
@@ -327,8 +327,9 @@ class GuardBuilder(GuardBuilderBase):
 
     def NAME_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
-        code = f"{self.arg_ref(guard)}.__name__ == '{obj.__name__}'"
-        self._produce_guard_code(guard, [code])
+        self.EQUALS_MATCH(
+            Guard(AttrSource(guard.originating_source, "__name__"), GuardBuilder.EQUALS_MATCH)  # type: ignore[arg-type]
+        )
 
     def DATA_PTR_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
