@@ -222,15 +222,18 @@ def ceildiv(
     return -(numer // -denom)
 
 
-def next_power_of_2(n: int) -> int:
+def next_power_of_2(n: int, allow_64bit: bool = False) -> int:
     """Return the smallest power of 2 greater than or equal to n"""
-    assert n <= 2**32, "32-bit only"
+    if not allow_64bit:
+        assert n <= 2**32, "32-bit only"
     n -= 1
     n |= n >> 1
     n |= n >> 2
     n |= n >> 4
     n |= n >> 8
     n |= n >> 16
+    if allow_64bit:
+        n |= n >> 32
     n += 1
     return n
 
