@@ -845,8 +845,21 @@ class EQUALS_MATCH : public LeafGuard {
         _value_type(Py_TYPE(value.ptr())) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    return Py_TYPE(value) == _value_type &&
-        PyObject_RichCompareBool(value, _value.ptr(), Py_EQ);
+    // Fast path - pointer equality check.
+    if (value != _value.ptr()) {
+      // Check type
+      if (Py_TYPE(value) != _value_type) {
+        return false;
+      }
+      int result = PyObject_RichCompareBool(value, _value.ptr(), Py_EQ);
+      // Check for exception
+      if (result == -1) {
+        PyErr_Clear();
+        return false;
+      }
+      return result;
+    }
+    return true;
   }
 
  private:
