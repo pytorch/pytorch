@@ -1389,7 +1389,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_CUDA, "No GPUs available, skipping test")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_set_nccl_pg_timeout(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         opts = dict(
