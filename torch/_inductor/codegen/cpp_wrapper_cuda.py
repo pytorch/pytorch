@@ -138,7 +138,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             """
         )
 
-    def write_get_raw_stream(self, index):
+    def write_get_raw_stream(self, index, graph=None):
         name = f"stream{index}"
         self.writeline(
             f"cudaStream_t {name} = at::cuda::getCurrentCUDAStream({index});"
@@ -268,7 +268,9 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
         self.writeline(f"void* {kernel_args_var}[] = {{{call_args}}};")
         stream = (
-            "stream" if V.graph.aot_mode else self.write_get_raw_stream(device_index)
+            "stream"
+            if V.graph.aot_mode
+            else self.write_get_raw_stream(device_index, V.graph)
         )
         grid_name = f"{name}_grid_{next(self.grid_id)}"
         assert isinstance(
