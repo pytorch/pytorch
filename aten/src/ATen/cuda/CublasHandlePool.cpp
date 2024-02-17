@@ -132,7 +132,7 @@ cublasHandle_t getCurrentCUDABlasHandle() {
     // workaround for corner case where a primary context exists but is not
     // the current context, seen in multithreaded use-cases
     TORCH_WARN_ONCE("Attempting to run cuBLAS, but there was no current CUDA context! Attempting to set the primary context...");
-    at::globalContext().getNVRTC().cuDevicePrimaryCtxRetain(&pctx, 0);
+    at::globalContext().getNVRTC().cuDevicePrimaryCtxRetain(&pctx, device);
     at::globalContext().getNVRTC().cuCtxSetCurrent(pctx);
   }
 #endif
