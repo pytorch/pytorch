@@ -500,10 +500,8 @@ struct map_types_to_values final {
 template <class... Types>
 struct map_types_to_values<typelist<Types...>> final {
   template <class Func>
-  static auto call(
-      Func&& func) {
-    return std::tuple{
-        std::forward<Func>(func)(type_<Types>())...};
+  static auto call(Func&& func) {
+    return std::tuple{std::forward<Func>(func)(type_<Types>())...};
   }
 };
 } // namespace detail
