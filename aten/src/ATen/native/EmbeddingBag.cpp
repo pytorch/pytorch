@@ -1210,8 +1210,7 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cpu_impl(
   TORCH_CHECK(weight.dim() == 2,
       "weight has to be a 2D Tensor, but got Tensor of dimension ",
       weight.dim());
-  Tensor indices, offsets;
-  std::tie(indices, offsets) = promoteIndicesAndOffsets(indices_, offsets_);
+  auto [indices, offsets] = promoteIndicesAndOffsets(indices_, offsets_);
   check_arguments(weight, indices, offsets, mode, per_sample_weights, include_last_offset);
 
   Tensor output = at::empty(
@@ -1410,8 +1409,7 @@ Tensor _embedding_bag_backward_symint(const Tensor &grad, const Tensor &indices_
   c10::MaybeOwned<Tensor> per_sample_weights_maybe_owned = at::borrow_from_optional_tensor(per_sample_weights_opt);
   const Tensor& per_sample_weights = *per_sample_weights_maybe_owned;
 
-  Tensor indices, offsets;
-  std::tie(indices, offsets) = promoteIndicesAndOffsets(indices_, offsets_);
+  auto [indices, offsets] = promoteIndicesAndOffsets(indices_, offsets_);
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarTypes("embedding_bag", indices_arg, {kLong, kInt});
   checkContiguous("embedding_bag", indices_arg);
