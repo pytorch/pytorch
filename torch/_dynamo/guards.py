@@ -54,7 +54,7 @@ from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc, mutation_guard
 from .eval_frame import set_guard_error_hook
-from .source import DefaultsSource, LocalSource, TypeSource
+from .source import AttrSource, DefaultsSource, LocalSource, TypeSource
 from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     common_constant_types,
@@ -263,6 +263,14 @@ class GuardBuilder(GuardBuilderBase):
 
         return name
 
+    def _guard_on_attribute(self, guard: Guard, attr_name: str, guard_fn):
+        attr_source = AttrSource(guard.originating_source, attr_name)
+        # Copy the stack info
+        new_guard = Guard(
+            attr_source, guard_fn, stack=guard.stack, user_stack=guard.user_stack
+        )
+        guard_fn(new_guard)
+
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         t = type(self.get(guard.name))
@@ -327,8 +335,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def NAME_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
-        code = f"{self.arg_ref(guard)}.__name__ == '{obj.__name__}'"
-        self._produce_guard_code(guard, [code])
+        self._guard_on_attribute(guard, "__name__", self.EQUALS_MATCH)
 
     def DATA_PTR_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
