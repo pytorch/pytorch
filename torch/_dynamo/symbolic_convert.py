@@ -1132,7 +1132,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         it = self.pop().realize()
         if (
             isinstance(it, variables.RangeIteratorVariable)
-            and not it.cannot_convert_to_higher_order
             and inst.starts_line is not None
         ):
             try:
@@ -1154,18 +1153,18 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 for loc in new_locals:
                     if isinstance(loc, torch.fx.Proxy):
                         del loc.node.meta["example_value"]
-                val = [
+                args = [
                     wrap_fx_proxy(self, loc) if isinstance(loc, torch.fx.Proxy) else loc
                     for loc in new_locals
                 ]
-                for name, v in zip(self.f_code.co_varnames, val):
+                for name, v in zip(self.f_code.co_varnames, args):
                     self.symbolic_locals[name] = v
 
                 # Skip the rest of the loop completely, now that we transformed it.
                 # Also pop off the iterator.
                 self.jump(inst)
             except CannotConvertRangeToHigherOrder:
-                it.cannot_convert_to_higher_order = True
+                pass
 
         if isinstance(it, (variables.ListIteratorVariable, variables.IteratorVariable)):
             try:

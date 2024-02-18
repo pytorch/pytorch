@@ -1317,6 +1317,12 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
             raise CannotConvertRangeToHigherOrder(
                 "Control flow too complex for loop higher order op."
             )
+        varnames = host_code_object.co_varnames
+        args = [symbolic_locals.get(k) for k in varnames]
+        if any(isinstance(arg, types.NoneType) for arg in args):
+            raise CannotConvertRangeToHigherOrder(
+                "Could not get the variables for some symbolic locals."
+            )
         # STORE_FAST always follows a FOR_ITER as CPython needs to store the next(iter) into the local
         # E.g. in `for i in range(10)`, there is a `STORE_FAST i``
         assert loop_body_instructions[0].opname == "STORE_FAST"
@@ -1355,7 +1361,6 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         codestring = co_code
         constants = host_code_object.co_consts
         names = host_code_object.co_names
-        varnames = host_code_object.co_varnames
         filename = "<dynamo memory>"
         name = "for_loop_body"
         qualname = "for_loop_body"
@@ -1417,7 +1422,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         obj = RangeHigherOrderVariable(value)
         obj.func = types.FunctionType(code_object, real_globals)
-        obj.args = [symbolic_locals.get(k) for k in varnames]
+        obj.args = args
         store_target = loop_body_instructions[0].arg
         assert store_target >= 0
         obj.store_target = store_target

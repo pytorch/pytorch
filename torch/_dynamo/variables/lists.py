@@ -5,7 +5,7 @@ import functools
 import inspect
 import operator
 import types
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.fx
@@ -654,7 +654,7 @@ class ListIteratorVariable(VariableTracker):
             f"{self.__class__.__name__}({repr(self.items)}, index={repr(self.index)})"
         )
 
-    def next_variables(self, tx):
+    def next_variables(self, tx) -> Tuple[VariableTracker, "ListIteratorVariable"]:
         assert self.mutable_local
         old_index = self.index
         if old_index >= len(self.items):
@@ -705,24 +705,24 @@ class RangeIteratorVariable(ListIteratorVariable):
         self,
         *args,
         range_object: range,
-        cannot_convert_to_higher_order: bool = False,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
         assert isinstance(range_object, range)
         self.range_object = range_object
-        self.cannot_convert_to_higher_order = cannot_convert_to_higher_order
 
-    def next_variables(self, tx):
+    def next_variables(self, tx) -> "Tuple[VariableTracker, ListIteratorVariable]":
+        """
+        This should only be attempted once, so on the second time,
+        just return the original list iterator.
+        """
         if self.index >= len(self.items):
             raise StopIteration()
-        next_iter = RangeIteratorVariable(
-            self.items,
-            self.index + 1,
-            range_object=self.range_object,
-            cannot_convert_to_higher_order=self.cannot_convert_to_higher_order,
+        items = [ConstantVariable.create(num) for num in self.range_object]
+        next_iter = ListIteratorVariable(
+            items, self.index + 1, mutable_local=MutableLocal()
         )
-        return self.items[self.index], next_iter
+        return items[self.index], next_iter
 
 
 class RestrictedListSubclassVariable(ListVariable):
