@@ -2395,6 +2395,7 @@ class ShapeEnv:
                 assert int(sym) == hint
             out = int(sym)
         else:
+            # See Note [Recursive fakification]
             if is_nested_int(hint):
                 fake_vec = metafy_fn(
                     hint.node.nested_int_vec(),
@@ -2407,10 +2408,11 @@ class ShapeEnv:
                                 nested_int=i, nested_int_vec=v)
                     )
                 registry = torch.nested._internal.nested_tensor.get_nested_int_registry()
-
-                out = registry.maybe_create(fake_vec, ctor_fn=ctor)
-                if hint.node.nested_int_coeff() != 1:
-                    out = ctor(out.node.nested_int(), out.node.nested_int_vec())
+                out = registry.maybe_create(
+                    fake_vec,
+                    ctor_fn=ctor,
+                    has_coeff=hint.node.nested_int_coeff() != 1,
+                )
             else:
                 out = SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
         return out

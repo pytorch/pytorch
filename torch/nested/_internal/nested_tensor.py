@@ -52,94 +52,166 @@ class NestedIntRegistry():
     #                                    | /--> id: int = 1
     #  j1_0 ------> vec2 -----> equiv_set1 ---> ...
     #
-    # Details on canonical vec and nested int:
-    # ----------------------------------------
+    # Details on canonical vec and nested int lifetimes:
+    # --------------------------------------------------
     # Throughout the lifetime of a equiv set, the canonical vec may change.
     # If we detect that the canonical vec is no longer alive, the next time
     # someone asks us for a nested int for a vec in that equiv set we will make
     # that vec the canonical vec. The canonical vec may be on cpu or cuda.
-    # nt.shape[ragged_dim].vec() is not necessarily the same Tensor
-    # Tensor as NT's ragged_source.
     #
-    # If canonical vec and nested int are alive, nested int's vec is the
+    # If canonical vec and nested int are alive, nested int's vec must be the
     # canonical vec. This implies that if canonical is not alive, then the
     # nested int is also not alive. It is possible for canonical to be alive,
     # but for nested int to be dead. This happens when the nested int is only
     # alive in cpp, but its corresponding python object has died.
+    #
+    # When you have tracing subclass tensors as vec
+    # ---------------------------------------------
+    # During tracing, we may be dealing with vec which are subclasses used
+    # for tracing, e.g. FakeTensor and FunctionalTensor. Though these tensors
+    # don't actually need equiv set for the purpose of checking equality, we
+    # the concepts of equiv sets are still useful so that we can reuse the logic
+    # in eager to access the cpu and cuda variants from one another. Note that
+    # that since each equiv set has its own cache, FakeTensor must be in a
+    # different equiv set from real tensor.
     #
     def __init__(self):
         self._equiv_set_counter = 0
         self._equiv_sets = WeakTensorKeyDictionary()
         self._version_counters = WeakTensorKeyDictionary()
 
-    def maybe_create(self, vec, ctor_fn=None, equiv_set_from=None):
-        # Given vec, return an associated nested int
+    def contains_vec(self, vec):
+        return vec in self._equiv_sets
+
+    def assert_contains_vec(self, vec):
+        assert self.contains_vec(vec), (
+            "Expected vec to have been registered. "
+        )
+
+    def check_version_counter(self, vec):
+        # Check that vec has not been mutated
+        assert self._version_counters[vec] == vec._version, (
+            "Detected that vec has been mutated. This is not allowed. "
+        )
+
+    def maybe_create(self, vec, *, ctor_fn=None, equiv_set_from=None, has_coeff=False):
+        # Given vec, return an associated nested int.
+        #
+        # Parameters:
+        #     ctor_fn (Callable[[int, Tensor], SymInt]): If not None, use a custom
+        #        constructor to create the nested int. A equiv set is "custom"
+        #        if its canonical int was created using a custom ctor_fn (This
+        #        is useful during compile). The custom-ness of a equiv set is
+        #        immutable. This is because (1) unlike ordinary equiv set,
+        #        canonical nested int of a custom equiv set cannot be changed
+        #        i.e., if the nested int of a custom equiv set dies, don't
+        #        allow re-creation, and (2) during recreation of canonical nested
+        #        int, ctor_fn cannot be used, so a non-custom equiv set cannot
+        #        become custom once created.
+        #     equiv_set_from (Tensor): If not None, add vec to the equiv set of
+        #        the equiv set corresponding to the vec specified by this arg.
+        #        The user is responsible for ensuring that vec and equiv_set_from
+        #        are compatible, i.e., they have the same data.
+        #     has_coeff (bool): If True, a new nested int will be created even
+        #        if vec is already in an equiv set. Note that we don't actually
+        #        allow coeff to passed to this function. The ctor_fn is expected
+        #        to handle this. Also note that this is not how nested ints with
+        #        coeff are typically created. Ordinarily, nested ints with coeff
+        #        are created by operations on existing nested ints.
+        #
+        # Returns:
+        #     SymInt: The nested int associated with vec.
         mb_equiv_set = self._equiv_sets.get(vec)
 
         if mb_equiv_set is not None:
-            # How can we create a nicer message for this?
-            assert self._version_counters[vec] == vec._version, (
-                "Detected that vec has been mutated. This is not allowed. "
+            self.check_version_counter(vec)
+            ret = mb_equiv_set["canonical_nested_int"]()
+            mb_vec = mb_equiv_set["canonical_vec"]()
+            assert equiv_set_from is None, (
+                "Expected equiv_set_from to be None if vec already has equiv_set"
             )
-            ret = mb_equiv_set["weak_nested_int"]()
-            mb_vec = mb_equiv_set["weak_vec"]()
             if ret is None:
-                # PyObject preservation does not exist for SymInts, so if
-                # shape is saved for backward, the SymInt in Python will be
-                # collected unless kept alive elsewhere.
+                # (1) vec is already has equiv set, but canonical nested int has
+                #     died, create a new nested int and add it to the equiv set.
+                #
+                #     We need this logic because PyObject preservation does not
+                #     exist for SymInts, so e.g. if shape is saved for
+                #     backward, the SymInt in Python will be collected unless
+                #     kept alive elsewhere.
                 assert ctor_fn is None
                 assert not mb_equiv_set["with_ctor_fn"]
-                assert equiv_set_from is None
                 if mb_vec is None:
-                    # Promote vec to canonical vec
-                    mb_equiv_set["weak_vec"] = weakref.ref(vec)
-                ret = _get_nested_int(mb_equiv_set["id"], mb_equiv_set["weak_vec"]())
-                mb_equiv_set["weak_nested_int"] = weakref.ref(ret)
+                    # if canonical vec has also died. Promote vec to canonical vec
+                    mb_equiv_set["canonical_vec"] = weakref.ref(vec)
+                ret = _get_nested_int(mb_equiv_set["id"], mb_equiv_set["canonical_vec"]())
+                mb_equiv_set["canonical_nested_int"] = weakref.ref(ret)
             else:
-                assert equiv_set_from is None, (
-                    "Expected equiv_set_from to be None if vec already has equiv_set"
-                )
+                # (2) vec is already has equiv set, and canonical nested int is alive
                 assert mb_vec is not None, (
                     "Expected vec to be alive if nested int is alive"
                 )
+                if ctor_fn is not None:
+                    assert mb_equiv_set["with_ctor_fn"], (
+                    "Expected ctor_fn not to be passed for vec with existing non-custom equiv set"
+                )
+                if not has_coeff:
+                    # (2a) if we do not want coeff, just return canonical nested int
+                    return ret
+                else:
+                    # (2b) If we want coeff, we don't want to return the canonical
+                    #      nested int (which must have coeff=1).
+                    assert ctor_fn is not None
+                    ret = ctor_fn(mb_equiv_set["id"], mb_vec)
         else:
+            assert not has_coeff, "The first nested int in an equiv set must not have a coeff"
             if equiv_set_from is None:
+                # (3) vec does not have a equiv set, and user didn't specify
+                #     that vec should belong to an existing one -> add a new vec
+                #     to a new equiv set
                 equiv_set_id = self._equiv_set_counter
                 self._equiv_set_counter += 1
                 _ctor_fn = ctor_fn if ctor_fn is not None else _get_nested_int
                 ret = _ctor_fn(equiv_set_id, vec)
                 self._equiv_sets[vec] = {
                     "id": equiv_set_id,
-                    "weak_nested_int": weakref.ref(ret),
-                    "weak_vec": weakref.ref(vec),
+                    "canonical_nested_int": weakref.ref(ret),
+                    "canonical_vec": weakref.ref(vec),
                     "with_ctor_fn": ctor_fn is not None,
                 }
                 self._version_counters[vec] = vec._version
             else:
+                # (4) vec does not have equiv set, user specified that vec
+                #     should belong to an existing one -> add vec to the equiv set
                 assert ctor_fn is None
-                equiv_set = self._equiv_sets[equiv_set_from.node.nested_int_vec()]
-                ret = equiv_set["weak_nested_int"]()
+                equiv_set = self._equiv_sets[equiv_set_from]
+                ret = equiv_set["canonical_nested_int"]()
                 assert ret is not None
                 self._equiv_sets[vec] = equiv_set
                 self._version_counters[vec] = vec._version
+            self._equiv_sets[vec]["weak_all_vecs"] = self._equiv_sets[vec].get("weak_all_vecs", []) + [weakref.ref(vec)]
         return ret
 
+    def get_all_equiv_vecs(self, vec):
+        # Returns all vecs that are alive in the same equiv set as vec
+        self.assert_contains_vec(vec)
+        self.check_version_counter(vec)
+        equiv_set = self._equiv_sets[vec]
+        for weak_vec in equiv_set["weak_all_vecs"]:
+            vec = weak_vec()
+            if vec is not None:
+                yield vec
+
     def maybe_set_metadata(self, vec, key, value):
-        equiv_set = self._equiv_sets.get(vec)
-        assert equiv_set is not None
-        assert self._version_counters[vec] == vec._version, (
-            "Detected that vec has been mutated. This is not allowed. "
-        )
+        self.assert_contains_vec(vec)
+        self.check_version_counter(vec)
+        equiv_set = self._equiv_sets[vec]
         if key not in equiv_set:
             equiv_set[key] = value
 
     def get_metadata(self, vec, key):
-        # Check version counter?
-        assert self._version_counters[vec] == vec._version, (
-            "Detected that vec has been mutated. This is not allowed. "
-        )
-        equiv_set = self._equiv_sets.get(vec)
-        assert equiv_set is not None
+        self.assert_contains_vec(vec)
+        self.check_version_counter(vec)
+        equiv_set = self._equiv_sets[vec]
         return equiv_set[key]
 
 _nested_int_registry: Optional[NestedIntRegistry] = None
@@ -326,29 +398,64 @@ class NestedTensor(torch.Tensor):
         ragged_idx = meta["ragged_idx"]
 
         vec = offsets if lengths is None else lengths
-        nested_int = outer_size[ragged_idx]
-        old_vec = nested_int.node.nested_int_vec()
+        nested_int = None
 
-        # During compilation, new symbolic nested int must be created via
-        # operations on existing ones, so that guard sources are propagated
-        # and the new symint is properly tracked by proxies. We reach here in
-        # three cases, each is handled slightly differently:
+        # Note [Nested ints handling in __tensor_unflatten__]
         #
-        # (1) During fakification, normal tensors are being swapped for fake
-        #     tensors. maybe_create is a no-op because we have already
-        #     registered the vec.
-        # (2) If AOTAutograd is constructing grad_outputs by viewing the outputs
-        #     create a new nested int and make sure they have the same equiv set
-        # (3) If AOTAutograd swapping out FakeTensor for FunctionalTensor during
-        #     functionalization. Create a new nested int with a new equiv set.
+        # First, read "When you have tracing subclass tensors as vec".
         #
-        def ctor_fn(i, v):
-            return torch.SymInt(nested_int.node.clone_nested_int_with_new_vec(i, v))
-        kwargs = {
-            "ctor_fn": ctor_fn,
-            "equiv_set_from": nested_int if type(vec) == type(old_vec) else None,
-        }
-        nested_int = get_nested_int_registry().maybe_create(vec, **kwargs)
+        # __tensor_unflatten__ is generally responsible for creating a new
+        # instance of the subclass given (1) some metadata (2) the inner tensors.
+        # and ordinarily, you would be able to use those inputs as-is to
+        # construct the new instance.
+        #
+        # This is not possible in the case of NT, however, because the NT's
+        # metadata is associated with one of the inner tensors. In particular,
+        # for every NT, its nested int is associated with some offsets or
+        # lengths (WLOG, let's say offsets from now on.) with the invariant that
+        # the offsets on the NT and the NT's nested int must be in the same
+        # equiv set. Naively using the metadata/inner tensors as-is would
+        # violate the invariant for example in the case when we are in
+        # AOTAutograd's runtime wrapper, constructing a new NT using traced
+        # metadata and real dense outputs.
+        #
+        # What you kind of want to do is to use offsets as the source of truth
+        # and rederive the nested int, and this is easy to do in the case
+        # where we have already seen and registered that offsets before, as it
+        # is already associated with a nested int. The harder case is when
+        # you don't actually know what the equiv set of offsets is. Unlike
+        # ordinary subclasses, NT's __tensor_unflatten__ has a second
+        # responsibility, which is to register the new vec via maybe_create if
+        # it is not already registered. This is because the caller of
+        # maybe_create is responsible for telling the registry what the equiv
+        # set of the new vec is, i.e., (1) either our offset is in the same
+        # equiv set as the vec associated with the metadata, or it is not.
+        #
+        # In this function we decide between the two by making the following
+        # assumption:
+        #
+        #   If the new offsets is the same type of tensor as the offsets
+        #   associated with the metadata, then we assume that they belong to the
+        #   same equiv set.
+        #
+        # Today it seems that this assumption holds for the below known cases:
+        # Fakification, AOTAutograd's construction of grad_outputs,
+        # Functionalization, and AOTAutograd's runtime wrapper.
+        registry = get_nested_int_registry()
+
+        if not registry.contains_vec(vec):
+            old_nested_int = outer_size[ragged_idx]
+
+            def ctor_fn(i, v):
+                # During compilation, new symbolic nested int must be created via
+                # operations on existing ones, so that guard sources are propagated
+                # and the new symint is properly tracked by proxies. We reach here in
+                # three cases, each is handled slightly differently:
+                return torch.SymInt(old_nested_int.node.clone_nested_int_with_new_vec(i, v))
+            old_vec = old_nested_int.node.nested_int_vec()
+            same_equiv_set = type(vec) == type(old_vec)
+            kwargs = {"equiv_set_from": old_vec} if same_equiv_set else {"ctor_fn": ctor_fn}
+            nested_int = registry.maybe_create(vec, **kwargs)
 
         return NestedTensor(
             values,
