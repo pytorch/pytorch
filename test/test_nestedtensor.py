@@ -3056,7 +3056,7 @@ class TestNestedTensorSubclass(TestCase):
                                     "directly calling torch.ops.aten.size"):
             torch.ops.aten.size.default(nt)
 
-        registry = torch.nested._internal.nested_tensor.get_nested_int_registry()
+        registry = torch.nested._internal.nested_tensor.NestedIntRegistry()
         nested_int = registry.maybe_create(offsets)
         self.assertEqual(nt.size(), (3, nested_int, 3))
         self.assertEqual(nt.shape, (3, nested_int, 3))
@@ -4056,7 +4056,7 @@ class TestNestedIntRegistry(TestCase):
             registry.maybe_set_metadata(vec, "foo", "bar")
 
         with self.assertRaisesRegex(AssertionError, "has been mutated"):
-            registry.get_metadata(vec)
+            registry.get_metadata(vec, "foo")
 
     def test_return_canonical_nested_int_and_vec(self):
         # Add another vec to the same equiv set returns the canonical nested int
@@ -4064,7 +4064,7 @@ class TestNestedIntRegistry(TestCase):
         vec = torch.tensor([1, 2, 3])
         vec_clone = vec.clone()
         nested_int = registry.maybe_create(vec)
-        nested_int2 = registry.maybe_create(vec_clone, equiv_set_from=nested_int)
+        nested_int2 = registry.maybe_create(vec_clone, equiv_set_from=nested_int.node.nested_int_vec())
         self.assertIs(nested_int2, nested_int)
 
     def test_ownership(self):
@@ -4096,7 +4096,7 @@ class TestNestedIntRegistry(TestCase):
         self.assertEqual(nested_int2.node.nested_int(), equiv_set_id)
 
         vec_clone = vec.clone()
-        nested_int3 = registry.maybe_create(vec_clone, equiv_set_from=nested_int2)
+        nested_int3 = registry.maybe_create(vec_clone, equiv_set_from=nested_int2.node.nested_int_vec())
         self.assertIs(nested_int3, nested_int2)
         ref = weakref.ref(vec)
         del vec, nested_int2, nested_int3
