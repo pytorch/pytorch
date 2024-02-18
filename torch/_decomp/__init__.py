@@ -372,6 +372,8 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.norm,
             aten.ones,
             aten.ones_like,
+            aten.put,
+            aten.put_,
             aten.pixel_shuffle,
             aten.pixel_unshuffle,
             aten._prelu_kernel,
