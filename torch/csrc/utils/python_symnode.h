@@ -104,7 +104,7 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   c10::TensorImpl* nested_int_vec() const override {
     TORCH_INTERNAL_ASSERT(
         false,
-        "We don't expect to call this nested_int_vec on PythonSymNodeImpl in C++");
+        "Expect not to call nested_int_vec on PythonSymNodeImpl in C++");
   }
 
   bool has_hint() override {
