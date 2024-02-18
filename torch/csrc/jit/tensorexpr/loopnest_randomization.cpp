@@ -288,9 +288,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
             break;
           }
           int n_pivots = (std::rand() % (int)stmts.size()) + 1;
-          std::vector<StmtPtr> pivots;
-          std::vector<int> chosen_indices;
-          std::tie(pivots, chosen_indices) =
+          auto [pivots, chosen_indices] =
               randomization_helper::select_n_randomly<StmtPtr>(
                   stmts, n_pivots, random_engine);
           std::unordered_set<StmtPtr> pivots_set(pivots.begin(), pivots.end());
@@ -371,9 +369,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
           int num_loops_to_fuse =
               std::max(2, (int)(std::rand() % (int)loops.size()));
 
-          std::vector<ForPtr> loops_to_fuse;
-          std::vector<int> chosen_indices;
-          std::tie(loops_to_fuse, chosen_indices) =
+          auto [loops_to_fuse, chosen_indices] =
               randomization_helper::select_n_randomly<ForPtr>(
                   loops, num_loops_to_fuse, random_engine);
 

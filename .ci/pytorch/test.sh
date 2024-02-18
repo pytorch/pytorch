@@ -139,6 +139,8 @@ if [[ "$TEST_CONFIG" == *crossref* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # regression in ROCm 6.0 on MI50 CI runners due to hipblaslt; remove in 6.1
+  export VALGRIND=OFF
   # Print GPU info
   rocminfo
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
@@ -292,6 +294,11 @@ test_inductor_distributed() {
   pytest test/distributed/tensor/parallel/test_fsdp_2d_parallel.py
   pytest test/distributed/_composable/fsdp/test_fully_shard_comm.py
   pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_multi_group
+  pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_with_activation_checkpointing
+  pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_2d_mlp
+  pytest test/distributed/_composable/fsdp/test_fully_shard_frozen.py
+  pytest test/distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_compute_dtype
+  pytest test/distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_reduce_dtype
 
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
