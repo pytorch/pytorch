@@ -1006,22 +1006,26 @@ class GLOBAL_STATE : public LeafGuard {
 
 class DATA_PTR_MATCH : public LeafGuard {
  public:
-  DATA_PTR_MATCH(py::object data_ptr, py::object verbose_code_parts)
-      : LeafGuard(verbose_code_parts), _data_ptr(data_ptr) {}
+  DATA_PTR_MATCH(py::object tensor, py::object verbose_code_parts)
+      : LeafGuard(verbose_code_parts) {
+    PyObject* value = tensor.ptr();
+    if (!THPVariable_CheckExact(value) && !THPVariable_Check(value)) {
+      throw std::runtime_error("DATA_PTR_MATCH guard requires a tensor");
+    }
+    _data_ptr = THPVariable_Unpack(value).data_ptr();
+  }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    PyObject* data_ptr_method =
-        PyObject_GetAttrString(value, "data_ptr"); // new ref
-    PyObject* data_ptr = PyObject_CallNoArgs(data_ptr_method); // new ref
-    bool result = PyObject_RichCompareBool(data_ptr, _data_ptr.ptr(), Py_EQ);
-    Py_DECREF(data_ptr);
-    Py_DECREF(data_ptr_method);
-    return result;
+    if (!THPVariable_CheckExact(value) && !THPVariable_Check(value)) {
+      return false;
+    }
+    void* data_ptr = THPVariable_Unpack(value).data_ptr();
+    return data_ptr == _data_ptr;
   }
 
  private:
-  // Need to save the ptr so py::object.
-  py::object _data_ptr;
+  // Original tensor data pointer.
+  void* _data_ptr;
 };
 
 class TENSOR_MATCH : public LeafGuard {
