@@ -1,0 +1,69 @@
+====================================================================================================================================== short test summary info ======================================================================================================================================
+FAILED [0.0967s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_forward_mode_AD_dot_cpu_complex128 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5,), device="cpu", dtype=torch.complex128], args=TensorList[Tensor[size=(5,), device="cpu", dtype=torch.com...
+SKIPPED [0.0007s] [15] test_ops_fwd_gradients.py:28: Skipped!
+SKIPPED [0.0007s] [175] test_ops_fwd_gradients.py:28: Skipped! Op doesn't support autograd for this dtype.
+SKIPPED [0.0007s] [2] test_ops_fwd_gradients.py:28: Numerous errors
+SKIPPED [0.0007s] [2] test_ops_fwd_gradients.py:28: Passes on complex128 and float64 only
+SKIPPED [0.0007s] [105] test_ops_fwd_gradients.py:28: PyTorch compiled without Lapack
+SKIPPED [0.0007s] [2] test_ops_fwd_gradients.py:28: Barely fails
+SKIPPED [0.0007s] [10] test_ops_fwd_gradients.py:28: Only runs on cuda
+SKIPPED [0.0007s] [1] test_ops_fwd_gradients.py:28: Skipped! Flaky
+SKIPPED [0.0007s] [1] test_ops_fwd_gradients.py:28: Gradients are incorrect!
+SKIPPED [0.0007s] [7] test_ops_fwd_gradients.py:28: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.0007s] [23] test_ops_fwd_gradients.py:58: Skipped!
+SKIPPED [0.0007s] [175] test_ops_fwd_gradients.py:58: Skipped! Op doesn't support autograd for this dtype.
+SKIPPED [0.0007s] [2] test_ops_fwd_gradients.py:58: Numerous errors
+SKIPPED [0.0007s] [106] test_ops_fwd_gradients.py:58: PyTorch compiled without Lapack
+SKIPPED [0.0007s] [10] test_ops_fwd_gradients.py:58: Only runs on cuda
+SKIPPED [0.0007s] [1] test_ops_fwd_gradients.py:58: Gradients are incorrect!
+SKIPPED [0.0007s] [7] test_ops_fwd_gradients.py:58: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.0007s] [531] test_ops_fwd_gradients.py:66: Skipped! Operation does not support inplace autograd.
+SKIPPED [0.0007s] [12] test_ops_fwd_gradients.py:66: Skipped!
+SKIPPED [0.0007s] [1] test_ops_fwd_gradients.py:66: In-place abs not supported for complex tensors
+SKIPPED [0.0007s] [175] test_ops_fwd_gradients.py:66: Skipped! Op doesn't support autograd for this dtype.
+SKIPPED [0.0007s] [2] test_ops_fwd_gradients.py:66: Numerous errors
+SKIPPED [0.0007s] [106] test_ops_fwd_gradients.py:66: PyTorch compiled without Lapack
+SKIPPED [0.0007s] [10] test_ops_fwd_gradients.py:66: Only runs on cuda
+SKIPPED [0.0007s] [1] test_ops_fwd_gradients.py:66: Gradients are incorrect!
+SKIPPED [0.0007s] [2] test_ops_fwd_gradients.py:66: PyTorch is built without MKL support
+SKIPPED [0.0007s] [7] test_ops_fwd_gradients.py:66: Skipping - testing takes an unreasonably long time, #79528
+XFAIL [0.2211s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_fn_fwgrad_bwgrad_as_strided_partial_views_cpu_complex128 - reason:
+XFAIL [0.0778s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_fn_fwgrad_bwgrad_bfloat16_cpu_complex128 - reason:
+XFAIL [0.0551s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_fn_fwgrad_bwgrad_bfloat16_cpu_float64 - reason:
+XFAIL [0.0814s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_fn_fwgrad_bwgrad_cfloat_cpu_complex128 - reason:
+XFAIL [0.0652s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_fn_fwgrad_bwgrad_cfloat_cpu_float64 - reason:
+XFAIL [0.0799s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_fn_fwgrad_bwgrad_chalf_cpu_complex128 - reason:
+XFAIL [0.0650s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_fn_fwgrad_bwgrad_chalf_cpu_float64 - reason:
+XFAIL [0.0787s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_fn_fwgrad_bwgrad_float_cpu_complex128 - reason:
+XFAIL [0.0557s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_fn_fwgrad_bwgrad_float_cpu_float64 - reason:
+XFAIL [0.0759s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_fn_fwgrad_bwgrad_half_cpu_complex128 - reason:
+XFAIL [0.0561s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_fn_fwgrad_bwgrad_half_cpu_float64 - reason:
+XFAIL [0.8419s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_fn_fwgrad_bwgrad_logcumsumexp_cpu_complex128 - reason:
+XFAIL [0.5463s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_fn_fwgrad_bwgrad_polar_cpu_float64 - reason:
+XFAIL [0.3358s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_fn_fwgrad_bwgrad_scatter_reduce_prod_cpu_float64 - reason:
+XFAIL [0.0999s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_forward_mode_AD_as_strided_partial_views_cpu_complex128 - reason:
+XFAIL [0.0546s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_forward_mode_AD_as_strided_partial_views_cpu_float64 - reason:
+XFAIL [0.0974s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_forward_mode_AD_as_strided_scatter_cpu_complex128 - reason:
+XFAIL [0.0552s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_forward_mode_AD_as_strided_scatter_cpu_float64 - reason:
+XFAIL [0.1087s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_forward_mode_AD_bernoulli_cpu_float64 - reason:
+XFAIL [0.0759s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_forward_mode_AD_bfloat16_cpu_complex128 - reason: 
+XFAIL [0.0534s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_forward_mode_AD_bfloat16_cpu_float64 - reason:
+XFAIL [0.0739s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_forward_mode_AD_cfloat_cpu_complex128 - reason:
+XFAIL [0.0550s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_forward_mode_AD_cfloat_cpu_float64 - reason:
+XFAIL [0.0723s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_forward_mode_AD_chalf_cpu_complex128 - reason:
+XFAIL [0.0498s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_forward_mode_AD_chalf_cpu_float64 - reason:
+XFAIL [0.0988s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_forward_mode_AD_cov_cpu_complex128 - reason:
+XFAIL [0.0880s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_forward_mode_AD_cov_cpu_float64 - reason:
+XFAIL [0.0760s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_forward_mode_AD_float_cpu_complex128 - reason:
+XFAIL [0.0538s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_forward_mode_AD_float_cpu_float64 - reason:
+XFAIL [0.0742s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_forward_mode_AD_half_cpu_complex128 - reason:
+XFAIL [0.0533s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_forward_mode_AD_half_cpu_float64 - reason:
+XFAIL [0.3562s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_forward_mode_AD_logcumsumexp_cpu_complex128 - reason:
+XFAIL [0.1046s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_forward_mode_AD_nn_functional_feature_alpha_dropout_with_train_cpu_float64 - reason:
+XFAIL [0.1018s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_forward_mode_AD_scatter_reduce_prod_cpu_float64 - reason:
+XFAIL [0.1096s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_inplace_forward_mode_AD_as_strided_partial_views_cpu_complex128 - reason:
+XFAIL [0.0536s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_inplace_forward_mode_AD_as_strided_partial_views_cpu_float64 - reason:
+XFAIL [0.1043s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_inplace_forward_mode_AD_nn_functional_feature_alpha_dropout_with_train_cpu_float64 - reason:
+XFAIL [0.0769s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_inplace_forward_mode_AD_nn_functional_rrelu_cpu_float64 - reason:
+XFAIL [0.0766s] test_ops_fwd_gradients.py::TestFwdGradientsCPU::test_inplace_forward_mode_AD_scatter_reduce_prod_cpu_float64 - reason:
+======================================================================================================== 1 failed, 1542 passed, 1491 skipped, 2 deselected, 39 xfailed in 948.99s (0:15:48) ========================================================================================================= 

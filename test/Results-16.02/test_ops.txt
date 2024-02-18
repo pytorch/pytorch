@@ -1,0 +1,663 @@
+====================== short test summary info ======================================================================================================================================
+FAILED [0.2875s] test_ops.py::TestCommonCPU::test_dtypes__refs_linalg_svd_cpu - Exception: Caused by sample input at index 31: SampleInput(input=Tensor[size=(3, 0), device="cpu", dtype=torch.bfloat16], args=(), kwargs={'full_matrices': 'False'}, broadcasts_input=False, name='')
+FAILED [0.0603s] test_ops.py::TestCommonCPU::test_out__refs_linalg_matrix_norm_cpu_float32 - Exception: Caused by sample input at index 4: SampleInput(input=Tensor[size=(2, 2), device="cpu", dtype=torch.float32], args=('nuc',(-2,-1),True), kwargs={}, broadcasts_input=False, name='')
+FAILED [0.1579s] test_ops.py::TestCommonCPU::test_out__refs_linalg_norm_cpu_float32 - Exception: Caused by sample input at index 44: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.float32], args=('nuc'), kwargs={'keepdim': 'False'}, broadcasts_input=False, name='')
+FAILED [0.2866s] test_ops.py::TestCommonCPU::test_out__refs_linalg_svd_cpu_float32 - Exception: Caused by sample input at index 31: SampleInput(input=Tensor[size=(3, 0), device="cpu", dtype=torch.float32], args=(), kwargs={'full_matrices': 'False'}, broadcasts_input=False, name='')
+FAILED [0.0501s] test_ops.py::TestCommonCPU::test_out__refs_linalg_svdvals_cpu_float32 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.float32], args=(), kwargs={}, broadcasts_input=False, name='')
+FAILED [0.0673s] test_ops.py::TestCommonCPU::test_out_warning__refs_linalg_matrix_norm_cpu - Exception: Caused by sample input at index 4: SampleInput(input=Tensor[size=(2, 2), device="cpu", dtype=torch.float32], args=('nuc',(-2,-1),True), kwargs={}, broadcasts_input=False, name='')
+FAILED [0.2138s] test_ops.py::TestCommonCPU::test_out_warning__refs_linalg_norm_cpu - Exception: Caused by sample input at index 44: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.float32], args=('nuc'), kwargs={'keepdim': 'False'}, broadcasts_input=False, name='')
+FAILED [0.2395s] test_ops.py::TestCommonCPU::test_out_warning__refs_linalg_svd_cpu - Exception: Caused by sample input at index 31: SampleInput(input=Tensor[size=(3, 0), device="cpu", dtype=torch.float32], args=(), kwargs={'full_matrices': 'False'}, broadcasts_input=False, name='')
+FAILED [0.0515s] test_ops.py::TestCommonCPU::test_out_warning__refs_linalg_svdvals_cpu - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.float32], args=(), kwargs={}, broadcasts_input=False, name='')
+FAILED [0.3451s] test_ops.py::TestCommonCPU::test_python_ref__refs_div_trunc_rounding_cpu_float16 - Exception: Caused by reference input at index 52: SampleInput(input=Tensor[size=(5, 10, 5), device="cpu", dtype=torch.float16, contiguous=False], args=TensorList[Tensor[size=(10, 5), device="...
+FAILED [0.0657s] test_ops.py::TestCommonCPU::test_python_ref__refs_linalg_matrix_norm_cpu_complex128 - Exception: Caused by sample input at index 4: SampleInput(input=Tensor[size=(2, 2), device="cpu", dtype=torch.complex128], args=('nuc',(-2,-1),True), kwargs={}, broadcasts_input=False, nam...
+FAILED [0.0640s] test_ops.py::TestCommonCPU::test_python_ref__refs_linalg_matrix_norm_cpu_complex64 - Exception: Caused by sample input at index 4: SampleInput(input=Tensor[size=(2, 2), device="cpu", dtype=torch.complex64], args=('nuc',(-2,-1),True), kwargs={}, broadcasts_input=False, name='')
+FAILED [0.0634s] test_ops.py::TestCommonCPU::test_python_ref__refs_linalg_matrix_norm_cpu_float32 - Exception: Caused by sample input at index 4: SampleInput(input=Tensor[size=(2, 2), device="cpu", dtype=torch.float32], args=('nuc',(-2,-1),True), kwargs={}, broadcasts_input=False, name='')    
+FAILED [0.0623s] test_ops.py::TestCommonCPU::test_python_ref__refs_linalg_matrix_norm_cpu_float64 - Exception: Caused by sample input at index 4: SampleInput(input=Tensor[size=(2, 2), device="cpu", dtype=torch.float64], args=('nuc',(-2,-1),True), kwargs={}, broadcasts_input=False, name='')    
+FAILED [0.1594s] test_ops.py::TestCommonCPU::test_python_ref__refs_linalg_norm_cpu_complex128 - Exception: Caused by sample input at index 44: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.complex128], args=('nuc'), kwargs={'keepdim': 'False'}, broadcasts_input=False, name...
+FAILED [0.1692s] test_ops.py::TestCommonCPU::test_python_ref__refs_linalg_norm_cpu_complex64 - Exception: Caused by sample input at index 44: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.complex64], args=('nuc'), kwargs={'keepdim': 'False'}, broadcasts_input=False, name='') 
+FAILED [0.1518s] test_ops.py::TestCommonCPU::test_python_ref__refs_linalg_norm_cpu_float32 - Exception: Caused by sample input at index 44: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.float32], args=('nuc'), kwargs={'keepdim': 'False'}, broadcasts_input=False, name='')     
+FAILED [0.1498s] test_ops.py::TestCommonCPU::test_python_ref__refs_linalg_norm_cpu_float64 - Exception: Caused by sample input at index 44: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.float64], args=('nuc'), kwargs={'keepdim': 'False'}, broadcasts_input=False, name='')     
+FAILED [0.1028s] test_ops.py::TestCommonCPU::test_python_ref__refs_linalg_svd_cpu_complex128 - Exception: Caused by sample input at index 31: SampleInput(input=Tensor[size=(3, 0), device="cpu", dtype=torch.complex128], args=(), kwargs={'full_matrices': 'False'}, broadcasts_input=False, name...
+FAILED [0.1124s] test_ops.py::TestCommonCPU::test_python_ref__refs_linalg_svd_cpu_complex64 - Exception: Caused by sample input at index 31: SampleInput(input=Tensor[size=(3, 0), device="cpu", dtype=torch.complex64], args=(), kwargs={'full_matrices': 'False'}, broadcasts_input=False, name='') 
+FAILED [0.1047s] test_ops.py::TestCommonCPU::test_python_ref__refs_linalg_svd_cpu_float32 - Exception: Caused by sample input at index 31: SampleInput(input=Tensor[size=(3, 0), device="cpu", dtype=torch.float32], args=(), kwargs={'full_matrices': 'False'}, broadcasts_input=False, name='')     
+FAILED [0.1003s] test_ops.py::TestCommonCPU::test_python_ref__refs_linalg_svd_cpu_float64 - Exception: Caused by sample input at index 31: SampleInput(input=Tensor[size=(3, 0), device="cpu", dtype=torch.float64], args=(), kwargs={'full_matrices': 'False'}, broadcasts_input=False, name='')     
+FAILED [0.0482s] test_ops.py::TestCommonCPU::test_python_ref__refs_linalg_svdvals_cpu_complex128 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.complex128], args=(), kwargs={}, broadcasts_input=False, name='')
+FAILED [0.0501s] test_ops.py::TestCommonCPU::test_python_ref__refs_linalg_svdvals_cpu_complex64 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.complex64], args=(), kwargs={}, broadcasts_input=False, name='')
+FAILED [0.0481s] test_ops.py::TestCommonCPU::test_python_ref__refs_linalg_svdvals_cpu_float32 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.float32], args=(), kwargs={}, broadcasts_input=False, name='')
+FAILED [0.0509s] test_ops.py::TestCommonCPU::test_python_ref__refs_linalg_svdvals_cpu_float64 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.float64], args=(), kwargs={}, broadcasts_input=False, name='')
+FAILED [0.0818s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_linalg_matrix_norm_cpu_complex128 - Exception: Caused by sample input at index 4: SampleInput(input=Tensor[size=(2, 2), device="cpu", dtype=torch.complex128], args=('nuc',(-2,-1),True), kwargs={}, broadcasts_input=False...
+FAILED [0.0790s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_linalg_matrix_norm_cpu_complex64 - Exception: Caused by sample input at index 4: SampleInput(input=Tensor[size=(2, 2), device="cpu", dtype=torch.complex64], args=('nuc',(-2,-1),True), kwargs={}, broadcasts_input=False, ...
+FAILED [0.0674s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_linalg_matrix_norm_cpu_float32 - Exception: Caused by sample input at index 4: SampleInput(input=Tensor[size=(2, 2), device="cpu", dtype=torch.float32], args=('nuc',(-2,-1),True), kwargs={}, broadcasts_input=False, name...
+FAILED [0.0670s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_linalg_matrix_norm_cpu_float64 - Exception: Caused by sample input at index 4: SampleInput(input=Tensor[size=(2, 2), device="cpu", dtype=torch.float64], args=('nuc',(-2,-1),True), kwargs={}, broadcasts_input=False, name...
+FAILED [0.1940s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_linalg_norm_cpu_complex128 - Exception: Caused by sample input at index 44: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.complex128], args=('nuc'), kwargs={'keepdim': 'False'}, broadcasts_input=False,...
+FAILED [0.2125s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_linalg_norm_cpu_complex64 - Exception: Caused by sample input at index 44: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.complex64], args=('nuc'), kwargs={'keepdim': 'False'}, broadcasts_input=False, n...
+FAILED [0.1861s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_linalg_norm_cpu_float32 - Exception: Caused by sample input at index 44: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.float32], args=('nuc'), kwargs={'keepdim': 'False'}, broadcasts_input=False, name='')
+FAILED [0.1788s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_linalg_norm_cpu_float64 - Exception: Caused by sample input at index 44: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.float64], args=('nuc'), kwargs={'keepdim': 'False'}, broadcasts_input=False, name='')
+FAILED [0.1566s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_linalg_svd_cpu_complex128 - Exception: Caused by sample input at index 31: SampleInput(input=Tensor[size=(3, 0), device="cpu", dtype=torch.complex128], args=(), kwargs={'full_matrices': 'False'}, broadcasts_input=False,...
+FAILED [0.1716s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_linalg_svd_cpu_complex64 - Exception: Caused by sample input at index 31: SampleInput(input=Tensor[size=(3, 0), device="cpu", dtype=torch.complex64], args=(), kwargs={'full_matrices': 'False'}, broadcasts_input=False, n...
+FAILED [0.1640s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_linalg_svd_cpu_float32 - Exception: Caused by sample input at index 31: SampleInput(input=Tensor[size=(3, 0), device="cpu", dtype=torch.float32], args=(), kwargs={'full_matrices': 'False'}, broadcasts_input=False, name='')
+FAILED [0.1771s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_linalg_svd_cpu_float64 - Exception: Caused by sample input at index 31: SampleInput(input=Tensor[size=(3, 0), device="cpu", dtype=torch.float64], args=(), kwargs={'full_matrices': 'False'}, broadcasts_input=False, name='')
+FAILED [0.0587s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_linalg_svdvals_cpu_complex128 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.complex128], args=(), kwargs={}, broadcasts_input=False, name='')
+FAILED [0.0574s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_linalg_svdvals_cpu_complex64 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.complex64], args=(), kwargs={}, broadcasts_input=False, name='')
+FAILED [0.0626s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_linalg_svdvals_cpu_float32 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.float32], args=(), kwargs={}, broadcasts_input=False, name='')
+FAILED [0.0534s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_linalg_svdvals_cpu_float64 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.float64], args=(), kwargs={}, broadcasts_input=False, name='')
+FAILED [0.2580s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_div_trunc_rounding_cpu_float16 - Exception: Caused by reference input at index 52: SampleInput(input=Tensor[size=(5, 10, 5), device="cpu", dtype=torch.float16, contiguous=False], args=TensorList[Tensor[size=(1...
+FAILED [0.0564s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_dot_cpu_complex128 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5,), device="cpu", dtype=torch.complex128], args=TensorList[Tensor[size=(5,), device="cpu", dtype=torch.complex...
+FAILED [0.0508s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_dot_cpu_complex64 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5,), device="cpu", dtype=torch.complex64], args=TensorList[Tensor[size=(5,), device="cpu", dtype=torch.complex64...
+FAILED [0.0550s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linalg_matrix_norm_cpu_complex128 - Exception: Caused by sample input at index 4: SampleInput(input=Tensor[size=(2, 2), device="cpu", dtype=torch.complex128], args=('nuc',(-2,-1),True), kwargs={}, broadcasts_i...
+FAILED [0.0530s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linalg_matrix_norm_cpu_complex64 - Exception: Caused by sample input at index 4: SampleInput(input=Tensor[size=(2, 2), device="cpu", dtype=torch.complex64], args=('nuc',(-2,-1),True), kwargs={}, broadcasts_inp...
+FAILED [0.0534s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linalg_matrix_norm_cpu_float32 - Exception: Caused by sample input at index 4: SampleInput(input=Tensor[size=(2, 2), device="cpu", dtype=torch.float32], args=('nuc',(-2,-1),True), kwargs={}, broadcasts_input=F...
+FAILED [0.0537s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linalg_matrix_norm_cpu_float64 - Exception: Caused by sample input at index 4: SampleInput(input=Tensor[size=(2, 2), device="cpu", dtype=torch.float64], args=('nuc',(-2,-1),True), kwargs={}, broadcasts_input=F...
+FAILED [0.0762s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linalg_norm_cpu_complex128 - Exception: Caused by sample input at index 44: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.complex128], args=('nuc'), kwargs={'keepdim': 'False'}, broadcasts_in...
+FAILED [0.0780s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linalg_norm_cpu_complex64 - Exception: Caused by sample input at index 44: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.complex64], args=('nuc'), kwargs={'keepdim': 'False'}, broadcasts_inpu...
+FAILED [0.0750s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linalg_norm_cpu_float32 - Exception: Caused by sample input at index 44: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.float32], args=('nuc'), kwargs={'keepdim': 'False'}, broadcasts_input=Fa...
+FAILED [0.0743s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linalg_norm_cpu_float64 - Exception: Caused by sample input at index 44: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.float64], args=('nuc'), kwargs={'keepdim': 'False'}, broadcasts_input=Fa...
+FAILED [0.1036s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linalg_svd_cpu_complex128 - Exception: Caused by sample input at index 31: SampleInput(input=Tensor[size=(3, 0), device="cpu", dtype=torch.complex128], args=(), kwargs={'full_matrices': 'False'}, broadcasts_in...
+FAILED [0.1060s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linalg_svd_cpu_complex64 - Exception: Caused by sample input at index 31: SampleInput(input=Tensor[size=(3, 0), device="cpu", dtype=torch.complex64], args=(), kwargs={'full_matrices': 'False'}, broadcasts_inpu...
+FAILED [0.1047s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linalg_svd_cpu_float32 - Exception: Caused by sample input at index 31: SampleInput(input=Tensor[size=(3, 0), device="cpu", dtype=torch.float32], args=(), kwargs={'full_matrices': 'False'}, broadcasts_input=Fa...
+FAILED [0.1028s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linalg_svd_cpu_float64 - Exception: Caused by sample input at index 31: SampleInput(input=Tensor[size=(3, 0), device="cpu", dtype=torch.float64], args=(), kwargs={'full_matrices': 'False'}, broadcasts_input=Fa...
+FAILED [0.0720s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linalg_svdvals_cpu_complex128 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.complex128], args=(), kwargs={}, broadcasts_input=False, name='')     
+FAILED [0.0488s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linalg_svdvals_cpu_complex64 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.complex64], args=(), kwargs={}, broadcasts_input=False, name='')       
+FAILED [0.0495s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linalg_svdvals_cpu_float32 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.float32], args=(), kwargs={}, broadcasts_input=False, name='')
+FAILED [0.0500s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linalg_svdvals_cpu_float64 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.float64], args=(), kwargs={}, broadcasts_input=False, name='')
+FAILED [0.0493s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_vdot_cpu_complex128 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5,), device="cpu", dtype=torch.complex128], args=TensorList[Tensor[size=(5,), device="cpu", dtype=torch.comple...
+FAILED [0.0497s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_vdot_cpu_complex64 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5,), device="cpu", dtype=torch.complex64], args=TensorList[Tensor[size=(5,), device="cpu", dtype=torch.complex6...
+FAILED [0.0490s] test_ops.py::TestMathBitsCPU::test_conj_view__refs_dot_cpu_complex64 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5,), device="cpu", dtype=torch.complex64], args=TensorList[Tensor[size=(5,), device="cpu", dtype=torch.complex64]], kwargs={},...
+FAILED [0.0534s] test_ops.py::TestMathBitsCPU::test_conj_view__refs_linalg_matrix_norm_cpu_complex64 - Exception: Caused by sample input at index 4: SampleInput(input=Tensor[size=(2, 2), device="cpu", dtype=torch.complex64], args=('nuc',(-2,-1),True), kwargs={}, broadcasts_input=False, name...
+FAILED [0.0816s] test_ops.py::TestMathBitsCPU::test_conj_view__refs_linalg_norm_cpu_complex64 - Exception: Caused by sample input at index 44: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.complex64], args=('nuc'), kwargs={'keepdim': 'False'}, broadcasts_input=False, name='')
+FAILED [0.1140s] test_ops.py::TestMathBitsCPU::test_conj_view__refs_linalg_svd_cpu_complex64 - Exception: Caused by sample input at index 31: SampleInput(input=Tensor[size=(3, 0), device="cpu", dtype=torch.complex64], args=(), kwargs={'full_matrices': 'False'}, broadcasts_input=False, name='')
+FAILED [0.0489s] test_ops.py::TestMathBitsCPU::test_conj_view__refs_linalg_svdvals_cpu_complex64 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.complex64], args=(), kwargs={}, broadcasts_input=False, name='')
+FAILED [0.0491s] test_ops.py::TestMathBitsCPU::test_conj_view__refs_vdot_cpu_complex64 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5,), device="cpu", dtype=torch.complex64], args=TensorList[Tensor[size=(5,), device="cpu", dtype=torch.complex64]], kwargs={}...
+FAILED [0.0491s] test_ops.py::TestMathBitsCPU::test_neg_conj_view__refs_dot_cpu_complex128 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5,), device="cpu", dtype=torch.complex128], args=TensorList[Tensor[size=(5,), device="cpu", dtype=torch.complex128]], kwa...
+FAILED [0.0495s] test_ops.py::TestMathBitsCPU::test_neg_conj_view__refs_linalg_svdvals_cpu_complex128 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.complex128], args=(), kwargs={}, broadcasts_input=False, name='')
+FAILED [0.0495s] test_ops.py::TestMathBitsCPU::test_neg_conj_view__refs_vdot_cpu_complex128 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5,), device="cpu", dtype=torch.complex128], args=TensorList[Tensor[size=(5,), device="cpu", dtype=torch.complex128]], kw...
+FAILED [0.0530s] test_ops.py::TestMathBitsCPU::test_neg_view__refs_linalg_matrix_norm_cpu_float64 - Exception: Caused by sample input at index 4: SampleInput(input=Tensor[size=(2, 2), device="cpu", dtype=torch.float64], args=('nuc',(-2,-1),True), kwargs={}, broadcasts_input=False, name='')    
+FAILED [0.0786s] test_ops.py::TestMathBitsCPU::test_neg_view__refs_linalg_norm_cpu_float64 - Exception: Caused by sample input at index 44: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.float64], args=('nuc'), kwargs={'keepdim': 'False'}, broadcasts_input=False, name='')     
+FAILED [0.1050s] test_ops.py::TestMathBitsCPU::test_neg_view__refs_linalg_svd_cpu_float64 - Exception: Caused by sample input at index 31: SampleInput(input=Tensor[size=(3, 0), device="cpu", dtype=torch.float64], args=(), kwargs={'full_matrices': 'False'}, broadcasts_input=False, name='')     
+FAILED [0.0504s] test_ops.py::TestMathBitsCPU::test_neg_view__refs_linalg_svdvals_cpu_float64 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.float64], args=(), kwargs={}, broadcasts_input=False, name='')
+FAILED [0.0512s] test_ops.py::TestTagsCPU::test_tags__refs_linalg_matrix_norm_cpu_float32 - Exception: Caused by sample input at index 4: SampleInput(input=Tensor[size=(2, 2), device="cpu", dtype=torch.float32], args=('nuc',(-2,-1),True), kwargs={}, broadcasts_input=False, name='')
+FAILED [0.0624s] test_ops.py::TestTagsCPU::test_tags__refs_linalg_norm_cpu_float32 - Exception: Caused by sample input at index 44: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.float32], args=('nuc'), kwargs={'keepdim': 'False'}, broadcasts_input=False, name='')
+FAILED [0.0695s] test_ops.py::TestTagsCPU::test_tags__refs_linalg_svd_cpu_float32 - Exception: Caused by sample input at index 31: SampleInput(input=Tensor[size=(3, 0), device="cpu", dtype=torch.float32], args=(), kwargs={'full_matrices': 'False'}, broadcasts_input=False, name='')
+FAILED [0.0482s] test_ops.py::TestTagsCPU::test_tags__refs_linalg_svdvals_cpu_float32 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5, 5), device="cpu", dtype=torch.float32], args=(), kwargs={}, broadcasts_input=False, name='')
+SKIPPED [0.3572s] [461] test_ops.py:281: Only runs on cuda
+SKIPPED [0.3572s] [10] test_ops.py:281: Overflow when downcasting signed type is undefined
+SKIPPED [0.3572s] [3] test_ops.py:281: Some inputs produce undefined outputs
+SKIPPED [0.3572s] [1] test_ops.py:281: Skipped some inputs produce undefined outputs
+SKIPPED [0.3572s] [40] test_ops.py:281: output is non-deterministic
+SKIPPED [0.3572s] [1] test_ops.py:281: Expected: dropout is not comparable
+SKIPPED [0.3572s] [51] test_ops.py:281: PyTorch compiled without Lapack
+SKIPPED [0.3572s] [4] test_ops.py:281: Skipped!
+SKIPPED [0.3572s] [1] test_ops.py:281: output is non-deterministic (when dropout_p > 0)
+SKIPPED [0.3572s] [1] test_ops.py:281: PyTorch is built without MKL support
+SKIPPED [0.3572s] [9] test_ops.py:281: testing takes an unreasonably long time, #79528
+SKIPPED [0.3572s] [2] test_ops.py:281: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.3572s] [1] test_ops.py:281: Output order is undefined when sorted=False
+SKIPPED [0.3572s] [1] test_ops.py:1208: Errors when storage_offset is included
+SKIPPED [0.3572s] [1] test_ops.py:1208: Fails on cuda + rocm
+SKIPPED [0.3572s] [1] test_ops.py:1208: Expected: empty is not comparable
+SKIPPED [0.3572s] [1] test_ops.py:1208: Skipped!
+SKIPPED [0.3572s] [1] test_ops.py:1208: Expected: empty_permuted is not comparable
+SKIPPED [0.3572s] [1] test_ops.py:1208: Expected: new_empty is not comparable
+SKIPPED [0.3572s] [1] test_ops.py:1208: Expected: new_empty_strided is not comparable
+SKIPPED [0.3572s] [2] test_ops.py:1208: Expected: randn_like is not comparable between dtypes
+SKIPPED [0.3572s] [10] test_ops.py:1264: Skipped!
+SKIPPED [0.3572s] [55] test_ops.py:1264: PyTorch compiled without Lapack
+SKIPPED [0.3572s] [6] test_ops.py:1264: Only runs on cuda
+SKIPPED [0.3572s] [1] test_ops.py:1264: PyTorch is built without MKL support
+SKIPPED [0.3572s] [7] test_ops.py:1264: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.3572s] [3] test_ops.py:524: Only runs on cuda
+SKIPPED [0.3572s] [3] test_ops.py:524: PyTorch compiled without Lapack
+SKIPPED [0.3572s] [7] test_ops.py:524: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.3572s] [1020] test_ops.py:152: Only runs on cuda
+SKIPPED [0.3572s] [55] test_ops.py:152: PyTorch compiled without Lapack
+SKIPPED [0.3572s] [10] test_ops.py:152: Skipped!
+SKIPPED [0.3572s] [1] test_ops.py:152: PyTorch is built without MKL support
+SKIPPED [0.3572s] [14] test_ops.py:152: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.3572s] [1] test_ops.py:1237: Modifies input strides and storage_offset
+SKIPPED [0.3572s] [9] test_ops.py:1237: Skipped!
+SKIPPED [0.3572s] [5] test_ops.py:1237: Only runs on cuda
+SKIPPED [0.3572s] [1] test_ops.py:1237: Expected: new_empty_strided is not comparable
+SKIPPED [0.3572s] [7] test_ops.py:1237: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.3572s] [1388] test_ops.py:571: Skipped under Windows
+SKIPPED [0.3572s] [5] test_ops.py:571: 67470!
+SKIPPED [0.3572s] [3] test_ops.py:571: Works for int64, fails for everything else
+SKIPPED [0.3572s] [51] test_ops.py:571: Skipped!
+SKIPPED [0.3572s] [2] test_ops.py:571: The backward may give different results
+SKIPPED [0.3572s] [3] test_ops.py:571: Expected: new_empty_strided is not comparable
+SKIPPED [0.3572s] [6] test_ops.py:571: Test expects tensor input
+SKIPPED [0.3572s] [14] test_ops.py:571: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.3572s] [3] test_ops.py:571: Skipped
+SKIPPED [0.3572s] [6] test_ops.py:262: Only runs on cuda
+SKIPPED [0.3572s] [4] test_ops.py:262: PyTorch compiled without Lapack
+SKIPPED [0.3572s] [7] test_ops.py:800: Skipped! Only supports single tensor or iterable of tensor outputs.
+SKIPPED [0.3572s] [1] test_ops.py:800: Expected: cauchy is not comparable
+SKIPPED [0.3572s] [4] test_ops.py:800: Expected: empty is not comparable
+SKIPPED [0.3572s] [1] test_ops.py:800: Expected: exponential is not comparable
+SKIPPED [0.3572s] [1] test_ops.py:800: Expected: geometric is not comparable
+SKIPPED [0.3572s] [1] test_ops.py:800: Expected: log_normal is not comparable
+SKIPPED [0.3572s] [1] test_ops.py:800: Expected: dropout is not comparable
+SKIPPED [0.3572s] [3] test_ops.py:800: Expected: normal is not comparable
+SKIPPED [0.3572s] [54] test_ops.py:800: PyTorch compiled without Lapack
+SKIPPED [0.3572s] [1] test_ops.py:800: Expected: empty_permuted is not comparable
+SKIPPED [0.3572s] [5] test_ops.py:800: Only runs on cuda
+SKIPPED [0.3572s] [12] test_ops.py:800: Skipped!
+SKIPPED [0.3572s] [7] test_ops.py:800: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.3572s] [7] test_ops.py:663: Skipped! Only supports single tensor or iterable of tensor outputs.
+SKIPPED [0.3572s] [1] test_ops.py:663: Expected: cauchy is not comparable
+SKIPPED [0.3572s] [4] test_ops.py:663: Expected: empty is not comparable
+SKIPPED [0.3572s] [1] test_ops.py:663: Expected: exponential is not comparable
+SKIPPED [0.3572s] [1] test_ops.py:663: Expected: geometric is not comparable
+SKIPPED [0.3572s] [1] test_ops.py:663: Expected: log_normal is not comparable
+SKIPPED [0.3572s] [1] test_ops.py:663: Expected: dropout is not comparable
+SKIPPED [0.3572s] [3] test_ops.py:663: Expected: normal is not comparable
+SKIPPED [0.3572s] [55] test_ops.py:663: PyTorch compiled without Lapack
+SKIPPED [0.3572s] [1] test_ops.py:663: Expected: empty_permuted is not comparable
+SKIPPED [0.3572s] [6] test_ops.py:663: Only runs on cuda
+SKIPPED [0.3572s] [8] test_ops.py:663: Skipped!
+SKIPPED [0.3572s] [7] test_ops.py:663: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.3572s] [3] test_ops.py:663: Skipped! Op has not supported dtypes on this device.
+SKIPPED [0.3572s] [24] test_ops.py:1463: Skipped!
+SKIPPED [0.3572s] [42] test_ops.py:1463: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.3572s] [7] test_ops.py:476: Skipped!
+SKIPPED [0.3572s] [35] test_ops.py:476: TODO: RuntimeError: no _refs support for torch.rand_like
+SKIPPED [0.3572s] [39] test_ops.py:476: Expected: empty is not comparable
+SKIPPED [0.3572s] [25] test_ops.py:476: Expected: empty_strided is not comparable
+SKIPPED [0.3572s] [8] test_ops.py:476: Expected: dropout is not comparable
+SKIPPED [0.3572s] [3188] test_ops.py:497: Only runs on cuda
+SKIPPED [0.3572s] [3] test_ops.py:497: Skipped!
+SKIPPED [0.3572s] [13] test_ops.py:497: Can't check result for empty
+SKIPPED [0.3572s] [13] test_ops.py:497: Can't check result for empty_like
+SKIPPED [0.3572s] [25] test_ops.py:497: Expected: empty_strided is not comparable
+SKIPPED [0.3572s] [13] test_ops.py:497: Can't check result for new_empty
+SKIPPED [0.3572s] [21] test_ops.py:497: make_traced() doesn't set seed properly!
+SKIPPED [0.3572s] [5] test_ops.py:488: Skipped!
+SKIPPED [0.3572s] [4] test_ops.py:488: Expected: cauchy is not comparable
+SKIPPED [0.3572s] [39] test_ops.py:488: Expected: empty is not comparable
+SKIPPED [0.3572s] [25] test_ops.py:488: Expected: empty_strided is not comparable
+SKIPPED [0.3572s] [4] test_ops.py:488: Expected: exponential is not comparable
+SKIPPED [0.3572s] [9] test_ops.py:488: Expected: geometric is not comparable
+SKIPPED [0.3572s] [4] test_ops.py:488: Expected: log_normal is not comparable
+SKIPPED [0.3572s] [8] test_ops.py:488: Expected: dropout is not comparable
+SKIPPED [0.3572s] [14] test_ops.py:488: Expected: normal is not comparable
+SKIPPED [0.3572s] [40] test_ops.py:1027: Skipped!
+SKIPPED [0.3572s] [2] test_ops.py:1027: Errors when storage_offset is included
+SKIPPED [0.3572s] [2] test_ops.py:1027: Fails in most cases, passes on LAZY for some reason
+SKIPPED [0.3572s] [108] test_ops.py:1027: PyTorch compiled without Lapack
+SKIPPED [0.3572s] [10] test_ops.py:1027: Only runs on cuda
+SKIPPED [0.3572s] [2] test_ops.py:1027: Expected: new_empty_strided is not comparable
+SKIPPED [0.3572s] [7] test_ops.py:1027: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.3572s] [49] test_ops.py:1493: PyTorch compiled without Lapack
+SKIPPED [0.3572s] [4] test_ops.py:1493: Skipped!
+SKIPPED [0.3572s] [1] test_ops.py:1493: Allowed exception
+SKIPPED [0.3572s] [24] test_ops.py:1510: Does not support forward_ad
+SKIPPED [0.3572s] [119] test_ops.py:1510: Does not support autograd
+SKIPPED [0.3572s] [54] test_ops.py:1510: PyTorch compiled without Lapack
+SKIPPED [0.3572s] [5] test_ops.py:1510: Only runs on cuda
+SKIPPED [0.3572s] [4] test_ops.py:1510: Skipped!
+SKIPPED [0.3572s] [1] test_ops.py:1510: PyTorch is built without MKL support
+SKIPPED [0.3572s] [7] test_ops.py:1510: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.3572s] [1] test_ops.py:1510: test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test
+SKIPPED [0.3572s] [55] test_ops.py:1480: PyTorch compiled without Lapack
+SKIPPED [0.3572s] [2] test_ops.py:1480: Expected: empty is not comparable
+SKIPPED [0.3572s] [1] test_ops.py:1480: Expected: empty_like is not comparable
+SKIPPED [0.3572s] [1] test_ops.py:1480: Expected: empty_permuted is not comparable
+SKIPPED [0.3572s] [5] test_ops.py:1480: skip
+SKIPPED [0.3572s] [1] test_ops.py:1480: Expected: new_empty is not comparable
+SKIPPED [0.3572s] [1] test_ops.py:1480: Expected: new_empty_strided is not comparable
+SKIPPED [0.3572s] [3] test_ops.py:1480: Allowed exemption
+SKIPPED [0.3572s] [3] test_ops.py:1480: Skipped!
+SKIPPED [0.3572s] [2] test_ops.py:1480: Allowed exception
+SKIPPED [0.3572s] [7] test_ops.py:1480: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.3572s] [55] test_ops.py:1531: PyTorch compiled without Lapack
+SKIPPED [0.3572s] [5] test_ops.py:1531: Only runs on cuda
+SKIPPED [0.3572s] [1] test_ops.py:1531: PyTorch is built without MKL support
+SKIPPED [0.3572s] [7] test_ops.py:1531: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.3572s] [3] test_ops.py:1686: Errors when storage_offset is included
+SKIPPED [0.3572s] [3] test_ops.py:1686: Expected: empty is not comparable
+SKIPPED [0.3572s] [2] test_ops.py:1686: Expected: empty_strided is not comparable
+SKIPPED [0.3572s] [9] test_ops.py:1686: Skipped!
+SKIPPED [0.3572s] [1] test_ops.py:1686: Test expects tensor input
+SKIPPED [0.3572s] [1] test_ops.py:1686: Test changes in memory layout
+SKIPPED [0.3572s] [53] test_ops.py:1686: PyTorch compiled without Lapack
+SKIPPED [0.3572s] [5] test_ops.py:1686: Only runs on cuda
+SKIPPED [0.3572s] [1] test_ops.py:1686: Expected: new_empty_strided is not comparable
+SKIPPED [0.3572s] [1] test_ops.py:1686: Operation doesn't support conjugated inputs.
+SKIPPED [0.3572s] [2] test_ops.py:1727: Errors when storage_offset is included
+SKIPPED [0.3572s] [3] test_ops.py:1727: Expected: empty is not comparable
+SKIPPED [0.3572s] [2] test_ops.py:1727: Expected: empty_strided is not comparable
+SKIPPED [0.3572s] [9] test_ops.py:1727: Skipped!
+SKIPPED [0.3572s] [1] test_ops.py:1727: Test expects tensor input
+SKIPPED [0.3572s] [1] test_ops.py:1727: Test changes in memory layout
+SKIPPED [0.3572s] [53] test_ops.py:1727: PyTorch compiled without Lapack
+SKIPPED [0.3572s] [2] test_ops.py:1727: Operation not tested with tensors with negative bit.
+SKIPPED [0.3572s] [5] test_ops.py:1727: Only runs on cuda
+SKIPPED [0.3572s] [1] test_ops.py:1727: Expected: new_empty_strided is not comparable
+SKIPPED [0.3572s] [1] test_ops.py:1727: Operation doesn't support conjugated inputs.
+SKIPPED [0.3572s] [3] test_ops.py:1708: Errors when storage_offset is included
+SKIPPED [0.3572s] [3] test_ops.py:1708: Expected: empty is not comparable
+SKIPPED [0.3572s] [2] test_ops.py:1708: Expected: empty_strided is not comparable
+SKIPPED [0.3572s] [24] test_ops.py:1708: Skipped!
+SKIPPED [0.3572s] [2] test_ops.py:1708: Expected: dropout is not comparable
+SKIPPED [0.3572s] [1] test_ops.py:1708: Test expects tensor input
+SKIPPED [0.3572s] [6] test_ops.py:1708: Operation not tested with tensors with negative bit.
+SKIPPED [0.3572s] [1] test_ops.py:1708: Test changes in memory layout
+SKIPPED [0.3572s] [55] test_ops.py:1708: PyTorch compiled without Lapack
+SKIPPED [0.3572s] [5] test_ops.py:1708: Only runs on cuda
+SKIPPED [0.3572s] [1] test_ops.py:1708: Expected: new_empty_strided is not comparable
+SKIPPED [0.3572s] [7] test_ops.py:1708: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.alias does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.bitwise_right_shift does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.copy_to does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.empty_permuted does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.empty_strided does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.equal does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.full does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.full_like does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.index_copy_ does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.index_fill_ does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.is_complex does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.mvlgamma does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.native_group_norm does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.ones does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.ones_like does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.rfloordiv does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.rpow does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.rtruediv does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.scalar_tensor does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.special.expit does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.swap_axes does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.to does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.trunc_divide does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.zero does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.zeros does not have an entry in python_ref_db
+SKIPPED [0.3572s] [1] test_ops.py:1974: _refs.zeros_like does not have an entry in python_ref_db
+SKIPPED [0.3572s] [20] test_ops.py:2215: Skip failing test
+SKIPPED [0.3572s] [20] test_ops.py:2219: Skip failing test
+SKIPPED [0.3572s] [55] test_ops.py:2219: PyTorch compiled without Lapack
+SKIPPED [0.3572s] [5] test_ops.py:2219: Only runs on cuda
+SKIPPED [0.3572s] [1] test_ops.py:2219: Skipped!
+SKIPPED [0.3572s] [1] test_ops.py:2219: PyTorch is built without MKL support
+SKIPPED [0.3572s] [7] test_ops.py:2219: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.3572s] [55] test_ops.py:2215: PyTorch compiled without Lapack
+SKIPPED [0.3572s] [460] test_ops.py:2258: Only runs on cuda
+SKIPPED [0.3572s] [38] test_ops.py:2258: PyTorch compiled without Lapack
+SKIPPED [0.3572s] [16] test_ops.py:2258: Skipped!
+SKIPPED [0.3572s] [461] test_ops.py:2252: Only runs on cuda
+SKIPPED [0.3572s] [42] test_ops.py:2252: PyTorch compiled without Lapack
+SKIPPED [0.3572s] [10] test_ops.py:2252: Skipped!
+SKIPPED [0.3572s] [1] test_ops.py:2252: PyTorch is built without MKL support
+SKIPPED [0.3572s] [5] test_ops.py:2215: Only runs on cuda
+SKIPPED [0.3572s] [1] test_ops.py:2215: Skipped!
+SKIPPED [0.3572s] [1] test_ops.py:2215: PyTorch is built without MKL support
+SKIPPED [0.3572s] [7] test_ops.py:2215: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.3572s] [20] test_ops.py:2162: Skip failing test
+SKIPPED [0.3572s] [55] test_ops.py:2162: PyTorch compiled without Lapack
+SKIPPED [0.3572s] [5] test_ops.py:2162: Only runs on cuda
+SKIPPED [0.3572s] [1] test_ops.py:2162: PyTorch is built without MKL support
+SKIPPED [0.3572s] [7] test_ops.py:2162: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.3572s] [55] test_ops.py:1796: PyTorch compiled without Lapack
+SKIPPED [0.3572s] [5] test_ops.py:1796: Only runs on cuda
+SKIPPED [0.3572s] [3] test_ops.py:1796: Skipped!
+SKIPPED [0.3572s] [7] test_ops.py:1796: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.3572s] [1] test_ops.py:1796: Allowed exception
+XFAIL [0.0620s] test_ops.py::TestCommonCPU::test_complex_half_reference_testing_as_strided_partial_views_cpu_complex32 - reason:
+XFAIL [0.2245s] test_ops.py::TestCommonCPU::test_dtypes_nn_functional_silu_complex_cpu - reason:
+XFAIL [0.2244s] test_ops.py::TestCommonCPU::test_dtypes_resize__cpu - reason:
+XFAIL [0.2223s] test_ops.py::TestCommonCPU::test_dtypes_resize_as__cpu - reason:
+XFAIL [0.0490s] test_ops.py::TestCommonCPU::test_errors_clamp_max_cpu - reason:
+XFAIL [0.0469s] test_ops.py::TestCommonCPU::test_errors_clamp_min_cpu - reason:
+XFAIL [0.0524s] test_ops.py::TestCommonCPU::test_numpy_ref_clone_cpu_complex128 - reason:
+XFAIL [0.0497s] test_ops.py::TestCommonCPU::test_numpy_ref_clone_cpu_float64 - reason:
+XFAIL [0.0491s] test_ops.py::TestCommonCPU::test_numpy_ref_clone_cpu_int64 - reason:
+XFAIL [0.0718s] test_ops.py::TestCommonCPU::test_numpy_ref_nn_functional_conv_transpose1d_cpu_int64 - reason:
+XFAIL [0.0721s] test_ops.py::TestCommonCPU::test_numpy_ref_nn_functional_conv_transpose2d_cpu_complex128 - reason:
+XFAIL [0.0707s] test_ops.py::TestCommonCPU::test_numpy_ref_nn_functional_conv_transpose2d_cpu_float64 - reason:
+XFAIL [0.0687s] test_ops.py::TestCommonCPU::test_numpy_ref_nn_functional_conv_transpose2d_cpu_int64 - reason:
+XFAIL [0.0867s] test_ops.py::TestCommonCPU::test_numpy_ref_nn_functional_conv_transpose3d_cpu_complex128 - reason:
+XFAIL [0.0787s] test_ops.py::TestCommonCPU::test_numpy_ref_nn_functional_conv_transpose3d_cpu_float64 - reason:
+XFAIL [0.0581s] test_ops.py::TestCommonCPU::test_numpy_ref_nn_functional_conv_transpose3d_cpu_int64 - reason:
+XFAIL [0.0542s] test_ops.py::TestCommonCPU::test_out__refs_cumprod_cpu_float32 - reason:
+XFAIL [0.0518s] test_ops.py::TestCommonCPU::test_out__refs_cumsum_cpu_float32 - reason:
+XFAIL [0.0525s] test_ops.py::TestCommonCPU::test_out__refs_prod_cpu_float32 - reason:
+XFAIL [0.0524s] test_ops.py::TestCommonCPU::test_out__refs_sum_cpu_float32 - reason:
+XFAIL [0.0614s] test_ops.py::TestCommonCPU::test_out_bernoulli_cpu_float32 - reason:
+XFAIL [0.0500s] test_ops.py::TestCommonCPU::test_out_cumprod_cpu_float32 - reason:
+XFAIL [0.0485s] test_ops.py::TestCommonCPU::test_out_cumsum_cpu_float32 - reason:
+XFAIL [0.0612s] test_ops.py::TestCommonCPU::test_out_fft_ihfft2_cpu_float32 - reason:
+XFAIL [0.0570s] test_ops.py::TestCommonCPU::test_out_fft_ihfftn_cpu_float32 - reason:
+XFAIL [0.0608s] test_ops.py::TestCommonCPU::test_out_matmul_cpu_float32 - reason:
+XFAIL [0.0510s] test_ops.py::TestCommonCPU::test_out_narrow_copy_cpu_float32 - reason:
+XFAIL [0.0691s] test_ops.py::TestCommonCPU::test_out_nn_functional_avg_pool3d_cpu_float32 - reason:
+XFAIL [0.0514s] test_ops.py::TestCommonCPU::test_out_nn_functional_linear_cpu_float32 - reason:
+XFAIL [0.0535s] test_ops.py::TestCommonCPU::test_out_nonzero_cpu_float32 - reason:
+XFAIL [0.0500s] test_ops.py::TestCommonCPU::test_out_nonzero_static_cpu_float32 - reason:
+XFAIL [0.0923s] test_ops.py::TestCommonCPU::test_out_normal_cpu_float32 - reason:
+XFAIL [0.0517s] test_ops.py::TestCommonCPU::test_out_randint_cpu_float32 - reason:
+XFAIL [0.0715s] test_ops.py::TestCommonCPU::test_out_randn_cpu_float32 - reason:
+XFAIL [0.0720s] test_ops.py::TestCommonCPU::test_out_warning__native_batch_norm_legit_cpu - reason:
+XFAIL [0.0515s] test_ops.py::TestCommonCPU::test_out_warning_addbmm_cpu - reason:
+XFAIL [0.0521s] test_ops.py::TestCommonCPU::test_out_warning_arange_cpu - reason:
+XFAIL [0.0577s] test_ops.py::TestCommonCPU::test_out_warning_bernoulli_cpu - reason:
+XFAIL [0.0575s] test_ops.py::TestCommonCPU::test_out_warning_eye_cpu - reason:
+XFAIL [0.0606s] test_ops.py::TestCommonCPU::test_out_warning_fft_ihfft2_cpu - reason:
+XFAIL [0.0569s] test_ops.py::TestCommonCPU::test_out_warning_fft_ihfftn_cpu - reason:
+XFAIL [0.0521s] test_ops.py::TestCommonCPU::test_out_warning_full_cpu - reason:
+XFAIL [0.0542s] test_ops.py::TestCommonCPU::test_out_warning_linspace_cpu - reason:
+XFAIL [0.0515s] test_ops.py::TestCommonCPU::test_out_warning_linspace_tensor_overload_cpu - reason:
+XFAIL [0.0511s] test_ops.py::TestCommonCPU::test_out_warning_logspace_cpu - reason:
+XFAIL [0.0530s] test_ops.py::TestCommonCPU::test_out_warning_logspace_tensor_overload_cpu - reason:
+XFAIL [0.0536s] test_ops.py::TestCommonCPU::test_out_warning_max_pool2d_with_indices_backward_cpu - reason:
+XFAIL [0.0743s] test_ops.py::TestCommonCPU::test_out_warning_mode_cpu - reason:
+XFAIL [0.0581s] test_ops.py::TestCommonCPU::test_out_warning_multinomial_cpu - reason:
+XFAIL [0.0537s] test_ops.py::TestCommonCPU::test_out_warning_narrow_copy_cpu - reason:
+XFAIL [0.0675s] test_ops.py::TestCommonCPU::test_out_warning_native_batch_norm_cpu - reason:
+XFAIL [0.0514s] test_ops.py::TestCommonCPU::test_out_warning_nn_functional_logsigmoid_cpu - reason:
+XFAIL [0.0512s] test_ops.py::TestCommonCPU::test_out_warning_nonzero_cpu - reason:
+XFAIL [0.0490s] test_ops.py::TestCommonCPU::test_out_warning_nonzero_static_cpu - reason:
+XFAIL [0.0864s] test_ops.py::TestCommonCPU::test_out_warning_normal_cpu - reason:
+XFAIL [0.0529s] test_ops.py::TestCommonCPU::test_out_warning_ones_cpu - reason:
+XFAIL [0.0505s] test_ops.py::TestCommonCPU::test_out_warning_randint_cpu - reason:
+XFAIL [0.0601s] test_ops.py::TestCommonCPU::test_out_warning_randn_cpu - reason:
+XFAIL [0.0522s] test_ops.py::TestCommonCPU::test_out_warning_zeros_cpu - reason:
+XFAIL [0.0643s] test_ops.py::TestCommonCPU::test_python_ref__refs_addr_cpu_bfloat16 - reason:
+XFAIL [0.0509s] test_ops.py::TestCommonCPU::test_python_ref__refs_addr_cpu_bool - reason:
+XFAIL [0.0509s] test_ops.py::TestCommonCPU::test_python_ref__refs_addr_cpu_complex128 - reason:
+XFAIL [0.0511s] test_ops.py::TestCommonCPU::test_python_ref__refs_addr_cpu_complex64 - reason:
+XFAIL [0.0502s] test_ops.py::TestCommonCPU::test_python_ref__refs_addr_cpu_float16 - reason:
+XFAIL [0.0499s] test_ops.py::TestCommonCPU::test_python_ref__refs_addr_cpu_float32 - reason:
+XFAIL [0.0513s] test_ops.py::TestCommonCPU::test_python_ref__refs_addr_cpu_float64 - reason:
+XFAIL [0.0497s] test_ops.py::TestCommonCPU::test_python_ref__refs_addr_cpu_int16 - reason:
+XFAIL [0.0495s] test_ops.py::TestCommonCPU::test_python_ref__refs_addr_cpu_int32 - reason:
+XFAIL [0.0502s] test_ops.py::TestCommonCPU::test_python_ref__refs_addr_cpu_int64 - reason:
+XFAIL [0.0511s] test_ops.py::TestCommonCPU::test_python_ref__refs_addr_cpu_int8 - reason:
+XFAIL [0.0501s] test_ops.py::TestCommonCPU::test_python_ref__refs_addr_cpu_uint8 - reason:
+XFAIL [0.0480s] test_ops.py::TestCommonCPU::test_python_ref__refs_dot_cpu_complex128 - reason:
+XFAIL [0.0482s] test_ops.py::TestCommonCPU::test_python_ref__refs_dot_cpu_complex64 - reason:
+XFAIL [0.0476s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_add_cpu_bfloat16 - reason:
+XFAIL [0.0496s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_add_cpu_bool - reason:
+XFAIL [0.0477s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_add_cpu_complex128 - reason:
+XFAIL [0.0481s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_add_cpu_complex32 - reason:
+XFAIL [0.0475s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_add_cpu_complex64 - reason:
+XFAIL [0.0471s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_add_cpu_float16 - reason:
+XFAIL [0.0465s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_add_cpu_float32 - reason:
+XFAIL [0.0485s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_add_cpu_float64 - reason:
+XFAIL [0.0469s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_add_cpu_int16 - reason:
+XFAIL [0.0482s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_add_cpu_int32 - reason:
+XFAIL [0.0476s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_add_cpu_int64 - reason:
+XFAIL [0.0652s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_add_cpu_int8 - reason:
+XFAIL [0.0465s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_add_cpu_uint8 - reason:
+XFAIL [0.0514s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_copy_cpu_bfloat16 - reason:
+XFAIL [0.0506s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_copy_cpu_bool - reason:
+XFAIL [0.0511s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_copy_cpu_complex128 - reason:
+XFAIL [0.0511s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_copy_cpu_complex32 - reason:
+XFAIL [0.0517s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_copy_cpu_complex64 - reason:
+XFAIL [0.0513s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_copy_cpu_float16 - reason:
+XFAIL [0.0512s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_copy_cpu_float32 - reason:
+XFAIL [0.0513s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_copy_cpu_float64 - reason:
+XFAIL [0.0506s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_copy_cpu_int16 - reason:
+XFAIL [0.0511s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_copy_cpu_int32 - reason:
+XFAIL [0.0506s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_copy_cpu_int64 - reason:
+XFAIL [0.0504s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_copy_cpu_int8 - reason:
+XFAIL [0.0498s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_copy_cpu_uint8 - reason:
+XFAIL [0.0570s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_fill_cpu_bfloat16 - reason:
+XFAIL [0.0561s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_fill_cpu_bool - reason:
+XFAIL [0.0567s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_fill_cpu_complex128 - reason: 
+XFAIL [0.0582s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_fill_cpu_complex32 - reason:
+XFAIL [0.0563s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_fill_cpu_complex64 - reason:
+XFAIL [0.0570s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_fill_cpu_float16 - reason:
+XFAIL [0.0566s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_fill_cpu_float32 - reason:
+XFAIL [0.0582s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_fill_cpu_float64 - reason:
+XFAIL [0.0568s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_fill_cpu_int16 - reason:
+XFAIL [0.0564s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_fill_cpu_int32 - reason:
+XFAIL [0.0563s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_fill_cpu_int64 - reason:
+XFAIL [0.0562s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_fill_cpu_int8 - reason:
+XFAIL [0.0572s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_fill_cpu_uint8 - reason:
+XFAIL [0.0522s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_select_cpu_bfloat16 - reason:
+XFAIL [0.0509s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_select_cpu_bool - reason:
+XFAIL [0.0509s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_select_cpu_complex128 - reason:
+XFAIL [0.0519s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_select_cpu_complex32 - reason:
+XFAIL [0.0504s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_select_cpu_complex64 - reason:
+XFAIL [0.0514s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_select_cpu_float16 - reason:
+XFAIL [0.0520s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_select_cpu_float32 - reason:
+XFAIL [0.0508s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_select_cpu_float64 - reason:
+XFAIL [0.0501s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_select_cpu_int16 - reason:
+XFAIL [0.0508s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_select_cpu_int32 - reason:
+XFAIL [0.0509s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_select_cpu_int64 - reason:
+XFAIL [0.0506s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_select_cpu_int8 - reason:
+XFAIL [0.0505s] test_ops.py::TestCommonCPU::test_python_ref__refs_index_select_cpu_uint8 - reason:
+XFAIL [0.0669s] test_ops.py::TestCommonCPU::test_python_ref__refs_istft_cpu_complex128 - reason:
+XFAIL [0.0509s] test_ops.py::TestCommonCPU::test_python_ref__refs_istft_cpu_complex64 - reason:
+XFAIL [0.0501s] test_ops.py::TestCommonCPU::test_python_ref__refs_linspace_cpu_int16 - reason:
+XFAIL [0.0486s] test_ops.py::TestCommonCPU::test_python_ref__refs_linspace_cpu_int32 - reason:
+XFAIL [0.0492s] test_ops.py::TestCommonCPU::test_python_ref__refs_linspace_cpu_int64 - reason:
+XFAIL [0.0491s] test_ops.py::TestCommonCPU::test_python_ref__refs_linspace_cpu_int8 - reason:
+XFAIL [0.0794s] test_ops.py::TestCommonCPU::test_python_ref__refs_linspace_cpu_uint8 - reason:
+XFAIL [0.0561s] test_ops.py::TestCommonCPU::test_python_ref__refs_linspace_tensor_overload_cpu_int16 - reason:
+XFAIL [0.0544s] test_ops.py::TestCommonCPU::test_python_ref__refs_linspace_tensor_overload_cpu_int32 - reason:
+XFAIL [0.0538s] test_ops.py::TestCommonCPU::test_python_ref__refs_linspace_tensor_overload_cpu_int64 - reason:
+XFAIL [0.0564s] test_ops.py::TestCommonCPU::test_python_ref__refs_linspace_tensor_overload_cpu_int8 - reason:
+XFAIL [0.1750s] test_ops.py::TestCommonCPU::test_python_ref__refs_linspace_tensor_overload_cpu_uint8 - reason:
+XFAIL [0.8014s] test_ops.py::TestCommonCPU::test_python_ref__refs_logaddexp_cpu_complex128 - reason:
+XFAIL [0.7763s] test_ops.py::TestCommonCPU::test_python_ref__refs_logaddexp_cpu_complex64 - reason:
+XFAIL [0.0502s] test_ops.py::TestCommonCPU::test_python_ref__refs_nn_functional_pdist_cpu_float32 - reason:
+XFAIL [0.0478s] test_ops.py::TestCommonCPU::test_python_ref__refs_nn_functional_pdist_cpu_float64 - reason:
+XFAIL [0.0492s] test_ops.py::TestCommonCPU::test_python_ref__refs_stft_cpu_complex128 - reason:
+XFAIL [0.0488s] test_ops.py::TestCommonCPU::test_python_ref__refs_stft_cpu_complex64 - reason: 
+XFAIL [0.0490s] test_ops.py::TestCommonCPU::test_python_ref__refs_stft_cpu_float32 - reason:
+XFAIL [0.0479s] test_ops.py::TestCommonCPU::test_python_ref__refs_stft_cpu_float64 - reason:
+XFAIL [0.0498s] test_ops.py::TestCommonCPU::test_python_ref__refs_take_along_dim_cpu_bfloat16 - reason:
+XFAIL [0.0499s] test_ops.py::TestCommonCPU::test_python_ref__refs_take_along_dim_cpu_bool - reason:
+XFAIL [0.0494s] test_ops.py::TestCommonCPU::test_python_ref__refs_take_along_dim_cpu_complex128 - reason:
+XFAIL [0.0484s] test_ops.py::TestCommonCPU::test_python_ref__refs_take_along_dim_cpu_complex64 - reason:
+XFAIL [0.0489s] test_ops.py::TestCommonCPU::test_python_ref__refs_take_along_dim_cpu_float16 - reason:
+XFAIL [0.0500s] test_ops.py::TestCommonCPU::test_python_ref__refs_take_along_dim_cpu_float32 - reason:
+XFAIL [0.0487s] test_ops.py::TestCommonCPU::test_python_ref__refs_take_along_dim_cpu_float64 - reason:
+XFAIL [0.0496s] test_ops.py::TestCommonCPU::test_python_ref__refs_take_along_dim_cpu_int16 - reason:
+XFAIL [0.0483s] test_ops.py::TestCommonCPU::test_python_ref__refs_take_along_dim_cpu_int32 - reason:
+XFAIL [0.0507s] test_ops.py::TestCommonCPU::test_python_ref__refs_take_along_dim_cpu_int64 - reason:
+XFAIL [0.0485s] test_ops.py::TestCommonCPU::test_python_ref__refs_take_along_dim_cpu_int8 - reason:
+XFAIL [0.0491s] test_ops.py::TestCommonCPU::test_python_ref__refs_take_along_dim_cpu_uint8 - reason:
+XFAIL [0.0493s] test_ops.py::TestCommonCPU::test_python_ref__refs_tensor_split_cpu_bfloat16 - reason:
+XFAIL [0.0487s] test_ops.py::TestCommonCPU::test_python_ref__refs_tensor_split_cpu_bool - reason:
+XFAIL [0.0473s] test_ops.py::TestCommonCPU::test_python_ref__refs_tensor_split_cpu_complex128 - reason:
+XFAIL [0.0487s] test_ops.py::TestCommonCPU::test_python_ref__refs_tensor_split_cpu_complex64 - reason:
+XFAIL [0.0485s] test_ops.py::TestCommonCPU::test_python_ref__refs_tensor_split_cpu_float16 - reason:
+XFAIL [0.0471s] test_ops.py::TestCommonCPU::test_python_ref__refs_tensor_split_cpu_float32 - reason:
+XFAIL [0.0467s] test_ops.py::TestCommonCPU::test_python_ref__refs_tensor_split_cpu_float64 - reason:
+XFAIL [0.0478s] test_ops.py::TestCommonCPU::test_python_ref__refs_tensor_split_cpu_int16 - reason:
+XFAIL [0.0470s] test_ops.py::TestCommonCPU::test_python_ref__refs_tensor_split_cpu_int32 - reason:
+XFAIL [0.0482s] test_ops.py::TestCommonCPU::test_python_ref__refs_tensor_split_cpu_int64 - reason:
+XFAIL [0.0480s] test_ops.py::TestCommonCPU::test_python_ref__refs_tensor_split_cpu_int8 - reason:
+XFAIL [0.0684s] test_ops.py::TestCommonCPU::test_python_ref__refs_tensor_split_cpu_uint8 - reason:
+XFAIL [0.0477s] test_ops.py::TestCommonCPU::test_python_ref__refs_vdot_cpu_complex128 - reason:
+XFAIL [0.0481s] test_ops.py::TestCommonCPU::test_python_ref__refs_vdot_cpu_complex64 - reason:
+XFAIL [0.0571s] test_ops.py::TestCommonCPU::test_python_ref_errors__refs_cat_cpu - reason:
+XFAIL [0.0539s] test_ops.py::TestCommonCPU::test_python_ref_errors__refs_clamp_max_cpu - reason:
+XFAIL [0.0525s] test_ops.py::TestCommonCPU::test_python_ref_errors__refs_clamp_min_cpu - reason:
+XFAIL [0.0571s] test_ops.py::TestCommonCPU::test_python_ref_errors__refs_dstack_cpu - reason:
+XFAIL [0.0535s] test_ops.py::TestCommonCPU::test_python_ref_errors__refs_hstack_cpu - reason:
+XFAIL [0.0555s] test_ops.py::TestCommonCPU::test_python_ref_errors__refs_index_add_cpu - reason:
+XFAIL [0.0594s] test_ops.py::TestCommonCPU::test_python_ref_errors__refs_index_select_cpu - reason:
+XFAIL [0.0500s] test_ops.py::TestCommonCPU::test_python_ref_errors__refs_item_cpu - reason:
+XFAIL [0.0512s] test_ops.py::TestCommonCPU::test_python_ref_errors__refs_masked_fill_cpu - reason:
+XFAIL [0.0519s] test_ops.py::TestCommonCPU::test_python_ref_errors__refs_maximum_cpu - reason:
+XFAIL [0.0505s] test_ops.py::TestCommonCPU::test_python_ref_errors__refs_minimum_cpu - reason:
+XFAIL [0.0549s] test_ops.py::TestCommonCPU::test_python_ref_errors__refs_vstack_cpu - reason:
+XFAIL [0.0739s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_equal_cpu_bfloat16 - reason: 
+XFAIL [0.0561s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_equal_cpu_bool - reason:
+XFAIL [0.0552s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_equal_cpu_complex128 - reason:
+XFAIL [0.0563s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_equal_cpu_complex64 - reason:
+XFAIL [0.0584s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_equal_cpu_float16 - reason:
+XFAIL [0.0581s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_equal_cpu_float32 - reason:
+XFAIL [0.0567s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_equal_cpu_float64 - reason:
+XFAIL [0.0565s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_equal_cpu_int16 - reason:
+XFAIL [0.0566s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_equal_cpu_int32 - reason:
+XFAIL [0.0568s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_equal_cpu_int64 - reason:
+XFAIL [0.0572s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_equal_cpu_int8 - reason:
+XFAIL [0.0570s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_equal_cpu_uint8 - reason:
+XFAIL [0.0518s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_geometric_cpu_int16 - reason:
+XFAIL [0.0508s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_geometric_cpu_int32 - reason:
+XFAIL [0.0494s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_geometric_cpu_int64 - reason:
+XFAIL [0.0503s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_geometric_cpu_int8 - reason:
+XFAIL [0.0512s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_geometric_cpu_uint8 - reason:
+XFAIL [0.0529s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_item_cpu_bfloat16 - reason:
+XFAIL [0.0521s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_item_cpu_bool - reason:
+XFAIL [0.0510s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_item_cpu_complex128 - reason:
+XFAIL [0.0521s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_item_cpu_complex32 - reason:
+XFAIL [0.0512s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_item_cpu_complex64 - reason:
+XFAIL [0.0507s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_item_cpu_float16 - reason:
+XFAIL [0.0522s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_item_cpu_float32 - reason:
+XFAIL [0.0522s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_item_cpu_float64 - reason:
+XFAIL [0.0520s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_item_cpu_int16 - reason:
+XFAIL [0.0522s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_item_cpu_int32 - reason:
+XFAIL [0.0515s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_item_cpu_int64 - reason:
+XFAIL [0.0515s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_item_cpu_int8 - reason:
+XFAIL [0.0526s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_item_cpu_uint8 - reason:
+XFAIL [0.0550s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_tensor_split_cpu_bfloat16 - reason:
+XFAIL [0.0526s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_tensor_split_cpu_bool - reason:
+XFAIL [0.0514s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_tensor_split_cpu_complex128 - reason:
+XFAIL [0.0536s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_tensor_split_cpu_complex64 - reason:
+XFAIL [0.0536s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_tensor_split_cpu_float16 - reason:
+XFAIL [0.0537s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_tensor_split_cpu_float32 - reason:
+XFAIL [0.0543s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_tensor_split_cpu_float64 - reason:
+XFAIL [0.0520s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_tensor_split_cpu_int16 - reason:
+XFAIL [0.0509s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_tensor_split_cpu_int32 - reason:
+XFAIL [0.0529s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_tensor_split_cpu_int64 - reason:
+XFAIL [0.0514s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_tensor_split_cpu_int8 - reason:
+XFAIL [0.0517s] test_ops.py::TestCommonCPU::test_python_ref_meta__refs_tensor_split_cpu_uint8 - reason:
+XFAIL [0.0622s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linspace_cpu_int16 - reason:
+XFAIL [0.0621s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linspace_cpu_int32 - reason:
+XFAIL [0.0621s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linspace_cpu_int64 - reason:
+XFAIL [0.0624s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linspace_cpu_int8 - reason:
+XFAIL [0.0546s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linspace_cpu_uint8 - reason:
+XFAIL [0.0966s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linspace_tensor_overload_cpu_int16 - reason:
+XFAIL [0.0963s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linspace_tensor_overload_cpu_int32 - reason:
+XFAIL [0.0964s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linspace_tensor_overload_cpu_int64 - reason:
+XFAIL [0.0955s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linspace_tensor_overload_cpu_int8 - reason:
+XFAIL [0.0685s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_linspace_tensor_overload_cpu_uint8 - reason:
+XFAIL [0.3363s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_logaddexp_cpu_complex128 - reason:
+XFAIL [0.3320s] test_ops.py::TestCommonCPU::test_python_ref_torch_fallback__refs_logaddexp_cpu_complex64 - reason:
+XFAIL [0.0991s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_addcdiv_cpu_complex64 - reason:
+XFAIL [0.0718s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_addcdiv_cpu_float32 - reason:
+XFAIL [0.0957s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_addcmul_cpu_complex64 - reason:
+XFAIL [0.0715s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_addcmul_cpu_float32 - reason:
+XFAIL [0.0469s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_arange_cpu_float32 - reason:
+XFAIL [0.0675s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_as_strided_partial_views_cpu_complex64 - reason: 
+XFAIL [0.0515s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_as_strided_partial_views_cpu_float32 - reason:
+XFAIL [0.0517s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_cauchy_cpu_float32 - reason:
+XFAIL [0.0679s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_chalf_cpu_complex64 - reason:
+XFAIL [0.0508s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_chalf_cpu_float32 - reason:
+XFAIL [0.0504s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_exponential_cpu_float32 - reason:
+XFAIL [0.0639s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_full_cpu_complex64 - reason:
+XFAIL [0.0481s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_full_cpu_float32 - reason:
+XFAIL [0.0511s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_geometric_cpu_float32 - reason:
+XFAIL [0.0730s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_ldexp_cpu_complex64 - reason:
+XFAIL [0.0511s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_ldexp_cpu_float32 - reason:
+XFAIL [0.0647s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_linspace_cpu_complex64 - reason:
+XFAIL [0.0485s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_linspace_cpu_float32 - reason:
+XFAIL [0.0790s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_linspace_tensor_overload_cpu_complex64 - reason:
+XFAIL [0.0554s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_linspace_tensor_overload_cpu_float32 - reason:
+XFAIL [0.0504s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_log_normal_cpu_float32 - reason:
+XFAIL [0.0774s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_logspace_cpu_complex64 - reason:
+XFAIL [0.0558s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_logspace_cpu_float32 - reason:
+XFAIL [0.1672s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_logspace_tensor_overload_cpu_complex64 - reason:
+XFAIL [0.1063s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_logspace_tensor_overload_cpu_float32 - reason:
+XFAIL [0.0672s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_normal_in_place_cpu_complex64 - reason:
+XFAIL [0.0520s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_normal_in_place_cpu_float32 - reason:
+XFAIL [0.0625s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_ones_cpu_complex64 - reason:
+XFAIL [0.0469s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_ones_cpu_float32 - reason:
+XFAIL [0.0490s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_randint_cpu_float32 - reason:
+XFAIL [0.0622s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_randn_cpu_complex64 - reason:
+XFAIL [0.0470s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_randn_cpu_float32 - reason:
+XFAIL [0.0678s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_uniform_cpu_complex64 - reason:
+XFAIL [0.0523s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_uniform_cpu_float32 - reason:
+XFAIL [0.0629s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_zeros_cpu_complex64 - reason:
+XFAIL [0.0465s] test_ops.py::TestCommonCPU::test_variant_consistency_eager_zeros_cpu_float32 - reason:
+XFAIL [0.0533s] test_ops.py::TestCompositeComplianceCPU::test_backward_as_strided_partial_views_cpu_float32 - reason:
+XFAIL [0.0543s] test_ops.py::TestCompositeComplianceCPU::test_backward_narrow_cpu_float32 - reason:
+XFAIL [0.0571s] test_ops.py::TestCompositeComplianceCPU::test_backward_nn_functional_gaussian_nll_loss_cpu_float32 - reason:
+XFAIL [0.0918s] test_ops.py::TestCompositeComplianceCPU::test_backward_tensor_split_cpu_float32 - reason:
+XFAIL [0.0555s] test_ops.py::TestCompositeComplianceCPU::test_forward_ad_as_strided_partial_views_cpu_float32 - reason:
+XFAIL [0.0646s] test_ops.py::TestCompositeComplianceCPU::test_forward_ad_narrow_cpu_float32 - reason:
+XFAIL [0.1314s] test_ops.py::TestCompositeComplianceCPU::test_forward_ad_nn_functional_gaussian_nll_loss_cpu_float32 - reason:
+XFAIL [0.0604s] test_ops.py::TestCompositeComplianceCPU::test_forward_ad_tensor_split_cpu_float32 - reason:
+XFAIL [0.0519s] test_ops.py::TestCompositeComplianceCPU::test_operator_item_cpu_float32 - reason:
+XFAIL [0.0504s] test_ops.py::TestCompositeComplianceCPU::test_operator_narrow_cpu_float32 - reason:
+XFAIL [0.0482s] test_ops.py::TestCompositeComplianceCPU::test_operator_nn_functional_gaussian_nll_loss_cpu_float32 - reason:
+XFAIL [0.0480s] test_ops.py::TestCompositeComplianceCPU::test_operator_tensor_split_cpu_float32 - reason:
+XFAIL [0.0468s] test_ops.py::TestMathBitsCPU::test_conj_view__refs_linspace_cpu_complex64 - reason:
+XFAIL [0.0499s] test_ops.py::TestMathBitsCPU::test_conj_view__refs_linspace_tensor_overload_cpu_complex64 - reason:
+XFAIL [0.0478s] test_ops.py::TestMathBitsCPU::test_conj_view__refs_logspace_cpu_complex64 - reason:
+XFAIL [0.0488s] test_ops.py::TestMathBitsCPU::test_conj_view__refs_logspace_tensor_overload_cpu_complex64 - reason:
+XFAIL [0.0491s] test_ops.py::TestMathBitsCPU::test_conj_view__refs_normal__in_place_cpu_complex64 - reason:
+XFAIL [0.0485s] test_ops.py::TestMathBitsCPU::test_conj_view__refs_ones_cpu_complex64 - reason:
+XFAIL [0.0479s] test_ops.py::TestMathBitsCPU::test_conj_view__refs_zeros_cpu_complex64 - reason:
+XFAIL [0.0518s] test_ops.py::TestMathBitsCPU::test_conj_view_cartesian_prod_cpu_complex64 - reason:
+XFAIL [0.0493s] test_ops.py::TestMathBitsCPU::test_conj_view_chalf_cpu_complex64 - reason:
+XFAIL [0.0462s] test_ops.py::TestMathBitsCPU::test_conj_view_full_cpu_complex64 - reason:
+XFAIL [0.0486s] test_ops.py::TestMathBitsCPU::test_conj_view_ldexp_cpu_complex64 - reason:
+XFAIL [0.0469s] test_ops.py::TestMathBitsCPU::test_conj_view_linspace_cpu_complex64 - reason:
+XFAIL [0.0497s] test_ops.py::TestMathBitsCPU::test_conj_view_linspace_tensor_overload_cpu_complex64 - reason:
+XFAIL [0.0474s] test_ops.py::TestMathBitsCPU::test_conj_view_logspace_cpu_complex64 - reason:
+XFAIL [0.0499s] test_ops.py::TestMathBitsCPU::test_conj_view_logspace_tensor_overload_cpu_complex64 - reason:
+XFAIL [0.0532s] test_ops.py::TestMathBitsCPU::test_conj_view_narrow_cpu_complex64 - reason:
+XFAIL [0.0539s] test_ops.py::TestMathBitsCPU::test_conj_view_normal_in_place_cpu_complex64 - reason:
+XFAIL [0.0487s] test_ops.py::TestMathBitsCPU::test_conj_view_ones_cpu_complex64 - reason:
+XFAIL [0.0509s] test_ops.py::TestMathBitsCPU::test_conj_view_randn_cpu_complex64 - reason:
+XFAIL [0.0508s] test_ops.py::TestMathBitsCPU::test_conj_view_stack_cpu_complex64 - reason:
+XFAIL [0.0530s] test_ops.py::TestMathBitsCPU::test_conj_view_uniform_cpu_complex64 - reason:
+XFAIL [0.0672s] test_ops.py::TestMathBitsCPU::test_conj_view_zeros_cpu_complex64 - reason:
+XFAIL [0.0480s] test_ops.py::TestMathBitsCPU::test_neg_conj_view__refs_linspace_cpu_complex128 - reason:
+XFAIL [0.0467s] test_ops.py::TestMathBitsCPU::test_neg_conj_view__refs_logspace_cpu_complex128 - reason:
+XFAIL [0.0491s] test_ops.py::TestMathBitsCPU::test_neg_conj_view__refs_normal__in_place_cpu_complex128 - reason:
+XFAIL [0.0473s] test_ops.py::TestMathBitsCPU::test_neg_conj_view__refs_ones_cpu_complex128 - reason:
+XFAIL [0.0468s] test_ops.py::TestMathBitsCPU::test_neg_conj_view__refs_zeros_cpu_complex128 - reason:
+XFAIL [0.0486s] test_ops.py::TestMathBitsCPU::test_neg_conj_view_chalf_cpu_complex128 - reason:
+XFAIL [0.0477s] test_ops.py::TestMathBitsCPU::test_neg_conj_view_full_cpu_complex128 - reason:
+XFAIL [0.0490s] test_ops.py::TestMathBitsCPU::test_neg_conj_view_ldexp_cpu_complex128 - reason: 
+XFAIL [0.0470s] test_ops.py::TestMathBitsCPU::test_neg_conj_view_linspace_cpu_complex128 - reason:
+XFAIL [0.0490s] test_ops.py::TestMathBitsCPU::test_neg_conj_view_logspace_cpu_complex128 - reason:
+XFAIL [0.0537s] test_ops.py::TestMathBitsCPU::test_neg_conj_view_normal_in_place_cpu_complex128 - reason:
+XFAIL [0.0473s] test_ops.py::TestMathBitsCPU::test_neg_conj_view_ones_cpu_complex128 - reason:
+XFAIL [0.0521s] test_ops.py::TestMathBitsCPU::test_neg_conj_view_randn_cpu_complex128 - reason:
+XFAIL [0.0531s] test_ops.py::TestMathBitsCPU::test_neg_conj_view_uniform_cpu_complex128 - reason:
+XFAIL [0.0476s] test_ops.py::TestMathBitsCPU::test_neg_conj_view_zeros_cpu_complex128 - reason:
+XFAIL [0.0471s] test_ops.py::TestMathBitsCPU::test_neg_view__refs_arange_cpu_float64 - reason:
+XFAIL [0.0490s] test_ops.py::TestMathBitsCPU::test_neg_view__refs_cauchy_cpu_float64 - reason:
+XFAIL [0.0495s] test_ops.py::TestMathBitsCPU::test_neg_view__refs_exponential_cpu_float64 - reason:
+XFAIL [0.0490s] test_ops.py::TestMathBitsCPU::test_neg_view__refs_geometric_cpu_float64 - reason:
+XFAIL [0.0463s] test_ops.py::TestMathBitsCPU::test_neg_view__refs_linspace_cpu_float64 - reason:
+XFAIL [0.0494s] test_ops.py::TestMathBitsCPU::test_neg_view__refs_linspace_tensor_overload_cpu_float64 - reason:
+XFAIL [0.0601s] test_ops.py::TestMathBitsCPU::test_neg_view__refs_log_normal_cpu_float64 - reason:
+XFAIL [0.0478s] test_ops.py::TestMathBitsCPU::test_neg_view__refs_logspace_cpu_float64 - reason:
+XFAIL [0.0483s] test_ops.py::TestMathBitsCPU::test_neg_view__refs_logspace_tensor_overload_cpu_float64 - reason:
+XFAIL [0.0475s] test_ops.py::TestMathBitsCPU::test_neg_view__refs_normal__in_place_cpu_float64 - reason:
+XFAIL [0.0489s] test_ops.py::TestMathBitsCPU::test_neg_view__refs_normal_cpu_float64 - reason:
+XFAIL [0.0469s] test_ops.py::TestMathBitsCPU::test_neg_view__refs_normal_number_mean_cpu_float64 - reason:
+XFAIL [0.0465s] test_ops.py::TestMathBitsCPU::test_neg_view__refs_ones_cpu_float64 - reason:
+XFAIL [0.0465s] test_ops.py::TestMathBitsCPU::test_neg_view__refs_zeros_cpu_float64 - reason:
+XFAIL [0.0535s] test_ops.py::TestMathBitsCPU::test_neg_view__upsample_bilinear2d_aa_cpu_float64 - reason:
+XFAIL [0.0480s] test_ops.py::TestMathBitsCPU::test_neg_view_arange_cpu_float64 - reason:
+XFAIL [0.0520s] test_ops.py::TestMathBitsCPU::test_neg_view_cartesian_prod_cpu_float64 - reason:
+XFAIL [0.0526s] test_ops.py::TestMathBitsCPU::test_neg_view_cauchy_cpu_float64 - reason:
+XFAIL [0.0487s] test_ops.py::TestMathBitsCPU::test_neg_view_chalf_cpu_float64 - reason:
+XFAIL [0.0535s] test_ops.py::TestMathBitsCPU::test_neg_view_exponential_cpu_float64 - reason:
+XFAIL [0.0468s] test_ops.py::TestMathBitsCPU::test_neg_view_full_cpu_float64 - reason:
+XFAIL [0.0519s] test_ops.py::TestMathBitsCPU::test_neg_view_geometric_cpu_float64 - reason:
+XFAIL [0.0491s] test_ops.py::TestMathBitsCPU::test_neg_view_ldexp_cpu_float64 - reason:
+XFAIL [0.0479s] test_ops.py::TestMathBitsCPU::test_neg_view_linspace_cpu_float64 - reason:
+XFAIL [0.0483s] test_ops.py::TestMathBitsCPU::test_neg_view_linspace_tensor_overload_cpu_float64 - reason:      
+XFAIL [0.0545s] test_ops.py::TestMathBitsCPU::test_neg_view_log_normal_cpu_float64 - reason:
+XFAIL [0.0491s] test_ops.py::TestMathBitsCPU::test_neg_view_logspace_cpu_float64 - reason:
+XFAIL [0.0486s] test_ops.py::TestMathBitsCPU::test_neg_view_logspace_tensor_overload_cpu_float64 - reason:      
+XFAIL [0.0518s] test_ops.py::TestMathBitsCPU::test_neg_view_narrow_cpu_float64 - reason:
+XFAIL [0.0533s] test_ops.py::TestMathBitsCPU::test_neg_view_normal_in_place_cpu_float64 - reason:
+XFAIL [0.0469s] test_ops.py::TestMathBitsCPU::test_neg_view_ones_cpu_float64 - reason:
+XFAIL [0.0473s] test_ops.py::TestMathBitsCPU::test_neg_view_randint_cpu_float64 - reason:
+XFAIL [0.0508s] test_ops.py::TestMathBitsCPU::test_neg_view_randn_cpu_float64 - reason:
+XFAIL [0.0513s] test_ops.py::TestMathBitsCPU::test_neg_view_stack_cpu_float64 - reason:
+XFAIL [0.0531s] test_ops.py::TestMathBitsCPU::test_neg_view_uniform_cpu_float64 - reason:
+XFAIL [0.0470s] test_ops.py::TestMathBitsCPU::test_neg_view_zeros_cpu_float64 - reason:
+XFAIL [0.0550s] test_ops.py::TestFakeTensorCPU::test_fake_autocast_item_cpu_float32 - reason:
+XFAIL [0.0535s] test_ops.py::TestFakeTensorCPU::test_fake_item_cpu_float32 - reason:
+====================================================================================================== 80 failed, 21574 passed, 9308 skipped, 10 deselected, 360 xfailed in 5725.16s (1:35:25) ======================================================================================================

@@ -1,0 +1,79 @@
+SKIPPED [0.0028s] [261] test_nn.py:7503: Excluded from CUDA tests
+SKIPPED [0.0028s] [48] test_nn.py:7480: Excluded from CUDA tests
+SKIPPED [0.0028s] [48] test_nn.py:7478: Excluded from CUDA tests
+SKIPPED [0.0028s] [48] test_nn.py:7483: Excluded from CUDA tests
+SKIPPED [0.0028s] [1] test_nn.py:3009: CUDA not available
+SKIPPED [0.0028s] [1] test_nn.py:2968: CUDA not available
+SKIPPED [0.0028s] [1] test_nn.py:2985: CUDA not available
+SKIPPED [0.0028s] [1] test_nn.py:3025: CUDA not available
+SKIPPED [0.0028s] [1] test_nn.py:4645: needs cudnn >= 5.1
+SKIPPED [0.0028s] [1] test_nn.py:4468: needs cudnn
+SKIPPED [0.0028s] [1] test_nn.py:4473: needs cudnn >= 5.1
+SKIPPED [0.0028s] [1] test_nn.py:4478: needs cudnn
+SKIPPED [0.0028s] [1] test_nn.py:4533: needs cudnn >= 5.1
+SKIPPED [0.0028s] [1] test_nn.py:4605: needs cudnn >= 5.1
+SKIPPED [0.0028s] [1] test_nn.py:5204: CUDA unavailable
+SKIPPED [0.0028s] [1] test_nn.py:5167: CUDA unavailable
+SKIPPED [0.0028s] [1] test_nn.py:5313: CUDA not available
+SKIPPED [0.0028s] [1] test_nn.py:5224: CUDA unavailable
+SKIPPED [0.0028s] [1] test_nn.py:2193: multi-GPU not supported
+SKIPPED [0.0028s] [1] test_nn.py:2218: multi-GPU not supported
+SKIPPED [0.0028s] [1] test_nn.py:2204: multi-GPU not supported
+SKIPPED [0.0028s] [1] test_nn.py:7159: CUDA not available
+SKIPPED [0.0028s] [1] test_nn.py:3702: CUDNN or multi-gpu not available
+SKIPPED [0.0028s] [1] test_nn.py:3724: CUDNN not available
+SKIPPED [0.0028s] [1] test_nn.py:3779: CUDNN not available
+SKIPPED [0.0028s] [1] test_nn.py:2117: Linear_FP16_weight requires FBGEMM. FBGEMM is only optimized for CPUs with instruction set support avx2 or newer.
+SKIPPED [0.0028s] [1] test_nn.py:6700: CUDA unavailable
+SKIPPED [0.0028s] [1] test_nn.py:3105: CUDA not available
+SKIPPED [0.0028s] [1] test_nn.py:4509: CUDA not available
+SKIPPED [0.0028s] [1] test_nn.py:4192: multi-GPU not supported
+SKIPPED [0.0028s] [1] test_nn.py:2401: Tempfile permission issue on windows
+SKIPPED [0.0028s] [1] test_nn.py:4144: multi-GPU not supported
+SKIPPED [0.0028s] [1] test_nn.py:1976: PyTorch compiled without Lapack
+SKIPPED [0.0028s] [1] test_nn.py:7226: CUDA not available
+SKIPPED [0.0028s] [1] test_nn.py:7184: CUDA not available
+SKIPPED [0.0028s] [1] test_nn.py:10815: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:9049: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:8974: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:9001: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:11525: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:12824: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:8292: Only runs on cuda
+SKIPPED [0.0028s] [2] test_nn.py:11184: Only runs on cuda
+SKIPPED [0.0028s] [2] test_nn.py:11135: Only runs on cuda
+SKIPPED [0.0028s] [2] test_nn.py:8414: Only runs on cuda
+SKIPPED [0.0028s] [2] test_nn.py:11251: Only runs on cuda
+SKIPPED [0.0028s] [2] test_nn.py:12103: Only runs on cuda
+SKIPPED [0.0028s] [3] test_nn.py:11607: Only runs on cuda
+SKIPPED [0.0028s] [3] test_nn.py:11924: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:11338: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:10944: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:10565: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:10545: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:10413: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:11033: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:11046: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:10678: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:10255: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:10106: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:10234: Only runs on cuda
+SKIPPED [0.0028s] [3] test_nn.py:11574: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:10957: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:9154: Only runs on cuda
+SKIPPED [0.0028s] [2] test_nn.py:9073: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:10362: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:12814: Only runs on cuda
+SKIPPED [0.0028s] [2] test_nn.py:10999: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:12800: Only runs on cuda
+SKIPPED [0.0028s] [28] test_nn.py:9818: Nearest mode does not have antialiasing
+SKIPPED [0.0028s] [1] test_nn.py:10770: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:10779: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:10798: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:10807: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:10788: Only runs on cuda
+SKIPPED [0.0028s] [1] test_nn.py:10036: Only runs on cuda
+SKIPPED [0.0028s] [2] test_nn.py:10339: Only runs on cuda
+XFAIL [0.0056s] test_nn.py::TestNN::test_getattr_with_property - reason:
+XFAIL [0.0104s] test_nn.py::TestNN::test_pdist_cpu_gradgrad_unimplemented - reason:
+XFAIL [0.0028s] test_nn.py::TestNN::test_pdist_cuda_gradgrad_unimplemented - reason:

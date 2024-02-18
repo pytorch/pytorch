@@ -1,0 +1,75 @@
+FAILED [20.1922s] test_autograd.py::TestAutograd::test_pynode_destruction_deadlock - AssertionError: Example code timed out! See the code sample in t...
+SKIPPED [0.0010s] [1] test_autograd.py:6347: test requires CUDA
+SKIPPED [0.0010s] [1] test_autograd.py:5777: test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test
+SKIPPED [0.0010s] [1] test_autograd.py:5840: Test requires CUDA bf16 support
+SKIPPED [0.0010s] [2] test_autograd.py:6104: test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test
+SKIPPED [0.0010s] [1] test_autograd.py:5851: Test requires CUDA
+SKIPPED [0.0010s] [1] test_autograd.py:8798: test requires CUDA
+SKIPPED [0.0010s] [1] test_autograd.py:5275: MKL-DNN build is disabled
+SKIPPED [0.0010s] [1] test_autograd.py:5118: MKL-DNN build is disabled
+SKIPPED [0.0010s] [1] test_autograd.py:5102: MKL-DNN build is disabled
+SKIPPED [0.0010s] [1] test_autograd.py:8521: test requires CUDA
+SKIPPED [0.0010s] [1] test_autograd.py:3837: PyTorch compiled without Lapack
+SKIPPED [0.0010s] [1] test_autograd.py:5672: Skipping because doesn't work for windows
+SKIPPED [0.0010s] [1] test_autograd.py:11386: test requires CUDA
+SKIPPED [0.0010s] [2] autograd\test_functional.py:504: test requires CUDA
+SKIPPED [0.0010s] [2] autograd\test_functional.py:771: test requires CUDA
+SKIPPED [0.0010s] [1] test_autograd.py:9791: Only runs on cuda
+SKIPPED [0.0010s] [1] test_autograd.py:10025: fewer than 2 devices detected
+SKIPPED [0.0010s] [1] test_autograd.py:10123: Only runs on cuda
+SKIPPED [0.0010s] [1] test_autograd.py:9907: Only runs on cuda
+SKIPPED [0.0010s] [1] test_autograd.py:10374: Only runs on cuda
+SKIPPED [0.0010s] [1] test_autograd.py:10044: fewer than 2 devices detected
+SKIPPED [0.0010s] [1] test_autograd.py:9922: Only runs on cuda
+SKIPPED [0.0010s] [1] test_autograd.py:9954: ITT is required
+SKIPPED [0.0010s] [1] test_autograd.py:9931: Only runs on cuda
+SKIPPED [0.0010s] [1] test_autograd.py:9847: Only runs on cuda
+SKIPPED [0.0010s] [1] test_autograd.py:9942: Only runs on cuda
+SKIPPED [0.0010s] [1] test_autograd.py:10084: Only runs on cuda
+SKIPPED [0.0010s] [1] test_autograd.py:10016: fewer than 2 devices detected
+SKIPPED [0.0010s] [1] test_autograd.py:11834: Only runs on cuda
+SKIPPED [0.0010s] [1] test_autograd.py:11861: Only runs on cuda
+XFAIL [0.0036s] test_autograd.py::TestAutograd::test_naughty_anomaly_access - reason:
+
+
+====================================================================== FAILURES ======================================================================= 
+____________________________________________________ TestAutograd.test_pynode_destruction_deadlock ____________________________________________________ 
+Traceback (most recent call last):
+  File "test_autograd.py", line 8646, in test_pynode_destruction_deadlock
+    subprocess.check_output(
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\subprocess.py", line 466, in check_output
+    return run(*popenargs, stdout=PIPE, timeout=timeout, check=True,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\subprocess.py", line 550, in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\subprocess.py", line 1209, in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\subprocess.py", line 1628, in _communicate
+    raise TimeoutExpired(self.args, orig_timeout)
+subprocess.TimeoutExpired: Command '['C:\\Users\\iremyuksel\\AppData\\Local\\Programs\\Python\\Python311-arm64\\python.exe', '-c', "\nimport torch\n\nclass Foo(torch.autograd.Function):\n    @staticmethod\n    def forward(ctx, x):\n        return x.clone()\n\n    @staticmethod\n    def forward(ctx, gO):\n        return gO.clone()\n\ndef get_out():\n    inp = torch.rand(2, requires_grad=True)\n\n    # The python function is first so that it runs\n    # last in the backward pass\n    right = Foo.apply(inp)\n\n    # An op that creates new memory\n    left1 = inp.clone()\n    # An op that saves its input\n    left2 = left1 ** 2\n\n    # Inplace modify so that the backward for\n    # left2 always raises an error\n    left1 += 1\n\n    # An op that takes both side as input.\n    # After running, both side's last op will be in\n    # the ready queue\n    # And the op for left will run first as it was\n    # executed last during the forward\n    out = left2 + right\n\n    return out\n\n# Nothing should be global variables here as, from what\n# I can see, python leaks all the global objects\nget_out().sum().backward()\n\n# This used to deadlock when the PyNode is being destroyed after\n# the error is raised.\n"]' timed out after 20 seconds
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\unittest\case.py", line 57, in testPartExecutor
+    yield
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\unittest\case.py", line 623, in run
+    self._callTestMethod(testMethod)
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\unittest\case.py", line 579, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_utils.py", line 2683, in wrapper
+    method(*args, **kwargs)
+  File "test_autograd.py", line 8655, in test_pynode_destruction_deadlock
+    self.fail(msg="Example code timed out! See the code sample in the test for details.")
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\unittest\case.py", line 703, in fail
+    raise self.failureException(msg)
+AssertionError: Example code timed out! See the code sample in the test for details.
+
+To execute this test, run the following from the base repo dir:
+     python test_autograd.py -k test_pynode_destruction_deadlock
+
+This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0
+
