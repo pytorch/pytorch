@@ -1155,7 +1155,9 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
       py::object verbose_code_parts)
       : RelationalGuard(verbose_code_parts),
         _num_tensors(num_tensors),
-        _tensor_names(tensor_names) {}
+        _tensor_names(tensor_names) {
+    _unique_tensors.reserve(num_tensors);
+  }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     // Typically we don't have to increment the ref count here because the
@@ -1165,9 +1167,9 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
     // garbage collected, and the next time from_numpy can reuse the memory
     // address. Therefore, we incref here. They are decref'd in reset_state.
     Py_INCREF(value);
-    auto insertion = unique_tensors.insert({value, nullptr});
+    auto insertion = _unique_tensors.insert({value, nullptr});
     if (!insertion.second) {
-      // No need to clear unique_tensors, reset_state will do
+      // No need to clear _unique_tensors, reset_state will do
       // it.
       return false;
     }
@@ -1192,17 +1194,17 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
   }
 
   void reset_state() override {
-    for (auto item : unique_tensors) {
+    for (auto item : _unique_tensors) {
       Py_DECREF(item.first);
     }
-    unique_tensors.clear();
+    _unique_tensors.clear();
     _counter = 0;
   }
 
  private:
   long unsigned int _num_tensors;
   py::list _tensor_names;
-  ska::flat_hash_map<PyObject*, std::nullptr_t> unique_tensors;
+  ska::flat_hash_map<PyObject*, std::nullptr_t> _unique_tensors;
   long unsigned int _counter = 0;
 };
 
