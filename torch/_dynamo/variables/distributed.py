@@ -50,14 +50,16 @@ def is_constant_pg_functions(value):
         return False
 
     from torch.distributed.distributed_c10d import (
+        _get_group_size_by_name,
         _get_group_tag,
         _rank_not_in_group,
         get_process_group_ranks,
     )
 
     constant_processgroup_functions = [
-        get_process_group_ranks,
+        _get_group_size_by_name,
         _get_group_tag,
+        get_process_group_ranks,
         _rank_not_in_group,
     ]
 
