@@ -1314,10 +1314,11 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "clone_nested_int_with_new_vec",
-          [](const c10::SymNode& node, const at::Tensor& vec, int64_t sum_vec) {
-            TORCH_CHECK(node->is_nested_int());
-            return c10::SymNode(c10::make_intrusive<c10::NestedIntSymNodeImpl>(
-                *node->nested_int(), *node->nested_int_coeff(), vec, c10::NestedTensorVariant::PYTHON));
+          [](const c10::SymNode& node, const at::Tensor& vec) {
+            TORCH_CHECK(
+                false,
+                "Expect not to call clone_nested_int_with_new_vec on a "
+                "non-symbolic nested int");
           });
 
   // clang-format on

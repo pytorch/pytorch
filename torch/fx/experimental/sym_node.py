@@ -82,6 +82,10 @@ class SymNode:
         self._expr = expr
         self.shape_env = shape_env
         # Only populated when is_nested_int() is true
+        from torch.fx.experimental.symbolic_shapes import is_nested_int
+        if is_nested_int(hint):
+            assert nested_int is not None
+            assert nested_int_vec is not None
         self._nested_int: Optional[int] = nested_int
         self._nested_int_vec: Optional[torch.Tensor] = nested_int_vec
 
@@ -473,9 +477,6 @@ class SymNode:
 
     def is_symbolic(self):
         return True
-
-    def nested_int(self):
-        return None
 
     def is_constant(self):
         return False
@@ -1031,7 +1032,13 @@ def _make_node_magic(method, func):
         fx_node, _ = self.shape_env._create_fx_call_function(
             op, (self.fx_node, other.fx_node)
         )
-        return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
+        # Propagate nested int information
+        nested_int, nested_int_vec = None, None
+        if isinstance(out_hint, SymInt) and out_hint.node.is_nested_int():
+            nested_src = self if self.is_nested_int() else other
+            nested_int = nested_src.nested_int()
+            nested_int_vec = nested_src.nested_int_vec()
+        return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node, nested_int=nested_int, nested_int_vec=nested_int_vec)
 
     def unary_magic_impl(self):
         from torch.fx.experimental.symbolic_shapes import safe_expand

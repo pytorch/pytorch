@@ -294,7 +294,7 @@ static PyObject* _get_nested_tensor_cls() {
                  .attr("_internal")
                  .attr("nested_tensor")
                  .attr("NestedTensor");
-    PyObject* py_cls_ptr = py_cls.release().ptr();
+    py_cls_ptr = py_cls.release().ptr();
     TORCH_INTERNAL_ASSERT(py_cls_ptr);
   }
   return py_cls_ptr;
