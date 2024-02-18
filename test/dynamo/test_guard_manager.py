@@ -154,9 +154,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
     def test_data_ptr_match_guard(self):
         foo = torch.tensor([1, 2, 3])
-        guard = guards.DATA_PTR_MATCH(
-            foo.data_ptr(), ["x.data_ptr() == foo.data_ptr()"]
-        )
+        guard = guards.DATA_PTR_MATCH(foo, ["x.data_ptr() == foo.data_ptr()"])
         self.assertTrue(guard(foo))
         self.assertFalse(guard(torch.tensor([1, 2, 3])))
 
