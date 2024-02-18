@@ -927,29 +927,8 @@ class BuiltinVariable(VariableTracker):
                     install_guard(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
 
             if self.fn == iter and isinstance(obj, variables.RangeVariable):
-                import sympy
-
-                new_items = []
-                for i in obj.unpack_var_sequence(tx):
-                    const_proxy = tx.output.create_proxy(
-                        "call_function", (lambda a: a), *proxy_args_kwargs([i], {})
-                    )
-                    num = i.as_python_constant()
-                    sym_a = torch.SymInt(
-                        torch.fx.experimental.sym_node.SymNode(
-                            sympy.Integer(num),
-                            torch.fx.experimental.symbolic_shapes.ShapeEnv(),
-                            int,
-                            num,
-                            constant=num,
-                            fx_node=num,
-                        )
-                    )
-                    const_proxy.node.meta["example_value"] = sym_a
-                    sym_arg = SymNodeVariable.create(tx, const_proxy, sym_a)
-                    new_items.append(sym_arg)
                 return RangeIteratorVariable(
-                    new_items,
+                    obj.unpack_var_sequence(tx),
                     range_object=obj.as_python_constant(),
                 )
             return cls(

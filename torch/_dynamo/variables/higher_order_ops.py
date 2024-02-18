@@ -1300,7 +1300,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         symbolic_locals: Dict[str, VariableTracker],
     ):
         if (
-            loop_items := len(value.unpack_var_sequence(tx))
+            loop_items := len(value.items)
         ) < torch._dynamo.config.for_loop_medium_size_boundary:
             raise CannotConvertRangeToHigherOrder(
                 f"Loop of length {loop_items} too small to consider optimizing"
@@ -1319,10 +1319,6 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
         varnames = host_code_object.co_varnames
         args = [symbolic_locals.get(k) for k in varnames]
-        if any(isinstance(arg, types.NoneType) for arg in args):
-            raise CannotConvertRangeToHigherOrder(
-                "Could not get the variables for some symbolic locals."
-            )
         # STORE_FAST always follows a FOR_ITER as CPython needs to store the next(iter) into the local
         # E.g. in `for i in range(10)`, there is a `STORE_FAST i``
         assert loop_body_instructions[0].opname == "STORE_FAST"
@@ -1439,7 +1435,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args = list(self.args)
         assert self.store_target >= 0
 
-        args[self.store_target] = val_range[0]
+        args[self.store_target] = self.make_symint(tx, val_range[0])
         try:
             # Convert the entire loop body to a subgraph.
             (
@@ -1488,7 +1484,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
             return fn(*args)
 
         for i in val_range:
-            previous_locals[self.store_target] = i
+            previous_locals[self.store_target] = self.make_symint(tx, i)
             args_tmp = [body_node] + [a.as_proxy() for a in previous_locals]
             result_tuple = wrap_fx_proxy(
                 tx=tx,
@@ -1505,6 +1501,27 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         previous_locals = list(previous_locals)
         previous_locals[self.store_target] = i
         return previous_locals
+
+    @staticmethod
+    def make_symint(tx, i):
+        import sympy
+        const_proxy = tx.output.create_proxy(
+            "call_function", (lambda a: a), *proxy_args_kwargs([i], {})
+        )
+        num = i.as_python_constant()
+        sym_a = torch.SymInt(
+            torch.fx.experimental.sym_node.SymNode(
+                sympy.Integer(num),
+                torch.fx.experimental.symbolic_shapes.ShapeEnv(),
+                int,
+                num,
+                constant=num,
+                fx_node=num,
+            )
+        )
+        const_proxy.node.meta["example_value"] = sym_a
+        sym_arg = SymNodeVariable.create(tx, const_proxy, sym_a)
+        return sym_arg
 
 
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
