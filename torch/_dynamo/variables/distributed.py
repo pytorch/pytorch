@@ -4,10 +4,10 @@ import inspect
 from typing import Dict, List
 
 import torch
-from torch._dynamo.variables.base import VariableTracker
 from .. import variables
 from ..exc import unimplemented
 from ..utils import istype
+from .base import VariableTracker
 from .constant import ConstantVariable
 
 
