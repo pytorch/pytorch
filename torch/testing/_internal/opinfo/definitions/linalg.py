@@ -2400,6 +2400,20 @@ python_ref_db: List[OpInfo] = [
     # torch.linalg
     #
     PythonRefInfo(
+        "_refs.linalg.cross",
+        torch_opinfo_name="linalg.cross",
+        supports_out=True,
+        op_db=op_db,
+        skips=(
+            # no _refs support for Tensor.__getitem__
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref"),
+            # TODO: is this really needed?
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_python_ref_errors"
+            ),
+        ),
+    ),
+    PythonRefInfo(
         "_refs.linalg.diagonal",
         torch_opinfo_name="linalg.diagonal",
         supports_out=False,

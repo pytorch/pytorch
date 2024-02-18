@@ -39,7 +39,16 @@ if TYPE_CHECKING:
 DimList = List
 
 log = logging.getLogger(__name__)
-not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
+
+# TODO: Hack to unblock https://github.com/pytorch/pytorch/pull/108186
+# Proper fix tracked by https://github.com/pytorch/pytorch/issues/120105
+try:
+    not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
+except ValueError as e:
+    if "'not_implemented' not registered" in str(e):
+        import logging as not_implemented_log
+    else:
+        raise e
 
 pytree = torch.utils._pytree
 T = TypeVar("T")
