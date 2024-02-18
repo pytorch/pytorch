@@ -4500,11 +4500,15 @@ def take(self, index):
 @register_decomposition(aten.put)
 @out_wrapper()
 def put(self, index, source, accumulate=False):
+    stride = utils.compute_elementwise_output_strides(self)
     flattened = self.flatten()
     flattened = torch.index_put(
         flattened, [index], source.reshape(index.shape), accumulate
     )
-    return flattened.reshape(self.shape)
+    output = flattened.reshape(self.shape)
+    if stride != output.stride():
+        output = prims.copy_strided(output, stride)
+    return output
 
 
 register_inplace(aten.addbmm_, aten.addbmm)
