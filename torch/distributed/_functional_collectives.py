@@ -12,8 +12,6 @@ from torch.fx.experimental.proxy_tensor import get_innermost_proxy_mode
 from . import _functional_collectives_impl as fun_col_impl
 from ._functional_collectives_impl import (  # noqa: F401
     _register_tensor_wrapper,
-    disable_native_funcol,
-    enable_native_funcol,
     native_funcol_enabled,
 )
 

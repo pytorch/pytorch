@@ -20,9 +20,9 @@ from torch.distributed._functional_collectives import (
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
+    run_with_native_funcol,
     skip_if_lt_x_gpu,
 )
-
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     run_tests,
     TestCase,
@@ -57,7 +57,6 @@ if not dist.is_available():
 class C10DFunctionalNativeTest(MultiProcessTestCase):
     def setUp(self) -> None:
         super().setUp()
-        funcol.enable_native_funcol()
         self._spawn_processes()
 
     @property
@@ -88,6 +87,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
     @skip_if_lt_x_gpu(2)
+    @run_with_native_funcol
     def test_all_reduce_single(self) -> None:
         self._init_process_group()
 
@@ -114,6 +114,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         assert output.completed
 
     @skip_if_lt_x_gpu(2)
+    @run_with_native_funcol
     def test_all_reduce_single_(self) -> None:
         self._init_process_group()
 
@@ -129,6 +130,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         assert output.eq(expect).all()
 
     @skip_if_lt_x_gpu(2)
+    @run_with_native_funcol
     def test_all_reduce_coalesced(self) -> None:
         self._init_process_group()
 
@@ -158,6 +160,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             assert output.completed
 
     @skip_if_lt_x_gpu(2)
+    @run_with_native_funcol
     def test_all_reduce_coalesced_(self) -> None:
         self._init_process_group()
 
@@ -176,6 +179,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             assert output.eq(sum(self.ranks) / self.world_size * i).all()
 
     @skip_if_lt_x_gpu(2)
+    @run_with_native_funcol
     def test_all_gather_into_tensor_single(self) -> None:
         self._init_process_group()
 
@@ -207,6 +211,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         assert output.completed
 
     @skip_if_lt_x_gpu(2)
+    @run_with_native_funcol
     def test_all_gather_into_tensor_coalesced(self) -> None:
         self._init_process_group()
 
@@ -243,6 +248,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             assert output.completed
 
     @skip_if_lt_x_gpu(2)
+    @run_with_native_funcol
     def test_reduce_scatter_tensor_single(self) -> None:
         self._init_process_group()
 
@@ -269,6 +275,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         assert output.completed
 
     @skip_if_lt_x_gpu(2)
+    @run_with_native_funcol
     def test_reduce_scatter_tensor_coalesced(self) -> None:
         self._init_process_group()
 
@@ -296,6 +303,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             assert output.completed
 
     @skip_if_lt_x_gpu(2)
+    @run_with_native_funcol
     def test_all_to_all_single(self) -> None:
         self._init_process_group()
         torch.cuda.set_device(self.device)
@@ -331,6 +339,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         assert output.completed
 
     @skip_if_lt_x_gpu(2)
+    @run_with_native_funcol
     def test_broadcast(self) -> None:
         self._init_process_group()
 
@@ -357,6 +366,7 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         assert output.completed
 
     @skip_if_lt_x_gpu(2)
+    @run_with_native_funcol
     def test_unwaited(self) -> None:
         # Verify that the process can terminate gracefully
         # even with unwaited tensors
@@ -387,7 +397,6 @@ class C10DFunctionalNativeCompileTest(TestCase):
             rank=self.rank,
             store=store,
         )
-        funcol.enable_native_funcol()
 
     def tearDown(self):
         funcol.disable_native_funcol()
@@ -395,6 +404,7 @@ class C10DFunctionalNativeCompileTest(TestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
+    @run_with_native_funcol
     def test_inductor_all_reduce_single(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = arg + 42
@@ -431,6 +441,7 @@ class C10DFunctionalNativeCompileTest(TestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
+    @run_with_native_funcol
     def test_inductor_all_reduce_coalesced(self):
         def func(args: List[torch.Tensor]) -> torch.Tensor:
             bufs = [arg + 42 for arg in args]
@@ -476,6 +487,7 @@ class C10DFunctionalNativeCompileTest(TestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
+    @run_with_native_funcol
     def test_inductor_inplace_op_on_view(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = (arg + 10)[:2]
@@ -503,6 +515,7 @@ class C10DFunctionalNativeCompileTest(TestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
+    @run_with_native_funcol
     def test_inductor_reuse_buffer_after_inplace_collective(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
             # Expect allocation
@@ -537,6 +550,7 @@ class C10DFunctionalNativeCompileTest(TestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
+    @run_with_native_funcol
     def test_inductor_all_gather_into_tensor_single(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
             ag0 = funcol.all_gather_tensor(arg, 0, "0")
@@ -563,6 +577,7 @@ class C10DFunctionalNativeCompileTest(TestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
+    @run_with_native_funcol
     def test_inductor_all_gather_into_tensor_coalesced(self):
         def func(args: List[torch.Tensor]) -> torch.Tensor:
             ag0 = funcol.all_gather_into_tensor_coalesced(args, "0")
@@ -597,6 +612,7 @@ class C10DFunctionalNativeCompileTest(TestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
+    @run_with_native_funcol
     def test_inductor_reduce_scatter_tensor_single(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
             rs0 = funcol.reduce_scatter_tensor(arg, "avg", 0, "0")
@@ -623,6 +639,7 @@ class C10DFunctionalNativeCompileTest(TestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
+    @run_with_native_funcol
     def test_inductor_reduce_scatter_tensor_coalesced(self):
         def func(args: List[torch.Tensor]) -> torch.Tensor:
             rs0 = funcol.reduce_scatter_tensor_coalesced(
@@ -659,6 +676,7 @@ class C10DFunctionalNativeCompileTest(TestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
+    @run_with_native_funcol
     def test_inductor_all_to_all_single(self):
         def _tolist_with_constrain_as_size(tensor):
             lst = tensor.tolist()
@@ -707,6 +725,7 @@ class C10DFunctionalNativeCompileTest(TestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
+    @run_with_native_funcol
     def test_inductor_broadcast(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = arg + 42
