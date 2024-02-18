@@ -101,6 +101,7 @@ from torch.utils._pytree import tree_map_only
 
 
 counters: DefaultDict[str, Counter[str]] = collections.defaultdict(collections.Counter)
+optimus_scuba_log: Dict[str, Any] = {}
 troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
 nnmodule_doc_url = "https://pytorch.org/docs/master/compile/nn-module.html"
 nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
@@ -130,12 +131,17 @@ def cprofile_wrapper(func):
     @wraps(func)
     def profile_wrapper(*args, **kwargs):
         global timer_counter
-        profile_path = Path(func.__name__ + f"{next(timer_counter)}.profile")
+        profile_cnt = next(timer_counter)
+        profile_path = Path(func.__name__ + f"{profile_cnt}.profile")
         prof = cProfile.Profile()
         prof.enable()
+        start_ts = time.time()
         retval = prof.runcall(func, *args, **kwargs)
+        profile_latency = time.time() - start_ts
         prof.disable()
-        print(f"### Cprofile for {func.__name__} iter {next(timer_counter)} ###")
+        print(
+            f"### Cprofile for {func.__name__} iter {profile_cnt} took {profile_latency:.3f} seconds ###"
+        )
         ps = pstats.Stats(prof)
         prof.dump_stats(profile_path)
         svg_path = profile_path.with_suffix(".svg")
@@ -1154,10 +1160,7 @@ def dict_keys_repr(const_keys, *, local) -> str:
 GLOBAL_KEY_PREFIX = "__dict_key"
 
 
-from torch._subclasses import (  # noqa: F401
-    FakeTensorMode,
-    UnsupportedFakeTensorException,
-)
+from torch._subclasses import UnsupportedFakeTensorException  # noqa: F401
 
 
 def wrap_fake_exception(fn):
@@ -1724,6 +1727,10 @@ def run_node(tracer, node, args, kwargs, nnmodule):
     op = node.op
 
     with set_current_node(node):
+
+        def make_error_message(e):
+            return f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n" + str(e)
+
         try:
             if op == "call_function":
                 return node.target(*args, **kwargs)
@@ -1737,17 +1744,16 @@ def run_node(tracer, node, args, kwargs, nnmodule):
             elif op == "placeholder":
                 assert "example_value" in node.meta
                 return node.meta["example_value"]
-        except NotImplementedError as e:
+
+        except (NotImplementedError, UnsupportedFakeTensorException) as e:
             # NB: mimic how wrap_fake_exception does it
             from .exc import unimplemented
 
-            raise unimplemented(
-                f"running {op} {node.target}(*{args}, **{kwargs})"
-            ) from e
-
+            raise unimplemented(make_error_message(e)) from e
         except Exception as e:
-            fn_str = f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n"
-            raise RuntimeError(fn_str + str(e)).with_traceback(e.__traceback__) from e
+            raise RuntimeError(make_error_message(e)).with_traceback(
+                e.__traceback__
+            ) from e
 
     raise AssertionError(op)
 

@@ -571,7 +571,6 @@ dynamo_expected_failures = {
     "TestGraph.test_traverse_circular_datapipe",  # test_datapipe
     "TestGraph.test_traverse_unhashable_datapipe",  # test_datapipe
     "TestCppExtensionJIT.test_cpp_frontend_module_has_same_output_as_python",  # test_cpp_extensions_jit
-    "TestPoolingNN.test_quantized_max_pool1d_empty_kernel",  # nn/test_pooling
     "TestPoolingNN.test_MaxUnpool2d_output_size",  # nn/test_pooling
     "TestNNParametrization.test_deepcopy_after_parametrization",  # nn/test_parametrization
     "TestNNParametrization.test_new_spectral_norm_dim",  # nn/test_parametrization
@@ -1499,7 +1498,6 @@ dynamo_expected_failures = {
     "TestOpCPU.test_cat_cpu_bfloat16",  # test_jit_llga_fuser
     "TestTorch.test_type",  # test_torch
     "TestTorch.test_cuda_not_built",  # test_torch
-    "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_quint4x2",  # test_torch
     "TestTorch.test_map",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_fmod_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_uniform_kstest_cpu_float16",  # test_torch
@@ -1515,22 +1513,18 @@ dynamo_expected_failures = {
     "TestTorchDeviceTypeCPU.test_broadcast_fn_gt_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_uniform_kstest_cpu_bfloat16",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_div_cpu",  # test_torch
-    "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_quint8",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_lt_cpu",  # test_torch
     "TestTorch.test_pin_memory",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_masked_fill_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool2d_cpu_float64",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_sub_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_le_cpu",  # test_torch
-    "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_qint32",  # test_torch
     "TestTorchDeviceTypeCPU.test_exponential_kstest_cpu_float16",  # test_torch
-    "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_qint8",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_remainder_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool1d_cpu_float32",  # test_torch
     "TestTorchDeviceTypeCPU.test_uniform_kstest_cpu_float64",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_add_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_addcmul_cpu",  # test_torch
-    "TestTorchDeviceTypeCPU.test_nondeterministic_resize_quantized_cpu_quint2x4",  # test_torch
     "TestTorchDeviceTypeCPU.test_exponential_kstest_cpu_float64",  # test_torch
     "TestTorchDeviceTypeCPU.test_uniform_kstest_cpu_float32",  # test_torch
     "TestTorchDeviceTypeCPU.test_nondeterministic_alert_MaxUnpool2d_cpu_float32",  # test_torch
@@ -1549,7 +1543,6 @@ dynamo_expected_failures = {
     "TestTorchDeviceTypeCPU.test_broadcast_fn_ge_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_atan2_cpu",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_mul_cpu",  # test_torch
-    "TestTorch.test_tensoriterator_output_setup",  # test_torch
     "TestTorchDeviceTypeCPU.test_broadcast_fn_addcdiv_cpu",  # test_torch
     "TestTorch.test_parsing_double",  # test_torch
     "TestTorchDeviceTypeCPU.test_exponential_kstest_cpu_float32",  # test_torch
@@ -1656,12 +1649,10 @@ dynamo_expected_failures = {
     "TestQuantizeFx.test_conv_transpose_relu_not_reference",  # test_quantization
     "TestPT2ERepresentation.test_qdq",  # test_quantization
     "TestQuantizeFx.test_custom_module_class",  # test_quantization
-    "TestQuantizedConv.test_qconv2d_sum_relu_float_output_pt2e",  # test_quantization
     "TestStaticQuantizedModule.test_batch_norm3d",  # test_quantization
     "TestQuantizeFxOps.test_conv_transpose_1d",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn2d.test_qat_conv_bn_relu_fusion",  # test_quantization
     "TestQuantizeFxOps.test_fixed_qparams_ops_qint8",  # test_quantization
-    "TestStaticQuantizedModule.test_channel_shuffle",  # test_quantization
     "TestQuantizedTensor.test_qtensor_resize",  # test_quantization
     "TestQuantizeFx.test_state_dict",  # test_quantization
     "TestFXNumericSuiteCoreAPIs.test_extract_weights_conv_fun_qat",  # test_quantization
@@ -1682,7 +1673,6 @@ dynamo_expected_failures = {
     "TestQuantizedOps.test_qelu",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn2d.test_qat_conv_bn_relu_fusion_no_conv_bias",  # test_quantization
     "TestQuantizedTensor.test_qtensor_equal",  # test_quantization
-    "TestQuantizedTensor.test_qtensor_index_put_cpu",  # test_quantization
     "TestQuantizedConv.test_qconv3d_relu",  # test_quantization
     "TestQuantizedConv.test_qconv3d",  # test_quantization
     "TestXNNPACKQuantizer.test_propagate_annotation",  # test_quantization
@@ -1697,8 +1687,6 @@ dynamo_expected_failures = {
     "TestFXNumericSuiteNShadows.test_qconfig_multi_mapping_from_list",  # test_quantization
     "TestXNNPACKQuantizer.test_conv_linear",  # test_quantization
     "TestQuantizedOps.test_qadd_broadcast",  # test_quantization
-    "TestFXNumericSuiteNShadows.test_qconfig_multi_mapping_ordering",  # test_quantization
-    "TestFXNumericSuiteNShadows.test_linear_relu_mod",  # test_quantization
     "TestQuantizedOps.test_sigmoid_non_observed",  # test_quantization
     "TestStaticQuantizedModule.test_sigmoid",  # test_quantization
     "TestQuantizedOps.test_mean",  # test_quantization
@@ -1706,15 +1694,11 @@ dynamo_expected_failures = {
     "TestQuantizedTensor.test_decomposed_quantize_per_tensor_bfloat16_input",  # test_quantization
     "TestQuantizeFxOps.test_clamp",  # test_quantization
     "TestQuantizeFxOps.test_conv_module",  # test_quantization
-    "TestQuantizedOps.test_qmul_relu_different_qparams",  # test_quantization
     "TestQuantizeFx.test_attention",  # test_quantization
     "TestQuantizeFxOps.test_conv_transpose_2d",  # test_quantization
     "TestStaticQuantizedModule.test_relu",  # test_quantization
     "TestQuantizedOps.test_linear_bias_unpack",  # test_quantization
     "TestPT2ERepresentation.test_dynamic_linear",  # test_quantization
-    "TestQuantizeFxModels.test_resnet_base",  # test_quantization
-    "TestQuantizeFxOps.test_qbatch_norm",  # test_quantization
-    "TestQNNPackOps.test_qnnpack_sigmoid",  # test_quantization
     "TestFXNumericSuiteCoreAPIs.test_extract_weights_linear_fun_qat",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn1d.test_qat_update_shared_qspec",  # test_quantization
     "TestQuantizeFxModels.test_qat_embedding_linear",  # test_quantization
@@ -1723,13 +1707,10 @@ dynamo_expected_failures = {
     "TestQuantizePT2E.test_fold_quantize_per_channel",  # test_quantization
     "TestQuantizationDocs.test_quantization_doc_qat",  # test_quantization
     "TestQuantizedOps.test_custom_module_lstm",  # test_quantization
-    "TestStaticQuantizedModule.test_pool_api",  # test_quantization
     "TestQuantizeFx.test_quant_output_always_observed",  # test_quantization
     "TestQuantizeEagerOps.test_functional_module",  # test_quantization
     "TestFakeQuantizeOps.test_learnable_backward_per_channel_cuda",  # test_quantization
-    "TestFXNumericSuiteNShadows.test_partial_qconfig_mapping",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn1d.test_qat_conv_no_bias",  # test_quantization
-    "TestFXNumericSuiteCoreAPIs.test_layer_names",  # test_quantization
     "TestQuantizedConv.test_qconv1d_unpack",  # test_quantization
     "TestQuantizeFx.test_custom_module_class_input_has_duplicate_nodes",  # test_quantization
     "TestXNNPACKQuantizer.test_linear_relu",  # test_quantization
@@ -1742,35 +1723,27 @@ dynamo_expected_failures = {
     "TestObserver.test_per_tensor_observers",  # test_quantization
     "TestQuantizedTensor.test_qtensor_per_channel_load_save",  # test_quantization
     "TestQuantizedOps.test_max_pool2d_nhwc",  # test_quantization
-    "TestFXGraphMatcher.test_simple_fun",  # test_quantization
     "TestEqualizeFx.test_selective_equalization",  # test_quantization
     "TestQuantizeFx.test__convert_to_reference_decomposed_fx",  # test_quantization
     "TestQuantizeFx.test_remove_qconfig",  # test_quantization
-    "TestQuantizedLinear.test_qlinear_relu",  # test_quantization
     "TestQuantizePT2E.test_constant_prop_preserve_metadata",  # test_quantization
     "TestQuantizedTensor.test_qtensor_permute",  # test_quantization
     "TestQuantizedTensor.test_quantize_per_channel_sub_byte",  # test_quantization
-    "TestStaticQuantizedModule.test_conv3d_relu_api",  # test_quantization
     "TestPT2ERepresentation.test_add_relu",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn2d.test_qat_conv_bn_fusion_no_conv_bias",  # test_quantization
-    "TestQuantizeFxOps.test_layer_norm",  # test_quantization
     "TestQuantizeFxOps.test_add_relu",  # test_quantization
     "TestQuantizedOps.test_qthreshold",  # test_quantization
     "TestXNNPACKQuantizer.test_dynamic_linear_with_conv",  # test_quantization
     "TestQuantizeFx.test_custom_module_class_input_has_multiple_users",  # test_quantization
     "TestXNNPACKQuantizer.test_add_mul_scalar",  # test_quantization
-    "TestQuantizedTensor.test_qtensor_load_save",  # test_quantization
     "TestFXNumericSuiteNShadows.test_add_loggers_functions",  # test_quantization
     "TestFXNumericSuiteNShadows.test_linear_mod",  # test_quantization
     "TestXNNPACKQuantizer.test_add_and_inplace_add",  # test_quantization
-    "TestQuantizeFxOps.test_elu",  # test_quantization
     "TestQuantizeFx.test_conv_lowering",  # test_quantization
-    "TestQuantizedFunctionalOps.test_conv1d_api",  # test_quantization
     "TestQuantizeFx.test_lowering_functional_linear_with_kwargs",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn1d.test_qat_conv_bn_fusion_literal_args",  # test_quantization
     "TestQuantizedTensor.test_per_tensor_qtensor_to_memory_format",  # test_quantization
     "TestQuantizedOps.test_cat_nhwc",  # test_quantization
-    "TestStaticQuantizedModule.test_conv2d_relu_api",  # test_quantization
     "TestQuantizeFx.test_prepare_custom_config_set_standalone_module_class",  # test_quantization
     "TestQuantizeFxOps.test_mul",  # test_quantization
     "TestQuantizedTensor.test_qtensor_quant_dequant",  # test_quantization
@@ -1780,7 +1753,6 @@ dynamo_expected_failures = {
     "TestStaticQuantizedModule.test_embedding_api",  # test_quantization
     "TestQuantizePT2E.test_speed",  # test_quantization
     "TestStaticQuantizedModule.test_dropout",  # test_quantization
-    "TestQNNPackOps.test_qnnpack_sigmoid_sweep",  # test_quantization
     "TestFXNumericSuiteCoreAPIs.test_match_activations_fun_qat",  # test_quantization
     "TestQuantizedOps.test_qclamp",  # test_quantization
     "TestQuantizedOps.test_avg_pool2d",  # test_quantization
@@ -1788,41 +1760,34 @@ dynamo_expected_failures = {
     "TestQuantizedTensor.test_decomposed_dequantize_per_tensor",  # test_quantization
     "TestFXNumericSuiteCoreAPIs.test_int8_shadows_int8_mod",  # test_quantization
     "TestQuantizedTensor.test_qtensor_dtypes",  # test_quantization
-    "TestQuantizedOps.test_quantized_equal",  # test_quantization
     "TestQuantizeFx.test_fold_quant_dequant",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn1d.test_prepare_qat_conv_bn_fusion_getitem_placeholder",  # test_quantization
     "TestFakeQuantizeOps.test_fake_quant_per_channel_qparam_range",  # test_quantization
     "TestQuantizedTensor.test_fp16_saturate_op",  # test_quantization
-    "TestQuantizedFunctionalOps.test_conv2d_api",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn1d.test_qat_conv_bn_fusion",  # test_quantization
     "TestQuantizedOps.test_avg_pool2d_nhwc",  # test_quantization
-    "TestQuantizeFxOps.test_quantized_conv_relu",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn2d.test_qat_update_shared_qspec",  # test_quantization
     "TestQuantizeFx.test_fp32_sum",  # test_quantization
     "TestQuantizedTensor.test_per_channel_qtensor_to_memory_format",  # test_quantization
     "TestQuantizeFx.test_dict_output",  # test_quantization
-    "TestQuantizedConv.test_qconv2d_pt2e",  # test_quantization
     "TestQuantizedLinear.test_qlinear_unpack",  # test_quantization
     "TestQuantizeFx.test_lowering_functional_conv_with_kwargs",  # test_quantization
     "TestQuantizePT2E.test_reentrant",  # test_quantization
     "TestFXNumericSuiteNShadows.test_add_loggers_conv_bn_relu_fusion_quant",  # test_quantization
     "TestQuantizedLinear.test_qlinear_qnnpack_free_memory_and_unpack",  # test_quantization
     "TestDynamicQuantizedOps.test_qrnncell",  # test_quantization
-    "TestFXNumericSuiteNShadows.test_functions",  # test_quantization
     "TestQuantizedOps.test_qmul_broadcast",  # test_quantization
     "TestQuantizeFx.test_dequantize",  # test_quantization
     "TestDynamicQuantizedModule.test_dynamic_convtranspose3d",  # test_quantization
     "TestQuantizeFx.test_static_lstm_consume_tuple",  # test_quantization
     "TestXNNPACKQuantizer.test_conv_linear_no_permute",  # test_quantization
     "TestReferenceQuantizedModule.test_rnn_cell",  # test_quantization
-    "TestStaticQuantizedModule.test_conv2d_add",  # test_quantization
     "TestQuantizedConv.test_qconv2d_relu_pt2e",  # test_quantization
     "TestPT2ERepresentation.test_add",  # test_quantization
     "TestQuantizedEmbeddingOps.test_embedding_bag_4bit",  # test_quantization
     "TestQuantizedTensor.test_qtensor_channel_float_assignment",  # test_quantization
     "TestFXNumericSuiteCoreAPIs.test_match_activations_fun_ptq",  # test_quantization
     "TestXNNPACKQuantizer.test_mul_float32_max",  # test_quantization
-    "TestFXNumericSuiteNShadows.test_add_loggers_linear_mod_quant_quant",  # test_quantization
     "TestQuantizeFx.test_standalone_module_float_interface",  # test_quantization
     "TestFXNumericSuiteNShadows.test_custom_functions_and_tracer",  # test_quantization
     "TestQuantizeFxOps.test_multiple_qconfigs_for_single_value",  # test_quantization
@@ -1837,9 +1802,7 @@ dynamo_expected_failures = {
     "TestQuantizedOps.test_mul_scalar_relu",  # test_quantization
     "TestQuantizedTensor.test_qtensor_per_channel_permute",  # test_quantization
     "TestStaticQuantizedModule.test_batch_norm2d",  # test_quantization
-    "TestDynamicQuantizedModule.test_dynamic_conv2d",  # test_quantization
     "TestGenerateNumericDebugHandle.test_quantize_pt2e_preserve_handle",  # test_quantization
-    "TestQuantizedTensor.test_qtensor_sub_byte_not_aligned_cols",  # test_quantization
     "TestQuantizeFx.test_conv_linear_reference",  # test_quantization
     "TestQuantizePT2E.test_composable_quantizer_linear_conv",  # test_quantization
     "TestFakeQuantizeOps.test_learnable_backward_per_tensor_cuda",  # test_quantization
@@ -1851,8 +1814,6 @@ dynamo_expected_failures = {
     "TestQuantizePT2E.test_save_load",  # test_quantization
     "TestPT2ERepresentation.test_qdq_per_channel",  # test_quantization
     "TestQuantizeFxOps.test_prelu",  # test_quantization
-    "TestDynamicQuantizedOps.test_dynamic_conv1d",  # test_quantization
-    "TestFXNumericSuiteCoreAPIs.test_match_activations_fqn",  # test_quantization
     "TestQuantizeFx.test_assert_on_size_after_quant_layer",  # test_quantization
     "TestQuantizedConv.test_qconv1d_pt2e",  # test_quantization
     "TestQuantizeFx.test_conv_linear_not_reference",  # test_quantization
@@ -1862,14 +1823,11 @@ dynamo_expected_failures = {
     "TestPadding.test_reflection_pad2d",  # test_quantization
     "TestStaticQuantizedModule.test_quant_dequant_api",  # test_quantization
     "TestFXNumericSuiteCoreAPIs.test_add_shadow_loggers_fun_qat",  # test_quantization
-    "TestDynamicQuantizedOps.test_dynamic_conv2d",  # test_quantization
     "TestQuantizedOps.test_qsoftmax_qnnpack",  # test_quantization
     "TestStaticQuantizedModule.test_prelu",  # test_quantization
     "TestQuantizedEmbeddingOps.test_embedding_bag_byte",  # test_quantization
-    "TestQuantizedConv.test_qconv3d_pt2e",  # test_quantization
     "TestQuantizedOps.test_qcelu",  # test_quantization
     "TestReferenceQuantizedModule.test_sparse",  # test_quantization
-    "TestQuantizedOps.test_max_pool3d",  # test_quantization
     "TestPadding.test_reflection_pad1d",  # test_quantization
     "TestQuantizedConv.test_qconv2d_sum_relu_pt2e",  # test_quantization
     "TestDynamicQuantizedOps.test_qlstmGRU",  # test_quantization
@@ -1892,26 +1850,21 @@ dynamo_expected_failures = {
     "TestQuantizeFx.test_dynamic_with_fusion",  # test_quantization
     "TestQuantizeFx.test_convert_qconfig_mapping",  # test_quantization
     "TestQuantizeFx.test_save_observer_state_dict",  # test_quantization
-    "TestDynamicQuantizedOps.test_dynamic_convtranspose1d",  # test_quantization
     "TestQuantizePT2E.test_derived_qspec",  # test_quantization
     "TestDynamicQuantizedModule.test_dynamic_convtranspose2d",  # test_quantization
     "TestFuseFx.test_fuse_conv_bn_add_relu_lowering",  # test_quantization
-    "TestQuantizedConv.test_qconv2d_sum_pt2e",  # test_quantization
     "TestDynamicQuantizedOps.test_dynamic_convtranspose2d",  # test_quantization
     "TestPT2ERepresentation.test_maxpool2d",  # test_quantization
     "TestQuantizeFx.test_lowering_functional_conv_transpose_with_kwargs",  # test_quantization
     "TestQuantizedOps.test_avg_pool3d_nhwc",  # test_quantization
     "TestQuantizeFx.test_qparams_buffers",  # test_quantization
-    "TestStaticQuantizedModule.test_instance_norm",  # test_quantization
     "TestQuantizeFxOps.test_functional_conv",  # test_quantization
     "TestXNNPACKQuantizer.test_qat_dynamic_linear",  # test_quantization
     "TestQuantizedLinear.test_qlinear",  # test_quantization
     "TestQuantizeFx.test_no_obs_between_unmatched_node_and_copy_node",  # test_quantization
-    "TestStaticQuantizedModule.test_conv1d_relu_api",  # test_quantization
     "TestXNNPACKQuantizer.test_linear",  # test_quantization
     "TestQuantizeFxOps.test_norm_weight_bias",  # test_quantization
     "TestQuantizeFxOps.test_reshape_fp16",  # test_quantization
-    "TestQuantizeFx.test_packed_weight_fused_op",  # test_quantization
     "TestStaticQuantizedModule.test_embedding_bag_api",  # test_quantization
     "TestQuantizedOps.test_advanced_indexing",  # test_quantization
     "TestQuantizeFx.test_conv_bn_relu",  # test_quantization
@@ -1919,7 +1872,6 @@ dynamo_expected_failures = {
     "TestQuantizedConv.test_qconv3d_unpack",  # test_quantization
     "TestFakeQuantizeOps.test_fq_module_per_tensor",  # test_quantization
     "TestDynamicQuantizedOps.test_qlinear",  # test_quantization
-    "TestStaticQuantizedModule.test_layer_norm",  # test_quantization
     "TestQuantizedOps.test_leaky_relu",  # test_quantization
     "TestFakeQuantize.test_fq_module_per_channel",  # test_quantization
     "TestQuantizeFxOps.test_getitem",  # test_quantization
@@ -1961,7 +1913,6 @@ dynamo_expected_failures = {
     "TestFXNumericSuiteCoreAPIs.test_extract_weights_conv_fun_ptq",  # test_quantization
     "TestQuantizeFx.test_qconfig_module_name_object_type_order",  # test_quantization
     "TestDynamicQuantizedModule.test_dynamic_conv1d",  # test_quantization
-    "TestEqualizeFx.test_input_weight_equalization_convert",  # test_quantization
     "TestFXNumericSuiteNShadows.test_add_loggers_linear_mod_fp32_quant",  # test_quantization
     "TestQNNPackOps.test_qnnpack_add",  # test_quantization
     "TestStaticQuantizedModule.test_conv2d_api",  # test_quantization
@@ -1970,11 +1921,9 @@ dynamo_expected_failures = {
     "TestBitsCPU.test_cat_cpu",  # test_quantization
     "TestFakeQuantizeOps.test_forward_per_tensor",  # test_quantization
     "TestQNNPackOps.test_qnnpack_tanh",  # test_quantization
-    "TestFXNumericSuiteCoreAPIs.test_loggers_preserve_qat_numerics",  # test_quantization
     "TestDynamicQuantizedOps.test_qlinear_legacy",  # test_quantization
     "TestQuantizedOps.test_cat",  # test_quantization
     "TestXNNPACKQuantizer.test_conv1d",  # test_quantization
-    "TestQuantizedOps.test_qadd_relu_same_qparams",  # test_quantization
     "TestFXNumericSuiteCoreAPIs.test_shadow_loggers_preserve_qat_numerics",  # test_quantization
     "TestXNNPACKQuantizer.test_dynamic_linear",  # test_quantization
     "TestXNNPACKQuantizer.test_dynamic_linear_int4_weight",  # test_quantization
@@ -1988,7 +1937,6 @@ dynamo_expected_failures = {
     "TestQuantizedEmbeddingOps.test_embedding_2d_indices",  # test_quantization
     "TestQuantizedTensor.test_qtensor_sub_byte_aligned_cols",  # test_quantization
     "TestQuantizeFxOps.test_leaky_relu",  # test_quantization
-    "TestFXGraphMatcher.test_simple_fusion",  # test_quantization
     "TestXNNPACKQuantizer.test_mul_and_inplace_mul",  # test_quantization
     "TestQuantizedOps.test_max_pool2d",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn2d.test_qat_preserve_source_fn_stack",  # test_quantization
@@ -1997,20 +1945,15 @@ dynamo_expected_failures = {
     "TestQuantizeFx.test_conv_transpose_relu_reference",  # test_quantization
     "TestQuantizedConv.test_qconv2d_hardtanh_pt2e",  # test_quantization
     "TestQuantizedTensor.test_decomposed_quantize_per_tensor",  # test_quantization
-    "TestQNNPackOps.test_qnnpack_add_broadcast",  # test_quantization
     "TestQuantizeFxOps.test_linear_module",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn2d.test_qat_conv_no_bias",  # test_quantization
     "TestFakeQuantizeOps.test_learnable_forward_per_tensor_cpu",  # test_quantization
-    "TestStaticQuantizedModule.test_hard_swish",  # test_quantization
     "TestQuantizeFxModels.test_qat_embeddingbag_linear",  # test_quantization
-    "TestStaticQuantizedModule.test_conv2d_add_relu",  # test_quantization
     "TestQuantizedOps.test_interpolate3d",  # test_quantization
     "TestDynamicQuantizedOps.test_dynamic_convtranspose3d",  # test_quantization
     "TestQNNPackOps.test_qnnpack_relu",  # test_quantization
     "TestFXNumericSuiteCoreAPIs.test_int8_shadows_int8_fun",  # test_quantization
-    "TestStaticQuantizedModule.test_conv1d_api",  # test_quantization
     "TestQuantizationDocs.test_quantization_doc_fx",  # test_quantization
-    "TestQuantizedOps.test_channel_shuffle",  # test_quantization
     "TestQuantizedOps.test_hardtanh",  # test_quantization
     "TestQuantizeFx.test_qconfig_function",  # test_quantization
     "TestQuantizeFx.test_ref_conv_module",  # test_quantization
@@ -2020,11 +1963,9 @@ dynamo_expected_failures = {
     "TestQuantizePT2E.test_groupwise_per_channel_quant",  # test_quantization
     "TestQuantizeFxOps.test_hardswish",  # test_quantization
     "TestQuantizedTensor.test_qtensor_cpu",  # test_quantization
-    "TestQuantizedConv.test_qconv_transpose1d",  # test_quantization
     "TestEqualizeFx.test_input_weight_equalization_results",  # test_quantization
     "TestQuantizedFunctionalOps.test_conv3d_api",  # test_quantization
     "TestQuantizeFx.test_linear_bn",  # test_quantization
-    "TestStaticQuantizedModule.test_elu",  # test_quantization
     "TestQuantizeFx.test_standalone_module_quantized_interface",  # test_quantization
     "TestQuantizedOps.test_qprelu",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn1d.test_qat_preserve_source_fn_stack",  # test_quantization
@@ -2039,18 +1980,12 @@ dynamo_expected_failures = {
     "TestQuantizedConv.test_qconv1d",  # test_quantization
     "TestQuantizedTensor.test_choose_qparams",  # test_quantization
     "TestQuantizedConv.test_qconv1d_relu",  # test_quantization
-    "TestFXNumericSuiteNShadows.test_conv_bn_relu_mod",  # test_quantization
-    "TestQuantizedConv.test_qconv2d_add_relu",  # test_quantization
-    "TestStaticQuantizedModule.test_group_norm",  # test_quantization
     "TestStaticQuantizedModule.test_leaky_relu",  # test_quantization
     "TestQuantizedTensor.test_torch_qtensor_deepcopy",  # test_quantization
     "TestXNNPACKQuantizer.test_obs_sharing_ops",  # test_quantization
     "TestStaticQuantizedModule.test_linear_relu",  # test_quantization
     "TestQuantizedOps.test_avg_pool3d",  # test_quantization
     "TestQuantizedTensor.test_quantize_per_channel_float_qparams",  # test_quantization
-    "TestQuantizedOps.test_qmul_relu_same_qparams",  # test_quantization
-    "TestQuantizeFxOps.test_instance_norm",  # test_quantization
-    "TestQuantizedTensor.test_qtensor_legacy_new_failure",  # test_quantization
     "TestXNNPACKQuantizerModels.test_resnet18",  # test_quantization.py
     "TestFXGraphMatcherModels.test_mobilenet_v2_qat",  # test_quantization.py
     "TestQuantizePT2EQATModels.test_qat_resnet18",  # test_quantization.py
@@ -2211,7 +2146,6 @@ dynamo_skips = {
     "TestSWAUtils.test_averaged_model_exponential_use_multi_avg_fn_True_use_buffers_True",  # flaky
     "TestNativeFunctions.test_intlist_error_with_overload",  # known py311 fail
     "TestMkldnnFusion.test_single_conv",  # known py311 fail
-    "TestPythonDispatcher.test_quantized_structured_not_implemented",  # known py38 fail
     "TestLazyReuseIr.testAdd",  # known py311 fail
     "TestLazyReuseIr.testAddSubFallback",  # known py311 fail
     "TestLazyReuseIr.testBatchNorm",  # known py311 fail
