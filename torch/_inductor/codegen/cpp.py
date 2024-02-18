@@ -3364,7 +3364,7 @@ class CppScheduling(BaseScheduling):
         return tuple(tuple(map(V.graph.sizevars.simplify, s)) for s in sizes)
 
     def get_kernel_group(self):
-        from .wrapper import CppWrapperCodeGen
+        from .cpp_wrapper_cpu import CppWrapperCodeGen
 
         self.kernel_group: Union[CppWrapperKernelGroup, KernelGroup]
         if isinstance(V.graph.wrapper_code, CppWrapperCodeGen):
