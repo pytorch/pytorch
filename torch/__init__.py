@@ -745,6 +745,14 @@ def set_default_tensor_type(t):
     """
     if isinstance(t, str):
         t = _import_dotted_name(t)
+    import warnings
+    warnings.warn("torch.set_default_tensor_type() is deprecated as of PyTorch 2.1, "
+                  "please use torch.set_default_dtype() and torch.set_default_device() "
+                  "as alternatives.")
+    # torch.tensortype only alived in c++ side, so using type(torch.FloatTensor)
+    if not isinstance(t, type(torch.FloatTensor)):
+        raise TypeError("invalid type object: only floating-point types "
+                        "are supported as the default type")
     _C._set_default_tensor_type(t)
 
 
