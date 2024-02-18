@@ -747,7 +747,7 @@ class TorchLogsFormatter(logging.Formatter):
         prefix = (
             f"{record.rankprefix}{shortlevel}{record.asctime}.{int(record.msecs*1000):06d} {record.thread} "
             f"{os.path.relpath(record.pathname, os.path.dirname(os.path.dirname(torch.__file__)))}:"
-            f"{record.lineno}{record.traceid}"
+            f"{record.lineno}]{record.traceid}"
         )
         return "\n".join(f"{prefix} {l}" for l in lines)
 
