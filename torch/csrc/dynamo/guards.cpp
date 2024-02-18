@@ -934,19 +934,31 @@ class DEFAULT_DEVICE : public LeafGuard {
  public:
   DEFAULT_DEVICE(py::object verbose_code_parts)
       : LeafGuard(verbose_code_parts) {
-    _utils_device = py::module::import("torch.utils._device");
-    _current_device = _utils_device.attr("CURRENT_DEVICE");
+    py::handle device_module = py::module::import("torch.utils._device");
+    // Save the dict using py::object
+    _utils_device_dict = device_module.attr("__dict__");
+    _device = PyDict_GetItemString(
+        _utils_device_dict.ptr(), "CURRENT_DEVICE"); // borrowed ref
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    py::object device = _utils_device.attr("CURRENT_DEVICE");
-    return PyObject_RichCompareBool(device.ptr(), _current_device.ptr(), Py_EQ);
+    PyObject* device = PyDict_GetItemString(
+        _utils_device_dict.ptr(), "CURRENT_DEVICE"); // borrowed ref
+    if (device != _device) {
+      int result = PyObject_RichCompareBool(device, _device, Py_EQ);
+      if (result == -1) {
+        PyErr_Clear();
+        return false;
+      }
+      return result;
+    }
+    return true;
   }
 
  private:
-  // Save the current device during the guard construction.
-  py::object _utils_device;
-  py::object _current_device;
+  // Save the current device and the module dict during the guard construction.
+  py::object _utils_device_dict;
+  PyObject* _device;
 };
 
 class GLOBAL_STATE : public LeafGuard {
