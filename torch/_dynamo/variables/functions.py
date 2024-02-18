@@ -554,8 +554,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             codegen.extend_output(create_rot_n(2))
             codegen.extend_output(create_call_function(1, True))
 
-        return []
-
 
 class SkipFunctionVariable(VariableTracker):
     def __init__(self, value, reason=None, **kwargs):
@@ -695,18 +693,40 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         # It's safe to assume args/kwargs from orig_fn map 1:1 to args/kwargs of remapped_fn,
         # since that's the contract for putting a mapping in `traceable_collective_remaps`
         import torch.distributed as dist
+        from torch.distributed._functional_collectives import REDUCE_OP_TO_STR
 
-        if "async_op" in kwargs and kwargs["async_op"].as_python_constant():
+        # Merge args and kwargs so positional and keyword args
+        # can be located the same way.
+        signature = inspect.signature(self.fn)
+        arg_names = list(signature.parameters.keys())
+        new_kwargs = {}
+        for i in range(len(arg_names)):
+            if i < len(args):
+                new_kwargs[arg_names[i]] = args[i]
+            elif arg_names[i] in kwargs:
+                new_kwargs[arg_names[i]] = kwargs[arg_names[i]]
+
+        if "async_op" in new_kwargs and new_kwargs["async_op"].as_python_constant():
             unimplemented(
                 f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.fn}"
             )
-        group = kwargs.get("group")
-        if group is None or (
-            isinstance(group, variables.ConstantVariable)
-            and group.as_python_constant() is None
-        ):
-            kwargs["group"] = ProcessGroupVariable(dist.group.WORLD, source=self.source)
-        return self.replacement_var.call_function(tx, args, kwargs)
+
+        if new_kwargs.get("group") is None or new_kwargs["group"].value is None:
+            new_kwargs["group"] = ProcessGroupVariable.get_global_pg_variable()
+
+        if self.fn == dist.all_reduce:
+            reduce_op_var = new_kwargs.get("op")
+            reduce_op = (
+                reduce_op_var.value
+                if reduce_op_var is not None
+                else signature.parameters["op"].default
+            )
+            if reduce_op not in REDUCE_OP_TO_STR:
+                raise ValueError(f"Unsupported all_reduce op: {reduce_op}")
+            new_kwargs["op"] = variables.ConstantVariable.create(
+                REDUCE_OP_TO_STR[reduce_op]
+            )
+        return self.replacement_var.call_function(tx, (), new_kwargs)
 
 
 class FunctoolsPartialVariable(VariableTracker):
@@ -724,12 +744,13 @@ class FunctoolsPartialVariable(VariableTracker):
         if self.args:
             codegen.foreach(self.args)
         if not self.keywords:
-            return create_call_function(len(self.args) + 1, True)
+            codegen.extend_output(create_call_function(len(self.args) + 1, True))
+            return
 
         codegen.foreach(self.keywords.values())
         keys = tuple(self.keywords.keys())
-        return codegen.create_call_function_kw(
-            len(keys) + len(self.args) + 1, keys, True
+        codegen.extend_output(
+            codegen.create_call_function_kw(len(keys) + len(self.args) + 1, keys, True)
         )
 
     def get_function(self):
