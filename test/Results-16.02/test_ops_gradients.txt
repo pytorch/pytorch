@@ -1,0 +1,453 @@
+====================================================================================================================================== short test summary info ======================================================================================================================================
+FAILED [0.1182s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_grad___rmatmul___cpu_complex128 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(20,), device="cpu", dtype=torch.complex128], args=TensorList[Tensor[size=(20,), device="cpu", dtype=torch.compl...
+FAILED [0.0854s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_grad_dot_cpu_complex128 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5,), device="cpu", dtype=torch.complex128], args=TensorList[Tensor[size=(5,), device="cpu", dtype=torch.complex128]], k...
+FAILED [0.1165s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_grad_matmul_cpu_complex128 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(20,), device="cpu", dtype=torch.complex128], args=TensorList[Tensor[size=(20,), device="cpu", dtype=torch.complex128...
+FAILED [0.0849s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_grad_vdot_cpu_complex128 - Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5,), device="cpu", dtype=torch.complex128], args=TensorList[Tensor[size=(5,), device="cpu", dtype=torch.complex128]], ...
+SKIPPED [0.0908s] [708] test_ops_gradients.py:64: Skipped! Operation does support gradgrad
+SKIPPED [0.0908s] [177] test_ops_gradients.py:64: Skipped! Op doesn't support autograd for this dtype.
+SKIPPED [0.0908s] [12] test_ops_gradients.py:64: Skipped!
+SKIPPED [0.0908s] [2] test_ops_gradients.py:64: Numerous errors
+SKIPPED [0.0908s] [106] test_ops_gradients.py:64: PyTorch compiled without Lapack
+SKIPPED [0.0908s] [10] test_ops_gradients.py:64: Only runs on cuda
+SKIPPED [0.0908s] [1] test_ops_gradients.py:64: Gradients are incorrect!
+SKIPPED [0.0908s] [2] test_ops_gradients.py:64: PyTorch is built without MKL support
+SKIPPED [0.0908s] [7] test_ops_gradients.py:64: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.0908s] [177] test_ops_gradients.py:21: Skipped! Dtype is not in supported backward dtypes!
+SKIPPED [0.0908s] [18] test_ops_gradients.py:21: Skipped!
+SKIPPED [0.0908s] [2] test_ops_gradients.py:21: Numerous errors
+SKIPPED [0.0908s] [95] test_ops_gradients.py:21: PyTorch compiled without Lapack
+SKIPPED [0.0908s] [10] test_ops_gradients.py:21: Only runs on cuda
+SKIPPED [0.0908s] [1] test_ops_gradients.py:21: Gradients are incorrect!
+SKIPPED [0.0908s] [7] test_ops_gradients.py:21: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.0908s] [177] test_ops_gradients.py:55: Skipped! Op doesn't support autograd for this dtype.
+SKIPPED [0.0908s] [19] test_ops_gradients.py:55: Skipped!
+SKIPPED [0.0908s] [10] test_ops_gradients.py:55: Op claims it doesn't support gradgrad. This is not verified.
+SKIPPED [0.0908s] [2] test_ops_gradients.py:55: Numerous errors
+SKIPPED [0.0908s] [95] test_ops_gradients.py:55: PyTorch compiled without Lapack
+SKIPPED [0.0908s] [10] test_ops_gradients.py:55: Only runs on cuda
+SKIPPED [0.0908s] [1] test_ops_gradients.py:55: Gradients are incorrect!
+SKIPPED [0.0908s] [7] test_ops_gradients.py:55: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.0908s] [529] test_ops_gradients.py:36: Op has no inplace variant!
+SKIPPED [0.0908s] [177] test_ops_gradients.py:36: Skipped! Op doesn't support autograd for this dtype.
+SKIPPED [0.0908s] [12] test_ops_gradients.py:36: Skipped!
+SKIPPED [0.0908s] [1] test_ops_gradients.py:36: In-place abs not supported for complex tensors
+SKIPPED [0.0908s] [2] test_ops_gradients.py:36: Numerous errors
+SKIPPED [0.0908s] [106] test_ops_gradients.py:36: PyTorch compiled without Lapack
+SKIPPED [0.0908s] [10] test_ops_gradients.py:36: Only runs on cuda
+SKIPPED [0.0908s] [1] test_ops_gradients.py:36: Gradients are incorrect!
+SKIPPED [0.0908s] [2] test_ops_gradients.py:36: PyTorch is built without MKL support
+SKIPPED [0.0908s] [7] test_ops_gradients.py:36: Skipping - testing takes an unreasonably long time, #79528
+SKIPPED [0.0908s] [531] test_ops_gradients.py:81: Skipped! Operation does not support inplace autograd.
+SKIPPED [0.0908s] [11] test_ops_gradients.py:81: Skipped!
+SKIPPED [0.0908s] [1] test_ops_gradients.py:81: In-place abs not supported for complex tensors
+SKIPPED [0.0908s] [175] test_ops_gradients.py:81: Skipped! Op doesn't support autograd for this dtype.
+SKIPPED [0.0908s] [2] test_ops_gradients.py:81: Numerous errors
+SKIPPED [0.0908s] [106] test_ops_gradients.py:81: PyTorch compiled without Lapack
+SKIPPED [0.0908s] [10] test_ops_gradients.py:81: Only runs on cuda
+SKIPPED [0.0908s] [1] test_ops_gradients.py:81: Gradients are incorrect!
+SKIPPED [0.0908s] [2] test_ops_gradients.py:81: PyTorch is built without MKL support
+SKIPPED [0.0908s] [7] test_ops_gradients.py:81: Skipping - testing takes an unreasonably long time, #79528
+XFAIL [0.0787s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_grad_as_strided_scatter_cpu_complex128 - reason:
+XFAIL [0.0568s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_grad_as_strided_scatter_cpu_float64 - reason:
+XFAIL [0.0730s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_grad_bfloat16_cpu_complex128 - reason:
+XFAIL [0.1382s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_grad_bfloat16_cpu_float64 - reason:
+XFAIL [0.0742s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_grad_cfloat_cpu_complex128 - reason:
+XFAIL [0.0556s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_grad_cfloat_cpu_float64 - reason:
+XFAIL [0.1478s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_grad_chalf_cpu_complex128 - reason:
+XFAIL [0.0543s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_grad_chalf_cpu_float64 - reason:
+XFAIL [0.1164s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_grad_cov_cpu_complex128 - reason:
+XFAIL [0.0730s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_grad_cov_cpu_float64 - reason:
+XFAIL [0.0724s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_grad_float_cpu_complex128 - reason:
+XFAIL [0.0542s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_grad_float_cpu_float64 - reason:
+XFAIL [0.0693s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_grad_half_cpu_complex128 - reason:
+XFAIL [0.0517s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_grad_half_cpu_float64 - reason:
+XFAIL [2.7302s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_grad_istft_cpu_complex128 - reason:
+XFAIL [16.7804s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_grad_nn_functional_ctc_loss_cpu_float64 - reason:
+XFAIL [0.0796s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_gradgrad_bfloat16_cpu_complex128 - reason:
+XFAIL [0.0556s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_gradgrad_bfloat16_cpu_float64 - reason:
+XFAIL [0.3756s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_gradgrad_cat_cpu_complex128 - reason:
+XFAIL [0.1551s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_gradgrad_cat_cpu_float64 - reason:
+XFAIL [0.0807s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_gradgrad_cfloat_cpu_complex128 - reason:
+XFAIL [0.0601s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_gradgrad_cfloat_cpu_float64 - reason:
+XFAIL [0.1479s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_gradgrad_chalf_cpu_complex128 - reason:
+XFAIL [0.0508s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_gradgrad_chalf_cpu_float64 - reason:
+XFAIL [0.2697s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_gradgrad_cov_cpu_complex128 - reason:
+XFAIL [0.1348s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_gradgrad_cov_cpu_float64 - reason:
+XFAIL [0.0801s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_gradgrad_float_cpu_complex128 - reason:
+XFAIL [0.0569s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_gradgrad_float_cpu_float64 - reason:
+XFAIL [0.0785s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_gradgrad_half_cpu_complex128 - reason:
+XFAIL [0.0556s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_gradgrad_half_cpu_float64 - reason:
+XFAIL [0.1608s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_gradgrad_native_layer_norm_cpu_float64 - reason:
+XFAIL [0.0783s] test_ops_gradients.py::TestBwdGradientsCPU::test_fn_gradgrad_nn_functional_ctc_loss_cpu_float64 - reason:
+XFAIL [0.1059s] test_ops_gradients.py::TestBwdGradientsCPU::test_inplace_grad_as_strided_partial_views_cpu_complex128 - reason:
+XFAIL [0.0587s] test_ops_gradients.py::TestBwdGradientsCPU::test_inplace_grad_as_strided_partial_views_cpu_float64 - reason:
+XFAIL [0.1302s] test_ops_gradients.py::TestBwdGradientsCPU::test_inplace_gradgrad_as_strided_partial_views_cpu_complex128 - reason:
+XFAIL [0.0743s] test_ops_gradients.py::TestBwdGradientsCPU::test_inplace_gradgrad_as_strided_partial_views_cpu_float64 - reason:
+XFAIL [0.0532s] test_ops_gradients.py::TestBwdGradientsCPU::test_inplace_gradgrad_nn_functional_hardsigmoid_cpu_float64 - reason:
+======================================================================================================= 4 failed, 1757 passed, 3349 skipped, 24 deselected, 37 xfailed in 2811.11s (0:46:51) ========================================================================================================
+
+============================================================================================================================================= FAILURES ============================================================================================================================================== 
+____________________________________________________________________________________________________________________ TestBwdGradientsCPU.test_fn_grad___rmatmul___cpu_complex128 ____________________________________________________________________________________________________________________ 
+Traceback (most recent call last):
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_device_type.py", line 918, in test_wrapper
+    return test(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "test_ops_gradients.py", line 27, in test_fn_grad
+    self._grad_test_helper(device, dtype, op, op.get_op())
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_utils.py", line 4860, in _grad_test_helper
+    return self._check_helper(device, dtype, op, variant, 'gradcheck', check_forward_ad=check_forward_ad,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_utils.py", line 4829, in _check_helper
+    self.assertTrue(gradcheck(fn, gradcheck_args,
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_utils.py", line 4381, in gradcheck
+    return torch.autograd.gradcheck(fn, inputs, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\autograd\gradcheck.py", line 2051, in gradcheck
+    return _gradcheck_helper(**args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\autograd\gradcheck.py", line 2080, in _gradcheck_helper
+    _gradcheck_real_imag(
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\autograd\gradcheck.py", line 1461, in _gradcheck_real_imag
+    gradcheck_fn(
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\autograd\gradcheck.py", line 1924, in _fast_gradcheck
+    _check_analytical_numerical_equal(
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\autograd\gradcheck.py", line 1853, in _check_analytical_numerical_equal
+    raise GradcheckError(
+torch.autograd.gradcheck.GradcheckError: While considering the imaginary part of complex outputs only, Jacobian mismatch for output 0 with respect to input 0,
+numerical:tensor(0.+0.j, dtype=torch.complex128)
+analytical:tensor(-0.6876-2.6403j, dtype=torch.complex128)
+
+The above quantities relating the numerical and analytical jacobians are computed
+in fast mode. See: https://github.com/pytorch/pytorch/issues/53876 for more background
+about fast mode. Below, we recompute numerical and analytical jacobians in slow mode:
+
+Numerical:
+ tensor([[0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j]], dtype=torch.complex128)
+Analytical:
+tensor([[-4.1198-6.6074j],
+        [ 5.1320+3.5038j],
+        [-8.5293+8.1905j],
+        [ 6.9186+2.5708j],
+        [-6.0272+0.3845j],
+        [-4.1917-1.3899j],
+        [-2.8770-8.5045j],
+        [ 7.7401-0.7434j],
+        [-6.8162-7.5620j],
+        [-4.1208-7.9884j],
+        [ 7.5477-2.3856j],
+        [ 3.4886+2.5904j],
+        [-5.3641-2.6125j],
+        [-2.5120-0.5785j],
+        [-1.4041+7.2235j],
+        [ 2.8130-8.6864j],
+        [-8.2877+8.9576j],
+        [ 5.5098+7.3323j],
+        [-3.9056+7.9043j],
+        [ 3.2122+2.0218j]], dtype=torch.complex128)
+
+The max per-element difference (slow mode) is: 12.203476512558558.
+
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\unittest\case.py", line 57, in testPartExecutor
+    yield
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\unittest\case.py", line 623, in run
+    self._callTestMethod(testMethod)
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\unittest\case.py", line 579, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_utils.py", line 2683, in wrapper
+    method(*args, **kwargs)
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_device_type.py", line 416, in instantiated_test
+    result = test(self, **param_kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_utils.py", line 1360, in wrapper
+    fn(*args, **kwargs)
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_device_type.py", line 924, in test_wrapper
+    raise Exception(
+Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(20,), device="cpu", dtype=torch.complex128], args=TensorList[Tensor[size=(20,), device="cpu", dtype=torch.complex128]], kwargs={}, broadcasts_input=False, name='')
+
+To execute this test, run the following from the base repo dir:
+     python test_ops_gradients.py -k test_fn_grad___rmatmul___cpu_complex128
+
+This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0
+________________________________________________________________________________________________________________________ TestBwdGradientsCPU.test_fn_grad_dot_cpu_complex128 ________________________________________________________________________________________________________________________
+Traceback (most recent call last):
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_device_type.py", line 918, in test_wrapper
+    return test(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "test_ops_gradients.py", line 27, in test_fn_grad
+    self._grad_test_helper(device, dtype, op, op.get_op())
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_utils.py", line 4860, in _grad_test_helper
+    return self._check_helper(device, dtype, op, variant, 'gradcheck', check_forward_ad=check_forward_ad,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_utils.py", line 4829, in _check_helper
+    self.assertTrue(gradcheck(fn, gradcheck_args,
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_utils.py", line 4381, in gradcheck
+    return torch.autograd.gradcheck(fn, inputs, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\autograd\gradcheck.py", line 2051, in gradcheck
+    return _gradcheck_helper(**args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\autograd\gradcheck.py", line 2080, in _gradcheck_helper
+    _gradcheck_real_imag(
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\autograd\gradcheck.py", line 1461, in _gradcheck_real_imag
+    gradcheck_fn(
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\autograd\gradcheck.py", line 1924, in _fast_gradcheck
+    _check_analytical_numerical_equal(
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\autograd\gradcheck.py", line 1853, in _check_analytical_numerical_equal
+    raise GradcheckError(
+torch.autograd.gradcheck.GradcheckError: While considering the imaginary part of complex outputs only, Jacobian mismatch for output 0 with respect to input 0,
+numerical:tensor(0.+0.j, dtype=torch.complex128)
+analytical:tensor(8.4992+3.1575j, dtype=torch.complex128)
+
+The above quantities relating the numerical and analytical jacobians are computed
+in fast mode. See: https://github.com/pytorch/pytorch/issues/53876 for more background
+about fast mode. Below, we recompute numerical and analytical jacobians in slow mode:
+
+Numerical:
+ tensor([[0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j]], dtype=torch.complex128)
+Analytical:
+tensor([[ 0.5886-6.1278j],
+        [ 6.3505-8.0167j],
+        [-8.5019+0.3712j],
+        [ 5.0913+8.8816j],
+        [ 7.9659+2.2683j]], dtype=torch.complex128)
+
+The max per-element difference (slow mode) is: 10.237428780948914.
+
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\unittest\case.py", line 57, in testPartExecutor
+    yield
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\unittest\case.py", line 623, in run
+    self._callTestMethod(testMethod)
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\unittest\case.py", line 579, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_utils.py", line 2683, in wrapper
+    method(*args, **kwargs)
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_device_type.py", line 416, in instantiated_test
+    result = test(self, **param_kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_utils.py", line 1360, in wrapper
+    fn(*args, **kwargs)
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_device_type.py", line 924, in test_wrapper
+    raise Exception(
+Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5,), device="cpu", dtype=torch.complex128], args=TensorList[Tensor[size=(5,), device="cpu", dtype=torch.complex128]], kwargs={}, broadcasts_input=False, name='')
+
+To execute this test, run the following from the base repo dir:
+     python test_ops_gradients.py -k test_fn_grad_dot_cpu_complex128
+
+This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0
+______________________________________________________________________________________________________________________ TestBwdGradientsCPU.test_fn_grad_matmul_cpu_complex128 _______________________________________________________________________________________________________________________
+Traceback (most recent call last):
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_device_type.py", line 918, in test_wrapper
+    return test(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "test_ops_gradients.py", line 27, in test_fn_grad
+    self._grad_test_helper(device, dtype, op, op.get_op())
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_utils.py", line 4860, in _grad_test_helper
+    return self._check_helper(device, dtype, op, variant, 'gradcheck', check_forward_ad=check_forward_ad,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_utils.py", line 4829, in _check_helper
+    self.assertTrue(gradcheck(fn, gradcheck_args,
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_utils.py", line 4381, in gradcheck
+    return torch.autograd.gradcheck(fn, inputs, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\autograd\gradcheck.py", line 2051, in gradcheck
+    return _gradcheck_helper(**args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\autograd\gradcheck.py", line 2080, in _gradcheck_helper
+    _gradcheck_real_imag(
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\autograd\gradcheck.py", line 1461, in _gradcheck_real_imag
+    gradcheck_fn(
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\autograd\gradcheck.py", line 1924, in _fast_gradcheck
+    _check_analytical_numerical_equal(
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\autograd\gradcheck.py", line 1853, in _check_analytical_numerical_equal
+    raise GradcheckError(
+torch.autograd.gradcheck.GradcheckError: While considering the imaginary part of complex outputs only, Jacobian mismatch for output 0 with respect to input 0,
+numerical:tensor(0.+0.j, dtype=torch.complex128)
+analytical:tensor(-0.2611-1.9344j, dtype=torch.complex128)
+
+The above quantities relating the numerical and analytical jacobians are computed
+in fast mode. See: https://github.com/pytorch/pytorch/issues/53876 for more background
+about fast mode. Below, we recompute numerical and analytical jacobians in slow mode:
+
+Numerical:
+ tensor([[0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j]], dtype=torch.complex128)
+Analytical:
+tensor([[-4.0473+3.0133j],
+        [ 5.4076+2.6566j],
+        [-3.1431-3.9931j],
+        [ 1.6435+6.2300j],
+        [-3.1638+5.7239j],
+        [ 6.5686-6.7800j],
+        [ 2.7159-4.4377j],
+        [ 0.7286+0.0660j],
+        [-1.8017-1.6529j],
+        [ 8.1375-1.6164j],
+        [-4.5686-5.3318j],
+        [-5.4057-1.1255j],
+        [-7.0312-6.4412j],
+        [-4.2926+0.9671j],
+        [-8.2379-8.5319j],
+        [-5.8948-7.7946j],
+        [-4.8860-1.1101j],
+        [ 8.6544-0.4985j],
+        [ 8.4626+2.7447j],
+        [-8.0175+7.2806j]], dtype=torch.complex128)
+
+The max per-element difference (slow mode) is: 11.859873277451381.
+
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\unittest\case.py", line 57, in testPartExecutor
+    yield
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\unittest\case.py", line 623, in run
+    self._callTestMethod(testMethod)
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\unittest\case.py", line 579, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_utils.py", line 2683, in wrapper
+    method(*args, **kwargs)
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_device_type.py", line 416, in instantiated_test
+    result = test(self, **param_kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_utils.py", line 1360, in wrapper
+    fn(*args, **kwargs)
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_device_type.py", line 924, in test_wrapper
+    raise Exception(
+Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(20,), device="cpu", dtype=torch.complex128], args=TensorList[Tensor[size=(20,), device="cpu", dtype=torch.complex128]], kwargs={}, broadcasts_input=False, name='')
+
+To execute this test, run the following from the base repo dir:
+     python test_ops_gradients.py -k test_fn_grad_matmul_cpu_complex128
+
+This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0
+_______________________________________________________________________________________________________________________ TestBwdGradientsCPU.test_fn_grad_vdot_cpu_complex128 ________________________________________________________________________________________________________________________
+Traceback (most recent call last):
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_device_type.py", line 918, in test_wrapper
+    return test(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "test_ops_gradients.py", line 27, in test_fn_grad
+    self._grad_test_helper(device, dtype, op, op.get_op())
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_utils.py", line 4860, in _grad_test_helper
+    return self._check_helper(device, dtype, op, variant, 'gradcheck', check_forward_ad=check_forward_ad,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_utils.py", line 4829, in _check_helper
+    self.assertTrue(gradcheck(fn, gradcheck_args,
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_utils.py", line 4381, in gradcheck
+    return torch.autograd.gradcheck(fn, inputs, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\autograd\gradcheck.py", line 2051, in gradcheck
+    return _gradcheck_helper(**args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\autograd\gradcheck.py", line 2080, in _gradcheck_helper
+    _gradcheck_real_imag(
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\autograd\gradcheck.py", line 1461, in _gradcheck_real_imag
+    gradcheck_fn(
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\autograd\gradcheck.py", line 1924, in _fast_gradcheck
+    _check_analytical_numerical_equal(
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\autograd\gradcheck.py", line 1853, in _check_analytical_numerical_equal
+    raise GradcheckError(
+torch.autograd.gradcheck.GradcheckError: While considering the imaginary part of complex outputs only, Jacobian mismatch for output 0 with respect to input 0,
+numerical:tensor(0.+0.j, dtype=torch.complex128)
+analytical:tensor(8.4992-3.1575j, dtype=torch.complex128)
+
+The above quantities relating the numerical and analytical jacobians are computed
+in fast mode. See: https://github.com/pytorch/pytorch/issues/53876 for more background
+about fast mode. Below, we recompute numerical and analytical jacobians in slow mode:
+
+Numerical:
+ tensor([[0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j],
+        [0.+0.j]], dtype=torch.complex128)
+Analytical:
+tensor([[ 0.5886+6.1278j],
+        [ 6.3505+8.0167j],
+        [-8.5019-0.3712j],
+        [ 5.0913-8.8816j],
+        [ 7.9659-2.2683j]], dtype=torch.complex128)
+
+The max per-element difference (slow mode) is: 10.237428780948914.
+
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\unittest\case.py", line 57, in testPartExecutor
+    yield
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\unittest\case.py", line 623, in run
+    self._callTestMethod(testMethod)
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\unittest\case.py", line 579, in _callTestMethod
+    if method() is not None:
+       ^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_utils.py", line 2683, in wrapper
+    method(*args, **kwargs)
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_device_type.py", line 416, in instantiated_test
+    result = test(self, **param_kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_utils.py", line 1360, in wrapper
+    fn(*args, **kwargs)
+  File "C:\Users\iremyuksel\AppData\Local\Programs\Python\Python311-arm64\Lib\site-packages\torch\testing\_internal\common_device_type.py", line 924, in test_wrapper
+    raise Exception(
+Exception: Caused by sample input at index 0: SampleInput(input=Tensor[size=(5,), device="cpu", dtype=torch.complex128], args=TensorList[Tensor[size=(5,), device="cpu", dtype=torch.complex128]], kwargs={}, broadcasts_input=False, name='')
+
+To execute this test, run the following from the base repo dir:
+     python test_ops_gradients.py -k test_fn_grad_vdot_cpu_complex128
+
+This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0
