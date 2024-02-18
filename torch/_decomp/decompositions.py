@@ -4506,6 +4506,7 @@ def put(self, index, source, accumulate=False):
     )
     return flattened.reshape(self.shape)
 
+
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
 register_inplace(aten.addmv_, aten.addmv)

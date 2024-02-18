@@ -261,8 +261,7 @@ Tensor _to_copy(
           " only supports memory format Preserve, but got ", memory_format,
           " instead.");
 
-      Tensor compressed_indices, plain_indices;
-      std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(self);
+      auto [compressed_indices, plain_indices] = at::sparse_csr::getCompressedPlainIndices(self);
 
       const auto new_values = at::native::to(
           self.values(),
@@ -609,9 +608,7 @@ Tensor sparse_compressed_to_dense(
   auto compressed_rows = self.layout() == kSparseCsr || self.layout() == kSparseBsr;
   auto block_sparse = self.layout() == kSparseBsr || self.layout() == kSparseBsc;
 
-  Tensor compressed_indices;
-  Tensor plain_indices;
-  std::tie(compressed_indices, plain_indices) =
+  auto [compressed_indices, plain_indices] =
       sparse_csr::getCompressedPlainIndices(self);
 
   auto values = self.values();
@@ -1836,8 +1833,7 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, const int64_t sparse_dim)
   _to_sparse_check_arguments("sparse_compressed_to_sparse", self, sparse_dim);
 
   Layout layout = self.layout();
-  Tensor compressed_indices, plain_indices;
-  std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(self);
+  auto [compressed_indices, plain_indices] = at::sparse_csr::getCompressedPlainIndices(self);
   Tensor values;
   Tensor indices = at::_convert_indices_from_csr_to_coo(compressed_indices, plain_indices,
                                                         false, (layout == kSparseCsc || layout == kSparseBsc));
