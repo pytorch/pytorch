@@ -59,8 +59,8 @@ def is_constant_pg_functions(value):
     constant_processgroup_functions = [
         _get_group_size_by_name,
         _get_group_tag,
-        get_process_group_ranks,
         _rank_not_in_group,
+        get_process_group_ranks,
     ]
 
     return inspect.isfunction(value) and value in constant_processgroup_functions
