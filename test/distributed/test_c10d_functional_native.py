@@ -356,6 +356,19 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
         assert output.eq(expect).all()
         assert output.completed
 
+    @skip_if_lt_x_gpu(2)
+    def test_unwaited(self) -> None:
+        # Verify that the process can terminate gracefully
+        # even with unwaited tensors
+        self._init_process_group()
+
+        input = torch.full((10, 10), float(self.rank), device=self.device)
+        output = torch.ops._c10d_functional.all_reduce(
+            input,
+            "avg",
+            "default",
+        )
+
 
 class C10DFunctionalNativeCompileTest(TestCase):
     def setUp(self):
