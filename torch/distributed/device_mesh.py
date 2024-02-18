@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 import math
+from functools import cached_property
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
@@ -379,9 +380,10 @@ else:
 
             return submesh
 
+        @cached_property
         def get_group(
             self, mesh_dim: Optional[Union[int, str]] = None
-        ) -> Union[ProcessGroup, List[ProcessGroup]]:
+        ) -> Optional[Union[ProcessGroup, List[ProcessGroup]]]:
             """
             Returns a list of ProcessGroups corresponding to the mesh dimensions, or
             returns a single ProcessGroup if mesh_dim is specified or the given mesh has
@@ -398,6 +400,9 @@ else:
             """
             if not hasattr(self, "_dim_group_infos"):
                 raise RuntimeError("DeviceMesh process groups not initialized!")
+
+            if get_rank() not in self.mesh:
+                return None
 
             if self.mesh.ndim == 1:
                 return not_none(
