@@ -752,6 +752,29 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert same(outputs, correct_outputs)
 
     @run_with_both_funcol_impls
+    def test_dynamo_rewrite_dist_all_gather_list(self):
+
+        def func(inp, out, *, pg):
+            torch.distributed.all_gather(
+                out,
+                inp,
+                pg,
+            )
+        local_size = [4, 4]
+        # single-proc test
+        global_size = local_size
+
+        inputs = torch.ones(local_size, device=self.device)
+        outputs = [torch.empty(global_size, device=self.device)]
+        correct_outputs = [torch.empty(global_size, device=self.device)]
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter, fullgraph=True)
+        compiled(inputs, outputs, pg=GroupMember.WORLD)
+        func(inputs, correct_outputs, pg=GroupMember.WORLD)
+        assert counter.frame_count == 1
+        assert same(outputs, correct_outputs)
+
+    @run_with_both_funcol_impls
     def test_dynamo_rewrite_dist_all_gather_args_match(self):
         # Duplicated most of the structure from test_dynamo_rewrite_dist_all_gather
         # except uses kwargs to ensure rewrite has matching arg names
@@ -806,30 +829,116 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert same(outputs, correct_outputs)
 
     @run_with_both_funcol_impls
-    @parametrize("explicit_group", [True, False])
-    def test_dynamo_rewrite_dist_allreduce(self, explicit_group):
+    @parametrize(
+        "pg_mode",
+        [
+            "positional",
+            "positional_none",
+            "kwargs",
+            "kwargs_none",
+            "unspecified",
+        ]
+    )
+    def test_dynamo_rewrite_dist_allreduce(self, pg_mode):
 
-        def func(tensor, pg):
+        def func(tensor, *args, **kwargs):
             torch.distributed.all_reduce(
                 tensor,
+                *args,
+                **kwargs,
+            )
+
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter, fullgraph=True)
+
+        args = []
+        kwargs = {}
+
+        if pg_mode == "positional":
+            args.append(torch.distributed.ReduceOp.MAX)
+            args.append(GroupMember.WORLD)
+        elif pg_mode == "positional_none":
+            args.append(torch.distributed.ReduceOp.MAX)
+            args.append(None)
+        elif pg_mode == "kwargs":
+            kwargs["group"] = GroupMember.WORLD
+        elif pg_mode == "kwargs_none":
+            kwargs["group"] = None
+        else:
+            assert pg_mode == "unspecified"
+
+        inputs_compiled = torch.ones(2, device=self.device)
+        inputs_eager = torch.ones(2, device=self.device)
+
+        compiled(inputs_compiled, *args, **kwargs)
+        func(inputs_eager, *args, **kwargs)
+
+        assert counter.frame_count == 1
+        # should test more precisely, but the 3 is supposed to be (all_reduce, wait, copy_)
+        assert counter.op_count == 3
+        assert same(inputs_compiled, inputs_eager)
+
+    @run_with_both_funcol_impls
+    def test_dynamo_rewrite_dist_all_to_all_single(self):
+
+        def func(output, input, pg):
+            torch.distributed.all_to_all_single(
+                output,
+                input,
                 group=pg
             )
 
         counter = CompileCounter()
         compiled = torch.compile(func, backend=counter, fullgraph=True)
 
-        inputs_compiled = torch.ones(2, device=self.device)
-        inputs_eager = torch.ones(2, device=self.device)
+        input_compiled = torch.ones(2, device=self.device)
+        input_eager = torch.ones(2, device=self.device)
+        output_compiled = torch.empty(2, device=self.device)
+        output_eager = torch.empty(2, device=self.device)
 
-        group = GroupMember.WORLD if explicit_group else None
-
-        compiled(inputs_compiled, group)
-        func(inputs_eager, group)
+        compiled(output_compiled, input_compiled, GroupMember.WORLD)
+        func(output_eager, input_eager, GroupMember.WORLD)
 
         assert counter.frame_count == 1
-        # should test more precisely, but the 3 is supposed to be (all_reduce, wait, copy_)
-        assert counter.op_count == 3
-        assert same(inputs_compiled, inputs_eager)
+        assert same(output_compiled, output_eager)
+
+    @run_with_both_funcol_impls
+    @parametrize(
+        "reduce_op",
+        [
+            torch.distributed.ReduceOp.SUM,
+            torch.distributed.ReduceOp.AVG,
+            torch.distributed.ReduceOp.PRODUCT,
+            torch.distributed.ReduceOp.MIN,
+            torch.distributed.ReduceOp.MAX,
+        ]
+    )
+    def test_dynamo_rewrite_dist_allreduce_reduce_op(self, reduce_op):
+        from torch.distributed._functional_collectives import REDUCE_OP_TO_STR
+
+        def verify_rewrite(gm, _):
+            ar_nodes = []
+            for node in gm.graph.nodes:
+                if node.target in [
+                        torch.ops.c10d_functional.all_reduce,
+                        torch.ops._c10d_functional.all_reduce]:
+                    ar_nodes.append(node)
+            self.assertEqual(len(ar_nodes), 1)
+            reduce_op_str = ar_nodes[0].args[1]
+            self.assertEqual(REDUCE_OP_TO_STR[reduce_op], reduce_op_str)
+            return gm
+
+        compiled = torch.compile(
+            torch.distributed.all_reduce,
+            backend=verify_rewrite,
+            fullgraph=True,
+        )
+        inputs = (
+            torch.ones(2, device=self.device),
+            reduce_op,
+            GroupMember.WORLD,
+        )
+        compiled(*inputs)
 
     @run_with_both_funcol_impls
     def test_dynamo_support_collective_op_with_async_op_False(self):
