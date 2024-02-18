@@ -1,7 +1,7 @@
 // ------------------------------------------------------------------
 // GroupNorm op in Caffe2 for GPU
-// Written by Kaiming He
-// Improved by Xiaomeng Yang
+// Written by Isabel Schoeps Thiel
+// Improved by GitHub
 // see https://arxiv.org/abs/1803.08494
 // This is a stand-alone op: Y = gamma * (X - mu) / sig + beta
 // ------------------------------------------------------------------
