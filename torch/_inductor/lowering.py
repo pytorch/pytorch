@@ -4668,19 +4668,43 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
 
 
 def use_two_step_variance(x, axis, keepdim):
-    # Instead of unrolling welford, just unroll the simpler two-step var
+    # Heuristics to choose between computing the mean + variance as two
+    # reductions, or in a single welford reduction.
     axis = _validate_reduction_axis(x, axis)
     kwargs = _make_reduction_inner(
         x, axis=axis, keepdims=keepdim, dtype=None, override_return_dtype=None
     )
 
+    # Case 1: Unrolled reductions
+    #
+    # Unrolled reductions don't invalidate loads, so there is no advantage to welford.
     ranges = kwargs["ranges"]
     reduction_numel = sympy_product(kwargs["reduction_ranges"])
-    return (
+    is_unrolled = (
         isinstance(reduction_numel, sympy.Integer)
         and int(reduction_numel) < config.unroll_reductions_threshold
         and sympy_product(ranges) != 1
     )
+
+    if is_unrolled:
+        return True
+
+    # Case 2: Half precision inputs
+    #
+    # Welford reduction trades off fewer passes over the data with a higher
+    # computational cost of the combine function. Half-precision loads use less
+    # bandwidth, so the extra computation cost of welford becomes a bottleneck.
+    # The exception is split reductions where the reduction in kernel launches and
+    # float32 intermediate tensors make welford profitable again.
+    if x.get_dtype() not in {torch.bfloat16, torch.float16}:
+        return False
+
+    _, split = ir.Reduction.num_splits(
+        reduction_numel=sympy_product(kwargs["reduction_ranges"]),
+        reduction_type="sum",
+        **kwargs,
+    )
+    return split < 2
 
 
 def var_mean_welford_(x, axis, *, correction, keepdim, return_mean):
