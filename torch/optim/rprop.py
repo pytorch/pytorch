@@ -65,14 +65,10 @@ class Rprop(Optimizer):
                     # Complex Number should be as if they are two independent real numbers.
                     # Hence the step_size shouldn't be zero for imaginary part.
                     state["step_size"] = (
-                        grad.new()
-                        .resize_as_(grad)
-                        .fill_(complex(group["lr"], group["lr"]))
+                        torch.full_like(grad, complex(group["lr"], group["lr"]))
                     )
                 else:
-                    state["step_size"] = (
-                        grad.new().resize_as_(grad).fill_(group["lr"])
-                    )
+                    state["step_size"] = torch.full_like(grad, group["lr"])
 
             prevs.append(state["prev"])
             step_sizes.append(state["step_size"])

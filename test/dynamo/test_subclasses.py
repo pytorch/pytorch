@@ -99,6 +99,8 @@ class ScaledTensor(torch.Tensor):
         cls,
         data: torch.Tensor,
         scale: torch.Tensor,
+        *,
+        constant: int = 0,
     ):
         return torch.Tensor._make_wrapper_subclass(
             cls,
@@ -111,24 +113,29 @@ class ScaledTensor(torch.Tensor):
             device=data.device,
         )
 
-    def __init__(self, data: torch.Tensor, scale: torch.Tensor):
+    def __init__(self, data: torch.Tensor, scale: torch.Tensor, constant: int = 0):
         self._data = data
         self._scale = scale
+        self._constant = constant
 
     def __tensor_flatten__(self):
-        ctx = {}
+        ctx = {"_constant": self._constant}
         return ["_data", "_scale"], ctx
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
         assert len(inner_tensors) == 2
-        return ScaledTensor(inner_tensors["_data"], inner_tensors["_scale"])
+        return ScaledTensor(
+            inner_tensors["_data"],
+            inner_tensors["_scale"],
+            constant=metadata["_constant"],
+        )
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
         scaled_tensor = args[0]
         out = func(scaled_tensor._data, *args[1:], **kwargs)
-        return ScaledTensor(out, scaled_tensor._scale)
+        return ScaledTensor(out, scaled_tensor._scale, constant=scaled_tensor._constant)
 
     def __repr__(self):
         return f"{self._data.__repr__()}\n{self._scale.__repr__()}"
@@ -1029,6 +1036,16 @@ class GraphModule(torch.nn.Module):
                 ],
             ],
         )
+
+    def test_wrapper_subclass_dynamo_attribute_access_on_intermediate(self):
+        def f(x_subclass):
+            tmp_subclass = torch.add(x, 1)
+            return torch.mul(tmp_subclass._scale, tmp_subclass._constant)
+
+        x = ScaledTensor(torch.randn(2, 4), torch.randn(3), constant=2)
+        out_ref = f(x)
+        out_test = torch.compile(f, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(out_ref, out_test)
 
     def test_support_bases(self):
         import abc
