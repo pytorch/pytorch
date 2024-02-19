@@ -252,6 +252,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     def __repr__(self):
         return f"TorchInGraphFunctionVariable({self.value})"
 
+    def get_function(self):
+        return self.value
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -293,7 +296,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 self.value,
                 source=self.source,
             ).call_function(tx, args, kwargs)
-        elif self.value is torch.overrides.get_default_nowrap_functions:
+        elif self.value is torch.overrides.get_default_nowrap_functions.__wrapped__:
             # [Note: __torch_function__] we return empty here because we restrict
             # the set of functions that we trace __torch_function__ on to
             # functions outside of the actual set. Implementing this properly will require implementing
@@ -507,7 +510,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # We desugar it at trace-time into ranks by directly calling util
             # bake the result into the trace
             assert len(args) == 1, "Expected one arg (pg)"
-            assert isinstance(args[0], ProcessGroupVariable)
+            # Some constant pg functions address a pg via its name
+            assert isinstance(args[0], (ProcessGroupVariable, ConstantVariable))
 
             invocation_result = self.value(args[0].as_python_constant())
             # Note - while we *could* cook up sources around invocations, like a FunctionSource

@@ -158,6 +158,11 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual double guard_float(const char* file, int64_t line) {
     TORCH_CHECK(false, "NYI");
   };
+  virtual bool guard_size_oblivious(const char* file, int64_t line) {
+    // No improvement for unbacked SymBools by default, replace this
+    // with a better implementation!
+    return guard_bool(file, line);
+  }
   virtual bool expect_true(const char* file, int64_t line) {
     // No improvement for unbacked SymBools by default, replace this
     // with a better implementation!
@@ -180,10 +185,10 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual std::string str() {
     TORCH_CHECK(false, "NYI");
   };
-  virtual c10::optional<int64_t> singleton_int() {
+  virtual c10::optional<int64_t> nested_int() {
     return c10::nullopt;
   }
-  virtual c10::optional<int64_t> singleton_coeff() {
+  virtual c10::optional<int64_t> nested_int_coeff() {
     return c10::nullopt;
   }
   virtual c10::optional<int64_t> constant_int() {

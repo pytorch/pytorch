@@ -973,15 +973,20 @@ def gen_pyi(
             ],
         }
     )
-    for binop in ["mul", "true_divide", "floor_divide"]:
+    for binop in ["true_divide", "floor_divide"]:
         unsorted_function_hints[binop].append(
             f"def {binop}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
             "*, out: Optional[Tensor] = None) -> Tensor: ..."
         )
+    for binop in ["mul"]:
+        unsorted_function_hints[binop].append(
+            f"def {binop}(input: Union[Tensor, Number, _complex], other: Union[Tensor, Number, _complex], "
+            "*, out: Optional[Tensor] = None) -> Tensor: ..."
+        )
     for binop in ["add", "sub"]:
         unsorted_function_hints[binop].append(
-            f"def {binop}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
-            "*, alpha: Optional[Number] = 1, out: Optional[Tensor] = None) -> Tensor: ..."
+            f"def {binop}(input: Union[Tensor, Number, _complex], other: Union[Tensor, Number, _complex], "
+            "*, alpha: Optional[Union[Number, _complex]] = 1, out: Optional[Tensor] = None) -> Tensor: ..."
         )
 
     native_functions = parse_native_yaml(
@@ -1183,7 +1188,7 @@ def gen_pyi(
             ],
         }
     )
-    for binop in ["mul", "true_divide", "floor_divide"]:
+    for binop in ["true_divide", "floor_divide"]:
         for inplace in [False, True]:
             out_suffix = ", *, out: Optional[Tensor] = None"
             if inplace:
@@ -1193,6 +1198,16 @@ def gen_pyi(
                 f"def {binop}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat]{out_suffix})"
                 " -> Tensor: ..."
             )
+    for binop in ["mul"]:
+        for inplace in [False, True]:
+            out_suffix = ", *, out: Optional[Tensor] = None"
+            if inplace:
+                binop += "_"
+                out_suffix = ""
+            unsorted_tensor_method_hints[binop].append(
+                f"def {binop}(self, other: Union[Tensor, Number, _complex, torch.SymInt, torch.SymFloat]{out_suffix})"
+                " -> Tensor: ..."
+            )
     for binop in ["add", "sub"]:
         for inplace in [False, True]:
             out_suffix = ", out: Optional[Tensor] = None"
@@ -1200,8 +1215,8 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                f"def {binop}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat], "
-                f"*, alpha: Optional[Number] = 1{out_suffix})"
+                f"def {binop}(self, other: Union[Tensor, Number, _complex, torch.SymInt, torch.SymFloat], "
+                f"*, alpha: Optional[Union[Number, _complex]] = 1{out_suffix})"
                 " -> Tensor: ..."
             )
     simple_conversions = [

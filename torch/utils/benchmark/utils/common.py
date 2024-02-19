@@ -282,7 +282,7 @@ def trim_sigfig(x: float, n: int) -> float:
 
 
 def ordered_unique(elements: Iterable[Any]) -> List[Any]:
-    return list(collections.OrderedDict({i: None for i in elements}).keys())
+    return list(collections.OrderedDict(dict.fromkeys(elements)).keys())
 
 
 @contextlib.contextmanager
