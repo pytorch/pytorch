@@ -816,6 +816,7 @@ class LAMBDA_GUARD : public LeafGuard {
     PyObject* x = PyObject_CallOneArg(_guard_check_fn.ptr(), value); // new ref
     if (x == nullptr) {
       // An exception is caught in the lambda function.
+      PyErr_Clear();
       return false;
     }
     bool result = PyObject_IsTrue(x);
@@ -832,8 +833,7 @@ class TYPE_MATCH : public LeafGuard {
  public:
   // type_id = id(type(obj))
   TYPE_MATCH(py::object type_id, py::object verbose_code_parts)
-      : LeafGuard(verbose_code_parts),
-        _expected(py::cast<unsigned long long>(type_id)) {}
+      : LeafGuard(verbose_code_parts), _expected(py::cast<intptr_t>(type_id)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     return Py_TYPE(value) == (void*)_expected;
@@ -848,8 +848,7 @@ class ID_MATCH : public LeafGuard {
  public:
   // obj_id = id(obj)
   ID_MATCH(py::object obj_id, py::object verbose_code_parts)
-      : LeafGuard(verbose_code_parts),
-        _expected(py::cast<unsigned long long>(obj_id)) {}
+      : LeafGuard(verbose_code_parts), _expected(py::cast<intptr_t>(obj_id)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     return value == (void*)_expected;
@@ -1605,8 +1604,9 @@ class RootGuardManager : public GuardManager {
   // Fast check function.
   virtual bool check_nopybind(PyObject* value) override { // borrowed ref
     // reset_state is not thread safe. So acquire a lock.
-    static std::mutex lock;
-    std::lock_guard<std::mutex> lock_guard(lock);
+    Py_BEGIN_ALLOW_THREADS; // ; is added to avoid clang formatting.
+    std::lock_guard<std::mutex> lock_guard(_lock);
+    Py_END_ALLOW_THREADS; // ; is added to avoid clang formatting.
 
     if (!GuardManager::check_nopybind(value)) {
       _reset_relational_guard_state();
@@ -1627,8 +1627,9 @@ class RootGuardManager : public GuardManager {
   virtual GuardDebugInfo check_verbose_nopybind(
       PyObject* value) override { // borrowed ref
     // reset_state is not thread safe. So acquire a lock.
-    static std::mutex lock;
-    std::lock_guard<std::mutex> lock_guard(lock);
+    Py_BEGIN_ALLOW_THREADS; // ; is added to avoid clang formatting.
+    std::lock_guard<std::mutex> lock_guard(_lock);
+    Py_END_ALLOW_THREADS; // ; is added to avoid clang formatting.
 
     GuardDebugInfo debug_info = GuardManager::check_verbose_nopybind(value);
     if (!debug_info.result) {
@@ -1685,6 +1686,10 @@ class RootGuardManager : public GuardManager {
   // MUST be run after all other guard managers have finished to ensure that
   // the epilogue guards do not step on some nonexistent getattr or getitem.
   std::vector<std::unique_ptr<LeafGuard>> _epilogue_lambda_guards;
+
+  // GuardManager can change the state of Relation guards and also sort the
+  // child accessors. To make it thread safe, we need to acquire a lock.
+  std::mutex _lock;
 };
 
 std::unique_ptr<GuardManager> make_guard_manager(
