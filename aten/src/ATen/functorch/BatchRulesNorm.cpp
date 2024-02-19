@@ -225,12 +225,8 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> batch_norm_backward_plumbing(
   vmap_check_escaped(maybe_layer, "batch_norm_backward_plumbing");
   int64_t cur_level = maybe_layer->layerId();
 
-  Tensor grad_out_value;
-  optional<int64_t> grad_out_bdim;
-  std::tie(grad_out_value, grad_out_bdim) = unwrapTensorAtLevel(grad_out, cur_level);
-  Tensor input_value;
-  optional<int64_t> input_bdim;
-  std::tie(input_value, input_bdim) = unwrapTensorAtLevel(input, cur_level);
+  auto [grad_out_value, grad_out_bdim] = unwrapTensorAtLevel(grad_out, cur_level);
+  auto [input_value, input_bdim] = unwrapTensorAtLevel(input, cur_level);
   Tensor mean_value;
   optional<Tensor> weight_value;
   optional<int64_t> weight_bdim;
@@ -247,12 +243,8 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> batch_norm_backward_plumbing(
   if (running_var.defined()) {
     std::tie(running_var_value, running_var_bdim) = unwrapTensorAtLevel(running_var, cur_level);
   }
-  Tensor save_mean_value;
-  optional<int64_t> save_mean_bdim;
-  std::tie(save_mean_value, save_mean_bdim) = unwrapTensorAtLevel(save_mean, cur_level);
-  Tensor save_rstd_value;
-  optional<int64_t> save_rstd_bdim;
-  std::tie(save_rstd_value, save_rstd_bdim) = unwrapTensorAtLevel(save_rstd, cur_level);
+  auto [save_mean_value, save_mean_bdim] = unwrapTensorAtLevel(save_mean, cur_level);
+  auto [save_rstd_value, save_rstd_bdim] = unwrapTensorAtLevel(save_rstd, cur_level);
 
   // results
   Tensor grad_bias;
@@ -274,9 +266,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> batch_norm_backward_plumbing(
   if (output_mask[0]) {
     const auto grad_normalized_input = weight.defined() ?
       grad_out.transpose(0, 1) * padRight(weight, nullopt, grad_out.dim()) : grad_out.transpose(0, 1);           // [B0, C, B, *]
-    Tensor grad_normalized_input_value;
-    optional<int64_t> grad_normalized_input_bdim;
-    std::tie(grad_normalized_input_value, grad_normalized_input_bdim) =
+    auto [grad_normalized_input_value, grad_normalized_input_bdim] =
         unwrapTensorAtLevel(grad_normalized_input.transpose(0, 1), cur_level);       // [B0, B, C, *]
 
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
@@ -312,9 +302,7 @@ static std::tuple<Tensor,Tensor,Tensor> native_group_norm_plumbing(
     return at::native_group_norm(input, weight_opt, bias_opt, N, C, HxW, group, eps);
   }
 
-  Tensor input_value;
-  optional<int64_t> input_bdim;
-  std::tie(input_value, input_bdim) = unwrapTensorAtLevel(input, cur_level);
+  auto [input_value, input_bdim] = unwrapTensorAtLevel(input, cur_level);
 
   Tensor result0;
   Tensor mean;
@@ -401,20 +389,14 @@ static std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
     return at::native_group_norm_backward(grad_out, input, mean, rstd, weight_opt, N, C, HxW, group, output_mask);
   }
 
-  Tensor input_value;
-  optional<int64_t> input_bdim;
-  std::tie(input_value, input_bdim) = unwrapTensorAtLevel(input, cur_level);
+  auto [input_value, input_bdim] = unwrapTensorAtLevel(input, cur_level);
   Tensor weight_value;
   optional<int64_t> weight_bdim;
   if (weight.defined()){
     std::tie(weight_value, weight_bdim) = unwrapTensorAtLevel(weight, cur_level);
   }
-  Tensor mean_value;
-  optional<int64_t> mean_bdim;
-  std::tie(mean_value, mean_bdim) = unwrapTensorAtLevel(mean, cur_level);
-    Tensor rstd_value;
-  optional<int64_t> rstd_bdim;
-  std::tie(rstd_value, rstd_bdim) = unwrapTensorAtLevel(rstd, cur_level);
+  auto [mean_value, mean_bdim] = unwrapTensorAtLevel(mean, cur_level);
+  auto [rstd_value, rstd_bdim] = unwrapTensorAtLevel(rstd, cur_level);
 
   // results
   Tensor grad_input;
@@ -436,9 +418,7 @@ static std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
   if (output_mask[0]) {
     const auto grad_normalized_input = weight.defined() ?
       grad_out * padRight(weight, nullopt, grad_out.dim() - 1) : grad_out;
-    Tensor grad_normalized_input_value;
-    optional<int64_t> grad_normalized_input_bdim;
-    std::tie(grad_normalized_input_value, grad_normalized_input_bdim) =
+    auto [grad_normalized_input_value, grad_normalized_input_bdim] =
         unwrapTensorAtLevel(grad_normalized_input, cur_level);
 
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
@@ -611,18 +591,10 @@ static std::tuple<at::Tensor,at::Tensor,at::Tensor> native_layer_norm_backward_p
     return at::native_layer_norm_backward(grad_out, input, normalized_shape, mean, rstd,
         weight_opt, bias_opt, output_mask);
   }
-  Tensor grad_out_value;
-  optional<int64_t> grad_out_bdim;
-  std::tie(grad_out_value, grad_out_bdim) = unwrapTensorAtLevel(grad_out, cur_level);
-  Tensor input_value;
-  optional<int64_t> input_bdim;
-  std::tie(input_value, input_bdim) = unwrapTensorAtLevel(input, cur_level);
-  Tensor mean_value;
-  optional<int64_t> mean_bdim;
-  std::tie(mean_value, mean_bdim) = unwrapTensorAtLevel(mean, cur_level);
-  Tensor rstd_value;
-  optional<int64_t> rstd_bdim;
-  std::tie(rstd_value, rstd_bdim) = unwrapTensorAtLevel(rstd, cur_level);
+  auto [grad_out_value, grad_out_bdim] = unwrapTensorAtLevel(grad_out, cur_level);
+  auto [input_value, input_bdim] = unwrapTensorAtLevel(input, cur_level);
+  auto [mean_value, mean_bdim] = unwrapTensorAtLevel(mean, cur_level);
+  auto [rstd_value, rstd_bdim] = unwrapTensorAtLevel(rstd, cur_level);
   optional<Tensor> weight_value;
   optional<int64_t> weight_bdim;
   if (weight.defined()) {
@@ -662,9 +634,7 @@ static std::tuple<at::Tensor,at::Tensor,at::Tensor> native_layer_norm_backward_p
   if (output_mask[0]) {
     const auto grad_normalized_input = weight.defined() ?
       grad_out * weight : grad_out;
-    Tensor grad_normalized_input_value;
-    optional<int64_t> grad_normalized_input_bdim;
-    std::tie(grad_normalized_input_value, grad_normalized_input_bdim) =
+    auto [grad_normalized_input_value, grad_normalized_input_bdim] =
         unwrapTensorAtLevel(grad_normalized_input, cur_level);
 
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
