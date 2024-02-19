@@ -70,6 +70,7 @@ class WhyNoFuse:
     def __call__(self, reason, *args):
         self.reason = reason
         self.args = args
+        # print(self)
         fusion_log.debug(self)
 
     def __str__(self):
@@ -1282,7 +1283,9 @@ class Scheduler:
         self.create_foreach_nodes()
         self.topological_sort_schedule()
         self.logged_slow_fusion = set()
+        # print("pre nodes: ", self.nodes)
         self.fuse_nodes()
+        # print("post nodes: ", self.nodes)
         if config.reorder_for_compute_comm_overlap:
             # Refresh node_users and inverse_users to reflect fused nodes
             self.compute_node_users()
@@ -1782,6 +1785,7 @@ class Scheduler:
             - self.score_fusion(): assigns priority to a given fusion
         """
         fused_nodes = set(self.nodes)
+        # breakpoint()
         for node1, node2 in self.get_possible_fusions():
             node1 = self.name_to_fused_node[node1.get_first_name()]
             node2 = self.name_to_fused_node[node2.get_first_name()]
@@ -1982,6 +1986,9 @@ class Scheduler:
         del device2
 
         no_shared_data = self.score_fusion_memory(node1, node2) == 0
+        # if no_shared_data and "buf1_buf2_buf3" in str(node1):
+        #     breakpoint()
+        #     print()
         if no_shared_data and (
             not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
         ):

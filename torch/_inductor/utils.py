@@ -480,9 +480,24 @@ def get_kernel_metadata(node_schedule, wrapper):
         if "from_node" in node.meta:
             key = node.meta["from_node"][0][0]
             from_node_dict[key].append(node.name)
+
+    from . import ir
+    from .scheduler import BaseSchedulerNode
+
+    def get_node_schedule_name(schedule):
+        if isinstance(schedule, ir.ExternKernel):
+            return schedule.get_name()
+        assert isinstance(schedule, list), type(schedule)
+        name = []
+        for node in schedule:
+            if isinstance(node, BaseSchedulerNode):
+                name.append(node.get_name())
+        return "_".join(name)
+
     metadata = (
         f"{wrapper.comment} Source Nodes: [{', '.join(sorted(from_node_dict.keys()))}], "
-        f"Original ATen: [{', '.join(sorted(original_aten_dict.keys()))}]"
+        f"Original ATen: [{', '.join(sorted(original_aten_dict.keys()))}], "
+        f"Scheduler Nodes: {get_node_schedule_name(node_schedule)} "
     )
     # trace back to original node here
     detailed_metadata = []
