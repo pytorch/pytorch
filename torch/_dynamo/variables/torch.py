@@ -133,7 +133,9 @@ class BaseTorchVariable(VariableTracker):
         except Exception:
             name = f"torch_obj_{id(self.value)}"
         unique_var_name = "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
-        return codegen.setup_globally_cached(unique_var_name, self.value, False)
+        codegen.extend_output(
+            codegen.setup_globally_cached(unique_var_name, self.value, False)
+        )
 
     def as_proxy(self):
         return self.value
@@ -510,7 +512,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # We desugar it at trace-time into ranks by directly calling util
             # bake the result into the trace
             assert len(args) == 1, "Expected one arg (pg)"
-            assert isinstance(args[0], ProcessGroupVariable)
+            # Some constant pg functions address a pg via its name
+            assert isinstance(args[0], (ProcessGroupVariable, ConstantVariable))
 
             invocation_result = self.value(args[0].as_python_constant())
             # Note - while we *could* cook up sources around invocations, like a FunctionSource
