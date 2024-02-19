@@ -10,8 +10,8 @@ set -eou pipefail
 # Create and Check out to Release Branch
 # git checkout -b "${RELEASE_BRANCH}"
 
-# DRY_RUN=${DRY_RUN:-enabled}
-# python3 .github/scripts/tag_docker_images_for_release.py --version ${RELEASE_VERSION} --dry-run ${DRY_RUN}
+DRY_RUN=${DRY_RUN:-enabled}
+python3 .github/scripts/tag_docker_images_for_release.py --version ${RELEASE_VERSION} --dry-run ${DRY_RUN}
 
 # Change all GitHub Actions to reference the test-infra release branch
 # as opposed to main.
@@ -21,19 +21,19 @@ for i in .github/workflows/*.yml; do
 done
 
 # Change all checkout step in templates to not add ref to checkout
-# echo "Applying to templates"
-# for i in .github/templates/*.yml.j2; do
-#    sed -i 's#common.checkout(\(.*\))#common.checkout(\1, checkout_pr_head=False)#' $i;
-#done
+echo "Applying to templates"
+for i in .github/templates/*.yml.j2; do
+    sed -i 's#common.checkout(\(.*\))#common.checkout(\1, checkout_pr_head=False)#' $i;
+done
 
 # Triton wheel
-#echo "Triton Changes"
-#sed -i -e s#-\ main#"-\ release\/${RELEASE_VERSION}"# .github/workflows/build-triton-wheel.yml
+echo "Triton Changes"
+sed -i -e s#-\ main#"-\ release\/${RELEASE_VERSION}"# .github/workflows/build-triton-wheel.yml
 
 # XLA related changes
-#echo "XLA Changes"
-#sed -i -e s#--quiet#-b\ r"${RELEASE_VERSION}"# .ci/pytorch/common_utils.sh
-#sed -i -e s#.*#r"${RELEASE_VERSION}"# .github/ci_commit_pins/xla.txt
+echo "XLA Changes"
+sed -i -e s#--quiet#-b\ r"${RELEASE_VERSION}"# .ci/pytorch/common_utils.sh
+sed -i -e s#.*#r"${RELEASE_VERSION}"# .github/ci_commit_pins/xla.txt
 
 # Regenerate templates
 export RELEASE_VERSION_TAG=${RELEASE_VERSION}
