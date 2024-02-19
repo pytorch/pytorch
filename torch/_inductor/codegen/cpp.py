@@ -2198,7 +2198,7 @@ initializer(omp_priv={{{self.reduction_init_vec(reduction_type, dtype)}}})
                 if out_dtype in DTYPE_LOWP_FP and dtype == torch.float:
                     _lowp_fp_tmpvar_vec = f"{DTYPE_TO_CPP[out_dtype]}_{value}"
                     code.writeline(
-                        f"auto {_lowp_fp_tmpvar_vec} = cvt_fp32_to_lowp_fp<{DTYPE_TO_CPP[out_dtype]}>({value});"
+                        f"auto {_lowp_fp_tmpvar_vec} = at::vec::convert<{DTYPE_TO_CPP[out_dtype]}>({value});"
                     )
                     value = _lowp_fp_tmpvar_vec
                 else:
