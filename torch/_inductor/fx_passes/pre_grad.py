@@ -4,8 +4,8 @@ from typing import List, Optional
 
 import torch
 import torch.nn as nn
-from torch._dynamo.utils import detect_fake_mode
-from torch._utils_internal import print_graph
+from torch._dynamo.utils import counters, detect_fake_mode, optimus_scuba_log
+from torch._utils_internal import upload_graph
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
@@ -13,6 +13,7 @@ from torch.fx.experimental.optimization import (
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
+
 from .. import config
 
 from ..fx_utils import matches_module_function_pattern
@@ -27,13 +28,27 @@ from .misc_patterns import numpy_compat_normalization
 
 log = logging.getLogger(__name__)
 
-normalization_pass = PatternMatcherPass(prevent_match_across_mutations=True)
-merge_splits_pass = PatternMatcherPass(prevent_match_across_mutations=True)
-split_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
-unbind_stack_pass = PatternMatcherPass(prevent_match_across_mutations=True)
-efficient_conv_bn_eval_pass = PatternMatcherPass(prevent_match_across_mutations=True)
-merge_getitem_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
-predispatch_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+normalization_pass = PatternMatcherPass(
+    prevent_match_across_mutations=True, pass_name="normalization_pass"
+)
+merge_splits_pass = PatternMatcherPass(
+    prevent_match_across_mutations=True, pass_name="merge_splits_pass"
+)
+split_cat_pass = PatternMatcherPass(
+    prevent_match_across_mutations=True, pass_name="split_cat_pass"
+)
+unbind_stack_pass = PatternMatcherPass(
+    prevent_match_across_mutations=True, pass_name="unbind_stack_pass"
+)
+efficient_conv_bn_eval_pass = PatternMatcherPass(
+    prevent_match_across_mutations=True, pass_name="efficient_conv_bn_eval_pass"
+)
+merge_getitem_cat_pass = PatternMatcherPass(
+    prevent_match_across_mutations=True, pass_name="merge_getitem_cat_pass"
+)
+predispatch_pass = PatternMatcherPass(
+    prevent_match_across_mutations=True, pass_name="predispatch_pass"
+)
 # based on predispatch aten IR
 normalization_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
 merge_splits_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
@@ -114,17 +129,23 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
                     f"[Pre grad(predispatch IR)]Apply split_cat, index: {ind}",
                 )
         else:
+            # We only log the graph with changes to avoid the excessive compilation time
+            # https://fb.workplace.com/groups/257735836456307/permalink/633533465543207/
             gm = fuse_fx(gm, example_inputs)
             numpy_compat_normalization(gm.graph)
-            print_graph(gm.graph, "Before group batch fusion in pre grad pass.")
+            inductor_before_change = copy.deepcopy(counters["inductor"])
             group_batch_fusion_passes(gm.graph, pre_grad=True)
-            print_graph(gm.graph, "Before split cat in pre grad pass.")
-            for pattern_matcher_pass in pattern_matcher_passes:
-                pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
-                print_graph(
-                    gm.graph,
-                    "Apply split cat pattern matcher PatternMatcherPass in pre grad.",
+            if counters["inductor"] != inductor_before_change:
+                optimus_scuba_log["group_batch_fusion_pre_grad"] = upload_graph(
+                    gm.graph
                 )
+            for pattern_matcher_pass in pattern_matcher_passes:
+                inductor_before_change = copy.deepcopy(counters["inductor"])
+                pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
+                if counters["inductor"] != inductor_before_change:
+                    optimus_scuba_log[
+                        f"split_cat_pattern_{pattern_matcher_pass.pass_name}_pre_grad"
+                    ] = upload_graph(gm.graph)
 
     if config.pre_grad_custom_pass is not None:
         config.pre_grad_custom_pass(gm.graph)
@@ -147,8 +168,6 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
             config.fx_passes_numeric_check.get("num_iterations", 1),
             config.fx_passes_numeric_check.get("precision", 1e-4),
         )
-
-    print_graph(gm.graph, "After recompile in pre grad pass.")
 
     return gm
 

@@ -873,14 +873,7 @@ void validate_outputs(
       continue;
     }
 
-    if (!metadata.is_same_shape(grad)) {
-      if (metadata.is_expandable_to_shape(grad)) {
-        grad = metadata.reduce_grad(grad);
-      } else {
-        const auto message = metadata.incompatible_shape_error_message(i, grad);
-        TORCH_CHECK(false, format_error(message.str()));
-      }
-    }
+    grad = metadata.maybe_reduce(i, std::move(grad), format_error);
 
     bool input_is_complex =
         isComplexType(c10::typeMetaToScalarType(metadata.options().dtype()));

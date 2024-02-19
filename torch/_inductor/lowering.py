@@ -4,7 +4,6 @@ import logging
 import os
 import warnings
 from collections import defaultdict
-from collections.abc import Iterable
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
@@ -904,65 +903,6 @@ def slice_(x, dim=0, start=0, end=2**63, step=1):
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
-
-
-@register_lowering(aten.roll, type_promotion_kind=None)
-def roll(a, shifts, dims=tuple()):
-    """
-    This is based on torch._refs.roll(), but uses ModularIndexing().
-
-    We can't use the ref here because it is based on multiple calls to
-    torch.cat() that this will result in terrible code.
-    """
-    # ATen specifies int[1] type for shifts and dims which expands integers to tuples of length 1
-    if not isinstance(shifts, Iterable):
-        shifts = (shifts,)
-    if not isinstance(dims, Iterable):
-        dims = (dims,)
-    dims = [_validate_dim(a, d) for d in dims]
-
-    if sympy_product(a.get_size()) == 0:
-        return clone(a)
-
-    len_shifts = len(shifts)
-    len_dims = len(dims)
-    if len_shifts != 1 or len_dims != 1:
-        if len_shifts == 0:
-            raise RuntimeError("`shifts` required")
-        # Takes care of the case when dims is not specified (default)
-        # By default, the tensor is flattened before shifting, after which the original shape is restored
-        if len_dims == 0 and len_shifts == 1:
-            flat = view(a, [sympy_product(a.get_size())])
-            rolled = roll(flat, shifts, 0)
-            return view(rolled, list(a.get_size()))
-        if len_shifts != len_dims:
-            raise RuntimeError(
-                f"shifts and dimensions must align. shifts: {len_shifts}, dims: {len_dims}"
-            )
-        tail_shifts = shifts[1:]
-        tail_dims = dims[1:]
-        first_dim_rolled = roll(a, shifts[0], dims[0])
-        return roll(first_dim_rolled, tail_shifts, tail_dims)
-
-    (dim,) = dims
-    # TODO: Avoid guarding on shape here
-    size = V.graph.sizevars.evaluate_static_shape(a.get_size()[dim])
-    start = (size - shifts[0]) % size
-    a_loader = a.make_loader()
-
-    def fn(index):
-        index = list(index)
-        index[dim] = ModularIndexing(
-            index[dim] + start, sympy.Integer(1), sympy.expand(size)
-        )
-        return a_loader(index)
-
-    return Pointwise.create(
-        device=a.get_device(),
-        dtype=a.get_dtype(),
-        inner_fn=fn,
-        ranges=a.get_size(),
-    )
 
 
 @register_lowering(aten.as_strided, type_promotion_kind=None)
@@ -2249,10 +2189,8 @@ make_fallback(aten.fractional_max_pool3d)
 make_fallback(aten.frexp)
 make_fallback(aten.geqrf)
 make_fallback(aten.histc)
-make_fallback(aten.isin)
 make_fallback(aten.kthvalue)
 make_fallback(aten.linalg_cholesky_ex)
-make_fallback(aten.linalg_cross)
 make_fallback(aten._linalg_det)
 make_fallback(aten.linalg_householder_product)
 make_fallback(aten.linalg_inv_ex)
@@ -2267,7 +2205,6 @@ make_fallback(aten._linalg_slogdet)
 make_fallback(aten._linalg_solve_ex)
 make_fallback(aten.linalg_solve_triangular)
 make_fallback(aten._linalg_svd)
-make_fallback(aten.logcumsumexp)
 make_fallback(aten.lu_unpack)
 make_fallback(aten.max_pool3d_with_indices)
 make_fallback(aten.max_unpool2d)
@@ -4985,6 +4922,7 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
 
 fallback_cumsum = fallback_handler(aten.cumsum.default)
 fallback_cumprod = fallback_handler(aten.cumprod.default)
+fallback_logcumsumexp = fallback_handler(aten.logcumsumexp.default)
 
 
 @register_lowering(aten.cumsum)
@@ -5022,6 +4960,26 @@ def cumprod(x, axis=None, dtype=None):
     result = ir.Scan.create(**kwargs, combine_fn=ops.mul, init=1)
     if result is None:
         return fallback_cumprod(x, dim=axis, dtype=dtype)
+    return result
+
+
+@register_lowering(aten.logcumsumexp)
+def logcumsumexp(x, dim):
+    def log_add_exp_helper(a, b):
+        min_v = ops.minimum(a, b)
+        max_v = ops.maximum(a, b)
+        mask = (min_v != max_v) | (~ops.isinf(min_v))
+        return ops.where(mask, ops.log1p(ops.exp(min_v - max_v)) + max_v, a)
+
+    dtype = x.get_dtype()
+    if len(x.get_size()) == 0:
+        assert dim in [0, -1]
+        return clone(x)
+
+    kwargs = _make_scan_inner(x, axis=dim, dtype=dtype)
+    result = ir.Scan.create(**kwargs, combine_fn=log_add_exp_helper, init=float("-inf"))
+    if result is None:
+        return fallback_logcumsumexp(x, dim=dim)
     return result
 
 
@@ -5342,8 +5300,10 @@ register_inplace(aten.__ixor__, aten.__xor__)
 
 @register_lowering(aten.sym_constrain_range)
 def sym_constrain_range(a, min=None, max=None):
-    tracing_context = torch._guards.TracingContext.get()
-    assert a in tracing_context.fake_mode.shape_env.var_to_range
+    tracing_context = torch._guards.TracingContext.try_get()
+    assert (
+        tracing_context is None or a in tracing_context.fake_mode.shape_env.var_to_range
+    )
     return a
 
 
@@ -5398,6 +5358,13 @@ def accumulate_grad_(variable, new_grad):
     variable.realize()
     new_grad.realize()
     ir.AccumulateGrad(variable, new_grad)
+    return variable
+
+
+@register_lowering(torch.ops.inductor.resize_storage_bytes_)
+def resize_storage_bytes_(variable, new_size):
+    variable.realize()
+    ir.ResizeStorageBytes(variable, new_size)
     return variable
 
 
@@ -5592,6 +5559,21 @@ try:
                 group_name,
             )
         )
+
+    @register_lowering(_c10d_functional.broadcast)
+    def _broadcast(inp, src, group_name):
+        inp = clone(inp)
+        ir._CollectiveKernel.create_inplace(
+            _c10d_functional.broadcast_.default, inp, src, group_name
+        )
+        return inp
+
+    @register_lowering(_c10d_functional.broadcast_)
+    def _broadcast_(inp, src, group_name):
+        ir._CollectiveKernel.create_inplace(
+            _c10d_functional.broadcast_.default, inp, src, group_name
+        )
+        return inp
 
     @register_lowering(_c10d_functional.wait_tensor)
     def _wait_tensor(inp):

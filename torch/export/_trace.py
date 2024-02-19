@@ -1,7 +1,9 @@
 import dataclasses
 import functools
+import inspect
 import logging
 import re
+import time
 import warnings
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
@@ -29,6 +31,7 @@ from torch._export.wrappers import _wrap_submodules
 from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._utils_internal import log_export_usage
 from torch.export.exported_program import OutputKind
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -169,10 +172,14 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
             add_root = True
             if nn_module_stack := node.meta.get("nn_module_stack", {}):
                 path, ty = next(iter(nn_module_stack.values()))
-                assert issubclass(ty, torch.nn.Module)
-                # TODO Figure out why sometimes we have root sometimes we don't.
-                if path == root and ty is root_cls:
-                    add_root = False
+                # After deserializing the class `ty` might not exist anymore so
+                # it could be a string
+                if inspect.isclass(ty) and issubclass(ty, torch.nn.Module):
+                    # TODO Figure out why sometimes we have root sometimes we don't.
+                    if path == root and ty is root_cls:
+                        add_root = False
+                else:
+                    assert isinstance(ty, str)
             if add_root:
 
                 def normalize_path(path):
@@ -280,11 +287,15 @@ def _export_to_torch_ir(
     preserve_module_call_signature: Tuple[str, ...] = (),
     disable_constraint_solver: bool = False,
     restore_fqn: bool = True,
+    _log_export_usage: bool = True,
 ) -> torch.fx.GraphModule:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
     operations inside and produce a torch.fx.GraphModule in torch IR.
     """
+
+    if _log_export_usage:
+        log_export_usage(event="export.private_api", flags={"_export_to_torch_ir"})
 
     constraints = constraints or []
     kwargs = kwargs or {}
@@ -312,6 +323,7 @@ def _export_to_torch_ir(
                     assume_static_by_default=True,
                     tracing_mode="symbolic",
                     disable_constraint_solver=disable_constraint_solver,
+                    _log_export_usage=_log_export_usage,
                 )(
                     *args,
                     **kwargs,
@@ -496,6 +508,39 @@ def rewrite_non_persistent_buffers(
                 constants[spec.target] = orig_mod.get_buffer(spec.target)
 
 
+_EXPORT_FLAGS: Optional[Set[str]] = None
+
+
+def _log_export_wrapper(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        global _EXPORT_FLAGS
+        try:
+            start = time.time()
+            ep = fn(*args, **kwargs)
+            end = time.time()
+            log_export_usage(
+                event="export.time", metrics=end - start, flags=_EXPORT_FLAGS
+            )
+        except Exception as e:
+            t = type(e)
+            error_type = t.__module__ + "." + t.__qualname__
+            log_export_usage(
+                event="export.error",
+                type=error_type,
+                message=str(e),
+                flags=_EXPORT_FLAGS,
+            )
+            raise e
+        finally:
+            _EXPORT_FLAGS = None
+
+        return ep
+
+    return wrapper
+
+
+@_log_export_wrapper
 @_disable_prexisiting_fake_mode
 def _export(
     f: torch.nn.Module,
@@ -551,7 +596,15 @@ def _export(
     """
     from .dynamic_shapes import _process_dynamic_shapes
 
+    global _EXPORT_FLAGS
+    flags = set()
+    flags.add("strict" if strict else "non_strict")
+    flags.add("pre_dispatch" if pre_dispatch else "aot_dispatch")
+    log_export_usage(event="export.enter", flags=flags)
+    _EXPORT_FLAGS = flags
+
     if constraints is not None:
+        log_export_usage(event="export.private_api", flags={"constraints"})
         warnings.warn(
             "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
             "and will not be supported in the future. "
@@ -716,6 +769,7 @@ def _export(
         constraints,
         preserve_module_call_signature=preserve_module_call_signature,
         restore_fqn=False,  # don't need to restore because we will do it later
+        _log_export_usage=False,
     )
 
     # We detect the fake_mode by looking at gm_torch_level's placeholders, this is the fake_mode created in dynamo.
