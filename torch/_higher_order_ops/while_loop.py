@@ -2,15 +2,16 @@ import torch
 import torch.utils._pytree as pytree
 
 from torch._C import DispatchKey
+
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
     _maybe_run_with_interpreter,
+    _set_compilation_env,
     autograd_not_implemented,
     UnsupportedAliasMutationException,
 )
 from torch._ops import HigherOrderOperator
-
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
@@ -42,7 +43,6 @@ class WhileLoopOp(HigherOrderOperator):
 while_loop_op = HigherOrderOperator("while_loop")
 
 
-# TODO(yidi): turn on dynamo in eager-mode
 def while_loop(cond_fn, body_fn, operands):
     r"""
     Run body_fn(*operands) while cond_fn(*operands) returns a True scalar tensor. Returns the output of body_fn or
@@ -97,8 +97,27 @@ def while_loop(cond_fn, body_fn, operands):
         - 'while_loop' only supports **inference** right now. Autograd will be supported in the future.
 
     """
-    assert isinstance(operands, tuple)
-    return while_loop_op(cond_fn, body_fn, operands)
+    if torch._dynamo.is_compiling():
+        return while_loop_op(cond_fn, body_fn, operands)
+
+    def _validate_input(cond_fn, body_fn, operands):
+        if not callable(cond_fn) or not callable(body_fn):
+            raise RuntimeError("Expect cond_fn and body_fn to be callbale.")
+
+        if not isinstance(operands, (tuple, list)) or pytree.tree_any(
+            lambda t: not isinstance(t, torch.Tensor), operands
+        ):
+            raise RuntimeError(
+                "Expect operands to be a tuple of possibly nested dict/list/tuple that only"
+                f"consists of tensor leaves, but got {operands}."
+            )
+
+    _validate_input(cond_fn, body_fn, operands)
+
+    with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
+        return torch.compile(while_loop_op, backend="eager", fullgraph=True)(
+            cond_fn, body_fn, operands
+        )
 
 
 @while_loop_op.py_impl(DispatchKey.CompositeExplicitAutograd)

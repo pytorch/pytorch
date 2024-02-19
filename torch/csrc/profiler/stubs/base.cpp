@@ -12,7 +12,8 @@ namespace {
 struct DefaultStubs : public ProfilerStubs {
   DefaultStubs(const char* name) : name_{name} {}
 
-  void record(int*, ProfilerVoidEventStub*, int64_t*) const override {
+  void record(c10::DeviceIndex*, ProfilerVoidEventStub*, int64_t*)
+      const override {
     fail();
   }
   float elapsed(const ProfilerVoidEventStub*, const ProfilerVoidEventStub*)

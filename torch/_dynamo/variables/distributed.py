@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import inspect
 from typing import Dict, List
 
@@ -48,13 +50,15 @@ def is_constant_pg_functions(value):
         return False
 
     from torch.distributed.distributed_c10d import (
+        _get_group_size_by_name,
         _get_group_tag,
         get_process_group_ranks,
     )
 
     constant_processgroup_functions = [
-        get_process_group_ranks,
+        _get_group_size_by_name,
         _get_group_tag,
+        get_process_group_ranks,
     ]
 
     return inspect.isfunction(value) and value in constant_processgroup_functions
@@ -168,6 +172,24 @@ class DeviceMeshVariable(DistributedVariable):
         if name == "ndim":
             return ConstantVariable.create(self.value.ndim)
         return super().var_getattr(tx, name)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "size":
+            const_args = [x.as_python_constant() for x in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            return ConstantVariable.create(self.value.size(*const_args, **const_kwargs))
+        if name == "get_coordinate":
+            return ConstantVariable.create(self.value.get_coordinate())
+        if name == "get_group":
+            return ConstantVariable.create(self.value.get_group())
+
+        return super().call_method(tx, name, args, kwargs)
 
 
 class ProcessGroupVariable(DistributedVariable):

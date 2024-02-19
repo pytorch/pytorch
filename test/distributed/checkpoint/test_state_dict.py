@@ -11,6 +11,9 @@ import torch.nn as nn
 from torch.distributed._composable import fully_shard, replicate
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor, init_device_mesh
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    apply_activation_checkpointing,
+)
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
@@ -140,6 +143,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         use_composable: bool,
         use_dtensor: bool,
         wrapping: Tuple[nn.Module] = (),
+        compile_model: bool = False,
     ) -> None:
         if not use_orig_params and use_composable:
             return
@@ -179,6 +183,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                         use_orig_params=use_orig_params,
                     )
 
+            if compile_model:
+                dist_model = torch.compile(dist_model)
             dist_optim = torch.optim.Adam(dist_model.parameters(), lr=1e-3)
             return orig_model, orig_optim, copy_optim, dist_model, dist_optim
 
@@ -195,6 +201,17 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 "wrapping": [tuple(), (nn.Linear, UnitModule)],
             },
             self._test_fsdp,
+        )
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_compiled_fsdp(self) -> None:
+        self._test_fsdp(
+            use_orig_params=True,
+            use_composable=False,
+            use_dtensor=False,
+            wrapping=tuple(),
+            compile_model=True,
         )
 
     def _test_ddp(self, use_composable: bool) -> None:
@@ -442,6 +459,19 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         else:
             self.assertEqual(mst, {})
             self.assertEqual(ost, {})
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_activation_ckpt_fqns(self) -> None:
+        """Tests that activation checkpointing prefixes are removed from module names"""
+        model = CompositeParamModel(device=torch.device("cuda"))
+        original_keys = get_model_state_dict(model).keys()
+
+        apply_activation_checkpointing(model)
+        model = DDP(model)
+        new_keys = get_model_state_dict(model).keys()
+
+        self.assertEqual(original_keys, new_keys)
 
 
 if __name__ == "__main__":
