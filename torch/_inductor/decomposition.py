@@ -656,3 +656,9 @@ def put(self, index, source, accumulate=False):
         flattened, [index], source.reshape(index.shape), accumulate
     )
     return flattened.reshape(self.shape)
+
+
+@register_decomposition(aten.put_)
+def put_(self, index, source, accumulate=False):
+    out = aten.put(self, index, source, accumulate=accumulate)
+    return self.copy_(out)
