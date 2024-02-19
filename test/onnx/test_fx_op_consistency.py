@@ -1020,15 +1020,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
     ),
     xfail(
-        "put",
-        dtypes=onnx_test_common.BOOL_TYPES,
-        reason=onnx_test_common.reason_onnx_script_does_not_support("index_put", "bool"),
-    ),
-    xfail(
-        "put",
-        reason=onnx_test_common.reason_dynamo_does_not_support("fixme: indices element out of data bound"),
-    ),
-    xfail(
         "quantile",
         reason=onnx_test_common.reason_dynamo_does_not_support("aten.equal.default")
     ),

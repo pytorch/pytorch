@@ -1000,6 +1000,8 @@ aten::poisson.out
 aten::polygamma
 aten::polygamma.out
 aten::polygamma_
+aten::put
+aten::put.out
 aten::q_per_channel_axis
 aten::q_per_channel_scales
 aten::q_per_channel_scales.out
