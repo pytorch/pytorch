@@ -16,7 +16,8 @@ CUDAAllocatorConfig::CUDAAllocatorConfig()
       m_pinned_num_register_threads(1),
       m_expandable_segments(false),
       m_release_lock_on_cudamalloc(false),
-      m_pinned_use_cuda_host_register(false) {
+      m_pinned_use_cuda_host_register(false),
+      m_last_allocator_settings("") {
   m_roundup_power2_divisions.assign(kRoundUpPowerOfTwoIntervals, 0);
 }
 
@@ -242,6 +243,10 @@ void CUDAAllocatorConfig::parseArgs(const char* env) {
 
   if (env == nullptr) {
     return;
+  }
+  {
+    std::lock_guard<std::mutex> lock(m_last_allocator_settings_mutex);
+    m_last_allocator_settings = env;
   }
 
   std::vector<std::string> config;

@@ -846,7 +846,7 @@ def infer_size_shapes(a: ShapeType, b: ShapeType) -> Tuple[int, ...]:
             (sizeA == sizeB) or (sizeA == 1) or (sizeB == 1),
             lambda: (
                 f"The size of tensor a ({sizeA}) must match the size of "
-                f"tensor b ({sizeB}) at non-singleton dimension {i}"
+                f"tensor b ({sizeB}) at non-jagged dimension {i}"
             ),
         )
 
@@ -1566,13 +1566,13 @@ def make_contiguous_strides_for(
     if not shape:
         return ()
 
-    from torch.fx.experimental.symbolic_shapes import is_singleton
+    from torch.fx.experimental.symbolic_shapes import is_nested_int
 
     multiplier = 1
     strides = []
     for l in reversed(shape):
         strides.append(multiplier)
-        multiplier *= l if is_singleton(l) else sym_max(l, 1)
+        multiplier *= l if is_nested_int(l) else sym_max(l, 1)
 
     result = tuple(reversed(strides))
 
