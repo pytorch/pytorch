@@ -14,9 +14,12 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/fbgemm_linear_fp16_weight_fp32_activation_native.h>
+#include <ATen/ops/fbgemm_linear_fp16_weight_native.h>
 #include <ATen/ops/fbgemm_linear_int8_weight_fp32_activation_native.h>
 #include <ATen/ops/fbgemm_linear_int8_weight_native.h>
 #include <ATen/ops/fbgemm_linear_quantize_weight_native.h>
+#include <ATen/ops/fbgemm_pack_gemm_matrix_fp16_native.h>
 #include <ATen/ops/fbgemm_pack_quantized_matrix_native.h>
 #endif
 
@@ -373,6 +376,94 @@ void HandleWeightsSaturation(int64_t N, float* weight) {
 
 } // namespace
 
+Tensor fbgemm_pack_gemm_matrix_fp16(const Tensor& weight) {
+  TORCH_WARN_ONCE("fbgemm_pack_gemm_matrix_fp16 is deprecated "
+                  "and will be removed in a future PyTorch release.")
+
+  // We make a strong guarantee that models using these operators will have the
+  // same numerics across different machines. Therefore, we do not provide a
+  // fallback path and rather fail loudly if we cannot run FBGEMM.
+  TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
+
+  const int64_t K = weight.size(1);
+  const int64_t N = weight.size(0);
+  Tensor weight_contig = weight.contiguous();
+  float* weight_contig_ptr = weight_contig.data_ptr<float>();
+  HandleWeightsSaturation(K * N, weight_contig_ptr);
+
+  // TODO(mingzhe09088):
+  // Consider using a functor here in PackedGemmMatrixFP16
+  // Comments from (XQ): Not entirely sure this make_unique is safe. make_unique
+  // is created with regular "new", and freed through TypeMetaData::deleteFn in
+  // this function. This is perfectly fine if the tensors are created and freed
+  // within this translation unit. It might be very problematic if that tensor
+  // flows across dll boundaries.
+  auto ptr = std::make_unique<fbgemm::PackedGemmMatrixFP16>(
+      fbgemm::matrix_op_t::Transpose, K, N, 1, weight_contig_ptr);
+  c10::intrusive_ptr<LinearPackedParamsBase> packed_weight =
+      c10::make_intrusive<PackedLinearWeightFp16>(std::move(ptr), c10::nullopt);
+  auto unique_ptr_wrapper =
+      std::make_unique<decltype(packed_weight)>(std::move(packed_weight));
+  return cpp_custom_type_hack::create(
+      std::move(unique_ptr_wrapper), weight.options());
+}
+
+Tensor fbgemm_linear_fp16_weight_fp32_activation(
+    const Tensor& input,
+    const Tensor& packed_weight,
+    const Tensor& bias) {
+  TORCH_WARN_ONCE("fbgemm_linear_fp16_weight_fp32_activation is deprecated "
+                  "and will be removed in a future PyTorch release.")
+
+  // We make a strong guarantee that models using these operators will have the
+  // same numerics across different machines. Therefore, we do not provide a
+  // fallback path and rather fail loudly if we cannot run FBGEMM.
+  TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
+
+  const Tensor input_contig = input.contiguous();
+  const float* input_ptr = input_contig.data_ptr<float>();
+
+  // Pull out the PackedGemmMatrixFP16 instance from the owning tensor
+  const fbgemm::PackedGemmMatrixFP16& packed_weight_fp16 =
+      *c10::dynamic_intrusive_pointer_cast<PackedLinearWeightFp16>(
+           cpp_custom_type_hack::cast<
+               c10::intrusive_ptr<LinearPackedParamsBase>>(packed_weight))
+           ->w;
+
+  TORCH_CHECK(input.size(input.dim() - 1) == packed_weight_fp16.numRows())
+  TORCH_CHECK(input.dim() >= 2);
+  TORCH_CHECK(bias.dim() == 1);
+
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+  const int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
+  const int64_t N = packed_weight_fp16.numCols();
+  std::vector<int64_t> output_size = input.sizes().vec();
+  output_size.back() = N;
+  Tensor output = at::empty(output_size, input.options().dtype(at::kFloat));
+
+  // Call the fp16 gemm interface
+  fbgemm::cblas_gemm_compute(
+      fbgemm::matrix_op_t::NoTranspose,
+      M,
+      input_ptr,
+      packed_weight_fp16,
+      0.0f,
+      output.data_ptr<float>());
+
+  // Add bias term
+  output.add_(bias);
+
+  return output;
+}
+
+Tensor fbgemm_linear_fp16_weight(
+    const Tensor& input,
+    const Tensor& packed_weight,
+    const Tensor& bias) {
+  return at::native::fbgemm_linear_fp16_weight_fp32_activation(
+      input, packed_weight, bias);
+}
+
 #else // USE_FBGEMM
 
 Tensor fbgemm_linear_int8_weight_fp32_activation(
@@ -439,6 +530,45 @@ Tensor fbgemm_pack_quantized_matrix(
     int64_t /*K*/,
     int64_t /*N*/) {
   TORCH_WARN_ONCE("fbgemm_pack_quantized_matrix is deprecated "
+                  "and will be removed in a future PyTorch release.")
+
+  // We make a strong guarantee that models using these operators will have the
+  // same numerics across different machines. Therefore, we do not provide a
+  // fallback path and rather fail loudly if we cannot run FBGEMM.
+  TORCH_CHECK(
+      false, "This PyTorch installation was not built with FBGEMM operators");
+}
+
+Tensor fbgemm_pack_gemm_matrix_fp16(const Tensor& weight) {
+  TORCH_WARN_ONCE("fbgemm_pack_gemm_matrix_fp16 is deprecated "
+                  "and will be removed in a future PyTorch release.")
+
+  // We make a strong guarantee that models using these operators will have the
+  // same numerics across different machines. Therefore, we do not provide a
+  // fallback path and rather fail loudly if we cannot run FBGEMM.
+  TORCH_CHECK(
+      false, "This PyTorch installation was not built with FBGEMM operators");
+}
+
+Tensor fbgemm_linear_fp16_weight_fp32_activation(
+    const Tensor& input,
+    const Tensor& packed_weight,
+    const Tensor& bias) {
+  TORCH_WARN_ONCE("fbgemm_linear_fp16_weight_fp32_activation is deprecated "
+                  "and will be removed in a future PyTorch release.")
+
+  // We make a strong guarantee that models using these operators will have the
+  // same numerics across different machines. Therefore, we do not provide a
+  // fallback path and rather fail loudly if we cannot run FBGEMM.
+  TORCH_CHECK(
+      false, "This PyTorch installation was not built with FBGEMM operators");
+}
+
+Tensor fbgemm_linear_fp16_weight(
+    const Tensor& input,
+    const Tensor& packed_weight,
+    const Tensor& bias) {
+  TORCH_WARN_ONCE("fbgemm_linear_fp16_weight is deprecated "
                   "and will be removed in a future PyTorch release.")
 
   // We make a strong guarantee that models using these operators will have the
