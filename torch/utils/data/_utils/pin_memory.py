@@ -4,7 +4,6 @@ These **needs** to be in global scope since Py2 doesn't support serializing
 static methods.
 """
 
-import collections
 import queue
 
 import torch
