@@ -14,9 +14,9 @@
     "You're trying to build PyTorch with a too old version of GCC. We need GCC 9 or later."
 #endif
 
-#if defined(__clang__) && __clang_major__ < 10
+#if defined(__clang__) && __clang_major__ < 9
 #error \
-    "You're trying to build PyTorch with a too old version of Clang. We need Clang 10 or later."
+    "You're trying to build PyTorch with a too old version of Clang. We need Clang 9 or later."
 #endif
 
 #if (defined(_MSC_VER) && (!defined(_MSVC_LANG) || _MSVC_LANG < 201703L)) || \
