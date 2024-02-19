@@ -651,15 +651,8 @@ def masked_scatter(self, mask, source):
 
 @register_decomposition(aten.put)
 def put(self, index, source, accumulate=False):
-    stride = utils.compute_elementwise_output_strides(self)
     flattened = self.flatten()
     flattened = torch.index_put(
         flattened, [index], source.reshape(index.shape), accumulate
     )
     return flattened.reshape(self.shape)
-
-
-@register_decomposition(aten.put_)
-def put_(self, index, source, accumulate=False):
-    out = aten.put(self, index, source, accumulate=accumulate)
-    return self.copy_(out)
