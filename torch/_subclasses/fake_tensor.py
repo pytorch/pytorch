@@ -267,6 +267,8 @@ class FakeTensorConverter:
         if type(t) is torch.nn.Parameter:
             assert not make_constant
 
+        maybe_constant_t = t if make_constant else None
+
         def mk_fake_tensor(make_meta_t, *, orig_t=None):
             # NB: don't use in_kernel_invocation_manager. to
             # ensure FakeTensor can internally do constant computation
@@ -284,7 +286,7 @@ class FakeTensorConverter:
                     fake_mode,
                     make_meta_t(),
                     existing_device,
-                    constant=t if make_constant else None,
+                    constant=maybe_constant_t,
                 )
 
         out = self.meta_converter(
