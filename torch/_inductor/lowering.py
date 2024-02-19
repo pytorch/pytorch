@@ -4674,33 +4674,12 @@ def use_two_step_variance(x, axis, keepdim):
     kwargs = _make_reduction_inner(
         x, axis=axis, keepdims=keepdim, dtype=None, override_return_dtype=None
     )
-
-    # Case 1: Unrolled reductions
-    #
-    # Unrolled reductions don't invalidate loads, so there is no advantage to welford.
-    ranges = kwargs["ranges"]
     reduction_numel = sympy_product(kwargs["reduction_ranges"])
-    is_unrolled = (
-        isinstance(reduction_numel, sympy.Integer)
-        and int(reduction_numel) < config.unroll_reductions_threshold
-        and sympy_product(ranges) != 1
-    )
 
-    if is_unrolled:
-        return True
-
-    # Case 2: Half precision inputs
-    #
-    # Welford reduction trades off fewer passes over the data with a higher
-    # computational cost of the combine function. Half-precision loads use less
-    # bandwidth, so the extra computation cost of welford becomes a bottleneck.
-    # The exception is split reductions where the reduction in kernel launches and
-    # float32 intermediate tensors make welford profitable again.
-    if x.get_dtype() not in {torch.bfloat16, torch.float16}:
-        return False
-
+    # Disable for everything except split reductions while we
+    # investigate performance issues.
     _, split = ir.Reduction.num_splits(
-        reduction_numel=sympy_product(kwargs["reduction_ranges"]),
+        reduction_numel=reduction_numel,
         reduction_type="sum",
         **kwargs,
     )
