@@ -693,26 +693,21 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         # It's safe to assume args/kwargs from orig_fn map 1:1 to args/kwargs of remapped_fn,
         # since that's the contract for putting a mapping in `traceable_collective_remaps`
 
-        # Merge args and kwargs so positional and keyword args
-        # can be located the same way.
+        # Merge args into kwargs so positional and keyword args
+        # can be processed the same way.
         signature = inspect.signature(self.fn)
-        arg_names = list(signature.parameters.keys())
-        new_kwargs = {}
-        for i in range(len(arg_names)):
-            if i < len(args):
-                new_kwargs[arg_names[i]] = args[i]
-            elif arg_names[i] in kwargs:
-                new_kwargs[arg_names[i]] = kwargs[arg_names[i]]
+        kwargs = dict(signature.bind(*args, **kwargs).arguments)
+        args = ()
 
-        if "async_op" in new_kwargs and new_kwargs["async_op"].as_python_constant():
+        if "async_op" in kwargs and kwargs["async_op"].as_python_constant():
             unimplemented(
                 f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.fn}"
             )
 
-        if kwargs.get("group") is None or new_kwargs["group"].value is None:
-            new_kwargs["group"] = ProcessGroupVariable.get_global_pg_variable()
+        if kwargs.get("group") is None or kwargs["group"].value is None:
+            kwargs["group"] = ProcessGroupVariable.get_global_pg_variable()
 
-        return self.replacement_var.call_function(tx, (), new_kwargs)
+        return self.replacement_var.call_function(tx, args, kwargs)
 
 
 class FunctoolsPartialVariable(VariableTracker):
