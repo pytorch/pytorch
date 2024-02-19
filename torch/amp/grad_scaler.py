@@ -275,15 +275,11 @@ class GradScaler:
 
             for device, per_dtype_grads in per_device_and_dtype_grads.items():
                 for grads in per_dtype_grads.values():
-                    try:
-                        torch._amp_foreach_non_finite_check_and_unscale_(
-                            grads,
-                            per_device_found_inf.get(device),
-                            per_device_inv_scale.get(device),
-                        )
-                    except Exception as e:
-                        raise NotImplementedError(f"grad scaler required op function(torch._amp_foreach_non_finite_check_and_unscale_)"
-                                                  f"is not implemented on {device}")
+                    torch._amp_foreach_non_finite_check_and_unscale_(
+                        grads,
+                        per_device_found_inf.get(device),
+                        per_device_inv_scale.get(device),
+                    )
 
         return per_device_found_inf._per_device_tensors
 
@@ -518,18 +514,14 @@ class GradScaler:
                 for i in range(1, len(found_infs)):
                     found_inf_combined += found_infs[i]
             
-            try:
-                torch._amp_update_scale_(
-                    _scale,
-                    _growth_tracker,
-                    found_inf_combined,
-                    self._growth_factor,
-                    self._backoff_factor,
-                    self._growth_interval,
-                )
-            except Exception as e:
-                raise NotImplementedError(f"grad scaler required op function(torch._amp_update_scale_)"
-                                          f"is not implemented on {_scale.device.type}")
+            torch._amp_update_scale_(
+                _scale,
+                _growth_tracker,
+                found_inf_combined,
+                self._growth_factor,
+                self._backoff_factor,
+                self._growth_interval,
+            )
 
         # To prepare for next iteration, clear the data collected from optimizers this iteration.
         self._per_optimizer_states = defaultdict(_refresh_per_optimizer_state)
