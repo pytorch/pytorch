@@ -26,7 +26,6 @@ import tempfile
 import textwrap
 import threading
 import warnings
-import platform
 import weakref
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
@@ -1026,17 +1025,19 @@ cdll.LoadLibrary("__lib_path__")
 
             return True
 
+
 @dataclasses.dataclass
 class VecNEON(VecISA):
-    _bit_width = 256 #This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec256/vec256_float_neon.h
+    _bit_width = 256  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec256/vec256_float_neon.h
     _macro = "CPU_CAPABILITY_NEON"
-    _arch_flags = "" # Unused, even for AVX
+    _arch_flags = ""  # Unused, even for AVX
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16}
 
     def __str__(self) -> str:
-        return "neon" # Unused
+        return "neon"  # Unused
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
 
 @dataclasses.dataclass
 class VecAVX512(VecISA):
@@ -1093,7 +1094,11 @@ class InvalidVecISA(VecISA):
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecNEON()] # This order matters for test_cpu_repro
+supported_vec_isa_list = [
+    VecAVX512(),
+    VecAVX2(),
+    VecNEON(),
+]  # This order matters for test_cpu_repro
 
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
@@ -1112,7 +1117,11 @@ def valid_vec_isa_list() -> List[VecISA]:
         _cpu_info_content = _cpu_info.read()
         for isa in supported_vec_isa_list:
             # cpuinfo does not reveal info about NEON support. All aarch64 processors do support NEON though.
-            if (str(isa) in _cpu_info_content) or (isinstance(isa, VecNEON) and platform.processor() == "aarch64") and isa: 
+            if (
+                (str(isa) in _cpu_info_content)
+                or (isinstance(isa, VecNEON) and platform.processor() == "aarch64")
+                and isa
+            ):
                 isa_list.append(isa)
         return isa_list
 
