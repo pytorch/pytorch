@@ -10,6 +10,7 @@ import queue
 import torch
 from . import MP_STATUS_CHECK_INTERVAL
 from torch._utils import ExceptionWrapper
+from ..._pytree import tree_map
 
 
 def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
@@ -53,27 +54,13 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
         do_one_step()
 
 def pin_memory(data, device=None):
-    if isinstance(data, torch.Tensor):
-        return data.pin_memory(device)
-    elif isinstance(data, (str, bytes)):
-        return data
-    elif isinstance(data, collections.abc.Mapping):
-        try:
-            return type(data)({k: pin_memory(sample, device) for k, sample in data.items()})  # type: ignore[call-arg]
-        except TypeError:
-            # The mapping type may not support `__init__(iterable)`.
-            return {k: pin_memory(sample, device) for k, sample in data.items()}
-    elif isinstance(data, tuple) and hasattr(data, '_fields'):  # namedtuple
-        return type(data)(*(pin_memory(sample, device) for sample in data))
-    elif isinstance(data, tuple):
-        return [pin_memory(sample, device) for sample in data]  # Backwards compatibility.
-    elif isinstance(data, collections.abc.Sequence):
-        try:
-            return type(data)([pin_memory(sample, device) for sample in data])  # type: ignore[call-arg]
-        except TypeError:
-            # The sequence type may not support `__init__(iterable)` (e.g., `range`).
-            return [pin_memory(sample, device) for sample in data]
-    elif hasattr(data, "pin_memory"):
-        return data.pin_memory()
-    else:
-        return data
+    def pin_mem(tensor):
+        if isinstance(tensor, torch.Tensor):
+            return tensor.pin_memory(device)
+        elif isinstance(tensor, (str, bytes)):
+            return tensor
+        elif hasattr(tensor, "pin_memory"):
+            return tensor.pin_memory()
+        else:
+            return tensor
+    return tree_map(pin_mem, data)
