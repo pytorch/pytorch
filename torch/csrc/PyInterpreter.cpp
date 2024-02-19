@@ -384,9 +384,10 @@ void ConcretePyInterpreterVTable::python_dispatcher(
   // Currently only used by Autocast, as AutocastFunctionality acts as
   // a Per Backend Functionality key, which is not sufficient to determine
   // which backend is enabled.
-  auto found = getDispatchKeySetFuncs().find(ks.highestFunctionalityKey());
-  if (found != getDispatchKeySetFuncs().end())
+  auto found = getDKFuncMaps().find(ks.highestFunctionalityKey());
+  if (found != getDKFuncMaps().end()) {
     ks = found->second(ks);
+  }
 
   c10::DispatchKey k = ks.highestPriorityTypeId();
   // TODO: allow this to be non-owning

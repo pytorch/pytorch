@@ -8,66 +8,59 @@
 namespace at::autocast {
 
 bool is_enabled() {
-  return is_backend_enabled(BackendComponent::CUDABit);
+  return is_backend_autocast_enabled(BackendComponent::CUDABit);
 }
 
 void set_enabled(bool new_enabled) {
-  set_autocast_backend(
-      1 << static_cast<uint8_t>(BackendComponent::CUDABit), new_enabled);
+  set_autocast_backend(BackendComponent::CUDABit, new_enabled);
 }
 
 bool is_cpu_enabled() {
-  return is_backend_enabled(BackendComponent::CPUBit);
+  return is_backend_autocast_enabled(BackendComponent::CPUBit);
 }
 
 void set_cpu_enabled(bool new_enabled) {
-  set_autocast_backend(
-      1 << static_cast<uint8_t>(BackendComponent::CPUBit), new_enabled);
+  set_autocast_backend(BackendComponent::CPUBit, new_enabled);
 }
 
 bool is_xpu_enabled() {
-  return is_backend_enabled(BackendComponent::XPUBit);
+  return is_backend_autocast_enabled(BackendComponent::XPUBit);
 }
 
 void set_xpu_enabled(bool new_enabled) {
-  set_autocast_backend(
-      1 << static_cast<uint8_t>(BackendComponent::XPUBit), new_enabled);
+  set_autocast_backend(BackendComponent::XPUBit, new_enabled);
 }
 
 bool is_ipu_enabled() {
-  return is_backend_enabled(BackendComponent::IPUBit);
+  return is_backend_autocast_enabled(BackendComponent::IPUBit);
 }
 
 void set_ipu_enabled(bool new_enabled) {
-  set_autocast_backend(
-      1 << static_cast<uint8_t>(BackendComponent::IPUBit), new_enabled);
+  set_autocast_backend(BackendComponent::IPUBit, new_enabled);
 }
 
 bool is_hpu_enabled() {
-  return is_backend_enabled(BackendComponent::HPUBit);
+  return is_backend_autocast_enabled(BackendComponent::HPUBit);
 }
 
 void set_hpu_enabled(bool new_enabled) {
-  set_autocast_backend(
-      1 << static_cast<uint8_t>(BackendComponent::HPUBit), new_enabled);
+  set_autocast_backend(BackendComponent::HPUBit, new_enabled);
 }
 
 bool is_xla_enabled() {
-  return is_backend_enabled(BackendComponent::XLABit);
+  return is_backend_autocast_enabled(BackendComponent::XLABit);
 }
 
 void set_xla_enabled(bool new_enabled) {
-  set_autocast_backend(
-      1 << static_cast<uint8_t>(BackendComponent::XLABit), new_enabled);
+  set_autocast_backend(BackendComponent::XLABit, new_enabled);
 }
 
 bool is_privateuseone_enabled() {
-  return is_backend_enabled(BackendComponent::PrivateUse1Bit);
+  return is_backend_autocast_enabled(BackendComponent::PrivateUse1Bit);
 }
 
 void set_privateuseone_enabled(bool new_enabled) {
-  set_autocast_backend(
-      1 << static_cast<uint8_t>(BackendComponent::PrivateUse1Bit), new_enabled);
+  set_autocast_backend(BackendComponent::PrivateUse1Bit, new_enabled);
 }
 
 namespace {
@@ -208,7 +201,7 @@ bool is_any_autocast_enabled() {
   return autocast_backend_bitset;
 }
 
-bool is_backend_enabled(BackendComponent backend) {
+bool is_backend_autocast_enabled(BackendComponent backend) {
   return autocast_backend_bitset & (1 << static_cast<uint8_t>(backend));
 }
 
@@ -216,7 +209,11 @@ uint16_t get_autocast_backend() {
   return autocast_backend_bitset;
 }
 
-// DispatchKey::AutocastFUnctionality can be removed when only no backend is set.
+void set_autocast_backend(BackendComponent backend, bool enable) {
+  set_autocast_backend(1 << static_cast<uint8_t>(backend), enable);
+}
+
+// DispatchKey::AutocastFunctionality can be removed when only no backend is set.
 void set_autocast_backend(uint16_t backends, bool enable) {
   if (enable) {
     if (!is_any_autocast_enabled())
@@ -249,10 +246,11 @@ ExcludeAutocastGuard::~ExcludeAutocastGuard() {
 // If the backend located on the leftmost side of ks is not in autocast_backend_bitset,
 // it means that autocast is not enabled for this backend, then remove the
 // DispatchKey::AutocastFunctionality from the ks.
-DispatchKeySet compute_dispatchkeyset_by_backend(c10::DispatchKeySet ks) {
+DispatchKeySet get_ks_by_autocast(c10::DispatchKeySet ks) {
   auto backend = ks.highestBackendKey();
-  if (!is_backend_enabled(backend))
+  if (!is_backend_autocast_enabled(backend)) {
     ks = ks.remove(c10::DispatchKey::AutocastFunctionality);
+  }
 
   return ks;
 }
@@ -581,11 +579,11 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
 
 }
 
-// Register callbacke of AutocastFUnctionality to PyTorch to additional
+// Register callback of AutocastFunctionality to PyTorch to additional
 // compute DispatchKeySet when needed.
 REGISTER_DISPATCHKEYSET_FUNC(
     DispatchKey::AutocastFunctionality,
-    compute_dispatchkeyset_by_backend);
+    get_ks_by_autocast);
 
 } // namespace
 } // namespace at::autocast

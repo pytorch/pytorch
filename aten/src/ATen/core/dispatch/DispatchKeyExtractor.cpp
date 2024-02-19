@@ -5,28 +5,39 @@
 
 namespace c10 {
 
-static std::mutex g_dispatchkeyset_mutex;
+static std::mutex g_dk_mutex;
 
 ska::flat_hash_map<DispatchKey, DispatchKeySetFuncType>&
-getDispatchKeySetFuncs() {
-  static ska::flat_hash_map<DispatchKey, DispatchKeySetFuncType> funcs;
-  return funcs;
+getDKFuncMaps() {
+  static ska::flat_hash_map<DispatchKey, DispatchKeySetFuncType> dk_func_maps;
+  return dk_func_maps;
 }
 
-DispatchKeySetFuncs::DispatchKeySetFuncs(
+static void checkIsInWhitelist(DispatchKey key) {
+  static std::set<DispatchKey> whitelist = {DispatchKey::AutocastFunctionality};
+
+  TORCH_CHECK(
+      whitelist.find(key) != whitelist.end(),
+      "The DispatchKey key: ",
+      key,
+      " is not been allowed to register callback!");
+}
+
+DSFuncRegistry::DSFuncRegistry(
     DispatchKey key,
     const DispatchKeySetFuncType func) {
-  std::lock_guard<std::mutex> lock(g_dispatchkeyset_mutex);
+  std::lock_guard<std::mutex> lock(g_dk_mutex);
 
-  auto& funcs = getDispatchKeySetFuncs();
-  auto found = funcs.find(key);
+  checkIsInWhitelist(key);
+  auto& maps = getDKFuncMaps();
+  auto found = maps.find(key);
   TORCH_CHECK(
-      found == funcs.end(),
-      "The DispatchKey key:",
+      found == maps.end(),
+      "The DispatchKey key: ",
       key,
-      "Can only been registered once");
+      " can only been registered once!");
 
-  funcs.emplace(key, std::move(func));
+  maps.emplace(key, std::move(func));
 }
 
 void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool has_fallthrough) {
