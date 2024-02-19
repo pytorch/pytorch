@@ -4497,20 +4497,6 @@ def take(self, index):
     return flattened[index]
 
 
-@register_decomposition(aten.put)
-@out_wrapper()
-def put(self, index, source, accumulate=False):
-    stride = utils.compute_elementwise_output_strides(self)
-    flattened = self.flatten()
-    flattened = torch.index_put(
-        flattened, [index], source.reshape(index.shape), accumulate
-    )
-    output = flattened.reshape(self.shape)
-    if stride != output.stride():
-        output = prims.copy_strided(output, stride)
-    return output
-
-
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
 register_inplace(aten.addmv_, aten.addmv)
@@ -4529,7 +4515,6 @@ register_inplace(aten.__irshift__, aten.__rshift__)
 register_inplace(aten.__ixor__, aten.__xor__)
 register_inplace(aten.leaky_relu_, aten.leaky_relu)
 register_inplace(aten.logit_, aten.logit)
-register_inplace(aten.put_, aten.put)
 register_inplace(aten.relu_, aten.relu)
 register_inplace(aten.renorm_, aten.renorm)
 register_inplace(aten.round_, aten.round)
