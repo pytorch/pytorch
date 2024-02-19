@@ -35,7 +35,7 @@ from torch._inductor.metrics import is_metric_table_enabled, log_kernel_metadata
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import ValueRanges
-from torch.utils._triton import has_triton_package
+from torch.utils._triton import has_triton_package, has_triton
 
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
@@ -2567,6 +2567,9 @@ class TritonKernel(Kernel):
         import AttrsDescriptor if the triton version is new enough to have this
         class defined.
         """
+        if not has_triton():
+            return ""
+        
         import triton.compiler.compiler
 
         if hasattr(triton.compiler.compiler, "AttrsDescriptor"):
