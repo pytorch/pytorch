@@ -455,12 +455,19 @@ class Tensor(torch._C.TensorBase):
         self.requires_grad, _, self._backward_hooks = state
 
     def __repr__(self, *, tensor_contents=None):
-        if has_torch_function_unary(self):
-            return handle_torch_function(
-                Tensor.__repr__, (self,), self, tensor_contents=tensor_contents
-            )
-        # All strings are unicode in Python 3.
-        return torch._tensor_str._str(self, tensor_contents=tensor_contents)
+        _in_recursive_repr = getattr(self, "_in_recursive_repr", 0)
+        if _in_recursive_repr > 0:
+            return f"<recursive tensor {id(self)}>"
+        self._in_recursive_repr = _in_recursive_repr + 1
+        try:
+            if has_torch_function_unary(self):
+                return handle_torch_function(
+                    Tensor.__repr__, (self,), self, tensor_contents=tensor_contents
+                )
+            # All strings are unicode in Python 3.
+            return torch._tensor_str._str(self, tensor_contents=tensor_contents)
+        finally:
+            self._in_recursive_repr = _in_recursive_repr
 
     def backward(
         self, gradient=None, retain_graph=None, create_graph=False, inputs=None
