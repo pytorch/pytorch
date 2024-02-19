@@ -15,7 +15,7 @@ click
 #Pinned versions:
 #test that import:
 
-coremltools==5.0b5
+coremltools==5.0b5 ; python_version < "3.12"
 #Description: Apple framework for ML integration
 #Pinned versions: 5.0b5
 #test that import:
@@ -273,9 +273,9 @@ rockset==1.0.3
 #Pinned versions: 1.0.3
 #test that import:
 
-ghstack==0.7.1
+ghstack==0.8.0
 #Description: ghstack tool
-#Pinned versions: 0.7.1
+#Pinned versions: 0.8.0
 #test that import:
 
 jinja2==3.1.3
@@ -298,7 +298,8 @@ tensorboard==2.13.0
 #Pinned versions:
 #test that import: test_tensorboard
 
-pywavelets==1.4.1
+pywavelets==1.4.1 ; python_version < "3.12"
+pywavelets==1.5.0 ; python_version >= "3.12"
 #Description: This is a requirement of scikit-image, we need to pin
 # it here because 1.5.0 conflicts with numpy 1.21.2 used in CI
 #Pinned versions: 1.4.1
