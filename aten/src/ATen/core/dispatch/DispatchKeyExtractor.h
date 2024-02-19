@@ -111,32 +111,33 @@ namespace detail {
 
 /**
  * This is used to register callback of specific key to PyTorch for
- * computing DispatchKeySet additionally.
+ * computing DispatchKeySet additionally, currently only AutocastFunctionality
+ * is allowed to register.
  *
- * DispatchKeySet compute_dispatchkeyset_by_backend(c10::DispatchKeySet ks) {
+ * DispatchKeySet get_ds_by_autocast(c10::DispatchKeySet ks) {
  *   ...
  *   return ks;
  * }
  *
  * Usage: REGISTER_DISPATCHKEYSET_FUNC(DispatchKey::AutocastFunctionality,
- * compute_dispatchkeyset_by_backend)
+ * get_ds_by_autocast
  *
  */
 
 using DispatchKeySetFuncType = std::function<DispatchKeySet(DispatchKeySet)>;
 
 TORCH_API ska::flat_hash_map<DispatchKey, DispatchKeySetFuncType>&
-getDispatchKeySetFuncs();
+getDKFuncMaps();
 
-class TORCH_API DispatchKeySetFuncs {
+class TORCH_API DSFuncRegistry {
  public:
-  explicit DispatchKeySetFuncs(
+  explicit DSFuncRegistry(
       DispatchKey key,
       const DispatchKeySetFuncType func);
 };
 
 #define REGISTER_DISPATCHKEYSET_FUNC(dispatchkey, function) \
-  static auto temp##function = DispatchKeySetFuncs(dispatchkey, function);
+  static auto temp##function = DSFuncRegistry(dispatchkey, function);
 
 /**
  * An instance of DispatchKeyExtractor knows how to get a dispatch key given
@@ -188,9 +189,10 @@ public:
     // Currently only used by Autocast, as AutocastFunctionality acts as
     // a Per Backend Functionality key, which is not sufficient to determine
     // which backend is enabled.
-    auto found = getDispatchKeySetFuncs().find(ks.highestFunctionalityKey());
-    if (found != getDispatchKeySetFuncs().end())
+    auto found = getDKFuncMaps().find(ks.highestFunctionalityKey());
+    if (found != getDKFuncMaps().end()) {
       ks = found->second(ks);
+    }
 
     return ks;
   }
