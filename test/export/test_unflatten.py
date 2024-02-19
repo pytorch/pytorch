@@ -21,7 +21,6 @@ from torch.export import (
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
-from torch._export import capture_pre_autograd_graph
 from torch._export.utils import (
     get_buffer,
     get_param,
@@ -547,7 +546,7 @@ class TestUnflatten(TestCase):
         export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
         unflattened = unflatten(export_module)
 
-        self.compare_outputs(export_module.module(), unflattened, (torch.randn((2, 3)),))
+        self.compare_outputs(export_module, unflattened, (torch.randn((2, 3)),))
 
     @skipIfTorchDynamo("custom objects not supported in dynamo yet")
     def test_unflatten_constant_obj(self):
@@ -584,7 +583,7 @@ class TestUnflatten(TestCase):
             export_module = torch.export.export(Mod(), (torch.randn((2, 3)),), strict=False)
         unflattened = unflatten(export_module)
 
-        self.compare_outputs(export_module.module(), unflattened, (torch.randn((2, 3)),))
+        self.compare_outputs(export_module, unflattened, (torch.randn((2, 3)),))
 
 if __name__ == "__main__":
     run_tests()
