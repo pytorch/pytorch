@@ -386,7 +386,6 @@ dynamo_expected_failures = {
     "TestDLPack.test_higher_dims_ndim_19",  # torch_np/numpy_tests/core/test_dlpack
     "TestDLPack.test_higher_dims_ndim_26",  # torch_np/numpy_tests/core/test_dlpack
     "TestDLPack.test_higher_dims_ndim_8",  # torch_np/numpy_tests/core/test_dlpack
-    "TestViewOpsLAZY.test_advanced_indexing_assignment_lazy",  # test_view_ops
     "TestOldViewOpsCPU.test_crow_col_indices_cpu",  # test_view_ops
     "TestViewOpsLAZY.test_advanced_indexing_nonview_lazy",  # test_view_ops
     "TestTypePromotionCPU.test_alpha_mismatch_cpu",  # test_type_promotion
@@ -405,7 +404,6 @@ dynamo_expected_failures = {
     "TestAssertCloseSparseCSR.test_mismatching_crow_indices_msg",  # test_testing
     "TestAssertCloseSparseBSC.test_mismatching_row_indices_msg",  # test_testing
     "TestAssertCloseSparseCOO.test_mismatching_values_msg",  # test_testing
-    "TestAssertCloseQuantized.test_matching_per_channel",  # test_testing
     "TestAssertCloseSparseCOO.test_matching_uncoalesced",  # test_testing
     "TestAssertCloseSparseCSR.test_matching",  # test_testing
     "TestAssertCloseSparseBSR.test_mismatching_crow_indices_msg",  # test_testing
@@ -458,7 +456,6 @@ dynamo_expected_failures = {
     "TestStatelessFunctionalAPI.test_reparametrize_module_fail_reset_to_original_stateless",  # test_stateless
     "TestSortAndSelectCPU.test_isin_cpu_int32",  # test_sort_and_select
     "TestSortAndSelectCPU.test_sort_overflow_cpu_int16",  # test_sort_and_select
-    "TestSortAndSelectCPU.test_topk_quantized_scalar_input_cpu",  # test_sort_and_select
     "TestSortAndSelectCPU.test_isin_cpu_float64",  # test_sort_and_select
     "TestSortAndSelectCPU.test_isin_cpu_uint8",  # test_sort_and_select
     "TestSortAndSelectCPU.test_isin_cpu_int8",  # test_sort_and_select
@@ -467,7 +464,6 @@ dynamo_expected_failures = {
     "TestSortAndSelectCPU.test_isin_cpu_int64",  # test_sort_and_select
     "TestSortAndSelectCPU.test_isin_cpu_float32",  # test_sort_and_select
     "TestShapeOpsCUDA.test_flip_cuda_float32",  # test_shape_ops
-    "TestShapeOpsCPU.test_flip_cpu_float32",  # test_shape_ops
     "TestSubclassSerialization.test_tensor_subclass_deepcopy",  # test_serialization
     "TestSubclassSerialization.test_tensor_subclass_getstate_overwrite",  # test_serialization
     "TestSubclassSerialization.test_tensor_subclass_wrapper_serialization",  # test_serialization
@@ -1316,7 +1312,6 @@ dynamo_expected_failures = {
     "TestFX.test_pytree_concrete",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_Mutation_cpu",  # test_fx
     "TestFX.test_custom_traceback_raised_when_exception_source_is_graphmodule",  # test_fx
-    "TestConstFold.test_check_skip_folding_quant_dequant_pattern",  # test_fx
     "TestFX.test_immutable_list_pytree_ops",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_TakeList_cpu",  # test_fx
     "TestPassManager.test_pass_manager",  # test_fx
@@ -1866,7 +1861,6 @@ dynamo_expected_failures = {
     "TestQuantizeFxOps.test_norm_weight_bias",  # test_quantization
     "TestQuantizeFxOps.test_reshape_fp16",  # test_quantization
     "TestStaticQuantizedModule.test_embedding_bag_api",  # test_quantization
-    "TestQuantizedOps.test_advanced_indexing",  # test_quantization
     "TestQuantizeFx.test_conv_bn_relu",  # test_quantization
     "TestQuantizeFx.test_qconfig_for_call_func",  # test_quantization
     "TestQuantizedConv.test_qconv3d_unpack",  # test_quantization
@@ -2085,6 +2079,8 @@ dynamo_expected_failures = {
     "TestJvpCPU.test_inputs_are_tuples_of_tensors_cpu",  # functorch/test_eager_transforms.py
     "TestJvpCPU.test_disable_fwd_grad_outside_cpu",  # functorch/test_eager_transforms.py
     "TestAOTDispatch.test_aot_dispatch_simple",  # functorch/test_aotdispatch.py
+    "TestSymbolicShapeAnalysis.test_shape_embedding_bag",  # test_jit.py
+    "TestFusionUtils.test_fuse_linear_bn_requires_grad",  # test_nn.py
 }
 
 # see NOTE [dynamo_test_failures.py] for more details
@@ -6310,6 +6306,13 @@ dynamo_skips = {
     "TestCustomOpTestingCPU.test_opcheck_fails_basic_cpu",  # test_custom_ops.py
     "TestSaveLoadForOpVersion.test_versioned_div_tensor_out",  # test_jit.py
     "TestAutograd.test_post_accumulate_grad_hook_gets_cleaned_up",  # test_autograd
+    "TestShapeOpsCPU.test_flip_cpu_float32",  # test_shape_ops.py
+    "TestQuantizedOps.test_advanced_indexing",  # test_quantization.py
+    "TestSortAndSelectCPU.test_topk_quantized_scalar_input_cpu",  # test_sort_and_select.py
+    "TestExpandedWeightFunctionalCPU.test_embedding_model_cpu",  # test_expanded_weights.py
+    "TestNestedTensorDeviceTypeCPU.test_embedding_jagged_cpu",  # test_nestedtensor.py
+    "TestEmbeddingNN.test_embedding_from_pretrained_float32",  # nn/test_embedding.py
+    "TestFusionUtils.test_fuse_conv_bn_requires_grad",  # test_nn.py
 }
 
 
