@@ -90,7 +90,7 @@ __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
     "guard_int", "guard_float", "guard_scalar", "canonicalize_bool_expr",
     "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
-    "is_concrete_bool", "is_singleton", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
+    "is_concrete_bool", "is_nested_int", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
     "has_free_symbols", "sym_eq", "SymbolicContext", "StatelessSymbolicContext",
     "StatefulSymbolicContext", "SubclassSymbolicContext", "statically_known_true",
     "guard_size_oblivious",
@@ -262,25 +262,25 @@ def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
 
     return False
 
-def is_singleton(s: Int) -> bool:
-    # check for SingletonSymNode
+def is_nested_int(s):
+    # check for NestedIntSymNode
     if not isinstance(s, torch.SymInt):
         return False
-    if s.node.singleton_int() is not None:
+    if s.node.nested_int() is not None:
         return True
 
-    # check for symbolic variable wrapping a SingletonSymNode (fake-ifying causes this)
+    # check for symbolic variable wrapping a NestedIntSymNode (fake-ifying causes this)
     return (
         s.node.is_symbolic()
         and s.node.hint is not None
         and isinstance(s.node.hint, torch.SymInt)
-        and s.node.hint.node.singleton_int() is not None
+        and s.node.hint.node.nested_int() is not None
     )
 
 def _iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Basic]:
     if isinstance(val, SymTypes):
         # This allow applies to the jagged layout NestedTensor case as
-        # singleton ints are not symbolic
+        # nested ints are not symbolic
         if is_symbolic(val):
             yield val.node.expr
     elif isinstance(val, sympy.Basic):
@@ -2306,9 +2306,9 @@ class ShapeEnv:
             val_list = sorted(
                 [(ex_stride[i], i) for i in range(len(stride)) if stride[i] is None],
                 key=lambda tup: (
-                    # Order singletons by their coefficients.
-                    # 1 here to order singletons after non-singletons.
-                    (1, tup[0].node.singleton_coeff(), tup[1]) if is_singleton(tup[0])
+                    # Order nested int by their coefficients.
+                    # 1 here to order nested int after non-nested int.
+                    (1, tup[0].node.nested_int_coeff(), tup[1]) if is_nested_int(tup[0])
                     else (0, *tup)
                 )
             )
@@ -2572,7 +2572,7 @@ class ShapeEnv:
                 self.var_to_val[sympy_expr] = sympy.Integer(val)
             else:
                 # Only used for jagged layout nested tensors
-                self.var_to_val[sympy_expr] = SingletonInt(val.node.singleton_int(), coeff=val.node.singleton_coeff())
+                self.var_to_val[sympy_expr] = SingletonInt(val.node.nested_int(), coeff=val.node.nested_int_coeff())
 
             # Do the appending later, because we always want to populate this
             self.var_to_sources[sympy_expr] = []

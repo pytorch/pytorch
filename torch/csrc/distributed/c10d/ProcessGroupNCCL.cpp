@@ -616,7 +616,6 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
     // Python, thus blocking current stream would already block the next
     // compute kernel;
     // - achieve better barrier performance.
-    LOG(INFO) << logPrefix() << "Waiting in barrier; this is a CPU halt";
     auto currentStream = at::cuda::getCurrentCUDAStream(device_.index());
     AT_CUDA_CHECK(cudaStreamSynchronize(currentStream));
   }
@@ -842,7 +841,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // segment when SEGMENT_ALLOC action occurs, and deregister a segment when
   // SEGMENT_FREE action occurs.
   // We attach hooks only once at the first PG creation.
+  // Attaching hooks fails if CUDACachingAllocator is not initialized, so
+  // lazyInitCUDA is called (and is a no-op if CUDA is already initialized).
   if (useTensorRegisterAllocatorHook_ && !allocatorHooksAttached) {
+    at::globalContext().lazyInitCUDA();
     c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
         &cacheAllocatorRegisterHook);
     c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
