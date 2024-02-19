@@ -63,6 +63,7 @@ __all__ = [
     "tree_flatten",
     "tree_flatten_with_path",
     "tree_unflatten",
+    "tree_iter",
     "tree_leaves",
     "tree_leaves_with_path",
     "tree_structure",
@@ -818,13 +819,13 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
     return treespec.unflatten(leaves)
 
 
-def _tree_leaves_helper(
+def tree_iter(
     tree: PyTree,
-    leaves: List[Any],
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> None:
+) -> Iterable[Any]:
+    """Get an iterator over the leaves of a pytree."""
     if _is_leaf(tree, is_leaf=is_leaf):
-        leaves.append(tree)
+        yield tree
         return
 
     node_type = _get_node_type(tree)
@@ -833,7 +834,7 @@ def _tree_leaves_helper(
 
     # Recursively flatten the children
     for child in child_pytrees:
-        _tree_leaves_helper(child, leaves, is_leaf=is_leaf)
+        yield from tree_iter(child, is_leaf=is_leaf)
 
 
 def tree_leaves(
@@ -841,9 +842,7 @@ def tree_leaves(
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> List[Any]:
     """Get a list of leaves of a pytree."""
-    leaves: List[Any] = []
-    _tree_leaves_helper(tree, leaves, is_leaf=is_leaf)
-    return leaves
+    return list(tree_iter(tree, is_leaf=is_leaf))
 
 
 def tree_structure(
@@ -1082,7 +1081,7 @@ def tree_all(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+    flat_args = tree_iter(tree, is_leaf=is_leaf)
     return all(map(pred, flat_args))
 
 
@@ -1091,7 +1090,7 @@ def tree_any(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+    flat_args = tree_iter(tree, is_leaf=is_leaf)
     return any(map(pred, flat_args))
 
 
@@ -1131,7 +1130,7 @@ def tree_all_only(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+    flat_args = tree_iter(tree, is_leaf=is_leaf)
     return all(pred(x) for x in flat_args if isinstance(x, __type_or_types))
 
 
@@ -1171,7 +1170,7 @@ def tree_any_only(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+    flat_args = tree_iter(tree, is_leaf=is_leaf)
     return any(pred(x) for x in flat_args if isinstance(x, __type_or_types))
 
 
@@ -1379,9 +1378,9 @@ def arg_tree_leaves(*args: PyTree, **kwargs: PyTree) -> List[Any]:
     """
     leaves: List[Any] = []
     for a in args:
-        _tree_leaves_helper(a, leaves)
+        leaves.extend(tree_iter(a))
     for a in kwargs.values():
-        _tree_leaves_helper(a, leaves)
+        leaves.extend(tree_iter(a))
     return leaves
 
 
