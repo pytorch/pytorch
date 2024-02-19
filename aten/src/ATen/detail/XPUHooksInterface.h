@@ -58,6 +58,10 @@ struct TORCH_API XPUHooksInterface {
   virtual Device getDeviceFromPtr(void* /*data*/) const {
     TORCH_CHECK(false, "Cannot get device of pointer on XPU without ATen_xpu library.");
   }
+
+  virtual void deviceSynchronize(DeviceIndex /*device_index*/) const {
+    TORCH_CHECK(false, "Cannot synchronize XPU device without ATen_xpu library.");
+  }
 };
 
 struct TORCH_API XPUHooksArgs {};
