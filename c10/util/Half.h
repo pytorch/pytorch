@@ -45,7 +45,7 @@
 #include <sycl/sycl.hpp> // for SYCL 2020
 #endif
 
-#if defined(__ARM_FEATURE_FP16_SCALAR_ARITHMETIC) && !defined(C10_MOBILE)
+#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
 #include <arm_neon.h>
 #endif
 
@@ -328,7 +328,7 @@ inline uint16_t fp16_ieee_from_fp32_value(float f) {
       (shl1_w > UINT32_C(0xFF000000) ? UINT16_C(0x7E00) : nonsign));
 }
 
-#if defined(__ARM_FEATURE_FP16_SCALAR_ARITHMETIC) && !defined(C10_MOBILE)
+#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
 constexpr inline float16_t fp16_from_bits(uint16_t h) {
   union {
     uint16_t as_bits;
@@ -347,11 +347,11 @@ constexpr inline uint16_t fp16_to_bits(float16_t f) {
 
 // According to https://godbolt.org/z/8s14GvEjo it would translate to single
 // fcvt s0, h0
-inline float sve_fp16_to_fp32_value(uint16_t h) {
+inline float native_fp16_to_fp32_value(uint16_t h) {
   return static_cast<float>(fp16_from_bits(h));
 }
 
-inline uint16_t sve_fp32_to_fp16_value(float f) {
+inline uint16_t native_fp16_from_fp32_value(float f) {
   return fp16_to_bits(static_cast<float16_t>(f));
 }
 #endif
