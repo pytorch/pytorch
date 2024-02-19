@@ -32,7 +32,13 @@ from .functional_utils import (
     has_same_metadata,
     to_fun,
 )
-from .schemas import InputAliasInfo, OutputAliasInfo, OutputType, ViewAndMutationMeta
+from .schemas import (
+    InputAliasInfo,
+    MutationType,
+    OutputAliasInfo,
+    OutputType,
+    ViewAndMutationMeta,
+)
 from .subclass_utils import create_subclass_meta
 
 from .utils import _get_autocast_states, KNOWN_TYPES, strict_zip
@@ -523,7 +529,7 @@ from a multi-output view call"
         f_input_tangents = [
             inp
             for inp, info in zip(flat_f_args, input_info)
-            if info.should_return_for_external_mutation()
+            if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
             and info.mutates_data
             and info.requires_grad
         ]
@@ -550,7 +556,7 @@ from a multi-output view call"
         f_mutated_inputs = [
             inp
             for inp, info in zip(flat_f_args, input_info)
-            if info.should_return_for_external_mutation()
+            if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
         ]
         f_metadata_mutated_inputs = [
             inp for inp, info in zip(flat_f_args, input_info) if info.mutates_metadata

@@ -129,16 +129,6 @@ class InputAliasInfo:
 
         return MutationType.MUTATED_OUT_GRAPH
 
-    def should_return_for_external_mutation(self):
-        # Should we also include this input in from the forward graph because the
-        # input is mutated?
-        # MUTATED_IN_GRAPH means we'll keep the mutation in the graph.
-        # MUTATED_OUT_GRAPH means we won't, and we'll apply the mutation afterwards.
-        val = self.mutation_type == MutationType.MUTATED_OUT_GRAPH
-        if val:
-            assert self.mutates_data or self.mutates_metadata
-        return
-
 
 @dataclass
 class SubclassCreationMeta:
