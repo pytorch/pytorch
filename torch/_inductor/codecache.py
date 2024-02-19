@@ -59,7 +59,6 @@ from torch._dynamo.device_interface import (
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc
 from torch._inductor.codegen.cuda import cuda_env
-from torch._inductor.ir import FixedLayout, TensorBox
 from torch._inductor.utils import cache_dir, developer_warning, is_linux
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
@@ -1576,24 +1575,6 @@ class AotCodeCompiler:
                 with open(output_json, "w") as f:
                     f.write(serialized_extern_kernel_nodes)
 
-            if config.aot_inductor.eager_mode:
-                output_json = os.path.splitext(input_path)[0] + ".conf"
-                with open(output_json, "w") as f:
-                    lines = []
-                    for value in graph.graph_inputs.values():
-                        if isinstance(value, TensorBox) and isinstance(
-                            value.layout, FixedLayout
-                        ):
-                            device_type = value.get_device().type
-                            dtype = value.get_dtype()
-                            sizes = value.get_size()
-                            strides = value.get_stride()
-                            kernel_meta_info_item = (
-                                f"true;{device_type};{dtype};{sizes};{strides}"
-                            )
-                            lines.append(kernel_meta_info_item)
-                    f.writelines(lines)
-
             output_so = (
                 config.aot_inductor.output_path
                 if specified_so_name
@@ -1970,7 +1951,11 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 
     @classmethod
     def load_pybinding(
-        cls, argtypes: List[str], source_code: str, cuda: bool = False
+        cls,
+        argtypes: List[str],
+        source_code: str,
+        cuda: bool = False,
+        kernel_meta_info: Any = None,
     ) -> Any:
         """
         Wrap a C++ function in fast Python bindings.
@@ -1997,16 +1982,51 @@ class CppPythonBindingsCodeCache(CppCodeCache):
                 }
                 """
             )
-            result = cls.compile(source_code + c_func_name_decl, cuda)
-            output_so_path = result
-            cls.extra_parse_arg = cls.extra_parse_arg % (
+
+            output_so_path = cls.compile(source_code + c_func_name_decl, cuda)
+
+            if kernel_meta_info:
+                assert isinstance(kernel_meta_info, dict)
+                eager_cache_dir = pathlib.Path(os.path.join(cache_dir(), "aten_eager"))
+                eager_cache_dir.mkdir(parents=True, exist_ok=True)
+                op_name, input_tensors_meta_info = next(iter(kernel_meta_info.items()))
+                if op_name:
+                    kernel_meta_info = {}
+                    kernel_meta_info["meta_info"] = input_tensors_meta_info
+                    kernel_meta_info["kernel_path"] = output_so_path
+
+                    json_data = []
+                    update_json = True
+                    op_conf = os.path.join(eager_cache_dir, f"{op_name}.json")
+                    mode = "r" if os.path.exists(op_conf) else "w"
+                    with open(op_conf, mode) as f:
+                        try:
+                            json_data = json.load(f)
+                        except Exception as e:
+                            json_data = []
+
+                        assert isinstance(json_data, list)
+                        for item in json_data:
+                            assert isinstance(item, dict)
+                            if item["meta_info"] == input_tensors_meta_info:
+                                update_json = False
+                                break
+
+                    if update_json:
+                        json_data.append(kernel_meta_info)
+                        with open(op_conf, "w") as f:
+                            json.dump(json_data, f)
+
+            _extra_parse_arg = cls.extra_parse_arg % (
                 output_so_path,
                 cls.entry_function,
             )
+        else:
+            _extra_parse_arg = cls.extra_parse_arg
 
         suffix = cls.suffix_template % (
             cls.entry_function,
-            cls.extra_parse_arg,
+            _extra_parse_arg,
             cls.entry_function,
             len(argtypes),
             len(argtypes),

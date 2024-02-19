@@ -364,7 +364,6 @@ class WrapperCodeGen(CodeGen):
         self.prefix = IndentedBuffer()
         self.suffix = IndentedBuffer()
         self.wrapper_call = IndentedBuffer()
-        self.kernel_meta_info = IndentedBuffer()
         self.src_to_kernel = {}
         self.kenel_numel_expr = set()
         self.lines = []
@@ -495,16 +494,6 @@ class WrapperCodeGen(CodeGen):
             self.prefix.writeline(line)
             line = f"assert not {name}.isinf().any().item()"
             self.prefix.writeline(line)
-
-    def write_kernel_meta_info(self):
-        for value in V.graph.graph_inputs.values():
-            if isinstance(value, TensorBox) and isinstance(value.layout, FixedLayout):
-                device_type = value.get_device().type
-                dtype = value.get_dtype()
-                sizes = value.get_size()
-                strides = value.get_stride()
-                kernel_meta_info_item = f"true;{device_type};{dtype};{sizes};{strides}"
-                self.kernel_meta_info.writeline(kernel_meta_info_item)
 
     def write_prefix(self):
         self.prefix.splice(
@@ -1854,9 +1843,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.codegen_model_constructor()
         self.write_wrapper_decl()
 
-        if config.aot_inductor.eager_mode:
-            self.write_kernel_meta_info()
-
         return super().generate(is_inference)
 
     def finalize_prefix(self):
@@ -2006,9 +1992,31 @@ class CppWrapperCodeGen(WrapperCodeGen):
             if config.aot_inductor.eager_mode
             else "CppWrapperCodeCache"
         )
+
+        kernel_meta_info = {}
+        if config.aot_inductor.eager_mode and config.aot_inductor.eager_op_name:
+            lines = []
+            for value in V.graph.graph_inputs.values():
+                if isinstance(value, TensorBox) and isinstance(
+                    value.layout, FixedLayout
+                ):
+                    device_type = value.get_device().type
+                    dtype = value.get_dtype()
+                    sizes = value.get_size()
+                    strides = value.get_stride()
+                    kernel_meta_info_item = (
+                        f"true;{device_type};{dtype};{sizes};{strides}"
+                    )
+                    lines.append(kernel_meta_info_item)
+            kernel_meta_info[config.aot_inductor.eager_op_name] = lines
+
         result.splice(
             f"""
-            inductor_entry = {cache_cls_name}.load_pybinding(["std::vector<at::Tensor>"], cpp_wrapper_src, {self.cuda})
+            inductor_entry = {cache_cls_name}.load_pybinding(
+                ["std::vector<at::Tensor>"],
+                cpp_wrapper_src,
+                cuda={self.cuda},
+                kernel_meta_info={kernel_meta_info})
             """
         )
 
