@@ -3,6 +3,7 @@ import functools
 import inspect
 import logging
 import re
+import time
 import warnings
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
@@ -379,6 +380,13 @@ def _export_non_strict(
     if isinstance(mod, torch.fx.GraphModule) and hasattr(mod, "meta"):
         gm.meta.update(mod.meta)
 
+    if pre_dispatch:
+        from torch._export.passes.replace_set_grad_with_hop_pass import (
+            replace_set_grad_with_hop_pass,
+        )
+
+        gm = replace_set_grad_with_hop_pass(gm)
+
     # NOTE: aot_export adds symint metadata for placeholders with int values;
     # since these become specialized, we replace such metadata with the original values
     flat_args = pytree.tree_leaves((fake_args, fake_kwargs))
@@ -507,23 +515,39 @@ def rewrite_non_persistent_buffers(
                 constants[spec.target] = orig_mod.get_buffer(spec.target)
 
 
-def _log_export_error(fn):
+_EXPORT_FLAGS: Optional[Set[str]] = None
+
+
+def _log_export_wrapper(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
+        global _EXPORT_FLAGS
         try:
-            return fn(*args, **kwargs)
+            start = time.time()
+            ep = fn(*args, **kwargs)
+            end = time.time()
+            log_export_usage(
+                event="export.time", metrics=end - start, flags=_EXPORT_FLAGS
+            )
         except Exception as e:
             t = type(e)
             error_type = t.__module__ + "." + t.__qualname__
             log_export_usage(
-                event="export.error", error_type=error_type, error_message=str(e)
+                event="export.error",
+                type=error_type,
+                message=str(e),
+                flags=_EXPORT_FLAGS,
             )
             raise e
+        finally:
+            _EXPORT_FLAGS = None
+
+        return ep
 
     return wrapper
 
 
-@_log_export_error
+@_log_export_wrapper
 @_disable_prexisiting_fake_mode
 def _export(
     f: torch.nn.Module,
@@ -579,10 +603,12 @@ def _export(
     """
     from .dynamic_shapes import _process_dynamic_shapes
 
+    global _EXPORT_FLAGS
     flags = set()
     flags.add("strict" if strict else "non_strict")
     flags.add("pre_dispatch" if pre_dispatch else "aot_dispatch")
     log_export_usage(event="export.enter", flags=flags)
+    _EXPORT_FLAGS = flags
 
     if constraints is not None:
         log_export_usage(event="export.private_api", flags={"constraints"})
