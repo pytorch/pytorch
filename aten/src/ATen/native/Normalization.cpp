@@ -485,23 +485,6 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
 std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     const Tensor& input, const c10::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */, const c10::optional<Tensor>& running_mean_opt /* optional */, const c10::optional<Tensor>& running_var_opt /* optional */,
     bool training, double momentum, double eps, bool cudnn_enabled) {
-  TORCH_CHECK(
-      input.dim() >= 2,
-      "Expected at least 2 input dimensions, but got ",
-      input.dim());
-
-  if (training) {
-    auto size = input.sizes();
-    int64_t size_prods = size[0];
-    for (const auto i : c10::irange(size.size() - 2)) {
-      size_prods *= size[i + 2];
-    }
-    TORCH_CHECK(
-        size_prods != 1,
-        "Expected more than 1 value per channel when training, got input size ",
-        size);
-  }
-
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
@@ -662,6 +645,23 @@ Tensor batch_norm(
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
+  TORCH_CHECK(
+      input.dim() >= 2,
+      "Expected at least 2 input dimensions, but got ",
+      input.dim());
+
+  if (training) {
+    auto size = input.sizes();
+    int64_t size_prods = size[0];
+    for (const auto i : c10::irange(size.size() - 2)) {
+      size_prods *= size[i + 2];
+    }
+    TORCH_CHECK(
+        size_prods != 1,
+        "Expected more than 1 value per channel when training, got input size ",
+        size);
+  }
+
   return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
                                                 training, momentum, eps, cudnn_enabled));
 }
