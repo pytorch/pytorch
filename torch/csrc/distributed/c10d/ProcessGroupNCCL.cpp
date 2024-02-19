@@ -616,7 +616,6 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
     // Python, thus blocking current stream would already block the next
     // compute kernel;
     // - achieve better barrier performance.
-    LOG(INFO) << logPrefix() << "Waiting in barrier; this is a CPU halt";
     auto currentStream = at::cuda::getCurrentCUDAStream(device_.index());
     AT_CUDA_CHECK(cudaStreamSynchronize(currentStream));
   }
