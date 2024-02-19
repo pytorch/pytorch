@@ -35,7 +35,8 @@ class vTensorStorage final {
       const api::StorageType storage_type,
       const api::GPUMemoryLayout gpu_memory_layout,
       const std::vector<int64_t>& sizes,
-      const api::ScalarType dtype);
+      const api::ScalarType dtype,
+      const bool allocate_memory = true);
 
   vTensorStorage(const vTensorStorage&) = delete;
   vTensorStorage& operator=(const vTensorStorage&) = delete;
@@ -92,7 +93,8 @@ class vTensor final {
       const api::ScalarType dtype,
       const api::StorageType storage_type = api::StorageType::TEXTURE_3D,
       const api::GPUMemoryLayout memory_layout =
-          api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED);
+          api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED,
+      const bool allocate_memory = true);
 
   // Default constructor for quantized vTensor
   vTensor(
@@ -176,6 +178,10 @@ class vTensor final {
     return view_->storage_type_;
   }
 
+  inline api::VulkanImage& image() const& {
+    return view_->image_;
+  }
+
   api::VulkanImage& image(api::PipelineBarrier&, const api::PipelineStageFlags)
       const&;
 
@@ -183,6 +189,10 @@ class vTensor final {
       api::PipelineBarrier&,
       const api::PipelineStageFlags,
       const api::MemoryAccessFlags) &;
+
+  inline api::VulkanBuffer& buffer() const& {
+    return view_->buffer_;
+  }
 
   api::VulkanBuffer& buffer(
       api::PipelineBarrier&,
@@ -307,6 +317,21 @@ class vTensor final {
   inline VkDeviceSize gpu_nbytes() const {
     return api::element_size(dtype()) * gpu_numel();
   }
+
+  /*
+   * Return the VmaAllocationCreateInfo of the underlying resource
+   */
+  VmaAllocationCreateInfo get_allocation_create_info() const;
+
+  /*
+   * Return the VkMemoryRequirements of the underlying resource
+   */
+  VkMemoryRequirements get_memory_requirements() const;
+
+  /*
+   * Binds the underlying resource to the given memory allocation
+   */
+  void bind_allocation(const api::MemoryAllocation& allocation);
 };
 
 void add_buffer_barrier(

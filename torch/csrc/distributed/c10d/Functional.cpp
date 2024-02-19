@@ -1,5 +1,3 @@
-#include <torch/csrc/distributed/c10d/Functional.hpp>
-
 #include <shared_mutex>
 
 #include <ATen/ATen.h>
@@ -29,11 +27,9 @@ class WorkRegistry {
     const auto storage = tensor.storage().getWeakStorageImpl();
     std::unique_lock lock(lock_);
     auto it = registry_.find(storage);
-    TORCH_CHECK(
-        it != registry_.end(),
-        "No pending collective is associated with the tensor storage. "
-        "This typically means that the tensor is not a collective output, "
-        "or the tensor has already been waited on.");
+    if (it == registry_.end()) {
+      return nullptr;
+    }
     auto work = it->second;
     registry_.erase(it);
     return work;
@@ -70,7 +66,6 @@ c10d::ReduceOp to_reduce_op(const std::string& reduce_op) {
 at::Tensor& all_reduce_(
     at::Tensor& input,
     std::string reduce_op,
-    // c10::string_view group_name,
     std::string group_name) {
   c10d::AllreduceOptions opts;
   opts.reduceOp = to_reduce_op(reduce_op);
@@ -218,9 +213,30 @@ at::Tensor all_to_all_single(
   return output;
 }
 
+at::Tensor& broadcast_(at::Tensor& input, int64_t src, std::string group_name) {
+  c10d::BroadcastOptions opts;
+  opts.rootRank = src;
+  std::vector<at::Tensor> inputs{input};
+
+  auto group = c10d::resolve_process_group(group_name);
+  auto work = group->broadcast(inputs, opts);
+  c10d::RankLocal<WorkRegistry>::get().register_work(input, work);
+  return input;
+}
+
+at::Tensor broadcast(
+    const at::Tensor& input,
+    int64_t src,
+    std::string group_name) {
+  auto output = input.clone(at::MemoryFormat::Contiguous);
+  return broadcast_(output, src, group_name);
+}
+
 at::Tensor wait_tensor(const at::Tensor& tensor) {
   auto work = c10d::RankLocal<WorkRegistry>::get().pop_work(tensor);
-  work->wait();
+  if (work != nullptr) {
+    work->wait();
+  }
   return tensor;
 }
 
@@ -286,6 +302,17 @@ TORCH_LIBRARY(_c10d_functional, m) {
       "str group_name) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, ::all_to_all_single),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "broadcast(Tensor input, int src, str group_name) -> Tensor",
+      torch::dispatch(c10::DispatchKey::CompositeExplicitAutograd, ::broadcast),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "broadcast_(Tensor(a!) input, int src, str group_name) -> Tensor(a!)",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, ::broadcast_),
       {at::Tag::pt2_compliant_tag});
 
   m.def(

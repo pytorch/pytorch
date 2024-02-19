@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 """
 Python polyfills for common builtins.
 """
@@ -18,7 +20,7 @@ def any(iterator):
     return False
 
 
-def index(iterator, item, start=0, end=-1):
+def index(iterator, item, start=0, end=None):
     for i, elem in enumerate(list(iterator))[start:end]:
         if item == elem:
             return i

@@ -20,7 +20,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xfailIfTorchDynamo,
     xpassIfTorchDynamo,
 )
 
@@ -202,13 +201,13 @@ class TestIndexing(TestCase):
         b[(Ellipsis,)] = 2
         assert_equal(b, 2)
 
-    @xfailIfTorchDynamo  # numpy ndarrays do not have `.tensor` attribute
+    @xpassIfTorchDynamo  # 'torch_.np.array() does not have base attribute.
     def test_ellipsis_index_2(self):
         a = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
         assert_(a[...] is not a)
         assert_equal(a[...], a)
         # `a[...]` was `a` in numpy <1.9.
-        assert_(a[...].tensor._base is a.tensor)
+        assert_(a[...].base is a)
 
     def test_single_int_index(self):
         # Single integer index selects one row

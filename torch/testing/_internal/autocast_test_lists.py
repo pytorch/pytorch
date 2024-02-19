@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import torch
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
 

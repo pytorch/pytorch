@@ -8,7 +8,9 @@ from unittest.mock import patch
 
 import torch
 import torch._dynamo
+import torch._dynamo.testing
 import torch.distributed as dist
+import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
 from torch._C import FileCheck
 from torch._inductor.utils import run_and_get_triton_code
@@ -125,6 +127,26 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             compiled_out = compiled_fn(x)
             self.assertEqual(opt_fn, compiled_out)
 
+    def test_device_mesh_compile(self):
+        def fn(x):
+            # test size()
+            a = x.size()
+            b = x.size(0)
+            c = x.size(mesh_dim=0)
+            size = a + b + c
+            # test get_coordinate()
+            coord = x.get_coordinate()
+            # test get_group()
+            group = x.get_group()
+            return size, coord, group
+
+        compiled_fn = torch.compile(backend="aot_eager", fullgraph=True)(fn)
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        opt_fn = fn(mesh)
+        compiled_out = compiled_fn(mesh)
+        self.assertEqual(opt_fn, compiled_out)
+
     def test_fakify_dtensor(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -153,6 +175,23 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
+    def test_dtensor_attribute_access_on_intermediate(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        def fn(x):
+            tmp = x * 2
+            if tmp.placements[0].is_shard():
+                return tmp._local_tensor + 2
+            else:
+                return tmp._local_tensor + 3
+
+        x = DTensor.from_local(torch.ones(4), mesh, [Shard(0)], run_check=False)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
     def test_dynamo_dtensor_from_local(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -172,11 +211,16 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         # _dt_lib_impl = torch.library.Library("dtensor", "IMPL")
         # _dt_lib_impl.impl("from_local", from_local_tensor, "Autograd")
 
-        x = torch.ones(1)
+        x = torch.ones(1, requires_grad=True)
         ref = fn(x)
-        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
         res = opt_fn(x)
+        # backward should work as well
+        res.sum().backward()
+
         self.assertEqual(res, ref)
+        self.assertEqual(cnt.frame_count, 1)
 
         # test if user calls from_local with mesh/placements as kwargs and that should still work
         def from_local_kwargs_fn(x):
@@ -186,11 +230,10 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             return dt.to_local() + 2
 
         ref = from_local_kwargs_fn(x)
-        opt_kwargs_fn = torch.compile(
-            from_local_kwargs_fn, backend="aot_eager", fullgraph=True
-        )
+        opt_kwargs_fn = torch.compile(from_local_kwargs_fn, backend=cnt, fullgraph=True)
         res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_dynamo_dtensor_from_local_redistribute(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -203,7 +246,8 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
         x = torch.ones(1)
         ref = fn(x)
-        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
@@ -217,7 +261,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         x = torch.ones(1)
         ref = redistribute_kwargs_fn(x)
         opt_kwargs_fn = torch.compile(
-            redistribute_kwargs_fn, backend="aot_eager", fullgraph=True
+            redistribute_kwargs_fn, backend=cnt, fullgraph=True
         )
         res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
@@ -281,9 +325,12 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             parallelize_plan=parallel_plan,
         )
 
-        compiled_model = torch.compile(model)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled_model = torch.compile(model, backend=cnt, fullgraph=True)
         inp = torch.rand(20, 16).to(self.device_type)
         out = compiled_model(inp)
+        out.sum().backward()
+        self.assertEqual(cnt.frame_count, 1)
 
         code = run_and_get_triton_code(compiled_model, inp)
         # Check that `buf2` is correctly waited on before first use.
@@ -303,7 +350,11 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
     @with_comms
     @parametrize("is_seq_parallel", [True, False])
-    def test_tp_compile_fullgraph(self, is_seq_parallel):
+    @parametrize("use_native_funcol", [True, False])
+    def test_tp_compile_fullgraph(self, is_seq_parallel, use_native_funcol):
+        if use_native_funcol:
+            funcol.enable_native_funcol()
+
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         model = SimpleModel(self.device_type)
@@ -354,13 +405,20 @@ class TestDTensorCompileE2E(DTensorTestBase):
         torch.manual_seed(rng_seed)
         inp = torch.rand(20, 10, device=self.device_type)
         out = model(inp)
-        compiled_mod = torch.compile(model, backend="aot_eager", fullgraph=True)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        compiled_mod = torch.compile(model, backend=cnt, fullgraph=True)
         compiled_out = compiled_mod(inp)
+        compiled_out.sum().backward()
         self.assertEqual(compiled_out, out)
+        self.assertEqual(cnt.frame_count, 1)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_2d_fsdp_tp_compile(self):
+    @parametrize("use_native_funcol", [True, False])
+    def test_2d_fsdp_tp_compile(self, use_native_funcol):
+        if use_native_funcol:
+            funcol.enable_native_funcol()
+
         data_parallel_size = 2
         model = SimpleModel(self.device_type)
         model_copy = copy.deepcopy(model)
@@ -402,14 +460,20 @@ class TestDTensorCompileE2E(DTensorTestBase):
         )
 
         # TODO: once aot autograd support is ready we can just use default backend
-        compiled_2d = torch.compile(fsdp_2d, backend="aot_eager")
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        compiled_2d = torch.compile(fsdp_2d, backend=cnt)
         compiled_output = compiled_2d(inp)
 
         self.assertEqual(out, compiled_output)
+        self.assertEqual(cnt.frame_count, 1)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_2d_fsdp_tp_ac_compile(self):
+    @parametrize("use_native_funcol", [True, False])
+    def test_2d_fsdp_tp_ac_compile(self, use_native_funcol):
+        if use_native_funcol:
+            funcol.enable_native_funcol()
+
         dp_degree = 2
         tp_degree = self.world_size // dp_degree
         model = SimpleModel(self.device_type)
@@ -460,7 +524,11 @@ class TestDTensorCompileE2E(DTensorTestBase):
 
     @with_comms
     @skip_if_lt_x_gpu(4)
-    def test_compile_dtensor_redistribute_backward(self):
+    @parametrize("use_native_funcol", [True, False])
+    def test_compile_dtensor_redistribute_backward(self, use_native_funcol):
+        if use_native_funcol:
+            funcol.enable_native_funcol()
+
         mesh = DeviceMesh(device_type="cuda", mesh=torch.arange(self.world_size))
 
         def fn(x, y):
@@ -490,7 +558,25 @@ class TestDTensorCompileE2E(DTensorTestBase):
         self.assertEqual(y_ref.grad, y.grad)
 
 
+class TestDTensorCompileWithNativeFunCol(TestDTensorCompile):
+    def setUp(self) -> None:
+        self._prev_native_funcol_enabled = funcol.native_funcol_enabled()
+        funcol.enable_native_funcol()
+        super().setUp()
+
+    def tearDown(self) -> None:
+        super().tearDown()
+        if not self._prev_native_funcol_enabled:
+            funcol.disable_native_funcol()
+
+    def test_tp_compile_comm_reordering(self):
+        # Bypass this test for now. The native funcols have different
+        # IRs, so the reordering pass needs to be reworked.
+        pass
+
+
 instantiate_parametrized_tests(TestDTensorCompileE2E)
+
 
 if __name__ == "__main__":
     run_tests()
