@@ -285,7 +285,7 @@ class ViewAndMutationMeta:
         mutated_inp_runtime_indices = [
             i
             for i, m in enumerate(self.input_info)
-            if m.should_return_for_external_mutation()
+            if (m.mutation_type == MutationType.MUTATED_OUT_GRAPH)
         ]
 
         mutated_graph_handled_indices = [

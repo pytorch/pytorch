@@ -11,7 +11,7 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from .schemas import SubclassCreationMeta, ViewAndMutationMeta
+from .schemas import MutationType, SubclassCreationMeta, ViewAndMutationMeta
 from .utils import strict_zip
 
 zip = strict_zip
@@ -245,7 +245,7 @@ def create_metadata_for_subclass(meta: ViewAndMutationMeta) -> ViewAndMutationMe
 
 def compute_inner_mutated_inp_indices_from_subclass_meta(
     fw_metadata: ViewAndMutationMeta,
-    inner_metadata: Optional[ViewAndMutationMeta] = None,  # used for sanity check
+    inner_metadata: ViewAndMutationMeta,
 ) -> List[int]:
     # Note: [Recomputing subclass mutation handling]
     #
@@ -266,6 +266,9 @@ def compute_inner_mutated_inp_indices_from_subclass_meta(
 
     updated_input_info = []
     inner_idx = 0
+    if not fw_metadata.subclass_inp_meta:
+        # Sometimes we don't have subclass info, e.g. synthetic_base codepaths
+        return inner_metadata.mutated_inp_runtime_indices
     assert len(fw_metadata.subclass_inp_meta) == len(fw_metadata.input_info)
     for outer_idx, inp_meta in enumerate(fw_metadata.subclass_inp_meta):
         if isinstance(inp_meta, int):
@@ -288,5 +291,5 @@ def compute_inner_mutated_inp_indices_from_subclass_meta(
     return [
         i
         for i, inp in enumerate(updated_input_info)
-        if inp.should_return_for_external_mutation()
+        if inp.mutation_type == MutationType.MUTATED_OUT_GRAPH
     ]

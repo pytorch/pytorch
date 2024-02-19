@@ -179,7 +179,9 @@ def aot_dispatch_autograd(
             # See Note: [Partitioner handling for Subclasses, Part 1]
             # See Note: [Recomputing subclass mutation handling]
             mutated_inp_runtime_indices = (
-                compute_inner_mutated_inp_indices_from_subclass_meta(fw_metadata)
+                compute_inner_mutated_inp_indices_from_subclass_meta(
+                    fw_metadata, inner_meta
+                )
             )
             num_mutated_inp_runtime_indices = len(mutated_inp_runtime_indices)
             num_inner_fwd_outputs = (
