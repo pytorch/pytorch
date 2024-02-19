@@ -351,6 +351,7 @@ configure_file("${TORCH_SRC_DIR}/csrc/api/include/torch/version.h.in"
 
 set(GENERATED_CXX_TORCH
   "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/ViewFuncs.cpp"
   )
 
 if(NOT INTERN_DISABLE_AUTOGRAD AND NOT BUILD_LITE_INTERPRETER)
@@ -380,6 +381,7 @@ endif()
 set(GENERATED_H_TORCH
   "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.h"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/variable_factories.h"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/ViewFuncs.h"
   )
 
 if(NOT INTERN_DISABLE_AUTOGRAD)

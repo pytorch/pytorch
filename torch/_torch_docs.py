@@ -13779,7 +13779,7 @@ Args:
 add_docstr(
     torch.searchsorted,
     r"""
-searchsorted(sorted_sequence, values, *, out_int32=False, right=False, side='left', out=None, sorter=None) -> Tensor
+searchsorted(sorted_sequence, values, *, out_int32=False, right=False, side=None, out=None, sorter=None) -> Tensor
 
 Find the indices from the *innermost* dimension of :attr:`sorted_sequence` such that, if the
 corresponding values in :attr:`values` were inserted before the indices, when sorted, the order
