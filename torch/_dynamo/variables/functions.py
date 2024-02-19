@@ -695,27 +695,22 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         import torch.distributed as dist
         from torch.distributed._functional_collectives import REDUCE_OP_TO_STR
 
-        # Merge args and kwargs so positional and keyword args
-        # can be located the same way.
+        # Merge args into kwargs so positional and keyword args
+        # can be processed the same way.
         signature = inspect.signature(self.fn)
-        arg_names = list(signature.parameters.keys())
-        new_kwargs = {}
-        for i in range(len(arg_names)):
-            if i < len(args):
-                new_kwargs[arg_names[i]] = args[i]
-            elif arg_names[i] in kwargs:
-                new_kwargs[arg_names[i]] = kwargs[arg_names[i]]
+        kwargs = dict(signature.bind(*args, **kwargs).arguments)
+        args = ()
 
-        if "async_op" in new_kwargs and new_kwargs["async_op"].as_python_constant():
+        if "async_op" in kwargs and kwargs["async_op"].as_python_constant():
             unimplemented(
                 f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.fn}"
             )
 
-        if new_kwargs.get("group") is None or new_kwargs["group"].value is None:
-            new_kwargs["group"] = ProcessGroupVariable.get_global_pg_variable()
+        if kwargs.get("group") is None or kwargs["group"].value is None:
+            kwargs["group"] = ProcessGroupVariable.get_global_pg_variable()
 
         if self.fn == dist.all_reduce:
-            reduce_op_var = new_kwargs.get("op")
+            reduce_op_var = kwargs.get("op")
             reduce_op = (
                 reduce_op_var.value
                 if reduce_op_var is not None
@@ -723,10 +718,10 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
             )
             if reduce_op not in REDUCE_OP_TO_STR:
                 raise ValueError(f"Unsupported all_reduce op: {reduce_op}")
-            new_kwargs["op"] = variables.ConstantVariable.create(
+            kwargs["op"] = variables.ConstantVariable.create(
                 REDUCE_OP_TO_STR[reduce_op]
             )
-        return self.replacement_var.call_function(tx, (), new_kwargs)
+        return self.replacement_var.call_function(tx, args, kwargs)
 
 
 class FunctoolsPartialVariable(VariableTracker):
