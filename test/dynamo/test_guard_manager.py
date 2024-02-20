@@ -400,6 +400,24 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(guard_manager.check(f_locals))
 
+    def test_tuple_iterator_getitem(self):
+        a = (1, 2, 3, 4, 5, 6)
+        foo = iter(a)
+        next(foo)  # foo points at index=1
+
+        guard_manager = RootGuardManager()
+        # Check a[3] which is tuple_iterator_getitem(foo, 2)
+        guard_manager.tuple_iterator_getitem_manager(2, foo).add_equals_match_guard(
+            a[3], ["x==4"]
+        )
+
+        self.assertTrue(guard_manager.check(foo))
+
+        # Check that index error fails gracefully
+        b = (1, 2)
+        b_foo = iter(b)
+        self.assertFalse(guard_manager.check(b_foo))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

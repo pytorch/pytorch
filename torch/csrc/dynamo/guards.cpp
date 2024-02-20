@@ -15,6 +15,29 @@
 
 #include <sstream>
 
+// For TupleIteratorGetItemAccessor, we need a fast way to retrieve the
+// underlying tuple and access the item. Before Python 3.12 version, the
+// datastructure is in tupleobject.c file -
+// https://github.com/python/cpython/blob/9afc6d102d16080535325f645849cd84eb04d57d/Objects/tupleobject.c#L1058-L1062
+// To handle this, we manually copy the struct here and manually cast it to this
+// new struct. From 3.12, the struct is included in the header file.
+#if IS_PYTHON_3_12_PLUS
+
+#define Py_BUILD_CORE
+// Bring _PyTupleIterObject from the header file
+#include <internal/pycore_tuple.h>
+#undef Py_BUILD_CORE
+
+#else
+
+// Manually create _PyTupleIterObject struct
+typedef struct {
+  PyObject_HEAD Py_ssize_t it_index;
+  PyTupleObject* it_seq; /* Set to NULL when iterator is exhausted */
+} _PyTupleIterObject;
+
+#endif // IS_PYTHON_3_12_PLUS
+
 namespace {
 
 struct LocalState {
@@ -1692,6 +1715,55 @@ class TypeGuardAccessor : public GuardAccessor {
   }
 };
 
+/**
+ * Getitem tuple_iterator accessor.
+ */
+class TupleIteratorGetItemAccessor : public GuardAccessor {
+ public:
+  TupleIteratorGetItemAccessor(
+      RootGuardManager* root,
+      py::object index,
+      py::handle example_value)
+      : GuardAccessor(root, index, example_value),
+        _index(py::cast<Py_ssize_t>(index)) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    _PyTupleIterObject* it = (_PyTupleIterObject*)obj;
+    PyObject* x =
+        PyTuple_GET_ITEM(it->it_seq, it->it_index + _index); // borrowed ref
+    if (x == nullptr) {
+      // Out of range.
+      PyErr_Clear();
+      return false;
+    }
+    bool result = _guard_manager->check_nopybind(x);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    _PyTupleIterObject* it = (_PyTupleIterObject*)obj;
+    PyObject* x =
+        PyTuple_GET_ITEM(it->it_seq, it->it_index + _index); // borrowed ref
+    if (x == nullptr) {
+      // Out of range.
+      PyErr_Clear();
+      return GuardDebugInfo(false, std::string("IndexError ") + repr(), 0);
+    }
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    return result;
+  }
+
+  std::string repr() const override {
+    return "TupleIteratorGetItemAccessor(" + std::to_string(_index) + ")";
+  }
+
+ private:
+  Py_ssize_t _index;
+};
+
 void install_tensor_aliasing_guard(
     GuardManager* x,
     GuardManager* y,
@@ -1867,6 +1939,11 @@ PyObject* torch_c_dynamo_guards_init() {
       TypeGuardAccessor,
       GuardAccessor,
       std::unique_ptr<TypeGuardAccessor>>(py_m, "TypeGuardAccessor");
+  py::class_<
+      TupleIteratorGetItemAccessor,
+      GuardAccessor,
+      std::unique_ptr<TupleIteratorGetItemAccessor>>(
+      py_m, "TupleIteratorGetItemAccessor");
 
   // Guard Manager - No constructor in python, python should use
   // RootGuardManager.
@@ -1962,6 +2039,12 @@ PyObject* torch_c_dynamo_guards_init() {
             return self.get_child_manager<TypeGuardAccessor>(
                 unique_key, example_value);
           },
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "tuple_iterator_getitem_manager",
+          &GuardManager::get_child_manager<TupleIteratorGetItemAccessor>,
           py::return_value_policy::reference)
       // return by reference because C++ GuardManager has the ownership of
       // accessors and guard managers
