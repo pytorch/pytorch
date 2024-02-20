@@ -2,7 +2,6 @@
 
 // C2039 MSVC
 #include <pybind11/complex.h>
-#include <pybind11/pybind11.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <Python.h>

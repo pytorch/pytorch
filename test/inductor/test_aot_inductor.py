@@ -73,7 +73,7 @@ def check_model(
 ):
     with torch.no_grad(), config.patch(
         {
-            "aot_inductor.abi_compatible": self.abi_compatible,
+            "abi_compatible": self.abi_compatible,
             "allow_stack_allocation": self.allow_stack_allocation,
             "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
         }
@@ -107,7 +107,7 @@ def check_model_with_multiple_inputs(
 ):
     with torch.no_grad(), config.patch(
         {
-            "aot_inductor.abi_compatible": self.abi_compatible,
+            "abi_compatible": self.abi_compatible,
             "allow_stack_allocation": self.allow_stack_allocation,
         }
     ):
@@ -819,9 +819,7 @@ class AOTInductorTestsTemplate:
         result_cpu = Model(w1, w2)(*inputs)
 
         # Compile model with AOTInductor
-        with torch.cuda.device(0), config.patch(
-            "aot_inductor.abi_compatible", self.abi_compatible
-        ):
+        with torch.cuda.device(0), config.patch("abi_compatible", self.abi_compatible):
             so_path = AOTIRunnerUtil.compile(
                 model=Model(w1.cuda(0), w2.cuda(0)),
                 example_inputs=tuple(t.cuda(0) for t in inputs),
@@ -870,14 +868,14 @@ class AOTInductorTestsTemplate:
         result_cpu = Model(weight)(*inputs)
 
         with torch.cuda.device(0), torch.no_grad(), config.patch(
-            "aot_inductor.abi_compatible", self.abi_compatible
+            "abi_compatible", self.abi_compatible
         ):
             result_cuda_0 = AOTIRunnerUtil.run(
                 "cuda", Model(weight.cuda(0)), tuple(t.cuda(0) for t in inputs)
             )
 
         with torch.cuda.device(1), torch.no_grad(), config.patch(
-            "aot_inductor.abi_compatible", self.abi_compatible
+            "abi_compatible", self.abi_compatible
         ):
             result_cuda_1 = AOTIRunnerUtil.run(
                 "cuda", Model(weight.cuda(1)), tuple(t.cuda(1) for t in inputs)
@@ -1258,10 +1256,19 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 # AOT export does not allow for input mutation
                 x = x.clone()
-                pass_kernel[(1,)](x, torch.empty_like(x))
-                return x
+                out = torch.zeros_like(x[:, 4:])
+                # the slicing below creates two ReinterpretView
+                # instances: with offset=3 and offset=4
+                add_kernel[(10,)](
+                    in_ptr0=x[:, 3:-1],
+                    in_ptr1=x[:, 4:],
+                    out_ptr=out,
+                    n_elements=160,
+                    BLOCK_SIZE=16,
+                )
+                return out
 
-        example_inputs = (torch.randn(4, device=self.device),)
+        example_inputs = (torch.randn(10, 20, device=self.device),)
         self.check_model(Model(), example_inputs)
 
     @skipIfRocm
@@ -1645,7 +1652,7 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     @skipIfRocm
-    @config.patch({"aot_inductor.abi_compatible": True})
+    @config.patch({"abi_compatible": True})
     def test_triton_kernel_reinterpret_view_mem_leak(self):
         # Check for memory leak when using user-defined Triton Kernel + AOTI.
         if self.device != "cuda":
@@ -1656,6 +1663,8 @@ class AOTInductorTestsTemplate:
                 super().__init__()
 
             def forward(self, x, y):
+                # AOT export does not allow for input mutation
+                x = x.clone()
                 out = torch.zeros_like(x)
                 yy = y * y
                 # reshape creates a ReinterpretView
@@ -1751,6 +1760,14 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    def test_fft_c2c(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.fft.fftn(x), torch.fft.fftn(x).real
+
+        example_inputs = (torch.randn(16, 16, 16, device=self.device),)
+        self.check_model(Model(), example_inputs)
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
@@ -1813,10 +1830,10 @@ CPU_TEST_FAILURES = {
     "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
     "test_constant_folding": fail_with_and_without_stack_allocation(is_skip=True),
     "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(),
-    "test_dynamic_cat": fail_with_and_without_stack_allocation(),
+    "test_dynamic_cat": fail_minimal_arrayref_interface(),
     "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
     "test_dynamic_smem_above_default_limit": fail_with_and_without_stack_allocation(),
-    "test_foreach_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_fft_c2c": fail_stack_allocation(is_skip=True),
     # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
     #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
     "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
@@ -1826,7 +1843,6 @@ CPU_TEST_FAILURES = {
     # minimal arrayref interface only works with CPU; test crashes.
     "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
     "test_normal_functional": fail_with_and_without_stack_allocation(),
-    "test_poi_multiple_dynamic": fail_with_and_without_stack_allocation(),
     # There is a double-free issue which will be fixed in another PR
     "test_repeat_output": fail_with_and_without_stack_allocation(is_skip=True),
     # the test segfaults
@@ -1841,7 +1857,7 @@ CPU_TEST_FAILURES = {
     "test_shifted_constraint_ranges": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
-    "test_simple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_simple_dynamic": fail_minimal_arrayref_interface(),
     "test_zero_grid_with_unbacked_symbols": fail_with_and_without_stack_allocation(
         is_skip=True
     ),

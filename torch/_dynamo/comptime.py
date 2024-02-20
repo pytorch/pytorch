@@ -14,6 +14,7 @@ import torch
 from torch.fx.experimental.symbolic_shapes import free_symbols
 
 from .exc import unimplemented
+from .variables.constant import ConstantVariable
 from .variables.tensor import SymNodeVariable
 
 
@@ -100,6 +101,20 @@ class ComptimeVar:
             fs = free_symbols(self.__variable.sym_num)
             return bool(fs)
         return False
+
+    def force_static(self):
+        """
+        Forces that a value is static, inducing a guard on its specific value
+        """
+        if isinstance(self.__variable, SymNodeVariable):
+            self.__variable.evaluate_expr()
+        elif isinstance(self.__variable, ConstantVariable):
+            # TODO: Maybe complain if this isn't a int/bool/float variable
+            pass
+        else:
+            raise AssertionError(
+                f"cannot force {self.__variable} ({type(self.__variable)}) static"
+            )
 
     def _i_will_not_complain_if_bc_breaks_VariableTracker(self):
         """
@@ -325,6 +340,10 @@ class _Comptime:
     @staticmethod
     def assert_static(val):
         comptime(lambda ctx: ctx.assert_static(ctx.get_local("val")))
+
+    @staticmethod
+    def force_static(val):
+        comptime(lambda ctx: ctx.get_local("val").force_static())
 
     @staticmethod
     def breakpoint():
