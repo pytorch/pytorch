@@ -189,7 +189,7 @@ SparseTensor pow_sparse_scalar(const SparseTensor& t, const Scalar& value) {
 }
 
 // --------------------------------------------------------------------
-// div(SparseTensor, Scalar)
+// coalesce(SparseTensor)
 // --------------------------------------------------------------------
 
 static SparseTensor& coalesce_(SparseTensor& tensor) {
