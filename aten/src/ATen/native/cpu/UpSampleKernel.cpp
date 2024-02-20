@@ -846,7 +846,7 @@ struct HelperInterpBase {
     return wt_max;
   }
 
-  // Note [ Support for antialias=False as a subcase of antilias=True ]
+  // Note [ Support for antialias=False as a subcase of antialias=True ]
   // This function was originally written with the hard assumption that
   // antialias=True and it was later extended to support antialias=False.
   // The only difference between aa and no-aa is in how the
@@ -952,7 +952,7 @@ struct HelperInterpBase {
   uint8 in basic_loop_aa_horizontal<uint8_t> (and vertical)
 
   In essence the idea is to avoid a multiplication between a float (the
-  weight) and an int (the pixel value) and instead run a multpilication between
+  weight) and an int (the pixel value) and instead run a multiplication between
   2 ints:
 
   ```py
@@ -1478,11 +1478,11 @@ void upsample_generic_Nd_kernel_impl(
   config.check_all_same_dtype(false)
     .declare_static_dtype_and_device(input.scalar_type(), input.device())
     .add_output(output)
-    .add_input(restrided_input);
+    .add_const_input(restrided_input);
 
   for (auto & idx_weight: indices_weights) {
     for (auto& tensor : idx_weight) {
-      config.add_input(tensor);
+      config.add_const_input(tensor);
     }
   }
 
@@ -1594,10 +1594,10 @@ void _separable_upsample_generic_Nd_kernel_impl_single_dim(
   config.check_all_same_dtype(false)
       .declare_static_dtype_and_device(input.scalar_type(), input.device())
       .add_output(output)
-      .add_input(restrided_input);
+      .add_const_input(restrided_input);
 
   for (auto& tensor : indices_weights) {
-    config.add_input(tensor);
+    config.add_const_input(tensor);
   }
 
   auto iter = config.build();

@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     get_report_path,
     IS_CI,
+    IS_MACOS,
     parser as common_parser,
     retry_shell,
     set_cwd,
@@ -75,6 +76,7 @@ sys.path.remove(str(REPO_ROOT))
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
 DISTRIBUTED_TEST_PREFIX = "distributed"
 INDUCTOR_TEST_PREFIX = "inductor"
+DYNAMO_TEST_PREFIX = "dynamo"
 
 
 # Note [ROCm parallel CI testing]
@@ -239,7 +241,6 @@ CI_SERIAL_LIST = [
     "test_utils",  # OOM
     "test_sort_and_select",  # OOM
     "test_backward_compatible_arguments",  # OOM
-    "test_module_init",  # OOM
     "test_autocast",  # OOM
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
@@ -325,6 +326,7 @@ JIT_EXECUTOR_TESTS = [
 ]
 
 INDUCTOR_TESTS = [test for test in TESTS if test.startswith(INDUCTOR_TEST_PREFIX)]
+DYNAMO_TESTS = [test for test in TESTS if test.startswith(DYNAMO_TEST_PREFIX)]
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith(DISTRIBUTED_TEST_PREFIX)]
 TORCH_EXPORT_TESTS = [test for test in TESTS if test.startswith("export")]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
@@ -434,7 +436,8 @@ def run_test(
         unittest_args.extend(test_module.get_pytest_args())
         unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
 
-    # TODO: These features are not available for C++ test yet
+    # NB: These features are not available for C++ tests, but there is little incentive
+    # to implement it because we have never seen a flaky C++ test before.
     if IS_CI and not is_cpp_test:
         ci_args = ["--import-slow-tests", "--import-disabled-tests"]
         if RERUN_DISABLED_TESTS:
@@ -614,6 +617,16 @@ def run_test_retries(
         else:
             sc_command = f"--sc={stepcurrent_key}"
         print_to_file("Retrying...")
+        # Print full c++ stack traces during retries
+        # Don't do it for macos inductor tests as it makes them
+        # segfault for some reason
+        if not (
+            IS_MACOS
+            and len(command) >= 2
+            and command[2].startswith(INDUCTOR_TEST_PREFIX)
+        ):
+            env = env or {}
+            env["TORCH_SHOW_CPP_STACKTRACES"] = "1"
         print_items = []  # do not continue printing them, massive waste of space
 
     consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
@@ -1146,6 +1159,14 @@ def parse_args():
         default=IS_CI and not strtobool(os.environ.get("NO_TEST_TIMEOUT", "False")),
     )
     parser.add_argument(
+        "--enable-td",
+        action="store_true",
+        help="Enables removing tests based on TD",
+        default=IS_CI
+        and os.getenv("BRANCH", "") != "main"
+        and not strtobool(os.environ.get("NO_TD", "False")),
+    )
+    parser.add_argument(
         "additional_unittest_args",
         nargs="*",
         help="additional arguments passed through to unittest, e.g., "
@@ -1317,6 +1338,20 @@ def get_selected_tests(options) -> List[str]:
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
     if torch.version.cuda is not None:
         options.exclude.extend(["distributions/test_constraints"])
+
+    # these tests failing in Python 3.12 temporarily disabling
+    if sys.version_info >= (3, 12):
+        options.exclude.extend(INDUCTOR_TESTS)
+        options.exclude.extend(DYNAMO_TESTS)
+        options.exclude.extend(
+            [
+                "functorch/test_dims",
+                "functorch/test_rearrange",
+                "functorch/test_parsing",
+                "functorch/test_memory_efficient_fusion",
+                "torch_np/numpy_tests/core/test_multiarray",
+            ]
+        )
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 

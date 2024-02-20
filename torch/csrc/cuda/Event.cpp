@@ -98,7 +98,10 @@ static PyObject* THCPEvent_from_ipc_handle(
 }
 
 static void THCPEvent_dealloc(THCPEvent* self) {
-  self->cuda_event.~CUDAEvent();
+  {
+    pybind11::gil_scoped_release no_gil{};
+    self->cuda_event.~CUDAEvent();
+  }
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 

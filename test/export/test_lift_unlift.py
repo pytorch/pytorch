@@ -111,6 +111,9 @@ class GraphBuilder:
                         kind=self.input_to_kind[node],
                         arg=TensorArgument(name=node.name),
                         target=None,
+                        persistent=True
+                        if self.input_to_kind[node] == InputKind.BUFFER
+                        else None,
                     )
                 )
         return input_specs

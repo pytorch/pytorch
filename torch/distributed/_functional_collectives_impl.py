@@ -24,7 +24,12 @@ _wait_all
 
 """
 
-USE_NATIVE_C10D_FUNCTIONAL = "_USE_NATIVE_C10D_FUNCTIONAL" in os.environ
+_use_native_funcol = "_USE_NATIVE_C10D_FUNCTIONAL" in os.environ
+
+
+def native_funcol_enabled():
+    return _use_native_funcol
+
 
 logger = logging.getLogger(__name__)
 
@@ -95,13 +100,8 @@ def _wait_reg_dec(ptr, wait_reg):
 
 
 def _register_tensor_wrapper(tensor) -> None:
-    if USE_NATIVE_C10D_FUNCTIONAL:
+    if native_funcol_enabled():
         # Tensor storage -> work mapping is maintained in C++
-        weakref.finalize(
-            tensor,
-            torch.ops._c10d_functional.wait_tensor,
-            tensor,
-        )
         return
     global data_ptr_to_work
     data_ptr = tensor.elem.data_ptr()

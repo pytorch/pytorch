@@ -69,6 +69,7 @@ Features described in this documentation are classified by release status:
    torch.cuda.memory <torch_cuda_memory>
    mps
    xpu
+   meta
    torch.backends <backends>
    torch.export <export>
    torch.distributed <distributed>
@@ -84,6 +85,7 @@ Features described in this documentation are classified by release status:
    torch.func <func>
    futures
    fx
+   fx.experimental
    torch.hub <hub>
    torch.jit <jit>
    torch.linalg <linalg>
@@ -124,7 +126,9 @@ Features described in this documentation are classified by release status:
    named_tensor
    name_inference
    torch.__config__ <config_mod>
+   torch.__future__ <future_mod>
    logging
+   torch_environment_variables
 
 .. toctree::
    :maxdepth: 1
