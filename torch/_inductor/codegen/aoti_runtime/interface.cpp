@@ -150,6 +150,15 @@ AOTIRuntimeError AOTInductorModelContainerGetConstantOriginalFQN(
     { *original_fqn = container->constant_original_fqn(idx); })
 }
 
+AOTIRuntimeError AOTInductorModelContainerGetConstantFromFolded(
+    AOTInductorModelContainerHandle container_handle,
+    size_t idx,
+    bool* from_folded) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(container_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({ *from_folded = container->constant_from_folded(idx); })
+}
+
 AOTIRuntimeError AOTInductorModelContainerGetConstantDtype(
     AOTInductorModelContainerHandle container_handle,
     size_t idx,

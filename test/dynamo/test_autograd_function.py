@@ -822,6 +822,42 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         foo(torch.randn(2, requires_grad=True))
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_repeated_save_for_backward_calls(self):
+        from torch.autograd import Function
+
+        class Foo(Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.save_for_backward(x)
+                ctx.save_for_backward(x, y)
+                return x * y
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                x, y = ctx.saved_tensors
+                return grad_out * x, grad_out * y
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def foo(x, y):
+            return Foo.apply(x, y)
+
+        x_ref = torch.randn(2, requires_grad=True)
+        y_ref = torch.randn(2, requires_grad=True)
+        x_test = x_ref.clone().detach().requires_grad_()
+        y_test = y_ref.clone().detach().requires_grad_()
+
+        out_ref = foo(x_ref, y_ref)
+        out_ref.sum().backward()
+
+        out_test = torch.compile(foo, backend=cnts)(x_test, y_test)
+        out_test.sum().backward()
+
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(x_ref.grad, x_test.grad)
+        self.assertEqual(y_ref.grad, y_test.grad)
+
     def test_smuggle_tensor_and_complex_structures(self):
         from torch.autograd import Function
 
