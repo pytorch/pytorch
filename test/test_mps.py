@@ -1002,6 +1002,8 @@ def mps_ops_modifier(ops):
         # Unsupported
         # input types 'tensor<1x3x9x9xf16>' and 'tensor<1xf32>' are not broadcast compatible
         'nn.functional.avg_pool2d': [torch.float16],
+        'fft.fft2': [torch.bool],
+        'fft.fft': [torch.bool],
     }
 
     def addDecorator(op, d) -> None:
