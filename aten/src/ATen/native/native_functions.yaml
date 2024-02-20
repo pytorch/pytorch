@@ -134,7 +134,7 @@
   autogen: _new_zeros_with_same_feature_meta.out
 
 # This function compares the storage numel of self with that of other, where
-# storage numel is cumputed as: `other.storage().nbytes() / other.itemsize()`.
+# storage numel is computed as: `other.storage().nbytes() / other.itemsize()`.
 # We create this function for composite compliance purposes. The batching rule
 # always returns true because vmapped as_strided does not support accessing
 # storage locations not indexable by the input tensor.
@@ -478,6 +478,7 @@
 - func: conj_physical.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: conj_physical_out
+    MPS: conj_physical_out_mps
     SparseCPU, SparseCUDA: conj_physical_out_sparse
     SparseCsrCPU, SparseCsrCUDA: conj_physical_sparse_csr_out
   tags: pointwise
@@ -771,7 +772,7 @@
   dispatch:
     CompositeExplicitAutograd: arange
 
-# This operator should be named `aragne.start_out` if following the naming convention. However that
+# This operator should be named `arange.start_out` if following the naming convention. However that
 # name is already taken. Disabled because of CI job failures.
 # FIXME: enable this
 #- func: arange.start_out_(Scalar start, Scalar end, *, Tensor(a!) out) -> Tensor(a!)
@@ -4992,6 +4993,7 @@
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
+    QuantizedCPU: gelu_quantized_cpu_
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_gelu_
 
 - func: gelu(Tensor self, *, str approximate='none') -> Tensor
@@ -5791,6 +5793,7 @@
   variants: function
   dispatch:
     CPU, CUDA: std_mean
+    MPS: std_mean_mps
   autogen: std_mean.correction_out
 
 - func: std_mean.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
@@ -6046,7 +6049,6 @@
     CPU, MPS: roll
     CUDA: roll_cuda
   autogen: roll.out
-  tags: core
 
 # default int[] value [0,1] should not add space after comma, since codegen parser uses ', ' to split args
 
@@ -6128,6 +6130,73 @@
   dispatch:
     CompositeExplicitAutogradNonFunctional: _nested_view_from_buffer_copy
   autogen: _nested_view_from_buffer_copy.out
+
+- func: _nested_view_from_jagged(Tensor(a) self, Tensor offsets, Tensor dummy, Tensor? lengths=None, int ragged_idx=1) -> Tensor(a)
+  variants: function
+  device_check: NoCheck
+  dispatch:
+    CompositeExplicitAutograd: _nested_view_from_jagged
+
+- func: _nested_view_from_jagged_copy(Tensor self, Tensor offsets, Tensor dummy, Tensor? lengths=None, int ragged_idx=1) -> Tensor
+  variants: function
+  device_check: NoCheck
+  tags: view_copy
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: _nested_view_from_jagged_copy
+  autogen: _nested_view_from_jagged_copy.out
+
+- func: _nested_strided_to_jagged(Tensor(a) self, Tensor dummy) -> Tensor(a)
+  variants: function
+  device_check: NoCheck
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: _nested_strided_to_jagged
+
+- func: _nested_strided_to_jagged_copy(Tensor self, Tensor dummy) -> Tensor
+  variants: function
+  device_check: NoCheck
+  tags: view_copy
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: _nested_strided_to_jagged_copy
+  autogen: _nested_strided_to_jagged_copy.out
+
+- func: _nested_get_values(Tensor(a) self) -> Tensor(a)
+  variants: function
+  device_check: NoCheck
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: _nested_get_values
+
+- func: _nested_get_values_copy(Tensor self) -> Tensor
+  variants: function
+  device_check: NoCheck
+  tags: view_copy
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: _nested_get_values_copy
+  autogen: _nested_get_values_copy.out
+
+- func: _nested_get_offsets(Tensor self) -> Tensor
+  variants: function
+  device_check: NoCheck
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: _nested_get_offsets
+
+# returns undefined Tensor if no lengths present
+- func: _nested_get_lengths(Tensor self) -> Tensor
+  variants: function
+  device_check: NoCheck
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: _nested_get_lengths
+
+- func: _nested_get_ragged_idx(Tensor self) -> int
+  variants: function
+  device_check: NoCheck
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: _nested_get_ragged_idx
+
+- func: _nested_get_jagged_dummy() -> Tensor
+  variants: function
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA, Meta: _nested_get_jagged_dummy
 
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
   dispatch:
@@ -6313,6 +6382,7 @@
   variants: function
   dispatch:
     CPU, CUDA: var_mean
+    MPS: var_mean_mps
   autogen: var_mean.correction_out
 
 - func: var_mean.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
@@ -12872,7 +12942,7 @@
     SparseMeta: isinf_sparse_meta
     SparseCsrCPU, SparseCsrCUDA: isinf_sparse_csr
   autogen: isinf.out
-  tags: core
+  tags: [core, pointwise]
 
 - func: record_stream(Tensor(a!) self, Stream s) -> ()
   variants: method
@@ -14440,6 +14510,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: split_with_sizes_copy_out
+    CUDA: split_with_sizes_copy_out_cuda
 
 - func: view_copy(Tensor self, SymInt[] size) -> Tensor
   variants: function
@@ -14550,6 +14621,11 @@
     CUDA: _scaled_dot_product_efficient_attention_backward_cuda
   tags: nondeterministic_seeded
 
+- func: _scaled_dot_product_cudnn_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor ouput, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset)
+  dispatch:
+    CUDA: _scaled_dot_product_cudnn_attention_cuda
+  tags: nondeterministic_seeded
+
 - func: _flash_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cum_seq_q, Tensor? cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, bool return_debug_mask, *, float? scale=None) -> (Tensor output, Tensor softmax_logsumexp, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
   variants: function
   dispatch:
@@ -14562,7 +14638,7 @@
   dispatch:
     CUDA: _flash_attention_backward
 
-# Returns ouput, logsumexp if compute_logsumexp
+# Returns output, logsumexp if compute_logsumexp
 - func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, int? max_seqlen_k, float dropout_p, int custom_mask_type, bool compute_log_sumexp=False, *, float? scale=None, Tensor? causal_diagonal=None, Tensor? seqlen_k=None) -> (Tensor output, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, SymInt max_seqlen_batch_q, SymInt max_seqlen_batch_k)
   variants: function
   dispatch:

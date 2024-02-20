@@ -90,11 +90,11 @@ Tensor _to_copy_nested(
     bool non_blocking,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
-      !layout.has_value() || self.layout() == layout.value(),
+      !layout.has_value() || self.layout() == layout.value() || layout.value() == Layout::Jagged,
       "to(options) doesn't support converting to a different layout, "
-      "but got self.layout being ",
+      "but we support only strided -> jagged conversion, you have ",
       self.layout(),
-      " and options.layout set as ",
+      " and options.layout is set as ",
       layout.value());
   auto options =
       TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
@@ -115,6 +115,11 @@ Tensor _to_copy_nested(
   r = at::empty_like(self, dtype, layout, device, pin_out, memory_format);
   get_nested_tensor_impl(r)->get_buffer().copy_(
       get_nested_tensor_impl(self)->get_buffer(), non_blocking);
+
+  if (self.layout() != layout.value() && layout.value() == Layout::Jagged) {
+    Tensor dummy = at::_nested_get_jagged_dummy();
+    return at::_nested_strided_to_jagged(r, dummy);
+  }
   return r;
 }
 
