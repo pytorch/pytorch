@@ -125,6 +125,7 @@ std::vector<at::Tensor> all_reduce_coalesced(
     std::string reduce_op,
     std::string group_name) {
   std::vector<at::Tensor> outputs;
+  outputs.reserve(inputs.size());
   for (const auto& tensor : inputs) {
     outputs.push_back(tensor.clone(at::MemoryFormat::Contiguous));
   }
