@@ -10,6 +10,7 @@ from torch.testing._internal.common_utils import set_default_dtype
 RootGuardManager = guards.RootGuardManager
 GetAttrGuardAccessor = guards.GetAttrGuardAccessor
 GetItemGuardAccessor = guards.GetItemGuardAccessor
+TypeGuardAccessor = guards.TypeGuardAccessor
 TENSOR_ALIASING = guards.TENSOR_ALIASING
 install_tensor_aliasing_guard = guards.install_tensor_aliasing_guard
 NO_TENSOR_ALIASING = guards.NO_TENSOR_ALIASING
@@ -360,6 +361,44 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(guard_manager.check(global_pair))
         global_pair.y = "foo"
         self.assertFalse(guard_manager.check(global_pair))
+
+    def test_type_manager(self):
+        guard_manager = RootGuardManager()
+
+        class A:
+            a = 4
+
+        class B(A):
+            def mul(self, x):
+                super().mul(x)
+
+        foo = B()
+        f_locals = {"foo": foo}
+
+        # len(type(foo).__mro__) == 2
+        foo_mgr = guard_manager.getitem_manager("foo", foo)
+        type_manager = foo_mgr.type_manager(type(foo))
+        self.assertTrue(isinstance(foo_mgr.get_accessors()[0], TypeGuardAccessor))
+        mro_manager = type_manager.getattr_manager("__mro__", type(foo).__mro__)
+        self.assertTrue(
+            isinstance(type_manager.get_accessors()[0], GetAttrGuardAccessor)
+        )
+
+        # type(foo).__mro__[0].a = 4
+        item_manager = mro_manager.getitem_manager(1, type(foo).__mro__[1])
+        self.assertTrue(
+            isinstance(mro_manager.get_accessors()[0], GetItemGuardAccessor)
+        )
+        attr_manager = item_manager.getattr_manager("a", type(foo).__mro__[0].a)
+        self.assertTrue(
+            isinstance(item_manager.get_accessors()[0], GetAttrGuardAccessor)
+        )
+        attr_manager.add_lambda_guard(
+            lambda x: x == 4,
+            "Expected value 4",
+        )
+
+        self.assertTrue(guard_manager.check(f_locals))
 
 
 if __name__ == "__main__":

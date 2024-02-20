@@ -1662,6 +1662,36 @@ class GlobalsGuardAccessor : public GuardAccessor {
   PyObject* _globals_dict;
 };
 
+/**
+ * Represent type(...) accessor.
+ */
+class TypeGuardAccessor : public GuardAccessor {
+ public:
+  // name = __type_accessor__, a unique string used as attribute name.
+  TypeGuardAccessor(
+      RootGuardManager* root,
+      py::str name,
+      py::handle example_value)
+      : GuardAccessor(root, name, example_value) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    PyObject* x = (PyObject*)Py_TYPE(obj); // borrowed ref
+    return _guard_manager->check_nopybind(x);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* x = (PyObject*)Py_TYPE(obj); // borrowed ref
+    return _guard_manager->check_verbose_nopybind(x);
+  }
+
+  std::string repr() const override {
+    return "TypeGuardAccessor";
+  }
+};
+
 void install_tensor_aliasing_guard(
     GuardManager* x,
     GuardManager* y,
@@ -1833,6 +1863,10 @@ PyObject* torch_c_dynamo_guards_init() {
       GlobalsGuardAccessor,
       GuardAccessor,
       std::unique_ptr<GlobalsGuardAccessor>>(py_m, "GlobalsGuardAccessor");
+  py::class_<
+      TypeGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<TypeGuardAccessor>>(py_m, "TypeGuardAccessor");
 
   // Guard Manager - No constructor in python, python should use
   // RootGuardManager.
@@ -1917,6 +1951,17 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "globals_dict_manager",
           &GuardManager::get_child_manager<GlobalsGuardAccessor>,
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "type_manager",
+          [](GuardManager& self, py::handle example_value) -> GuardManager* {
+            // A unique key is used to save as the accessor key.
+            py::str unique_key("__type_accessor__");
+            return self.get_child_manager<TypeGuardAccessor>(
+                unique_key, example_value);
+          },
           py::return_value_policy::reference)
       // return by reference because C++ GuardManager has the ownership of
       // accessors and guard managers
