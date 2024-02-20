@@ -105,13 +105,6 @@ class OutputNode:
     __repr__ = get_name
 
 
-def fuse(node1: "BaseSchedulerNode", node2: "BaseSchedulerNode"):
-    if node1.is_foreach() or node2.is_foreach():
-        return ForeachKernelSchedulerNode.fuse(node1, node2)
-    else:
-        return FusedSchedulerNode.fuse(node1, node2)
-
-
 def _prune_redundant_deps(node, name_to_fused_node):
     """
     Prunes weakdeps intended for mutation ordering
@@ -844,16 +837,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
         assert isinstance(node1, (SchedulerNode, FusedSchedulerNode)) and isinstance(
             node2, (SchedulerNode, FusedSchedulerNode)
         )
-        _, (vars1, reduce1) = node1.group
-        _, (vars2, reduce2) = node2.group
-
-        if vars1 != vars2 and isinstance(vars1, tuple) and isinstance(vars2, tuple):
-            device = node1.get_device()
-            if device == torch.device("cpu"):
-                scheduler = node1.scheduler
-                backend = scheduler.get_backend(device)
-                node1, node2 = backend.recompute_nodes_for_fusion(node1, node2)
-
         return cls(node1.scheduler, list(node1.get_nodes()) + list(node2.get_nodes()))  # type: ignore[arg-type]
 
     def __init__(self, scheduler: "Scheduler", snodes: List[SchedulerNode]):
@@ -1834,7 +1817,9 @@ class Scheduler:
                     "fusing %s with %s", node1.get_name(), node2.get_name()
                 )
 
-                node3 = fuse(node1, node2)
+                # above can_fuse asserts that node2 has the same device
+                device = node1.get_device()
+                node3 = self.get_backend(device).fuse(node1, node2)
                 fused_nodes.remove(node1)
                 fused_nodes.remove(node2)
                 fused_nodes.add(node3)
@@ -2393,13 +2378,14 @@ class BaseScheduling:
         """
         raise NotImplementedError()
 
-    def recompute_nodes_for_fusion(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ):
+    def fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         """
-        Recompute one of the input nodes to be able to fuse them together
+        Fuse two nodes
         """
-        raise NotImplementedError()
+        if node1.is_foreach() or node2.is_foreach():
+            return ForeachKernelSchedulerNode.fuse(node1, node2)
+        else:
+            return FusedSchedulerNode.fuse(node1, node2)
 
     def group_fn(self, sizes):
         """

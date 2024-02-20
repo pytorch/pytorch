@@ -23,7 +23,12 @@ from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
 from ..optimize_indexing import range_expressable_in_32_bits
-from ..scheduler import BaseScheduling, FusedSchedulerNode, SchedulerNode
+from ..scheduler import (
+    BaseScheduling,
+    ForeachKernelSchedulerNode,
+    FusedSchedulerNode,
+    SchedulerNode,
+)
 from ..utils import (
     cache_on_self,
     get_fused_kernel_name,
@@ -3477,49 +3482,52 @@ class CppScheduling(BaseScheduling):
         else:
             self.kernel_group = KernelGroup()
 
-    def recompute_nodes_for_fusion(self, node1, node2):
-        assert isinstance(node1, (SchedulerNode, FusedSchedulerNode))
-        assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
-
-        _, (vars1, reduce1) = node1.group
-        _, (vars2, reduce2) = node2.group
-
-        assert reduce1 == () and reduce2 == (), (reduce1, reduce2)
-
-        def get_indexing_ranges_exprs(node):
-            if isinstance(node, FusedSchedulerNode):
-                assert len(node.snodes) > 0
-                # use the last scheduler node from the list as it has the most
-                # relevant indexing expressions
-                return get_indexing_ranges_exprs(node.snodes[-1])
-            else:
-                assert isinstance(node, SchedulerNode)
-                comp_buffer = node.node
-                assert isinstance(comp_buffer, ir.ComputedBuffer)
-                _, body, _ = comp_buffer.get_default_sizes_body()
-                return body.var_ranges, [*body.indexing_exprs.values()]
-
-        node_to_recomp = node1 if len(vars1) < len(vars2) else node2
-        assert isinstance(node_to_recomp, SchedulerNode)
-
-        ref_node = node2 if len(vars1) < len(vars2) else node1
-
-        extra_indexing_constraints = get_indexing_ranges_exprs(ref_node)
-
-        node_to_recomp.recompute_size_and_body(
-            extra_indexing_constraints=extra_indexing_constraints
-        )
-
-        if len(vars1) < len(vars2):
-            node1 = node_to_recomp
+    def fuse(self, node1, node2):
+        if node1.is_foreach() or node2.is_foreach():
+            return ForeachKernelSchedulerNode.fuse(node1, node2)
         else:
-            node2 = node_to_recomp
+            if self._can_fuse_nodes_with_compatible_ranges(node1, node2):
+                assert isinstance(node1, (SchedulerNode, FusedSchedulerNode))
+                assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
 
-        _, (vars1, _) = node1.group
-        _, (vars2, _) = node2.group
-        assert vars1 == vars2, (vars1, vars2)
+                _, (vars1, reduce1) = node1.group
+                _, (vars2, reduce2) = node2.group
+                assert reduce1 == () and reduce2 == (), (reduce1, reduce2)
 
-        return node1, node2
+                def get_indexing_ranges_exprs(node):
+                    if isinstance(node, FusedSchedulerNode):
+                        assert len(node.snodes) > 0
+                        # use the last scheduler node from the list as it has the most
+                        # relevant indexing expressions
+                        return get_indexing_ranges_exprs(node.snodes[-1])
+                    else:
+                        assert isinstance(node, SchedulerNode)
+                        comp_buffer = node.node
+                        assert isinstance(comp_buffer, ir.ComputedBuffer)
+                        _, body, _ = comp_buffer.get_default_sizes_body()
+                        return body.var_ranges, [*body.indexing_exprs.values()]
+
+                node_to_recomp = node1 if len(vars1) < len(vars2) else node2
+                assert isinstance(node_to_recomp, SchedulerNode)
+
+                ref_node = node2 if len(vars1) < len(vars2) else node1
+
+                extra_indexing_constraints = get_indexing_ranges_exprs(ref_node)
+
+                node_to_recomp.recompute_size_and_body(
+                    extra_indexing_constraints=extra_indexing_constraints
+                )
+
+                if len(vars1) < len(vars2):
+                    node1 = node_to_recomp
+                else:
+                    node2 = node_to_recomp
+
+                _, (vars1, _) = node1.group
+                _, (vars2, _) = node2.group
+                assert vars1 == vars2, (vars1, vars2)
+
+            return FusedSchedulerNode.fuse(node1, node2)
 
     def _can_fuse_nodes_with_compatible_ranges(self, node1, node2):
         # Here we try to fuse SchedulerNode/FusedSchedulerNode with compatible ranges
@@ -3540,18 +3548,26 @@ class CppScheduling(BaseScheduling):
         if not isinstance(node_to_recomp, SchedulerNode):
             return False
 
-        def has_computed_buffer(node):
+        def get_buffer(node):
             if isinstance(node, FusedSchedulerNode):
                 assert len(node.snodes) > 0
                 # use the last scheduler node from the list as it has the most
                 # relevant indexing expressions
-                return has_computed_buffer(node.snodes[-1])
+                return get_buffer(node.snodes[-1])
             else:
                 assert isinstance(node, SchedulerNode)
-                comp_buffer = node.node
-                return isinstance(comp_buffer, ir.ComputedBuffer)
+                return node.node
 
-        if not has_computed_buffer(ref_node):
+        ref_node_buffer = get_buffer(ref_node)
+        if not isinstance(ref_node_buffer, ir.ComputedBuffer):
+            return False
+
+        # It may happen that node1 and node2 compatible number of elements
+        # but different original ranges, for example:
+        # {d0: s0, d1: s1, d2: s2} vs {d0: s0*s1*s2}
+        var_ranges1 = ref_node_buffer.get_read_writes().var_ranges
+        var_ranges2 = node_to_recomp.node.get_read_writes().var_ranges
+        if var_ranges1 != var_ranges2:
             return False
 
         return True

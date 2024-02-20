@@ -9,7 +9,7 @@ import textwrap
 import traceback
 from contextlib import nullcontext
 from enum import Enum
-from functools import partial, reduce
+from functools import partial
 from typing import (
     Any,
     Callable,
@@ -3257,13 +3257,10 @@ class ComputedBuffer(Buffer):
                 extra_indexing_ranges,
             )
 
-            extra_indexing_symbols = reduce(
-                lambda a, b: a | b, [f.free_symbols for f in extra_indexing_expr]
+            extra_indexing_symbols = set.union(
+                *[f.free_symbols for f in extra_indexing_expr]
             )
-
-            indexing_symbols = reduce(
-                lambda a, b: a | b, [f.free_symbols for f in index_formulas]
-            )
+            indexing_symbols = set.union(*[f.free_symbols for f in index_formulas])
 
             assert len(indexing_symbols - extra_indexing_symbols) == 0, (
                 extra_indexing_symbols,
