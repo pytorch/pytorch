@@ -438,7 +438,8 @@ static PyMethodDef TensorGuards_methods[] = {
 
 static PyTypeObject TensorGuardsType = {PyVarObject_HEAD_INIT(nullptr, 0)};
 
-// TODO (janimesh) - Remove this when C++ guard manager is merged.
+// TODO (janimesh) - Remove the PyObject_HEAD part when C++ guard manager is
+// merged.
 struct GlobalStateGuard {
   PyObject_HEAD;
 
@@ -906,44 +907,17 @@ class DEFAULT_DEVICE : public LeafGuard {
 class GLOBAL_STATE : public LeafGuard {
  public:
   GLOBAL_STATE(py::object verbose_code_parts) : LeafGuard(verbose_code_parts) {
-    auto& ctx = at::globalContext();
-    _grad_mode = at::GradMode::is_enabled();
-    _torch_function = torch::torch_function_enabled();
-    _deterministic_algorithms = ctx.deterministicAlgorithms();
-    _deterministic_algorithms_warn_only = ctx.deterministicAlgorithmsWarnOnly();
-    _allow_tf32 = ctx.allowTF32CuBLAS();
-    _allow_fp16_reduce = ctx.allowFP16ReductionCuBLAS();
-    _allow_bf16_reduce = ctx.allowBF16ReductionCuBLAS();
-    _num_threads = at::get_num_threads();
-    _default_dtype = at::get_default_dtype();
+    _guard = std::make_unique<GlobalStateGuard>();
+    _guard->init();
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     // Ignore value arg, this is just to satisfy the interface.
-    auto& ctx = at::globalContext();
-    return (_grad_mode == at::GradMode::is_enabled() &&
-            _torch_function == torch::torch_function_enabled() &&
-            _deterministic_algorithms == ctx.deterministicAlgorithms() &&
-            _deterministic_algorithms_warn_only ==
-                ctx.deterministicAlgorithmsWarnOnly() &&
-            _allow_tf32 == ctx.allowTF32CuBLAS() &&
-            _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
-            _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
-            _num_threads == at::get_num_threads()) &&
-        _default_dtype == at::get_default_dtype();
+    return _guard->check();
   }
 
  private:
-  bool _grad_mode;
-  bool _torch_function;
-  bool _deterministic_algorithms;
-  bool _deterministic_algorithms_warn_only;
-  bool _allow_tf32;
-  bool _allow_fp16_reduce;
-  bool _allow_bf16_reduce;
-  int _num_threads;
-  caffe2::TypeMeta _default_dtype;
-  // TODO(jansel): we should guard on more state as inductor starts using it
+  std::unique_ptr<GlobalStateGuard> _guard;
 };
 
 class DATA_PTR_MATCH : public LeafGuard {
