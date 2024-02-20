@@ -184,7 +184,10 @@ def mps_ops_grad_modifier(ops):
         'fft.ifftn': [torch.float32],
         'fft.irfft': [torch.float32],
         'fft.rfft2': [torch.float32],
+        'fft.ihfftn': [torch.float32],
         # Those are tentative
+        'fft.ihfft': [torch.float32],
+        'fft.ihfft2': [torch.float32],
         'fft.ifft': [torch.float32],
         'fft.ifft2': [torch.float32],
         'fft.ifftshift': [torch.float32],
