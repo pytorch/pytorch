@@ -438,6 +438,8 @@ static PyMethodDef TensorGuards_methods[] = {
 
 static PyTypeObject TensorGuardsType = {PyVarObject_HEAD_INIT(nullptr, 0)};
 
+// TODO (janimesh) - Remove the PyObject_HEAD part when C++ guard manager is
+// merged.
 struct GlobalStateGuard {
   PyObject_HEAD;
 
@@ -905,6 +907,22 @@ class DEFAULT_DEVICE : public LeafGuard {
   // Save the current device and the module dict during the guard construction.
   py::object _utils_device_dict;
   py::object _device;
+};
+
+class GLOBAL_STATE : public LeafGuard {
+ public:
+  GLOBAL_STATE(py::object verbose_code_parts) : LeafGuard(verbose_code_parts) {
+    _guard = std::make_unique<GlobalStateGuard>();
+    _guard->init();
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    // Ignore value arg, this is just to satisfy the interface.
+    return _guard->check();
+  }
+
+ private:
+  std::unique_ptr<GlobalStateGuard> _guard;
 };
 
 /**
@@ -1545,6 +1563,10 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DEFAULT_DEVICE")
       .def(py::init<py::list>())
       .def("__call__", &DEFAULT_DEVICE::check);
+  py::class_<GLOBAL_STATE, LeafGuard, std::shared_ptr<GLOBAL_STATE>>(
+      py_m, "GLOBAL_STATE")
+      .def(py::init<py::list>())
+      .def("__call__", &GLOBAL_STATE::check);
 
   // Guard Accessors - These are present so that we can iterate over the
   // GuardManager hierarchy. We intentionally do not provide even an init
@@ -1614,6 +1636,12 @@ PyObject* torch_c_dynamo_guards_init() {
           [](GuardManager& self, py::object verbose_code_parts) -> void {
             self.add_leaf_guard(
                 std::make_shared<DEFAULT_DEVICE>(verbose_code_parts));
+          })
+      .def(
+          "add_global_state_guard",
+          [](GuardManager& self, py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(
+                std::make_shared<GLOBAL_STATE>(verbose_code_parts));
           })
       // return by reference because C++ GuardManager has the ownership of
       // accessors and guard managers
