@@ -14,8 +14,12 @@
 #if !defined(__MAC_14_0) && (!defined(MAC_OS_X_VERSION_14_0) || (MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_14_0))
 @implementation FakeMPSGraphFFTDescriptor
 + (nullable instancetype)descriptor {
-  // This should never be called
-  return nil;
+  id desc = NSClassFromString(@"MPSGraphFFTDescriptor");
+  return (FakeMPSGraphFFTDescriptor*)[desc descriptor];
+}
+
+- (nonnull id)copyWithZone:(nullable NSZone*)zone {
+  return self;
 }
 @end
 #endif

@@ -12,7 +12,7 @@ typedef NS_ENUM(NSUInteger, MPSGraphFFTScalingMode)
     MPSGraphFFTScalingModeUnitary       = 2L,
 };
 
-@interface FakeMPSGraphFFTDescriptor : NSObject<NSCopying>
+@interface FakeMPSGraphFFTDescriptor : MPSGraphObject<NSCopying>
 @property (readwrite, nonatomic) BOOL inverse;
 @property (readwrite, nonatomic) MPSGraphFFTScalingMode scalingMode;
 @property (readwrite, nonatomic) BOOL roundToOddHermitean;

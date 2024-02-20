@@ -179,26 +179,6 @@ def mps_ops_grad_modifier(ops):
         'nn.functional.conv_transpose1d': [torch.float16],
         'nn.functional.conv_transpose2d': [torch.float16],
         'nn.functional.conv_transpose3d': [torch.float16],
-        'fft.fftn': [torch.float32],
-        'fft.hfft': [torch.float32],
-        'fft.ifftn': [torch.float32],
-        'fft.irfft': [torch.float32],
-        'fft.rfft2': [torch.float32],
-        'fft.ihfftn': [torch.float32],
-        'stft': [torch.float32],
-        # Those are tentative
-        'fft.ihfft': [torch.float32],
-        'fft.ihfft2': [torch.float32],
-        'fft.ifft': [torch.float32],
-        'fft.ifft2': [torch.float32],
-        'fft.ifftshift': [torch.float32],
-        'fft.irfft2': [torch.float32],
-        'fft.irfftn': [torch.float32],
-        'fft.fft': [torch.float32],
-        'fft.fft2': [torch.float32],
-        'fft.fftshift': [torch.float32],
-        'fft.rfft': [torch.float32],
-        'fft.rfftn': [torch.float32],
     }
 
     MACOS_13_3_XFAILLIST_GRAD = {
@@ -1002,8 +982,6 @@ def mps_ops_modifier(ops):
         # Unsupported
         # input types 'tensor<1x3x9x9xf16>' and 'tensor<1xf32>' are not broadcast compatible
         'nn.functional.avg_pool2d': [torch.float16],
-        'fft.fft2': [torch.bool],
-        'fft.fft': [torch.bool],
     }
 
     def addDecorator(op, d) -> None:
