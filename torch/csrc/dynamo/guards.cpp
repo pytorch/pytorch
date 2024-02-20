@@ -903,13 +903,17 @@ class DEFAULT_DEVICE : public LeafGuard {
     py::handle device_module = py::module::import("torch.utils._device");
     // Save the dict using py::object
     _utils_device_dict = device_module.attr("__dict__");
-    _current_device_str =
-        PyUnicode_InternFromString("CURRENT_DEVICE"); // new reference
-    _device = PyDict_GetItem(
-        _utils_device_dict.ptr(), _current_device_str); // borrowed ref
+    _device = PyDict_GetItemString(
+        _utils_device_dict.ptr(), "CURRENT_DEVICE"); // borrowed ref
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
+    // Create a static interned string. Interned string is faster than creating
+    // a new string every time. Even though its a new reference, we don't dec
+    // ref it. Interned strings are used for things like variable names and are
+    // leaked by design.
+    static PyObject* _current_device_str =
+        PyUnicode_InternFromString("CURRENT_DEVICE");
     PyObject* device = PyDict_GetItem(
         _utils_device_dict.ptr(), _current_device_str); // borrowed ref
     if (device != _device) {
@@ -921,10 +925,6 @@ class DEFAULT_DEVICE : public LeafGuard {
       return result;
     }
     return true;
-  }
-
-  ~DEFAULT_DEVICE() override {
-    Py_DECREF(_current_device_str);
   }
 
  private:
