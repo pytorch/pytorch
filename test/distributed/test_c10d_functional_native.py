@@ -399,7 +399,6 @@ class C10DFunctionalNativeCompileTest(TestCase):
         )
 
     def tearDown(self):
-        funcol.disable_native_funcol()
         dist.destroy_process_group()
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
