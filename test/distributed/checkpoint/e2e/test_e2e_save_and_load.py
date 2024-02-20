@@ -185,6 +185,9 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
             "s": original_stateful_obj,
         }
 
+        import fbvscode
+
+        fbvscode.attach_debugger()
         if async_op:
             f = saver._async_save(sd, checkpoint_id=self.temp_dir)
             t = time.monotonic()
@@ -280,6 +283,23 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     def test_no_dist(self):
         DCP.save({}, checkpoint_id=self.temp_dir, no_dist=True)
         DCP.load({}, checkpoint_id=self.temp_dir, no_dist=True)
+
+
+class TestNoCPU(DTensorTestBase):
+    @property
+    def backend(self):
+        return "nccl"
+
+    @with_comms
+    def test_no_cpu(self):
+        import fbvscode
+
+        fbvscode.attach_debugger()
+        with self.assertRaisesRegex(
+            AssertionError, r"A CPU backend must be enabled for async save;.*?"
+        ):
+            f = saver._async_save({})
+            f.result()
 
 
 instantiate_parametrized_tests(TestE2ESaveAndLoad)

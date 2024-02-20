@@ -7,6 +7,7 @@ import torch
 import torch.distributed as dist
 from torch.distributed._state_dict_utils import _offload_state_dict_to_cpu
 from torch.distributed.checkpoint.stateful import Stateful
+from torch.distributed.distributed_c10d import _get_default_group
 
 from ._storage_utils import _storage_setup
 from .default_planner import DefaultSavePlanner
@@ -200,6 +201,11 @@ def _async_save(
 
     """
     torch._C._log_api_usage_once("torch.distributed.checkpoint._async_save")
+
+    pg = process_group or _get_default_group()
+    assert (
+        torch.device("cpu") in pg._device_types  # type: ignore[attr-defined]
+    ), "A CPU backend must be enabled for async save; try initializing process group with 'cpu:gloo,cuda:ncc'"
 
     cpu_state_dict = _offload_state_dict_to_cpu(_stateful_to_state_dict(state_dict))
 
