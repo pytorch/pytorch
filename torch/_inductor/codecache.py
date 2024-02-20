@@ -1029,8 +1029,8 @@ cdll.LoadLibrary("__lib_path__")
 @dataclasses.dataclass
 class VecNEON(VecISA):
     _bit_width = 256  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec256/vec256_float_neon.h
-    _macro = "CPU_CAPABILITY_NEON"
-    _arch_flags = ""  # Unused, even for AVX
+    _macro = "-DCPU_CAPABILITY_NEON"
+    _arch_flags = ""  # Unused
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16}
 
     def __str__(self) -> str:
