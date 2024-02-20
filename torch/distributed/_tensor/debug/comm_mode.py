@@ -5,17 +5,17 @@ import torch
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
-native = torch.ops._c10d_functional
-legacy = torch.ops.c10d_functional
+funcol_native = torch.ops._c10d_functional
+funcol_py = torch.ops.c10d_functional
 
-NATIVE_TO_LEGACY_MAPPING = {
-    native.all_gather_into_tensor: legacy.all_gather_into_tensor,
-    native.all_gather_into_tensor_coalesced: legacy.all_gather_into_tensor_coalesced,
-    native.all_reduce: legacy.all_reduce,
-    native.all_to_all_single: legacy.all_to_all_single,
-    native.broadcast: legacy.broadcast,
-    native.reduce_scatter_tensor: legacy.reduce_scatter_tensor,
-    native.reduce_scatter_tensor_coalesced: legacy.reduce_scatter_tensor_coalesced,
+NATIVE_TO_PY_MAPPING = {
+    funcol_native.all_gather_into_tensor: funcol_py.all_gather_into_tensor,
+    funcol_native.all_gather_into_tensor_coalesced: funcol_py.all_gather_into_tensor_coalesced,
+    funcol_native.all_reduce: funcol_py.all_reduce,
+    funcol_native.all_to_all_single: funcol_py.all_to_all_single,
+    funcol_native.broadcast: funcol_py.broadcast,
+    funcol_native.reduce_scatter_tensor: funcol_py.reduce_scatter_tensor,
+    funcol_native.reduce_scatter_tensor_coalesced: funcol_py.reduce_scatter_tensor_coalesced,
 }
 
 
@@ -42,9 +42,9 @@ class CommDebugMode(TorchDispatchMode):
     def __init__(self):
         self.comm_counts: Dict[Any, int] = defaultdict(int)
         self.comm_registry = set()
-        for native_op, legacy_op in NATIVE_TO_LEGACY_MAPPING.items():
+        for native_op, py_op in NATIVE_TO_PY_MAPPING.items():
             self.comm_registry.add(native_op)
-            self.comm_registry.add(legacy_op)
+            self.comm_registry.add(py_op)
 
     def get_total_counts(self) -> int:
         return sum(self.comm_counts.values())
@@ -77,8 +77,8 @@ class CommDebugMode(TorchDispatchMode):
         # we make CommDebugMode translate native funcol ops into legacy funcol
         # ops until the migration finishes.
         if func_packet in self.comm_registry:
-            if func_packet in NATIVE_TO_LEGACY_MAPPING:
-                func_packet = NATIVE_TO_LEGACY_MAPPING[func_packet]
+            if func_packet in NATIVE_TO_PY_MAPPING:
+                func_packet = NATIVE_TO_PY_MAPPING[func_packet]
             self.comm_counts[func_packet] += 1
 
         return out
