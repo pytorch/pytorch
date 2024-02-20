@@ -105,7 +105,7 @@ class TestCutlassBackend(TestCase):
     @unittest.skipIf(not SM75OrLater, "need sm_75")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     def test_max_autotune_precompile(self):
         """
         Make sure autotuning mm in sub processes work without crashes.
@@ -139,7 +139,7 @@ class TestCutlassBackend(TestCase):
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM75OrLater, "need sm_75")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @parametrize("dynamic", (False,))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
@@ -284,7 +284,7 @@ class TestCutlassBackend(TestCase):
                     ), f"Expected fuse count of {expected_fuse_count} but got {actual_count}"
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_fusion_fp16(self):
@@ -297,7 +297,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_fusion_fp16_layout_opt(self):
@@ -322,7 +322,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_fusion_fp16_layout_opt2(self):
@@ -348,7 +348,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_fusion_fp16_layout_opt3(self):
@@ -376,7 +376,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_mm_fp16_standalone_runner_large(self):
@@ -408,7 +408,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_other_backends_simple_mm_fp16_standalone_runner_large(self):
@@ -429,7 +429,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_fusion_fp16_unaligned(
@@ -449,7 +449,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_double_matmul(
@@ -469,7 +469,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_fusion_fp32(self):
@@ -488,7 +488,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_fusion_fp16_fp32acc(self):
@@ -500,7 +500,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_chained_fusion_fp16(self):
@@ -513,7 +513,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_one_additional_input_simple(self):
@@ -542,7 +542,7 @@ class TestCutlassBackend(TestCase):
             )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_one_additional_input_random_mask(self):
@@ -575,7 +575,7 @@ class TestCutlassBackend(TestCase):
                 )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_two_additional_inputs_random_mask(self):
@@ -608,7 +608,7 @@ class TestCutlassBackend(TestCase):
                 )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_more_additional_inputs_random_mask(self):
@@ -631,7 +631,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_two_additional_inputs_random_mask_broadcasted(
@@ -657,7 +657,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_one_additional_input_random_mask_batched(
@@ -679,7 +679,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_chained_fusion_fp16_fp32acc(self):
@@ -691,7 +691,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_relu_fusion_fp16(self):
@@ -703,7 +703,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_addmm(self):
@@ -719,7 +719,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_addmm_broadcasted_row(self):
@@ -736,7 +736,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_addmm_large(self):
@@ -758,7 +758,7 @@ class TestCutlassBackend(TestCase):
     @unittest.skipIf(
         True, "Flaky test due to accumulation of minimal numerical differences"
     )
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
@@ -779,7 +779,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_addmm_large_broadcasted_2(self):
@@ -799,7 +799,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_addmm_broadcasted_col(self):
@@ -820,7 +820,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_addmm_broadcasted_row2(self):
@@ -844,7 +844,7 @@ class TestCutlassBackend(TestCase):
         True, "Flaky test, depending on chosen Cutlass op / autotuning result"
     )
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_addmm_broadcasted_col2(self):
@@ -861,7 +861,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_aux_broadcasted_row(self):
@@ -878,7 +878,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_aux_broadcasted_col(self):
@@ -896,7 +896,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_aux_broadcasted_col2(self):
@@ -913,7 +913,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_aux_broadcasted_row2(self):
@@ -930,7 +930,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_relu_fusion_fp16_fp32acc(self):
@@ -943,7 +943,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_relu6_fusion_fp16_fp32acc(self):
@@ -956,7 +956,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_bmm(self):
@@ -973,7 +973,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_baddbmm(self):
@@ -994,7 +994,7 @@ class TestCutlassBackend(TestCase):
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_shape_dependent_normalization_fusion(self):
@@ -1007,7 +1007,7 @@ class TestCutlassBackend(TestCase):
 
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM75OrLater, "need sm_75")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @parametrize("dynamic", (False,))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
@@ -1048,7 +1048,7 @@ class TestCutlassBackend(TestCase):
             torch.testing.assert_close(Y_compiled, Y, atol=1e-1, rtol=1e-1)
 
     @unittest.skipIf(not SM75OrLater, "need sm_75")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND)
+    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @parametrize("dynamic", (False,))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen,Triton,CUTLASS"))
