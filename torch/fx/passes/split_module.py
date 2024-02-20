@@ -47,6 +47,7 @@ def split_module(
     split_callback: Callable[[Node], int],
     qualname_map: Optional[Dict[str, str]] = None,
     keep_original_order: Optional[bool] = False,
+    keep_original_node_name: Optional[bool] = False,
 ):
     """
     Creates subgraphs out of main graph
@@ -152,9 +153,13 @@ def split_module(
             default_value = (
                 node.args[0] if len(node.args) > 0 else inspect.Signature.empty
             )
-            base_mod_env[node.name] = base_mod_graph.placeholder(
-                node.target, type_expr=node.type, default_value=default_value
-            )
+            if keep_original_node_name:
+                args = () if default_value is inspect.Signature.empty else (default_value,)
+                base_mod_env[node.name] = base_mod_graph.create_node('placeholder', node.name, args=args, type_expr=node.type)
+            else:
+                base_mod_env[node.name] = base_mod_graph.placeholder(
+                    node.target, type_expr=node.type, default_value=default_value
+                )
             base_mod_env[node.name].meta = node.meta.copy()
         elif node.op == "get_attr":
             base_mod_env[node.name] = base_mod_graph.get_attr(node.target)
@@ -394,12 +399,14 @@ def split_module(
 
             assert isinstance(gathered_args, tuple)
             assert isinstance(gathered_kwargs, dict)
+            name = node.name if keep_original_node_name else None
             new_node = partition.graph.create_node(
                 op=node.op,
                 target=target,
                 args=gathered_args,
                 kwargs=gathered_kwargs,
                 type_expr=node.type,
+                name=name,
             )
             new_node.meta = node.meta.copy()
             partition.environment[node] = new_node

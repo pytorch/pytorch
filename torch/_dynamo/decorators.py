@@ -93,7 +93,7 @@ def allow_in_graph(fn):
     if isinstance(fn, (list, tuple)):
         return [allow_in_graph(x) for x in fn]
     assert callable(fn), "allow_in_graph expects a callable"
-    if trace_rules.lookup(fn) != variables.TorchInGraphFunctionVariable:
+    if trace_rules.lookup_callable(fn) != variables.TorchInGraphFunctionVariable:
         trace_rules._disallowed_callable_ids.remove(id(fn))
         trace_rules._allowed_callable_ids.add(id(fn))
     return fn
@@ -106,8 +106,9 @@ def _disallow_in_graph_helper(throw_if_not_allowed):
         assert callable(fn), "disallow_in_graph expects a callable"
         if (
             throw_if_not_allowed
+            and trace_rules.lookup_callable(fn)
+            != variables.TorchInGraphFunctionVariable
             and trace_rules.lookup(fn) != variables.TorchInGraphFunctionVariable
-            and fn not in trace_rules._allowed_callable_ids
         ):
             raise IncorrectUsage(
                 "disallow_in_graph is expected to be used on an already allowed callable (like torch.* ops). "

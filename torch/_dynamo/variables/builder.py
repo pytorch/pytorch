@@ -39,7 +39,7 @@ from torch.fx.immutable_collections import immutable_list
 from torch.nested._internal.nested_tensor import NestedTensor
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef
-from .. import config, mutation_guard, replay_record, skipfiles, trace_rules
+from .. import config, mutation_guard, replay_record, trace_rules
 
 from ..device_interface import get_registered_device_interfaces
 from ..exc import InternalTorchDynamoError, unimplemented
@@ -59,7 +59,7 @@ from ..source import (
     Source,
     TupleIteratorGetItemSource,
 )
-from ..trace_rules import is_builtin_callable, is_callable_allowed, is_numpy
+from ..trace_rules import is_callable_allowed, is_numpy
 from ..utils import (
     build_checkpoint_variable,
     clone_input,
@@ -82,7 +82,6 @@ from ..utils import (
 )
 
 from .base import MutableLocal, typestr, VariableTracker
-from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
@@ -109,7 +108,6 @@ from .functions import (
     CollectiveFunctionRewriteVariable,
     FunctoolsPartialVariable,
     TritonKernelVariable,
-    UserFunctionVariable,
     UserMethodVariable,
 )
 from .higher_order_ops import TorchHigherOrderOperatorVariable
@@ -138,7 +136,6 @@ from .misc import (
     NumpyVariable,
     PythonModuleVariable,
     SavedTensorBox,
-    SkipFilesVariable,
     TypingVariable,
 )
 from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
@@ -205,8 +202,8 @@ class GraphArg:
             self._example = TensorWeakRef(self._example)
             assert is_fake(self.fake_tensor)
 
-    def load(self, tx):
-        return self.source.reconstruct(tx)
+    def reconstruct(self, codegen):
+        self.source.reconstruct(codegen)
 
     def erase(self):
         self._example = None
@@ -474,9 +471,6 @@ class VariableBuilder:
         elif isinstance(value, enum.Enum):
             self.install_guards(GuardBuilder.ID_MATCH)
             return EnumVariable(value=value, source=self.source)
-        elif is_builtin_callable(value):
-            self.install_guards(GuardBuilder.BUILTIN_MATCH)
-            return BuiltinVariable(value, source=self.source)
         elif is_utils_checkpoint(value):
             return build_checkpoint_variable(source=self.source)
         elif isinstance(value, functools.partial):
@@ -493,6 +487,8 @@ class VariableBuilder:
             keywords = {}
             keywords_source = AttrSource(self.get_source(), "keywords")
             for k, v in value.keywords.items():
+                if not ConstantVariable.is_literal(k):
+                    unimplemented("functools.partial with non-literal keyword")
                 keywords[k] = VariableBuilder(
                     self.tx, GetItemSource(keywords_source, k)
                 )(v)
@@ -502,7 +498,7 @@ class VariableBuilder:
                 keywords_source.make_guard(GuardBuilder.DICT_KEYS),
                 args_source.make_guard(GuardBuilder.LIST_LENGTH),
             )
-            return FunctoolsPartialVariable(func_obj, args, keywords, original=value)
+            return FunctoolsPartialVariable(func_obj, args, keywords)
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.
             self.install_guards(GuardBuilder.ID_MATCH)
@@ -568,6 +564,12 @@ class VariableBuilder:
                     value.__self__, source=AttrSource(self.source, member="__self__")
                 ),
                 "apply",
+            )
+        elif callable(value) and trace_rules.lookup_callable(value) is not None:
+            if is_callable_allowed(value):
+                self.tx.output.has_user_defined_allowed_in_graph = True
+            return trace_rules.lookup_callable(value).create_with_source(
+                value, source=self.source
             )
         elif np and isinstance(value, np.number):
             return self.wrap_unspecialized_primitive(value)
@@ -706,11 +708,8 @@ class VariableBuilder:
         elif TorchCtxManagerClassVariable.is_matching_cls(value):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return TorchCtxManagerClassVariable(value, source=self.source)
-        elif (is_function_or_wrapper(value) or callable(value)) and trace_rules.lookup(
-            value
-        ) is not None:
-            if is_callable_allowed(value):
-                self.tx.output.has_user_defined_allowed_in_graph = True
+        elif is_function_or_wrapper(value):
+            value = unwrap_if_wrapper(value)
             return trace_rules.lookup(value).create_with_source(
                 value, source=self.source
             )
@@ -720,25 +719,6 @@ class VariableBuilder:
         elif isinstance(value, (types.ModuleType, replay_record.DummyModule)):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return PythonModuleVariable(
-                value,
-                source=self.source,
-            )
-        elif (
-            is_function_or_wrapper(value)
-            and skipfiles.check(value, is_inlined_call=True)
-            and not inspect.getattr_static(value, "_torchdynamo_inline", False)
-            and not inspect.getattr_static(value, "__script_if_tracing_wrapper", False)
-        ):
-            value = unwrap_if_wrapper(value)
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return SkipFilesVariable(
-                value,
-                skipfiles.check_verbose(value, is_inlined_call=True).reason,
-                source=self.source,
-            )
-        elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
-            self.install_guards(GuardBuilder.CLOSURE_MATCH)
-            return UserFunctionVariable(
                 value,
                 source=self.source,
             )
@@ -775,7 +755,9 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            # This is a userdefined class, so install an ID_MATCH even if its a
+            # global variable.
+            self.install_guards(GuardBuilder.ID_MATCH)
             return UserDefinedClassVariable(
                 value,
                 source=self.source,
@@ -1616,9 +1598,9 @@ def _automatic_dynamic(
 
     # We preserve the dynamism of inputs. For example, when users call
     # make_fx(torch.cond, tracing_mode="symbolic")(*args), inputs have SymInt sizes.
-    from torch.fx.experimental.symbolic_shapes import is_singleton
+    from torch.fx.experimental.symbolic_shapes import is_nested_int
 
-    if any(isinstance(s, SymInt) and not is_singleton(s) for s in e.size()):
+    if any(isinstance(s, SymInt) and not is_nested_int(s) for s in e.size()):
         return StatefulSymbolicContext(
             dynamic_sizes=[
                 DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
@@ -1747,7 +1729,7 @@ def _automatic_dynamic(
             constraint_dim is not None
             or marked_dynamic
             or marked_weak_dynamic
-            or is_singleton(e.shape[i])
+            or is_nested_int(e.shape[i])
         ):
             # NB: We could assert static_shapes is False here, but it
             # seems better to allow the user to override symbolic_context in this
@@ -1869,17 +1851,12 @@ class SourcelessBuilder:
             return UserDefinedObjectVariable(value)
         if ConstantVariable.is_literal(value):
             return SourcelessBuilder.wrap_constant_literal(value)
-        elif is_builtin_callable(value):
-            return BuiltinVariable(value)
-        elif (is_function_or_wrapper(value) or callable(value)) and trace_rules.lookup(
-            value
-        ) is not None:
-            value = unwrap_if_wrapper(value)
+        elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
+            return trace_rules.lookup_callable(value)(value)
+        elif is_function_or_wrapper(value):
             return trace_rules.lookup(value)(value)
-        elif isinstance(value, types.FunctionType):
-            return UserFunctionVariable(value)
         elif isinstance(value, enum.Enum):
             return EnumVariable(value)
         elif isinstance(value, (type, abc.ABCMeta)):
@@ -1897,6 +1874,10 @@ class SourcelessBuilder:
             return cls([self(tx, x) for x in value], mutable_local=MutableLocal())
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)
+        elif PlacementVariable.is_placement(value):
+            return PlacementVariable(value)
+        elif DeviceMeshVariable.is_device_mesh(value):
+            return DeviceMeshVariable(value)
         unimplemented(f"Unexpected type in sourceless builder {type(value)}")
 
     @staticmethod

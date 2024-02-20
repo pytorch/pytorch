@@ -23,9 +23,9 @@ from torch._export.serde.serialize import (
     serialize,
     SerializeError,
 )
-from torch._subclasses.fake_tensor import FakeTensor
-from torch.export import Dim, export, load, save
-from torch.export import WrapperModule
+from torch._higher_order_ops.torchbind import enable_torchbind_tracing
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch.export import Dim, export, load, save, WrapperModule
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 from torch.testing._internal.common_utils import (
     find_library_location,
@@ -70,12 +70,21 @@ class TestSerialize(TestCase):
                 with torch.enable_grad():
                     return x + x
 
+        inp = (torch.ones(10),)
         with torch.no_grad():
             from torch.export._trace import _export
-            ep = _export(Foo(), (torch.ones(10),), pre_dispatch=True)
+            ep = _export(Foo(), inp, pre_dispatch=True)
 
-        with self.assertRaisesRegex(SerializeError, "Failed serializing node _set_grad_enabled"):
-            torch.export.save(ep, io.BytesIO())
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = torch.export.load(buffer)
+
+        exp_out = ep.module()(*inp)
+        actual_out = loaded_ep.module()(*inp)
+        self.assertEqual(exp_out, actual_out)
+        self.assertEqual(exp_out.requires_grad, actual_out.requires_grad)
+
 
     def test_serialize_multiple_returns_from_node(self) -> None:
         class MyModule(torch.nn.Module):
@@ -221,12 +230,11 @@ class TestSerialize(TestCase):
             g.nodes[1].inputs[0].arg.as_tensor.name
         )
 
-
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestDeserialize(TestCase):
     def check_graph(self, fn, inputs, dynamic_shapes=None, _check_meta=True) -> None:
         """Export a graph, serialize it, deserialize it, and compare the results."""
-        # TODO(angelayi): test better with some sort of wrapper
         ep = torch.export.export(fn, copy.deepcopy(inputs), {}, dynamic_shapes=dynamic_shapes)
         ep.graph.eliminate_dead_code()
 
@@ -281,8 +289,9 @@ class TestDeserialize(TestCase):
                         # Or both are fake tensors lists with one element and with the
                         # same shape/dtype
                         for v1, v2 in zip(pytree.tree_leaves(val1), pytree.tree_leaves(val2)):
-                            self.assertEqual(v1.shape, v2.shape)
-                            self.assertEqual(v1.dtype, v2.dtype)
+                            if isinstance(v1, FakeTensor):
+                                self.assertEqual(v1.shape, v2.shape)
+                                self.assertEqual(v1.dtype, v2.dtype)
                     else:
                         # For expressions like 's0 < 10' can only compare through string
                         self.assertEqual(str(val1), str(val2))
@@ -326,7 +335,7 @@ class TestDeserialize(TestCase):
 
     def test_auto_functionalize(self):
         try:
-            lib = torch.library.Library("mylib", "FRAGMENT")
+            lib = torch.library.Library("mylib", "FRAGMENT")  # noqa: TOR901
             torch.library.define(
                 "mylib::foo1",
                 "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor n) -> Tensor",
@@ -336,6 +345,12 @@ class TestDeserialize(TestCase):
             torch.library.define(
                 "mylib::foo2",
                 "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor n) -> (Tensor, Tensor)",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+            torch.library.define(
+                "mylib::foo3",
+                "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor n) -> ()",
                 tags=torch.Tag.pt2_compliant_tag,
                 lib=lib,
             )
@@ -354,9 +369,17 @@ class TestDeserialize(TestCase):
                 z.add_(y[1] + n)
                 return (n + n, n * n)
 
+            @torch.library.impl("mylib::foo3", "cpu", lib=lib)
+            @torch.library.impl_abstract("mylib::foo3")
+            def foo3_impl(x, y, z, w, n):
+                x.add_(y[0] + w)
+                z.add_(y[1] + n)
+                return
+
             class M(torch.nn.Module):
                 def forward(self, x, y, z, n):
                     n = torch.ops.mylib.foo1(x, y, z, 2, n)
+                    torch.ops.mylib.foo3(x, y, z, 2, n)
                     return torch.ops.mylib.foo2(x, y, z, 2, n)
 
             x = torch.randn(3)
@@ -508,7 +531,7 @@ class TestDeserialize(TestCase):
     def test_tensor_tensor_list(self):
         try:
             from torch.library import Library
-            lib = Library("_export", "FRAGMENT")
+            lib = Library("_export", "FRAGMENT")  # noqa: TOR901
             lib.define(
                 "_test_tensor_tensor_list_output(Tensor x, Tensor y) -> (Tensor, Tensor[])",
                 tags=torch.Tag.pt2_compliant_tag)
@@ -832,6 +855,26 @@ class TestSerializeCustomClass(TestCase):
                 self.assertEqual(arg._type(), custom_obj._type())
                 self.assertEqual(arg.__getstate__(), custom_obj.__getstate__())
                 self.assertEqual(arg.top(), 7)
+
+    def test_custom_class_containing_fake_tensor(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.custom_obj = torch.classes._TorchScriptTesting._ContainsTensor(torch.rand(2, 3))
+
+            def forward(self, x):
+                return x + self.custom_obj.get()
+
+        with FakeTensorMode():
+            f = Foo()
+
+        inputs = (torch.zeros(2, 3),)
+        with enable_torchbind_tracing():
+            ep = export(f, inputs, strict=False)
+
+        serialized_vals = serialize(ep)
+        ep = deserialize(serialized_vals)
+        self.assertTrue(isinstance(ep.constants["_lifted_custom_obj0"].get(), FakeTensor))
 
 
 if __name__ == '__main__':

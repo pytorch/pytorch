@@ -1,5 +1,20 @@
+import types
+
 import torch
 import torch.nn.functional as F
+
+
+__all__ = [
+    "model_is_exported",
+]
+
+
+def model_is_exported(m: torch.fx.GraphModule) -> bool:
+    """
+    Return True if the `torch.fx.GraphModule` was exported,
+    False otherwise (e.g. if the model was FX symbolically traced).
+    """
+    return any("val" in n.meta for n in m.graph.nodes)
 
 
 def _replace_dropout(m: torch.fx.GraphModule, train_to_eval: bool):
@@ -115,6 +130,7 @@ def _replace_batchnorm(m: torch.fx.GraphModule, train_to_eval: bool):
     m.recompile()
 
 
+# TODO: expose these under this namespace?
 def _move_exported_model_to_eval(model: torch.fx.GraphModule):
     """
     Move an exported GraphModule to eval mode.
@@ -136,4 +152,31 @@ def _move_exported_model_to_train(model: torch.fx.GraphModule):
     """
     _replace_dropout(model, train_to_eval=False)
     _replace_batchnorm(model, train_to_eval=False)
+    return model
+
+
+def _allow_exported_model_train_eval(model: torch.fx.GraphModule):
+    """
+    Allow users to call `model.train()` and `model.eval()` on an exported model,
+    but with the effect of changing behavior between the two modes limited to special
+    ops only, which are currently dropout and batchnorm.
+
+    Note: This does not achieve the same effect as what `model.train()` and `model.eval()`
+    does in eager models, but only provides an approximation. In particular, user code
+    branching on `training` flag will not function correctly in general because the branch
+    is already specialized at export time. Additionally, other ops beyond dropout and batchnorm
+    that have different train/eval behavior will also not be converted properly.
+    """
+
+    def _train(self, mode: bool = True):
+        if mode:
+            _move_exported_model_to_train(self)
+        else:
+            _move_exported_model_to_eval(self)
+
+    def _eval(self):
+        _move_exported_model_to_eval(self)
+
+    model.train = types.MethodType(_train, model)  # type: ignore[method-assign]
+    model.eval = types.MethodType(_eval, model)  # type: ignore[method-assign]
     return model

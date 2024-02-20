@@ -23,7 +23,7 @@ from ..utils import (
     is_tensor_base_attr_getter,
     proxy_args_kwargs,
 )
-from .base import MutableLocal, VariableTracker
+from .base import VariableTracker
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
 from .user_defined import UserDefinedObjectVariable
 
@@ -40,9 +40,9 @@ class SuperVariable(VariableTracker):
         codegen(self.typevar)
         if self.objvar is not None:
             codegen(self.objvar)
-            return create_call_function(2, True)
+            codegen.extend_output(create_call_function(2, True))
         else:
-            return create_call_function(1, True)
+            codegen.extend_output(create_call_function(1, True))
 
     def _resolved_getattr_and_source(self, tx, name):
         assert self.objvar, "1-arg super not implemented"
@@ -233,7 +233,7 @@ class ClosureVariable(UnknownVariable):
         self.name = name
 
     def reconstruct(self, codegen):
-        return [codegen.create_load_closure(self.name)]
+        codegen.append_output(codegen.create_load_closure(self.name))
 
 
 # closure variable created by an inlined function
@@ -243,7 +243,7 @@ class InlinedClosureVariable(UnknownVariable):
         self.name = name
 
     def reconstruct(self, codegen):
-        return [codegen.create_load_closure(self.name)]
+        codegen.append_output(codegen.create_load_closure(self.name))
 
 
 class NewCellVariable(VariableTracker):
@@ -483,6 +483,9 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             assert self.source and not kwargs
             tx.output.side_effects.track_save_for_backward(self, args)
 
+        # In eager mode, multiple calls to .save_for_backward() will overwrite previous calls.
+        if len(self.saved_tensors.tensors) > 0:
+            self.saved_tensors.tensors = []
         for arg in args:
             self.saved_tensors.tensors.append(arg)
         return variables.ConstantVariable.create(None)
@@ -539,7 +542,7 @@ class GetAttrVariable(VariableTracker):
 
     def reconstruct(self, codegen):
         codegen(self.obj)
-        return codegen.create_load_attrs(self.name)
+        codegen.extend_output(codegen.create_load_attrs(self.name))
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -613,80 +616,6 @@ class PythonModuleVariable(VariableTracker):
             result = hasattr(self.value, name)
             return variables.ConstantVariable.create(result)
         return super().call_hasattr(tx, name)
-
-
-class SkipFilesVariable(VariableTracker):
-    def __init__(self, value, reason=None, **kwargs):
-        super().__init__(**kwargs)
-        self.value = value
-        self.reason = reason
-
-    def python_type(self):
-        return type(self.value)
-
-    def as_python_constant(self):
-        return self.value
-
-    @classmethod
-    def create_with_source(cls, value, source):
-        install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
-        return cls(
-            value,
-            source=source,
-        )
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def fold_through_function_to_wrapper():
-        return {
-            collections.namedtuple: variables.UserDefinedClassVariable,
-        }
-
-    def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-    ) -> "VariableTracker":
-        if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
-            unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
-        # Fold through the functions(e.g, collections.namedtuple)
-        # that inputs & outputs are all python constants
-        elif (
-            self.value in self.fold_through_function_to_wrapper().keys()
-            and check_constant_args(args, kwargs)
-        ):
-            value = self.value(
-                *[x.as_python_constant() for x in args],
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
-            )
-            return self.fold_through_function_to_wrapper().get(self.value)(
-                value, mutable_local=MutableLocal()
-            )
-        elif (
-            self.value is functools.wraps
-            and not kwargs
-            and len(args) == 1
-            and (
-                args[0].source is not None or args[0].can_reconstruct(tx.output.root_tx)
-            )
-        ):
-
-            def wraps(fn):
-                if isinstance(fn, variables.NestedUserFunctionVariable):
-                    if args[0].source:
-                        reconstructible = args[0].source
-                    else:
-                        reconstructible = args[0]
-                    return fn.clone(wrapped_reconstructible=reconstructible)
-                unimplemented(f"functools.wraps({fn})")
-
-            return variables.LambdaVariable(wraps)
-        else:
-            try:
-                path = inspect.getfile(self.value)
-            except TypeError:
-                path = f"Builtin {self.value.__name__}"
-            msg = f"'skip function {self.value.__qualname__} in file {path}'"
-            msg += f"', {self.reason}'" if self.reason else ""
-            unimplemented(msg)
 
 
 class TypingVariable(VariableTracker):
@@ -779,6 +708,8 @@ class NumpyVariable(VariableTracker):
                 msg += f"confg.use_numpy_random_stream={config.use_numpy_random_stream}"
                 unimplemented(msg)
 
+            args, kwargs = NumpyNdarrayVariable.patch_args(func.__name__, args, kwargs)
+
             constant_args = check_constant_args(args, kwargs)
             unspec_python_args = check_unspec_python_args(args, kwargs)
 
@@ -837,7 +768,7 @@ class NullVariable(VariableTracker):
     def reconstruct(self, codegen):
         if sys.version_info < (3, 11):
             unimplemented("cannot reconstruct NullVariable in < Python 3.11")
-        return [create_instruction("PUSH_NULL")]
+        codegen.append_output(create_instruction("PUSH_NULL"))
 
 
 class DeletedVariable(VariableTracker):
@@ -880,12 +811,9 @@ class StringFormatVariable(VariableTracker):
             codegen.append_output(create_instruction("PUSH_NULL"))
         codegen.append_output(codegen.create_load_const(self.format_string))
         codegen.append_output(codegen.create_load_attr("format"))
-        codegen.extend_output(
-            variables.TupleVariable(self.sym_args).reconstruct(codegen)
-        )
+        codegen(variables.TupleVariable(self.sym_args))
         kwargs = {
             variables.ConstantVariable.create(k): v for k, v in self.sym_kwargs.items()
         }
-        codegen.extend_output(variables.ConstDictVariable(kwargs).reconstruct(codegen))
+        codegen(variables.ConstDictVariable(kwargs))
         codegen.append_output(create_instruction("CALL_FUNCTION_EX", arg=1))
-        return []

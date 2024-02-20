@@ -1,13 +1,12 @@
 # Owner(s): ["module: onnx"]
 from __future__ import annotations
 
-import io
-
 import tempfile
 
 from typing import Mapping, Tuple
 
 import onnx
+import onnx.inliner
 import pytorch_test_common
 import torch
 import transformers  # type: ignore[import]
@@ -362,11 +361,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             node: onnx.NodeProto,
             value_infos: Mapping[str, onnx.ValueInfoProto],
             local_functions: Mapping[Tuple[str, str], onnx.FunctionProto],
-            prefix: str = "",
+            function_id: str = "",
         ):
             for output in node.output:
-                output_prefix = f"{prefix}/{output}" if prefix else output
-                self.assertIn(output_prefix, value_infos)
+                name = f"{function_id}/{output}" if function_id else output
+                self.assertIn(name, value_infos)
             if node.domain.startswith("pkg.onnxscript.torch_lib"):
                 # No shape info available for values inside torchlib functions.
                 return
@@ -374,11 +373,9 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 function := local_functions.get((node.domain, node.op_type))
             ) is not None:
                 for node in function.node:
-                    node_prefix = (
-                        f"{prefix}/{function.name}" if prefix else function.name
-                    )
+                    function_id = f"{function.domain}::{function.name}"
                     _assert_node_outputs_has_value_info(
-                        node, value_infos, local_functions, node_prefix
+                        node, value_infos, local_functions, function_id
                     )
 
         type_infos = {vi.name: vi for vi in model_proto.graph.value_info}
@@ -621,17 +618,22 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 x,
             )
 
-    def test_aten_linalg_vector_norm_with_reducel2(self):
-        class Net(nn.Module):
-            def forward(self, x):
-                x = F.normalize(x)
-                return x
+    def test_aten_div_no_opmath_type_promotion(self):
+        class Model(torch.nn.Module):
+            def forward(self, input):
+                return input / 2
 
-        f = io.BytesIO()
-        torch.onnx.export(Net(), (torch.randn(1, 2, 2),), f)
-        onnx_model = onnx.load_from_string(f.getvalue())
-        onnx_nodes = [n.op_type for n in onnx_model.graph.node]
-        self.assertTrue("ReduceL2" in onnx_nodes)
+        model = Model()
+        input = torch.randn(3, 5, requires_grad=True, dtype=torch.float16)
+
+        model_proto = torch.onnx.dynamo_export(model, input).model_proto
+        model_proto = onnx.inliner.inline_local_functions(model_proto)
+        div_node = next(
+            node for node in model_proto.graph.node if node.op_type == "Div"
+        )
+        # The input of Div node should be the input of the model,
+        # with no Cast node in between.
+        self.assertEqual(div_node.input[0], model_proto.graph.input[0].name)
 
     def test_exported_program_as_input_with_model_signature(self):
         class Model(torch.nn.Module):
