@@ -1009,6 +1009,70 @@ class TENSOR_ALIASING : public RelationalGuard {
   PyObject* _first_tensor;
 };
 
+/**
+ * Checks that none of the tensors alias.
+ */
+class NO_TENSOR_ALIASING : public RelationalGuard {
+ public:
+  NO_TENSOR_ALIASING(
+      long unsigned int num_tensors,
+      py::object tensor_names,
+      py::object verbose_code_parts)
+      : RelationalGuard(verbose_code_parts),
+        _num_tensors(num_tensors),
+        _tensor_names(tensor_names) {
+    _unique_tensors.reserve(num_tensors);
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    // Typically we don't have to increment the ref count here because the
+    // tensors are held in f_locals. But there is a special case for
+    // `from_numpy` source. `from_numpy` converts integers and such into tensors
+    // and these tensors are ephemeral. If we don't incref, those tensors can be
+    // garbage collected, and the next time from_numpy can reuse the memory
+    // address. Therefore, we incref here. They are decref'd in reset_state.
+    Py_INCREF(value);
+    auto insertion = _unique_tensors.insert({value, nullptr});
+    if (!insertion.second) {
+      // No need to clear _unique_tensors, reset_state will do
+      // it.
+      return false;
+    }
+    _counter++;
+    if (_counter == _num_tensors) {
+      reset_state();
+    }
+    return true;
+  }
+
+  virtual GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
+    bool result = check_nopybind(value);
+
+    if (!result) {
+      std::stringstream fail_reason;
+      fail_reason << "Duplicate tensor found where not expected! ";
+      fail_reason << py::cast<std::string>(_tensor_names[_counter])
+                  << " should not alias to anything, but is aliased";
+      return GuardDebugInfo(false, fail_reason.str(), 0);
+    }
+    return GuardDebugInfo(true, 1);
+  }
+
+  void reset_state() final override {
+    for (auto item : _unique_tensors) {
+      Py_DECREF(item.first);
+    }
+    _unique_tensors.clear();
+    _counter = 0;
+  }
+
+ private:
+  long unsigned int _num_tensors;
+  py::list _tensor_names;
+  ska::flat_hash_map<PyObject*, std::nullptr_t> _unique_tensors;
+  long unsigned int _counter = 0;
+};
+
 class GuardManager;
 class RootGuardManager;
 class DictGuardManager;
@@ -1529,6 +1593,26 @@ void install_tensor_aliasing_guard(
   y->add_leaf_guard(guard);
 }
 
+void install_no_tensor_aliasing_guard(
+    py::list guard_managers,
+    py::list tensor_names,
+    py::object verbose_code_parts) {
+  // Adds a guard that checks none of tensors alias. This is a an example of
+  // relational guard. There is one guard object that is shared between multiple
+  // guard managers.
+  std::shared_ptr<RelationalGuard> guard = std::make_shared<NO_TENSOR_ALIASING>(
+      guard_managers.size(), tensor_names, verbose_code_parts);
+
+  // Register the resetter on the toor gaurd mananger, so that it can reset
+  // the newly added relational guard when the guard eval fails.
+  py::cast<GuardManager*>(guard_managers[0])
+      ->get_root()
+      ->add_relational_guard_resetter(guard);
+  for (py::size_t index = 0; index < guard_managers.size(); index++) {
+    py::cast<GuardManager*>(guard_managers[index])->add_leaf_guard(guard);
+  }
+}
+
 } // namespace
 
 static void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj) {
@@ -1641,6 +1725,10 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("__call__", &DATA_PTR_MATCH::check);
   py::class_<TENSOR_ALIASING, LeafGuard, std::shared_ptr<TENSOR_ALIASING>>(
       py_m, "TENSOR_ALIASING");
+  py::class_<
+      NO_TENSOR_ALIASING,
+      LeafGuard,
+      std::shared_ptr<NO_TENSOR_ALIASING>>(py_m, "NO_TENSOR_ALIASING");
 
   // Guard Accessors - These are present so that we can iterate over the
   // GuardManager hierarchy. We intentionally do not provide even an init
@@ -1754,6 +1842,8 @@ PyObject* torch_c_dynamo_guards_init() {
           });
 
   py_m.def("install_tensor_aliasing_guard", install_tensor_aliasing_guard);
+  py_m.def(
+      "install_no_tensor_aliasing_guard", install_no_tensor_aliasing_guard);
 
   return m;
 }
