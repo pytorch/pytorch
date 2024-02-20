@@ -5,6 +5,7 @@ import unittest
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import List, Any
+from re import escape
 
 import torch
 import torch._dynamo as torchdynamo
@@ -20,7 +21,6 @@ from torch.export import (
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
-from torch._export import capture_pre_autograd_graph
 from torch._export.utils import (
     get_buffer,
     get_param,
@@ -209,6 +209,7 @@ class TestUnflatten(TestCase):
             id(getattr(unflattened_module.sub_net, "2")),
         )
 
+    @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
     @skipIfTorchDynamo("Non strict mode is not meant to run with dynamo")
     def test_unflatten_preserve_signature(self):
         class NestedChild(torch.nn.Module):
@@ -254,12 +255,12 @@ class TestUnflatten(TestCase):
                 strict=strict
             )
             unflattened = unflatten(export_module)
-            self.compare_outputs(export_module, unflattened, inps)
+            self.compare_outputs(export_module.module(), unflattened, inps)
             unflattened.foo.nested = NestedChild()
-            self.compare_outputs(export_module, unflattened, inps)
+            self.compare_outputs(export_module.module(), unflattened, inps)
 
             # Test tree spec mismatched input
-            orig_outs = export_module(*inps)
+            orig_outs = export_module.module()(*inps)
             new_inps = *inps, torch.rand(2, 3)
             with self.assertRaisesRegex(
                 TypeError,
@@ -304,7 +305,7 @@ class TestUnflatten(TestCase):
         export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
         unflattened = unflatten(export_module)
 
-        self.compare_outputs(export_module, unflattened, (torch.randn((2, 3)),))
+        self.compare_outputs(export_module.module(), unflattened, (torch.randn((2, 3)),))
 
     def test_unflatten_wrong_input(self):
         class Mod(torch.nn.Module):
@@ -326,11 +327,11 @@ class TestUnflatten(TestCase):
                 return a
 
         export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
-        with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\] to be equal to 2, but got 6"):
-            export_module(torch.randn(6, 6))
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[0] to be equal to 2, but got 6")):
+            export_module.module()(torch.randn(6, 6))
 
         unflattened = unflatten(export_module)
-        with self.assertRaisesRegex(RuntimeError, "Expected input l_x_.shape\[0\] to be equal to 2, but got 6"):
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[0] to be equal to 2, but got 6")):
             unflattened(torch.randn(6, 6))
 
     def test_unflatten_with_inplace_compile(self):
@@ -467,7 +468,39 @@ class TestUnflatten(TestCase):
 
         gm_unflat_non_strict = unflatten(ep_non_strict)
         ep = torch.export.export(gm_unflat_non_strict, inp, strict=False)
-        self.assertTrue(torch.allclose(ep(*inp), mod(*inp)))
+        self.assertTrue(torch.allclose(ep.module()(*inp), mod(*inp)))
+
+    def test_unflattened_module_nodes_has_meta_val(self):
+        class SubMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x + x, x * x
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod = SubMod()
+
+            def forward(self, x):
+                return x + sum(self.submod(x))
+
+        orig_eager = MyModule()
+        export_module = torch.export.export(orig_eager, (torch.rand(2, 3),), {})
+        unflattened = unflatten(export_module)
+
+        inputs = (torch.rand(2, 3),)
+        self.compare_outputs(orig_eager, unflattened, inputs)
+
+        def check_meta(gm):
+            for n in gm.graph.nodes:
+                if n.op == "output":
+                    continue
+                self.assertTrue(n.meta.get("val") is not None)
+
+        for m in unflattened.modules():
+            check_meta(m)
 
     def test_placeholder_and_get_attr_ordering_after_unflattened(self):
         class TransposeModule(torch.nn.Module):

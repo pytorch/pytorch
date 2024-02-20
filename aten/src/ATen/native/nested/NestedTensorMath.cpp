@@ -680,7 +680,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
     std::vector<int64_t> size_reshaped_vector(proposed_shape.begin() + 1, proposed_shape.end());
     // only allow one pre-existing dimension to have proposed shape == -1
     int64_t infer_index_old = -1;
-    // some negative sizes remain to be infered
+    // some negative sizes remain to be inferred
     if (ndims_underlying < ndims_underlying_reshaped) {
       int64_t numel = 1, numel_reshaped = 1;
       // replace negative sizes for old dimensions with old sizes
@@ -770,7 +770,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
 } // namespace
 
 // Note [Special size rule for nested tensor]
-// Instead of infering size, -1 means "inherit the old size", so:
+// Instead of inferring size, -1 means "inherit the old size", so:
 // * negative size is legal for a ragged dimension
 // * however, we only allow one -1
 // In principle we could still infer a dimension,
@@ -859,6 +859,41 @@ Tensor _nested_view_from_buffer(
     nested_sizes,
     nested_strides,
     storage_offsets);
+}
+
+Tensor _nested_view_from_jagged(
+    const Tensor& values,
+    const Tensor& offsets,
+    const Tensor& dummy,
+    const c10::optional<Tensor>& lengths,
+    const int64_t ragged_idx) {
+  TORCH_INTERNAL_ASSERT(
+      false, "_nested_view_from_jagged(): expected to be implemented from Python");
+  return Tensor();
+}
+
+Tensor _nested_get_values(const Tensor& self) {
+  TORCH_INTERNAL_ASSERT(
+      false, "_nested_get_values(): expected to be implemented from Python");
+  return Tensor();
+}
+
+Tensor _nested_get_offsets(const Tensor& self) {
+  TORCH_INTERNAL_ASSERT(
+      false, "_nested_get_offsets(): expected to be implemented from Python");
+  return Tensor();
+}
+
+Tensor _nested_get_lengths(const Tensor& self) {
+  TORCH_INTERNAL_ASSERT(
+      false, "_nested_get_lengths(): expected to be implemented from Python");
+  return Tensor();
+}
+
+int64_t _nested_get_ragged_idx(const Tensor& self) {
+  TORCH_INTERNAL_ASSERT(
+      false, "_nested_get_ragged_idx(): expected to be implemented from Python");
+  return 0;
 }
 
 // See Note [Special size rule for nested tensor]

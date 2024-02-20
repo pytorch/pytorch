@@ -499,7 +499,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
 
   const bool needs_reduction = train || grad_input_mask[1] || grad_input_mask[2];
 
-  // Fused reducion & elementwise kernel
+  // Fused reduction & elementwise kernel
   if (needs_reduction && grad_input_mask[0] &&
       !batch_norm_use_channels_last_kernels(input) &&
       cuda::detail::canUse32BitIndexMath(input) &&
