@@ -1558,7 +1558,9 @@ def _automatic_dynamic(
     e, tx, source, static_shapes, outer_only=False
 ) -> SymbolicContext:
     # strided NT not supported
-    if e.is_nested and not isinstance(e, torch.nested._internal.nested_tensor.NestedTensor):
+    if e.is_nested and not isinstance(
+        e, torch.nested._internal.nested_tensor.NestedTensor
+    ):
         unimplemented("torch.compile does not support strided NestedTensor")
 
     name = source.name()
