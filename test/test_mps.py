@@ -181,6 +181,14 @@ def mps_ops_grad_modifier(ops):
         'nn.functional.conv_transpose3d': [torch.float16],
         'fft.fftn': [torch.float32],
         'fft.hfft': [torch.float32],
+        'fft.ifftn': [torch.float32],
+        # Those are tentative
+        'fft.ifft': [torch.float32],
+        'fft.ifft2': [torch.float32],
+        'fft.ifftshift': [torch.float32],
+        'fft.fft': [torch.float32],
+        'fft.fft2': [torch.float32],
+        'fft.fftshift': [torch.float32],
     }
 
     MACOS_13_3_XFAILLIST_GRAD = {
