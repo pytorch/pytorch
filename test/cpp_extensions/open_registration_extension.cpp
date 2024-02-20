@@ -140,14 +140,8 @@ c10::intrusive_ptr<c10::StorageImpl> make_custom_storage_impl(c10::StorageImpl::
                                                               c10::DataPtr data_ptr,
                                                               c10::Allocator* allocator,
                                                               bool resizable) {
-  c10::intrusive_ptr<c10::StorageImpl> custom_storage_impl;
-  if (data_ptr == nullptr){
-    custom_storage_impl = c10::make_intrusive<c10::StorageImpl>(
-      c10::StorageImpl::use_byte_size_t(), size_bytes, allocator, resizable);
-  } else {
-    custom_storage_impl = c10::make_intrusive<c10::StorageImpl>(
+  c10::intrusive_ptr<c10::StorageImpl> custom_storage_impl = c10::make_intrusive<c10::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(), size_bytes, std::move(data_ptr), allocator, resizable);
-  }
   storageImpl_counter += 1;
   return custom_storage_impl;
 }
