@@ -1898,6 +1898,9 @@ class FlatParamHandle:
                         param_name,
                         nn.Parameter(view, requires_grad=flat_param.requires_grad),
                     )
+                    # Since wrapping with `nn.Parameter` constructs a new
+                    # object, we re-set that it is FSDP-flattened
+                    _set_fsdp_flattened(getattr(module, param_name))
                     continue
                 param = self.flat_param._params[i]
                 self._setattr_param(module, param_name, param)
