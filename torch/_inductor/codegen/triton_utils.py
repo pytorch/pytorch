@@ -3,7 +3,7 @@ from typing import Dict, List
 import torch
 
 from .. import config
-from ..utils import instance_descriptor, _type_of
+from ..utils import _type_of, instance_descriptor
 from ..virtualized import V
 from .common import KernelArgType, SizeArg, TensorArg, WorkspaceArg
 
