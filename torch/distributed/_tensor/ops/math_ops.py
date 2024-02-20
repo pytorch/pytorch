@@ -1,8 +1,10 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+from dataclasses import dataclass
 from enum import Enum
-from typing import cast, List, Optional, Sequence, Tuple
+from typing import cast, List, Optional, Sequence, Tuple, Union
 
 import torch
+import torch.distributed._functional_collectives as funcol
 
 import torch.distributed.distributed_c10d as c10d
 from torch.distributed._tensor.op_schema import (
@@ -104,7 +106,10 @@ def map_placements_after_reduction(
             if new_shard_dim == -1 or shard_dim in reduction_dims:
                 # if new_shard_dim collapsed or its in the reduction dims
                 # (i.e. for the case where keepdims=True), we generate partial
-                new_placements.append(_Partial(reduction_op))
+                if isinstance(reduction_op, _Partial):  # HACK!
+                    new_placements.append(reduction_op)
+                else:
+                    new_placements.append(_Partial(reduction_op))
             else:
                 new_placements.append(Shard(new_shard_dim))
     return tuple(new_placements)
@@ -224,6 +229,57 @@ def var_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     keep_dim = cast(bool, op_schema.kwargs_schema.get("keepdim", False))
     return common_reduction_strategy(
         mesh, input_strategy, reduce_dims, keep_dim=keep_dim, reduction_linear=False
+    )
+
+
+@dataclass(frozen=True)
+class _NormPartial(_Partial):
+    norm_type: Union[int, float, str] = 2
+
+    def _partition_value(self):
+        raise NotImplementedError()
+
+    def _reduce_shard_value(self):
+        raise NotImplementedError()
+
+    def _reduce_value(
+        self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
+    ) -> torch.Tensor:
+        if self.norm_type in (float("inf"), "inf"):
+            return funcol.all_reduce(tensor, reduceOp="max", group=(mesh, mesh_dim))
+        elif self.norm_type in (float("-inf"), "-inf"):
+            return funcol.all_reduce(tensor, reduceOp="min", group=(mesh, mesh_dim))
+        elif self.norm_type == 0:
+            raise NotImplementedError()
+        elif isinstance(self.norm_type, (int, float)):
+            reduced_tensor = funcol.all_reduce(
+                tensor**self.norm_type, reduceOp="sum", group=(mesh, mesh_dim)
+            )
+            if self.norm_type != 1:
+                reduced_tensor **= 1.0 / self.norm_type
+            return reduced_tensor
+        else:
+            raise NotImplementedError(f"norm type: {self.norm_type}")
+
+
+@register_op_strategy(
+    [aten.linalg_vector_norm.default], schema_info=RuntimeSchemaInfo(1)
+)
+def vector_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+    args_schema = op_schema.args_schema
+    input_strategy = args_schema[0]
+    assert isinstance(input_strategy, OpStrategy)
+    norm_type = args_schema[1] if len(args_schema) > 1 else 2
+    dim = args_schema[2] if len(args_schema) > 2 else None
+    keepdim = args_schema[3] if len(args_schema) > 3 else False
+    dims = _infer_reduction_dims(dim, input_strategy.output_ndim)
+    reduce_dims = list(range(input_strategy.output_ndim)) if dims is None else dims
+    return common_reduction_strategy(
+        mesh,
+        input_strategy,
+        reduce_dims,
+        keep_dim=cast(bool, keepdim),
+        reduction_op=_NormPartial(norm_type=norm_type),  # type: ignore[arg-type]
     )
 
 

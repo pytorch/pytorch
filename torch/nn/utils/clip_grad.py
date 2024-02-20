@@ -66,6 +66,9 @@ def clip_grad_norm_(
             '`parameters` is non-finite, so it cannot be clipped. To disable '
             'this error and scale the gradients by the non-finite norm anyway, '
             'set `error_if_nonfinite=False`')
+    from torch.distributed._tensor import DTensor
+    if isinstance(total_norm, DTensor):
+        total_norm = total_norm.full_tensor()
     clip_coef = max_norm / (total_norm + 1e-6)
     # Note: multiplying by the clamped coef is redundant when the coef is clamped to 1, but doing so
     # avoids a `if clip_coef < 1:` conditional which can require a CPU <=> device synchronization

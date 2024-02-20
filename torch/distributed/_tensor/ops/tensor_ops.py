@@ -12,6 +12,7 @@ from torch.distributed._tensor.op_schema import (
     PlacementStrategy,
     RuntimeSchemaInfo,
     StrategyType,
+    TupleStrategy,
 )
 from torch.distributed._tensor.ops.common_rules import pointwise_rule
 from torch.distributed._tensor.ops.embedding_ops import _MaskPartial
@@ -396,6 +397,22 @@ def gather_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
             all_strategies.append(strat)
 
     return OpStrategy(all_strategies)
+
+
+@register_op_strategy(aten.stack.default, RuntimeSchemaInfo(1, needs_pytree=True))
+def stack_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+    args_schema = op_schema.args_schema
+    input_tuple_strategy = args_schema[0]
+    assert isinstance(input_tuple_strategy, TupleStrategy)
+
+    # TODO: If all inputs have the same partial spec, then can keep partial.
+    # Otherwise, redistribute to replicate.
+    child_strategy = input_tuple_strategy.childs[0]
+    assert isinstance(child_strategy, OpStrategy)
+    strategies = [
+        PlacementStrategy(output_specs=child_strategy.strategies[0].output_spec)
+    ]
+    return OpStrategy(strategies)
 
 
 @register_prop_rule(aten.index_select.default, schema_info=RuntimeSchemaInfo(1))
