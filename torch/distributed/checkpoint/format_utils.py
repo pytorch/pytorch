@@ -97,11 +97,17 @@ class BroadcastingTorchSaveReader(StorageReader):
         self.coordinator_rank = coordinator_rank
 
     def read_metadata(self) -> Metadata:
-        # Metadata is built in planner.set_up_planner, since are not actually reading metadata from
+        """Extends the default StorageReader to support building the metadata file"""
+        # Metadata is built in planner.set_up_planner, since we are not actually reading metadata from
         # the disk
         return Metadata(state_dict_metadata={})
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
+        """
+        Reads torch save data on the coordinator rank, and broadcast afterwards
+        this incurrs a communication cost, but avoids having to load
+        the entire checkpoint on each rank, hopefully preventing OOM issues
+        """
         planner = cast(DefaultLoadPlanner, planner)
 
         # data is read in on the coordinator rank, and broadcast afterwards
@@ -144,6 +150,7 @@ class BroadcastingTorchSaveReader(StorageReader):
         return fut
 
     def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
+        """Implementatoin of the StorageReader method"""
         self.is_coordinator = is_coordinator
         if self.is_coordinator:
             assert dist.get_rank() == self.coordinator_rank
@@ -151,16 +158,20 @@ class BroadcastingTorchSaveReader(StorageReader):
         assert self.checkpoint_id is not None
 
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
+        """Implementatoin of the StorageReader method"""
         return plan
 
     def prepare_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
+        """Implementatoin of the StorageReader method"""
         return global_plan
 
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+        """Implementatoin of the StorageReader method"""
         self.checkpoint_id = checkpoint_id
 
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        """Implementatoin of the StorageReader method"""
         return os.path.isfile(checkpoint_id)
 
 
@@ -191,6 +202,8 @@ class DynamicMetaLoadPlanner(DefaultLoadPlanner):
         metadata: Metadata,
         is_coordinator: bool,
     ) -> None:
+        """Setups of the planner, extnding default behavior by creating the Metadata object from the state dict
+        """
         super().set_up_planner(state_dict, metadata, is_coordinator)
 
         state_dict_metadata: Dict[str, STORAGE_TYPES] = {}
