@@ -224,13 +224,13 @@ def ceildiv(
 
 def next_power_of_2(n: int) -> int:
     """Return the smallest power of 2 greater than or equal to n"""
-    assert n <= 2**32, "32-bit only"
     n -= 1
     n |= n >> 1
     n |= n >> 2
     n |= n >> 4
     n |= n >> 8
     n |= n >> 16
+    n |= n >> 32
     n += 1
     return n
 
@@ -818,6 +818,13 @@ class IndentedBuffer:
 
     def __repr__(self):
         return f"{type(self)}({self.getvalue()})"
+
+    def __add__(self, other):
+        assert self._indent == other._indent
+        res = IndentedBuffer(initial_indent=self._indent)
+        res.writelines(self._lines)
+        res.writelines(other._lines)
+        return res
 
 
 class DeferredLineBase:
