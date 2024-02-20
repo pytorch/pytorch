@@ -2640,8 +2640,6 @@ class TritonKernel(Kernel):
         return "pointwise"
 
     def codegen_kernel(self, name=None):
-        from triton import next_power_of_2
-
         code = IndentedBuffer()
 
         size_hints = []
