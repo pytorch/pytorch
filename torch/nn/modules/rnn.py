@@ -511,7 +511,7 @@ class RNN(RNNBase):
             self.nonlinearity = args[3]
             args = args[:3] + args[4:]
         else:
-            self.nonlinearity =  kwargs.pop('nonlinearity', 'tanh')
+            self.nonlinearity = kwargs.pop('nonlinearity', 'tanh')
         if self.nonlinearity == 'tanh':
             mode = 'RNN_TANH'
         elif self.nonlinearity == 'relu':
