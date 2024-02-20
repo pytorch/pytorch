@@ -1859,18 +1859,6 @@ def device_hint(tensor):
     else:
         return None
 
-def wrap_output_with_input_device_(x, common_device):
-    # wrap meta tensor
-    if common_device is not None and x.device.type == "meta":
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
-        fake_mode = FakeTensorMode()
-        fake_mode.in_kernel_invocation = True
-        converter = fake_mode.fake_tensor_converter
-        return converter.from_meta_and_device(fake_mode, x, common_device)
-
-    return x
-
 
 @register_decomposition(aten._to_copy)
 @out_wrapper()

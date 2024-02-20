@@ -2036,7 +2036,7 @@ class GraphModule(torch.nn.Module):
         @torch.compile(backend="eager")
         def fn():
             t = torch.ones(2)
-            y = t.to('meta')
+            y = t.to("meta")
 
         fn()
 
