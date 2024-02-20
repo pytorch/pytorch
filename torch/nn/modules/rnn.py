@@ -365,7 +365,7 @@ class RNNBase(Module):
 
 
 class RNN(RNNBase):
-    r"""__init__(input_size,hidden_size,num_layers=1,bias=True,batch_first=False,dropout=0.0,bidirectional=False,device=None,dtype=None,*,nonlinearity='tanh')
+    r"""__init__(input_size,hidden_size,num_layers=1,nonlinearity='tanh',bias=True,batch_first=False,dropout=0.0,bidirectional=False,device=None,dtype=None)
 
     Apply a multi-layer Elman RNN with :math:`\tanh` or :math:`\text{ReLU}`
     non-linearity to an input sequence. For each element in the input sequence,
@@ -413,6 +413,7 @@ class RNN(RNNBase):
             would mean stacking two RNNs together to form a `stacked RNN`,
             with the second RNN taking in outputs of the first RNN and
             computing the final results. Default: 1
+        nonlinearity: The non-linearity to use. Can be either ``'tanh'`` or ``'relu'``. Default: ``'tanh'``
         bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`.
             Default: ``True``
         batch_first: If ``True``, then the input and output tensors are provided
@@ -423,9 +424,6 @@ class RNN(RNNBase):
             RNN layer except the last layer, with dropout probability equal to
             :attr:`dropout`. Default: 0
         bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
-
-    Keyword args:
-        nonlinearity: The non-linearity to use. Can be either ``'tanh'`` or ``'relu'``. Default: ``'tanh'``
 
     Inputs: input, h_0
         * **input**: tensor of shape :math:`(L, H_{in})` for unbatched input,
@@ -497,9 +495,9 @@ class RNN(RNNBase):
 
     @overload
     def __init__(self, input_size: int, hidden_size: int, num_layers: int = 1,
-                 bias: bool = True, batch_first: bool = False,
+                 nonlinearity: str = 'tanh', bias: bool = True, batch_first: bool = False,
                  dropout: float = 0., bidirectional: bool = False, device=None,
-                 dtype=None, *, nonlinearity: str = 'tanh') -> None:
+                 dtype=None) -> None:
         ...
 
     @overload
