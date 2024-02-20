@@ -6906,7 +6906,7 @@ Returns the mean value of all elements in the :attr:`input` tensor. Input must b
 
 Args:
     input (Tensor):
-      the input tensor, must be either a floating point or complex dtype.
+      the input tensor, either of floating point or complex dtype
 
 Keyword args:
     {dtype}
