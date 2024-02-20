@@ -728,9 +728,6 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
     """
     # `tag` will be deprecated. See details in:
     # https://github.com/pytorch/pytorch/issues/93173#issuecomment-1907095208
-    if tag != "":
-        warnings.warn(f"tag ({tag}) is ignored for process group resolution.")
-
     if isinstance(group, dist.ProcessGroup):
         return group.group_name
     elif isinstance(group, str):
@@ -753,8 +750,12 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
     elif isinstance(group, list):
         if not is_torchdynamo_compiling():
-            warnings.warn("Deprecatd!!!")
-        return c10d._resolve_group_name_by_ranks_and_tag(group, tag)
+            warnings.warn(
+                "The combination of ranks + tag as process group "
+                "identifier has been deprecated. Please switch to "
+                "using ProcessGroup, DeviceMesh, or group name instead."
+            )
+        return c10d._resolve_group_name_by_ranks_and_tag(cast(List[int], group), tag)
     else:
         raise ValueError(f"Unsupported group type: {type(group)}, {group}")
 

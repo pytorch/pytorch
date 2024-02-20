@@ -762,7 +762,7 @@ class C10DFunctionalNativeCompileTest(TestCase):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
     @run_with_native_funcol
-    def test_foo_bar(self):
+    def test_ranks_and_tag(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = arg + 42
             # Expect in-place with inductor allocated buf
@@ -777,7 +777,7 @@ class C10DFunctionalNativeCompileTest(TestCase):
         compiled = torch.compile(func, fullgraph=True)
 
         code = run_and_get_triton_code(compiled, arg)
-        print(code)
+        (FileCheck().check("all_reduce_.default(buf0, 'avg', '0')").run(code))
 
 
 if __name__ == "__main__":

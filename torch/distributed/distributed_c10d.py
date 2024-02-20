@@ -851,6 +851,8 @@ def _get_group_size_by_name(group_name: str) -> int:
 
 
 def _resolve_group_name_by_ranks_and_tag(ranks: List[int], tag: str) -> str:
+    # TODO(yifu): remove this function once ranks + tag is not a supported
+    # identifier for process group for functional collectives.
     group = _find_pg_by_ranks_and_tag(tag, ranks)
     if group is None:
         raise ValueError("")
