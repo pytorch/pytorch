@@ -819,6 +819,13 @@ class IndentedBuffer:
     def __repr__(self):
         return f"{type(self)}({self.getvalue()})"
 
+    def __add__(self, other):
+        assert self._indent == other._indent
+        res = IndentedBuffer(initial_indent=self._indent)
+        res.writelines(self._lines)
+        res.writelines(other._lines)
+        return res
+
 
 class DeferredLineBase:
     """A line that can be 'unwritten' at a later time"""

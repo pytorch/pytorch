@@ -290,6 +290,7 @@ test_inductor_distributed() {
   pytest test/inductor/test_torchinductor.py -k test_multi_gpu
   pytest test/inductor/test_aot_inductor.py -k test_non_default_cuda_device
   pytest test/inductor/test_aot_inductor.py -k test_replicate_on_devices
+  pytest test/distributed/test_c10d_functional_native.py
   pytest test/distributed/_tensor/test_dtensor_compile.py
   pytest test/distributed/tensor/parallel/test_fsdp_2d_parallel.py
   pytest test/distributed/_composable/fsdp/test_fully_shard_comm.py
