@@ -14,6 +14,7 @@
 #if !defined(__MAC_14_0) && (!defined(MAC_OS_X_VERSION_14_0) || (MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_14_0))
 @implementation FakeMPSGraphFFTDescriptor
 + (nullable instancetype)descriptor {
+  // Redispatch the constructor to the actual implementation
   id desc = NSClassFromString(@"MPSGraphFFTDescriptor");
   return (FakeMPSGraphFFTDescriptor*)[desc descriptor];
 }
@@ -83,6 +84,8 @@ Tensor _fft_c2c_mps(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 }
 
 using namespace mps;
+
+// TODO: Investigate numerical discrepancies see https://github.com/pytorch/pytorch/issues/120237
 Tensor& _fft_r2c_mps_out(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided, Tensor& out) {
   TORCH_CHECK(supportsComplex(), "FFT operations are only supported on MacOS 14+");
   auto key = __func__ + getTensorsStringKey({self, out}) + ":" + getArrayRefString(dim) + ":" +
