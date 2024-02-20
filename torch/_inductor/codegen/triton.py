@@ -2569,7 +2569,7 @@ class TritonKernel(Kernel):
         """
         if not has_triton_package():
             return ""
-        
+
         import triton.compiler.compiler
 
         if hasattr(triton.compiler.compiler, "AttrsDescriptor"):
