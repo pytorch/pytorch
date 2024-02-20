@@ -98,14 +98,17 @@ an experimental feature and is subject to change.
 
 For users which are used to using and sharing models in the `torch.save` format the following methods are provided, which provide offline utilities for converting betweeing formats.
 
-.. autofunction:: torch.distributed.checkpoint.format_utils.dcp_to_torch_save
+.. automodule:: torch.distributed.checkpoint.format_utils
 
-.. autofunction:: torch.distributed.checkpoint.format_utils.torch_save_to_dcp
+.. currentmodule:: torch.distributed.checkpoint.format_utils
+
+.. autofunction:: dcp_to_torch_save
+.. autofunction:: torch_save_to_dcp
 
 The following classes can also be utilized for online loading and resharding of models from the torch.save format.
 
-.. autoclass:: torch.distributed.checkpoint.format_utils.BroadcastingTorchSaveReader
+.. autoclass:: BroadcastingTorchSaveReader
    :members:
 
-.. autoclass:: torch.distributed.checkpoint.format_utils.DynamicMetaLoadPlanner
+.. autoclass:: DynamicMetaLoadPlanner
    :members:
