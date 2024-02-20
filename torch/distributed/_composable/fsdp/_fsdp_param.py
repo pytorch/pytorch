@@ -10,7 +10,7 @@ from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed._tensor import DTensor, Placement, Replicate, Shard
 from torch.distributed._tensor.device_mesh import _mesh_resources
 from torch.distributed._tensor.placement_types import DTensorSpec
-from ._fsdp_api import MixedPrecisionPolicy
+from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import (
     _chunk_with_empty,
     _from_local_no_grad,
@@ -111,6 +111,7 @@ class FSDPParam:
     _sharded_post_forward_param_data: Optional[torch.Tensor]  # 1D
     _sharded_post_forward_param: Optional[nn.Parameter]  # ND
     _unsharded_param: nn.Parameter  # ND
+    cpu_sharded_grad: torch.Tensor  # unpadded, ND, pinned memory
     _global_placements: Tuple[Placement, ...]
     _global_size: torch.Size
     _global_stride: Tuple[int, ...]
@@ -125,12 +126,15 @@ class FSDPParam:
         post_forward_mesh_info: Optional[FSDPMeshInfo],
         device: torch.device,
         mp_policy: MixedPrecisionPolicy,
+        offload_policy: OffloadPolicy,
     ):
         self._module_info: ParamModuleInfo = module_info
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
         self._init_dtype_attrs(param, mp_policy)
+        self.offload_to_cpu: bool = offload_policy.offload_type == "cpu"
+        self.grad_offload_event: Optional[torch.cuda.Event] = None
         self._init_sharded_param(param, device)
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
@@ -214,6 +218,11 @@ class FSDPParam:
         padded_sharded_param = param_data.new_zeros(padded_sharded_size)
         if sharded_param.numel() > 0:
             padded_sharded_param[: sharded_param.size(0)].copy_(sharded_param)
+        if self.offload_to_cpu:
+            padded_sharded_param = padded_sharded_param.cpu().pin_memory()
+            self.cpu_sharded_grad = sharded_param.new_zeros(
+                sharded_param.size(), device="cpu", pin_memory=True
+            )
         self._sharded_param_data = padded_sharded_param.view(-1)
         self.sharded_param = nn.Parameter(
             self.to_sharded_dtensor(padded_sharded_param[: sharded_param.size(0)])
@@ -373,7 +382,12 @@ class FSDPParam:
     def all_gather_input(self) -> torch.Tensor:  # 1D
         self._assert_in_states(ShardedState.SHARDED, ShardedState.SHARDED_POST_FORWARD)
         if self.sharded_state == ShardedState.SHARDED:
-            return _to_dtype_if_needed(self._sharded_param_data, self.param_dtype)
+            sharded_param_data = self._sharded_param_data
+            if self.offload_to_cpu:
+                sharded_param_data = sharded_param_data.to(
+                    self.device, non_blocking=True
+                )
+            return _to_dtype_if_needed(sharded_param_data, self.param_dtype)
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             return _to_dtype_if_needed(
                 cast(torch.Tensor, self._sharded_post_forward_param_data),

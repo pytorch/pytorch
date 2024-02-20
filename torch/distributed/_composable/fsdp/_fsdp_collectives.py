@@ -160,6 +160,25 @@ def foreach_reduce_scatter(
                 storage_offset=flat_grad_offset,
             )
             to_accumulate_grad = fsdp_param.sharded_param.grad is not None
+            if fsdp_param.offload_to_cpu:
+                # Only overlap the D2H copy if not accumulating since otherwise
+                # we need a way to run the CPU add kernel as a callback
+                gpu_sharded_grad = new_sharded_grad
+                cpu_sharded_grad = (
+                    fsdp_param.cpu_sharded_grad
+                    if not to_accumulate_grad
+                    else torch.empty_like(new_sharded_grad, device="cpu")
+                )
+                cpu_sharded_grad.copy_(
+                    gpu_sharded_grad, non_blocking=not to_accumulate_grad
+                )
+                # Since the GPU sharded gradient is allocated in the RS stream,
+                # we can free it here by not keeping a ref without waiting for
+                # the D2H copy since future RS-stream ops run after the copy
+                new_sharded_grad = cpu_sharded_grad
+                # Record an event on which to block the CPU thread to ensure
+                # that the D2H copy finishes before the optimizer
+                fsdp_param.grad_offload_event = reduce_scatter_stream.record_event()
             new_sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(new_sharded_grad)
             if to_accumulate_grad:
                 fsdp_param.sharded_param.grad += new_sharded_dtensor_grad
