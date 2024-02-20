@@ -746,13 +746,21 @@ def aot_graph_input_parser(
 
     sym_shapes = sym_shapes or {}
 
+    def get_sym_int(symint):
+        torch._check(
+            symint in sym_shapes or default_sym_shape is not None,
+            lambda: f"{symint} not in symbolic_shapes and default sym shape not passed in",
+        )
+        return sym_shapes.get(symint, default_sym_shape)
+
     def gen_tensor(shape, dtype) -> Tensor:
         # Resolve symbolic shapes to concrete values
         resolved_shape = []
         dynamic_dims = []
         for i, dim in enumerate(shape):
             dim = dim.strip()
-            if s := sym_shapes.get(dim, None):
+            if "s" in dim:
+                s = get_sym_int(dim)
                 resolved_shape.append(s)
                 dynamic_dims.append(i)
             else:
@@ -780,12 +788,7 @@ def aot_graph_input_parser(
 
         match = re.search(sym_shape_regex, annotation)
         if match:
-            symint = match.group(1)
-            torch._check(
-                symint in sym_shapes or default_sym_shape is not None,
-                lambda: f"{symint} not in symbolic_shapes and default sym shape not passed in",
-            )
-            kwargs[param] = sym_shapes.get(symint, default_sym_shape)
+            kwargs[param] = get_sym_int(match.group(1))
 
     if "self" in inspect.signature(func).parameters:
         container = TensorContainer()
