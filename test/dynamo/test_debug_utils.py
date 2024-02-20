@@ -155,14 +155,21 @@ def forward(self, x_1):
             self,
             primals_1: "f32[1001, 6]",  # noqa: F821
             primals_2: "f32[s0]",  # noqa: F821
-            primals_3: "Sym(s0)",  # noqa: F821
+            primals_3: "Sym(s0)",  # noqa: F821,
+            primals_4: "f32[s1]",  # noqa: F821,
+            primals_5: "Sym(s1)",  # noqa: F821,
         ):
             _tensor_constant0: "i64[4190]" = self._tensor_constant0
 
-        kwargs = aot_graph_input_parser(forward, device="cuda", sym_shapes={"s0": 10})
+        kwargs = aot_graph_input_parser(
+            forward, device="cuda", sym_shapes={"s0": 10}, default_sym_shape=5
+        )
 
         self.assertEqual(list(kwargs["primals_2"].shape), [10])
         self.assertEqual(kwargs["primals_3"], 10)
+
+        self.assertEqual(list(kwargs["primals_4"].shape), [5])
+        self.assertEqual(kwargs["primals_5"], 5)
 
 
 if __name__ == "__main__":
