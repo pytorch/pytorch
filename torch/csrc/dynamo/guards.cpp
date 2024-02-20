@@ -871,6 +871,42 @@ class EQUALS_MATCH : public LeafGuard {
   PyTypeObject* _value_type;
 };
 
+class DEFAULT_DEVICE : public LeafGuard {
+ public:
+  DEFAULT_DEVICE(py::object verbose_code_parts)
+      : LeafGuard(verbose_code_parts) {
+    py::handle device_module = py::module::import("torch.utils._device");
+    // Save the dict using py::object
+    _utils_device_dict = device_module.attr("__dict__");
+    _device = _utils_device_dict["CURRENT_DEVICE"];
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    // Create a static interned string. Interned string is faster than creating
+    // a new string every time. Even though its a new reference, we don't dec
+    // ref it. Interned strings are used for things like variable names and are
+    // leaked by design.
+    static PyObject* current_device_str =
+        PyUnicode_InternFromString("CURRENT_DEVICE");
+    PyObject* device = PyDict_GetItem(
+        _utils_device_dict.ptr(), current_device_str); // borrowed ref
+    if (device != _device.ptr()) {
+      int result = PyObject_RichCompareBool(device, _device.ptr(), Py_EQ);
+      if (result == -1) {
+        PyErr_Clear();
+        return false;
+      }
+      return result;
+    }
+    return true;
+  }
+
+ private:
+  // Save the current device and the module dict during the guard construction.
+  py::object _utils_device_dict;
+  py::object _device;
+};
+
 /**
  * Relational guards compare more than one value. We implement Relational
  * guards by capturing some state in the guard object. For example for tensor
@@ -1505,6 +1541,10 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "EQUALS_MATCH")
       .def(py::init<py::object, py::list>())
       .def("__call__", &EQUALS_MATCH::check);
+  py::class_<DEFAULT_DEVICE, LeafGuard, std::shared_ptr<DEFAULT_DEVICE>>(
+      py_m, "DEFAULT_DEVICE")
+      .def(py::init<py::list>())
+      .def("__call__", &DEFAULT_DEVICE::check);
 
   // Guard Accessors - These are present so that we can iterate over the
   // GuardManager hierarchy. We intentionally do not provide even an init
@@ -1568,6 +1608,12 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(
                 std::make_shared<EQUALS_MATCH>(value, verbose_code_parts));
+          })
+      .def(
+          "add_default_device_guard",
+          [](GuardManager& self, py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(
+                std::make_shared<DEFAULT_DEVICE>(verbose_code_parts));
           })
       // return by reference because C++ GuardManager has the ownership of
       // accessors and guard managers
