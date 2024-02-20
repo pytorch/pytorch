@@ -96,7 +96,7 @@ an experimental feature and is subject to change.
 .. autoclass:: torch.distributed.checkpoint.state_dict.StateDictOptions
    :members:
 
-For users which are used to using and sharing models in the `torch.save` format the following methods are provided, which provide offline utilities for converting betweeing formats.
+For users which are used to using and sharing models in the `torch.save` format, the following methods are provided which provide offline utilities for converting betweeing formats.
 
 .. automodule:: torch.distributed.checkpoint.format_utils
 
@@ -107,8 +107,8 @@ For users which are used to using and sharing models in the `torch.save` format 
 
 The following classes can also be utilized for online loading and resharding of models from the torch.save format.
 
-.. autoclass:: BroadcastingTorchSaveReader
+.. autoclass:: torch.distributed.checkpoint.format_utils.BroadcastingTorchSaveReader
    :members:
 
-.. autoclass:: DynamicMetaLoadPlanner
+.. autoclass:: torch.distributed.checkpoint.format_utils.DynamicMetaLoadPlanner
    :members:
