@@ -1353,6 +1353,60 @@ std::unique_ptr<GuardManager> make_guard_manager(
   return std::make_unique<GuardManager>(root);
 }
 
+/**
+ * Represents __getattr__ acccessor.
+ */
+class GetAttrGuardAccessor : public GuardAccessor {
+ public:
+  GetAttrGuardAccessor(
+      RootGuardManager* root,
+      py::str name,
+      py::handle example_value)
+      : GuardAccessor(root, name, example_value), _attr_name(name.ptr()) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    PyObject* x = PyObject_GetAttr(obj, _attr_name); // new ref
+    if (x == nullptr) {
+      // Attribute absent, clear the exception and return false.
+      PyErr_Clear();
+      return false;
+    }
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* x = PyObject_GetAttr(obj, _attr_name); // new ref
+    if (x == nullptr) {
+      // Attribute absent, clear the exception and return false.
+      PyErr_Clear();
+      return GuardDebugInfo(
+          false,
+          std::string("get attr failed for attr name ") +
+              py::str(_attr_name).cast<std::string>(),
+          0);
+    }
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+  std::string repr() const override {
+    // Helpful when priting GuardManager tree structure.
+    return "GetAttrGuardAccessor(" + py::str(_attr_name).cast<std::string>() +
+        ")";
+  }
+
+ private:
+  // no need of py::object here because the attr_name is already passed on to
+  // the base class as accessor_key which is a py::object.
+  PyObject* _attr_name;
+};
+
 } // namespace
 
 static void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj) {
@@ -1458,6 +1512,10 @@ PyObject* torch_c_dynamo_guards_init() {
   py::class_<GuardAccessor, std::unique_ptr<GuardAccessor>>(
       py_m, "GuardAccessor")
       .def("repr", &GuardAccessor::repr);
+  py::class_<
+      GetAttrGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<GetAttrGuardAccessor>>(py_m, "GetAttrGuardAccessor");
 
   // Guard Manager - No constructor in python, python should use
   // RootGuardManager.
@@ -1510,7 +1568,13 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(
                 std::make_shared<EQUALS_MATCH>(value, verbose_code_parts));
-          });
+          })
+      // return by reference because C++ GuardManager has the ownership of
+      // accessors and guard managers
+      .def(
+          "getattr_manager",
+          &GuardManager::get_child_manager<GetAttrGuardAccessor>,
+          py::return_value_policy::reference);
 
   // Root Guard Manager
   py::class_<RootGuardManager, GuardManager, std::unique_ptr<RootGuardManager>>(
