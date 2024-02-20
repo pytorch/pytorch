@@ -2,6 +2,7 @@
 import itertools
 import random
 import unittest
+import sys
 
 import torch
 from torch import nn
@@ -215,6 +216,7 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
         assert sparse_result.stride() == sparse_compile_result.stride()
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
+    @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
     @unittest.skipIf("cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS, "cusparselt not supported on this machine")
     def test_mlp_contiguous_relu_compile_cusparselt(self):
         """
@@ -224,6 +226,7 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
             SparseSemiStructuredTensorCompileTest._test_mlp_contiguous_relu_compile("cusparselt", dense_input_shape)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
+    @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
     def test_mlp_contiguous_relu_compile_cutlass(self):
         """
         test for CUTLASS meta registrations (_sparse_semi_structured_linear) + torch.compile
@@ -1268,8 +1271,6 @@ instantiate_device_type_tests(TestSparseSemiStructuredTraining, globals(), only_
 
 if __name__ == "__main__":
     run_tests()
-
-
 
 # class _TransformerFFN(nn.Module):
 #     def __init__(
