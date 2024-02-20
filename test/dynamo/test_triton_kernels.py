@@ -20,7 +20,9 @@ from torch.testing._internal.common_utils import skipIfRocm
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import requires_cuda, requires_lark, HAS_CUDA, add_kernel, add_kernel_autotuned, \
-    add_kernel_2d_autotuned, mul2_kernel, mul2_inplace_kernel, zero_negs, indirection_kernel, double_strided_kernel
+    add_kernel_2d_autotuned, mul2_kernel, mul2_inplace_kernel, zero_negs, indirection_kernel, double_strided_kernel, cond_op_kernel, \
+    add_4_times_kernel, atomic_add_kernel, add_kernel_with_import, add_kernel_with_block_ptr, inline_asm_kernel, HAS_LARK, \
+    add_kernel_out_of_order_fn2
 
 if HAS_CUDA:
     import triton
