@@ -22,7 +22,8 @@ struct TensorMetaInfo {
       std::vector<int64_t> strides);
   bool operator==(const TensorMetaInfo& other) const;
   static bool sanityCheck(const TensorMetaInfo& tensor_meta_info);
-  static std::vector<TensorMetaInfo> fromConfig(const std::string& conf_path);
+  static std::vector<TensorMetaInfo> fromConfig(
+      const std::vector<std::string>&);
 };
 
 struct TensorMetaInfoHash {

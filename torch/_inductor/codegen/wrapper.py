@@ -2005,7 +2005,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     sizes = value.get_size()
                     strides = value.get_stride()
                     kernel_meta_info_item = (
-                        f"true;{device_type};{dtype};{sizes};{strides}"
+                        f"false;{device_type};{dtype};{sizes};{strides}"
                     )
                     lines.append(kernel_meta_info_item)
             kernel_meta_info[config.aot_inductor.eager_op_name] = lines

@@ -7,7 +7,11 @@
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 
+#include <nlohmann/json.hpp>
+
 #include <filesystem>
+#include <fstream>
+#include <regex>
 
 namespace fs = std::filesystem;
 
@@ -108,6 +112,11 @@ AOTIPythonKernelHolder::AOTIPythonKernelHolder(
       device_opt_(c10::nullopt) {
   // Canonicalize the op_name as a valid directory name
   std::replace(op_name_.begin(), op_name_.end(), '.', '_');
+  std::string to_remove = "aten::";
+  size_t start_pos = op_name_.find(to_remove);
+  if (start_pos != std::string::npos) {
+    op_name_.replace(start_pos, to_remove.length(), "");
+  }
 
   if (dispatch_key_ == c10::DispatchKey::CUDA) {
     device_opt_ = c10::Device(c10::DeviceType::CUDA, 0);
@@ -178,11 +187,11 @@ AOTIKernelMetaInfo AOTIPythonKernelHolder::getInputsMetaInfo(
  * AOTIPythonKernelHolder class.
  *
  * The path of AOTI kernels for eager is
- *  - ${TORCH_EAGER_AOTI_KERNEL_PATH}/${device}/${op_name}/${kernel_id}.so
+ *  - ${TORCHINDUCTOR_CACHE_DIR}/${kernel_path}/${kernel_id}.so
  *
  * Besides the kernel library, there is also a metadata file for each kernel
  * library.
- *  - ${TORCH_EAGER_AOTI_KERNEL_PATH}/${device}/${op_name}/${kernel_id}.conf
+ *  - ${TORCHINDUCTOR_CACHE_DIR}/aten_eager/${op_name}.json
  *
  * The kernels are loaded from the path and cached in the
  * AOTIPythonKernelHolder.
@@ -193,7 +202,7 @@ AOTIKernelMetaInfo AOTIPythonKernelHolder::getInputsMetaInfo(
  * these device types.
  *
  * 2. Environment Variable Retrieval: Attempts to retrieve the Eager AOTI kernel
- * path from the "TORCH_EAGER_AOTI_KERNEL_PATH" environment variable. If this
+ * path from the "TORCHINDUCTOR_CACHE_DIR" environment variable. If this
  * variable isn't set, the function exits early, indicating no path is provided.
  *
  * 3. AOTI Kernel Path Construction: Constructs the path to the AOTI kernels by
@@ -225,33 +234,61 @@ void AOTIPythonKernelHolder::initAOTIKernelCache() {
     return;
   }
 
-  auto eager_aoti_kernel_path = std::getenv("TORCH_EAGER_AOTI_KERNEL_PATH");
-  if (eager_aoti_kernel_path == nullptr) {
+  fs::path eager_aoti_cache_path;
+  auto inductor_cache_dir = std::getenv("TORCHINDUCTOR_CACHE_DIR");
+  if (inductor_cache_dir == nullptr) {
+#ifdef _WIN32
+    return;
+#else
+    std::string username = std::getenv("USER");
+    std::regex special_chars(R"([\\/:*?"<>|])");
+    std::string sanitized_username =
+        std::regex_replace(username, special_chars, "_");
+    std::string temp_dir = std::filesystem::temp_directory_path();
+    if (temp_dir.empty())
+      temp_dir = std::getenv("TMPDIR");
+    if (temp_dir.empty())
+      temp_dir = "/tmp";
+    eager_aoti_cache_path =
+        fs::path(temp_dir) / fs::path("torchinductor_" + sanitized_username);
+#endif
+  } else {
+    eager_aoti_cache_path = inductor_cache_dir;
+  }
+
+  fs::path eager_aoti_json_path =
+      fs::path("aten_eager") / fs::path(op_name_ + ".json");
+  fs::path eager_aoti_full_json_path =
+      eager_aoti_cache_path / eager_aoti_json_path;
+  if (!fs::exists(eager_aoti_full_json_path)) {
     return;
   }
 
-  fs::path eager_aoti_path = eager_aoti_kernel_path;
-  fs::path eager_aoti_device_path =
-      device_opt_.value().type() == c10::DeviceType::CPU    ? "cpu"
-      : device_opt_.value().type() == c10::DeviceType::CUDA ? "cuda"
-                                                            : "xpu";
-  fs::path eager_aoti_op_path = op_name_;
-  fs::path eager_aoti_full_path =
-      eager_aoti_path / eager_aoti_device_path / eager_aoti_op_path;
-  if (!fs::exists(eager_aoti_full_path)) {
-    return;
-  }
+  try {
+    std::ifstream json_file(eager_aoti_full_json_path);
+    nlohmann::json conf_json;
+    json_file >> conf_json;
 
-  for (auto const& entry : fs::directory_iterator(eager_aoti_full_path)) {
-    fs::path so_path = entry.path().string();
-    if (so_path.extension() == ".so") {
-      fs::path& kernel_conf = so_path.replace_extension(".conf");
-      auto kernel_meta_infos = TensorMetaInfo::fromConfig(kernel_conf);
-      if (kernel_meta_infos.size() > 0) {
-        aoti_kernel_cache_[kernel_meta_infos] =
-            getAOTIEagerKernelRunner(so_path);
+    for (auto& element : conf_json) {
+      if (element["meta_info"] == nullptr ||
+          element["kernel_path"] == nullptr) {
+        continue;
+      }
+
+      std::string kernel_so_path = element["kernel_path"];
+      if (!fs::exists(kernel_so_path)) {
+        continue;
+      }
+
+      std::vector<std::string> tensors_meta_info = element["meta_info"];
+      auto kernel_meta_info = TensorMetaInfo::fromConfig(tensors_meta_info);
+      if (kernel_meta_info.size() > 0) {
+        aoti_kernel_cache_[kernel_meta_info] =
+            getAOTIEagerKernelRunner(kernel_so_path);
       }
     }
+  } catch (nlohmann::detail::parse_error& e) {
+    TORCH_CHECK(false, e.what());
   }
 }
 
