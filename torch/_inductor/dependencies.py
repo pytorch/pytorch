@@ -456,16 +456,14 @@ def canonicalization_prefix():
 class FreeUnbackedSymbolsOpsHandler:
     symbols: Set[sympy.Symbol]
 
-    def __init__(self, parent_handler):
+    def __init__(self):
         self.symbols = set()
-        self.parent_handler = parent_handler
 
     def __getattr__(self, name: str) -> Callable[..., Any]:
         def inner(*args, **kwargs):
             for a in itertools.chain(args, kwargs.values()):
                 if isinstance(a, (sympy.Expr, sympy.logic.boolalg.Boolean)):
                     self.symbols |= free_unbacked_symbols(a)
-            return getattr(self.parent_handler, name)(*args, **kwargs)
 
         return inner
 
@@ -473,6 +471,9 @@ class FreeUnbackedSymbolsOpsHandler:
         assert not isinstance(index_var, (sympy.Expr, sympy.logic.boolalg.Boolean))
         self.symbols |= free_unbacked_symbols(size)
         return sympy_index_symbol(f"({str(index_var)})")
+
+    def frexp(self, x):
+        return (None,) * 2
 
     def reduction(
         self,
@@ -495,7 +496,7 @@ def extract_free_unbacked_symbols(fn: Callable[..., Any], index, rindex=None):
     from .ir import FlexibleLayout
 
     args = [index, rindex] if rindex is not None else [index]
-    handler = FreeUnbackedSymbolsOpsHandler(V.MockHandler())
+    handler = FreeUnbackedSymbolsOpsHandler()
     # NB: I cargo culted the allow_indexing patch here, I don't understand why
     # people do this all over
     with V.set_ops_handler(handler), patch.object(
