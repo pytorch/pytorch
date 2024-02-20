@@ -183,6 +183,7 @@ def mps_ops_grad_modifier(ops):
         'fft.hfft': [torch.float32],
         'fft.ifftn': [torch.float32],
         'fft.irfft': [torch.float32],
+        'fft.rfft2': [torch.float32],
         # Those are tentative
         'fft.ifft': [torch.float32],
         'fft.ifft2': [torch.float32],
@@ -192,6 +193,8 @@ def mps_ops_grad_modifier(ops):
         'fft.fft': [torch.float32],
         'fft.fft2': [torch.float32],
         'fft.fftshift': [torch.float32],
+        'fft.rfft': [torch.float32],
+        'fft.rfftn': [torch.float32],
     }
 
     MACOS_13_3_XFAILLIST_GRAD = {
