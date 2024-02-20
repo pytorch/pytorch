@@ -269,7 +269,9 @@ class MetaConverter:
                 device="meta",
             )
 
-        def metafy_subclass(
+        # Creates a subclass instance with empty inner tensors according to the specified
+        # symbolic context.
+        def empty_create_subclass(
             t,
             outer_size,
             outer_stride,
@@ -473,7 +475,7 @@ class MetaConverter:
                                     storage_offset,
                                 ) = sym_sizes_strides_storage_offset(t, source)
 
-                                fake_t = metafy_subclass(
+                                fake_t = empty_create_subclass(
                                     t, outer_size=sizes, outer_stride=strides
                                 )
 
@@ -584,7 +586,9 @@ class MetaConverter:
                     # If we have a subclass that desugars into dense tensors,
                     # perform our callback on each inner tensor.
                     if is_traceable_wrapper_subclass(t):
-                        r = metafy_subclass(t, outer_size=sizes, outer_stride=strides)
+                        r = empty_create_subclass(
+                            t, outer_size=sizes, outer_stride=strides
+                        )
                     else:
                         r = callback(
                             lambda: torch.empty_strided(
