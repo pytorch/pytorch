@@ -1194,10 +1194,12 @@ class RootGuardManager : public GuardManager {
 
   // Fast check function.
   virtual bool check_nopybind(PyObject* value) override { // borrowed ref
-    // reset_state is not thread safe. So acquire a lock.
-    Py_BEGIN_ALLOW_THREADS; // ; is added to avoid clang formatting.
+    // Check [Note on GIL interaction with mutex lock] for details on why we
+    // need mutex and its interactions wth GIL.
+    PyThreadState* _save;
+    Py_UNBLOCK_THREADS; // ; is added to avoid clang-formatting
     std::lock_guard<std::mutex> lock_guard(_lock);
-    Py_END_ALLOW_THREADS; // ; is added to avoid clang formatting.
+    Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
 
     if (!GuardManager::check_nopybind(value)) {
       _reset_relational_guard_state();
@@ -1217,10 +1219,12 @@ class RootGuardManager : public GuardManager {
   // Fast check_verbose function.
   virtual GuardDebugInfo check_verbose_nopybind(
       PyObject* value) override { // borrowed ref
-    // reset_state is not thread safe. So acquire a lock.
-    Py_BEGIN_ALLOW_THREADS; // ; is added to avoid clang formatting.
+    // Check [Note on GIL interaction with mutex lock] for details on why we
+    // need mutex and its interactions wth GIL.
+    PyThreadState* _save;
+    Py_UNBLOCK_THREADS; // ; is added to avoid clang-formatting
     std::lock_guard<std::mutex> lock_guard(_lock);
-    Py_END_ALLOW_THREADS; // ; is added to avoid clang formatting.
+    Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
 
     GuardDebugInfo debug_info = GuardManager::check_verbose_nopybind(value);
     if (!debug_info.result) {
@@ -1278,8 +1282,27 @@ class RootGuardManager : public GuardManager {
   // the epilogue guards do not step on some nonexistent getattr or getitem.
   std::vector<std::unique_ptr<LeafGuard>> _epilogue_lambda_guards;
 
-  // GuardManager can change the state of Relation guards and also sort the
-  // child accessors. To make it thread safe, we need to acquire a lock.
+  // [Note on GIL interaction with mutex lock]
+  // We use std::mutex to prevent multiple threads from running
+  // check/check_verbose simultaneously. This is to prevent race condition due
+  // to state changes in RelationalGuard.
+  //
+  // However, we also need to be careful about GIL interaction with mutex. There
+  // is a chance of deadlock
+  //
+  //    Thread 1: has GIL, waiting for lock
+  //    Thread 2: has lock, waiting for GIL
+  //
+  // This can happen when Thread 2 earlier acquired the mutex lock, starting
+  // running the critical section of check function and then called some python
+  // function (like LAMBDA_GUARD) and reached Cpython codebase that checks if it
+  // should release the GIL (typically happens after every few bytecode
+  // instructions). Thread 2 here can decide to release the GIL. Thread 1 can
+  // acquire GIL and reach the mutex, where it will wait forever.
+  //
+  // To avoid this, each thread releases the GIL before acquiring the mutex and
+  // then acquires the GIL again after acquiring the mutex lock by using
+  // Py_BLOCK_THREADS and Py_UNBLOCK_THREADS. This avoids the deadlock.
   std::mutex _lock;
 };
 
