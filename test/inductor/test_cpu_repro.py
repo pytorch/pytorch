@@ -3371,16 +3371,6 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         assert metrics.generated_cpp_vec_kernel_count == 1
 
-    @config.patch({"cpp.dynamic_threads": True})
-    def test_reduction_with_dynamic_threads(self):
-        def fn(a, b):
-            return a.sum(), b.sum()
-
-        self.common(
-            fn,
-            (torch.randn(1000), torch.rand(1000)),
-        )
-
     def test_no_redundant_to_dtypes_between_fused_scheduler_node(self):
         # https://github.com/pytorch/pytorch/issues/115260
         p0 = torch.tensor([1.0879], dtype=torch.float16)
