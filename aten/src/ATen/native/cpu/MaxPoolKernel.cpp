@@ -406,7 +406,7 @@ void cpu_max_pool_channels_last(
   using opmath_t = at::opmath_type<scalar_t>;
   using Vec = vec::Vectorized<scalar_t>;
   using integer_t = vec::int_same_size_t<opmath_t>;
-  // for the convience of vectorization, use integer of the same size of scalar_t,
+  // for the convenience of vectorization, use integer of the same size of scalar_t,
   //   e.g. int32_t for float, int64_t for double
   // need to make sure doesn't overflow
   TORCH_CHECK(input_depth * input_height * input_width <= std::numeric_limits<integer_t>::max());

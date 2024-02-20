@@ -191,7 +191,7 @@ at::Tensor& _amp_update_scale_cpu_kernel(
   return current_scale;
 }
 
-} // namepace
+} // namespace
 
 REGISTER_DISPATCH(_amp_foreach_non_finite_check_and_unscale_cpu_stub, &_amp_foreach_non_finite_check_and_unscale_cpu_kernel);
 REGISTER_DISPATCH(_amp_update_scale_cpu_stub, &_amp_update_scale_cpu_kernel);

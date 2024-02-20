@@ -196,7 +196,7 @@ Tensor& unary_op_inplace(Tensor& self, const F& op_inplace, Args&&... args) {
 namespace native {
 
 using namespace at::sparse_csr;
-// certain utiliy functions are usable from sparse COO.
+// certain utility functions are usable from sparse COO.
 using namespace at::sparse;
 
 Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
@@ -1456,7 +1456,7 @@ std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_backward_sparse_csr_cpu(
         /*transpose*/false);
     row = coo_indices.select(0, 0);
 
-    // calculte the global index for CSC
+    // calculate the global index for CSC
     // and get the conversion permute pattern
     Tensor index = col.mul(self.size(0)).add_(row);
     permute = index.argsort();

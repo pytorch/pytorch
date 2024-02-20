@@ -846,7 +846,7 @@ struct HelperInterpBase {
     return wt_max;
   }
 
-  // Note [ Support for antialias=False as a subcase of antilias=True ]
+  // Note [ Support for antialias=False as a subcase of antialias=True ]
   // This function was originally written with the hard assumption that
   // antialias=True and it was later extended to support antialias=False.
   // The only difference between aa and no-aa is in how the
@@ -952,7 +952,7 @@ struct HelperInterpBase {
   uint8 in basic_loop_aa_horizontal<uint8_t> (and vertical)
 
   In essence the idea is to avoid a multiplication between a float (the
-  weight) and an int (the pixel value) and instead run a multpilication between
+  weight) and an int (the pixel value) and instead run a multiplication between
   2 ints:
 
   ```py
