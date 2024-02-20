@@ -1,6 +1,4 @@
 # Owner(s): ["module: inductor"]
-import io
-import json
 import os
 import unittest
 
