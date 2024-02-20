@@ -6,9 +6,9 @@ import sympy
 from typing_extensions import Protocol
 
 import torch
+import torch.utils._pytree as pytree
 from torch.fx.graph import inplace_methods, magic_methods
 from .utils import IndentedBuffer, reduction_num_outputs, sympy_index_symbol, sympy_str
-import torch.utils._pytree as pytree
 
 T = TypeVar("T")
 StoreMode = Optional[Literal["atomic_add"]]
