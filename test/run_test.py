@@ -26,7 +26,6 @@ from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     get_report_path,
     IS_CI,
-    IS_MACOS,
     parser as common_parser,
     retry_shell,
     set_cwd,
@@ -617,16 +616,6 @@ def run_test_retries(
         else:
             sc_command = f"--sc={stepcurrent_key}"
         print_to_file("Retrying...")
-        # Print full c++ stack traces during retries
-        # Don't do it for macos inductor tests as it makes them
-        # segfault for some reason
-        if not (
-            IS_MACOS
-            and len(command) >= 2
-            and command[2].startswith(INDUCTOR_TEST_PREFIX)
-        ):
-            env = env or {}
-            env["TORCH_SHOW_CPP_STACKTRACES"] = "1"
         print_items = []  # do not continue printing them, massive waste of space
 
     consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
