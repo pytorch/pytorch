@@ -37,6 +37,7 @@
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_backward_native.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_native.h>
+#include <ATen/ops/_scaled_dot_product_cudnn_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_native.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention_for_cpu_backward.h>
@@ -645,6 +646,14 @@ Tensor scaled_dot_product_attention(
   sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
   c10::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
   switch (backend) {
+    case sdp::SDPBackend::cudnn_attention: {
+      bool compute_logsumexp =
+          (query_.requires_grad() || key.requires_grad() ||
+           value.requires_grad());
+      auto out_lse_softmax = at::_scaled_dot_product_cudnn_attention(
+          query_, key, value, dropout_p, is_causal, compute_logsumexp, scale);
+      return std::get<0>(out_lse_softmax);
+    }
     case sdp::SDPBackend::flash_attention: {
       if(query_.device().type() == DeviceType::CUDA){
         c10::SymInt og_size = query_.sym_size(-1);
