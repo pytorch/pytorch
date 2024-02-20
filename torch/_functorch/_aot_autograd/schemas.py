@@ -4,6 +4,7 @@ input/output types, metadata, config, function signatures etc.
 """
 
 import collections
+import functools
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Dict, List, NewType, Optional, Set, Tuple, Union
@@ -16,6 +17,7 @@ from torch._subclasses.fake_tensor import is_fake
 
 from .. import config
 
+from .functional_utils import _check_if_mutation_can_be_in_graph
 from .utils import strict_zip
 
 zip = strict_zip
@@ -100,7 +102,7 @@ class InputAliasInfo:
     mutations_under_no_grad_or_inference_mode: bool
     mutates_storage_metadata: bool
     requires_grad: bool
-    mutation_type: MutationType
+    keep_input_mutations: bool
 
     def __post_init__(self):
         if self.mutates_storage_metadata:
@@ -109,6 +111,23 @@ class InputAliasInfo:
             # to additionally fix  up the tensor metadata, since our runtime
             # call to inp.set_(updated_inp) will already have the right metadata
             assert self.mutates_metadata
+
+    @functools.cached_property
+    def mutation_type(self) -> MutationType:
+        if (not self.mutates_data) and (not self.mutates_metadata):
+            return MutationType.NOT_MUTATED
+
+        if _check_if_mutation_can_be_in_graph(
+            self.keep_input_mutations,
+            self.mutates_data,
+            self.mutates_metadata,
+            self.mutations_hidden_from_autograd,
+            self.mutations_under_no_grad_or_inference_mode,
+            self.requires_grad,
+        ):
+            return MutationType.MUTATED_IN_GRAPH
+
+        return MutationType.MUTATED_OUT_GRAPH
 
 
 @dataclass
