@@ -884,7 +884,7 @@ class TestSplitCatFxPasses(TestCase):
             counters.clear()
 
     @patch
-    def test_getitem_cat_merge(self):
+    def test_split_cat_new_patterns(self):
         def split_cat_split(x):
             l1_out = torch.split(x, [200, 50, 50, 20, 20, 20, 20, 20, 20, 50, 30], 1)
             item0 = l1_out[0]
@@ -975,7 +975,7 @@ class TestSplitCatFxPasses(TestCase):
             )
             return output
 
-        def split_cat_split_with_multiple_users(x):
+        def remove_cat_node_with_all_getitmes(x):
             l1_out = torch.split(
                 x, [50, 50, 200, 20, 20, 20, 20, 20, 40, 10, 50], dim=0
             )
@@ -990,6 +990,22 @@ class TestSplitCatFxPasses(TestCase):
             item8 = l1_out[8]
             item9 = l1_out[9]
             item10 = l1_out[10]
+            cat = torch.cat(
+                (
+                    item0,
+                    item1,
+                    item2,
+                    item3,
+                    item4,
+                    item5,
+                    item6,
+                    item7,
+                    item8,
+                    item9,
+                    item10,
+                ),
+                dim=0,
+            )
             cat_1 = torch.cat((item0, item1), dim=0)
             cat_2 = torch.cat((item0, item10), dim=0)
             l2_out = torch.split(cat_1, [20, 30, 50], dim=0)
@@ -1019,15 +1035,70 @@ class TestSplitCatFxPasses(TestCase):
                 ],
                 dim=0,
             )
-            return output
+            return torch.cat((output, cat), dim=0)
+
+        def mutate_cat_node_with_some_getitmes(x):
+            l1_out = torch.split(
+                x, [50, 50, 200, 20, 20, 20, 20, 20, 40, 10, 50], dim=0
+            )
+            item0 = l1_out[0]
+            item1 = l1_out[1]
+            item2 = l1_out[2]
+            item3 = l1_out[3]
+            item4 = l1_out[4]
+            item5 = l1_out[5]
+            item6 = l1_out[6]
+            item7 = l1_out[7]
+            item8 = l1_out[8]
+            item9 = l1_out[9]
+            item10 = l1_out[10]
+            cat = torch.cat(
+                (
+                    item6,
+                    item7,
+                    item8,
+                    item9,
+                    item10,
+                    item2,
+                    item3,
+                    item4,
+                    item5,
+                ),
+                dim=0,
+            )
+            cat_1 = torch.cat((item0, item1), dim=0)
+            cat_2 = torch.cat((item0, item10), dim=0)
+            l2_out = torch.split(cat_1, [20, 30, 50], dim=0)
+            l3_out = torch.split(cat_2, [10, 60, 30], dim=0)
+            item11 = l2_out[0]
+            item12 = l2_out[1]
+            item13 = l2_out[2]
+            item14 = l3_out[0]
+            item15 = l3_out[1]
+            item16 = l3_out[2]
+
+            output = torch.cat(
+                [
+                    item11,
+                    item12,
+                    item13,
+                    item14,
+                    item15,
+                    item16,
+                    item2,
+                ],
+                dim=0,
+            )
+            return torch.cat((output, cat), dim=0)
 
         args = [
             torch.randn(500, 500),
         ]
-        for fn, expected_getitem_cat_merged in [
-            (split_cat_split, 2),
-            (split_cat_split_kwarg, 2),
-            (split_cat_split_with_multiple_users, 0),
+        for fn, expected_getitem_cat_merged, expected_cat_removed in [
+            (split_cat_split, 2, 0),
+            (split_cat_split_kwarg, 2, 0),
+            (remove_cat_node_with_all_getitmes, 0, 2),
+            (mutate_cat_node_with_some_getitmes, 0, 1),
         ]:
             expected = fn(*args)
             actual = torch.compile(fn)(*args)
@@ -1036,6 +1107,10 @@ class TestSplitCatFxPasses(TestCase):
             self.assertEqual(
                 counters["inductor"]["getitem_cat_merged"],
                 expected_getitem_cat_merged,
+            )
+            self.assertEqual(
+                counters["inductor"]["cat_mutated"],
+                expected_cat_removed,
             )
             counters.clear()
 
