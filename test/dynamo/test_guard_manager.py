@@ -121,6 +121,17 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(guard(int))
         self.assertFalse(guard(float))
 
+    def test_default_device_guard(self):
+        foo = 1
+        guard = guards.DEFAULT_DEVICE(["cpu device"])
+        self.assertTrue(guard(foo))
+
+        try:
+            torch.set_default_device("cuda")
+            self.assertFalse(guard(foo))
+        finally:
+            torch.set_default_device(None)
+
     def test_guard_manager_leaf_guard(self):
         guard_manager = RootGuardManager()
         guard_manager.add_type_match_guard(id_type(5), ["type(x) == int"])
