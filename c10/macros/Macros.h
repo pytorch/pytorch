@@ -437,16 +437,6 @@ __host__ __device__
 #define C10_ALWAYS_INLINE_UNLESS_MOBILE C10_ALWAYS_INLINE
 #endif
 
-// Portable determination of whether type T is trivially copyable.
-// Warning: __has_trivial_copy for GCC may not always detect the non-POD
-// correctly. For example, T = std::unique_ptr may evaluate to true and be
-// treated as POD. This can cause unexpected behavior.
-#if defined(__GNUG__) && __GNUC__ < 5 && !defined(__clang__)
-#define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
-#else
-#define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
-#endif
-
 #if defined(__CUDA_ARCH__)
 #if defined(_MSC_VER) && defined(__CUDACC__)
 #define CONSTEXPR_EXCEPT_WIN_CUDA const
