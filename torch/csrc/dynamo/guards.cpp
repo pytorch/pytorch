@@ -1135,7 +1135,7 @@ class TENSOR_ALIASING : public RelationalGuard {
     return result;
   }
 
-  void reset_state() override {
+  void reset_state() final override {
     _is_first_call = true;
   }
 
@@ -1193,7 +1193,7 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
     return GuardDebugInfo(true, 1);
   }
 
-  void reset_state() override {
+  void reset_state() final override {
     for (auto item : _unique_tensors) {
       Py_DECREF(item.first);
     }
