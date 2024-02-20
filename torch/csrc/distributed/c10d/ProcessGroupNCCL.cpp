@@ -2301,14 +2301,6 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       desyncDebug_,
       enableTiming_.load(),
       dist_debug_level_);
-  r->trace_id_ = NCCLTraceBuffer::get()->record(
-      uid_,
-      seq_,
-      profilingTitle,
-      inputs,
-      outputs,
-      r->ncclStartEvents_.get(),
-      r->ncclEndEvents_.get());
   return r;
 }
 
@@ -2339,14 +2331,34 @@ uint64_t ProcessGroupNCCL::WorkNCCL::getSequencenumber() const {
 void ProcessGroupNCCL::workEnqueue(
     c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work) {
   if (!terminateProcessGroup_.load()) {
-    std::lock_guard<std::mutex> lock(workMetaListMutex_);
-    // Avoid view tensors to be processed in cleanup thread.
-    // View tensors' destruction invokes autograd_meta, which
-    // needs to be destructed in user thread. Otherwise will
-    // get deadlock. Here we enqueue work without outputs_.
-    workMetaList_.emplace_back(*work);
-    lastEnqueuedSeq_ = work->seq_;
-    lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
+    {
+      std::lock_guard<std::mutex> lock(workMetaListMutex_);
+      // Avoid view tensors to be processed in cleanup thread.
+      // View tensors' destruction invokes autograd_meta, which
+      // needs to be destructed in user thread. Otherwise will
+      // get deadlock. Here we enqueue work without outputs_.
+      workMetaList_.emplace_back(*work);
+      lastEnqueuedSeq_ = work->seq_;
+      lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
+    }
+
+    // Record every work that we enqueue, rather than every work we create.
+    // - we do not currently enqueue every created work, see coalescing in pointToPoint
+    // - but it is UNSAFE to steal start/end event refs from works that may go out of scope,
+    //   and enqueueing in workMetaList is the mechanism by which we ensure they stay in scope
+    //   long enough for flight recorder to finish using them
+
+    work->trace_id_ = NCCLTraceBuffer::get()->record(
+      uid_,
+      seq_,
+      "sad no title",
+      // work->profilingTitle,
+      // TODO some new way to pass in/out tensor shapes to record()
+      // we avoid keeping tensors alive by holding a work obj, so shouldn't store the inputs/outputs directly
+      std::vector<at::Tensor>{},
+      work->outputs_ ? *work->outputs_ : std::vector<at::Tensor>{},
+      work->ncclStartEvents_.get(),
+      work->ncclEndEvents_.get());
   }
 }
 
