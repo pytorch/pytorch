@@ -1056,7 +1056,10 @@ class DeviceCachingAllocator {
       // cudaMalloc. So far this function has not modified allocator state, but
       // keep in mind that any observed allocator state may change across calls
       // to alloc_block since it may release the lock.
-      block_found = alloc_block(params, false, context, lock)
+      block_found = alloc_block(params, false, context, lock) ||
+          (C10_LIKELY(captures_underway.size() == 0) &&
+           CUDAAllocatorConfig::expandable_segments() &&
+           synchronize_and_free_events(context) && get_free_block(params))
           // Free enough available cached blocks to satisfy alloc and retry
           // alloc.
           || (release_available_cached_blocks(params, context) &&
@@ -2669,7 +2672,7 @@ class DeviceCachingAllocator {
     return event_pool->get(idx);
   }
 
-  void synchronize_and_free_events(
+  bool synchronize_and_free_events(
       const std::shared_ptr<GatheredContext>& context) {
     // Synchronize on outstanding events and then free associated blocks.
 
@@ -2691,8 +2694,9 @@ class DeviceCachingAllocator {
         }
       }
     }
-
+    bool changed = cuda_events.size() > 0;
     cuda_events.clear();
+    return changed;
   }
 
   void insert_events(Block* block) {
