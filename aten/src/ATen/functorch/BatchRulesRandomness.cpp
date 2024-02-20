@@ -40,9 +40,7 @@ Tensor& random_inplace_batching_rule(Tensor& self, ExtraArgs... extra_args) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  auto [self_value, self_bdim] = unwrapTensorAtLevel(self, cur_level);
   self_value = moveBatchDimToFront(self_value, self_bdim);
   RandomnessType randomness = maybe_layer->randomness();
   check_randomness(randomness);
@@ -67,13 +65,9 @@ static Tensor& bernoulli_inplace_Tensor_batching_rule(Tensor& self, const Tensor
   auto cur_level = maybe_layer->layerId();
   RandomnessType randomness = maybe_layer->randomness();
 
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  auto [self_value, self_bdim] = unwrapTensorAtLevel(self, cur_level);
 
-  Tensor other_value;
-  optional<int64_t> other_bdim;
-  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(p_, cur_level);
+  auto [other_value, other_bdim] = unwrapTensorAtLevel(p_, cur_level);
 
   check_randomness(randomness, other_bdim.has_value());
 
@@ -135,9 +129,7 @@ Tensor unary_pointwise_random_batch_rule(const Tensor& tensor, ExtraArgs... extr
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
 
-  Tensor tensor_value;
-  optional<int64_t> tensor_bdim;
-  std::tie(tensor_value, tensor_bdim) = unwrapTensorAtLevel(tensor, cur_level);
+  auto [tensor_value, tensor_bdim] = unwrapTensorAtLevel(tensor, cur_level);
   tensor_value = moveBatchDimToFront(tensor_value, tensor_bdim);
 
   RandomnessType randomness = maybe_layer->randomness();
@@ -165,9 +157,7 @@ Tensor tensor_like_random_batch_rule(const Tensor& self, ExtraArgs... extra_args
   RandomnessType randomness = maybe_layer->randomness();
   check_randomness(randomness);
 
-  Tensor tensor_value;
-  optional<int64_t> tensor_bdim;
-  std::tie(tensor_value, tensor_bdim) = unwrapTensorAtLevel(self, cur_level);
+  auto [tensor_value, tensor_bdim] = unwrapTensorAtLevel(self, cur_level);
   tensor_value = moveBatchDimToFront(tensor_value, tensor_bdim);
 
   if (randomness == RandomnessType::Same && tensor_bdim) {
@@ -190,9 +180,7 @@ static std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tens
   const auto cur_level = maybe_layer->layerId();
   RandomnessType randomness = maybe_layer->randomness();
 
-  Tensor tensor_value;
-  optional<int64_t> tensor_bdim;
-  std::tie(tensor_value, tensor_bdim) = unwrapTensorAtLevel(tensor, cur_level);
+  auto [tensor_value, tensor_bdim] = unwrapTensorAtLevel(tensor, cur_level);
   tensor_value = moveBatchDimToFront(tensor_value, tensor_bdim);
 
   if (!train.has_value() || train) {
@@ -231,9 +219,7 @@ static Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_sa
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
 
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  auto [self_value, self_bdim] = unwrapTensorAtLevel(self, cur_level);
   self_value = moveBatchDimToFront(self_value, self_bdim);
 
   RandomnessType randomness = maybe_layer->randomness();

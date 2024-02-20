@@ -134,7 +134,14 @@ def are_all_mutations_under_no_grad_or_inference_mode(t):
 # Note: "storage mutations" coming from set_() are a type of metadata mutation. So:
 # - check_only_storage_mutation=True: only return true if there was a storage mutation
 # - check_only_storage_mutation=Flse: return true if there was any metadata mutation (including a storage mutation)
-def has_metadata_mutation(f_arg, arg, *, check_only_storage_mutation: bool):
+def has_metadata_mutation(
+    f_arg,
+    arg,
+    *,
+    check_only_storage_mutation: bool,
+    check_for_noncontiguous_mutation: bool = False,
+):
+    assert not (check_only_storage_mutation and check_for_noncontiguous_mutation)
     if is_traceable_wrapper_subclass(f_arg):
         attrs, _ = f_arg.__tensor_flatten__()
         # A tensor subclass was updated if any of its inner elements were updated
@@ -145,6 +152,7 @@ def has_metadata_mutation(f_arg, arg, *, check_only_storage_mutation: bool):
                 f_inner_t,
                 inner_t,
                 check_only_storage_mutation=check_only_storage_mutation,
+                check_for_noncontiguous_mutation=check_for_noncontiguous_mutation,
             )
             for f_inner_t, inner_t in zip(f_inner_ts, inner_ts)
         )
@@ -178,7 +186,7 @@ def has_metadata_mutation(f_arg, arg, *, check_only_storage_mutation: bool):
         maybe_metadata_mutated = torch._functionalize_has_metadata_mutation(f_arg.elem)  # type: ignore[attr-defined]
         # This is true if the current tensor experienced at least one metadata mutation.
         # So if false, we know there was no metadata mutation
-        if not maybe_metadata_mutated:
+        if not maybe_metadata_mutated and not check_for_noncontiguous_mutation:
             return False
 
         # However, multi metadata mutations can cancel out.
@@ -186,9 +194,9 @@ def has_metadata_mutation(f_arg, arg, *, check_only_storage_mutation: bool):
         same_sizes = arg.shape == arg_after.shape
         same_strides = arg.stride() == arg_after.stride()
         same_offsets = arg.storage_offset() == arg_after.storage_offset()
-        has_metadata_mutation_ = maybe_metadata_mutated and not (
-            same_sizes and same_strides and same_offsets
-        )
+        has_metadata_mutation_ = (
+            maybe_metadata_mutated or check_for_noncontiguous_mutation
+        ) and not (same_sizes and same_strides and same_offsets)
         # We consider a tensor to have been metadata mutated if its storage was mutated through a set_() call.
         return has_metadata_mutation_
 

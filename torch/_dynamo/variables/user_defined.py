@@ -727,6 +727,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 unimplemented("UserDefined with non-function __getattr__")
 
         if isinstance(subobj, property):
+            # Rewrite the source being explicit about reading it statically.
+            if self.source:
+                source = AttrSource(self.source, name, get_static=True)
+                source = AttrSource(source, "fget")
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source
             ).call_function(tx, [], {})
@@ -923,12 +927,8 @@ class RemovableHandleVariable(VariableTracker):
     def reconstruct(self, codegen):
         if self.idx == self.REMOVED:
             # Hook has already been removed, return a dummy handle
-            codegen.extend_output(
-                codegen.create_load_import_from(
-                    "torch._dynamo.utils", "invalid_removeable_handle"
-                )
-            )
+            codegen.load_import_from("torch._dynamo.utils", "invalid_removeable_handle")
             codegen.extend_output(create_call_function(0, True))
-            return ()
+            return
         # unreachable due to codegen.add_cache() when the hook is installed
-        return super().reconstruct(codegen)
+        super().reconstruct(codegen)
