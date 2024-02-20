@@ -103,3 +103,4 @@ For users which are used to using and sharing models in the `torch.save` format,
 .. currentmodule:: torch.distributed.checkpoint.format_utils
 
 .. autofunction:: dcp_to_torch_save
+.. autofunction:: torch_save_to_dcp
