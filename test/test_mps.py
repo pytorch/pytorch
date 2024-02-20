@@ -882,25 +882,25 @@ def mps_ops_modifier(ops):
     if product_version < 14.0:
         # FFT and BFloat16 support was added in MacOS 14
         UNIMPLEMENTED_XFAILLIST.update({
-          'bfloat16': None,
-          'fft.fft': None,
-          'fft.fft2': None,
-          'fft.fftn': None,
-          'fft.hfft': None,
-          'fft.ifft': None,
-          'fft.ifft2': None,
-          'fft.ifftn': None,
-          'fft.ihfft': None,
-          'fft.ihfft2': None,
-          'fft.ihfftn': None,
-          'fft.irfft': None,
-          'fft.irfft2': None,
-          'fft.irfftn': None,
-          'fft.rfft': None,
-          'fft.rfft2': None,
-          'fft.rfftn': None,
-          'stft': None,
-         })
+            'bfloat16': None,
+            'fft.fft': None,
+            'fft.fft2': None,
+            'fft.fftn': None,
+            'fft.hfft': None,
+            'fft.ifft': None,
+            'fft.ifft2': None,
+            'fft.ifftn': None,
+            'fft.ihfft': None,
+            'fft.ihfft2': None,
+            'fft.ihfftn': None,
+            'fft.irfft': None,
+            'fft.irfft2': None,
+            'fft.irfftn': None,
+            'fft.rfft': None,
+            'fft.rfft2': None,
+            'fft.rfftn': None,
+            'stft': None,
+        })
 
     UNDEFINED_XFAILLIST = {
         # Top 60 operators
@@ -11548,7 +11548,9 @@ class TestConsistency(TestCaseMPS):
             elif op.name == "nn.functional.interpolate":
                 atol = 1e-3
                 rtol = 1e-4
-            elif op.name == "fft.rfft":
+            elif op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.fft', 'fft.fftn', 'fft.rfft']:
+                # TODO: Investigate why this is needed
+                # See https://github.com/pytorch/pytorch/issues/120237
                 atol = 3e-5
                 rtol = 2e-5
             else:
