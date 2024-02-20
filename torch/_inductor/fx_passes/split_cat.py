@@ -26,6 +26,7 @@ from ..pattern_matcher import (
     register_graph_pattern,
     RepeatedExpr,
 )
+from .group_batch_fusion import is_node_meta_valid
 from .pre_grad import (
     merge_getitem_cat_pass,
     merge_splits_pass,
@@ -1092,7 +1093,7 @@ def simplify_split_cat(match: Match, split_sections: List[int], dim: int):
 
 
 # noqa: W605
-# ############The pattern to be optimized is#########
+# ############pattern to be optimized is#########
 
 #                 split_node(dim=1)
 #       /     \         ...       /         \
@@ -1101,7 +1102,7 @@ def simplify_split_cat(match: Match, split_sections: List[int], dim: int):
 #      cat (user=mul, dim=1)           cat(user=mul, dim=1)
 #       |            \                   |          \
 
-# ################After transformation#############
+# ################after transformation#############
 
 #                 split_node(dim=1)
 #       /              ...                  \
@@ -1109,19 +1110,16 @@ def simplify_split_cat(match: Match, split_sections: List[int], dim: int):
 #     |    \                              |     \
 
 
-def safe_to_abort_node(node: torch.fx.Node):
-    """
-    1. the input nodes of the node should come from the same parent
-    2. the user of all the input nodes should be only one
-    """
+def has_same_parent_node(node: torch.fx.Node):
+    # the input nodes of the node should come from the same parent
     prev_node = None
-    for arg in node.args[0]:  # type: ignore[union-attr]
-        if len(arg.users) != 1 or arg.target != operator.getitem:  # type: ignore[union-attr]
+    for getitem in node.args[0]:  # type: ignore[union-attr]
+        if getitem.target != operator.getitem:  # type: ignore[union-attr]
             return False
         if prev_node is None:
-            prev_node = arg.args[0]  # type: ignore[union-attr]
+            prev_node = getitem.args[0]  # type: ignore[union-attr]
         else:
-            if arg.args[0] != prev_node:
+            if getitem.args[0] != prev_node:
                 return False
     return True
 
@@ -1140,6 +1138,26 @@ def remove_zeros(split_sections: List[int]):
             idx += 1
 
     return new_split_sections, index_mapping
+
+
+def is_sorted_and_consecutive(arr: List[int]) -> bool:
+    # check if the array is sorted
+    if arr == sorted(arr):
+        # check if the differences between adjacent elements are all 1
+        return all(x[1] - x[0] == 1 for x in zip(arr, arr[1:]))
+    else:
+        return False
+
+
+def calculate_fused_tensor_size(split_node: torch.fx.Node, indices: List[int]) -> int:
+    """
+    Calculate the fused tensor size in the indices
+    """
+    fused_tensor_size = 0
+    for i in range(len(split_node.args[1])):  # type: ignore[arg-type]
+        if i in indices:
+            fused_tensor_size += split_node.args[1][i]  # type: ignore[operator, assignment, index]
+    return fused_tensor_size
 
 
 @register_graph_pattern(
@@ -1166,20 +1184,22 @@ def merge_getitem_cat(match: Match, split_sections: List[int], dim: int):
     for cat_user in next_users:
         if cat_user.target == torch.cat:
             cat_dim = get_arg_value(cat_user, 1, "dim")
-            if split_dim != cat_dim:
-                continue
             # check the all getitems in the cat_user from the same node
-            if not safe_to_abort_node(cat_user):
+            # check the input of the cat has all getitem from the split
+            # check all getitem only has one single user
+            if (
+                split_dim != cat_dim
+                or not has_same_parent_node(cat_user)
+                or not all(len(arg.users) == 1 for arg in cat_user.args[0])  # type: ignore[union-attr]
+            ):
                 continue
             # find the index of getitems to be cated/stacked
             indices = []
             for arg in cat_user.args[0]:  # type: ignore[union-attr]
                 indices.append(arg.args[1])  # type: ignore[union-attr]
-            # indices may not be necessarily sorted, we sort them first
-            indices.sort()
             # the gettitems to be merged must be consecutive, otherwise
             # returned sliced tensor could be wrong
-            if indices[len(indices) - 1] - indices[0] + 1 != len(indices):
+            if not is_sorted_and_consecutive(indices):
                 continue
             # update the arg of cat user, only keep the first getitem
             cat_user.update_arg(0, cat_user.args[0][0])  # type: ignore[index]
@@ -1189,7 +1209,9 @@ def merge_getitem_cat(match: Match, split_sections: List[int], dim: int):
                 if i in indices:
                     fused_tensor_size += split_node.args[1][i]  # type: ignore[operator, assignment, index]
             # update the split sections
-            split_sections[indices[0]] = fused_tensor_size
+            split_sections[indices[0]] = calculate_fused_tensor_size(
+                split_node, indices
+            )
             # padding others with zeros to keep the same dict size
             for i in indices[1:]:
                 split_sections[i] = 0
@@ -1228,6 +1250,94 @@ def merge_getitem_cat(match: Match, split_sections: List[int], dim: int):
                 counters["inductor"]["getitem_cat_merged"] += 1
 
 
+# ############pattern to be optimized is#########
+
+#                 split_node(dim=1)  -> user=multiple
+#       /     \         ...       /         \
+# getitem    getitem          getitem     getitem   -> user=multiple
+#    \       \                    /            \
+#          other_op /cat(user=mul, dim=1)             other_op
+#                      |
+
+# ################after transformation#############
+
+#                 split_node(dim=1)         -> -> user=multiple
+#       /     \         ...       /         \
+# getitem    getitem          getitem     getitem   -> user=multiple
+#    \       \                    /           \
+#                          other_op
+
+
+@register_graph_pattern(
+    CallFunction(
+        torch.cat,
+        getitem_split,
+        dim=Ignored(),
+        _users=MULTIPLE,
+    ),
+    pass_dict=split_cat_pass,
+    extra_check=config_flag("split_cat_fx_passes"),
+)
+def mutate_cat_node(match: Match, split_sections: List[int], dim: int):
+    if not isinstance(split_sections, (list, tuple)):  # Unnormalized split
+        return
+    graph = match.graph
+    split_node = next(node for node in match.nodes if node.target == torch.split)
+    split_input, split_size, split_dim = _get_split_args_default(split_node)
+    # if the cat and split have different dims, return
+    # Find the next users (i.e. users after the getitem)
+    next_users = find_next_users(split_node)
+    for cat_user in next_users:
+        if cat_user.target == torch.cat:
+            cat_dim = get_arg_value(cat_user, 1, "dim") or 0
+            # check that all getitems in the cat_user from the same node
+            # check the input of the cat has all getitem from the split
+            if split_dim != cat_dim or not has_same_parent_node(cat_user):
+                continue
+            # find the index of getitems to be cat
+            indices, idx_to_getitem = [], {}
+            for getitem in cat_user.args[0]:  # type: ignore[union-attr]
+                indices.append(getitem.args[1])  # type: ignore[union-attr]
+                idx_to_getitem[getitem.args[1]] = getitem  # type: ignore[union-attr]
+            # the gettitems to be merged must be consecutive, otherwise
+            # returned sliced tensor could be wrong
+            if not is_sorted_and_consecutive(indices):
+                continue
+            # case 1: the cat uses all getitems from the split
+            if len(split_sections) == len(cat_user.args[0]):  # type: ignore[arg-type]
+                # replace the users of the cat node to be the input of the split node
+                cat_user.replace_all_uses_with(split_node.args[0])
+                # remove the cat node
+                graph.erase_node(cat_user)
+                counters["inductor"]["cat_mutated"] += 1
+            # case 2: the cat uses some getitems from the split
+            elif is_node_meta_valid(split_node.args[0]):  # type: ignore[arg-type]
+                # check the split dim, and construct the slice tuple
+                start_fused_size = calculate_fused_tensor_size(
+                    split_node, list(range(indices[0]))
+                )
+                end_fused_size = start_fused_size + calculate_fused_tensor_size(
+                    split_node, indices
+                )
+                slice_list = []
+                for i in range(len(split_node.args[0].meta["example_value"].shape)):  # type: ignore[union-attr]
+                    if i != split_dim:
+                        slice_list.append(slice(None, None, None))
+                    else:
+                        slice_list.append(slice(start_fused_size, end_fused_size, None))
+                with graph.inserting_after(split_node):
+                    slice_node = graph.call_function(
+                        operator.getitem,
+                        args=(split_node.args[0], tuple(slice_list)),
+                    )
+                    cat_user.replace_all_uses_with(slice_node)
+                    slice_node.meta.update(cat_user.meta)
+
+                # remove the cat node
+                graph.erase_node(cat_user)
+                counters["inductor"]["cat_mutated"] += 1
+
+
 # noqa: W605
 # ############The pattern to be optimized is#########
 #                            split_node (dim=1)
@@ -1259,9 +1369,7 @@ def merge_getitem_cat(match: Match, split_sections: List[int], dim: int):
             torch.stack,
             getitem_split,
             dim=Ignored(),
-            _users=1,
         ),
-        _users=1,
     ),
     pass_dict=merge_getitem_cat_pass,
     extra_check=config_flag("split_cat_fx_passes"),
@@ -1273,9 +1381,7 @@ def merge_getitem_cat(match: Match, split_sections: List[int], dim: int):
             torch.stack,
             tensors=getitem_split,
             dim=Ignored(),
-            _users=1,
         ),
-        _users=1,
     ),
     pass_dict=merge_getitem_cat_pass,
     extra_check=config_flag("split_cat_fx_passes"),
@@ -1287,9 +1393,7 @@ def merge_getitem_cat(match: Match, split_sections: List[int], dim: int):
             torch.stack,
             getitem_split,
             Ignored(),
-            _users=1,
         ),
-        _users=1,
     ),
     pass_dict=merge_getitem_cat_pass,
     extra_check=config_flag("split_cat_fx_passes"),
@@ -1307,15 +1411,19 @@ def merge_stack_tahn_unbind(match: Match, split_sections: List[int], dim: int):
     for user in next_users:
         # stack user only has one user
         if user.target == torch.stack:
-            if not safe_to_abort_node(user):
-                continue
+            stack_dim = get_arg_value(user, 1, "dim") or 0
             unbind_user = find_next_users(user)[0]
             if unbind_user.target != torch.unbind:
                 continue
             unbind_dim = get_arg_value(unbind_user, 1, "dim") or 0
-            stack_dim = get_arg_value(user, 1, "dim") or 0
-            # stack and unbind shouldhave the same dim
-            if unbind_user.target != torch.unbind or stack_dim != unbind_dim:
+            # stack and unbind should have the same dim
+            # check the all getitems in the user from the same node
+            # check all the getitems only has single user
+            if (
+                stack_dim != unbind_dim
+                or not has_same_parent_node(user)
+                or not all(len(arg.users) == 1 for arg in user.args[0])  # type: ignore[union-attr]
+            ):
                 continue
             # find the index of getitems to be stacked
             indices = []
@@ -1323,11 +1431,9 @@ def merge_stack_tahn_unbind(match: Match, split_sections: List[int], dim: int):
             for arg in user.args[0]:  # type: ignore[union-attr]
                 indices.append(arg.args[1])  # type: ignore[union-attr]
                 split_sections_for_unbind.append(split_sections[arg.args[1]])  # type: ignore[union-attr]
-            # indices may not be necessarily sorted, we sort them first
-            indices.sort()
             # the gettitems to be merged must be consecutive, otherwise
             # returned sliced tensor could be wrong
-            if indices[len(indices) - 1] - indices[0] + 1 != len(indices):
+            if not is_sorted_and_consecutive(indices):
                 continue
             # update the arg of stack user, only keep the first getitem
             user.update_arg(0, user.args[0][0])  # type: ignore[index]
@@ -1337,7 +1443,9 @@ def merge_stack_tahn_unbind(match: Match, split_sections: List[int], dim: int):
                 if i in indices:
                     fused_tensor_size += split_node.args[1][i]  # type: ignore[operator, index, assignment]
             # update the split sections
-            split_sections[indices[0]] = fused_tensor_size
+            split_sections[indices[0]] = calculate_fused_tensor_size(
+                split_node, indices
+            )
             # padding others with zeros to keep the same dict size
             for i in indices[1:]:
                 split_sections[i] = 0
