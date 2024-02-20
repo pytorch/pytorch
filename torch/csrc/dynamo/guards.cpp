@@ -878,8 +878,7 @@ class DEFAULT_DEVICE : public LeafGuard {
     py::handle device_module = py::module::import("torch.utils._device");
     // Save the dict using py::object
     _utils_device_dict = device_module.attr("__dict__");
-    _device = PyDict_GetItemString(
-        _utils_device_dict.ptr(), "CURRENT_DEVICE"); // borrowed ref
+    _device = _utils_device_dict["CURRENT_DEVICE"];
   }
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -887,12 +886,12 @@ class DEFAULT_DEVICE : public LeafGuard {
     // a new string every time. Even though its a new reference, we don't dec
     // ref it. Interned strings are used for things like variable names and are
     // leaked by design.
-    static PyObject* _current_device_str =
+    static PyObject* current_device_str =
         PyUnicode_InternFromString("CURRENT_DEVICE");
     PyObject* device = PyDict_GetItem(
-        _utils_device_dict.ptr(), _current_device_str); // borrowed ref
-    if (device != _device) {
-      int result = PyObject_RichCompareBool(device, _device, Py_EQ);
+        _utils_device_dict.ptr(), current_device_str); // borrowed ref
+    if (device != _device.ptr()) {
+      int result = PyObject_RichCompareBool(device, _device.ptr(), Py_EQ);
       if (result == -1) {
         PyErr_Clear();
         return false;
@@ -905,8 +904,7 @@ class DEFAULT_DEVICE : public LeafGuard {
  private:
   // Save the current device and the module dict during the guard construction.
   py::object _utils_device_dict;
-  PyObject* _device;
-  PyObject* _current_device_str;
+  py::object _device;
 };
 
 /**
