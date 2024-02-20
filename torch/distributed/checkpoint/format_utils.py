@@ -159,6 +159,10 @@ class BroadcastingTorchSaveReader(StorageReader):
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
         self.checkpoint_id = checkpoint_id
 
+    @classmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        return os.path.isfile(checkpoint_id)
+
 
 class DynamicMetaLoadPlanner(DefaultLoadPlanner):
     """
