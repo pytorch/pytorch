@@ -119,6 +119,10 @@ PROD_AVX512VNNI_MICROKERNEL_SRCS = [
     "xnnpack_wrappers/amalgam/gen/avx512vnni.c",
 ]
 
+PROD_AVX512VNNIGFNI_MICROKERNEL_SRCS = [
+    "xnnpack_wrappers/amalgam/gen/avx512vnnigfni.c",
+]
+
 PROD_RVV_MICROKERNEL_SRCS = [
     "xnnpack_wrappers/amalgam/gen/rvv.c",
 ]
