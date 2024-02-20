@@ -5435,8 +5435,7 @@ Done""")
 
         def bad_fn(x, y):
             # Hacky way to check if we're currently inside a forward ad level
-            fwAD_current_level = torch._C._get_current_dual_level()
-            is_running_forward_ad = fwAD_current_level >= 0
+            is_running_forward_ad = fwAD._current_level >= 0
 
             if is_running_forward_ad:
                 y_p, y_d = fwAD.unpack_dual(y)
@@ -5482,8 +5481,7 @@ Done""")
         class UserFn(Function):
             @staticmethod
             def forward(ctx, x, y):
-                fwAD_current_level = torch._C._get_current_dual_level()
-                if fwAD_current_level >= 0:
+                if fwAD._current_level >= 0:
                     self.assertFalse(x.requires_grad)
                     self.assertFalse(y.requires_grad)
                 return x.clone(), y.clone()
@@ -9010,8 +9008,7 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
 class TestAutogradForwardMode(TestCase):
     def tearDown(self):
         # Ensure that a failing test won't make others fail
-        fwAD_current_level = torch._C._get_current_dual_level()
-        while fwAD_current_level >= 0:
+        while fwAD._current_level >= 0:
             fwAD.exit_dual_level()
 
         super().tearDown()
