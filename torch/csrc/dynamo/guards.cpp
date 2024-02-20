@@ -972,82 +972,6 @@ class DATA_PTR_MATCH : public LeafGuard {
   void* _data_ptr;
 };
 
-class TENSOR_MATCH : public LeafGuard {
- public:
-  TENSOR_MATCH(
-      py::object value,
-      py::object dynamic_dims_sizes_py,
-      py::object dynamic_dims_strides_py,
-      py::object tensor_name,
-      py::object verbose_code_parts)
-      : LeafGuard(verbose_code_parts),
-        _tensor_name(py::cast<py::str>(tensor_name)) {
-    PyObject* item = value.ptr();
-    if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
-      PyErr_SetString(PyExc_TypeError, "expected Tensor()");
-      return;
-    }
-    auto tensor = THPVariable_Unpack(item);
-
-    std::vector<std::optional<c10::SymInt>> tensor_dims_size =
-        pyListToVecOptInt(dynamic_dims_sizes_py.ptr());
-    std::vector<std::optional<c10::SymInt>> tensor_dims_stride =
-        pyListToVecOptInt(dynamic_dims_strides_py.ptr());
-
-    tensor_dims_size = tensor_dims_size.empty()
-        ? wrapIntegersInOptional(tensor.sym_sizes())
-        : tensor_dims_size;
-    tensor_dims_stride = tensor_dims_stride.empty()
-        ? wrapIntegersInOptional(tensor.sym_strides())
-        : tensor_dims_stride;
-    LocalState state;
-    _tensor_check = std::make_unique<TensorCheck>(
-        state,
-        Py_TYPE(item),
-        std::move(tensor),
-        std::move(tensor_dims_size),
-        std::move(tensor_dims_stride));
-  }
-
-  bool check_nopybind(PyObject* value) override { // borrowed ref
-    LocalState state;
-    if (Py_TYPE(value) != _tensor_check->pytype) {
-      return false;
-    }
-    return _tensor_check->check(state, THPVariable_Unpack(value));
-  }
-
-  virtual GuardDebugInfo check_verbose_nopybind(
-      PyObject* value) override { // borrowed ref
-
-    if (Py_TYPE(value) != _tensor_check->pytype) {
-      std::stringstream fail_reason;
-      PyObject* type_str = PyObject_Str(PyObject_Type(value));
-      fail_reason << "expected type of '" << _tensor_name
-                  << "' to be a tensor type, ";
-      if (!type_str) {
-        fail_reason << "but found a different type";
-      } else {
-        fail_reason << "' but found " << PyUnicode_AsUTF8(type_str);
-      }
-      return GuardDebugInfo(false, fail_reason.str(), 0);
-    }
-
-    LocalState state;
-    std::string fail_reason = _tensor_check->check_verbose(
-        state, THPVariable_Unpack(value), _tensor_name);
-
-    if (fail_reason != "") {
-      return GuardDebugInfo(false, fail_reason, 0);
-    }
-    return GuardDebugInfo(true, 1);
-  }
-
- private:
-  std::string _tensor_name;
-  std::unique_ptr<TensorCheck> _tensor_check;
-};
-
 /**
  * Relational guards compare more than one value. We implement Relational
  * guards by capturing some state in the guard object. For example for tensor
@@ -1170,55 +1094,6 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
   py::list _tensor_names;
   ska::flat_hash_map<PyObject*, std::nullptr_t> _unique_tensors;
   long unsigned int _counter = 0;
-};
-
-class DYNAMIC_INDICES : public LeafGuard {
-  // C++ equivalent of
-  // if hasattr(value, "_dynamo_dynamic_indices"):
-  //     code.append(
-  //         f"(({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices}))
-  //         if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  #
-  //         noqa: B950
-  //     )
-  // else:
-  //     code.append(
-  //         f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
-  //     )
- public:
-  DYNAMIC_INDICES(
-      bool has_attr,
-      py::set dynamic_indices,
-      py::object verbose_code_parts)
-      : LeafGuard(verbose_code_parts),
-        _has_attr(has_attr),
-        _dynamic_indices(dynamic_indices) {}
-
-  bool check_nopybind(PyObject* value) override { // borrowed ref
-    py::handle handle = py::handle(value);
-
-    bool has_attr = py::hasattr(handle, "_dynamo_dynamic_indices");
-    // hasattr({tensor_name}, '_dynamo_dynamic_indices') == False
-    if (!_has_attr) {
-      return !has_attr;
-    }
-
-    // "((x._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices}))
-    //       if hasattr(x, '_dynamo_dynamic_indices') else True)
-    if (!has_attr) {
-      return true;
-    }
-
-    py::handle indices = py::getattr(handle, "_dynamo_dynamic_indices");
-    // py::set does not have issubset, so we have to manually get the method and
-    // do the call.
-    py::function is_subset =
-        py::cast<py::function>(py::getattr(indices, "issubset"));
-    return py::cast<bool>(is_subset(_dynamic_indices));
-  }
-
- private:
-  bool _has_attr;
-  py::set _dynamic_indices;
 };
 
 class GuardManager;
@@ -1889,73 +1764,6 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
   Py_ssize_t _index;
 };
 
-/**
- * GlobalWeakRef accessor. Dynamo can insert a weakref object into the frame
- * globals. This accessor reads the globals and then calls the weakref object
- * to get the underlying object. This is a child of GlobalsGuardAccessor.
- * Therefore, we will get the globals dict while caling check_nopybind.
- */
-class GlobalWeakRefGuardAccessor : public GuardAccessor {
- public:
-  GlobalWeakRefGuardAccessor(
-      RootGuardManager* root,
-      py::object global_name,
-      py::handle example_value)
-      : GuardAccessor(root, global_name, example_value),
-        _global_name(global_name.ptr()) {}
-
-  // NB: Intentional duplication between check_nopybind and
-  // check_verbose_nopybind.
-  bool check_nopybind(PyObject* obj) override { // borrowed ref
-    // obj is globals dict because GlobalWeakRefGuardAccessor has to be a
-    // child of GlobalsGuardAccessor.
-    PyObject* weakref = PyDict_GetItem(obj, _global_name); // borrowed ref
-    if (weakref == nullptr) {
-      // The weakref is not in the globals dict.
-      PyErr_Clear();
-      return false;
-    }
-    PyObject* x = PyObject_CallNoArgs(weakref); // new ref
-    if (x == nullptr) {
-      // The weakref is not valid.
-      PyErr_Clear();
-      return false;
-    }
-    bool result = _guard_manager->check_nopybind(x);
-    Py_DECREF(x);
-    return result;
-  }
-
-  GuardDebugInfo check_verbose_nopybind(
-      PyObject* obj) override { // borrowed ref
-    // obj is globals dict because GlobalWeakRefGuardAccessor has to be a
-    // child of GlobalsGuardAccessor.
-    PyObject* weakref = PyDict_GetItem(obj, _global_name); // borrowed ref
-    if (weakref == nullptr) {
-      // The weakref is not in the globals dict.
-      PyErr_Clear();
-      return GuardDebugInfo(false, std::string("KeyError ") + repr(), 0);
-    }
-    PyObject* x = PyObject_CallNoArgs(weakref); // new ref
-    if (x == nullptr) {
-      // The weakref is not valid.
-      PyErr_Clear();
-      return GuardDebugInfo(false, std::string("Invalid weakref ") + repr(), 0);
-    }
-    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
-    Py_DECREF(x);
-    return result;
-  }
-
-  std::string repr() const override {
-    return "GlobalWeakRefGuardAccessor(" +
-        py::str(_global_name).cast<std::string>() + ")";
-  }
-
- private:
-  PyObject* _global_name;
-};
-
 void install_tensor_aliasing_guard(
     GuardManager* x,
     GuardManager* y,
@@ -2102,14 +1910,6 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DATA_PTR_MATCH")
       .def(py::init<py::object, py::list>())
       .def("__call__", &DATA_PTR_MATCH::check);
-  py::class_<DYNAMIC_INDICES, LeafGuard, std::shared_ptr<DYNAMIC_INDICES>>(
-      py_m, "DYNAMIC_INDICES")
-      .def(py::init<bool, py::set, py::list>())
-      .def("__call__", &DYNAMIC_INDICES::check);
-  py::class_<TENSOR_MATCH, LeafGuard, std::shared_ptr<TENSOR_MATCH>>(
-      py_m, "TENSOR_MATCH")
-      .def(py::init<py::object, py::object, py::object, py::str, py::list>())
-      .def("__call__", &TENSOR_MATCH::check);
   py::class_<TENSOR_ALIASING, LeafGuard, std::shared_ptr<TENSOR_ALIASING>>(
       py_m, "TENSOR_ALIASING");
   py::class_<
@@ -2144,11 +1944,6 @@ PyObject* torch_c_dynamo_guards_init() {
       GuardAccessor,
       std::unique_ptr<TupleIteratorGetItemAccessor>>(
       py_m, "TupleIteratorGetItemAccessor");
-  py::class_<
-      GlobalWeakRefGuardAccessor,
-      GuardAccessor,
-      std::unique_ptr<GlobalWeakRefGuardAccessor>>(
-      py_m, "GlobalWeakRefGuardAccessor");
 
   // Guard Manager - No constructor in python, python should use
   // RootGuardManager.
@@ -2222,26 +2017,6 @@ PyObject* torch_c_dynamo_guards_init() {
             self.add_leaf_guard(
                 std::make_shared<DATA_PTR_MATCH>(data_ptr, verbose_code_parts));
           })
-      .def(
-          "add_dynamic_indices_guard",
-          [](GuardManager& self,
-             bool has_attr,
-             py::set value,
-             py::object verbose_code_parts) -> void {
-            self.add_leaf_guard(std::make_shared<DYNAMIC_INDICES>(
-                has_attr, value, verbose_code_parts));
-          })
-      .def(
-          "add_tensor_match_guard",
-          [](GuardManager& self,
-             py::object value,
-             py::object sizes,
-             py::object strides,
-             py::object tensor_name,
-             py::object verbose_code_parts) -> void {
-            self.add_leaf_guard(std::make_shared<TENSOR_MATCH>(
-                value, sizes, strides, tensor_name, verbose_code_parts));
-          })
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
       .def(
@@ -2270,12 +2045,6 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "tuple_iterator_getitem_manager",
           &GuardManager::get_child_manager<TupleIteratorGetItemAccessor>,
-          py::return_value_policy::reference)
-      // return by reference because GuardManager has the ownership of accessors
-      // and guard managers
-      .def(
-          "global_weakref_manager",
-          &GuardManager::get_child_manager<GlobalWeakRefGuardAccessor>,
           py::return_value_policy::reference)
       // return by reference because C++ GuardManager has the ownership of
       // accessors and guard managers
