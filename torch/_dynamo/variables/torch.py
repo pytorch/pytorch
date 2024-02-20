@@ -42,7 +42,7 @@ from .ctx_manager import (
     NullContextVariable,
     TorchFunctionDisableVariable,
 )
-from .distributed import is_constant_pg_functions, is_from_local, ProcessGroupVariable
+from .distributed import is_constant_pg_functions, is_from_local
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import ListVariable, TupleVariable
 from .torch_function import can_dispatch_torch_function, dispatch_torch_function
@@ -511,11 +511,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             # We desugar it at trace-time into ranks by directly calling util
             # bake the result into the trace
-            assert len(args) == 1, "Expected one arg (pg)"
+            # assert len(args) == 1, "Expected one arg (pg)"
             # Some constant pg functions address a pg via its name
-            assert isinstance(args[0], (ProcessGroupVariable, ConstantVariable))
+            # assert isinstance(args[0], (ProcessGroupVariable, ConstantVariable))
 
-            invocation_result = self.value(args[0].as_python_constant())
+            # invocation_result = self.value(args[0].as_python_constant())
+            invocation_result = self.value(*[arg.as_python_constant() for arg in args])
             # Note - while we *could* cook up sources around invocations, like a FunctionSource
             # the space of invoking functions in the middle of the guard chain is very iffy. As such,
             # guard propagation via options is the best we can do.

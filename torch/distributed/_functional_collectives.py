@@ -751,6 +751,10 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
             return dmesh._dim_group_infos[dim][2]
         else:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
+    elif isinstance(group, list):
+        if not is_torchdynamo_compiling():
+            warnings.warn("Deprecatd!!!")
+        return c10d._resolve_group_name_by_ranks_and_tag(group, tag)
     else:
         raise ValueError(f"Unsupported group type: {type(group)}, {group}")
 
