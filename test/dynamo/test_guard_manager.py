@@ -5,6 +5,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 from torch._C._dynamo import guards
+from torch.testing._internal.common_utils import set_default_dtype
 
 RootGuardManager = guards.RootGuardManager
 GetAttrGuardAccessor = guards.GetAttrGuardAccessor
@@ -39,6 +40,20 @@ def less_match_verbose_code_parts(expected):
 
 
 class GuardManagerTests(torch._dynamo.test_case.TestCase):
+    def test_global_state_guard(self):
+        guard = guards.GLOBAL_STATE(["global_state_check"])
+        self.assertTrue(guard(None))
+        with set_default_dtype(torch.double):
+            self.assertFalse(guard(None))
+        self.assertTrue(guard(None))
+        _orig = torch.are_deterministic_algorithms_enabled()
+        try:
+            torch.use_deterministic_algorithms(not _orig)
+            self.assertFalse(guard(None))
+        finally:
+            torch.use_deterministic_algorithms(_orig)
+        self.assertTrue(guard(None))
+
     def test_python_lambda_leaf_guard(self):
         const_guard = guards.LAMBDA_GUARD(
             functools.partial(equals_match, expected=5),
