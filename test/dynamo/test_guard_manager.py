@@ -173,6 +173,12 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(guard(foo))
         self.assertFalse(guard(torch.tensor([1, 2, 3])))
 
+    def test_length_check_guard(self):
+        foo = [1, 2, 3]
+        guard = guards.LENGTH_CHECK(len(foo), ["len(x) == len(foo)"])
+        self.assertTrue(guard(foo))
+        self.assertFalse(guard([]))
+
     def test_tensor_aliasing_guard(self):
         guard_manager = RootGuardManager()
 
@@ -388,6 +394,10 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(
             isinstance(type_manager.get_accessors()[0], GetAttrGuardAccessor)
         )
+        mro_manager.add_length_check_guard(
+            3,
+            "Expected len(type(foo).__mro__) == 3",
+        )
 
         # type(foo).__mro__[0].a = 4
         item_manager = mro_manager.getitem_manager(1, type(foo).__mro__[1])
@@ -412,6 +422,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         guard_manager = RootGuardManager()
         # Check a[3] which is tuple_iterator_getitem(foo, 2)
+        guard_manager.add_tuple_iterator_length_guard(5, ["len == 5"])
         guard_manager.tuple_iterator_getitem_manager(2, foo).add_equals_match_guard(
             a[3], ["x==4"]
         )
