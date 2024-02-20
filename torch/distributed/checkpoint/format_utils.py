@@ -150,7 +150,7 @@ class BroadcastingTorchSaveReader(StorageReader):
         return fut
 
     def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
-        """Implementatoin of the StorageReader method"""
+        """Implementation of the StorageReader method"""
         self.is_coordinator = is_coordinator
         if self.is_coordinator:
             assert dist.get_rank() == self.coordinator_rank
@@ -158,20 +158,20 @@ class BroadcastingTorchSaveReader(StorageReader):
         assert self.checkpoint_id is not None
 
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
-        """Implementatoin of the StorageReader method"""
+        """Implementation of the StorageReader method"""
         return plan
 
     def prepare_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
-        """Implementatoin of the StorageReader method"""
+        """Implementation of the StorageReader method"""
         return global_plan
 
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
-        """Implementatoin of the StorageReader method"""
+        """Implementation of the StorageReader method"""
         self.checkpoint_id = checkpoint_id
 
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
-        """Implementatoin of the StorageReader method"""
+        """Implementation of the StorageReader method"""
         return os.path.isfile(checkpoint_id)
 
 
