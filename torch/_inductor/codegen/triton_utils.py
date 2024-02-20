@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import torch
 
@@ -59,7 +59,7 @@ def signature_to_meta(
     }
 
 
-def config_of(args: List[KernelArgType]) -> instance_descriptor:
+def config_of(args: List[KernelArgType]) -> Any:
     def is_aligned(x: KernelArgType, alignment: int, include_tensor: bool) -> bool:
         """
         Roughly follow triton code here:
