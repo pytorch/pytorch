@@ -7,6 +7,7 @@ import torch._dynamo.test_case
 from torch._C._dynamo import guards
 
 RootGuardManager = guards.RootGuardManager
+GetAttrGuardAccessor = guards.GetAttrGuardAccessor
 
 
 def id_type(x):
@@ -135,6 +136,44 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(guard_manager.get_accessors()), 0)
         self.assertTrue(guard_manager.check(6))
         self.assertFalse(guard_manager.check(4))
+        self.assertFalse(guard_manager.check("foo"))
+
+    def test_attr_guard_manager(self):
+        class Foo:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        foo = Foo(1, 2)
+        guard_manager = RootGuardManager()
+        guard_manager.add_type_match_guard(id_type(foo), ["type(x) == Foo"])
+        guard_manager.getattr_manager("x", 1).add_lambda_guard(
+            functools.partial(equals_match, expected=foo.x),
+            equals_match_verbose_code_parts(foo.x),
+        )
+        guard_manager.getattr_manager("y", 2).add_lambda_guard(
+            functools.partial(equals_match, expected=foo.y),
+            equals_match_verbose_code_parts(foo.y),
+        )
+        self.assertEqual(len(guard_manager.get_leaf_guards()), 1)
+        # 2 child managers, one for x and one for y
+        self.assertEqual(len(guard_manager.get_accessors()), 2)
+        self.assertTrue(
+            isinstance(guard_manager.get_accessors()[0], GetAttrGuardAccessor)
+        )
+        self.assertTrue(
+            isinstance(guard_manager.get_accessors()[1], GetAttrGuardAccessor)
+        )
+        # Check leaf guards on child managers
+        self.assertEqual(
+            len(guard_manager.getattr_manager("x", None).get_leaf_guards()), 1
+        )
+        self.assertEqual(
+            len(guard_manager.getattr_manager("y", None).get_leaf_guards()), 1
+        )
+
+        self.assertTrue(guard_manager.check(foo))
+        self.assertFalse(guard_manager.check(Foo(3, 4)))
         self.assertFalse(guard_manager.check("foo"))
 
 
