@@ -703,7 +703,7 @@ namespace {
             );
         } while (!done && max_threads);
         if (!done) {
-          TORCH_INTERNAL_ASSERT(false, "Couldn't reduce launch bounds to accomodate shaedMemPerBlock limit");
+          TORCH_INTERNAL_ASSERT(false, "Couldn't reduce launch bounds to accomodate sharedMemPerBlock limit");
         }
         break;
       }
