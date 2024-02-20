@@ -49,17 +49,17 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       at::DataPtr data_ptr,
       at::Allocator* allocator,
       bool resizable)
-      : size_bytes_(std::move(size_bytes)),
+      : data_ptr_(std::move(data_ptr)),
+        size_bytes_(std::move(size_bytes)),
         size_bytes_is_heap_allocated_(size_bytes_.is_heap_allocated()),
         resizable_(resizable),
         received_cuda_(false),
         allocator_(allocator) {
-    if (data_ptr == nullptr) {
-        data_ptr = size_bytes.is_heap_allocated()
-                    ? allocator->allocate(0)
-                    : allocator->allocate(size_bytes.as_int_unchecked());
+    if (data_ptr_ == nullptr) {
+        data_ptr_ = size_bytes.is_heap_allocated()
+                        ? allocator->allocate(0)
+                        : allocator->allocate(size_bytes.as_int_unchecked());
     }
-    data_ptr_ = std::move(data_ptr);
     if (resizable) {
       TORCH_INTERNAL_ASSERT(
           allocator_, "For resizable storage, allocator must be provided");
