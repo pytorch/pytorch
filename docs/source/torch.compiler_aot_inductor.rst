@@ -75,7 +75,7 @@ For more details on ``torch.export``, you can refer to the :ref:`torch.export do
 
 In this illustrative example, the ``Dim`` parameter is employed to designate the first dimension of
 the input variable "x" as dynamic. Notably, the path and name of the compiled library remain unspecified,
-resulting in the shared library being stored in a temporay directory.
+resulting in the shared library being stored in a temporary directory.
 To access this path from the C++ side, we save it to a file for later retrieval within the C++ code.
 
 

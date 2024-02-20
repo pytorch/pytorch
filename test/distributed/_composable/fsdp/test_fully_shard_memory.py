@@ -4,7 +4,7 @@ import functools
 
 import torch
 
-from torch.distributed._composable.fsdp import fully_shard
+from torch.distributed._composable.fsdp import fully_shard, OffloadPolicy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests
@@ -23,11 +23,15 @@ class TestFullyShardMemory(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_fully_shard_training_memory(self):
         self.run_subtests(
-            {"reshard_after_forward": [True, False]},
+            {"reshard_after_forward": [True, False], "use_cpu_offload": [True, False]},
             self._test_fully_shard_training_memory,
         )
 
-    def _test_fully_shard_training_memory(self, reshard_after_forward: bool):
+    def _test_fully_shard_training_memory(
+        self, reshard_after_forward: bool, use_cpu_offload: bool
+    ):
+        if not reshard_after_forward and use_cpu_offload:
+            return  # skip since not a common use case
         assert (
             self.world_size == 2
         ), f"Requires world size of 2 since some values are hard coded: {self.world_size}"
@@ -57,7 +61,9 @@ class TestFullyShardMemory(FSDPTest):
             + sum(p.numel() for p in model.output.parameters())
         )
         fully_shard_fn = functools.partial(
-            fully_shard, reshard_after_forward=reshard_after_forward
+            fully_shard,
+            reshard_after_forward=reshard_after_forward,
+            offload_policy=OffloadPolicy("cpu" if use_cpu_offload else None),
         )
         for module in model.modules():
             if isinstance(module, TransformerBlock):
@@ -69,10 +75,15 @@ class TestFullyShardMemory(FSDPTest):
         # Init: Each module is moved to GPU before sharding parameters
         peak_mem_mb = self._get_peak_active_memory_mb()
         curr_mem_mb = self._get_curr_active_memory_mb()
-        init_mem_mb = (model_sharded_numel + max_unsharded_numel) * 4 / 1e6
+
         # Allow for some buffer for the peak memory since original parameters
         # are not freed until a `fully_shard` call returns
         buffer_mb = 4
+        if use_cpu_offload:
+            # Parameters are offloaded after sharding
+            init_mem_mb = (1.5 * max_unsharded_numel) * 4 / 1e6
+        else:
+            init_mem_mb = (model_sharded_numel + max_unsharded_numel) * 4 / 1e6
         self.assertLessEqual(peak_mem_mb - base_mem_mb, init_mem_mb + buffer_mb)
         self.assertLessEqual(curr_mem_mb - base_mem_mb, init_mem_mb)
 
@@ -92,11 +103,13 @@ class TestFullyShardMemory(FSDPTest):
             expected_mem_mb = (
                 3 * max_unsharded_numel + non_block_numel
             ) * 4 / 1e6 + buffer_mb
-            # Sharded parameters
-            expected_mem_mb += model_sharded_numel * 4 / 1e6
+            if not use_cpu_offload:
+                # Sharded parameters
+                expected_mem_mb += model_sharded_numel * 4 / 1e6
         else:
-            # Sharded parameters, unsharded parameters, 1x max unsharded block
-            # parameters (copy-out) and other (peak at end of forward)
+            assert not use_cpu_offload
+            # Sharded parameters, unsharded parameters, 1x max unsharded block parameters
+            # (copy-out) and other (peak at end of forward)
             expected_mem_mb = (
                 model_sharded_numel + model_unsharded_numel + max_unsharded_numel
             ) * 4 / 1e6 + buffer_mb
@@ -114,9 +127,11 @@ class TestFullyShardMemory(FSDPTest):
             expected_mem_mb = (
                 3 * max_unsharded_numel + non_block_numel
             ) * 4 / 1e6 + buffer_mb
-            # 2x sharded parameters/gradients
-            expected_mem_mb += 2 * model_sharded_numel * 4 / 1e6
+            if not use_cpu_offload:
+                # 2x sharded parameters/gradients
+                expected_mem_mb += 2 * model_sharded_numel * 4 / 1e6
         else:
+            assert not use_cpu_offload
             # Sharded parameters, unsharded parameters, 1.5x max unsharded
             # block parameters (reduce-scatter input/output), and other (peak
             # at beginning of backward)
@@ -131,19 +146,22 @@ class TestFullyShardMemory(FSDPTest):
         optim.step()
         mem_mb = self._get_peak_active_memory_mb()
         expected_mem_mb = buffer_mb
-        # 1x sharded parameters, 1x sharded gradients, 2x sharded optimizer
-        # states
-        expected_mem_mb += (4 * model_sharded_numel) * 4 / 1e6
+        if not use_cpu_offload:
+            # 1x sharded parameters, 1x sharded gradients, 2x sharded optimizer
+            # states
+            expected_mem_mb += (4 * model_sharded_numel) * 4 / 1e6
         self.assertLessEqual(mem_mb - base_mem_mb, expected_mem_mb)
 
         # Zero grad: sharded gradients freed
         optim.zero_grad()
         torch.cuda.reset_peak_memory_stats()  # reset after freeing
         mem_mb = self._get_peak_active_memory_mb()
-        # 1x sharded parameters
-        expected_mem_mb = model_sharded_numel * 4 / 1e6 + buffer_mb
-        # 2x sharded optimizer states
-        expected_mem_mb += (2 * model_sharded_numel) * 4 / 1e6 + buffer_mb
+        expected_mem_mb = 0
+        if not use_cpu_offload:
+            # 1x sharded parameters
+            expected_mem_mb += model_sharded_numel * 4 / 1e6 + buffer_mb
+            # 2x sharded optimizer states
+            expected_mem_mb += (2 * model_sharded_numel) * 4 / 1e6 + buffer_mb
         self.assertLessEqual(mem_mb - base_mem_mb, expected_mem_mb)
 
     def _get_peak_active_memory_mb(self) -> int:
