@@ -49,15 +49,15 @@ bool GlobalInit(int* pargc, char*** pargv) {
   internal::State& init_state = internal::GlobalInitState();
   static StaticLinkingProtector g_protector;
   bool success = true;
-
   // NOTE: if init_state == internal::State::Initializing at this point, do
   // nothing because that indicates a re-entrant call
   if (init_state == internal::State::Initialized) {
-    VLOG(1) << "GlobalInit has already been called: re-parsing gflags only.";
+    LOG(INFO) << "GlobalInit has already been called: re-parsing gflags only.";
     // Reparse command line flags
     success &= c10::ParseCommandLineFlags(pargc, pargv);
     UpdateLoggingLevelsFromFlags();
   } else if (init_state == internal::State::Uninitialized) {
+    LOG(INFO) << "Caffe2 GlobalInit Initializing.";
     init_state = internal::State::Initializing;
     auto init_state_guard = MakeGuard([&] {
       // If an exception is thrown, go back to Uninitialized state
