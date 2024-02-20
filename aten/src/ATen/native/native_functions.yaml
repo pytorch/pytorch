@@ -6195,6 +6195,7 @@
 - func: _nested_get_jagged_dummy() -> Tensor
   variants: function
   device_check: NoCheck
+  category_override: dummy
   dispatch:
     CPU, CUDA, Meta: _nested_get_jagged_dummy
 
