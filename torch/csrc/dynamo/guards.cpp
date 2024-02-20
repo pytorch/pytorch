@@ -1002,7 +1002,7 @@ class TENSOR_ALIASING : public RelationalGuard {
     return result;
   }
 
-  void reset_state() override {
+  void reset_state() final override {
     _is_first_call = true;
   }
 
