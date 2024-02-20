@@ -719,6 +719,10 @@ def _compile(
                 backend_compile_time = frame_phase_timing[frame_key].get(
                     "backend_compile", None
                 )
+                inductor_compile_time = frame_phase_timing[frame_key].get(
+                    "inductor_compile", None
+                )
+                code_gen_time = frame_phase_timing[frame_key].get("code_gen", None)
                 non_compliant_ops = {op.__qualname__ for op in output.non_compliant_ops}
                 compliant_custom_ops = {
                     op.__qualname__ for op in output.compliant_custom_ops
@@ -731,6 +735,8 @@ def _compile(
                 graph_input_count = None
                 entire_frame_compile_time = None
                 backend_compile_time = None
+                inductor_compile_time = None
+                code_gen_time = None
                 non_compliant_ops = set({})
                 compliant_custom_ops = set({})
             metrics = CompilationMetrics(
@@ -747,6 +753,8 @@ def _compile(
                 graph_input_count,
                 entire_frame_compile_time,
                 backend_compile_time,
+                inductor_compile_time,
+                code_gen_time,
                 fail_type,
                 fail_reason,
                 fail_user_frame_filename,
