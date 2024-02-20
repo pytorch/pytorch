@@ -90,7 +90,7 @@ __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
     "guard_int", "guard_float", "guard_scalar", "canonicalize_bool_expr",
     "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
-    "is_concrete_bool", "is_singleton", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
+    "is_concrete_bool", "is_nested_int", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
     "has_free_symbols", "sym_eq", "SymbolicContext", "StatelessSymbolicContext",
     "StatefulSymbolicContext", "SubclassSymbolicContext", "statically_known_true",
     "guard_size_oblivious",
@@ -262,25 +262,25 @@ def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
 
     return False
 
-def is_singleton(s: Int) -> bool:
-    # check for SingletonSymNode
+def is_nested_int(s):
+    # check for NestedIntSymNode
     if not isinstance(s, torch.SymInt):
         return False
-    if s.node.singleton_int() is not None:
+    if s.node.nested_int() is not None:
         return True
 
-    # check for symbolic variable wrapping a SingletonSymNode (fake-ifying causes this)
+    # check for symbolic variable wrapping a NestedIntSymNode (fake-ifying causes this)
     return (
         s.node.is_symbolic()
         and s.node.hint is not None
         and isinstance(s.node.hint, torch.SymInt)
-        and s.node.hint.node.singleton_int() is not None
+        and s.node.hint.node.nested_int() is not None
     )
 
 def _iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Basic]:
     if isinstance(val, SymTypes):
         # This allow applies to the jagged layout NestedTensor case as
-        # singleton ints are not symbolic
+        # nested ints are not symbolic
         if is_symbolic(val):
             yield val.node.expr
     elif isinstance(val, sympy.Basic):
@@ -1819,9 +1819,9 @@ class ShapeEnv:
         self.replacements: Dict[sympy.Symbol, sympy.Expr] = {}  #
         # Set holds a % b expressions that evaluate to 0.
         self.divisible: Set[sympy.Expr] = set()
-        # Set that holds "size-like" expressions.  When we perform
+        # Set that holds "size-like" symbols.  When we perform
         # "size-oblivious" tests, these can be assumed to be >= 2.
-        self.size_like: Set[sympy.Expr] = set()
+        self.size_like: Set[sympy.Symbol] = set()
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, sympy.Expr] = {}
@@ -2306,9 +2306,9 @@ class ShapeEnv:
             val_list = sorted(
                 [(ex_stride[i], i) for i in range(len(stride)) if stride[i] is None],
                 key=lambda tup: (
-                    # Order singletons by their coefficients.
-                    # 1 here to order singletons after non-singletons.
-                    (1, tup[0].node.singleton_coeff(), tup[1]) if is_singleton(tup[0])
+                    # Order nested int by their coefficients.
+                    # 1 here to order nested int after non-nested int.
+                    (1, tup[0].node.nested_int_coeff(), tup[1]) if is_nested_int(tup[0])
                     else (0, *tup)
                 )
             )
@@ -2572,7 +2572,7 @@ class ShapeEnv:
                 self.var_to_val[sympy_expr] = sympy.Integer(val)
             else:
                 # Only used for jagged layout nested tensors
-                self.var_to_val[sympy_expr] = SingletonInt(val.node.singleton_int(), coeff=val.node.singleton_coeff())
+                self.var_to_val[sympy_expr] = SingletonInt(val.node.nested_int(), coeff=val.node.nested_int_coeff())
 
             # Do the appending later, because we always want to populate this
             self.var_to_sources[sympy_expr] = []
@@ -3278,9 +3278,15 @@ class ShapeEnv:
             shape_groups[v].append(k)
         return shape_groups
 
-    def bound_sympy(self, expr: sympy.Expr) -> ValueRanges:
+    def bound_sympy(self, expr: sympy.Expr, size_oblivious: bool = False) -> ValueRanges:
         """Given a sympy expression, computes a ValueRanges bound for what values it can be"""
-        return bound_sympy(expr, {x: self.var_to_range.get(x, None) for x in expr.free_symbols})
+        var_to_range = {x: self.var_to_range.get(x, None) for x in expr.free_symbols}
+        if size_oblivious:
+            # Clamp values of size-like variables
+            for x in self.size_like & var_to_range.keys():
+                if var_to_range[x] is not None:
+                    var_to_range[x] &= ValueRanges(2, sympy.oo)
+        return bound_sympy(expr, var_to_range)
 
     @_lru_cache
     def _maybe_evaluate_static(
@@ -3512,6 +3518,7 @@ class ShapeEnv:
         """
 
         # Precondition: a == tgt
+        assert isinstance(a, sympy.Symbol)
 
         # Handles nested tensor symbolic variables which don't have
         # var_to_range bounds
@@ -3539,11 +3546,10 @@ class ShapeEnv:
             self.var_to_range[a] = src_bound & tgt_bound
 
             # Next, check if we can update the range of free symbols in tgt
-            # based on the range in a.  But only do it if:
+            # based on the range in a. But only do it if:
             #  - the source bound non-trivially improves over what we get out of
             #    the existing bounds.
-            #  - the replacement is univariate (multivariate makes my brain
-            #    explode)
+            #  - the replacement is univariate and we can invert the tgt expression
             if not issubset(tgt_bound, src_bound) and len(tgt.free_symbols) == 1:
                 b = next(iter(tgt.free_symbols))
                 # Try to invert the equality
@@ -3581,33 +3587,29 @@ class ShapeEnv:
             #
             #  - If the source has a non-trivial range, only substitute if
             #    we preserve this range.  Note that we may have propagated
-            #    the src_range to free variables in tgt, which helps us achieve
-            #    this.  This ensures we never "forget" about user defined ranges,
+            #    the src_range to free variables in tgt when tgt is univariate
+            #    and we could find an inverse, which helps us achieve this.
+            #    This ensures we never "forget" about user defined ranges,
             #    even if they end up being defined on composite formulas
             #    like s0 + s1.
             #
             #  - If the variable is unbacked, only substitute if the substitution
-            #    would preserve size-like-ness (no loss of information) OR we
-            #    would completely eliminate unbacked SymInts via the substitution
-            #    (because if you get rid of the unbacked symints, size-like-ness
-            #    doesn't matter anymore--you've got hints now, you can handle
-            #    guards directly).
-            #
-            #    Note that because we are very conservative about propagating
-            #    size-like-ness right now, this means something like u0 == u1 * 2
-            #    will NOT result in a substitution (but maybe in the future it
-            #    could)
+            #    would preserve the bounds also under size-like-ness conditions.
+
             if not issubset(tgt_bound, src_bound):
                 self.log.debug("skipped set_replacement %s = %s (%s) [%s not subset of %s]", a, tgt, msg, tgt_bound, src_bound)
                 return
-            elif (
-                self.is_unbacked_symint(a) and
-                a in self.size_like and
-                free_unbacked_symbols(tgt) and
-                tgt not in self.size_like
-            ):
-                self.log.debug("skipped set_replacement %s = %s (%s) [rhs not size-like]", a, tgt, msg)
-                return
+            elif a in self.size_like:
+                tgt_bound_so = self.bound_sympy(tgt, size_oblivious=True)
+                # This is morally equivalent to self.bound_sympy(a, size_oblivious=True)
+                # but handles substitutions like u0 == 0
+                src_bound_so = self.var_to_range[a]
+                if src_bound_so.upper >= 2:
+                    src_bound_so &= ValueRanges(2, sympy.oo)
+                if not issubset(tgt_bound_so, src_bound_so):
+                    self.log.debug("skipped set_replacement %s = %s (%s) "
+                                   "[%s not subset of %s (size-oblivious conditions)]", a, tgt, msg, tgt_bound_so, src_bound_so)
+                    return
 
         if config.print_specializations and isinstance(tgt, (sympy.Integer, sympy.Float)):
             # specializing to a constant, which is likely unexpected
@@ -3737,7 +3739,6 @@ class ShapeEnv:
                             # Propagate size-like-ness
                             if i0 in self.size_like:
                                 self.size_like.add(i1)
-                                self.size_like.add(d * i1)
                             self._set_replacement(i0, d * i1, "divisibility")
 
             except NotImplementedError:
