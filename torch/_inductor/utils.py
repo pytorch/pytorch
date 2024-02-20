@@ -236,6 +236,9 @@ def next_power_of_2(n: int) -> int:
 
 
 def _type_of(key):
+    # Use the function here to get rid of dependencies on the Triton during the codegen.
+    # Refer to Triton implementation here:
+    # https://github.com/openai/triton/blob/98b5945d2aef679e00ebca8e07c35c3658ec76de/python/triton/runtime/jit.py#L238
     # `None` is nullptr.  Implicitly convert to *i8.
     if key is None:
         return "*i8"
