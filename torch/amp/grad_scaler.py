@@ -513,7 +513,7 @@ class GradScaler:
             if len(found_infs) > 1:
                 for i in range(1, len(found_infs)):
                     found_inf_combined += found_infs[i]
-            
+
             torch._amp_update_scale_(
                 _scale,
                 _growth_tracker,
