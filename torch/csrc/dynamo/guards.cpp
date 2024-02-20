@@ -835,6 +835,42 @@ class ID_MATCH : public LeafGuard {
   intptr_t _expected;
 };
 
+class EQUALS_MATCH : public LeafGuard {
+ public:
+  EQUALS_MATCH(py::object value, py::object verbose_code_parts)
+      : LeafGuard(verbose_code_parts),
+        _value(value),
+        _value_type(Py_TYPE(value.ptr())) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    // Fast path - pointer equality check.
+    if (value != _value.ptr()) {
+      // Check type
+      if (Py_TYPE(value) != _value_type) {
+        return false;
+      }
+      int result = PyObject_RichCompareBool(value, _value.ptr(), Py_EQ);
+      // Check for exception
+      if (result == -1) {
+        PyErr_Clear();
+        return false;
+      }
+      return result;
+    }
+    return true;
+  }
+
+ private:
+  // value to compare against. This is py::object so that we hold on to the
+  // original value and prevent garbage collection. We run EQUALS_MATCH only on
+  // selected objects which do not have high memory footprint, so holding on to
+  // these objects is ok.
+  py::object _value;
+
+  // Type of the value
+  PyTypeObject* _value_type;
+};
+
 /**
  * Relational guards compare more than one value. We implement Relational
  * guards by capturing some state in the guard object. For example for tensor
@@ -1411,6 +1447,10 @@ PyObject* torch_c_dynamo_guards_init() {
   py::class_<ID_MATCH, LeafGuard, std::shared_ptr<ID_MATCH>>(py_m, "ID_MATCH")
       .def(py::init<py::object, py::list>())
       .def("__call__", &ID_MATCH::check);
+  py::class_<EQUALS_MATCH, LeafGuard, std::shared_ptr<EQUALS_MATCH>>(
+      py_m, "EQUALS_MATCH")
+      .def(py::init<py::object, py::list>())
+      .def("__call__", &EQUALS_MATCH::check);
 
   // Guard Accessors - These are present so that we can iterate over the
   // GuardManager hierarchy. We intentionally do not provide even an init
@@ -1462,6 +1502,14 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(
                 std::make_shared<ID_MATCH>(value, verbose_code_parts));
+          })
+      .def(
+          "add_equals_match_guard",
+          [](GuardManager& self,
+             py::object value,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(
+                std::make_shared<EQUALS_MATCH>(value, verbose_code_parts));
           });
 
   // Root Guard Manager
