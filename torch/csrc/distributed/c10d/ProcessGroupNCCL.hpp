@@ -918,6 +918,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Stores communicators for all collectives run inside a coalescing block
   std::vector<std::shared_ptr<NCCLComm>> coalescedComms_;
 
+  // stores a work object created at the beginning of coalescing and updated/returned
+  // at the end of coalescing.  Holds timing events recorded before/after coalesced op
+  c10::intrusive_ptr<WorkNCCL> pCoalescedWork_;
+
   // map from the key: "group name + pg counter (ID)" to the
   // unique NCCL ID count. This needs to be group and pg specific
   //

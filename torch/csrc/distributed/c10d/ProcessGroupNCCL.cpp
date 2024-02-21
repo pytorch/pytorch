@@ -2267,6 +2267,11 @@ static constexpr int CoalActive = 0x01, CoalColl = 0x02, CoalP2P = 0x04;
 void ProcessGroupNCCL::startCoalescing() {
   coalescedDevices_.clear();
   coalescedComms_.clear();
+
+  // Create Work object
+  TORCH_CHECK(coalescedWork_ == nullptr, "Started a second coalesced operation twice without finishing the first one.")
+  coalescedWork_ = initWork(devices, rank_, OpType::COALESCED, "nccl:coalesced");
+
   coalescing_state_ |= CoalActive;
   groupStart();
 }
@@ -2292,9 +2297,22 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   // Bump collective counter
   seq_++;
 
-  // Create Work object
-  auto work = initWork(device, rank_, optype, "nccl:coalesced");
+  TORCH_CHECK(coalescedWork_ != nullptr, "Ended coalescing region without starting it");
+  auto work = coalescedWork_;
   work->ncclComm_ = comm;
+
+  // Record stream event
+  // `getKeyFromDevices` is how we get keys for both collectives and batch P2P
+  const auto key = getKeyFromDevices(devices);
+  auto& ncclStreams = ncclStreams_[key];
+  // TODO(eqy): is this still necessary if avoidRecordStreams_ is set?
+  for (const auto i : c10::irange(devices.size())) {
+    auto& devEvent = (*work->ncclEndEvents_)[i];
+    devEvent.record(ncclStreams[i]);
+    work->ncclComms_[i] = comms[i];
+  }
+
+  // Set appropriate work parameters.
   work->blockingWait_ = blockingWait_;
   work->avoidRecordStreams_ = avoidRecordStreams_;
   work->opTimeout_ = options_->timeout;
