@@ -522,7 +522,10 @@ class TestNestedTensor(TestCase):
         if torch.cuda.is_available():
             for non_blocking in [True, False]:
                 for cuda in ['cuda', 'cuda:0' if torch.cuda.device_count() == 1 else 'cuda:1']:
-                    nt2 = random_nt(cuda, torch.float32, ntensors, (4, 4))
+                    if layout == torch.strided:
+                        nt2 = random_nt(cuda, torch.float32, ntensors, (4, 4), layout=layout)
+                    else:
+                        nt2 = random_nt_from_dims((7, None, 10), cuda, torch.float32, layout=layout)
                     test_copy_behavior(nt2, non_blocking)
                     self.assertEqual(nt2.device, nt2.to(cuda, non_blocking=non_blocking).device)
                     self.assertEqual(nt.device, nt2.to('cpu', non_blocking=non_blocking).device)
@@ -542,8 +545,11 @@ class TestNestedTensor(TestCase):
 
         # Strided to jagged (not implemented yet)
         if layout == torch.strided:
-            with self.assertRaises(RuntimeError):
-                jagged_nt = torch.ops.aten._to_copy(nt, layout=torch.jagged)
+            jagged_nt = torch.ops.aten._to_copy(nt, layout=torch.jagged)
+            self.assertIs(jagged_nt.layout, torch.jagged)
+            self.assertEqual(jagged_nt.device, nt.device)
+            self.assertEqual(jagged_nt.size(2), nt.size(2))
+            self.assertEqual(jagged_nt.unbind(), nt.unbind())
 
     def test_copy_(self):
         ntensors = 4

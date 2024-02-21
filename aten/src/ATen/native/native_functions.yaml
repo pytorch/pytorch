@@ -6192,9 +6192,7 @@
   dispatch:
     NestedTensorCPU, NestedTensorCUDA: _nested_get_ragged_idx
 
-- func: _nested_get_jagged_dummy() -> Tensor
-  variants: function
-  device_check: NoCheck
+- func: _nested_get_jagged_dummy(Tensor any) -> Tensor
   category_override: dummy
   dispatch:
     CPU, CUDA, Meta: _nested_get_jagged_dummy

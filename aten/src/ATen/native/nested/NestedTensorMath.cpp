@@ -942,7 +942,7 @@ Tensor _nested_strided_to_jagged(const Tensor& self, const Tensor& dummy) {
   return at::_nested_view_from_jagged(self_ptr->get_buffer(), jagged_offsets, dummy, jagged_lengths_arg, ragged_idx);
 }
 
-Tensor _nested_get_jagged_dummy() {
+Tensor _nested_get_jagged_dummy(const Tensor& any) {
   TORCH_INTERNAL_ASSERT(
       false, "_nested_get_jagged_dummy(): expected to be implemented from Python");
   return Tensor();

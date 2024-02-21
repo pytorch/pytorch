@@ -454,7 +454,6 @@ def _to_copy_default(func, *args, **kwargs):
         return NestedTensor(
             new_values,
             lengths=inp.lengths(),
-            _ragged_idx=inp._ragged_idx,
             **extract_kwargs(inp),
         )
 
@@ -1121,7 +1120,7 @@ def _nested_get_ragged_idx(func, *args, **kwargs):
 @torch.ops.aten._nested_get_jagged_dummy.default.py_impl(torch._C.DispatchKey.CPU)
 @torch.ops.aten._nested_get_jagged_dummy.default.py_impl(torch._C.DispatchKey.CUDA)
 @torch.ops.aten._nested_get_jagged_dummy.default.py_impl(torch._C.DispatchKey.Meta)
-def _nested_get_jagged_dummy() -> NestedTensor:
+def _nested_get_jagged_dummy(_):
     return NestedTensor(
         values=torch.randn(1, 1, device="meta"), offsets=torch.randn(1, device="meta")
     )

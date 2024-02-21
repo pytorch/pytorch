@@ -4,6 +4,7 @@
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/NestedTensorImpl.h>
 
 #include <utility>
 namespace at::functionalization {
@@ -309,6 +310,30 @@ Tensor FunctionalInverses::_nested_view_from_jagged_inverse(const Tensor& base, 
     return values;
   } else {
     return values.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
+  }
+}
+
+Tensor FunctionalInverses::_nested_strided_to_jagged_inverse(const at::Tensor & base, const at::Tensor & mutated_view, at::functionalization::InverseReturnMode inverse_return_mode, const at::Tensor & dummy) {
+  // base is a strided NT
+  auto base_ptr = at::native::get_nested_tensor_impl(base);
+
+  // Mutated view is a jagged NT
+  auto values = at::_nested_get_values(mutated_view);
+  auto offsets = at::_nested_get_offsets(mutated_view);
+  auto lengths = at::_nested_get_lengths(mutated_view);
+  auto ragged_idx = at::_nested_get_ragged_idx(mutated_view);
+
+  auto cpp_nt = at::_nested_view_from_buffer(
+    values,
+    base_ptr->get_nested_sizes(),
+    base_ptr->get_nested_strides(),
+    base_ptr->get_storage_offsets()
+  );
+
+  if (inverse_return_mode != InverseReturnMode::NeverView) {
+    return cpp_nt;
+  } else {
+    return cpp_nt.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
   }
 }
 

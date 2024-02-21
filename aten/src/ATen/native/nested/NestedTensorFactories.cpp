@@ -31,7 +31,7 @@ static TensorOptions verify_empty_parameters(
 
   TORCH_CHECK(
       !(options.layout() != kStrided && optional_memory_format.has_value()),
-      "memory format option is only supported by strided tensors");
+      "NT: memory format option is only supported by strided tensors");
   return options;
 }
 
@@ -56,7 +56,7 @@ Tensor empty_like_nested(
   // The fall through path must be Preserve
   TORCH_CHECK(
       memory_format == MemoryFormat::Preserve,
-      "memory format option is only supported by strided tensors");
+      "NT: memory format option is only supported by strided tensors");
   // Since we clone sizes, strides, and offsets it should be safe to use
   // get_unsafe_storage_as_tensor for the call to empty_like.
   Tensor new_buffer =
@@ -112,12 +112,12 @@ Tensor _to_copy_nested(
        (options.layout() == c10::kStrided));
 
   Tensor r;
-  r = at::empty_like(self, dtype, layout, device, pin_out, memory_format);
+  r = at::empty_like(self, dtype, Layout::Strided, device, pin_out, memory_format);
   get_nested_tensor_impl(r)->get_buffer().copy_(
       get_nested_tensor_impl(self)->get_buffer(), non_blocking);
 
-  if (self.layout() != layout.value() && layout.value() == Layout::Jagged) {
-    Tensor dummy = at::_nested_get_jagged_dummy();
+  if (layout.has_value() && self.layout() != layout.value() && layout.value() == Layout::Jagged) {
+    Tensor dummy = at::_nested_get_jagged_dummy(get_nested_tensor_impl(r)->get_buffer());
     return at::_nested_strided_to_jagged(r, dummy);
   }
   return r;
