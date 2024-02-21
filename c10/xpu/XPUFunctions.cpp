@@ -90,11 +90,9 @@ void initDeviceProperties(DeviceProp* device_prop, int device) {
 }
 
 inline void check_device(DeviceIndex device) {
+  auto total = gDevicePool.devices.size();
   TORCH_CHECK(
-      device >= 0 &&
-          device < std::min(
-                       gDevicePool.devices.size(),
-                       std::numeric_limits<DeviceIndex>::max()),
+      device >= 0 && device < total,
       "device is out of range, device is ",
       device,
       ", total number of device is ",
@@ -163,7 +161,7 @@ DeviceIndex current_device() {
 
 void set_device(DeviceIndex device) {
   initDevicePoolCallOnce();
-  check_device(static_cast<int>(device));
+  check_device(device);
   curDeviceIndex = device;
 }
 
