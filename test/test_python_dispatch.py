@@ -917,6 +917,13 @@ def forward(self, x_a_1, x_b_1, y_1):
     return (mul, mul_1, add)
     """)
 
+    # See https://github.com/pytorch/pytorch/issues/117794
+    def test_return_and_correct_aliasing_gives_correct_stride(self):
+        t = TwoTensor(torch.randn(2, 2), torch.randn(2, 2))
+        x = torch.randn(2, 2)
+        # slicing should result in the same stride for TwoTensor as a dense tensor would give
+        self.assertEqual(t[:, 0].stride(), x[:, 0].stride())
+
     def test_make_wrapper_subclass_propagates_metadata(self) -> None:
         class WrapperTensor(torch.Tensor):
             elem: torch.Tensor
