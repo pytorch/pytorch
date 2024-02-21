@@ -65,6 +65,7 @@ __all__ = [
     "tree_flatten",
     "tree_flatten_with_path",
     "tree_unflatten",
+    "tree_iter",
     "tree_leaves",
     "tree_leaves_with_path",
     "tree_structure",
@@ -838,6 +839,24 @@ def _tree_leaves_helper(
         _tree_leaves_helper(child, leaves, is_leaf=is_leaf)
 
 
+def tree_iter(
+    tree: PyTree,
+    is_leaf: Optional[Callable[[PyTree], bool]] = None,
+) -> Iterable[Any]:
+    """Get an iterator over the leaves of a pytree."""
+    if _is_leaf(tree, is_leaf=is_leaf):
+        yield tree
+        return
+
+    node_type = _get_node_type(tree)
+    flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
+    child_pytrees, _ = flatten_fn(tree)
+
+    # Recursively flatten the children
+    for child in child_pytrees:
+        yield from tree_iter(child, is_leaf=is_leaf)
+
+
 def tree_leaves(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
@@ -1126,7 +1145,7 @@ def tree_all(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+    flat_args = tree_iter(tree, is_leaf=is_leaf)
     return all(map(pred, flat_args))
 
 
@@ -1135,7 +1154,7 @@ def tree_any(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+    flat_args = tree_iter(tree, is_leaf=is_leaf)
     return any(map(pred, flat_args))
 
 
@@ -1175,7 +1194,7 @@ def tree_all_only(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+    flat_args = tree_iter(tree, is_leaf=is_leaf)
     return all(pred(x) for x in flat_args if isinstance(x, __type_or_types))
 
 
@@ -1215,7 +1234,7 @@ def tree_any_only(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> bool:
-    flat_args = tree_leaves(tree, is_leaf=is_leaf)
+    flat_args = tree_iter(tree, is_leaf=is_leaf)
     return any(pred(x) for x in flat_args if isinstance(x, __type_or_types))
 
 
