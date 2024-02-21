@@ -28,6 +28,10 @@ from torch.fx.passes.operator_support import OperatorSupport
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo, IS_WINDOWS
 from torch.utils import _pytree as pytree
+from torch._export.utils import sequential_split, nodes_filter, nodes_map, node_inline_, nodes_count
+from torch._export.passes.replace_set_grad_with_hop_pass import (
+    _is_set_grad_enabled_node, _is_set_grad_enabled_sub_mod
+)
 
 
 def count_call_function(graph: torch.fx.Graph, target: torch.ops.OpOverload) -> int:
@@ -60,6 +64,113 @@ def _get_output_names(gm: torch.fx.GraphModule) -> List[str]:
     # if isinstance(args, tuple) and len(args) == 1:
     #     args = args[0]
     return [str(arg) for arg in args]
+
+def _set_grad_enabled_tests():
+    from torch.export._trace import _export
+
+    class SetGradOp(torch.nn.Module):
+        def forward(self, x):
+            x = x + 1
+            torch._C._set_grad_enabled(True)
+            c = x.sin().sum()
+            torch._C._set_grad_enabled(False)
+            d = c + 1
+            torch._C._set_grad_enabled(True)
+            e = d - 1
+            return d, e
+
+    class SetGradCtxManager(torch.nn.Module):
+        def forward(self, x):
+            x = x + 1
+            with torch.enable_grad():
+                c = x.sin().sum()
+            with torch.no_grad():
+                d = c + 1
+            with torch.enable_grad():
+                e = d - 1
+            return d, e
+
+    class SetGradCtxManagerMultiDep(torch.nn.Module):
+        def forward(self, x):
+            x = x + 1
+            with torch.enable_grad():
+                c1 = x.sin().sum()
+                c2 = x.cos().sum()
+            with torch.no_grad():
+                d1 = c1 + 1
+                d2 = c2 + 1
+            with torch.enable_grad():
+                e1 = d1 - 1
+                e2 = d2 - 1
+            return d1, d2, e1, e2
+
+    x = torch.randn(2, 2)
+
+    def _get_predispatch_module(mod, args, ambient_grad_enabled=True):
+        with torch.set_grad_enabled(ambient_grad_enabled):
+            return _export(mod, args, pre_dispatch=True).module()
+
+    return {
+        "ctx_manager" : (_get_predispatch_module(SetGradCtxManager(), (x,)), (x,)),
+        "ctx_manager_under_no_grad" : (_get_predispatch_module(SetGradCtxManager(), (x,), False), (x,)),
+        "ctx_manager_multi_dep" : (_get_predispatch_module(SetGradCtxManagerMultiDep(), (x,)), (x,)),
+        "ctx_manager_multi_dep_no_grad" : (_get_predispatch_module(SetGradCtxManagerMultiDep(), (x,), False), (x,)),
+        "op" : (_get_predispatch_module(SetGradOp(), (x,)), (x,)),
+        "op_under_no_grad" : (_get_predispatch_module(SetGradOp(), (x,), False), (x,))
+    }
+
+SET_GRAD_ENABLED_TESTS = _set_grad_enabled_tests()
+
+def _sequential_split_inline_tests():
+    from torch.export._trace import _export
+
+    class Simple(torch.nn.Module):
+        def forward(self, x):
+            x = x + 1
+            c = x.sin().sum()
+            d = c + 1
+            e = d - 1
+            return d, e
+
+    class MultiDep(torch.nn.Module):
+        def forward(self, x1, x2):
+            x1 = x1 + 1
+            x2 = x2 + 1
+            c1 = x1.sin()
+            c2 = x2.cos()
+            d1 = c1 + 1
+            d2 = c2 + 1
+            e1 = d1 - 1
+            e2 = d2 - 1
+            return d1, d2, e1, e2
+
+    def _get_predispatch_module(mod, args):
+        return _export(mod, args, pre_dispatch=True).module()
+
+    def _insert_dilimiter_nodes(gm: torch.fx.GraphModule, step: int = 1):
+        insert_locs = []
+        for i, node in enumerate(nodes_filter(gm.graph.nodes, lambda n: n.op == "call_function")):
+            if i % step == 0:
+                insert_locs.append(node)
+
+        for i, node in enumerate(insert_locs):
+            with gm.graph.inserting_before(node):
+                gm.graph.call_function(torch._C._set_grad_enabled, (True if i % 2 == 0 else False,), {})
+        return gm
+
+    x = torch.randn(2, 2)
+    simple = _get_predispatch_module(Simple(), (x,))
+    simple1 = _get_predispatch_module(Simple(), (x,))
+    multi_dep = _get_predispatch_module(MultiDep(), (x, x.sin()))
+    multi_dep1 = _get_predispatch_module(MultiDep(), (x, x.sin()))
+    return {
+        'simple_step1': (_insert_dilimiter_nodes(simple1, 1), (x,)),
+        'simple_step2': (_insert_dilimiter_nodes(simple, 2), (x,)),
+        'multi_dep_step2': (_insert_dilimiter_nodes(multi_dep, 2), (x, x.sin())),
+        'multi_dep_step3': (_insert_dilimiter_nodes(multi_dep1, 3), (x, x.sin())),
+    }
+
+SEQUENTIAL_SPLIT_INLINE_TESTS = _sequential_split_inline_tests()
 
 
 @skipIfTorchDynamo("recursively running dynamo on export is unlikely")
@@ -353,6 +464,151 @@ class TestPasses(TestCase):
         ep = torch.export.export(WrapperModule(func), args=(x,))
         _ExportPassBaseDeprecatedDoNotUse()(ep.graph_module)
 
+    def test_predispatceh_set_grad(self):
+        mod, args = SET_GRAD_ENABLED_TESTS["op"]
+        self.assertExpectedInline(mod.code.strip("\n"), """\
+def forward(self, arg_0):
+    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+    sin = torch.ops.aten.sin.default(add);  add = None
+    sum_1 = torch.ops.aten.sum.default(sin);  sin = None
+    submod_4 = self.submod_2
+    add_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(False, submod_4, sum_1);  submod_4 = sum_1 = None
+    sub = torch.ops.aten.sub.Tensor(add_1, 1)
+    return pytree.tree_unflatten((add_1, sub), self._out_spec)
+    """)
+        mod, args = SET_GRAD_ENABLED_TESTS["op_under_no_grad"]
+        self.assertExpectedInline(mod.code.strip("\n"), """\
+def forward(self, arg_0):
+    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+    sin = torch.ops.aten.sin.default(add);  add = None
+    sum_1 = torch.ops.aten.sum.default(sin);  sin = None
+    submod_4 = self.submod_2
+    add_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(False, submod_4, sum_1);  submod_4 = sum_1 = None
+    sub = torch.ops.aten.sub.Tensor(add_1, 1)
+    return pytree.tree_unflatten((add_1, sub), self._out_spec)
+    """)
+
+        mod, args = SET_GRAD_ENABLED_TESTS["ctx_manager"]
+        self.assertExpectedInline(mod.code.strip("\n"), """\
+def forward(self, arg_0):
+    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+    sin = torch.ops.aten.sin.default(add);  add = None
+    sum_1 = torch.ops.aten.sum.default(sin);  sin = None
+    submod_3 = self.submod_1
+    add_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(False, submod_3, sum_1);  submod_3 = sum_1 = None
+    sub = torch.ops.aten.sub.Tensor(add_1, 1)
+    return pytree.tree_unflatten((add_1, sub), self._out_spec)
+    """)
+        mod, args = SET_GRAD_ENABLED_TESTS["ctx_manager_under_no_grad"]
+        self.assertExpectedInline(mod.code.strip("\n"), """\
+def forward(self, arg_0):
+    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+    submod_5 = self.submod_1
+    sum_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
+    add_1 = torch.ops.aten.add.Tensor(sum_1, 1);  sum_1 = None
+    submod_6 = self.submod_3
+    sub = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_6, add_1);  submod_6 = None
+    return pytree.tree_unflatten((add_1, sub), self._out_spec)
+    """)
+        mod, args = SET_GRAD_ENABLED_TESTS["ctx_manager_multi_dep"]
+        self.assertExpectedInline(mod.code.strip("\n"), """\
+def forward(self, arg_0):
+    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+    sin = torch.ops.aten.sin.default(add)
+    sum_1 = torch.ops.aten.sum.default(sin);  sin = None
+    cos = torch.ops.aten.cos.default(add);  add = None
+    sum_2 = torch.ops.aten.sum.default(cos);  cos = None
+    submod_3 = self.submod_1
+    wrap_with_set_grad_enabled = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(False, submod_3, sum_1, sum_2);  submod_3 = sum_1 = sum_2 = None
+    add_1 = wrap_with_set_grad_enabled[0]
+    add_2 = wrap_with_set_grad_enabled[1];  wrap_with_set_grad_enabled = None
+    sub = torch.ops.aten.sub.Tensor(add_1, 1)
+    sub_1 = torch.ops.aten.sub.Tensor(add_2, 1)
+    return pytree.tree_unflatten((add_1, add_2, sub, sub_1), self._out_spec)
+    """)  # noqa: B950
+        mod, args = SET_GRAD_ENABLED_TESTS["ctx_manager_multi_dep_no_grad"]
+        self.assertExpectedInline(mod.code.strip("\n"), """\
+def forward(self, arg_0):
+    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+    submod_5 = self.submod_1
+    wrap_with_set_grad_enabled = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
+    sum_1 = wrap_with_set_grad_enabled[0]
+    sum_2 = wrap_with_set_grad_enabled[1];  wrap_with_set_grad_enabled = None
+    add_1 = torch.ops.aten.add.Tensor(sum_1, 1);  sum_1 = None
+    add_2 = torch.ops.aten.add.Tensor(sum_2, 1);  sum_2 = None
+    submod_6 = self.submod_3
+    wrap_with_set_grad_enabled_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_6, add_1, add_2);  submod_6 = None
+    sub = wrap_with_set_grad_enabled_1[0]
+    sub_1 = wrap_with_set_grad_enabled_1[1];  wrap_with_set_grad_enabled_1 = None
+    return pytree.tree_unflatten((add_1, add_2, sub, sub_1), self._out_spec)
+    """)  # noqa: B950
+
+    def test_sequential_split(self):
+        for gm, args in SEQUENTIAL_SPLIT_INLINE_TESTS.values():
+            set_grad_counts = nodes_count(gm.graph.nodes, _is_set_grad_enabled_node)
+            new_gm = sequential_split(gm, _is_set_grad_enabled_node)
+            new_set_grad_counts = nodes_count(new_gm.graph.nodes, _is_set_grad_enabled_sub_mod)
+            self.assertEqual(set_grad_counts, new_set_grad_counts)
+            self.assertEqual(gm(*args), new_gm(*args))
+
+    def test_sequential_split_graph(self):
+        gm, args = SEQUENTIAL_SPLIT_INLINE_TESTS["multi_dep_step2"]
+
+        new_gm = sequential_split(gm, _is_set_grad_enabled_node)
+        self.assertEqual(gm(*args), new_gm(*args))
+        self.assertExpectedInline(new_gm.code.strip("\n"), """\
+def forward(self, arg_0, arg_1):
+    arg0_1, arg1_1, = fx_pytree.tree_flatten_spec(([arg_0, arg_1], {}), self._in_spec)
+    submod_1 = self.submod_1(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+    getitem = submod_1[0]
+    getitem_1 = submod_1[1];  submod_1 = None
+    submod_2 = self.submod_2(getitem, getitem_1);  getitem = getitem_1 = None
+    getitem_2 = submod_2[0]
+    getitem_3 = submod_2[1];  submod_2 = None
+    submod_3 = self.submod_3(getitem_2, getitem_3);  getitem_2 = getitem_3 = None
+    getitem_4 = submod_3[0]
+    getitem_5 = submod_3[1];  submod_3 = None
+    submod_4 = self.submod_4(getitem_4, getitem_5)
+    getitem_6 = submod_4[0]
+    getitem_7 = submod_4[1];  submod_4 = None
+    return pytree.tree_unflatten((getitem_4, getitem_5, getitem_6, getitem_7), self._out_spec)
+    """)
+        self.assertExpectedInline(new_gm.submod_1.code.strip("\n"), """\
+def forward(self, arg0_1, arg1_1):
+    _set_grad_enabled = torch._C._set_grad_enabled(True)
+    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+    add_1 = torch.ops.aten.add.Tensor(arg1_1, 1);  arg1_1 = None
+    return (add, add_1)
+    """)
+        self.assertExpectedInline(new_gm.submod_2.code.strip("\n"), """\
+def forward(self, add, add_1):
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
+    sin = torch.ops.aten.sin.default(add);  add = None
+    cos = torch.ops.aten.cos.default(add_1);  add_1 = None
+    return (sin, cos)
+    """)
+        self.assertExpectedInline(new_gm.submod_3.code.strip("\n"), """\
+def forward(self, sin, cos):
+    _set_grad_enabled_2 = torch._C._set_grad_enabled(True)
+    add_2 = torch.ops.aten.add.Tensor(sin, 1);  sin = None
+    add_3 = torch.ops.aten.add.Tensor(cos, 1);  cos = None
+    return (add_2, add_3)
+    """)
+
+    def test_inline_(self):
+        for gm, args in SEQUENTIAL_SPLIT_INLINE_TESTS.values():
+            before_str = gm.print_readable(print_output=False)
+            new_gm = sequential_split(gm, _is_set_grad_enabled_node)
+            nodes_map(new_gm.graph.nodes, lambda node: node_inline_(node) if node.op == "call_module" else node)
+            after_inline_str = new_gm.print_readable(print_output=False)
+            self.assertEqual(before_str, after_inline_str)
+            self.assertEqual(gm(*args), new_gm(*args))
 
 if __name__ == '__main__':
     run_tests()

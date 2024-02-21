@@ -640,6 +640,7 @@ class TestConfigFilter(TestCase):
             keep_going: bool = False,
             ci_verbose_test_logs: bool = False,
             ci_no_test_timeout: bool = False,
+            ci_no_td: bool = False,
             is_unstable: bool = False,
             reenabled_issues: str = "",
         ) -> str:
@@ -647,6 +648,7 @@ class TestConfigFilter(TestCase):
                 f"keep-going={keep_going}\n"
                 f"ci-verbose-test-logs={ci_verbose_test_logs}\n"
                 f"ci-no-test-timeout={ci_no_test_timeout}\n"
+                f"ci-no-td={ci_no_td}\n"
                 f"is-unstable={is_unstable}\n"
                 f"reenabled-issues={reenabled_issues}\n"
             )
@@ -693,6 +695,14 @@ class TestConfigFilter(TestCase):
                 "expected": _gen_expected_string(
                     ci_verbose_test_logs=True, ci_no_test_timeout=True
                 ),
+                "description": "No pipe logs in PR body and no test timeout in label (same as the above but swapped)",
+            },
+            {
+                "labels": {"ci-no-td"},
+                "test_matrix": '{include: [{config: "default"}]}',
+                "job_name": "A job name",
+                "pr_body": "",
+                "expected": _gen_expected_string(ci_no_td=True),
                 "description": "No pipe logs in PR body and no test timeout in label (same as the above but swapped)",
             },
             {
