@@ -879,9 +879,7 @@ void initJitScriptBindings(PyObject* module) {
               },
               [](const std::tuple<py::object, std::string>& state_tup)
                   -> Object {
-                py::object state;
-                std::string qualname;
-                std::tie(state, qualname) = state_tup;
+                auto [state, qualname] = state_tup;
                 auto class_type = getCustomClass(qualname);
                 TORCH_CHECK(
                     class_type,
@@ -1598,7 +1596,10 @@ void initJitScriptBindings(PyObject* module) {
             }
             return std::make_tuple(pp.str(), consts);
           })
-      .def_property_readonly("owner", &Method::owner);
+      .def_property_readonly("owner", &Method::owner)
+      .def_property_readonly("raw_owner", [](const Method& self) {
+        return Object(self.raw_owner());
+      });
   m.def("_generate_upgraders_graph", &generate_upgraders_graph);
   m.def(
       "_calculate_package_version_based_on_upgraders",
