@@ -261,11 +261,14 @@ def _parse_numel(proper_kernel_fn_code, numel_arg_name):
         return None
 
 
-def _parse_kernel_args_num_gb(kernel_fn_code):
+def _parse_kernel_args_num_gb(kernel_fn_code, kernel_category):
     """
     inductor meta looks like:
         inductor_meta={... 'mutated_arg_names': [], 'no_x_dim': False, 'kernel_num_gb': 2.0},
     """
+    if kernel_category == "foreach":
+        # foreach kernel does not have kernel_num_gb field in the metadata
+        return None
     m = re.search(r".kernel_num_gb.:\s*([0-9.]+)", kernel_fn_code)
     assert m, "kernel_num_gb field missing"
     return float(m.group(1))
@@ -306,7 +309,9 @@ def log_kernel_metadata(kernel_name, kernel_path, kernel_module_code):
             "xnumel": _parse_numel(proper_kernel_fn_code, "xnumel"),
             "ynumel": _parse_numel(proper_kernel_fn_code, "ynumel"),
             "rnumel": _parse_numel(proper_kernel_fn_code, "rnumel"),
-            "kernel_args_num_gb": _parse_kernel_args_num_gb(kernel_fn_code),
+            "kernel_args_num_gb": _parse_kernel_args_num_gb(
+                kernel_fn_code, kernel_category
+            ),
         }
     )
 
