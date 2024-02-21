@@ -4271,21 +4271,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         pg = self._create_process_group_nccl()
         if timing_enabled:
             pg._enable_collectives_timing()
-        print(f"sleeping, pid {os.getpid()}")
-        """
-        gdb attach {pid}
 
-        backtrace:
-        #0  0x00007f65d38ce2f4 in ?? () from /lib64/libcuda.so.1
-        #1  0x00007f6637a13b43 in ?? () from /usr/local/cuda-12/lib64/libcudart.so.12
-        #2  0x00007f6637a4ded8 in cudaEventQuery () from /usr/local/cuda-12/lib64/libcudart.so.12
-        #3  0x00007f6629e18556 in c10d::NCCLTraceBuffer::update_state(c10d::NCCLTraceBuffer::Entry&) () from /data/users/whc/pytorch/torch/lib/libtorch_cuda.so
-        #4  0x00007f6629e1661b in c10d::NCCLTraceBuffer::dump_entries() () from /data/users/whc/pytorch/torch/lib/libtorch_cuda.so
-        #5  0x00007f6629dad532 in c10d::NCCLTraceBuffer::dump[abi:cxx11]() () from /data/users/whc/pytorch/torch/lib/libtorch_cuda.so
-        #6  0x00007f6629dad474 in c10d::dump_nccl_trace[abi:cxx11]() () from /data/users/whc/pytorch/torch/lib/libtorch_cuda.so
-        #7  0x00007f663712a527 in pybind11::cpp_function::initialize<torch::distributed::c10d::(anonymous namespace)::c10d_init(_object*, _object*)::$_90, pybind11::bytes, , pybind11::name, pybind11::sc
-        """
-        time.sleep(10)
         for i in range (20):
             ops = []
             tensor = torch.zeros((2,3)).to(self.local_device)
@@ -4299,10 +4285,13 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         torch.cuda.synchronize()
 
-
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         ver = t['version']
+
         self.assertEqual(ver, "1.1")
+
+        if timing_enabled:
+            pass
 
 
 class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):

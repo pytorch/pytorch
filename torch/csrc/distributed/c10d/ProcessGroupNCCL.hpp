@@ -341,6 +341,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // work has completed
     c10::optional<uint64_t> trace_id_;
     DebugLevel distDebugLevel_;
+    std::string profilingTitle_;
     friend class ProcessGroupNCCL;
   };
 
@@ -917,6 +918,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Stores communicators for all collectives run inside a coalescing block
   std::vector<std::shared_ptr<NCCLComm>> coalescedComms_;
+
+  // Stores start/end events to be shared by all ops inside a coalesced region.
+  // Eventually, gets added to the 'Work' obj created during endCoalescing, but
+  // also ends up on the flight record for each op in the coalesced region.
+  std::shared_ptr<at::cuda::CUDAEvent> coalescedStartEvent_;
+  std::shared_ptr<at::cuda::CUDAEvent> coalescedEndEvent_;
 
   // map from the key: "group name + pg counter (ID)" to the
   // unique NCCL ID count. This needs to be group and pg specific
