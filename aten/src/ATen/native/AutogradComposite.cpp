@@ -88,7 +88,7 @@ Tensor _new_zeros_with_same_feature_meta(
 }
 
 bool _has_same_storage_numel(const at::Tensor& base, const at::Tensor& other) {
-  return base.storage().nbytes() / base.itemsize() == other.storage().nbytes() / other.itemsize();
+  return base.storage().sym_nbytes() / base.itemsize() == other.storage().sym_nbytes() / other.itemsize();
 }
 
 Tensor _lazy_clone(Tensor const& self) {

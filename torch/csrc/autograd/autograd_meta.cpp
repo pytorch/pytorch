@@ -116,24 +116,24 @@ bool has_same_meta(const Variable& base, const Variable& other) {
     return false;
   }
   for (const auto i : c10::irange(base.dim())) {
-    if (base.sizes()[i] != other.sizes()[i]) {
+    if (base.sym_sizes()[i] != other.sym_sizes()[i]) {
       return false;
     }
   }
 
   // The check below will always be vacuously true for 0-element tensors
-  if (base.numel() == 0 && other.numel() == 0) {
+  if (base.sym_numel() == 0 && other.sym_numel() == 0) {
     return true;
   }
 
   // 2) The same indices refer to the same elements in storage
-  if (base.storage_offset() != other.storage_offset()) {
+  if (base.sym_storage_offset() != other.sym_storage_offset()) {
     return false;
   }
 
   for (const auto i : c10::irange(base.dim())) {
-    if (base.strides()[i] != other.strides()[i] && base.sizes()[i] != 1 &&
-        base.sizes()[i] != 0) {
+    if (base.sym_strides()[i] != other.sym_strides()[i] &&
+        base.sym_sizes()[i] != 1 && base.sym_sizes()[i] != 0) {
       return false;
     }
   }

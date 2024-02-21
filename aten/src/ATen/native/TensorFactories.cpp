@@ -1339,16 +1339,16 @@ Tensor _efficientzerotensor(IntArrayRef size,
     return out;
 }
 
-Tensor _efficientzerotensor_meta(IntArrayRef size,
-                                 c10::optional<ScalarType> dtype,
-                                 c10::optional<Layout> layout,
-                                 c10::optional<Device> device,
-                                 c10::optional<bool> pin_memory) {
+Tensor _efficientzerotensor_meta_symint(SymIntArrayRef size,
+                                        c10::optional<ScalarType> dtype,
+                                        c10::optional<Layout> layout,
+                                        c10::optional<Device> device,
+                                        c10::optional<bool> pin_memory) {
   auto device_ = device_or_default(device);
   auto allocator = at::native::ZeroTensorAllocator(device_);
   auto dtype_ = dtype_or_default(dtype);
   auto zero_ks = at::DispatchKeySet(c10::DispatchKey::Meta) | at::DispatchKeySet(c10::DispatchKey::ZeroTensor);
-  auto out = at::detail::empty_generic(size, &allocator, zero_ks, dtype_, c10::nullopt);
+  auto out = at::detail::empty_generic_symint(size, &allocator, zero_ks, dtype_, c10::nullopt);
   return out;
 }
 
