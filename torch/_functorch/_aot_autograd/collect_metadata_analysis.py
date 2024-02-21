@@ -107,7 +107,8 @@ def run_functionalized_fw_and_collect_metadata(
 
         # It doesn't matter if we run this under predispatch or not because it is
         # only for figuring out metadata
-        with disable_above, FunctionalTensorMode():
+        mode = FunctionalTensorMode()
+        with disable_above, mode:
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_outs = f(*flat_f_args)
@@ -624,6 +625,7 @@ from a multi-output view call"
             is_train=is_train,
             grad_enabled_mutation=grad_enabled_mutation,
             requires_subclass_dispatch=requires_subclass_dispatch,
+            tokens=mode._tokens,
         )
         return metadata
 

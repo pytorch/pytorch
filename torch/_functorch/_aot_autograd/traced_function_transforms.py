@@ -350,11 +350,24 @@ def create_functionalized_fn(
         disable_above = torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
-        with disable_above, FunctionalTensorMode(aot_config.pre_dispatch):
+
+        mode = FunctionalTensorMode(aot_config.pre_dispatch, aot_config.is_export)
+        with disable_above, mode:
             # Wrap inputs into functional wrappers
             f_args = pytree.tree_map(to_fun, args)
+
+            # Populate the current FunctionalTensorMode with the tokens per
+            # operator
+            tokens = f_args[: len(meta.tokens)]
+            f_args = f_args[len(meta.tokens) :]
+            for i, k in enumerate(meta.tokens.keys()):
+                mode._tokens[k] = tokens[i]
+
             # Run the joint
             f_outs = fn(*f_args)
+
+            # Return both the tokens and the outputs
+            f_outs = [*mode._tokens.values(), *f_outs]
 
         if trace_joint:
             # We support a limited amount of mutation of graph inputs during the backward pass.
@@ -469,6 +482,10 @@ def create_functionalized_fn(
     if config.functionalize_rng_ops:
         # Setup the wrapper for functionalization of rng ops
         helper, args = create_functionalized_rng_ops_wrapper(helper, args, trace_joint)
+
+    # Additionally pass in tokens as inputs
+    additional_token_inputs = [torch.tensor([])] * len(meta.tokens)
+    args = [*additional_token_inputs, *args]
 
     return helper, args
 

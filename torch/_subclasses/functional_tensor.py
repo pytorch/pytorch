@@ -1,6 +1,6 @@
 import contextlib
 from abc import ABC, abstractmethod
-from typing import Any, Callable, ContextManager, Tuple
+from typing import Any, Callable, ContextManager, Dict, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -220,6 +220,12 @@ class FunctionalTensorMode(TorchDispatchMode):
         self._mode_key = torch._C._TorchDispatchModeKey.FUNCTIONAL
         # This will be turned off later for pre-dispatch functionalization
         self._dispatch_key = torch._C.DispatchKey.PreDispatch if pre_dispatch else None  # type: ignore[attr-defined]
+        # Map of functions or ScriptObjects to a token. The tokens help keep
+        # track of the ordering between side effectful operations. We have a
+        # token per ScriptObject and a token per function.
+        self._tokens: Dict[
+            Union[torch._ops.OpOverload, torch.ScriptObject], torch.Tensor
+        ] = {}
 
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):
@@ -331,6 +337,15 @@ class FunctionalTensorMode(TorchDispatchMode):
             func.name(), torch._C.DispatchKey.Functionalize
         ):
             return do_auto_functionalize(func, args, kwargs)
+
+        from torch._higher_order_ops.effects import handle_effects, has_effects
+
+        if has_effects(
+            func, args, kwargs
+        ) and not torch._C._dispatch_has_kernel_for_dispatch_key(
+            func.name(), torch._C.DispatchKey.Functionalize
+        ):
+            return handle_effects(self._tokens, func, args, kwargs)
 
         args_unwrapped, kwargs_unwrapped = pytree.tree_map_only(
             FunctionalTensor, unwrap, (args, kwargs)
