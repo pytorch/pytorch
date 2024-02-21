@@ -3,13 +3,9 @@
 
 import torch
 
-from torch.distributed._tensor import (
-    DeviceMesh,
-    distribute_tensor,
-    DTensor,
-    init_device_mesh,
-)
-from torch.distributed._tensor.placement_types import _Partial, Replicate, Shard
+from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
+from torch.distributed._tensor.placement_types import Replicate, Shard
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -41,12 +37,13 @@ class DTensorShardingTest(DTensorTestBase):
         # torchrec ShardedEmbeddingCollection keeps a list _model_parallel_name_to_sharded_tensor
         # which is initialized in _initialize_torch_state where torch.Tensor params are transformed
         # into ShardedTensor by ShardedTensor._init_from_local_shards()
-        dtensor = DTensor.from_local(local_shard, device_mesh, placements, run_check=False)
+        dtensor = DTensor.from_local(
+            local_shard, device_mesh, placements, run_check=False
+        )
         self.assertEqual(dtensor.full_tensor(), global_tensor)
 
     @with_comms
     def test_dtensor_table_wise_sharding(self):
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size))) # do we need this?
         # initialize N tables
         table_shape = [4, 4]
         table_to_local_shard = {}  # map {table_id: local shard of table_id}
@@ -59,8 +56,12 @@ class DTensorShardingTest(DTensorTestBase):
         table_to_dtensor = {}  # same purpose as _model_parallel_name_to_sharded_tensor
         for table_id, local_shard in table_to_local_shard.items():
             placements = [Replicate()]  # table-wise sharding
-            device_mesh = DeviceMesh(self.device_type, [table_id])  # table i is placed on rank i
-            dtensor = DTensor.from_local(local_shard, device_mesh, placements, run_check=False)
+            device_mesh = DeviceMesh(
+                self.device_type, [table_id]  # table i is placed on rank i
+            )
+            dtensor = DTensor.from_local(
+                local_shard, device_mesh, placements, run_check=False
+            )
             table_to_dtensor[table_id] = dtensor
 
         # example 2: transform DTensor into torch.Tensor
