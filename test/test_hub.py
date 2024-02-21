@@ -1,7 +1,8 @@
 # Owner(s): ["module: hub"]
 
 import unittest
-from unittest.mock import patch, skip
+from unittest.mock import patch
+from unittest import skip
 import os
 import tempfile
 import warnings
