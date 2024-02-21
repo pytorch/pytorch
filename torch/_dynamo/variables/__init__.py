@@ -24,6 +24,7 @@ from .dicts import (
 from .functions import (
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,
+    SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
@@ -63,7 +64,6 @@ from .misc import (
     NewGlobalVariable,
     NumpyVariable,
     PythonModuleVariable,
-    SkipFilesVariable,
     StringFormatVariable,
     SuperVariable,
     TypingVariable,
@@ -77,6 +77,7 @@ from .tensor import (
     SymNodeVariable,
     TensorVariable,
     UnspecializedPythonVariable,
+    UntypedStorageVariable,
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .user_defined import (
@@ -125,7 +126,7 @@ __all__ = [
     "RepeatIteratorVariable",
     "RestrictedListSubclassVariable",
     "SDPAParamsVariable",
-    "SkipFilesVariable",
+    "SkipFunctionVariable",
     "SliceVariable",
     "StringFormatVariable",
     "SuperVariable",
@@ -136,6 +137,7 @@ __all__ = [
     "UnknownVariable",
     "UnspecializedNNModuleVariable",
     "UnspecializedPythonVariable",
+    "UntypedStorageVariable",
     "UserDefinedClassVariable",
     "UserDefinedObjectVariable",
     "UserFunctionVariable",
