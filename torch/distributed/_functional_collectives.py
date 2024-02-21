@@ -1076,3 +1076,48 @@ traceable_collective_remaps = {
     legacy_reduce_scatter_base: reduce_scatter_tensor_inplace,
     legacy_all_gather_base: all_gather_tensor_inplace,
 }
+
+
+class _AlltoAllSingle(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input: torch.Tensor, output_split_sizes, input_split_sizes, group: RANK_TYPES):
+        ctx.input_size = input.size()
+        ctx.output_split_sizes = input_split_sizes
+        ctx.input_split_sizes = output_split_sizes
+        ctx.group = group
+        return all_to_all_single(
+            input,
+            output_split_sizes=output_split_sizes,
+            input_split_sizes=input_split_sizes,
+            group=group,
+        )
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return (
+            all_to_all_single(
+                grad_output,
+                ctx.output_split_sizes,
+                ctx.input_split_sizes,
+                ctx.group,
+            ),
+            None,
+            None,
+            None,
+        )
+
+from torch._dynamo import allow_in_graph
+
+@allow_in_graph
+def all_to_all_single_grad(
+    input: torch.Tensor,
+    output_split_sizes: List[int],
+    input_split_sizes: List[int],
+    group: RANK_TYPES,
+) -> torch.Tensor:
+    return _AlltoAllSingle.apply(
+        input,
+        output_split_sizes,
+        input_split_sizes,
+        group,
+    )
