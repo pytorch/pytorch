@@ -73,7 +73,7 @@ class DeviceMeshTest(DTensorTestBase):
     @skip_unless_torch_gpu
     def test_assert_invalid_mesh_tensor(self):
         mesh = torch.arange(self.world_size).to(self.rank)
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(ValueError):
             device_mesh = DeviceMesh(self.device_type, mesh)
 
     @with_comms
