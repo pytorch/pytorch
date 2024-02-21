@@ -11,6 +11,7 @@ from tools.testing.target_determination.determinator import TestPrioritizations
 from tools.testing.target_determination.heuristics.historical_class_failure_correlation import (
     HistoricalClassFailurCorrelation,
 )
+
 sys.path.remove(str(REPO_ROOT))
 
 HEURISTIC_CLASS = "tools.testing.target_determination.heuristics.historical_class_failure_correlation."

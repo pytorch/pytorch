@@ -9,6 +9,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(REPO_ROOT))
 from tools.testing.test_run import ShardedTest, TestRun
 from tools.testing.test_selections import calculate_shards, THRESHOLD
+
 sys.path.remove(str(REPO_ROOT))
 
 

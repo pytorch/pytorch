@@ -23,6 +23,7 @@ from tools.testing.test_run import TestRun, TestRuns
 
 sys.path.remove(str(REPO_ROOT))
 
+
 def mocked_file(contents: Dict[Any, Any]) -> io.IOBase:
     file_object = io.StringIO()
     json.dump(contents, file_object)

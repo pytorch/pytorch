@@ -14,7 +14,9 @@ from tools.stats.upload_stats_lib import (
     unzip,
     upload_workflow_stats_to_s3,
 )
+
 sys.path.remove(str(REPO_ROOT))
+
 
 def get_job_id(report: Path) -> Optional[int]:
     # [Job id in artifacts]
