@@ -9,7 +9,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 sys.path.append(str(REPO_ROOT))
 import tools.testing.target_determination.heuristics.interface as interface
 from tools.testing.test_run import TestRun, TestRuns
-
+sys.path.remove(str(REPO_ROOT))
 
 class TestAggregatedHeuristics(unittest.TestCase):
     def make_heuristic(self, classname: str) -> Any:

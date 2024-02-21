@@ -6,13 +6,15 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Dict, List, Optional
 
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.append(str(REPO_ROOT))
 from tools.stats.upload_stats_lib import (
     download_gha_artifacts,
     download_s3_artifacts,
     unzip,
     upload_workflow_stats_to_s3,
 )
-
+sys.path.remove(str(REPO_ROOT))
 
 def get_job_id(report: Path) -> Optional[int]:
     # [Job id in artifacts]

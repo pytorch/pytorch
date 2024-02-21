@@ -3,13 +3,9 @@ import sys
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
-try:
-    # using tools/ to optimize test run.
-    sys.path.append(str(REPO_ROOT))
-    from tools.testing.test_run import ShardedTest, TestRun
-except ModuleNotFoundError:
-    print("Can't import required modules, exiting")
-    sys.exit(1)
+sys.path.append(str(REPO_ROOT))
+from tools.testing.test_run import ShardedTest, TestRun
+sys.path.remove(str(REPO_ROOT))
 
 
 class TestTestRun(unittest.TestCase):
@@ -24,9 +20,7 @@ class TestTestRun(unittest.TestCase):
         run1 = TestRun("foo::bar")
         run2 = TestRun("foo::baz")
 
-        expected = TestRun("foo")
-        expected._included.add("bar")
-        expected._included.add("baz")
+        expected = TestRun("foo", included=["bar", "baz"])
 
         self.assertEqual(run1 | run2, expected)
         self.assertEqual(run2 | run1, expected)

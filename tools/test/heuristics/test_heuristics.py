@@ -7,27 +7,21 @@ from typing import Any, Dict, Set
 from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent.parent
-try:
-    # using tools/ to optimize test run.
-    sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(REPO_ROOT))
 
-    from tools.test.heuristics.heuristics_test_mixin import HeuristicsTestMixin
-    from tools.testing.target_determination.determinator import (
-        AggregatedHeuristics,
-        get_test_prioritizations,
-        TestPrioritizations,
-    )
-    from tools.testing.target_determination.heuristics import HEURISTICS
-    from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
-        get_previous_failures,
-    )
-    from tools.testing.test_run import TestRun, TestRuns
+from tools.test.heuristics.heuristics_test_mixin import HeuristicsTestMixin
+from tools.testing.target_determination.determinator import (
+    AggregatedHeuristics,
+    get_test_prioritizations,
+    TestPrioritizations,
+)
+from tools.testing.target_determination.heuristics import HEURISTICS
+from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
+    get_previous_failures,
+)
+from tools.testing.test_run import TestRun, TestRuns
 
-    sys.path.remove(str(REPO_ROOT))
-except ModuleNotFoundError:
-    print("Can't import required modules, exiting")
-    sys.exit(1)
-
+sys.path.remove(str(REPO_ROOT))
 
 def mocked_file(contents: Dict[Any, Any]) -> io.IOBase:
     file_object = io.StringIO()

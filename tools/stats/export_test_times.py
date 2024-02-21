@@ -12,6 +12,7 @@ from tools.stats.import_test_stats import (
     get_test_file_ratings,
     get_test_times,
 )
+sys.path.remove(str(REPO_ROOT))
 
 
 def main() -> None:

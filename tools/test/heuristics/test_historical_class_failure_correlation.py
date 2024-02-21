@@ -4,20 +4,14 @@ import unittest
 from typing import Dict, List
 from unittest import mock
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
-try:
-    # using tools/ to optimize test run.
-    sys.path.append(str(REPO_ROOT))
-
-    from tools.test.heuristics.heuristics_test_mixin import HeuristicsTestMixin
-    from tools.testing.target_determination.determinator import TestPrioritizations
-    from tools.testing.target_determination.heuristics.historical_class_failure_correlation import (
-        HistoricalClassFailurCorrelation,
-    )
-
-except ModuleNotFoundError as e:
-    print("Can't import required modules, exiting")
-    sys.exit(1)
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent.parent
+sys.path.append(str(REPO_ROOT))
+from tools.test.heuristics.heuristics_test_mixin import HeuristicsTestMixin
+from tools.testing.target_determination.determinator import TestPrioritizations
+from tools.testing.target_determination.heuristics.historical_class_failure_correlation import (
+    HistoricalClassFailurCorrelation,
+)
+sys.path.remove(str(REPO_ROOT))
 
 HEURISTIC_CLASS = "tools.testing.target_determination.heuristics.historical_class_failure_correlation."
 HEURISTIC_UTILS = "tools.testing.target_determination.heuristics.utils."

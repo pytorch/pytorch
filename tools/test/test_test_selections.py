@@ -6,14 +6,10 @@ from collections import defaultdict
 from typing import Dict, List, Tuple
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
-try:
-    # using tools/ to optimize test run.
-    sys.path.append(str(REPO_ROOT))
-    from tools.testing.test_run import ShardedTest, TestRun
-    from tools.testing.test_selections import calculate_shards, THRESHOLD
-except ModuleNotFoundError:
-    print("Can't import required modules, exiting")
-    sys.exit(1)
+sys.path.append(str(REPO_ROOT))
+from tools.testing.test_run import ShardedTest, TestRun
+from tools.testing.test_selections import calculate_shards, THRESHOLD
+sys.path.remove(str(REPO_ROOT))
 
 
 def gen_class_times(test_times: Dict[str, float]) -> Dict[str, Dict[str, float]]:

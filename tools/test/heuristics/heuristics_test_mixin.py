@@ -3,17 +3,11 @@ import sys
 import unittest
 from typing import Optional
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
-try:
-    # using tools/ to optimize test run.
-    sys.path.append(str(REPO_ROOT))
-
-    from tools.testing.target_determination.determinator import TestPrioritizations
-    from tools.testing.test_run import TestRuns
-
-except ModuleNotFoundError:
-    print("Can't import required modules, exiting")
-    sys.exit(1)
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent.parent
+sys.path.append(str(REPO_ROOT))
+from tools.testing.target_determination.determinator import TestPrioritizations
+from tools.testing.test_run import TestRuns
+sys.path.remove(str(REPO_ROOT))
 
 
 class HeuristicsTestMixin(unittest.TestCase):
