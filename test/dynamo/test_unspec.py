@@ -273,7 +273,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             comptime.assert_static(x.size(0))
             return x + 1
 
-        opt_fn = torch.compile(fn, dynamic=True)
+        opt_fn = torch.compile(fn, dynamic=True, fullgraph=True)
         opt_fn(torch.randn(12, 23))
 
     def test_shape_graph_break(self):

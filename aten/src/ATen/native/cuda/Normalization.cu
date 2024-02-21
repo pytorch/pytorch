@@ -124,7 +124,7 @@ void batch_norm_elementwise(
           out, self, *weight, *bias, mean_, invstd_);
       return;
     }
-    C10_FALLTHROUGH;
+    [[fallthrough]];
   }
   case Impl::General: {
     const int64_t ndim = self.dim();
@@ -193,7 +193,7 @@ Tensor batch_norm_elementwise_backward_train(
       return batch_norm_backward_elemt_channels_last_cuda_template(
           grad_out, input, mean, invstd, weight, sum_dy, sum_dy_xmu);
     }
-    C10_FALLTHROUGH;
+    [[fallthrough]];
   }
   case Impl::General: {
     const auto ndim = input.dim();
@@ -317,7 +317,7 @@ void batch_norm_mean_var(const Tensor& self, Tensor& save_mean, Tensor& save_var
       });
       return;
     }
-    C10_FALLTHROUGH;
+    [[fallthrough]];
   }
   case Impl::General: {
     const int64_t ndim = self.dim();
@@ -499,7 +499,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
 
   const bool needs_reduction = train || grad_input_mask[1] || grad_input_mask[2];
 
-  // Fused reducion & elementwise kernel
+  // Fused reduction & elementwise kernel
   if (needs_reduction && grad_input_mask[0] &&
       !batch_norm_use_channels_last_kernels(input) &&
       cuda::detail::canUse32BitIndexMath(input) &&

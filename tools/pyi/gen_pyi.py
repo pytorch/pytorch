@@ -418,7 +418,7 @@ def gen_nn_functional(fm: FileManager) -> None:
             "softplus": [
                 "def softplus({}) -> Tensor: ...".format(
                     ", ".join(
-                        ["input: Tensor", "beta: int = ...", "threshold: int = ..."]
+                        ["input: Tensor", "beta: float = ...", "threshold: float = ..."]
                     )
                 )
             ],
