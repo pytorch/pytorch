@@ -441,7 +441,9 @@ class TestExecutionTrace(TestCase):
         # There should be a constant difference between elements in each list
         deltas = {x - y for x, y in zip(rf_ids, external_ids)}
         self.assertEqual(len(deltas), 1,
-                         msg=f"ET and kineto rf_id should have constant difference, deltas = {deltas}")
+                         msg=f"ET and kineto rf_id should have constant difference, deltas = {deltas}\n"
+                             f"rf_ids = {rf_ids}\n"
+                             f"external_ids = {external_ids}\n")
 
 
     def test_execution_trace_alone(self):
