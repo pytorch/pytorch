@@ -1,11 +1,15 @@
 # Owner(s): ["module: inductor"]
 
+import unittest
+
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters, optimus_scuba_log
 from torch._inductor.fx_passes.misc_patterns import numpy_compat_normalization
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
+
+requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 
 def patch(f):
@@ -746,13 +750,13 @@ class TestSplitCatFxPasses(TestCase):
     @patch
     def test_unbind_stack(self):
         def unbind_stack(x):
-            return torch.stack(torch.unbind(x, dim=1), 1)
+            return torch.stack(torch.unbind(x, 1), 1)
 
         def unbind_cat(x):
-            return torch.cat(torch.unbind(x, dim=1), 1)
+            return torch.cat(torch.unbind(x, dim=-3), 1)
 
         def unbind_stack_argspec1(x):
-            return torch.stack(torch.unbind(x, dim=1), dim=1)
+            return torch.stack(torch.unbind(input=x, dim=1), dim=1)
 
         def unbind_stack_argspec2(x):
             return torch.stack(tensors=torch.unbind(x, dim=1), dim=1)
@@ -851,22 +855,23 @@ class TestSplitCatFxPasses(TestCase):
             expected_cat_added,
             expected_cat_removed,
             expected_sections_removed,
+            expected_unbind_normalized,
         ) in [
-            (unbind_stack, 0, 1, 0, 1, 31),
-            (unbind_stack_argspec1, 0, 1, 0, 1, 31),
-            (unbind_stack_argspec2, 0, 1, 0, 1, 31),
-            (dim_mismatch, 0, 1, 0, 1, 31),
-            (split_squeeze_stack, 0, 1, 0, 1, 31),
-            (split_squeeze_stack_callmethod, 0, 1, 0, 1, 31),
-            (other_users, 0, 0, 0, 0, 0),
-            (other_users_2, 0, 0, 0, 0, 0),
-            (unbind_cat_addn_args, 0, 1, 1, 1, 31),
-            (unbind_stack_addn_args, 0, 1, 1, 1, 31),
-            (unbind_cat_addn_args_dim2, 0, 1, 1, 1, 31),
-            (unbind_cat_dim_mismatch, 0, 1, 1, 1, 31),
-            (unbind_stack_dim_mismatch, 0, 1, 1, 1, 31),
-            (unbind_cat_multi_users, 0, 1, 2, 2, 31),
-            (unbind_cat_multi_users_diff_dims, 0, 1, 2, 2, 31),
+            (unbind_stack, 0, 1, 0, 1, 31, 2),
+            (unbind_stack_argspec1, 0, 1, 0, 1, 31, 2),
+            (unbind_stack_argspec2, 0, 1, 0, 1, 31, 2),
+            (dim_mismatch, 0, 1, 0, 1, 31, 2),
+            (split_squeeze_stack, 0, 1, 0, 1, 31, 2),
+            (split_squeeze_stack_callmethod, 0, 1, 0, 1, 31, 2),
+            (other_users, 0, 0, 0, 0, 0, 2),
+            (other_users_2, 0, 0, 0, 0, 0, 2),
+            (unbind_cat_addn_args, 0, 1, 1, 1, 31, 2),
+            (unbind_stack_addn_args, 0, 1, 1, 1, 31, 2),
+            (unbind_cat_addn_args_dim2, 0, 1, 1, 1, 31, 2),
+            (unbind_cat_dim_mismatch, 0, 1, 1, 1, 31, 2),
+            (unbind_stack_dim_mismatch, 0, 1, 1, 1, 31, 2),
+            (unbind_cat_multi_users, 0, 1, 2, 2, 31, 3),
+            (unbind_cat_multi_users_diff_dims, 0, 1, 2, 2, 31, 3),
         ]:
             print()
             print(fn)
@@ -893,6 +898,10 @@ class TestSplitCatFxPasses(TestCase):
             self.assertEqual(
                 counters["inductor"]["scmerge_split_sections_removed"],
                 expected_sections_removed,
+            )
+            self.assertEqual(
+                counters["inductor"]["split_cat_norm"],
+                expected_unbind_normalized,
             )
             counters.clear()
 
@@ -1182,6 +1191,7 @@ class TestSplitCatFxPasses(TestCase):
                 self.assertTrue(k not in {"x", "x1", "x2", "a", "axis", "keepdims"})
 
     @patch
+    @requires_cuda
     def test_stack_normalization_axis_kwarg(self):
         def fn(x, y):
             return torch.stack([x, y], axis=1)
