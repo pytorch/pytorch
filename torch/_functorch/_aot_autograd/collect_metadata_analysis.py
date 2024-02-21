@@ -127,14 +127,12 @@ def run_functionalized_fw_and_collect_metadata(
             # strides between the functionalized arg inner tensors and non-functionalized arg inner
             # tensors. This is a problem as the inner tensor stride change may not be reflected
             # correctly in the outer tensor, so disallow this for now.
-            noncontiguous_input_mutation = has_metadata_mutation(
-                f_arg,
-                arg,
-                check_only_storage_mutation=False,
-                check_for_noncontiguous_mutation=True,
-            )
-
-            if noncontiguous_input_mutation and is_traceable_wrapper_subclass(arg):
+            mutates_data = has_data_mutation(f_arg)
+            if (
+                mutates_data
+                and not arg.is_contiguous()
+                and is_traceable_wrapper_subclass(arg)
+            ):
                 raise RuntimeError(
                     "Mutations on non-contiguous inputs are currently not allowed on "
                     "tensor subclasses"
@@ -154,7 +152,6 @@ def run_functionalized_fw_and_collect_metadata(
             mutates_storage_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=True
             )
-            mutates_data = has_data_mutation(f_arg)
             mutations_hidden_from_autograd = are_all_mutations_hidden_from_autograd(
                 f_arg
             )
