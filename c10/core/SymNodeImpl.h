@@ -37,6 +37,9 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual bool is_float() {
     TORCH_CHECK(false, "NYI");
   };
+  virtual bool is_nested_int() const {
+    return false;
+  };
   virtual SymNode add(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
   };
@@ -185,10 +188,10 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual std::string str() {
     TORCH_CHECK(false, "NYI");
   };
-  virtual c10::optional<int64_t> singleton_int() {
+  virtual c10::optional<int64_t> nested_int() {
     return c10::nullopt;
   }
-  virtual c10::optional<int64_t> singleton_coeff() {
+  virtual c10::optional<int64_t> nested_int_coeff() {
     return c10::nullopt;
   }
   virtual c10::optional<int64_t> constant_int() {
