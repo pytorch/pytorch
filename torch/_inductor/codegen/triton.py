@@ -40,7 +40,7 @@ from torch.utils._triton import has_triton_package
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash, get_path, PyCodeCache
-from ..dependencies import Dep, MemoryDep, StarDep
+from ..dependencies import Dep, MemoryDep, StarDep, WeakDep
 from ..ir import IRNode, ReductionHint, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
@@ -2620,9 +2620,14 @@ class TritonKernel(Kernel):
                 # This arg points to a buf that has been sliced.
                 # We need to count each individual slice to have
                 # a better estimation.
-                indices = set()
+                indices: Set[Any] = set()
+                no_index_dep_count = 0
                 for dep in self.buf_accesses[arg]:
-                    indices.add(dep.index)
+                    if isinstance(dep, (StarDep, WeakDep)):
+                        indices.add(f"no_index_dep_{no_index_dep_count}")
+                        no_index_dep_count += 1
+                    else:
+                        indices.add(dep.index)
                 numel = len(indices) * out_numel
             else:
                 numel = buf_size
