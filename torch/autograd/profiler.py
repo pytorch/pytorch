@@ -602,17 +602,12 @@ class record_function(_ContextDecorator):
         )
 
     def __enter__(self):
-        from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
-
-        with torch.utils._python_dispatch._disable_current_modes(), maybe_disable_fake_tensor_mode():
-            self.record = torch.ops.profiler._record_function_enter_new(
-                self.name, self.args
-            )
+        self.record = torch.ops.profiler._record_function_enter_new(
+            self.name, self.args
+        )
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
-        from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
-
         if not self.run_callbacks_on_exit:
             return
 
@@ -623,8 +618,7 @@ class record_function(_ContextDecorator):
         # TODO: Too slow with __torch_function__ handling enabled
         # See https://github.com/pytorch/pytorch/issues/76410
         if not torch.jit.is_scripting():
-            # We disable current fake_tensor_mode as _RecordFunction is supposed to run its c++ implementaion
-            with torch._C.DisableTorchFunctionSubclass(), maybe_disable_fake_tensor_mode():
+            with torch._C.DisableTorchFunctionSubclass():
                 torch.ops.profiler._record_function_exit._RecordFunction(record)
         else:
             torch.ops.profiler._record_function_exit(record)

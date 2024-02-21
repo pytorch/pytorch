@@ -471,7 +471,7 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
 }
 
 TORCH_LIBRARY_FRAGMENT(_TorchScriptTesting, m) {
-  m.impl_abstract_pystub("export.test_torchbind");
+  m.impl_abstract_pystub("torchbind_impls");
   m.def(
       "takes_foo(__torch__.torch.classes._TorchScriptTesting._Foo foo, Tensor x) -> Tensor");
 }

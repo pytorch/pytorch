@@ -1197,6 +1197,14 @@ class FakeTensorMode(TorchDispatchMode):
             incr = IncrementRecursionCount()
 
         def _wrap_script_object(x):
+            # NOTE: Skip fakifying inputs to torch.ops.profiler because they only have c++ implementation
+            # and are performance critical. The suggested workaround will cause non-eligible overhead.
+            if func in {
+                torch.ops.profiler._record_function_enter_new,
+                torch.ops.profiler._record_function_exit._RecordFunction,
+            }:
+                return x
+
             full_qualname = x._type().qualified_name()
             if full_qualname not in torch.library.registered_class:
                 raise RuntimeError(
