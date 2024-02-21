@@ -1,6 +1,7 @@
 # ---[ Test binaries.
 
 set(C10_XPU_ALL_TEST_FILES
+    impl/XPUCachingAllocatorTest.cpp
     impl/XPUDeviceTest.cpp
     impl/XPUStreamTest.cpp
 )
