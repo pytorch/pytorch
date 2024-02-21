@@ -8765,8 +8765,12 @@ get_out().sum().backward()
         except subprocess.TimeoutExpired as e:
             self.fail(msg="Example code timed out! See the code sample in the test for details.")
         except subprocess.CalledProcessError as e:
-            err_msg = "RuntimeError: one of the variables needed for gradient computation"
-            self.assertTrue(err_msg in e.output.decode("utf-8"))
+            if e.returncode < 0:
+                # Sometimes we segfault instead of deadlocking
+                self.fail("Subprocess exited with a fatal signal")
+            else:
+                err_msg = "RuntimeError: one of the variables needed for gradient computation"
+                self.assertTrue(err_msg in e.output.decode("utf-8"))
 
     def test_view_func_replay(self):
         with torch.autograd._force_original_view_tracking(True):
