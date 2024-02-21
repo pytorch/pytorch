@@ -21,10 +21,10 @@ from torchgen.model import BaseTy, ScalarType
 from .types_base import (
     BaseCppType,
     BaseCType,
-    CType,
     boolT,
     byteT,
     charT,
+    CType,
     doubleT,
     floatT,
     int32T,
