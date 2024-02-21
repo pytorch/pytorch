@@ -391,15 +391,10 @@ class TestUnaryUfuncs(TestCase):
             contig = op(contig, **torch_kwargs)
             non_contig = op(non_contig, **torch_kwargs)
             for i in range(3):
-                if is_iterable_of_tensors(contig):
-                    for a, b in zip(contig, non_contig):
-                        self.assertEqual(
-                            a, b[i], msg="non-contiguous expand[" + str(i) + "]"
-                        )
-                else:
-                    self.assertEqual(
-                        contig, non_contig[i], msg="non-contiguous expand[" + str(i) + "]"
-                    )
+                non_contig_i = pytree.tree_map(lambda x: x[i], non_contig)
+                self.assertEqual(
+                    contig, non_contig_i, msg="non-contiguous expand[" + str(i) + "]"
+                )
 
     @ops(unary_ufuncs)
     def test_contig_size1(self, device, dtype, op):
@@ -446,12 +441,11 @@ class TestUnaryUfuncs(TestCase):
         torch_kwargs, _ = op.sample_kwargs(device, dtype, input)
         actual = op(input, **torch_kwargs)
 
-        expected_unstacked = [op(slice, **torch_kwargs) for slice in input]
+        all_outs = [op(slice, **torch_kwargs) for slice in input]
         if is_iterable_of_tensors(actual):
-            all_outs = [op(slice, **torch_kwargs) for slice in input]
             expected = [torch.stack([out[i] for out in all_outs]) for i in range(len(actual))]
         else:
-            expected = torch.stack([op(slice, **torch_kwargs) for slice in input])
+            expected = torch.stack(all_outs)
 
         self.assertEqual(actual, expected)
 
