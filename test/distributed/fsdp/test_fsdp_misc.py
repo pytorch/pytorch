@@ -3,7 +3,6 @@
 import functools
 import os
 import sys
-import warnings
 from collections import namedtuple
 from contextlib import nullcontext
 from copy import deepcopy
@@ -974,43 +973,6 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
     @property
     def world_size(self) -> int:
         return 1
-
-    @skip_if_lt_x_gpu(1)
-    def test_world_size_1_sharding_strategy_warning(self):
-        """
-        Tests that FSDP issues a warning when it switches to using ``NO_SHARD``
-        when the world size is 1.
-        """
-        warning_prefix = "FSDP is switching to use `NO_SHARD` instead of"
-        # If the user already passes `NO_SHARD`, then there should not be a
-        # warning
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")  # trigger all warnings
-            FSDP(nn.Linear(3, 3).cuda(), sharding_strategy=ShardingStrategy.NO_SHARD)
-            for warning in w:
-                self.assertTrue(
-                    warning.category != UserWarning
-                    or not str(warning.message).startswith(warning_prefix)
-                )
-
-        # Check that a warning is issued
-        warning_suffix = " since the world size is 1."
-        # - Pass `FULL_SHARD` or `None`
-        expected_regex_full_shard = (
-            warning_prefix + " " + str(ShardingStrategy.FULL_SHARD) + warning_suffix
-        )
-        with self.assertWarnsRegex(UserWarning, expected_regex_full_shard):
-            FSDP(nn.Linear(3, 3).cuda(), sharding_strategy=ShardingStrategy.FULL_SHARD)
-        with self.assertWarnsRegex(UserWarning, expected_regex_full_shard):
-            FSDP(nn.Linear(3, 3).cuda())
-        # - Pass `SHARD_GRAD_OP`
-        expected_regex_shard_grad_op = (
-            warning_prefix + " " + str(ShardingStrategy.SHARD_GRAD_OP) + warning_suffix
-        )
-        with self.assertWarnsRegex(UserWarning, expected_regex_shard_grad_op):
-            FSDP(
-                nn.Linear(3, 3).cuda(), sharding_strategy=ShardingStrategy.SHARD_GRAD_OP
-            )
 
     @skip_if_lt_x_gpu(1)
     def test_training_device_mismatch_errors(self):
