@@ -3143,6 +3143,27 @@ class TestMPS(TestCaseMPS):
         helper((2, 8, 4, 5), 0.2)
         helper((2, 3, 4, 5), 1.0)  # value of 1 should be ignored internally
 
+    def test_addcdiv_needs_to_be_contiguous(self):
+        # https://github.com/pytorch/pytorch/issues/118115
+        x = torch.randn(2, 3, device="cpu").T
+        x_mps = x.to(device="mps")
+        x_mps_contiguous = x.to(device="mps").contiguous()
+
+        y = torch.randn(3, 2, device="cpu")
+        y_mps = y.to(device="mps")
+
+        z = torch.ones(3, 2, device="cpu")
+        z_mps = z.to(device="mps")
+
+        cpu_output = x.addcdiv_(y, z, value=1)
+        mps_contiguous_output = x_mps_contiguous.addcdiv_(y_mps, z_mps, value=1)
+
+        self.assertEqual(cpu_output, mps_contiguous_output)
+
+        with self.assertRaisesRegex(RuntimeError, 'self must be contiguous'):
+            x_mps.addcdiv_(y_mps, z_mps, value=1)
+
+
     def test_buffer_size_match(self):
         # this test shouldn't cause any crash
         size = 16
