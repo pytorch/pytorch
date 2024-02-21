@@ -1086,7 +1086,9 @@ class WrapperCodeGen(CodeGen):
 
         traverse(kernel)
 
-        compile_wrapper.writeline("''')")
+        compile_wrapper.writeline(
+            f"''', device_str='{V.graph.scheduler.current_device.type}')"
+        )
         _, lineno = inspect.getsourcelines(kernel.fn)
         srcfile = inspect.getsourcefile(kernel.fn)
         metadata = f"# Original path: {srcfile}:{lineno}"
