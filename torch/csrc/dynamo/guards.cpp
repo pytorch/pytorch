@@ -1393,9 +1393,22 @@ class GuardManager {
     return _root;
   }
 
-  void add_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) {
+  virtual void add_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) {
     _leaf_guards.emplace_back(std::move(leaf_guard));
   }
+
+  virtual GuardManager* get_key_value_manager(const py::object& accessor_key) {
+    throw std::runtime_error("Not implemented");
+  }
+
+  virtual GuardManager* get_key_manager(py::handle example_value) {
+    throw std::runtime_error("Not implemented");
+  }
+
+  virtual GuardManager* get_value_manager(py::handle example_value) {
+    throw std::runtime_error("Not implemented");
+  }
+
   /**
    * Adds a new guard manager with appropriate Accessor. If the accessor is
    * already present, we just return the guard manager.
@@ -1406,6 +1419,11 @@ class GuardManager {
       py::handle example_value) {
     // accessor_key type depends on the GuardAccessorT
     // for example for GetAttrGuardAccessor - py::str name
+
+    // Check that we are not trying to add an accessor for DictGuardManager
+    if (_is_dict_guard_manager()) {
+      throw std::runtime_error("Can not add an accessor to DictGuardManager");
+    }
 
     // Return the manager if the guard accessor exists
     for (const auto& accessor : _accessors) {
@@ -1513,7 +1531,7 @@ class GuardManager {
 
   // DEBUG function - Returning raw pointers because we can't return unique_ptr
   // and pybind does not accept a unique_ptr reference return type.
-  std::vector<GuardAccessor*> get_accessors() const {
+  virtual std::vector<GuardAccessor*> get_accessors() const {
     std::vector<GuardAccessor*> ret;
     for (const auto& accessor : _accessors) {
       ret.emplace_back(accessor.get());
@@ -1545,6 +1563,11 @@ class GuardManager {
   // Keeps a count of how many times this guard manager check function returns
   // False. This is used for sorting optimization.
   int64_t _fail_count{0};
+
+ private:
+  virtual bool _is_dict_guard_manager() {
+    return false;
+  }
 
  private:
   // Root of the guard manager, this is the used to install the relational
@@ -1712,14 +1735,272 @@ class RootGuardManager : public GuardManager {
   std::mutex _lock;
 };
 
+/**
+ * DictGuardManager is composed of a vector of KeyValueDictGuardManager
+ * managers. KeyValueDictGuardManager has GuardManager for a key value pair of
+ * the parent DictGuardManager.
+ */
+class KeyValueDictGuardManager : public GuardManager {
+ public:
+  KeyValueDictGuardManager(RootGuardManager* root)
+      : GuardManager(root), _key_manager(nullptr), _value_manager(nullptr) {}
+
+  virtual GuardManager* get_key_manager(py::handle example_value) override {
+    if (!_key_manager) {
+      _key_manager = make_guard_manager(this->get_root(), example_value);
+    }
+    return _key_manager.get();
+  }
+
+  virtual GuardManager* get_value_manager(py::handle example_value) override {
+    if (!_value_manager) {
+      _value_manager = make_guard_manager(this->get_root(), example_value);
+    }
+    return _value_manager.get();
+  }
+
+  virtual bool check_nopybind(PyObject* item) override { // borrowed ref
+    // We get the key, value pair from the DictGuardManager here. Check the
+    // key guard manager and then value guard manager. There is no need to do
+    // any shuffling here.
+
+    // Get key, value pair. No need to check for nullptr here as item is result
+    // of PyDict_Items.
+    PyObject* key = PyTuple_GET_ITEM(item, 0); // borrowed ref
+    PyObject* value = PyTuple_GET_ITEM(item, 1); // borrowed ref
+
+    if (_key_manager) {
+      if (!_key_manager->check_nopybind(key)) {
+        _fail_count += 1;
+        return false;
+      }
+    }
+    if (_value_manager) {
+      if (!_value_manager->check_nopybind(value)) {
+        _fail_count += 1;
+        return false;
+      }
+    }
+    return true;
+  }
+
+  virtual GuardDebugInfo check_verbose_nopybind(
+      PyObject* item) override { // borrowed ref
+    // We get the key, value pair from the DictGuardManager here. Check the
+    // key guard manager and then value guard manager.
+
+    // Get key, value pair. No need to check for nullptr here as item is result
+    // of PyDict_Items.
+    PyObject* key = PyTuple_GET_ITEM(item, 0); // borrowed ref
+    PyObject* value = PyTuple_GET_ITEM(item, 1); // borrowed ref
+
+    int num_guards_executed = 0;
+    if (_key_manager) {
+      GuardDebugInfo debug_info = _key_manager->check_verbose_nopybind(key);
+      if (!debug_info.result) {
+        return debug_info;
+      }
+      num_guards_executed += debug_info.num_guards_executed;
+    }
+
+    if (_value_manager) {
+      GuardDebugInfo debug_info = _value_manager->check_verbose_nopybind(value);
+      if (!debug_info.result) {
+        return debug_info;
+      }
+      num_guards_executed += debug_info.num_guards_executed;
+    }
+    return GuardDebugInfo(true, num_guards_executed);
+  }
+
+  void add_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) override {
+    // If you are calling this, you probably want to go through a key, value
+    // child manager and then add a leaf guard on them. DictGuardManager already
+    // has TYPE_MATCH and LENGTH_CHECK built in.
+    throw std::runtime_error("DictGuardManager does not support a leaf_guard");
+  }
+
+  // Debug helper - Nobody should call this. Call child_managers to directly get
+  // the key and value managers.
+  std::vector<GuardAccessor*> get_accessors() const override {
+    throw std::runtime_error(
+        "KeyValueDictGuardManager does not have accessors");
+  }
+
+  // Debug helper - Returning raw pointers because we can't return unique_ptr
+  // and pybind does not accept a unique_ptr reference return type.
+  virtual std::vector<GuardManager*> get_child_managers() override {
+    std::vector<GuardManager*> ret;
+    ret.push_back(_key_manager.get());
+    ret.push_back(_value_manager.get());
+    return ret;
+  }
+
+ private:
+  bool _is_dict_guard_manager() override {
+    return true;
+  }
+
+ private:
+  std::unique_ptr<GuardManager> _key_manager;
+  std::unique_ptr<GuardManager> _value_manager;
+};
+
+/*
+ * Dicts are common in python code. Therefore, we handle guards for dicts
+ * differently and use PyDict_* APIs which are faster than PyObject_* APIs
+ * because of no ref count increments/decrements.
+ *
+ * DictGuardManager is composed of a vector of KeyValueDictGuardManager - an
+ * encapsulation of a manager for (key, value) pair. On guard failure, we just
+ * shuffle the KeyValueDictGuardManagers. This ensures that key guard managers
+ * are always run before value guard managers.
+ *
+ * DictGuardManager relies on the order of dict.keys(). It keeps track of the
+ * indices of dict.keys() to access the key, value pair.
+ */
+class DictGuardManager : public GuardManager {
+ public:
+  DictGuardManager(RootGuardManager* root, py::handle example_value)
+      : GuardManager(root), _size(PyDict_Size(example_value.ptr())) {}
+
+  /**
+   * Adds a new KeyDictGuardAccessor. If the accessor is already present, we
+   * just return the guard manager.
+   */
+  virtual GuardManager* get_key_value_manager(
+      const py::object& accessor_key) override {
+    // Check if the accessor is already present.
+    Py_ssize_t index = py::cast<Py_ssize_t>(accessor_key);
+    auto it = _key_value_managers.find(index);
+    if (it != _key_value_managers.end()) {
+      return it->second.get();
+    }
+    _indices.push_back(index);
+    _key_value_managers[index] =
+        std::make_unique<KeyValueDictGuardManager>(this->get_root());
+    return _key_value_managers[index].get();
+  }
+
+  virtual bool check_nopybind(PyObject* obj) override { // borrowed ref
+    // TODO(janimesh) - Implement a fast-path using dict versions.
+
+    if (!PyDict_Check(obj)) {
+      _fail_count += 1;
+      return false;
+    }
+
+    if (PyDict_Size(obj) != _size) {
+      _fail_count += 1;
+      return false;
+    }
+
+    // This is the dict object, here we use the indices to retrieve key value
+    // pairs and call the _key_value_managers.
+    PyObject* items = PyDict_Items(obj); // new ref
+
+    bool failed_on_first = true;
+    bool result = true;
+    for (Py_ssize_t index : _indices) {
+      // Use PyList_GET_ITEM instead of PyList_GetItem as we already have a
+      // length check. So, it will not throw an exception.
+      PyObject* item = PyList_GET_ITEM(items, index); // borrowed ref
+      result = result && _key_value_managers[index]->check_nopybind(item);
+      if (!result) {
+        _fail_count += 1;
+        break;
+      }
+      failed_on_first = false;
+    }
+    Py_DECREF(items);
+
+    if (!result && !failed_on_first) {
+      // Inplace sort the indices by the fail count. This moves the child
+      // guards with higher fail count earlier in the queue, and enables fail
+      // fast for the next check.
+      std::sort(
+          _indices.begin(),
+          _indices.end(),
+          [this](const Py_ssize_t& a, const Py_ssize_t& b) {
+            return this->_key_value_managers[a]->fail_count() >
+                this->_key_value_managers[b]->fail_count();
+          });
+    }
+    return result;
+  }
+
+  virtual GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    if (!PyDict_Check(obj)) {
+      return GuardDebugInfo(false, "not a dict", 0);
+    }
+
+    if (PyDict_Size(obj) != _size) {
+      return GuardDebugInfo(false, "len(dict) does not match", 0);
+    }
+
+    // This is the dict object, here we use the indices to retrieve key value
+    // pairs and call the _key_value_managers.
+    PyObject* items = PyDict_Items(obj); // new ref
+
+    int num_guards_executed = 0;
+    for (Py_ssize_t index : _indices) {
+      PyObject* item = PyList_GetItem(items, index); // borrowed ref
+      GuardDebugInfo debug_info =
+          _key_value_managers[index]->check_verbose_nopybind(item);
+      num_guards_executed += debug_info.num_guards_executed;
+      if (!debug_info.result) {
+        return GuardDebugInfo(
+            false, debug_info.verbose_code_parts, num_guards_executed);
+      }
+    }
+    Py_DECREF(items);
+    return GuardDebugInfo(true, num_guards_executed);
+  }
+
+  void add_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) override {
+    // If you are calling this, you probably want to go through a key, value
+    // child manager and then add a leaf guard on them. DictGuardManager already
+    // has TYPE_MATCH and LENGTH_CHECK built in.
+    throw std::runtime_error("DictGuardManager does not support a leaf_guard");
+  }
+
+  // Debug helper - Nobody should call this. Call child_managers to directly get
+  // the key and value managers.
+  std::vector<GuardAccessor*> get_accessors() const override {
+    throw std::runtime_error(
+        "KeyValueDictGuardManager does not have accessors");
+  }
+
+  // Debug helper - Returning raw pointers because we can't return unique_ptr
+  // and pybind does not accept a unique_ptr reference return type.
+  virtual std::vector<GuardManager*> get_child_managers() override {
+    std::vector<GuardManager*> ret;
+    for (auto index : _indices) {
+      ret.push_back(_key_value_managers[index].get());
+    }
+    return ret;
+  }
+
+ private:
+  bool _is_dict_guard_manager() override {
+    return true;
+  }
+
+ private:
+  Py_ssize_t _size;
+  std::vector<Py_ssize_t> _indices;
+  std::unordered_map<Py_ssize_t, std::unique_ptr<GuardManager>>
+      _key_value_managers;
+};
+
 std::unique_ptr<GuardManager> make_guard_manager(
     RootGuardManager* root,
     py::handle example_value) {
-  // TODO(janimesh) - Remove comment when DictGuardManager is introduced.
-  // // Check if example_value is a dict
-  // if (py::isinstance<py::dict>(example_value)) {
-  //   return std::make_unique<DictGuardManager>(root);
-  // }
+  // Check if example_value is a dict
+  if (py::isinstance<py::dict>(example_value)) {
+    return std::make_unique<DictGuardManager>(root, example_value);
+  }
   return std::make_unique<GuardManager>(root);
 }
 
@@ -2329,6 +2610,24 @@ PyObject* torch_c_dynamo_guards_init() {
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
       .def(
+          "get_key_value_manager",
+          &GuardManager::get_key_value_manager,
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "get_key_manager",
+          &GuardManager::get_key_manager,
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "get_value_manager",
+          &GuardManager::get_value_manager,
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
           "getitem_manager",
           &GuardManager::get_child_manager<GetItemGuardAccessor>,
           py::return_value_policy::reference)
@@ -2388,6 +2687,29 @@ PyObject* torch_c_dynamo_guards_init() {
             self.add_epilogue_lambda_guard(
                 std::make_unique<LAMBDA_GUARD>(lambda, verbose_code_parts));
           });
+
+  // Dict Guard Manager
+  py::class_<DictGuardManager, GuardManager, std::unique_ptr<DictGuardManager>>(
+      py_m, "DictGuardManager")
+      .def(
+          "get_key_value_manager",
+          &DictGuardManager::get_key_value_manager,
+          py::return_value_policy::reference);
+
+  // Dict key value guard Manager
+  py::class_<
+      KeyValueDictGuardManager,
+      GuardManager,
+      std::unique_ptr<KeyValueDictGuardManager>>(
+      py_m, "KeyValueDictGuardManager")
+      .def(
+          "get_key_manager",
+          &KeyValueDictGuardManager::get_key_manager,
+          py::return_value_policy::reference)
+      .def(
+          "get_value_manager",
+          &KeyValueDictGuardManager::get_value_manager,
+          py::return_value_policy::reference);
 
   py_m.def("install_tensor_aliasing_guard", install_tensor_aliasing_guard);
   py_m.def(
