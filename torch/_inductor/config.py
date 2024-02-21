@@ -1,6 +1,6 @@
 import os  # noqa: C101
 import sys
-from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 
@@ -336,11 +336,10 @@ fuse_ddp_bucket_size = 25
 # overlapping. At this moment, this pass performs better than
 # reorder_for_compute_comm_overlap_passes but we will add the logic of
 # "schedule_comm_wait" in the future and remove the one here.
-fuse_ddp_communication_passes = [
+fuse_ddp_communication_passes: List[Union[Callable[..., None], str]] = [
     "fuse_ddp_with_concat_op",
     "schedule_comm_wait",
 ]
-
 
 
 def decide_compile_threads():

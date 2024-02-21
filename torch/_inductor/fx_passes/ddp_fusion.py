@@ -566,10 +566,12 @@ def fuse_ddp_communication(
 ) -> None:
     for pa in passes:
         if isinstance(pa, str):
-            pa = globals()[pa]
-        if "bucket_size_mb" in {
-            v.name for v in inspect.signature(pa).parameters.values()
-        }:
-            pa(graph, bucket_size_mb=bucket_size_mb)
+            func = globals()[pa]
         else:
-            pa(graph)
+            func = pa
+        if "bucket_size_mb" in {
+            v.name for v in inspect.signature(func).parameters.values()
+        }:
+            func(graph, bucket_size_mb=bucket_size_mb)
+        else:
+            func(graph)
