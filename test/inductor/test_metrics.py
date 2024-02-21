@@ -1,7 +1,7 @@
 # Owner(s): ["module: inductor"]
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._inductor import metrics
+from torch._inductor import config, metrics
 from torch._inductor.utils import collect_defined_kernels
 from torch._inductor.wrapper_benchmark import get_kernel_category_by_source_code
 
@@ -91,6 +91,7 @@ class TestMetrics(TestCase):
         kernel_code = kernel_list[0]
         self.assertEqual(metrics._count_pattern(kernel_code, "tl.atomic_add"), 1)
 
+    @config.patch("benchmark_kernel", True)
     def test_kernel_args_num_gb(self):
         @torch.compile
         def f(x):
@@ -103,7 +104,9 @@ class TestMetrics(TestCase):
 
         self.assertEqual(len(kernel_list), 1)
         kernel_code = kernel_list[0]
-        self.assertEqual(metrics._parse_kernel_args_num_gb(kernel_code), 2.0)
+        self.assertEqual(
+            metrics._parse_kernel_args_num_gb(kernel_code, "pointwise"), 2.0
+        )
 
 
 if __name__ == "__main__":
