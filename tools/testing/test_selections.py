@@ -91,7 +91,7 @@ def get_duration(
         return file_duration
 
     def get_duration_for_classes(
-        test_file: str, test_classes: Set[str]
+        test_file: str, test_classes: FrozenSet[str]
     ) -> Optional[float]:
         duration: float = 0
 
