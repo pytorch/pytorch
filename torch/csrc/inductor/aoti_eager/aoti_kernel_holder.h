@@ -42,6 +42,7 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
 
  private:
   void initAOTIKernelCache();
+  void canonicalizeOpName();
   bool unpackTensors(
       const torch::jit::Stack& stack,
       std::vector<at::Tensor>& inputs);

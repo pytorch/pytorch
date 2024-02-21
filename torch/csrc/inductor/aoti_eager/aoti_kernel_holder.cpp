@@ -110,14 +110,7 @@ AOTIPythonKernelHolder::AOTIPythonKernelHolder(
       op_name_(std::string(op_name)),
       is_symbolic_(is_symbolic),
       device_opt_(c10::nullopt) {
-  // Canonicalize the op_name as a valid directory name
-  std::replace(op_name_.begin(), op_name_.end(), '.', '_');
-  std::string to_remove = "aten::";
-  size_t start_pos = op_name_.find(to_remove);
-  if (start_pos != std::string::npos) {
-    op_name_.replace(start_pos, to_remove.length(), "");
-  }
-
+  // TODO: To provide a registration mechanim to avoid adding such if-else block
   if (dispatch_key_ == c10::DispatchKey::CUDA) {
     device_opt_ = c10::Device(c10::DeviceType::CUDA, 0);
   } else if (dispatch_key_ == c10::DispatchKey::XPU) {
@@ -126,6 +119,7 @@ AOTIPythonKernelHolder::AOTIPythonKernelHolder(
     device_opt_ = c10::Device(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES);
   }
 
+  canonicalizeOpName();
   initAOTIKernelCache();
 }
 
@@ -289,6 +283,16 @@ void AOTIPythonKernelHolder::initAOTIKernelCache() {
     }
   } catch (nlohmann::detail::parse_error& e) {
     TORCH_CHECK(false, e.what());
+  }
+}
+
+void AOTIPythonKernelHolder::canonicalizeOpName() {
+  // Canonicalize the op_name as a valid directory name
+  std::replace(op_name_.begin(), op_name_.end(), '.', '_');
+  const std::string to_remove = "aten::";
+  size_t start_pos = op_name_.find(to_remove);
+  if (start_pos != std::string::npos) {
+    op_name_.replace(start_pos, to_remove.length(), "");
   }
 }
 
