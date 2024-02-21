@@ -318,7 +318,7 @@ def _fill_in_default_kwargs(
 ) -> Tuple[List[fx_type_utils.Argument], Dict[str, fx_type_utils.Argument]]:
     """Find and Fill in the not provided kwargs with default values."""
 
-    # TODO(titaiwang): aten::sym_size has overload, but fx graph is using
+    # TODO: aten::sym_size has overload, but fx graph is using
     # overloadpacket for some reasons.
     # https://github.com/pytorch/pytorch/issues/97201
     # We manually assigned overload for aten::sym_size.
@@ -853,11 +853,6 @@ class FxOnnxInterpreter:
         ],
         fx_graph_module: torch.fx.GraphModule,
     ):
-        # TODO: Constant tensors and buffer/weights are both categorized into `get_attr`,
-        # but they are different to ONNX. We need to distinguish them.
-        # Constant tensors should become ONNX constants in the graph, while buffers/weights ONNX initializers.
-        # For now they are all converted to ONNX initializers.
-
         assert isinstance(node.target, str), f"node.target {node.target} is not a str."
         attr_tensor = getattr(fx_graph_module, node.target)
         assert isinstance(attr_tensor, torch.Tensor), f"{attr_tensor} is not a tensor."

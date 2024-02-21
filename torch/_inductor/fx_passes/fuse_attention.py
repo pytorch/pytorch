@@ -465,7 +465,7 @@ def _sfdp_params_check(match):
         # attn_mask_node may be a float/int number.
         if not hasattr(attn_mask_node, "meta"):
             return False
-        attn_mask = attn_mask_node.meta["val"]
+        attn_mask = attn_mask_node.meta["val"]  # type: ignore[union-attr]
         # Make sure attn_mask.dtype == query.dtype or attn_mask.dtype == torch.bool
         if (
             not isinstance(attn_mask, torch.Tensor)

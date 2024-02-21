@@ -35,7 +35,8 @@ class vTensorStorage final {
       const api::StorageType storage_type,
       const api::GPUMemoryLayout gpu_memory_layout,
       const std::vector<int64_t>& sizes,
-      const api::ScalarType dtype);
+      const api::ScalarType dtype,
+      const bool allocate_memory = true);
 
   vTensorStorage(const vTensorStorage&) = delete;
   vTensorStorage& operator=(const vTensorStorage&) = delete;
@@ -92,7 +93,8 @@ class vTensor final {
       const api::ScalarType dtype,
       const api::StorageType storage_type = api::StorageType::TEXTURE_3D,
       const api::GPUMemoryLayout memory_layout =
-          api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED);
+          api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED,
+      const bool allocate_memory = true);
 
   // Default constructor for quantized vTensor
   vTensor(
@@ -150,7 +152,7 @@ class vTensor final {
 
   // Even at the cost of a heap allocation plus the resulting negative impact
   // on cache locality due to the subsequent pointer chasing, it is still
-  // critcal to share the view across vTensor implementations to minimize
+  // critical to share the view across vTensor implementations to minimize
   // programmer errors.  Ideally this class should have been only made movable,
   // and non-copyable - something we cannot do unfortunately due to the inner
   // workings of at::TensorImpl requiring copy semantics in
@@ -163,7 +165,7 @@ class vTensor final {
   // this trap and not pay the cost of indirection, but the resulting bugs of
   // missing memory barriers will be so frustrating to hunt down for those
   // unfamiliar with the internal mechanics of this class, that I decided to
-  // take the performance pentalty of this extra layer of indirection in favor
+  // take the performance penalty of this extra layer of indirection in favor
   // of making this class easier to use.
   std::shared_ptr<vTensorStorage> view_;
 
@@ -176,6 +178,10 @@ class vTensor final {
     return view_->storage_type_;
   }
 
+  inline api::VulkanImage& image() const& {
+    return view_->image_;
+  }
+
   api::VulkanImage& image(api::PipelineBarrier&, const api::PipelineStageFlags)
       const&;
 
@@ -183,6 +189,10 @@ class vTensor final {
       api::PipelineBarrier&,
       const api::PipelineStageFlags,
       const api::MemoryAccessFlags) &;
+
+  inline api::VulkanBuffer& buffer() const& {
+    return view_->buffer_;
+  }
 
   api::VulkanBuffer& buffer(
       api::PipelineBarrier&,
@@ -307,6 +317,21 @@ class vTensor final {
   inline VkDeviceSize gpu_nbytes() const {
     return api::element_size(dtype()) * gpu_numel();
   }
+
+  /*
+   * Return the VmaAllocationCreateInfo of the underlying resource
+   */
+  VmaAllocationCreateInfo get_allocation_create_info() const;
+
+  /*
+   * Return the VkMemoryRequirements of the underlying resource
+   */
+  VkMemoryRequirements get_memory_requirements() const;
+
+  /*
+   * Binds the underlying resource to the given memory allocation
+   */
+  void bind_allocation(const api::MemoryAllocation& allocation);
 };
 
 void add_buffer_barrier(
