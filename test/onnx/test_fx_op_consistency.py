@@ -5,14 +5,20 @@ and torch operators given the same inputs.
 
 Usage:
 
+    1. Test all operators:
+
     pytest test/onnx/test_fx_op_consistency.py
 
-    To run tests on a specific operator (e.g. torch.ceil):
+    2. To run tests on a specific operator (e.g. torch.ceil):
 
     pytest test/onnx/test_fx_op_consistency.py -k ceil
     pytest test/onnx/test_fx_op_consistency.py -k nn_functional_scaled_dot_product_attention
 
-    Read more on Running and writing tests:
+    3. Set `CREATE_REPRODUCTION_REPORT=1` to create markdown files for reproduction of errors. E.g.
+
+    CREATE_REPRODUCTION_REPORT=1 python -m pytest test/onnx/test_fx_op_consistency.py -k div_mode_int
+
+    NOTE: Read more on Running and writing tests:
         https://github.com/pytorch/pytorch/wiki/Running-and-writing-tests
 
 Note:
@@ -30,7 +36,10 @@ from __future__ import annotations
 
 import copy
 import itertools
+import os
 from typing import Any, Callable, Collection, Mapping, Optional, Tuple, Type, Union
+
+import error_reproduction
 
 import onnx_test_common
 
@@ -1392,22 +1401,10 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         and sample.kwargs.get("dim") is not None,
         reason="Op (ReduceMin) [ShapeInferenceError] axis must be in [-rank, rank-1]. input rank was 0",
     ),
-    xfail(
-        "arange",
-        matcher=lambda sample: not isinstance(sample.input, torch.Tensor),
-        reason="torch.export.export does not support non-tensor input (https://github.com/pytorch/pytorch/issues/115110)",
-        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
-    ),
     skip(
         "cat",
         matcher=lambda sample: sample.input[0].equal(torch.tensor([])),
         reason="core dump - cat does not support zero-dim tensors yet",
-    ),
-    xfail(
-        "full",
-        matcher=lambda sample: not isinstance(sample.input, torch.Tensor),
-        reason="torch.export.export does not support non-tensor input (https://github.com/pytorch/pytorch/issues/115110)",
-        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
     ),
     xfail(
         "index_add",
@@ -1633,32 +1630,32 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="Logic not implemented for size 0 inputs in op.Reshape",
         matcher=lambda sample: any(dim == 0 for dim in sample.input.shape),
     ),
-    xfail(
+    skip(
         "signal.windows.hamming",
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="does not match node name",
     ),
-    xfail(
+    skip(
         "signal.windows.general_hamming",
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="does not match node name",
     ),
-    xfail(
+    skip(
         "signal.windows.blackman",
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="does not match node name",
     ),
-    xfail(
+    skip(
         "signal.windows.general_cosine",
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="does not match node name",
     ),
-    xfail(
+    skip(
         "signal.windows.hann",
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="does not match node name",
     ),
-    xfail(
+    skip(
         "signal.windows.nuttall",
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="does not match node name",
@@ -1732,6 +1729,9 @@ def _compare_onnx_and_torch_exported_program(
     onnx_exported_program,
     input_args,
     input_kwargs=None,
+    test_name=None,
+    sample_num=None,
+    sample_kwargs=None,
     rtol=1e-03,
     atol=1e-07,
     only_check_shape=False,
@@ -1753,17 +1753,35 @@ def _compare_onnx_and_torch_exported_program(
             f"Expected {len(torch_outputs_onnx_format)} outputs, got {len(onnx_outputs)}"
         )
 
-    for torch_output, onnx_output in zip(torch_outputs_onnx_format, onnx_outputs):
+    for j, (torch_output, onnx_output) in enumerate(
+        zip(torch_outputs_onnx_format, onnx_outputs)
+    ):
         if only_check_shape:
             assert torch_output.shape == onnx_output.shape
         else:
-            torch.testing.assert_close(
-                torch_output,
-                torch.tensor(onnx_output),
-                rtol=rtol,
-                atol=atol,
-                equal_nan=True,
-            )
+            try:
+                torch.testing.assert_close(
+                    torch.tensor(onnx_output),
+                    torch_output,
+                    rtol=rtol,
+                    atol=atol,
+                    equal_nan=True,
+                )
+            except AssertionError as e:
+                if os.environ.get("CREATE_REPRODUCTION_REPORT") == "1":
+                    error_reproduction.create_mismatch_report(
+                        test_name,
+                        sample_num,
+                        onnx_exported_program.model_proto,
+                        input_args,
+                        sample_kwargs,
+                        torch.tensor(onnx_output),
+                        torch_output,
+                        e,
+                    )
+                if len(torch_outputs_onnx_format) > 1:
+                    raise AssertionError(f"Output {j} mismatch") from e
+                raise
 
 
 def _run_test_output_match(
@@ -1853,6 +1871,9 @@ def _run_test_output_match(
                     model,
                     onnx_program,
                     inputs,
+                    test_name=test_suite.id(),
+                    sample_num=i,
+                    sample_kwargs=cpu_sample.kwargs,
                     rtol=rtol,
                     atol=atol,
                     only_check_shape=(op.name in test_suite.only_shape_check_list),

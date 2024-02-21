@@ -88,8 +88,8 @@ set SCCACHE_IGNORE_SERVER_IO_ERROR=1
 sccache --stop-server
 sccache --start-server
 sccache --zero-stats
-set CC=sccache-cl
-set CXX=sccache-cl
+set CMAKE_C_COMPILER_LAUNCHER=sccache
+set CMAKE_CXX_COMPILER_LAUNCHER=sccache
 
 set CMAKE_GENERATOR=Ninja
 

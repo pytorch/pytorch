@@ -1290,14 +1290,14 @@ void initJITBindings(PyObject* module) {
             return node->is_symbolic();
           })
       .def(
-          "singleton_int",
+          "nested_int",
           [](const c10::SymNode& node) {
-            return node->singleton_int();
+            return node->nested_int();
           })
       .def(
-          "singleton_coeff",
+          "nested_int_coeff",
           [](const c10::SymNode& node) {
-            return node->singleton_coeff();
+            return node->nested_int_coeff();
           });
 
   // clang-format on
@@ -1497,9 +1497,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "get_record",
           [](PyTorchStreamReader& self, const std::string& key) {
-            at::DataPtr data;
-            size_t size = 0;
-            std::tie(data, size) = self.getRecord(key);
+            auto [data, size] = self.getRecord(key);
             return py::bytes(reinterpret_cast<const char*>(data.get()), size);
           })
       .def(

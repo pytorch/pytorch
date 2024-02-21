@@ -1256,10 +1256,19 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 # AOT export does not allow for input mutation
                 x = x.clone()
-                pass_kernel[(1,)](x, torch.empty_like(x))
-                return x
+                out = torch.zeros_like(x[:, 4:])
+                # the slicing below creates two ReinterpretView
+                # instances: with offset=3 and offset=4
+                add_kernel[(10,)](
+                    in_ptr0=x[:, 3:-1],
+                    in_ptr1=x[:, 4:],
+                    out_ptr=out,
+                    n_elements=160,
+                    BLOCK_SIZE=16,
+                )
+                return out
 
-        example_inputs = (torch.randn(4, device=self.device),)
+        example_inputs = (torch.randn(10, 20, device=self.device),)
         self.check_model(Model(), example_inputs)
 
     @skipIfRocm

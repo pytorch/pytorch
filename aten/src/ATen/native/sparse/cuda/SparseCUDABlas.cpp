@@ -154,6 +154,13 @@ void _csrmm2(
 
 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  // ALG1 is broken on SM89 as of CUDA 11.8+
+#if !defined(USE_ROCM)
+  auto default_alg = prop->major == 8 && prop->minor == 9 ? CUSPARSE_SPMM_CSR_ALG2 : CUSPARSE_SPMM_CSR_ALG1;
+#else
+  auto default_alg = CUSPARSE_SPMM_CSR_ALG1;
+#endif
 
   // cusparseSpMM_bufferSize returns the bufferSize that can be used by cusparseSpMM
   size_t bufferSize;
@@ -164,7 +171,7 @@ void _csrmm2(
     beta,
     descC,
     cusparse_value_type,      /* data type in which the computation is executed */
-    CUSPARSE_SPMM_CSR_ALG1,   /* default computing algorithm for CSR sparse matrix format */
+    default_alg,              /* default computing algorithm for CSR sparse matrix format */
     &bufferSize               /* output */
   ));
 
@@ -178,7 +185,7 @@ void _csrmm2(
     beta,
     descC,
     cusparse_value_type,      /* data type in which the computation is executed */
-    CUSPARSE_SPMM_CSR_ALG1,   /* default computing algorithm for CSR sparse matrix format */
+    default_alg,              /* default computing algorithm for CSR sparse matrix format */
     dataPtr.get()             /* external buffer */
   ));
 
