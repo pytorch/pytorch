@@ -88,10 +88,10 @@ class Min10:
         return mean(self.data)
 
 
-class TestForwardOverlapWorldSizeOne(FSDPTest):
+class TestForwardOverlap(FSDPTest):
     @property
     def world_size(self):
-        return 1
+        return 2
 
     def _dist_train(self):
         rank = self.rank
@@ -243,12 +243,6 @@ class TestForwardOverlapWorldSizeOne(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_forward_overlap(self):
         self._dist_train()
-
-
-class TestForwardOverlapWorldSizeTwo(TestForwardOverlapWorldSizeOne):
-    @property
-    def world_size(self):
-        return 2
 
 
 if __name__ == "__main__":
