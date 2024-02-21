@@ -21,10 +21,10 @@ from typing import (
 )
 
 import sympy
+from sympy.printing.printer import Printer
 
 import torch
 import torch.fx
-from sympy.printing.printer import Printer
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils._sympy.value_ranges import ValueRanges
 
