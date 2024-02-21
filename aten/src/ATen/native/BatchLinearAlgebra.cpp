@@ -463,8 +463,7 @@ TORCH_META_FUNC(linalg_ldl_solve)
       " does not match b dtype ",
       B.scalar_type());
 
-    std::vector<int64_t> B_broadcast_size;
-    std::tie(B_broadcast_size, std::ignore) = at::native::_linalg_broadcast_batch_dims(B, LD);
+    auto [B_broadcast_size, _] = at::native::_linalg_broadcast_batch_dims(B, LD);
 
   // prefer column major strides
   auto result_strides = at::native::batched_matrix_contiguous_strides(B_broadcast_size, /*column_major=*/true);
@@ -480,8 +479,7 @@ TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool uppe
   at::native::linearSolveCheckInputs(self, A, "triangular_solve");
 
   if (A.layout() == Layout::Strided) {
-    std::vector<int64_t> self_broadcast_size, A_broadcast_size;
-    std::tie(self_broadcast_size, A_broadcast_size) = at::native::_linalg_broadcast_batch_dims(self, A);
+    auto [self_broadcast_size, A_broadcast_size] = at::native::_linalg_broadcast_batch_dims(self, A);
 
     // make column major strides for BLAS
     const auto solution_strides = at::native::batched_matrix_contiguous_strides(self_broadcast_size, /*f-contig=*/true);
@@ -629,8 +627,7 @@ TORCH_META_FUNC(linalg_qr)(const Tensor& A,
                            c10::string_view mode) {
   at::native::checkIsMatrix(A, "linalg.qr");
   at::native::checkFloatingOrComplex(A, "linalg.qr");
-  bool compute_q, reduced_mode;
-  std::tie(compute_q, reduced_mode) = at::native::_parse_qr_mode(mode);
+  auto [compute_q, reduced_mode] = at::native::_parse_qr_mode(mode);
 
   auto A_shape = A.sizes().vec();
   const auto m = A_shape.cend()[-2];
@@ -1604,8 +1601,7 @@ Tensor& linalg_inv_out(const Tensor& A, Tensor& result) {
 }
 
 Tensor linalg_inv(const Tensor& A) {
-  Tensor result, info;
-  std::tie(result, info) = at::linalg_inv_ex(A);
+  auto [result, info] = at::linalg_inv_ex(A);
   at::_linalg_check_errors(info, "linalg.inv", A.dim() == 2);
   return result;
 }
@@ -1669,8 +1665,7 @@ Tensor cholesky_solve(const Tensor& self, const Tensor& A, bool upper) {
            "b should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   TORCH_CHECK(A.dim() >= 2,
            "u should have at least 2 dimensions, but has ", A.dim(), " dimensions instead");
-  Tensor self_broadcasted, A_broadcasted;
-  std::tie(self_broadcasted, A_broadcasted) = _linalg_broadcast_batch_dims(self, A, "cholesky_solve");
+  auto [self_broadcasted, A_broadcasted] = _linalg_broadcast_batch_dims(self, A, "cholesky_solve");
   return at::_cholesky_solve_helper(self_broadcasted, A_broadcasted, upper);
 }
 
@@ -1783,8 +1778,7 @@ TORCH_IMPL_FUNC(linalg_cholesky_ex_out)(const Tensor& A,
 }
 
 Tensor linalg_cholesky(const Tensor& A, bool upper) {
-  Tensor L, info;
-  std::tie(L, info) = at::linalg_cholesky_ex(A, upper, /*check_errors=*/false);
+  auto [L, info] = at::linalg_cholesky_ex(A, upper, /*check_errors=*/false);
   at::_linalg_check_errors(info, "linalg.cholesky", A.dim() == 2);
   return L;
 }
@@ -1921,8 +1915,7 @@ std::tuple<Tensor, Tensor> linalg_solve_ex(const Tensor& A,
                                            const Tensor& B,
                                            bool left,
                                            bool check_errors) {
-  Tensor result, LU, pivots, info;
-  std::tie(result, LU, pivots, info) = at::_linalg_solve_ex(A, B, left, check_errors);
+  auto [result, LU, pivots, info] = at::_linalg_solve_ex(A, B, left, check_errors);
   return std::make_tuple(std::move(result), std::move(info));
 }
 
@@ -1939,8 +1932,7 @@ Tensor& linalg_solve_out(const Tensor& A,
 Tensor linalg_solve(const Tensor& A,
                     const Tensor& B,
                     bool left) {
-  Tensor result, info;
-  std::tie(result, info) = at::linalg_solve_ex(A, B, left);
+  auto [result, info] = at::linalg_solve_ex(A, B, left);
   at::_linalg_check_errors(info, "torch.linalg.solve", A.dim() == 2);
   return result;
 }
@@ -1980,8 +1972,7 @@ std::tuple<Tensor&, Tensor&> linalg_lu_factor_out(const Tensor& A, bool pivot, T
 }
 
 std::tuple<Tensor, Tensor> linalg_lu_factor(const Tensor& A, bool pivot) {
-  Tensor LU, pivots, info;
-  std::tie(LU, pivots, info) = at::linalg_lu_factor_ex(A, pivot, /*check_errors=*/false);
+  auto [LU, pivots, info] = at::linalg_lu_factor_ex(A, pivot, /*check_errors=*/false);
   at::_linalg_check_errors(info, "torch.linalg.lu_factor", A.dim() == 2);
   return std::make_tuple(std::move(LU), std::move(pivots));
 }
@@ -2237,8 +2228,7 @@ static void triangular_solve_out_impl(
 }
 
 TORCH_IMPL_FUNC(triangular_solve_out)(const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular, const Tensor& result, const Tensor& clone_A) {
-  Tensor self_broadcast, A_broadcast;
-  std::tie(self_broadcast, A_broadcast) = _linalg_broadcast_batch_dims(self, A, "triangular_solve");
+  auto [self_broadcast, A_broadcast] = _linalg_broadcast_batch_dims(self, A, "triangular_solve");
 
   bool copy_needed = !result.transpose(-2, -1).is_contiguous();
   copy_needed |= !clone_A.transpose(-2, -1).is_contiguous();
@@ -2370,8 +2360,7 @@ TORCH_IMPL_FUNC(linalg_qr_out)(const Tensor& A,
   auto m = A.size(-2);
   auto n = A.size(-1);
   auto k = std::min(m, n);
-  bool compute_q, reduced_mode;
-  std::tie(compute_q, reduced_mode) = at::native::_parse_qr_mode(mode);
+  auto [compute_q, reduced_mode] = at::native::_parse_qr_mode(mode);
 
 
   // We need an auxiliary tensor to call geqrf
@@ -3740,8 +3729,7 @@ std::tuple<Tensor&, Tensor&> linalg_ldl_factor_out(
 std::tuple<Tensor, Tensor> linalg_ldl_factor(
     const Tensor& self,
     bool hermitian) {
-  Tensor LD, pivots, info;
-  std::tie(LD, pivots, info) =
+  auto [LD, pivots, info] =
       at::linalg_ldl_factor_ex(self, hermitian, /*check_errors=*/false);
   at::_linalg_check_errors(info, "torch.linalg.ldl_factor", self.dim() == 2);
   return std::make_tuple(std::move(LD), std::move(pivots));
@@ -3820,8 +3808,7 @@ Tensor& linalg_solve_triangular_out(
     bool unitriangular,
     Tensor& out) {
   checkInputsSolver(A, B, left, "linalg.solve_triangular");
-  Tensor A_, B_;
-  std::tie(B_, A_) = _linalg_broadcast_batch_dims(B, A, /*don't check errors*/nullptr);
+  auto [B_, A_] = _linalg_broadcast_batch_dims(B, A, /*don't check errors*/nullptr);
 
   // We'll write F-contig / F-transpose for FORTRAN contiguous / FORTRAN transpose etc
   // We say that a matrix is F-ready if it's F-contig OR F-transpose
