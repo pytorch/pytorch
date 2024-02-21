@@ -36,17 +36,17 @@ static int max_stream_priorities;
 // already been destroyed and thus invoking cudaStreamDestroy could lead to a
 // crash. It's likely an issue in CUDA, but to be safe - let's just "forget"
 // the destruction.
-static c10::once_flag device_flags[C10_COMPILE_TIME_MAX_GPUS];
+static c10::once_flag device_flags[c10::Device::MAX_NUM_DEVICES];
 static std::atomic<uint32_t>
     priority_counters[c10::cuda::max_compile_time_stream_priorities]
-                     [C10_COMPILE_TIME_MAX_GPUS];
+                     [c10::Device::MAX_NUM_DEVICES];
 
 static cudaStream_t streams[c10::cuda::max_compile_time_stream_priorities]
-                           [C10_COMPILE_TIME_MAX_GPUS][kStreamsPerPool];
+                           [c10::Device::MAX_NUM_DEVICES][kStreamsPerPool];
 #ifdef USE_ROCM
 static c10::once_flag
     stream_flags[c10::cuda::max_compile_time_stream_priorities]
-                [C10_COMPILE_TIME_MAX_GPUS][kStreamsPerPool];
+                [c10::Device::MAX_NUM_DEVICES][kStreamsPerPool];
 #endif
 
 // Note [HIP Lazy Streams]
@@ -165,10 +165,10 @@ static void initGlobalStreamState() {
   // Check if the number of GPUs matches the expected compile-time max number
   // of GPUs.
   TORCH_CHECK(
-      num_gpus <= C10_COMPILE_TIME_MAX_GPUS,
+      num_gpus <= c10::Device::MAX_NUM_DEVICES,
       "Number of CUDA devices on the machine is larger than the compiled "
       "max number of gpus expected (",
-      C10_COMPILE_TIME_MAX_GPUS,
+      c10::Device::MAX_NUM_DEVICES,
       "). Increase that and recompile.");
   int leastPriority = -1, greatestPriority = -1;
   C10_CUDA_CHECK(

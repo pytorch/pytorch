@@ -263,19 +263,7 @@ def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
     return False
 
 def is_nested_int(s):
-    # check for NestedIntSymNode
-    if not isinstance(s, torch.SymInt):
-        return False
-    if s.node.nested_int() is not None:
-        return True
-
-    # check for symbolic variable wrapping a NestedIntSymNode (fake-ifying causes this)
-    return (
-        s.node.is_symbolic()
-        and s.node.hint is not None
-        and isinstance(s.node.hint, torch.SymInt)
-        and s.node.hint.node.nested_int() is not None
-    )
+    return isinstance(s, torch.SymInt) and s.node.is_nested_int()
 
 def _iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Basic]:
     if isinstance(val, SymTypes):
