@@ -35,7 +35,7 @@ disable compilation are listed in the following table:
 TorchDynamo intercepts the execution of each Python function frame. So, suppose you have a code structure (image below) where the function ``fn`` calls functions ``a_fn`` and ``b_fn``. And ``a_fn`` calls ``aa_fn`` and ``ab_fn``. When you use the PyTorch eager mode rather than ``torch.compile``, these function frames run as is. With ``torch.compile``, TorchDynamo intercepts each of these function frames (indicated by the green color):
 
 .. figure:: _static/img/fine_grained_apis/api_diagram.png
-   :alt: Callstack diagram of differnet apis.
+   :alt: Callstack diagram of different apis.
 
 Let's imagine, that function ``a_fn`` is causing troubles with ``torch.compile``.
 And this is a non-critical portion of the model. You can use ``compiler.disable``

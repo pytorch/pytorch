@@ -1,19 +1,38 @@
 # Owner(s): ["oncall: distributed"]
 
+import contextlib
 import itertools
 import os
 import re
 import sys
+import warnings
 from abc import ABC, abstractmethod
 from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from functools import partial, wraps
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    no_type_check,
+    Optional,
+    Tuple,
+    Type,
+    Union,
+)
 from unittest import mock
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+import torch.nn.functional as F
+from torch.distributed._composable.fsdp._fsdp_param_group import (
+    FSDPParamGroup,
+    RegisterPostBackwardFunction,
+)
+from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp import CPUOffload, FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import TrainingState
 from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGIES
@@ -32,6 +51,7 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import FILE_SCHEMA, get_cycles_per_ms
+from torch.utils._triton import has_triton
 
 
 class FSDPInitMode(Enum):
@@ -73,15 +93,7 @@ class FSDPTestModel(nn.Module, ABC):
 
     @staticmethod
     @abstractmethod
-    def init(
-        group: dist.ProcessGroup,
-        fsdp_init_mode: FSDPInitMode,
-        *init_args: Any,
-        cuda_init_mode: CUDAInitMode,
-        fsdp_kwargs: Optional[Dict[str, Any]] = None,
-        deterministic: bool = False,
-        **init_kwargs: Any,
-    ) -> nn.Module:
+    def init(*args: Any, **kwargs: Any) -> nn.Module:
         """Initializes an instance of this model."""
         ...
 
@@ -110,7 +122,9 @@ def _assert_module_states(
     olist = [None for _ in range(world_size)]
     dist.all_gather_object(olist, named_module_states, group=process_group)
     rank0_states = olist[0]
+    assert rank0_states is not None  # mypy
     for state in olist[1:]:
+        assert state is not None  # mypy
         for (_, p1), (_, p2) in zip(rank0_states, state):
             assert_fn(p1, p2)
 
@@ -201,7 +215,7 @@ class DummyProcessGroup:
         dist_wait = mock.Mock()
 
         def get_future():
-            future = torch.futures.Future()
+            future: torch.futures.Future = torch.futures.Future()
             future.set_result(1)
             return future
 
@@ -466,8 +480,9 @@ class AlwaysWrapNestedWrappedModule(NestedWrappedModule):
         wraps with top-level FSDP and the ``always_wrap_policy()`` auto wrap
         policy.
         """
-        super_ = super(AlwaysWrapNestedWrappedModule, AlwaysWrapNestedWrappedModule)
-        model = super_.init(
+        model = super(
+            AlwaysWrapNestedWrappedModule, AlwaysWrapNestedWrappedModule
+        ).init(
             group=group,
             fsdp_init_mode=FSDPInitMode.NO_FSDP,
             cuda_init_mode=cuda_init_mode,
@@ -477,6 +492,7 @@ class AlwaysWrapNestedWrappedModule(NestedWrappedModule):
         if fsdp_init_mode == FSDPInitMode.NO_FSDP:
             return model
         elif fsdp_init_mode == FSDPInitMode.RECURSIVE:
+            fsdp_kwargs = fsdp_kwargs or {}
             fsdp_model = FSDP(model, auto_wrap_policy=always_wrap_policy, **fsdp_kwargs)
             if cuda_init_mode == CUDAInitMode.CUDA_AFTER:
                 fsdp_model = fsdp_model.cuda()
@@ -651,7 +667,7 @@ class ModuleWithDelay(FSDPTestModel):
 
 class NestedWrappedModuleWithDelay(ModuleWithDelay):
     @staticmethod
-    def init(
+    def init(  # type: ignore[override]
         group: dist.ProcessGroup,
         fsdp_init_mode: FSDPInitMode,
         cuda_init_mode: CUDAInitMode = CUDAInitMode.CUDA_AFTER,
@@ -660,7 +676,7 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
         delay_after_loss_ms: int = 0,
         delay_before_reduction_ms: int = 0,
     ):
-        return super(NestedWrappedModuleWithDelay, NestedWrappedModuleWithDelay).init(
+        return ModuleWithDelay.init(
             NestedWrappedModule,
             group=group,
             fsdp_init_mode=fsdp_init_mode,
@@ -762,8 +778,9 @@ class MixtureOfExperts(NestedWrappedModule):
                 for p in self.parameters():
                     if hasattr(p, "expert"):
                         continue  # these params don't need grad reduction
-                    p.grad.div_(self.world_size)
-                    torch.distributed.all_reduce(p.grad, group=self.group)
+                    if p.grad is not None:
+                        p.grad.div_(self.world_size)
+                        torch.distributed.all_reduce(p.grad, group=self.group)
 
     @staticmethod
     def init(
@@ -815,6 +832,158 @@ class MixtureOfExperts(NestedWrappedModule):
                 fsdp_model = fsdp_model.cuda()
             return fsdp_model
         raise ValueError(f"Unsupported FSDP init mode: {fsdp_init_mode}")
+
+
+class MLP(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        device: torch.device = torch.device("cpu"),
+        with_buffer: bool = False,
+        dim_multiplier: int = 4,
+    ):
+        super().__init__()
+        self.in_proj = nn.Linear(dim, dim_multiplier * dim, device=device)
+        self.out_proj = nn.Linear(dim_multiplier * dim, dim, device=device)
+        if with_buffer:
+            self.register_buffer("buffer", torch.randn((dim,), device=device))
+        else:
+            self.buffer = None
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        z = self.in_proj(x)
+        z = F.relu(z)
+        z = self.out_proj(z)
+        z = F.relu(z)
+        if self.buffer:
+            z += self.buffer
+        return z
+
+
+class DoubleLinear(nn.Module):
+    """
+    This can be used for returning multiple outputs from a module
+    (``use_second_linear=True``) or for having an unused module (``False``).
+    """
+
+    def __init__(self, dim: int, use_second_linear: bool = True):
+        super().__init__()
+        self.lin1 = nn.Linear(dim, dim)
+        self.lin2 = nn.Linear(dim, dim)
+        self.relu = nn.ReLU()
+        self.use_second_linear = use_second_linear
+
+    def forward(
+        self, x: torch.Tensor
+    ) -> Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
+        if self.use_second_linear:
+            return self.relu(self.lin1(x)), self.relu(self.lin2(x))
+        return self.relu(self.lin1(x))
+
+
+@contextlib.contextmanager
+def patch_all_gather(new_all_gather_into_tensor: Callable):
+    orig_all_gather = dist.all_gather_into_tensor
+    dist.all_gather_into_tensor = new_all_gather_into_tensor
+    try:
+        yield
+    finally:
+        dist.all_gather_into_tensor = orig_all_gather
+
+
+@contextlib.contextmanager
+def patch_reduce_scatter(new_reduce_scatter_tensor: Callable):
+    orig_reduce_scatter = dist.reduce_scatter_tensor
+    dist.reduce_scatter_tensor = new_reduce_scatter_tensor
+    try:
+        yield
+    finally:
+        dist.reduce_scatter_tensor = orig_reduce_scatter
+
+
+@no_type_check
+@contextlib.contextmanager
+def patch_unshard(new_unshard: Callable):
+    orig_unshard = FSDPParamGroup.unshard
+    FSDPParamGroup.unshard = new_unshard
+    try:
+        yield
+    finally:
+        FSDPParamGroup.unshard = orig_unshard
+
+
+@no_type_check
+@contextlib.contextmanager
+def patch_post_backward(new_post_backward: Callable):
+    orig_post_backward = FSDPParamGroup.post_backward
+    FSDPParamGroup.post_backward = new_post_backward
+    try:
+        yield
+    finally:
+        FSDPParamGroup.post_backward = orig_post_backward
+
+
+@no_type_check
+@contextlib.contextmanager
+def patch_register_post_backward_hook_backward(new_backward: Callable):
+    orig_backward = RegisterPostBackwardFunction.backward
+    RegisterPostBackwardFunction.backward = new_backward
+    try:
+        yield
+    finally:
+        RegisterPostBackwardFunction.backward = orig_backward
+
+
+def reduce_scatter_with_assert(
+    cls,
+    orig_reduce_scatter: Callable,
+    assert_fn: Callable,  # `assert_fn(output: Tensor)`
+    *args: Any,
+    **kwargs: Any,
+):
+    if len(args) > 0:
+        output = args[0]
+    elif "output" in kwargs:
+        output = kwargs["output"]
+    else:
+        raise AssertionError(
+            f"Cannot get reduce-scatter output from\nargs: {args}\nkwargs: {kwargs}"
+        )
+    assert_fn(output)
+    return orig_reduce_scatter(*args, **kwargs)
+
+
+def check_1d_sharded_parity(
+    cls,  # unit test class
+    replicated_module: nn.Module,
+    sharded_module: nn.Module,
+    group: Optional[dist.ProcessGroup] = None,
+    check_grads: bool = True,
+    prefixes_to_ignore: Tuple[str, ...] = (),
+):
+    group = group or dist.distributed_c10d._get_default_group()
+    rank, world_size = group.rank(), group.size()
+    for (replicated_name, replicated_param), (sharded_name, sharded_param) in zip(
+        replicated_module.named_parameters(), sharded_module.named_parameters()
+    ):
+        clean_sharded_name = sharded_name
+        for prefix in prefixes_to_ignore:
+            clean_sharded_name = clean_sharded_name.replace(prefix, "")
+        cls.assertEqual(replicated_name, clean_sharded_name)
+        cls.assertIsInstance(sharded_param, DTensor)
+        assert isinstance(sharded_param, DTensor)  # mypy
+        param_chunks = torch.chunk(replicated_param, world_size, dim=0)
+        cls.assertEqual(sharded_param._local_tensor, param_chunks[rank])
+        if not check_grads:
+            continue
+        if replicated_param.grad is None:
+            cls.assertIsNone(sharded_param.grad)
+            continue
+        cls.assertIsNotNone(sharded_param.grad)
+        grad_chunks = torch.chunk(replicated_param.grad, world_size, dim=0)
+        cls.assertIsInstance(sharded_param.grad, DTensor)
+        assert isinstance(sharded_param.grad, DTensor)  # mypy
+        cls.assertEqual(sharded_param.grad._local_tensor, grad_chunks[rank])
 
 
 def run_subtests(
@@ -995,6 +1164,7 @@ class FSDPTest(MultiProcessTestCase):
                     self.assertEqual(loss.dtype, torch.float16)
                 # FSDP loss is fp16, DDP AMP loss is fp32
                 elif isinstance(model, FSDP):
+                    assert mixed_precision is not None  # mypy
                     self.assertEqual(loss.dtype, mixed_precision.param_dtype)
                 else:
                     self.assertEqual(loss.dtype, torch.float32)
@@ -1018,7 +1188,7 @@ class FSDPTest(MultiProcessTestCase):
 
         if isinstance(model, FSDP):
             model._assert_state(TrainingState.IDLE)
-        return loss.detach()
+        return loss.detach()  # type: ignore[possibly-undefined]
 
     def _test_fsdp_parity(
         self,
@@ -1161,6 +1331,7 @@ class FSDPTest(MultiProcessTestCase):
         # Check parameter devices are CPU if offloading to CPU before calling
         # `get_full_params()`, which will cast the parameters to FP32
         if offload_params:
+            cpu_device = torch.device("cpu")
             for param in fsdp_model.parameters():
                 self.assertEqual(param.device, cpu_device)
             fsdp_loss = fsdp_loss.cuda()
@@ -1182,6 +1353,40 @@ class FSDPTest(MultiProcessTestCase):
                 exact_device=True,
                 msg="FSDP did not match DDP",
             )
+
+
+def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
+    def fully_shard_with_compiled_compute(*args, **kwargs):
+        # compile ``module._call_impl``
+        # to showcase how to include user-registered hooks
+        if compile_compute_on_module is None or isinstance(
+            args[0], compile_compute_on_module
+        ):
+            args[0].compile()
+        return torch.distributed._composable.fsdp.fully_shard(*args, **kwargs)  # type: ignore[operator]
+
+    class FullyShardPatch(Enum):
+        # apply ``partial`` in order to use ``Enum.value``
+        EAGER = partial(torch.distributed._composable.fsdp.fully_shard)  # type: ignore[var-annotated, arg-type]
+        COMPILED_COMPUTE = partial(fully_shard_with_compiled_compute)  # type: ignore[arg-type]
+        # add FULL for tracing FSDP
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for fully_shard_patch in FullyShardPatch:
+                if fully_shard_patch != FullyShardPatch.EAGER and not has_triton():
+                    warnings.warn("Inductor on GPU needs Triton and recent GPU arch")
+                    continue
+                with mock.patch(
+                    f"{func.__module__}.{torch.distributed._composable.fsdp.fully_shard.__name__}",
+                    fully_shard_patch.value,
+                ):
+                    func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 class SkipModule(nn.Module):
