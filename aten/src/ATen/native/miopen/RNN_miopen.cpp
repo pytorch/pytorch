@@ -915,7 +915,7 @@ void lstm_packed_miopen(Tensor& output, Tensor& hy, Tensor& cy,
 REGISTER_CUDA_DISPATCH(lstm_miopen_stub, &lstm_miopen);
 REGISTER_CUDA_DISPATCH(lstm_packed_miopen_stub, &lstm_packed_miopen);
 
-} // anonymous namepsace
+} // anonymous namespace
 }} //namespace native.
 
 #endif
