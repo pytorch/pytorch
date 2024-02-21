@@ -1356,6 +1356,7 @@ class FSDPTest(MultiProcessTestCase):
 
 
 def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
+    assert 0
     def fully_shard_with_compiled_compute(*args, **kwargs):
         # compile ``module._call_impl``
         # to showcase how to include user-registered hooks
