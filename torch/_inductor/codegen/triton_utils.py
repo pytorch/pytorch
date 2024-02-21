@@ -3,14 +3,12 @@ from typing import Any, Dict, List
 import torch
 
 from .. import config
-from ..utils import instance_descriptor
+from ..utils import _type_of, instance_descriptor
 from ..virtualized import V
 from .common import KernelArgType, SizeArg, TensorArg, WorkspaceArg
 
 
 def signature_of(arg: KernelArgType, *, size_dtype: str) -> str:
-    from triton.runtime.jit import JITFunction
-
     if isinstance(arg, TensorArg):
         # TODO: Remove fp8 special handling when Triton supports PyTorch fp8 dtypes.
         # Related PR: https://github.com/openai/triton/pull/2279/
@@ -23,7 +21,7 @@ def signature_of(arg: KernelArgType, *, size_dtype: str) -> str:
         elif arg.dtype == torch.float8_e5m2fnuz:
             tye = "*fp8e5b16"
         else:
-            tye = JITFunction._type_of(arg.dtype)
+            tye = _type_of(arg.dtype)
         if V.graph.is_unspec_arg(arg.buffer):
             # had unwrapped 0d tensor as scalar
             new_tye = tye.lstrip("*")
