@@ -485,9 +485,13 @@ class CompiledOptimizerTests(TestCase):
     # Basic shampoo test to verify we support compiling the various ops without error
     @requires_cuda
     def test_basic_shampoo(self):
-        mod = torch.nn.Linear(10, 10, device="cuda:0", bias=False)
-        compiled_mod = deepcopy(mod)
-        for p, p_c in zip(mod.parameters(), compiled_mod.parameters()):
+        param_buf = torch.rand((1024, 128))
+        param_buf_c = param_buf.clone().detach()
+
+        params_c = [param_buf_c[0:512, :], param_buf_c[512:, :]]
+        params = [param_buf[0:512, :], param_buf[512:, :]]
+
+        for p, p_c in zip(params, params_c):
             p.grad = torch.rand_like(p)
             p_c.grad = p.grad.clone().detach()
 
@@ -546,10 +550,7 @@ class CompiledOptimizerTests(TestCase):
 
         compiled_fn = torch.compile(shampoo_functional_basic)
 
-        self.assertEqual(
-            compiled_fn(list(compiled_mod.parameters())),
-            shampoo_functional_basic(list(mod.parameters())),
-        )
+        self.assertEqual(compiled_fn(params_c), shampoo_functional_basic(params))
 
 
 for optim_cls, name, kwargs in COMPILED_OPT_KWARG_DB:
