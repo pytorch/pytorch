@@ -7,7 +7,7 @@ from typing import List, Union
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._composable.fsdp import MixedPrecisionPolicy
+from torch.distributed._composable.fsdp import MixedPrecisionPolicy, OffloadPolicy
 from torch.distributed._composable.fsdp._fsdp_collectives import (
     foreach_all_gather,
     foreach_all_gather_copy_out,
@@ -74,6 +74,7 @@ class TestFullyShardCollectives(FSDPTestMultiThread):
             post_forward_mesh_info,
             self.device,
             MixedPrecisionPolicy(),
+            OffloadPolicy(),
         )
         return fsdp_param_group
 

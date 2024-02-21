@@ -3,10 +3,8 @@ from typing import Any, cast, Optional, Union
 import typing_extensions
 
 import torch.nn as nn
-
 from torch.distributed._composable import contract
 from torch.distributed._tensor import DeviceMesh
-
 from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_init import (
