@@ -104,6 +104,7 @@ class FSDPParam:
     _contiguous_orig_stride: Tuple[int, ...]
     sharded_size: torch.Size  # ND
     contiguous_sharded_stride: Tuple[int, ...]
+    padded_sharded_param_size: torch.Size  # ND
     sharded_post_forward_size: torch.Size  # ND
     contiguous_sharded_post_forward_stride: Tuple[int, ...]
     _sharded_param_data: torch.Tensor  # 1D
@@ -149,7 +150,7 @@ class FSDPParam:
 
     @torch.no_grad()
     def _init_sharded_param(self, param: nn.Parameter, device: torch.device):
-        if param.device != device:
+        if param.device != device and param.device.type != "meta":
             raise AssertionError(
                 f"Expects the parameter to already be moved to device {device} but got {param.device}"
             )
@@ -212,6 +213,7 @@ class FSDPParam:
         self.contiguous_sharded_stride = make_contiguous_strides_for(self.sharded_size)
         padded_sharded_size = chunks[0].size()  # 0th always padded
         padded_sharded_param = param_data.new_zeros(padded_sharded_size)
+        self.padded_sharded_param_size = padded_sharded_param.size()
         if sharded_param.numel() > 0:
             padded_sharded_param[: sharded_param.size(0)].copy_(sharded_param)
         self._sharded_param_data = padded_sharded_param.view(-1)

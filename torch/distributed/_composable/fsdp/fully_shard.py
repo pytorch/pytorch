@@ -2,10 +2,11 @@ from typing import Any, cast, Optional, Union
 
 import typing_extensions
 
+import torch
 import torch.nn as nn
 
 from torch.distributed._composable import contract
-from torch.distributed._tensor import DeviceMesh
+from torch.distributed._tensor import DeviceMesh, DTensor
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_init import (
@@ -205,3 +206,26 @@ class FSDP:
         if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:
             raise AssertionError(f"No FSDP state found on {self}")
         return state
+
+    def _apply(self, *args: Any, **kwargs: Any) -> Any:
+        self.reshard()
+        ret = super()._apply(*args, **kwargs)  # type: ignore[misc]
+        state = self._get_fsdp_state()
+        if not (fsdp_param_group := state._fsdp_param_group):
+            return ret
+        # Since `_apply` can change parameters or their storages, we refresh
+        # our references to them and pad as needed
+        with torch.no_grad():
+            for fsdp_param in fsdp_param_group.fsdp_params:
+                module_info = fsdp_param._module_info
+                new_param = getattr(module_info.module, module_info.param_name)
+                assert isinstance(new_param, DTensor) and isinstance(
+                    new_param, nn.Parameter
+                ), f"Expects DTensor parameter but got {new_param}"
+                new_local_tensor = new_param._local_tensor
+                padded_sharded_param_size = fsdp_param.padded_sharded_param_size
+                if new_local_tensor.size() != padded_sharded_param_size:
+                    new_local_tensor.resize_(padded_sharded_param_size)
+                fsdp_param._sharded_param_data = new_local_tensor.view(-1)
+                fsdp_param.sharded_param = new_param
+        return ret
