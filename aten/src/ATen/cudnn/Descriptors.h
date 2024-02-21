@@ -323,7 +323,7 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
     if (prop->major >= 7) {
       if (input_type == CUDNN_DATA_HALF) {
         math_type = CUDNN_TENSOR_OP_MATH;
-      } else if (allow_tf32) {
+      } else if (!allow_tf32) {
         math_type = CUDNN_FMA_MATH;
       }
     }
