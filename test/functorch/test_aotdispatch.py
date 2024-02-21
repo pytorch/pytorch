@@ -1357,10 +1357,7 @@ def forward(self, primals_1):
             return [(x,), (x,)]
 
         # See https://github.com/pytorch/pytorch/issues/114975
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "Metadata mutations are currently not allowed on tensor subclasses"):
             self.verify_aot_autograd(f, partial(inp_callable, req_grad=req_grad), test_mutation=True, make_inputs_subclasses=True)
 
     def test_input_data_and_metadata_mutation(self):
@@ -1583,22 +1580,16 @@ def forward(self, primals_1, primals_2):
         def inp_callable1(req_grad):
             base = torch.ones(4, 4, requires_grad=req_grad)
             x = base.add(1)
-            # create two non-contiguous views that share storage, but are actually non-overlapping
+            # create two views that share storage, but are actually non-overlapping
             a = x[0:2]
             b = x[2:4]
             return [base], [a, b]
 
         fw_graph = self.verify_aot_autograd(f, partial(inp_callable1, req_grad=False), test_mutation=True)
         self.verify_aot_autograd(f, partial(inp_callable1, req_grad=True), test_mutation=True)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses"
-        ):
-            self.verify_aot_autograd(f, partial(inp_callable1, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses"
-        ):
+        self.verify_aot_autograd(f, partial(inp_callable1, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+        # Input mutations on subclasses with training graphs fail backward guards today.
+        with self.assertRaisesRegex(AssertionError, "attempted to compile the backward with incorrect subclass metadata"):
             self.verify_aot_autograd(f, partial(inp_callable1, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
 
         # Important characteristic: the graph takes in 2 inputs!
@@ -1935,10 +1926,7 @@ def forward(self, primals_1, primals_2):
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "Metadata mutations are currently not allowed on tensor subclasses"):
             self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
 
         fw_graph = self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
