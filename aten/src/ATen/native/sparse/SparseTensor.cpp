@@ -743,7 +743,7 @@ static std::tuple<Tensor, Tensor, OptTensor> sparse_mask_like_prepare_sparse_inp
       const auto res_indices = t._indices().index_select(1, argsort_indices_hash);
       const auto res_values = t._values().index_select(0, argsort_indices_hash);
       const auto indices_hash_sorted = indices_hash.index_select(0, argsort_indices_hash);
-      // NOTE: res is not necessariy coalesced, but it is sorted.
+      // NOTE: res is not necessarily coalesced, but it is sorted.
       // We mark it as "coalesced" to skip sorting in the intersection kernel.
       auto res = wrapped_tensor(t, res_indices, res_values)._coalesced_(true);
       return std::make_tuple(std::move(res), static_cast<OptTensor>(std::move(indices_hash_sorted)), true);

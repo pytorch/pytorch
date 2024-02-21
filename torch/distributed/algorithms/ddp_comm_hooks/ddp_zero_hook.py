@@ -15,7 +15,7 @@ __all__ = ["hook_with_zero_step", "hook_with_zero_step_interleaved"]
 # method, and ZeRO requires a functional optimizer to overlap with DDP
 # Passing a `None` instead of an actual gradient indicates to the optimizer
 # to not update the corresponding parameter
-_NO_PARAM_UPDATE = None
+_NO_PARAM_UPDATE: None = None
 
 
 def _perform_local_step(

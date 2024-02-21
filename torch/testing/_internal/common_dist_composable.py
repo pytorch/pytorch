@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # Owner(s): ["oncall: distributed"]
 
 from typing import Tuple
@@ -55,6 +57,9 @@ class CompositeParamModel(nn.Module):
         self.u1 = UnitModule(device)
         self.u2 = UnitModule(device)
         self.p = nn.Parameter(torch.randn((100, 100), device=device))
+        self.register_buffer(
+            "buffer", torch.randn((100, 100), device=device), persistent=True
+        )
 
     def forward(self, x):
         a = self.u2(self.u1(self.l(x)))
