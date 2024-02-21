@@ -8753,7 +8753,7 @@ get_out().sum().backward()
 # This used to deadlock when the PyNode is being destroyed after
 # the error is raised.
 """
-        # 4
+        # 5
         try:
             subprocess.check_output(
                 [sys.executable, '-c', script],
