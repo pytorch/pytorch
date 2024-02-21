@@ -46,6 +46,18 @@ def get_kernel_category(kernel_mod):
         return "unknown"
 
 
+def get_triton_kernel(mod):
+    from torch._inductor.triton_heuristics import CachingAutotuner
+
+    cand_list = [
+        v
+        for k, v in mod.__dict__.items()
+        if k.startswith("triton_") and isinstance(v, CachingAutotuner)
+    ]
+    assert len(cand_list) == 1
+    return cand_list[0]
+
+
 def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
     """
     An experimental API used only when config.benchmark_kernel is true.
@@ -57,17 +69,6 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
     does not change based on different graph modules being compiled.
     """
     from torch._inductor.codecache import PyCodeCache
-
-    def get_triton_kernel(mod):
-        from torch._inductor.triton_heuristics import CachingAutotuner
-
-        cand_list = [
-            v
-            for k, v in mod.__dict__.items()
-            if k.startswith("triton_") and isinstance(v, CachingAutotuner)
-        ]
-        assert len(cand_list) == 1
-        return cand_list[0]
 
     nfound = 0
     for kernel_key, kernel_mod in PyCodeCache.cache.items():
