@@ -90,7 +90,7 @@ void initDeviceProperties(DeviceProp* device_prop, int device) {
 }
 
 inline void check_device(DeviceIndex device) {
-  auto total = gDevicePool.devices.size();
+  auto total = static_cast<int16_t>(gDevicePool.devices.size());
   TORCH_CHECK(
       device >= 0 && device < total,
       "device is out of range, device is ",
