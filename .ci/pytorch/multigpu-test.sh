@@ -34,7 +34,6 @@ time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/test
 # functional collective tests
 time python test/run_test.py --verbose -i distributed/test_functional_api
 
-
 # DTensor tests
 time python test/run_test.py --verbose -i distributed/_tensor/test_random_ops
 time python test/run_test.py --verbose -i distributed/_tensor/test_dtensor_compile
@@ -49,6 +48,7 @@ time python test/run_test.py --verbose -i distributed/tensor/parallel/test_tp_ex
 
 # Other tests
 time python test/run_test.py --verbose -i test_cuda_primary_ctx
-time python test/run_test.py --verbose -i test_optim -- -k optimizers_with_varying_tensors
+time python test/run_test.py --verbose -i test_optim -- -k test_forloop_goes_right_direction_multigpu
+time python test/run_test.py --verbose -i test_optim -- -k test_mixed_device_dtype
 time python test/run_test.py --verbose -i test_foreach -- -k test_tensors_grouping
 assert_git_not_dirty

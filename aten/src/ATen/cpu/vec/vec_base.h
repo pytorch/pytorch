@@ -26,7 +26,6 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/native/Math.h>
 #include <ATen/NumericUtils.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
@@ -365,6 +364,9 @@ public:
   Vectorized<T> acos() const {
     return map(std::acos);
   }
+  Vectorized<T> acosh() const {
+    return map(std::acosh);
+  }
   Vectorized<T> asin() const {
     return map(std::asin);
   }
@@ -617,6 +619,12 @@ template <class T> Vectorized<T> inline operator/(const Vectorized<T> &a, const 
     c[i] = a[i] / b[i];
   }
   return c;
+}
+
+template <class T,
+          typename std::enable_if<!is_floating_point_v<T>, int>::type = 0>
+Vectorized<T> inline operator%(const Vectorized<T> &a, const Vectorized<T> &b) __ubsan_ignore_float_divide_by_zero__ {
+  return a - a / b * b;
 }
 
 template <class T> Vectorized<T> inline operator||(
@@ -984,6 +992,19 @@ inline Vectorized<IntType> convert_to_int_of_same_size(const Vectorized<T>& src)
   std::transform(src_arr.cbegin(), src_arr.cend(), buffer.begin(),
                  [](const T& x) { return static_cast<IntType>(x); });
   return Vectorized<IntType>::loadu(static_cast<const void*>(buffer.data()));
+}
+
+template <typename T, typename IntType = int_same_size_t<T>>
+inline Vectorized<T> convert_to_fp_of_same_size(const Vectorized<IntType>& src) {
+  static_assert(sizeof(T) == sizeof(IntType));
+  static constexpr int size = Vectorized<T>::size();
+
+  std::array<IntType, size> src_arr;
+  src.store(static_cast<void*>(src_arr.data()));
+  std::array<T, size> buffer;
+  std::transform(src_arr.cbegin(), src_arr.cend(), buffer.begin(),
+                 [](const IntType& x) { return static_cast<T>(x); });
+  return Vectorized<T>::loadu(static_cast<const void*>(buffer.data()));
 }
 
 // Example inputs for AVX512:

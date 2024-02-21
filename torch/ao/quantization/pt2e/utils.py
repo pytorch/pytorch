@@ -10,6 +10,7 @@ from torch.fx import (
 from torch.nn.utils.fusion import fuse_conv_bn_weights
 from typing import Any, Callable, Dict, Optional, Tuple, List, Union
 from torch.utils._pytree import LeafSpec
+from torch.export.unflatten import _AttrKind, _assign_attr
 
 # Makes sure that quantized_decomposed ops are registered
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
@@ -132,7 +133,13 @@ def _get_tensor_constant_from_node(node, m):
     if node is None:
         return None
     assert node.op == "get_attr"
-    return getattr(m, node.target)
+    target_atoms = node.target.split('.')
+    attr_itr = m
+    for i, atom in enumerate(target_atoms):
+        if not hasattr(attr_itr, atom):
+            raise RuntimeError(f"Node referenced nonexistent target {'.'.join(target_atoms[:i])}")
+        attr_itr = getattr(attr_itr, atom)
+    return attr_itr
 
 def _get_all_arguments(orig_args, orig_kwargs, args_schema):
     all_args = []
@@ -221,13 +228,13 @@ def fold_bn_weights_into_conv_node(
     # calling data since the fused_weight and fused_bias are nn.Parameter
     weight_attr_name = conv_weight_node.target
     assert isinstance(weight_attr_name, str)
-    setattr(m, weight_attr_name, fused_weight)
+    _assign_attr(fused_weight, m, weight_attr_name, _AttrKind.PARAMETER)
     if conv_bias_node is not None:
         bias_attr_name = conv_bias_node.target
-        setattr(m, bias_attr_name, fused_bias)  # type: ignore[arg-type]
+        _assign_attr(fused_bias, m, str(bias_attr_name), _AttrKind.PARAMETER)
     else:
         bias_attr_name = weight_attr_name + "_bias"
-        setattr(m, bias_attr_name, fused_bias)  # type: ignore[arg-type]
+        _assign_attr(fused_bias, m, bias_attr_name, _AttrKind.PARAMETER)
         with m.graph.inserting_before(conv_node):
             get_bias_node = m.graph.get_attr(bias_attr_name)
         # NOTE: here we assume the bias of conv is not quantized!
@@ -510,11 +517,23 @@ def _disallow_eval_train(model: GraphModule):
     Disallow calling `model.train()` or `model.eval()` on the given GraphModule.
     This is useful for exported models, where these methods don't actually behave as expected.
     """
+    error_message = \
+        """
+        Calling train() or eval() is not supported for exported models.
+        Please call `torch.ao.quantization.move_exported_model_to_train(model)` (or eval) instead.
+
+        If you cannot replace the calls to `model.train()` and `model.eval()`, you may override
+        the behavior for these methods by calling `torch.ao.quantization.allow_exported_model_train_eval(model)`,
+        which does the above automatically for you. Note that this has limited effect on switching
+        behavior between train and eval modes, and should be used only for special ops such as dropout
+        and batchnorm.
+        """
+
     def _train(self, mode: bool = True):
-        raise NotImplementedError("Calling train() is not supported yet.")
+        raise NotImplementedError(error_message)
 
     def _eval(self, mode: bool = True):
-        raise NotImplementedError("Calling eval() is not supported yet.")
+        raise NotImplementedError(error_message)
 
     model.train = types.MethodType(_train, model)  # type: ignore[method-assign]
     model.eval = types.MethodType(_eval, model)  # type: ignore[method-assign]

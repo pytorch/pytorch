@@ -204,7 +204,7 @@ class TestBaseStructuredSparsifier(TestCase):
     def _test_constructor_on_device(self, model, device):
         self.assertRaisesRegex(
             TypeError,
-            "BaseStructuredSparsifier.* update_mask",
+            "BaseStructuredSparsifier.*update_mask",
             BaseStructuredSparsifier,
         )
         model1 = copy.deepcopy(model).to(device)
