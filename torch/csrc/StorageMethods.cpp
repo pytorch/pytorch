@@ -63,6 +63,13 @@ static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPStorage_resizable(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
+  return PyBool_FromLong(THPStorage_Unpack(self).resizable());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPStorage_copy_(
     PyObject* self,
     PyObject* args,
@@ -135,10 +142,8 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
       THPUtils_typename(number_arg));
   int64_t newsize = THPUtils_unpackLong(number_arg);
   c10::DeviceType device_type = storage.device_type();
-  if (device_type == at::kCPU) {
-    at::native::resize_bytes_cpu(storage.unsafeGetStorageImpl(), newsize);
+  if (device_type == at::kCUDA) {
 #ifdef USE_CUDA
-  } else if (device_type == at::kCUDA) {
     ptrdiff_t size_bytes_i = newsize;
     TORCH_CHECK(
         !c10::overflows<size_t>(size_bytes_i),
@@ -147,45 +152,11 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
         ") cannot be represented as a size_t");
     const auto size_bytes = static_cast<size_t>(size_bytes_i);
     at::native::resize_bytes_cuda(storage.unsafeGetStorageImpl(), size_bytes);
+#else
+    TORCH_CHECK(false, "built without USE_CUDA");
 #endif
-  } else if (device_type == at::kMeta) {
-    at::native::resize_bytes_meta(storage.unsafeGetStorageImpl(), newsize);
-  } else if (device_type == at::kPrivateUse1) {
-    at::GetPrivateUse1HooksInterface()->resizePrivateUse1Bytes(
-        storage, newsize);
-  } else if (device_type == at::kXPU) {
-    ptrdiff_t size_bytes_i = newsize;
-    TORCH_CHECK(
-        !c10::overflows<int64_t>(size_bytes_i),
-        "Requested storage size (",
-        size_bytes_i,
-        ") cannot be represented as a int64_t");
-    const auto size_bytes = static_cast<int64_t>(size_bytes_i);
-    void* original_data_ptr = storage.data_ptr().get();
-
-    auto src_option =
-        c10::TensorOptions().device(storage.device()).dtype(at::kByte);
-    auto src_tensor = at::empty({0}, src_option).set_(storage);
-    src_tensor.resize_({size_bytes});
-
-    // When using resize_ to replace resize_bytes_xxx, in some cases
-    // the original data_ptr is still returned, which is an inconsistent
-    // behavior when compared to resize_bytes_xxx. For these cases,
-    // an additional memory copy and update for storage are required.
-    if (original_data_ptr == src_tensor.storage().data_ptr().get()) {
-      auto new_tensor = at::empty(src_tensor.sizes(), src_tensor.options());
-      new_tensor.copy_(src_tensor);
-      storage.set_data_ptr_noswap(
-          std::move(new_tensor.storage().mutable_data_ptr()));
-      storage.unsafeGetStorageImpl()->set_allocator(
-          new_tensor.storage().unsafeGetStorageImpl()->allocator());
-      storage.set_nbytes(new_tensor.storage().nbytes());
-    }
   } else {
-    TORCH_CHECK(
-        false,
-        "UntypedStorage.resize_: got unexpected device type ",
-        device_type);
+    at::native::resize_bytes_nocuda(storage, newsize);
   }
   Py_INCREF(self);
   return self;
@@ -668,6 +639,7 @@ static PyMethodDef THPStorage_methods[] = {
     {"resize_", THPStorage_resize_, METH_O, nullptr},
     {"nbytes", THPStorage_nbytes, METH_NOARGS, nullptr},
     {"data_ptr", THPStorage_dataPtr, METH_NOARGS, nullptr},
+    {"resizable", THPStorage_resizable, METH_NOARGS, nullptr},
     {"_write_file", THPStorage_writeFile, METH_VARARGS, nullptr},
     {"_new_with_file",
      THPStorage_newWithFile,

@@ -33,17 +33,35 @@
 
 #ifdef __CUDACC__
 #include <cuda_fp16.h>
+#define __C10_NOT_CPU__
 #endif
 
 #ifdef __HIPCC__
 #include <hip/hip_fp16.h>
+#define __C10_NOT_CPU__
 #endif
 
 #if defined(CL_SYCL_LANGUAGE_VERSION)
 #include <CL/sycl.hpp> // for SYCL 1.2.1
+#define __C10_NOT_CPU__
 #elif defined(SYCL_LANGUAGE_VERSION)
 #include <sycl/sycl.hpp> // for SYCL 2020
+#define __C10_NOT_CPU__
 #endif
+
+#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
+#include <arm_neon.h>
+#endif
+
+#ifndef __C10_NOT_CPU__
+#if defined(__GNUC__) || defined(__clang__)
+#if defined(__aarch64__)
+#if (!defined(__ARM_32BIT_STATE)) || (__ARM_32BIT_STATE != 1)
+#define __C10_NATIVE_FP16__ 1
+#endif // !__ARM_32BIT_STATE
+#endif // __aarch64__
+#endif // GNUC or clang
+#endif // __C10_NOT_CPU__
 
 namespace c10 {
 
@@ -57,6 +75,10 @@ namespace detail {
  * @note The implementation doesn't use any floating-point operations.
  */
 inline uint32_t fp16_ieee_to_fp32_bits(uint16_t h) {
+#ifdef __C10_NATIVE_FP16__
+  float fp32 = (float)*(_Float16*)(&h);
+  return *(uint32_t*)(&fp32);
+#else // !__C10_NATIVE_FP16__
   /*
    * Extend the half-precision floating-point number to 32 bits and shift to the
    * upper part of the 32-bit word:
@@ -143,6 +165,7 @@ inline uint32_t fp16_ieee_to_fp32_bits(uint16_t h) {
       ((((nonsign << renorm_shift >> 3) + ((0x70 - renorm_shift) << 23)) |
         inf_nan_mask) &
        ~zero_mask);
+#endif // ! __C10_NATIVE_FP16__
 }
 
 /*
@@ -155,6 +178,10 @@ inline uint32_t fp16_ieee_to_fp32_bits(uint16_t h) {
  * between integer and floating-point variables.
  */
 C10_HOST_DEVICE inline float fp16_ieee_to_fp32_value(uint16_t h) {
+#if defined(__C10_NATIVE_FP16__)
+  float fp32 = (float)*(_Float16*)(&h);
+  return fp32;
+#else // ! __C10_NATIVE_FP16__
   /*
    * Extend the half-precision floating-point number to 32 bits and shift to the
    * upper part of the 32-bit word:
@@ -277,6 +304,7 @@ C10_HOST_DEVICE inline float fp16_ieee_to_fp32_value(uint16_t h) {
       (two_w < denormalized_cutoff ? fp32_to_bits(denormalized_value)
                                    : fp32_to_bits(normalized_value));
   return fp32_from_bits(result);
+#endif // !__C10_NATIVE_FP16__
 }
 
 /*
@@ -289,6 +317,10 @@ C10_HOST_DEVICE inline float fp16_ieee_to_fp32_value(uint16_t h) {
  * between integer and floating-point variables.
  */
 inline uint16_t fp16_ieee_from_fp32_value(float f) {
+#if defined(__C10_NATIVE_FP16__)
+  float fp16 = (_Float16)f;
+  return *(uint16_t*)(&fp16);
+#else // !defined(__C10_NATIVE_FP16__)
   // const float scale_to_inf = 0x1.0p+112f;
   // const float scale_to_zero = 0x1.0p-110f;
   constexpr uint32_t scale_to_inf_bits = (uint32_t)239 << 23;
@@ -322,12 +354,46 @@ inline uint16_t fp16_ieee_from_fp32_value(float f) {
   return static_cast<uint16_t>(
       (sign >> 16) |
       (shl1_w > UINT32_C(0xFF000000) ? UINT16_C(0x7E00) : nonsign));
+#endif
 }
+
+#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
+constexpr inline float16_t fp16_from_bits(uint16_t h) {
+  union {
+    uint16_t as_bits;
+    float16_t as_value;
+  } fp16 = {h};
+  return fp16.as_value;
+}
+
+constexpr inline uint16_t fp16_to_bits(float16_t f) {
+  union {
+    float16_t as_value;
+    uint16_t as_bits;
+  } fp16 = {.as_value = f};
+  return fp16.as_bits;
+}
+
+// According to https://godbolt.org/z/8s14GvEjo it would translate to single
+// fcvt s0, h0
+inline float native_fp16_to_fp32_value(uint16_t h) {
+  return static_cast<float>(fp16_from_bits(h));
+}
+
+inline uint16_t native_fp16_from_fp32_value(float f) {
+  return fp16_to_bits(static_cast<float16_t>(f));
+}
+#endif
 
 } // namespace detail
 
 struct alignas(2) Half {
-  unsigned short x;
+  union {
+#ifdef __C10_NATIVE_FP16__
+    _Float16 y;
+#endif
+    unsigned short x;
+  };
 
   struct from_bits_t {};
   C10_HOST_DEVICE static constexpr from_bits_t from_bits() {

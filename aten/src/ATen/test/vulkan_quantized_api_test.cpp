@@ -3519,6 +3519,68 @@ TEST_F(VulkanAPITest, channel_to_width_packing_test) {
   ASSERT_TRUE(!has_failure);
 }
 
+void test_gelu(
+    const at::IntArrayRef input_shape,
+    const c10::ScalarType dtype,
+    bool self_test) {
+  const auto& in_cpu = produce_random_tensor(input_shape);
+
+  auto [scale, zero_point] = compute_quant_params(in_cpu, dtype);
+  scale = safe_downcast<float>(scale);
+
+  auto in_cpu_quantized =
+      at::quantize_per_tensor(in_cpu, scale, zero_point, dtype);
+
+  auto in_vk_quantized =
+      at::quantize_per_tensor(in_cpu.vulkan(), scale, zero_point, dtype);
+
+  auto approximate = "tanh";
+
+  const auto& out_cpu_quantized =
+      self_test ? at::gelu_(in_cpu_quantized, approximate) : at::gelu(in_cpu_quantized, approximate);
+
+  const auto& out_vk_quantized =
+      self_test ? at::gelu_(in_vk_quantized, approximate) : at::gelu(in_vk_quantized, approximate);
+
+  const auto& out_cpu_deq = at::dequantize(out_cpu_quantized);
+  const auto& out_vk_deq = at::dequantize(out_vk_quantized);
+  const auto& out_vk_deq_cpu = out_vk_deq.cpu();
+
+  const auto check = almostEqual(out_vk_deq_cpu, out_cpu_deq, scale);
+
+  if (!check) {
+    showRtol(out_cpu_deq, out_vk_deq_cpu);
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, gelu_qint8) {
+  test_gelu({200, 20}, c10::ScalarType::QInt8, false);
+  test_gelu({200, 20, 10}, c10::ScalarType::QInt8, false);
+  test_gelu({200, 20, 30, 10}, c10::ScalarType::QInt8, false);
+}
+
+TEST_F(VulkanAPITest, gelu_qint8_self) {
+  test_gelu({4, 1, 4}, c10::ScalarType::QInt8, true);
+  test_gelu({200, 20}, c10::ScalarType::QInt8, true);
+  test_gelu({200, 20, 10}, c10::ScalarType::QInt8, true);
+  test_gelu({200, 20, 30, 10}, c10::ScalarType::QInt8, true);
+}
+
+TEST_F(VulkanAPITest, gelu_quint8) {
+  test_gelu({200, 20}, c10::ScalarType::QUInt8, false);
+  test_gelu({200, 20, 10}, c10::ScalarType::QUInt8, false);
+  test_gelu({200, 20, 30, 10}, c10::ScalarType::QUInt8, false);
+}
+
+TEST_F(VulkanAPITest, gelu_quint8_self) {
+  test_gelu({4, 1, 4}, c10::ScalarType::QUInt8, true);
+  test_gelu({200, 20}, c10::ScalarType::QUInt8, true);
+  test_gelu({200, 20, 10}, c10::ScalarType::QUInt8, true);
+  test_gelu({200, 20, 30, 10}, c10::ScalarType::QUInt8, true);
+}
+
+
 } // namespace
 
 #endif /* USE_VULKAN_API */

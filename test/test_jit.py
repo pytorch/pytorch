@@ -344,7 +344,6 @@ class FooToPickle(torch.nn.Module):
         self.bar = torch.jit.ScriptModule()
 
 
-@skipIfTorchDynamo()
 class TestJitProfiler(JitTestCase):
     """
     This runs tests that requires setting some global states like torch._C._set_graph_executor_optimize
@@ -409,7 +408,6 @@ class TestJitProfiler(JitTestCase):
             self.assertTrue(other_fn_events[thread] >= mul_time)
 
 
-@skipIfTorchDynamo()
 class TestJit(JitTestCase):
     @unittest.skip("Requires a lot of RAM")
     def test_big(self):
@@ -2944,7 +2942,6 @@ graph(%Ra, %Rb):
         self.assertRegex(graph.__repr__(), source_range_regex)
 
 
-@skipIfTorchDynamo()
 class TestFrontend(JitTestCase):
 
     def test_instancing_error(self):
@@ -3001,7 +2998,6 @@ class TestFrontend(JitTestCase):
             res_2 = traced_model_2(**{'x': torch.rand([2]), 'z': torch.rand([2])})  # noqa: PIE804
 
 
-@skipIfTorchDynamo()
 class TestScript(JitTestCase):
 
     # Tests that calling torch.jit.script repeated on function is allowed.
@@ -3443,6 +3439,21 @@ def foo(x):
                     cu.define(full)
             else:
                 cu.define(full)
+
+    def test_int16_device_index(self):
+        # This used to fail after the switch from int8 to int16 DeviceIndex as the ArgumentInfo struct hardcoded
+        # the bit width. Thus, the default device (-1) wrapped around to 255.
+        # See https://github.com/pytorch/pytorch/issues/115331
+        tensor = torch.tensor([1.])
+        code_template = """
+        def fn(x):
+            return x.device
+        """
+        cu = torch.jit.CompilationUnit()
+        cu.define(code_template)
+        res = cu.fn(tensor)
+        self.assertEqual(tensor.device, res)
+
 
     def test_namedtuple_python(self):
         global MyTuple, MyMod  # see [local resolution in python]
@@ -16041,12 +16052,10 @@ EXCLUDE_ALIAS = {
 }
 
 
-@skipIfTorchDynamo()
 class TestJitGeneratedModule(JitTestCase):
     pass
 
 
-@skipIfTorchDynamo()
 class TestJitGeneratedFunctional(JitTestCase):
     pass
 

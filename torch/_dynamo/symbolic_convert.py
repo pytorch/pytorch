@@ -24,7 +24,7 @@ import torch
 import torch._logging
 from torch._guards import Checkpointable, tracing, TracingContext
 
-from . import config, exc, logging as torchdynamo_logging, skipfiles, variables
+from . import config, exc, logging as torchdynamo_logging, trace_rules, variables
 from .bytecode_analysis import (
     get_indexof,
     JUMP_OPNAMES,
@@ -86,6 +86,7 @@ from .variables.dicts import ConstDictVariable, SetVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
     NestedUserFunctionVariable,
+    SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
@@ -102,7 +103,6 @@ from .variables.misc import (
     InlinedClosureVariable,
     NullVariable,
     PythonModuleVariable,
-    SkipFilesVariable,
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable
@@ -481,8 +481,6 @@ def break_graph_if_unsupported(*, push):
                 if not self.should_compile_partial_graph():
                     raise
 
-                log.debug("break_graph_if_unsupported triggered compile", exc_info=True)
-
                 user_stack = excp.real_stack
                 # TODO: Also report the traceback from the parent frame
                 user_stack_formatted = "".join(traceback.format_list(user_stack))
@@ -494,10 +492,20 @@ def break_graph_if_unsupported(*, push):
                     and not explain
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
+                    # This log line is exercised from
+                    #   python test/dynamo/test_exc.py -k test_graph_break_log
                     graph_break_log.debug(
-                        "Graph break: %s from user code at:\n%s",
-                        excp,
+                        "Graph break: from user code at:\n%s",
                         user_stack_formatted,
+                        exc_info=True,
+                    )
+                else:
+                    # This log line MUST NOT contain the string "Graph break",
+                    # exercised by
+                    #   python test/dynamo/test_misc.py -k test_duplicate_graph_break_log
+                    log.debug(
+                        "Unsupported break in user code at %s:%s (details suppressed)",
+                        *frame_loc,
                     )
 
                 if self.has_backedge():
@@ -524,12 +532,10 @@ def break_graph_if_unsupported(*, push):
             # Reconstruct the context variables in the block stack
             for b in self.block_stack:
                 assert b.with_context is not None
-                self.output.add_output_instructions(
-                    [
-                        *b.with_context.reconstruct(cg),
-                        *b.resume_fn().try_except(cg.code_options, cleanup),
-                    ]
-                )
+                cg(b.with_context)
+                cg.extend_output(b.resume_fn().try_except(cg.code_options, cleanup))
+            self.output.add_output_instructions(cg.get_instructions())
+            del cg
 
             if sys.version_info >= (3, 11) and inst.opname == "CALL":
                 kw_names = (
@@ -2262,7 +2268,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if func.has_self():
             unimplemented("inline with __self__")
 
-        result = skipfiles.check_verbose(func, is_inlined_call=True)
+        result = trace_rules.check_verbose(func, is_inlined_call=True)
         if result.skipped:
             from torch._dynamo.variables.misc import produce_trampoline_autograd_apply
 
@@ -2272,7 +2278,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 produce_trampoline_autograd_apply,
             ]:
                 # Known sound
-                return skipfiles.SkipResult(False, "allowlist in dynamo known function")
+                return trace_rules.SkipResult(
+                    False, "allowlist in dynamo known function"
+                )
             fn_qualname = func.fn.__qualname__ if hasattr(func, "fn") else ""
             unimplemented(
                 f"'inline in skipfiles: {fn_qualname} | {func.get_name()} {func.get_filename()}, {result.reason}'"
@@ -2291,7 +2299,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def inline_call_(
         parent, func: VariableTracker, args: List[VariableTracker], kwargs
     ):
-        if isinstance(func, SkipFilesVariable):
+        if isinstance(func, SkipFunctionVariable):
             unimplemented("inline with functions in skip files")
         assert isinstance(
             func,

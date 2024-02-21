@@ -549,22 +549,19 @@ class _World:
         return self._pg_default_device
 
     @property
-    def pg_config_info(self) -> List[Dict[str, Union[int, str, List[int]]]]:
+    def pg_config_info(self) -> List[Dict[str, Any]]:
         """
         Return a list of dict with process groups and backends.
 
         Along with their unique IDs and configurations (types and ranks).
         """
-        config_info: List[Dict[str, Union[int, str, List[int]]]] = []
+        config_info: List[Dict[str, Any]] = []
         default_pg_size = _get_group_size(None)
-        for pg, backend in self.pg_map.items():
-            # backend is a tuple with the first element being the backend type ("nccl", etc.)
-            backend_type = Backend.backend_type_map[backend[0]]
+        for pg in self.pg_map.keys():
             ranks = self.pg_group_ranks[pg]
             config_info.append(
                 {
                     "pg_name": self.pg_names[pg],
-                    "backend_id": pg._backend_id(backend_type),
                     "backend_config": self.pg_backend_config[pg],
                     "ranks": list(ranks.keys())
                     if len(ranks) != default_pg_size
@@ -989,6 +986,12 @@ def _is_barrier_after_init() -> int:
     return int(os.getenv("TORCH_DIST_INIT_BARRIER", "0"))
 
 
+def _abort_in_destroy_pg() -> bool:
+    # Environment variable to control whether to abort the communicators when users call destroy_process_group()
+    env = os.getenv("TORCH_NCCL_ABORT_IN_DESTROY_PG", "0")
+    return env == "1" or env.lower() == "true"
+
+
 def _get_default_group() -> ProcessGroup:
     """Get the default process group created by init_process_group."""
     if not is_initialized():
@@ -1329,6 +1332,21 @@ def _get_split_source(pg):
 
     return split_from
 
+def _shutdown_backend(pg):
+    """
+    Try to shut down the backend of a process group.
+    Currently, only ProcessGroupNCCL backend is supported.
+    No op for other backends.
+    """
+    backend = None
+    try:
+        backend = pg._get_backend(torch.device("cuda"))
+    except RuntimeError:
+        pass
+    if isinstance(backend, ProcessGroupNCCL):
+        # explictly call shutdown to ensure that NCCL resources are released
+        backend._shutdown()
+
 def _new_process_group_helper(
     group_size,
     group_rank,
@@ -1598,6 +1616,12 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         pg._wait_for_pending_works()
 
     if group is None or group == GroupMember.WORLD:
+        if _abort_in_destroy_pg():
+            # shutdown all backends in the order of pg names. shutting down in order because
+            # ncclCommAbort() was a 'collective' call in some versions of NCCL.
+            for pg_to_shutdown in sorted(_world.pg_names, key=lambda x: _world.pg_names[x], reverse=True):
+                _shutdown_backend(pg_to_shutdown)
+
         _update_default_pg(None)
         _world.pg_map.clear()
         _world.pg_names.clear()
@@ -1619,6 +1643,8 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
     else:
+        if _abort_in_destroy_pg():
+            _shutdown_backend(pg)
         del _world.pg_map[pg]
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
