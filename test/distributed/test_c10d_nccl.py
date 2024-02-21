@@ -3971,7 +3971,7 @@ class NCCLTraceTestBase(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
         os.environ["TORCH_NCCL_ENABLE_TIMING"] = '0'  # see 'timing_enabled' parametrized tests
-        os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = '10'
+        os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = '1000'
         os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = '1'
         self.tempdir = tempfile.TemporaryDirectory()
         os.environ["TORCH_NCCL_DEBUG_INFO_TEMP_FILE"] = self._trace_basename()
@@ -4272,9 +4272,12 @@ class NCCLTraceTest(NCCLTraceTestBase):
         if timing_enabled:
             pg._enable_collectives_timing()
 
-        for i in range (20):
+        num_coalesced_ops = 20
+        ops_per_coalesce = 1
+        input_sizes = (2, 3)
+        for i in range (num_coalesced_ops):
             ops = []
-            tensor = torch.zeros((2,3)).to(self.local_device)
+            tensor = torch.zeros(input_sizes).to(self.local_device)
             if self.rank == 0:
                 ops.append(dist.P2POp(dist.irecv, tensor, 1))
             elif self.rank == 1:
@@ -4287,11 +4290,35 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         ver = t['version']
-
         self.assertEqual(ver, "1.1")
+        self.assertEqual(len(t['entries']), num_coalesced_ops * (ops_per_coalesce + 1))
+        for seq in range(num_coalesced_ops):
+            first_op = seq * 2
+            coalesced_op = first_op + 1
+            # the indivudal ops inside  the coalescing group are updated with timing information from the shared
+            # events with teh coalesing op. They also include the individual op metadata
+            profiling_name = 'nccl:recv 0<-1' if self.rank == 0 else 'nccl:send 1->0'
+            self.assertEqual(t['entries'][first_op]['profiling_name'], profiling_name)
+            self.assertEqual(t['entries'][first_op]['seq_id'], seq)
+            self.assertEqual(t['entries'][first_op]['state'], 'completed')
+            self.assertEqual(t['entries'][first_op]['input_sizes'], [input_sizes])
+            self.assertEqual(t['entries'][first_op]['output_sizes'], [input_sizes])
+            if timing_enabled:
+                self.assertEqual(t['entries'][first_op]['duration'], 1)
+            else:
+                self.assertTrue('duration' not in t['entries'][first_op])
 
-        if timing_enabled:
-            pass
+            # the coalesced op has no metadata but indicates that coalescing was used
+            self.assertEqual(t['entries'][coalesced_op]['profiling_name'], 'nccl:coalesced')
+            self.assertEqual(t['entries'][coalesced_op]['seq_id'], seq)
+            self.assertEqual(t['entries'][coalesced_op]['state'], 'completed')
+            self.assertEqual(t['entries'][coalesced_op]['input_sizes'], [])
+            self.assertEqual(t['entries'][coalesced_op]['output_sizes'], [])
+
+            if timing_enabled:
+                self.assertEqual(t['entries'][coalesced_op]['duration'], 1)
+            else:
+                self.assertTrue('duration' not in t['entries'][coalesced_op])
 
 
 class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):

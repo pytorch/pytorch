@@ -879,6 +879,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
         &cacheAllocatorDeregisterHook);
     allocatorHooksAttached = true;
   }
+  LOG(ERROR) << "PG ctor seq " << seq_;
 }
 
 void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
@@ -2266,6 +2267,9 @@ void ProcessGroupNCCL::startCoalescing() {
   coalescing_state_ |= CoalActive;
 
   bool enableTiming = enableTiming_.load();
+  LOG(ERROR) << "startCoalescing found timingEnabled = "
+             << enableTiming_.load();
+
   if (enableTiming) {
     coalescedStartEvent_ =
         std::make_shared<at::cuda::CUDAEvent>(cudaEventDefault);
@@ -2293,9 +2297,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   // `getKeyFromDevice` is how we get keys for both collectives and batch P2P
   const auto key = getKeyFromDevice(device);
   auto ncclStream = ncclStreams_.at(key);
-
-  // Bump collective counter
-  seq_++;
 
   // Create Work object
   auto work = initWork(device, rank_, optype, "nccl:coalesced");
@@ -2341,6 +2342,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   } else {
     at::cuda::CUDAGraph::dec_pending_event_queries();
   }
+
+  // Bump collective counter after creating the work-
+  // this way all the flight-recorder events inside the coalesing group share
+  // the seq_ with the coalsed op and the work that goes with it
+  seq_++;
 
   coalescing_state_ = 0;
   return work;
@@ -2690,10 +2696,15 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     p2pRank = rank_ <= peer ? 0 : 1;
     isSendRecvSelf = rank_ == peer;
     p2pTargetRank = isSendRecvSelf ? 0 : 1 - p2pRank;
-    // Bump sequence number. Don't do so if it's a batch P2P, it will be bumped
-    // in `endCoalescing`.
-    seq_++;
+
+    if (!coalescing_state_) {
+      // Bump sequence number. Don't do so if it's a batch P2P, it will be
+      // bumped in `endCoalescing`.
+      LOG(ERROR) << "Bumping seq_ inside pointToPoint" << seq_;
+      seq_++;
+    }
   }
+
   auto ncclComm = getNCCLComm(key, device, opType, p2pRank, isSendRecvSelf);
 
   if (coalescing_state_ & CoalActive) {
@@ -2710,6 +2721,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // Work itself will create the CUDA events on all GPUs of tensors
   c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work;
   if (coalescing_state_) {
+    LOG(ERROR) << "pointToPoint found timingEnabled = " << enableTiming_.load();
     auto trace_id = NCCLTraceBuffer::get()->record(
         uid_,
         seq_,
