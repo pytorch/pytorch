@@ -8865,7 +8865,7 @@ get_out().sum().backward()
             _test_fn(nested_view_from_values_offsets, values, offsets)
 
             nt = nested_view_from_values_offsets(values, offsets).clone().detach()
-            _test_fn(torch.ops.aten._nested_get_values.default, nt, use_unsafe_fwd=True)
+            _test_fn(torch.ops.aten._nested_get_values.default, nt)
 
     def test_view_func_replay_with_modified_state(self):
         with torch.autograd._force_original_view_tracking(True):
