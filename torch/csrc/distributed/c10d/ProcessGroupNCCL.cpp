@@ -2239,7 +2239,6 @@ void ProcessGroupNCCL::workEnqueue(
       work->outputs_ ? *work->outputs_ : std::vector<at::Tensor>{},
       work->ncclStartEvent_.get(),
       work->ncclEndEvent_.get());
-  LOG(ERROR) << "workEnqueue just recorded " << work->trace_id_.value();
   if (!terminateProcessGroup_.load()) {
     {
       std::lock_guard<std::mutex> lock(workMetaListMutex_);
@@ -2689,7 +2688,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     p2pRank = rank_;
     p2pTargetRank = peer;
   } else {
-    // For single P2P, preserve the old two-rank behavior (to avoid perf diff)
+    // For single P2P, preserve theworkEnqueue old two-rank behavior (to avoid perf diff)
     key = getKeySendRecv(rank_, peer);
     p2pRank = rank_ <= peer ? 0 : 1;
     isSendRecvSelf = rank_ == peer;

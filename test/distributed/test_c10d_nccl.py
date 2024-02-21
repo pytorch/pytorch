@@ -4272,6 +4272,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
         if timing_enabled:
             pg._enable_collectives_timing()
 
+        print(os.getpid())
+        time.sleep(10)
+
         num_coalesced_ops = 20
         ops_per_coalesce = 1
         input_sizes = (2, 3)
@@ -4287,7 +4290,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
             dist.batch_isend_irecv(ops).pop().wait()
 
         torch.cuda.synchronize()
-
 
         if timing_enabled:
             # wait for watchdog thread to process the queue of works
