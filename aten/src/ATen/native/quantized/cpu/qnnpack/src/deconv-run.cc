@@ -78,7 +78,7 @@ static void compute_q8conv(
       c_stride,
       output_channel_index,
       &context->quantization_params);
-};
+}
 
 struct QnnpackDeleter {
   void operator()(pytorch_qnnp_operator_t op) {
