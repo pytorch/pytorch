@@ -1,6 +1,8 @@
 # Owner(s): ["oncall: mobile"]
 import copy
 import operator
+import sys
+import unittest
 
 import torch
 import torch._dynamo as torchdynamo
@@ -42,6 +44,9 @@ from torch.testing._internal.common_quantized import override_quantized_engine
 
 
 @skipIfNoQNNPACK
+@unittest.skipIf(
+    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+)
 class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
     def test_conv1d(self):
         quantizer = XNNPACKQuantizer()
@@ -340,6 +345,49 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
         ]
         self._test_quantizer(m, example_inputs, quantizer, node_occurrence, node_list)
+
+    def test_set_module_name_with_underscores(self) -> None:
+        """Test that if a module name has an underscore, we can still quantize it"""
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # This module name has underscores, which can be part of a mangled
+                # name.
+                self.foo_bar = torch.nn.Linear(2, 2)
+                self.baz = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.baz(self.foo_bar(x))
+
+        quantizer = XNNPACKQuantizer()
+        # Set global to no quantization and then per-channel for a specific submodule.
+        quantizer.set_module_name(
+            "foo_bar", get_symmetric_quantization_config(is_per_channel=True)
+        )
+        example_inputs = (torch.randn(2, 2),)
+        m = M().eval()
+        m = capture_pre_autograd_graph(m, example_inputs)
+        m = prepare_pt2e(m, quantizer)
+        # Use a linear count instead of names because the names might change, but
+        # the order should be the same.
+        count = 0
+        for n in m.graph.nodes:
+            if n.op == "call_function" and n.target == torch.ops.aten.linear.default:
+                # Get the weight observer to see the per-channel vs per-tensor.
+                weight_observer_node = n.args[1]
+                if count == 0:
+                    # The weight tensor should be per-tensor and not per-channel
+                    # for foo_bar.
+                    self.assertEqual(weight_observer_node.op, "call_module")
+                    observer_instance = getattr(m, weight_observer_node.target)
+                    self.assertEqual(
+                        observer_instance.qscheme, torch.per_channel_symmetric
+                    )
+                else:
+                    # For baz it should have no observer at all.
+                    self.assertNotEqual(weight_observer_node.op, "call_module")
+                count += 1
 
     def test_set_module_type(self):
         class Sub(torch.nn.Module):
@@ -942,6 +990,9 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
 
 
 # TODO: express this using self._test_quantizer, add test for inception_v4
+@unittest.skipIf(
+    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+)
 class TestXNNPACKQuantizerModels(PT2EQuantizationTestCase):
     @skip_if_no_torchvision
     @skipIfNoQNNPACK

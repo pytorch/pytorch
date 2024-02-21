@@ -54,7 +54,7 @@ from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc, mutation_guard
 from .eval_frame import set_guard_error_hook
-from .source import DefaultsSource, LocalSource, TypeSource
+from .source import AttrSource, DefaultsSource, LocalSource, TypeSource
 from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     common_constant_types,
@@ -113,6 +113,7 @@ CLOSURE_VARS = {
     # If not numpy array, piggy back on e.g. tensor guards to check type
     (lambda a: torch.as_tensor(a) if isinstance(a, (np.generic, np.ndarray)) else a),
     "torch": torch,
+    "inspect": inspect,
 }
 
 if sys.version_info[:2] <= (3, 8):
@@ -262,6 +263,14 @@ class GuardBuilder(GuardBuilderBase):
 
         return name
 
+    def _guard_on_attribute(self, guard: Guard, attr_name: str, guard_fn):
+        attr_source = AttrSource(guard.originating_source, attr_name)
+        # Copy the stack info
+        new_guard = Guard(
+            attr_source, guard_fn, stack=guard.stack, user_stack=guard.user_stack
+        )
+        new_guard.create(self)
+
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         t = type(self.get(guard.name))
@@ -326,8 +335,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def NAME_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
-        code = f"{self.arg_ref(guard)}.__name__ == '{obj.__name__}'"
-        self._produce_guard_code(guard, [code])
+        self._guard_on_attribute(guard, "__name__", GuardBuilder.EQUALS_MATCH)
 
     def DATA_PTR_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
@@ -348,13 +356,13 @@ class GuardBuilder(GuardBuilderBase):
 
         self._produce_guard_code(guard, [code], provided_guarded_object=self.get(base))
 
-    def FUNCTORCH_CURRENT_LEVEL_MATCH(self, guard: Guard):
-        # Invalidate the graph if a call to vmap has been made prior to this
-        # This is super conservative as the interpreter stack may not contain
-        # vmap
-        code = [
-            "torch._C._functorch.maybe_current_level() is None",
-        ]
+    def FUNCTORCH_STACK_MATCH(self, guard: Guard):
+        # Invalidate functorch code if current level is different than
+        # the one when FX graph was generated
+        # if torch._C._functorch.peek_interpreter_stack() is not None:
+        cis = torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters()
+        states = [ci.get_state() for ci in cis]
+        code = [f"torch._functorch.pyfunctorch.compare_functorch_state({states})"]
         self._produce_guard_code(guard, code)
 
     def EQUALS_MATCH(self, guard: Guard):
@@ -403,15 +411,15 @@ class GuardBuilder(GuardBuilderBase):
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
+            self.TYPE_MATCH(guard)
             code = list()
-            code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
             code.append(f"__math_isnan({ref})")
             self._produce_guard_code(guard, code)
             return
         # Python math library doesn't support complex nan, so we need to use numpy
         elif istype(val, complex) and np.isnan(val):
+            self.TYPE_MATCH(guard)
             code = list()
-            code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
             code.append(f"__numpy_isnan({ref})")
             self._produce_guard_code(guard, code)
             return
@@ -430,7 +438,7 @@ class GuardBuilder(GuardBuilderBase):
                 )
         else:
             # Add type check to prevent equality check between tensor and non-tensor.
-            code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
+            self.TYPE_MATCH(guard)
 
         if istype(val, torch.Size):
             val = tuple(val)
@@ -455,10 +463,7 @@ class GuardBuilder(GuardBuilderBase):
 
         def setup_guard():
             assert istype(val.training, bool)
-            # TODO: Why doesn't this use produce_guard_code?
-            self.code.append(
-                GuardCodeList([f"{ref}.training == {val.training}"], guard)
-            )
+            self._guard_on_attribute(guard, "training", GuardBuilder.EQUALS_MATCH)
 
         if hasattr(val, "training"):
             # There are cases where a monkeypatched object has a guard made between __new__ and __init__
@@ -477,11 +482,8 @@ class GuardBuilder(GuardBuilderBase):
             val = self.get(guard.name)
             # Strictly only want user-defined functions
             if type(val) == types.FunctionType and hasattr(val, "__code__"):
-                ref = self.arg_ref(guard)
-                code = [
-                    f"___check_obj_id(getattr({ref}, '__code__', None), {self.id_ref(val.__code__)})",
-                ]
-                self._produce_guard_code(guard, code)
+                self._guard_on_attribute(guard, "__code__", GuardBuilder.HASATTR)
+                self._guard_on_attribute(guard, "__code__", GuardBuilder.FUNCTION_MATCH)
             else:
                 self.FUNCTION_MATCH(guard)
 
@@ -496,8 +498,8 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard.name)
         t = type(value)
 
+        self.TYPE_MATCH(guard)
         code = list()
-        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         if len(value) == 0:
             code.append(f"not {ref}")
         else:
@@ -510,8 +512,8 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard.name)
         t = type(value)
 
+        self.TYPE_MATCH(guard)
         code = list()
-        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
 
         self._produce_guard_code(guard, code)
@@ -530,8 +532,8 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard.name)
         t = type(value)
 
+        self.TYPE_MATCH(guard)
         code = list()
-        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         any_key_is_id = any(key_is_id(k) for k in value.keys())
         const_keys_repr = dict_keys_repr(
             key_to_id(value),
@@ -553,8 +555,8 @@ class GuardBuilder(GuardBuilderBase):
         t = type(value)
         keys = {k for k, v in value.named_parameters()}
 
+        self.TYPE_MATCH(guard)
         code = list()
-        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         code.append(f"{{k for k, v in {ref}.named_parameters()}} == {keys!r}")
 
         self._produce_guard_code(guard, code)
@@ -565,8 +567,8 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard.name)
         t = type(value)
 
+        self.TYPE_MATCH(guard)
         code = list()
-        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         code.append(f"list({ref}.keys()) == {list(value.keys())!r}")
 
         self._produce_guard_code(guard, code)
