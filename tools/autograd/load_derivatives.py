@@ -49,7 +49,9 @@ from torchgen.model import (
 from torchgen.utils import concatMap, IDENT_REGEX, split_name_params
 from torchgen.yaml_utils import YamlLoader
 
-_GLOBAL_LOAD_DERIVATIVE_CACHE = {}
+DerivativeRet = Tuple[Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]], Set[str]]
+
+_GLOBAL_LOAD_DERIVATIVE_CACHE: Dict[Tuple[str, str], DerivativeRet] = {}
 
 _VALID_AUTOGRAD_KEYS = set(AUTOGRAD_KEYS)
 
@@ -94,7 +96,7 @@ def add_view_copy_derivatives(
 
 def load_derivatives(
     derivatives_yaml_path: str, native_yaml_path: str, tags_yaml_path: str
-) -> Tuple[Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]], Set[str]]:
+) -> DerivativeRet:
     # Do some caching as this is a deterministic function
     global _GLOBAL_LOAD_DERIVATIVE_CACHE
     key = (derivatives_yaml_path, native_yaml_path)

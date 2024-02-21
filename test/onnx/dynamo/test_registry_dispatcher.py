@@ -2,7 +2,6 @@
 """Unit tests for the internal registration wrapper module."""
 from __future__ import annotations
 
-import logging
 import operator
 from typing import TypeVar, Union
 
@@ -142,8 +141,6 @@ class TestRegistration(common_utils.TestCase):
 class TestDispatcher(common_utils.TestCase):
     def setUp(self):
         self.registry = torch.onnx.OnnxRegistry()
-        # TODO: remove this once we have a better way to do this
-        logger = logging.getLogger("TestDispatcher")
         self.diagnostic_context = diagnostics.DiagnosticContext(
             "torch.onnx.dynamo_export", torch.__version__
         )
