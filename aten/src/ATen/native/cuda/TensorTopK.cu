@@ -300,7 +300,7 @@ __global__ void radixFindKthValues(
       ? items_per_thread
       : at::ceil_div((int64_t)(slice_size - blk_idx_in_slice * items_per_block), (int64_t)BLOCK_THREADS);
 
-  // collect digit counts and store in shared memorey
+  // collect digit counts and store in shared memory
   for (int i = 0; i < items_per_thread; ++i) {
     // Find the start offset for this slice
     IndexType idx = blk_idx_in_slice * items_per_block + i * BLOCK_THREADS + tidx;

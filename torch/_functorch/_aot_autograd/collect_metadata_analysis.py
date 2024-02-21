@@ -24,7 +24,6 @@ from torch.utils._python_dispatch import (
     transform_subclass,
 )
 from .functional_utils import (
-    _get_mutation_type,
     are_all_mutations_hidden_from_autograd,
     are_all_mutations_under_no_grad_or_inference_mode,
     from_fun,
@@ -66,14 +65,14 @@ def coerce_tangent(x):
     # that we can not answer (and therefore have to guess) as we trace the backward ahead-of-time,
     # The same applies to any tensor subclass metadata, when we have tangents that are subclasses.
     # To handle this situation, we have two new methods that a tensor subclass can implement:
-    # (1) __force_standard_metadata__(self)
+    # (1) __coerce_tangent_metadata__(self)
     #     Given a subclass with "non-standard" metadata, turn it into a new subclass with "normal" metadata.
     #     The main example here is a DTensor with the "_Partial" placement.
     #     If we have a forward output with a _Partial placement, and corresponding tangent
     #     with a Replicate/Shard placement, we have no way to convert the tangent "back" to a _Partial placement.
     #     This method lets us avoid the problem entirely by allowing subclasses to ensure that we can never
     #     have a tangent with "problematic" metadata, that we cannot convert to.
-    # (1) __force_same_metadata__(self, target)
+    # (1) __coerce_same_metadata_as_tangent__(self, target)
     #     Given a subclass, and a target subclass with differing metadata,
     #     convert self to have the same metadata as the target.
     #     With DTensor being the main example, we can use this to convert a DTensor with a Replicate()
@@ -81,9 +80,9 @@ def coerce_tangent(x):
     #     and traced tangents with a Shard() placement at compile time.
     #
     if is_traceable_wrapper_subclass(out) and hasattr(
-        out, "__force_standard_metadata__"
+        out, "__coerce_tangent_metadata__"
     ):
-        return out.__force_standard_metadata__()
+        return out.__coerce_tangent_metadata__()
     return out
 
 
@@ -112,7 +111,6 @@ def run_functionalized_fw_and_collect_metadata(
     keep_input_mutations: bool,
     # TODO: refactor to kill this flag
     is_train: bool = False,
-    requires_subclass_dispatch: bool = False,
     pre_dispatch: bool = False,
 ) -> Callable[..., ViewAndMutationMeta]:
     memo: Dict[Tensor, Tensor] = {}
@@ -161,6 +159,21 @@ def run_functionalized_fw_and_collect_metadata(
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
         for i, (arg, f_arg) in enumerate(zip(flat_args, flat_f_args)):
+            # NB: Mutation of non-contiguous tensor subclass input can result in a mismatch in
+            # strides between the functionalized arg inner tensors and non-functionalized arg inner
+            # tensors. This is a problem as the inner tensor stride change may not be reflected
+            # correctly in the outer tensor, so disallow this for now.
+            mutates_data = has_data_mutation(f_arg)
+            if (
+                mutates_data
+                and not arg.is_contiguous()
+                and is_traceable_wrapper_subclass(arg)
+            ):
+                raise RuntimeError(
+                    "Mutations on non-contiguous inputs are currently not allowed on "
+                    "tensor subclasses"
+                )
+
             if not isinstance(arg, Tensor):
                 new_arg = arg
             else:
@@ -175,7 +188,6 @@ def run_functionalized_fw_and_collect_metadata(
             mutates_storage_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=True
             )
-            mutates_data = has_data_mutation(f_arg)
             mutations_hidden_from_autograd = are_all_mutations_hidden_from_autograd(
                 f_arg
             )
@@ -212,14 +224,7 @@ def run_functionalized_fw_and_collect_metadata(
                     mutates_storage_metadata=mutates_storage_metadata,
                     mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
                     requires_grad=requires_grad,
-                    mutation_type=_get_mutation_type(
-                        keep_input_mutations,
-                        mutates_data,
-                        mutates_metadata,
-                        mutations_hidden_from_autograd,
-                        mutations_under_no_grad_or_inference_mode,
-                        requires_grad,
-                    ),
+                    keep_input_mutations=keep_input_mutations,
                 )
             )
 
@@ -576,17 +581,7 @@ from a multi-output view call"
         f_input_tangents = [
             inp
             for inp, info in zip(flat_f_args, input_info)
-            if _get_mutation_type(
-                keep_input_mutations,
-                mutates_data=info.mutates_data,
-                mutates_metadata=info.mutates_metadata,
-                mutations_hidden_from_autograd=info.mutations_hidden_from_autograd,
-                mutations_under_no_grad_or_inference_mode=info.mutations_under_no_grad_or_inference_mode,
-                requires_grad=info.requires_grad
-                # MUTATED_OUT_GRAPH corresponds to any input mutations that happen outside the graph.
-                # this can also include metadata mutations, and inputs that do not require grad,
-            )
-            == MutationType.MUTATED_OUT_GRAPH
+            if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
             and info.mutates_data
             and info.requires_grad
         ]
@@ -618,7 +613,7 @@ from a multi-output view call"
         f_mutated_inputs = [
             inp
             for inp, info in zip(flat_f_args, input_info)
-            if info.mutates_data or info.mutates_metadata
+            if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
         ]
         f_metadata_mutated_inputs = [
             inp for inp, info in zip(flat_f_args, input_info) if info.mutates_metadata
@@ -666,7 +661,6 @@ from a multi-output view call"
             subclass_tangent_meta=create_subclass_meta(traced_tangents),
             is_train=is_train,
             grad_enabled_mutation=grad_enabled_mutation,
-            requires_subclass_dispatch=requires_subclass_dispatch,
         )
         return metadata
 

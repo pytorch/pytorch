@@ -44,7 +44,11 @@ from .schemas import (
     TensorAlias,
     ViewAndMutationMeta,
 )
-from .subclass_utils import unwrap_tensor_subclasses, wrap_tensor_subclasses
+from .subclass_utils import (
+    compute_inner_mutated_inp_indices_from_subclass_meta,
+    unwrap_tensor_subclasses,
+    wrap_tensor_subclasses,
+)
 
 from .utils import (
     _get_symint_hints,
@@ -74,7 +78,7 @@ def coerce_runtime_tangent(x, metadata_tensor):
     _, expected_tangent_metadata = metadata_tensor.__tensor_flatten__()
     if runtime_tangent_metadata == expected_tangent_metadata:
         return x
-    if not hasattr(x, "__force_same_metadata__"):
+    if not hasattr(x, "__coerce_same_metadata_as_tangent__"):
         raise RuntimeError(
             f"""
 During the backward, we encountered a tensor subclass where we guessed its
@@ -88,7 +92,7 @@ shape: {str(x.shape)}
 To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
 """
         )
-    return x.__force_same_metadata__(metadata_tensor)  # type: ignore[attr-defined]
+    return x.__coerce_same_metadata_as_tangent__(metadata_tensor)  # type: ignore[attr-defined]
 
 
 def aot_dispatch_base(
@@ -202,8 +206,15 @@ def aot_dispatch_autograd(
         )
         with track_graph_compiling(aot_config, "joint"):
             # See Note: [Partitioner handling for Subclasses, Part 1]
+            # See Note: [Recomputing subclass mutation handling]
+            mutated_inp_runtime_indices = (
+                compute_inner_mutated_inp_indices_from_subclass_meta(
+                    fw_metadata, inner_meta
+                )
+            )
+            num_mutated_inp_runtime_indices = len(mutated_inp_runtime_indices)
             num_inner_fwd_outputs = (
-                inner_meta.num_mutated_inp_runtime_indices
+                num_mutated_inp_runtime_indices
                 + inner_meta.num_outputs
                 + inner_meta.num_intermediate_bases
                 + inner_meta.num_outputs_rng_offset
