@@ -95,11 +95,15 @@ query ($owner: String!, $repo: String!, $cursor: String) {
 
 
 def is_protected(branch: str) -> bool:
-    ESTIMATED_TOKENS[0] += 1
-    res = gh_fetch_json_dict(
-        f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/branches/{branch}"
-    )
-    return bool(res["protected"])
+    try:
+        ESTIMATED_TOKENS[0] += 1
+        res = gh_fetch_json_dict(
+            f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/branches/{branch}"
+        )
+        return bool(res["protected"])
+    except Exception as e:
+        print(f"[{branch}] Failed to fetch branch protections: {e}")
+        return True
 
 
 def convert_gh_timestamp(date: str) -> float:

@@ -760,8 +760,8 @@ _vec_softmax(
             // Tail case(Scalar): it is exactly same logic as host_softmax
             // inside aten/src/ATen/native/SoftMax.cpp. There are 2 kind of
             // cases which will fall through this part:
-            // Case 1: For the idx at the end of total chunk for each thread, there are not enough numbers for parallization.
-            // Case 2: For the idx at the end of each inner_size inside thread, there are not enough numbers for parallization.
+            // Case 1: For the idx at the end of total chunk for each thread, there are not enough numbers for parallelization.
+            // Case 2: For the idx at the end of each inner_size inside thread, there are not enough numbers for parallelization.
             int64_t tail_number = ((idx+vectorized_step) > end) ? /*Case1*/ (end - idx) : /*Case2*/ (inner_size - inner_idx);
             for (const auto i : c10::irange(tail_number)) {
               outer_idx = (idx + i) / inner_size;
@@ -845,8 +845,8 @@ _vec_softmax(
             // Tail case(Scalar): it is exactly same logic as host_softmax
             // inside aten/src/ATen/native/SoftMax.cpp. There are 2 kind of
             // cases which will fall through this part:
-            // Case 1: For the idx at the end of total chunk for each thread, there are not enough numbers for parallization.
-            // Case 2: For the idx at the end of each inner_size inside thread, there are not enough numbers for parallization.
+            // Case 1: For the idx at the end of total chunk for each thread, there are not enough numbers for parallelization.
+            // Case 2: For the idx at the end of each inner_size inside thread, there are not enough numbers for parallelization.
             int64_t tail_number = ((idx+vectorized_step) > end) ? /*Case1*/ (end - idx) : /*Case2*/ (inner_size - inner_idx);
             for (const auto i : c10::irange(tail_number)) {
               outer_idx = (idx + i) / inner_size;
@@ -882,7 +882,7 @@ _vec_softmax(
 // NB: fast kernel for log_softmax when dim != -1
 // input shape is normalized to {outer_size, dim_size, inner_size}
 //
-// The algorithm requires to load input tensor 3 times, to increase parallelsim
+// The algorithm requires to load input tensor 3 times, to increase parallelism
 // and cache hit rate, inner_size is blocked as:
 //   inner_size: {CHUNK_SIZE, CHUNK_SIZE, ..., Remainder}
 //
