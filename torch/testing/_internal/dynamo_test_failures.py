@@ -403,7 +403,6 @@ dynamo_expected_failures = {
     "TestImports.test_circular_dependencies",  # test_testing
     "TestAssertCloseSparseCSR.test_mismatching_crow_indices_msg",  # test_testing
     "TestAssertCloseSparseBSC.test_mismatching_row_indices_msg",  # test_testing
-    "TestAssertCloseSparseCOO.test_mismatching_values_msg",  # test_testing
     "TestAssertCloseQuantized.test_matching_per_channel",  # test_testing
     "TestAssertCloseSparseCSR.test_matching",  # test_testing
     "TestAssertCloseSparseBSR.test_mismatching_crow_indices_msg",  # test_testing
