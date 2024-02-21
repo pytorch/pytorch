@@ -1,7 +1,9 @@
-import ast
 import dataclasses
+import logging
 import threading
-from typing import Any, Dict
+import warnings
+from collections import defaultdict
+from typing import Any, Dict, List, Optional, Union
 
 import torch.utils._pytree as pytree
 from torch import Tensor
@@ -14,6 +16,8 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
+
+log = logging.getLogger("torch._dynamo")
 
 
 ###############################################################################
@@ -60,89 +64,400 @@ kernel_side_table = KernelSideTable()
 # Mutation Tracker
 
 
-@dataclasses.dataclass
-class MutationInfo:
-    mutated: bool = False
-    used_in_unknown: bool = False
+@dataclasses.dataclass(frozen=True)
+class Param:
+    idx: int
 
 
-# Super basic mutation tracking pass that tracks which inputs are used in stores
-# It bails if any of the inputs are used in non tl.load/tl.store positions.
-# This pass will miss simple things like
-# a = in_ptr
-# tl.load(a, ...)
-# since it does not do any contextual analysis. This means that we might incorrectly
-# find extra mutations but this is safe as it would only be incorrect to miss
-# mutations.
-class MutationTracker(ast.NodeVisitor):
-    ALLOWED_READ_FNS = {
-        "load",
-        "max_constancy",
-        "max_contiguous",
-        "multiple_of",
-        "static_print",
-        "static_assert",
-        "device_print",
-        "device_assert",
-    }
+@dataclasses.dataclass(frozen=True)
+class Intermediate:
+    idx: int
 
-    def __init__(self, infos) -> None:
-        super().__init__()
-        self.infos = infos
-        self.read_depth = 0
-        self.in_store = False
+    def fake(self):
+        return self.idx < 0
 
-    def visit_Name(self, node):
-        if node.id not in self.infos:
-            return
-        if self.read_depth:
-            pass
-        elif self.in_store:
-            self.infos[node.id].mutated = True
+
+@dataclasses.dataclass(frozen=True)
+class Op:
+    name: str
+    fn_call_name: Optional[str]
+    args: List[Union[Param, Intermediate]]
+    ret: Intermediate = dataclasses.field(repr=False)
+
+    def __post_init__(self):
+        if self.name == "tt.call":
+            assert self.fn_call_name is not None
         else:
-            self.infos[node.id].used_in_unknown = True
-
-    def visit_Call(self, node):
-        # TODO(oulgen): Here we assume that there exists a line called
-        # from triton import language as tl. This needs to be checked
-        # as if someones imports xyz as tl then we will incorrectly
-        # assume a mutation but this would be ok as it is only unsafe to
-        # miss a mutation.
-        if (
-            isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "tl"
-        ):
-            if node.func.attr == "store":
-                # Do not allow for store to appear inside a read
-                # tl.load(a if tl.store(b) else z) is not useful
-                # and allowing this would complicate the analysis
-                assert self.read_depth == 0
-                assert self.in_store is False
-                self.in_store = True
-                self.generic_visit(node)
-                self.in_store = False
-                return
-            if node.func.attr in self.ALLOWED_READ_FNS:
-                self.read_depth += 1
-                self.generic_visit(node)
-                self.read_depth -= 1
-                return
-        self.generic_visit(node)
+            assert self.fn_call_name is None
 
 
-def filter_non_mutated(kernel, tensors):
+def generate_ttir(kernel, kwargs):
+    """
+    Uses Triton's internal code generation to create TTIR
+    """
+    import triton
+    from triton.compiler.compiler import ASTSource
     from triton.runtime.autotuner import Autotuner
+    from triton.runtime.jit import JITFunction
+
+    import torch
+    from torch._subclasses.fake_tensor import FakeTensor
 
     if isinstance(kernel, Autotuner):
+        if len(kernel.configs) > 0:
+            # If we are autotuning, then it doesn't matter which version gets
+            # picked for tracing purposes, so lets pick the first one
+            kwargs = {**kwargs, **kernel.configs[0].kwargs}
         kernel = kernel.fn
 
-    infos = {name: MutationInfo() for name in tensors}
-    tracker = MutationTracker(infos)
-    tracker.visit(kernel.parse())
-    return [
-        name for name, info in infos.items() if info.mutated or info.used_in_unknown
+    assert isinstance(kernel, JITFunction)
+
+    if len(kwargs) != len(kernel.arg_names):
+        raise Exception("Incorrect number of arguments passed to kernel")
+
+    # Replace all SymExprs with a regular value for TTIR generation
+    # Replace all FakeTensor with real tensors
+    # These replacements are needed for triton's type, key and config functions
+    ordered_args: Dict[str, Any] = {}
+    for name in kernel.arg_names:
+        a = kwargs[name]
+        if isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            ordered_args[name] = 2
+        elif isinstance(a, FakeTensor):
+            ordered_args[name] = torch.empty(2, dtype=a.dtype)
+        else:
+            ordered_args[name] = a
+
+    ordered_tensor_names = [
+        name for name, arg in ordered_args.items() if isinstance(arg, Tensor)
     ]
+    specialization = kernel._get_config(*ordered_args.values())
+    constants = {
+        i: arg
+        for i, arg in enumerate(ordered_args.values())
+        if not isinstance(arg, Tensor)
+    }
+
+    # Build kernel signature -- doesn't include constexpr arguments.
+    signature = {
+        i: kernel._type_of(kernel._key_of(arg))
+        for i, arg in enumerate(ordered_args.values())
+        if i not in kernel.constexprs
+    }
+
+    context = triton._C.libtriton.ir.context()
+    target = triton.runtime.driver.active.get_current_target()
+    backend = triton.compiler.compiler.make_backend(target)
+    options = backend.parse_options(dict())
+    triton._C.libtriton.ir.load_dialects(context)
+    backend.load_dialects(context)
+
+    src = ASTSource(kernel, signature, constants, specialization)
+    ttir_module = src.make_ir(options, context)
+    if not ttir_module.verify():
+        raise Exception("Verification for TTIR module has failed")
+    return str(ttir_module), ordered_tensor_names
+
+
+def parse_ttir(ttir, kwargs):
+    """
+    Given a Triton emitted TTIR text, this function lexes and parses the
+    code using a minimal grammar defined inside. During the lexing/parsing,
+    we drop any constant value and type information as they are not
+    necessary to us.
+    Being able to choose what we need makes this not a general purpose TTIR
+    parser which further makes parsing much simpler.
+    """
+    # TODO(oulgen):
+    # - Support closures (e.g. "tt.reduce")
+
+    try:
+        import lark  # type: ignore[import-not-found]
+        from lark import Lark, Transformer, v_args
+    except ModuleNotFoundError:
+        warnings.warn(
+            "Using slow path for user-defined Triton kernels. `pip install lark` to fix this."
+        )
+        raise
+
+    # Ops looks like one of the following forms:
+    #
+    # %14 = tt.addptr %13, %4 : tensor<4x!tt.ptr<f32, 1>>, tensor<4xi32>
+    # tt.store %14, %12, %5 {cache = 1 : i32, evict = 1 : i32} : tensor<4xf32>
+    # %15 = "tt.atomic_rmw"(%14, %12, %5) <{atomic_rmw_op = 5 : i32, scope = 1 : i32, sem = 4 : i32}> : (tensor<4x!tt.ptr<f32, 1>>, tensor<4xf32>, tensor<4xi1>) -> tensor<4xf32>  # noqa: B950
+    grammar = """
+        start: (module_block | loc_line)+
+
+        loc_line: "#loc" /.+/ NEWLINE
+
+        module_block: "module" "{" func_block+ "}" LOC
+
+        func_block: "tt.func" ("public"|"private") FN_NAME "(" /.+/ NEWLINE stmt* "}" LOC -> process_func
+
+        ?stmt: op | if | for | while | condition_stmt | label_stmt | cf_stmt
+
+        if: [assign_lhs "="] "scf.if" args rest stmt* "}" "else" "{" stmt* "}" LOC -> process_if
+        for: [assign_lhs "="] "scf.for" args rest stmt* "}" divisibility_annot? LOC -> process_for
+        while: [assign_lhs "="] "scf.while" args rest stmt* "}" "do" "{" stmt* "}" LOC -> process_while
+
+        condition_stmt: "scf.condition" "(" arg ")" args rest
+        label_stmt: LABEL ":" "// pred:" LABEL
+                  | LABEL "(" /.+/ NEWLINE
+        cf_stmt: "cf" "." NAME /.+/ NEWLINE
+
+        op: OP_NAME LOC
+          | [assign_lhs "="] OP_NAME [FN_NAME] args rest?  -> process_op
+
+        ?rest: (":" | "{" | "\\"" | "->" | "<" | "=") /.+/ NEWLINE
+        divisibility_annot: "{" "tt.divisibility_arg1" /[^}]+/ "}"
+
+        args: | "(" ")" | "("? arg ("," arg)* ")"?
+
+        ?arg: INTERMEDIATE
+            | INTERMEDIATE_CONSTANT
+            | CONSTANT
+            | PARAM
+            | "[" arg "]"
+            | arg_with_index
+
+        ?arg_with_index: arg "#" DIGIT+
+
+        ?assign_lhs: (INTERMEDIATE | INTERMEDIATE_CONSTANT) [":" DIGIT+]
+
+        PARAM.5: "%arg" DIGIT+
+        INTERMEDIATE.4: "%" DIGIT+
+        INTERMEDIATE_CONSTANT.3: "%" NAME
+        CONSTANT: FLOAT | DIGIT+ | NAME ("<" DIGIT+ ">")?
+        LABEL: "^bb" DIGIT+
+
+        NAME: (LETTER | DIGIT | "_")+
+        NON_CF_NAME: /(?!(cf))/ NAME
+        FN_NAME: "@" (NAME | ESCAPED_STRING)
+        OP_NAME: "\\""? NON_CF_NAME ("." NAME)+ "\\""?
+
+        LOC.5: "loc(#loc" DIGIT* ")"
+
+        %import common.LETTER
+        %import common.DIGIT
+        %import common.WS
+        %import common.NEWLINE
+        %import common.ESCAPED_STRING
+        %import common.FLOAT
+        %ignore WS
+    """
+
+    next_fake_intermediate = 0
+
+    def convert(token):
+        if isinstance(token, lark.tree.Tree):
+            if token.data == "args":
+                return [convert(a) for a in token.children]
+            elif token.data in {"assign_lhs", "arg_with_index"}:
+                # Drop length/index qualifier
+                return convert(token.children[0])
+            else:
+                raise AssertionError(f"Tree node with {token.data}")
+
+        if token is None or (
+            isinstance(token, lark.lexer.Token)
+            and token.type in ("CONSTANT", "INTERMEDIATE_CONSTANT")
+        ):
+            nonlocal next_fake_intermediate
+            next_fake_intermediate -= 1
+            return Intermediate(next_fake_intermediate)
+
+        assert isinstance(token, lark.lexer.Token)
+
+        if token.type == "INTERMEDIATE":
+            return Intermediate(int(token.value[len("%") :]))
+        if token.type == "PARAM":
+            return Param(int(token.value[len("%arg") :]))
+
+        raise AssertionError(f"{type(token.type)} => {token.value} invalid")
+
+    # In alternative representation, function names are quoted.
+    # It should be possible to move this into the grammar alltogether.
+    def convert_name(token):
+        if token is None:
+            return None
+        s = token.value
+        if len(s) > 2 and s[0] == '"' and s[-1] == '"':
+            return s[1:-1]
+        return s
+
+    functions: Dict[str, Dict[Intermediate, List[Op]]] = {}
+
+    def extend_dict_list(d1, d2):
+        for key, values in d2.items():
+            d1[key].extend(values)
+
+    @v_args(inline=True)
+    class TransformOps(Transformer):
+        def process_op(self, ret, op_name, fn_name, args, *rest):
+            return Op(
+                convert_name(op_name),
+                convert_name(fn_name),
+                convert(args),
+                convert(ret),
+            )
+
+        def process_func(self, name, _args, *stmts):
+            ops: Dict[Intermediate, List[Op]] = defaultdict(list)
+            for e in stmts:
+                if isinstance(e, Op):
+                    ops[e.ret].append(e)
+                elif isinstance(e, dict):
+                    extend_dict_list(ops, e)
+            functions[name.value] = ops
+
+        def _process_scf(self, ret, stmts):
+            ret = convert(ret)
+            ops: Dict[Intermediate, List[Op]] = defaultdict(list)
+            for e in stmts:
+                if isinstance(e, Op):
+                    if e.name == "scf.yield":
+                        ops[ret].append(Op(e.name, None, e.args, ret))
+                    else:
+                        ops[e.ret].append(e)
+                elif isinstance(e, dict):
+                    extend_dict_list(ops, e)
+            return ops
+
+        def process_if(self, ret, _args, _rest, *stmts):
+            return self._process_scf(ret, stmts)
+
+        def process_for(self, ret, _args, _rest, *stmts):
+            return self._process_scf(ret, stmts)
+
+        def process_while(self, ret, _args, _rest, *stmts):
+            return self._process_scf(ret, stmts)
+
+    parser = Lark(
+        grammar, parser="lalr", maybe_placeholders=True, transformer=TransformOps()
+    )
+    parser.parse(ttir)
+    return functions
+
+
+class MemoizeWithCycleCheck:
+    def __init__(self, fn):
+        self.fn = fn
+        self.reset()
+
+    def __call__(self, functions, fn_name, num_args):
+        key = (fn_name, num_args)
+        if key not in self.cache:
+            self.cache[key] = None
+            self.cache[key] = self.fn(functions, fn_name, num_args)
+        if self.cache[key] is None:
+            raise Exception("Recursion is not supported")
+        return self.cache[key]
+
+    def reset(self):
+        self.cache = {}
+
+
+@MemoizeWithCycleCheck
+def analyze_kernel_mutations(functions, fn_name, num_args):
+    """
+    Analyzes the graph to detect all sinks from a predefined list of sinks
+    by using triton's MemWrite trait list. NOTE: What if triton exposed this?
+    From each sink, it traverses the CFG backwards to identify all the input
+    pointers that are mutated
+    """
+    # Name of mutation op to mutated parameter indices
+    # List from Triton Github include/triton/Dialect/Triton/IR/TritonOps.td
+    # All the OPs that have MemWrite trait.
+    # What if Triton exposed this?
+    MUTATION_OPS = {"tt.store": [0], "tt.atomic_cas": [0], "tt.atomic_rmw": [0]}
+    # Ops that we want to bail out on
+    UNKNOWN_OPS = {"tt.elementwise_inline_asm"}
+
+    stack: List[Union[Param, Intermediate]] = []
+    visited = set()
+    ops = functions[fn_name]
+    for op_list in ops.values():
+        for op in op_list:
+            if op.name in UNKNOWN_OPS:
+                raise Exception(
+                    f"ttir analysis hit an op we do not know how to analyze: {op.name}"
+                )
+
+            if op.name == "tt.call":
+                assert op.fn_call_name in functions
+                mutations = analyze_kernel_mutations(
+                    functions, op.fn_call_name, len(op.args)
+                )
+                stack.extend(arg for arg, mutated in zip(op.args, mutations) if mutated)
+            else:
+                for idx in MUTATION_OPS.get(op.name, []):
+                    stack.append(op.args[idx])
+
+    # The following is an iterative DFS algorithm
+    mutated = [False] * num_args
+    while stack:
+        arg = stack.pop()
+        if arg in visited:
+            continue
+
+        visited.add(arg)
+
+        if isinstance(arg, Param):
+            if arg.idx >= num_args:
+                # This is an argument defined in the kernel, not passed in
+                continue
+            mutated[arg.idx] = True
+        elif isinstance(arg, Intermediate) and not arg.fake():
+            for op in ops[arg]:
+                # Skip arguments to load
+                if op.name != "tt.load":
+                    stack.extend(op.args)
+    return mutated
+
+
+def identify_mutated_tensors(kernel, kwargs):
+    """
+    Given a triton kernel and the arguments for this kernel, this function
+    1) Retrieves the TTIR converted version of the kernel from Triton's API.
+    2) Parses the TTIR and creates a control flow graph
+    3) Analyzes the graph to detect all input tensor mutations
+    """
+
+    try:
+        from torch._dynamo import config
+
+        if not config.optimize_user_defined_triton_kernels:
+            raise Exception("optimize_user_defined_triton_kernels is False")
+
+        ttir, ordered_tensor_names = generate_ttir(kernel, kwargs)
+        functions = parse_ttir(ttir, kwargs)
+
+        kernel_name = next(iter(functions.keys()))
+        # Triton codegen modifies the name
+        assert kernel.fn.__name__ in kernel_name
+        # Reset the cache between top level invocations
+        # The cache for analyze kernel mutations is mainly used for cycle
+        # detection, so each top level invocation needs a clean cache
+        analyze_kernel_mutations.reset()
+        mutations = analyze_kernel_mutations(
+            functions, kernel_name, len(ordered_tensor_names)
+        )
+
+        return [
+            ordered_tensor_names[i] for i, mutated in enumerate(mutations) if mutated
+        ]
+    except Exception as e:
+        import traceback
+
+        warnings.warn(
+            "Encountered an exception in identify_mutated_tensors, assuming every input is mutated"
+        )
+        log.debug(
+            "".join(
+                traceback.TracebackException.from_exception(e).format()  # noqa: G001
+            )
+        )
+        return [key for key, value in kwargs.items() if isinstance(value, Tensor)]
 
 
 ###############################################################################
@@ -226,15 +541,12 @@ def triton_kernel_wrapper_mutation_proxy_torch_dispatch_mode(
 @triton_kernel_wrapper_mutation.py_functionalize_impl
 def triton_kernel_wrapper_mutation_functionalize(ctx, kernel_idx, grid, kwargs):
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
-    tensors_to_clone = [
-        key for key, value in unwrapped_kwargs.items() if isinstance(value, Tensor)
-    ]
     kernel = kernel_side_table.get_kernel(kernel_idx)
     # TODO(oulgen): Preexisting bug, if two kernel inputs are views of each
     # other, and one gets mutated in kernel, and later another gets mutated,
     # they are no longer equal. Fix this by graph breaking on this condition
     # earlier in dynamo.
-    tensors_to_clone = filter_non_mutated(kernel, tensors_to_clone)
+    tensors_to_clone = identify_mutated_tensors(kernel, unwrapped_kwargs)
     with ctx.redispatch_to_next():
         unwrapped_outputs = triton_kernel_wrapper_functional(
             kernel_idx=kernel_idx,

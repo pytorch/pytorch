@@ -117,14 +117,14 @@ class ShardingPropagator:
     def _wrap_output_spec_tensor_meta(
         self,
         op: OpOverload,
-        output_spec: OutputSpecType,
+        output_specs: OutputSpecType,
         output_tensor_meta: Union[None, TensorMeta, Sequence[Optional[TensorMeta]]],
     ) -> None:
         """
-        Wrap the output_spec with the tensor metadata from the output.
+        Wrap the output_specs with the tensor metadata from the output.
         """
 
-        if isinstance(output_spec, DTensorSpec):
+        if isinstance(output_specs, DTensorSpec):
             if not isinstance(output_tensor_meta, TensorMeta):
                 # Either error due to ShardingPropagator or due to incorrect OutputSpec
                 if not isinstance(output_tensor_meta, (tuple, list)):
@@ -132,19 +132,19 @@ class ShardingPropagator:
                         "ShardingPropagator error: output does not have an associated TensorMeta"
                     )
                 raise ValueError(
-                    f"For the op {op.name()}, `output_spec` has 1 output which does not equal the "
+                    f"For the op {op.name()}, `output_specs` has 1 output which does not equal the "
                     f"number of op outputs: {len(output_tensor_meta)}."
                 )
-            output_spec.tensor_meta = output_tensor_meta
-        elif isinstance(output_spec, (tuple, list)):
+            output_specs.tensor_meta = output_tensor_meta
+        elif isinstance(output_specs, (tuple, list)):
             if not isinstance(output_tensor_meta, (tuple, list)) or len(
-                output_spec
+                output_specs
             ) != len(output_tensor_meta):
                 raise ValueError(
-                    f"For the op {op.name()}, `output_spec` has {len(output_spec)} outputs which does not equal the "
+                    f"For the op {op.name()}, `output_specs` has {len(output_specs)} outputs which does not equal the "
                     f"number of op outputs {_length(output_tensor_meta)}."
                 )
-            for i, spec in enumerate(output_spec):
+            for i, spec in enumerate(output_specs):
                 if isinstance(spec, DTensorSpec):
                     output_tensor_meta_i = output_tensor_meta[i]
                     if not isinstance(output_tensor_meta_i, TensorMeta):
@@ -219,15 +219,15 @@ class ShardingPropagator:
                 needs_redistribute = False
                 expected_input_specs = []
 
-                # in case where the op does not specify input_specs and output_spec
-                # is a DTensorSpec, we use output_spec as the spec for each DTensor
+                # in case where the op does not specify input_specs and output_specs
+                # is a DTensorSpec, we use output_specs as the spec for each DTensor
                 # input arg.
                 if output_strategy.input_specs is None:
-                    assert isinstance(output_strategy.output_spec, DTensorSpec)
+                    assert isinstance(output_strategy.output_specs, DTensorSpec)
 
                 for idx, input_spec in enumerate(op_schema.args_spec):
                     desired_spec = (
-                        output_strategy.out_spec
+                        output_strategy.output_spec
                         if output_strategy.input_specs is None
                         else output_strategy.input_specs[idx]
                     )
@@ -245,29 +245,30 @@ class ShardingPropagator:
 
                 # construct output spec for the op
                 if op_schema.return_type_tuple_tensors():
-                    # for ops return multiple tensors, make output spec return same spec
-                    # returned from the op strategy if output_spec is not a sequence
-                    output_spec: OutputSpecType = output_strategy.output_spec
-                    if isinstance(output_spec, DTensorSpec):
-                        output_spec = tuple(
+                    # for ops that return multiple tensors and the output_specs is not
+                    # a tuple, we use a tuple of that single output spec as the new
+                    # output_specs
+                    output_specs: OutputSpecType = output_strategy.output_specs
+                    if isinstance(output_specs, DTensorSpec):
+                        output_specs = tuple(
                             [
                                 # create a new DTensorSpec with the same placement as the
-                                # output_spec in output_strategy
+                                # output_specs in output_strategy
                                 DTensorSpec(
-                                    mesh=output_spec.mesh,
-                                    placements=output_spec.placements,
-                                    tensor_meta=output_spec.tensor_meta,
+                                    mesh=output_specs.mesh,
+                                    placements=output_specs.placements,
+                                    tensor_meta=output_specs.tensor_meta,
                                 )
                                 for _ in range(len(op_schema.op._schema.returns))
                             ]
                         )
                 elif op_schema.return_type_tensor():
-                    output_spec = output_strategy.output_spec
+                    output_specs = output_strategy.output_specs
                 else:
-                    output_spec = None
+                    output_specs = None
 
                 output_sharding = OutputSharding(
-                    output_spec,
+                    output_specs,
                     suggestion_schema,
                     needs_redistribute=needs_redistribute,
                 )
@@ -277,7 +278,6 @@ class ShardingPropagator:
                 for strategy in op_strategy.childs:
                     assert isinstance(strategy, OpStrategy)
                     output_strategy = self._select_strategy(strategy)
-                    assert isinstance(output_strategy.output_spec, DTensorSpec)
                     out_spec_list.append(output_strategy.output_spec)
 
                 needs_redistribute = False

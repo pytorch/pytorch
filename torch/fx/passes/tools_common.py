@@ -243,7 +243,7 @@ def legalize_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     Returns:
         The graph module in-place sorted
     """
-    indeg = {node: 0 for node in gm.graph.nodes}
+    indeg = dict.fromkeys(gm.graph.nodes, 0)
     new_graph = torch.fx.Graph()
     # Track how many unfulfilled dependencies each node has
     for node in gm.graph.nodes:
