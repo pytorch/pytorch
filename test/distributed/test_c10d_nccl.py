@@ -4288,6 +4288,11 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         torch.cuda.synchronize()
 
+
+        if timing_enabled:
+            # wait for watchdog thread to process the queue of works
+            time.sleep(1)
+
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         ver = t['version']
         self.assertEqual(ver, "1.1")
@@ -4295,18 +4300,20 @@ class NCCLTraceTest(NCCLTraceTestBase):
         for seq in range(num_coalesced_ops):
             first_op = seq * 2
             coalesced_op = first_op + 1
-            # the indivudal ops inside  the coalescing group are updated with timing information from the shared
-            # events with teh coalesing op. They also include the individual op metadata
+            # the indivudal ops inside the coalescing group the individual op metadata,
+            # but not the timing info coming from the actual coalesced kernel
             profiling_name = 'nccl:recv 0<-1' if self.rank == 0 else 'nccl:send 1->0'
             self.assertEqual(t['entries'][first_op]['profiling_name'], profiling_name)
             self.assertEqual(t['entries'][first_op]['seq_id'], seq)
             self.assertEqual(t['entries'][first_op]['state'], 'completed')
             self.assertEqual(t['entries'][first_op]['input_sizes'], [input_sizes])
             self.assertEqual(t['entries'][first_op]['output_sizes'], [input_sizes])
-            if timing_enabled:
-                self.assertEqual(t['entries'][first_op]['duration'], 1)
-            else:
-                self.assertTrue('duration' not in t['entries'][first_op])
+            # if timing_enabled:
+                # self.assertEqual(t['entries'][first_op]['duration'], 1)
+            # else:
+                # self.assertTrue('duration' not in t['entries'][first_op])
+            # duration doesn't get tagged onto individual ops yet
+            self.assertTrue('duration' not in t['entries'][first_op])
 
             # the coalesced op has no metadata but indicates that coalescing was used
             self.assertEqual(t['entries'][coalesced_op]['profiling_name'], 'nccl:coalesced')

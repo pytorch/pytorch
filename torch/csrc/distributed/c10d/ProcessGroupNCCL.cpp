@@ -879,7 +879,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
         &cacheAllocatorDeregisterHook);
     allocatorHooksAttached = true;
   }
-  LOG(ERROR) << "PG ctor seq " << seq_;
 }
 
 void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
@@ -2220,6 +2219,27 @@ uint64_t ProcessGroupNCCL::WorkNCCL::getSequencenumber() const {
 
 void ProcessGroupNCCL::workEnqueue(
     c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work) {
+  // Record every work that we enqueue, rather than every work we create.
+  // - we do not currently enqueue every created work, see coalescing in
+  // pointToPoint
+  // - but it is UNSAFE to steal start/end event refs from works that may go
+  // out of scope,
+  //   and enqueueing in workMetaList is the mechanism by which we ensure they
+  //   stay in scope long enough for flight recorder to finish using them
+
+  work->trace_id_ = NCCLTraceBuffer::get()->record(
+      uid_,
+      seq_,
+      work->profilingTitle_,
+
+      // TODO some new way to pass in/out tensor shapes to record()
+      // we avoid keeping tensors alive by holding a work obj, so shouldn't
+      // store the inputs/outputs directly
+      std::vector<at::Tensor>{},
+      work->outputs_ ? *work->outputs_ : std::vector<at::Tensor>{},
+      work->ncclStartEvent_.get(),
+      work->ncclEndEvent_.get());
+  LOG(ERROR) << "workEnqueue just recorded " << work->trace_id_.value();
   if (!terminateProcessGroup_.load()) {
     {
       std::lock_guard<std::mutex> lock(workMetaListMutex_);
@@ -2231,27 +2251,6 @@ void ProcessGroupNCCL::workEnqueue(
       lastEnqueuedSeq_ = work->seq_;
       lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
     }
-
-    // Record every work that we enqueue, rather than every work we create.
-    // - we do not currently enqueue every created work, see coalescing in
-    // pointToPoint
-    // - but it is UNSAFE to steal start/end event refs from works that may go
-    // out of scope,
-    //   and enqueueing in workMetaList is the mechanism by which we ensure they
-    //   stay in scope long enough for flight recorder to finish using them
-
-    work->trace_id_ = NCCLTraceBuffer::get()->record(
-        uid_,
-        seq_,
-        work->profilingTitle_,
-
-        // TODO some new way to pass in/out tensor shapes to record()
-        // we avoid keeping tensors alive by holding a work obj, so shouldn't
-        // store the inputs/outputs directly
-        std::vector<at::Tensor>{},
-        work->outputs_ ? *work->outputs_ : std::vector<at::Tensor>{},
-        work->ncclStartEvent_.get(),
-        work->ncclEndEvent_.get());
   }
 }
 
@@ -2267,8 +2266,6 @@ void ProcessGroupNCCL::startCoalescing() {
   coalescing_state_ |= CoalActive;
 
   bool enableTiming = enableTiming_.load();
-  LOG(ERROR) << "startCoalescing found timingEnabled = "
-             << enableTiming_.load();
 
   if (enableTiming) {
     coalescedStartEvent_ =
@@ -2284,6 +2281,7 @@ void ProcessGroupNCCL::startCoalescing() {
 // REDUCE_SCATTER
 c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   if (coalescedComms_.size() == 0) {
+    LOG(ERROR) << "endcoalescing bailed bc comms size";
     // There is no actual work being coalesced, return here
     groupEnd();
     return nullptr;
@@ -2721,7 +2719,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // Work itself will create the CUDA events on all GPUs of tensors
   c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work;
   if (coalescing_state_) {
-    LOG(ERROR) << "pointToPoint found timingEnabled = " << enableTiming_.load();
     auto trace_id = NCCLTraceBuffer::get()->record(
         uid_,
         seq_,
