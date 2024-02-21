@@ -4137,6 +4137,7 @@ def _adaptive_avg_pool2d(x, output_size):
     # TODO: should we force these to be realized?
     return rv
 
+
 def _adaptive_pooling_idx_max(kernel_maxes, in_sizes, out_sizes, return_index, loader):
     h_in, w_in = in_sizes
     h_out, w_out = out_sizes
@@ -4145,7 +4146,7 @@ def _adaptive_pooling_idx_max(kernel_maxes, in_sizes, out_sizes, return_index, l
         return FloorDiv((index * inp_dim), out_dim)
 
     def end_index(index, out_dim, inp_dim):
-        return FloorDiv((index + 1) * inp_dim + out_dim -1, out_dim)
+        return FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
 
     h_start_index_fn = functools.partial(start_index, out_dim=h_out, inp_dim=h_in)
     h_end_index_fn = functools.partial(end_index, out_dim=h_out, inp_dim=h_in)
@@ -4161,7 +4162,7 @@ def _adaptive_pooling_idx_max(kernel_maxes, in_sizes, out_sizes, return_index, l
         w_start_index = w_start_index_fn(bw)
         w_end_index = w_end_index_fn(bw)
         maxval = None
-        maxindex = None 
+        maxindex = None
         for ih, iw in itertools.product(range(kernel_maxes[0]), range(kernel_maxes[1])):
             val = loader(
                 prefix,
@@ -4169,8 +4170,10 @@ def _adaptive_pooling_idx_max(kernel_maxes, in_sizes, out_sizes, return_index, l
                 [h_start_index, w_start_index],
                 [h_end_index, w_end_index],
             )
+            index = ops.index_expr(
+                (h_start_index + ih) * w_in + w_start_index + iw, torch.int64
+            )
             if return_index:
-                index = ops.index_expr(ih * w_in + iw, torch.int64)
                 if maxindex is None:
                     maxindex = index
                 else:
@@ -4179,15 +4182,18 @@ def _adaptive_pooling_idx_max(kernel_maxes, in_sizes, out_sizes, return_index, l
                 maxval = val
             else:
                 maxval = ops.maximum(val, maxval)
-            if return_index:
-                return maxindex
-            else:
-                return maxval
+        if return_index:
+            return maxindex
+        else:
+            return maxval
+
     return fn_max
+
 
 fallback_adaptive_max_pool2d = fallback_handler(
     aten.adaptive_max_pool2d.default, add_to_fallback_set=False
 )
+
 
 @register_lowering(aten.adaptive_max_pool2d)
 def adaptive_max_pool2d(x, output_size):
@@ -4208,7 +4214,9 @@ def adaptive_max_pool2d(x, output_size):
 
     if h_out == 0 or w_out == 0:
         o_size = [*batch, h_out, w_out]
-        return empty(o_size, dtype=x.get_dtype(), device=x.get_device())
+        return empty(o_size, dtype=x.get_dtype(), device=x.get_device()), empty(
+            o_size, dtype=torch.int64, device=x.get_device()
+        )
     if h_in % h_out == 0 and w_in % w_out == 0:
         kernel_size = [h_in // h_out, w_in // w_out]
         return max_pool2d_with_indices(x, kernel_size)
@@ -4218,7 +4226,6 @@ def adaptive_max_pool2d(x, output_size):
 
     new_size = list(batch) + [h_out, w_out]
     dtype = x.get_dtype()
-
 
     window_size = h_kernel_max * w_kernel_max
     if window_size > 25:

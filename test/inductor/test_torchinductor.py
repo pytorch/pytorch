@@ -3216,7 +3216,6 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 0)
 
-
     def test_multi_threading(self):
         model = torch.nn.Linear(2, 3).eval()
         inp = torch.randn(4, 2)
