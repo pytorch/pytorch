@@ -89,7 +89,7 @@ def efficient_conv_bn_eval_graph_transform(match: Match, *args, **kwargs):
     bn_node = match.nodes[0]
     graph = match.graph
     gm = graph.owning_module
-    bn_mod = getattr(gm, bn_node.target)
+    bn_mod = getattr(gm, bn_node.target)  # type: ignore[arg-type]
 
     # We can only use efficient conv-bn for eval mode with track_running_stats
     if not bn_mod.track_running_stats or bn_mod.training:
@@ -100,11 +100,11 @@ def efficient_conv_bn_eval_graph_transform(match: Match, *args, **kwargs):
         input_node = bn_node.args[0]
     else:
         input_node = bn_node.kwargs["input"]
-    if input_node.op != "call_module":
+    if input_node.op != "call_module":  # type: ignore[union-attr]
         return
-    if not hasattr(gm, input_node.target):
+    if not hasattr(gm, input_node.target):  # type: ignore[arg-type, union-attr]
         return
-    input_mod = getattr(gm, input_node.target)
+    input_mod = getattr(gm, input_node.target)  # type: ignore[arg-type, union-attr]
     supported_convs = [
         nn.Linear,
         nn.Conv1d,
@@ -118,7 +118,7 @@ def efficient_conv_bn_eval_graph_transform(match: Match, *args, **kwargs):
         return
     conv_node = input_node
     # Output of conv is used by other nodes, cannot optimize
-    if len(conv_node.users) > 1:
+    if len(conv_node.users) > 1:  # type: ignore[union-attr]
         return
 
     # Find a pair of conv and bn computation nodes to optimize.
@@ -130,15 +130,15 @@ def efficient_conv_bn_eval_graph_transform(match: Match, *args, **kwargs):
         # argument. `graph.get_attr` and
         # `graph.call_function` does not allow the `name` argument.
         conv_get_node = graph.create_node(
-            op="get_attr", target=conv_node.target, name="get_conv"
+            op="get_attr", target=conv_node.target, name="get_conv"  # type: ignore[union-attr]
         )
         bn_get_node = graph.create_node(
             op="get_attr", target=bn_node.target, name="get_bn"
         )
-        if conv_node.args:
-            conv_input = conv_node.args[0]
+        if conv_node.args:  # type: ignore[union-attr]
+            conv_input = conv_node.args[0]  # type: ignore[union-attr]
         else:
-            conv_input = conv_node.kwargs["input"]
+            conv_input = conv_node.kwargs["input"]  # type: ignore[union-attr]
         # prepare args for the fused function
         args = (bn_get_node, conv_get_node, conv_input)
         # create a new node
