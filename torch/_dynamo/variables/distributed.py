@@ -52,12 +52,14 @@ def is_constant_pg_functions(value):
     from torch.distributed.distributed_c10d import (
         _get_group_size_by_name,
         _get_group_tag,
+        _rank_not_in_group,
         get_process_group_ranks,
     )
 
     constant_processgroup_functions = [
         _get_group_size_by_name,
         _get_group_tag,
+        _rank_not_in_group,
         get_process_group_ranks,
     ]
 
@@ -191,7 +193,8 @@ class DeviceMeshVariable(DistributedVariable):
             return ConstantVariable.create(self.value.get_coordinate())
         if name == "get_group":
             return ConstantVariable.create(self.value.get_group())
-
+        if name == "_get_or_create_default_group":
+            return ProcessGroupVariable(self.value._get_or_create_default_group())
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -232,6 +235,8 @@ class ProcessGroupVariable(DistributedVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx, name):
+        if name == "group_name":
+            return variables.ConstantVariable.create(self.value.group_name)
         if name in ["rank", "size"]:
             return variables.LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)

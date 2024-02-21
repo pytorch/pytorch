@@ -1419,6 +1419,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if not config.abi_compatible:
             super().codegen_multi_output(name, value)
 
+    def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
+        raise NotImplementedError("Control flow NYI in C++ wrapper codegen.")
+
+    def codegen_conditional(self, conditional):
+        raise NotImplementedError("Control flow NYI in C++ wrapper codegen.")
+
     def generate_extern_kernel_args_decl_if_needed(
         self, op_overload, raw_args, output_args
     ):
