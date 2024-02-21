@@ -2403,6 +2403,31 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
     @xfailIfTorchDynamo
     @config.patch(capture_func_transforms=True)
     @make_logging_test(recompiles=True)
+    def test_vmap_guard_fail_different_state(self, records):
+        @torch.compile(backend="eager")
+        def fn(x):
+            return torch.vmap(lambda x: x.sin())(x)
+
+        x = torch.zeros(3, 4)
+        y = torch.vmap(fn, randomness="same")(x)
+        self.assertEqual(x.sin(), y)
+        self.assertEqual(len(records), 0)
+
+        # call vmap(vmap(fn))(x) should retrigger compilation
+        y = torch.vmap(fn, randomness="different")(x)
+        self.assertEqual(x.sin(), y)
+        self.assertGreater(len(records), 0)
+        record = self.getRecord(records, "pyfunctorch")
+        self.assertIn(
+            """\
+    triggered by the following guard failure(s):
+    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'same')])  # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:401 in _flat_vmap""",
+            record.getMessage(),
+        )
+
+    @xfailIfTorchDynamo
+    @config.patch(capture_func_transforms=True)
+    @make_logging_test(recompiles=True)
     def test_vmap_guard_fail(self, records):
         @torch.compile(backend="eager")
         def fn(x):
@@ -2419,11 +2444,11 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         y = torch.vmap(torch.vmap(fn))(x)
         self.assertEqual(x.sin(), y)
         self.assertGreater(len(records), 0)
-        record = self.getRecord(records, "maybe_current_level()")
+        record = self.getRecord(records, "pyfunctorch")
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._C._functorch.maybe_current_level() is None             # with vmap_increment_nesting(batch_size, randomness) as vmap_level:""",
+    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])  # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:401 in _flat_vmap""",
             record.getMessage(),
         )
 
@@ -3026,6 +3051,54 @@ class GraphModule(torch.nn.Module):
             {"torch.func.grad: kwargs arguments are currently unsupported.": 2},
         )
         self.assertEqual(actual, expected)
+
+    @config.patch(capture_func_transforms=True)
+    @config.patch(error_on_recompile=True)
+    def test_vmap_recompile(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            return torch.vmap(lambda x: x.sin())(x)
+
+        x = torch.zeros(3, 3, 4, 5)
+        y = torch.vmap(fn)(x)
+        # should not recompile on second call. See Pytorch issue #118493
+        y = torch.vmap(fn)(x)
+
+    @config.patch(capture_func_transforms=True)
+    @config.patch(error_on_recompile=True)
+    def test_vmap_recompile_different_config(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            return torch.vmap(lambda x: x.sin())(x)
+
+        x = torch.zeros(3, 3, 4, 5)
+        y = torch.vmap(fn)(x)
+        with self.assertRaises(torch._dynamo.exc.RecompileError):
+            fn(x)
+
+    @config.patch(capture_func_transforms=True)
+    @config.patch(error_on_recompile=True)
+    def test_vmap_recompile_same_config(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            return torch.vmap(lambda x: x.sin())(x)
+
+        x = torch.zeros(3, 3, 4, 5)
+        torch.vmap(torch.vmap(fn, randomness="same"), randomness="same")(x)
+        with self.assertRaises(torch._dynamo.exc.RecompileError):
+            torch.vmap(torch.vmap(fn, randomness="same"), randomness="error")(x)
+
+    @config.patch(capture_func_transforms=True)
+    @config.patch(error_on_recompile=True)
+    def test_vmap_recompile_with_randomness(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            return torch.vmap(lambda x: x.sin())(x)
+
+        x = torch.zeros(3, 3, 4, 5)
+        torch.vmap(fn, randomness="same")(x)
+        with self.assertRaises(torch._dynamo.exc.RecompileError):
+            torch.vmap(fn, randomness="different")(x)
 
     @config.patch(capture_func_transforms=True)
     def test_vmap_get_wrapped(self):

@@ -10,11 +10,13 @@ from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed._tensor import DTensor, Placement, Replicate, Shard
 from torch.distributed._tensor.device_mesh import _mesh_resources
 from torch.distributed._tensor.placement_types import DTensorSpec
+from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import (
     _chunk_with_empty,
     _from_local_no_grad,
     _get_dim0_chunked_size,
     _raise_assert_with_print,
+    _to_dtype_if_needed,
     FSDPMeshInfo,
     HSDPMeshInfo,
 )
@@ -96,6 +98,8 @@ class FSDPParam:
     """
 
     orig_dtype: torch.dtype
+    param_dtype: Optional[torch.dtype]
+    reduce_dtype: Optional[torch.dtype]
     _orig_size: torch.Size  # ND
     _contiguous_orig_stride: Tuple[int, ...]
     sharded_size: torch.Size  # ND
@@ -120,20 +124,28 @@ class FSDPParam:
         mesh_info: FSDPMeshInfo,
         post_forward_mesh_info: Optional[FSDPMeshInfo],
         device: torch.device,
+        mp_policy: MixedPrecisionPolicy,
     ):
         self._module_info: ParamModuleInfo = module_info
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
-        self._init_dtype_attrs(param)
+        self._init_dtype_attrs(param, mp_policy)
         self._init_sharded_param(param, device)
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
         self.all_gather_output = torch.empty(0)
         self._param_fqn: Optional[str] = None  # prefixed from root module
 
-    def _init_dtype_attrs(self, param: nn.Parameter):
+    def _init_dtype_attrs(self, param: nn.Parameter, mp_policy: MixedPrecisionPolicy):
+        param_dtype, reduce_dtype = (mp_policy.param_dtype, mp_policy.reduce_dtype)
         self.orig_dtype = param.dtype
+        # Clamp `param_dtype` to `None` if no casting is required
+        if param_dtype == self.orig_dtype:
+            param_dtype = None
+        self.param_dtype = param_dtype
+        self.reduce_dtype = reduce_dtype
+        # None indicates that the mixed precision is not enabled
 
     @torch.no_grad()
     def _init_sharded_param(self, param: nn.Parameter, device: torch.device):
@@ -309,14 +321,14 @@ class FSDPParam:
             self._sharded_post_forward_param_data = None  # free
         self.sharded_state = ShardedState.UNSHARDED
 
-    def _setattr_on_modules(self, tensor: torch.Tensor) -> None:
+    def _setattr_on_modules(self, param: nn.Parameter) -> None:
         unsafe_setattr_param(
-            self._module_info.module, self._module_info.param_name, tensor
+            self._module_info.module, self._module_info.param_name, param
         )
         for shared_module, shared_param_name in zip(
             self._module_info.shared_modules, self._module_info.shared_param_names
         ):
-            unsafe_setattr_param(shared_module, shared_param_name, tensor)
+            unsafe_setattr_param(shared_module, shared_param_name, param)
 
     def to_sharded_dtensor(self, tensor: torch.Tensor) -> DTensor:
         """
@@ -361,9 +373,12 @@ class FSDPParam:
     def all_gather_input(self) -> torch.Tensor:  # 1D
         self._assert_in_states(ShardedState.SHARDED, ShardedState.SHARDED_POST_FORWARD)
         if self.sharded_state == ShardedState.SHARDED:
-            return self._sharded_param_data
+            return _to_dtype_if_needed(self._sharded_param_data, self.param_dtype)
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
-            return cast(torch.Tensor, self._sharded_post_forward_param_data)
+            return _to_dtype_if_needed(
+                cast(torch.Tensor, self._sharded_post_forward_param_data),
+                self.param_dtype,
+            )
         return torch.empty(0)  # mypy
 
     @property
@@ -409,10 +424,10 @@ def unsafe_free_storage(tensor: torch.Tensor) -> None:
 # CPU overhead, if the module did not override it. For FSDP, we know we do not
 # need those checks when transitioning between sharded/unsharded parameters.
 def unsafe_setattr_param(
-    module: nn.Module, param_name: str, param: torch.Tensor
+    module: nn.Module, param_name: str, param: nn.Parameter
 ) -> None:
     if getattr(module.__setattr__, "__func__", None) is nn.Module.__setattr__:
-        module._parameters[param_name] = cast(nn.Parameter, param)
+        module._parameters[param_name] = param
         super(nn.Module, module).__setattr__(param_name, param)
     else:  # slow path
         setattr(module, param_name, param)
