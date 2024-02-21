@@ -16,29 +16,47 @@ class DTensorShardingTest(DTensorTestBase):
     @with_comms
     def test_dtensor_row_wise_sharding(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        placements = [Shard(0)]  # row-wise sharding
+        row_wise_sharding_placements = [Shard(0)]  # row-wise sharding
         local_shard_shape = [4, 4]
         global_tensor_shape = [4 * self.world_size, 4]
         global_tensor = torch.randn(*global_tensor_shape)
 
         # example 1: embedding sharding
-        dtensor = distribute_tensor(global_tensor, device_mesh, placements)
+        dtensor = distribute_tensor(
+            global_tensor, device_mesh, row_wise_sharding_placements
+        )
         local_shard = dtensor.to_local()
         self.assertEqual(local_shard.shape, torch.Size(local_shard_shape))
 
-        # example 2: load state dict from a global Tensor
-        # pre hook: let distribute_tensor do the splicing
-        src_dtensor = distribute_tensor(global_tensor, device_mesh, placements)
-        # _load_state_dict: copy DTensor into DTensor
+        # example 2: transform DTensor into local_shards
+        # usage in TorchRec:
+        #   In ShardedEmbeddingCollection's load_state_dict pre hook
+        #   _pre_load_state_dict_hook, the source param will be spliced
+        #   according to local_shards' original place in the gloabl tensor
+        #   if the source param is a torch.Tensor because the source param
+        #   holds the global tensor and we want to tailor the shards from it.
+        #   We can let ``distribute_tensor'' do the splicing work for us.
+        src_dtensor = distribute_tensor(
+            global_tensor, device_mesh, row_wise_sharding_placements
+        )
+        splice_result = row_wise_sharding_placements[0]._split_tensor(
+            global_tensor, self.world_size, with_padding=False, contiguous=True
+        )[0][self.rank]
+        self.assertEqual(splice_result, src_dtensor.to_local())
+
+        # example 3: copy DTensor into DTensor as in _load_state_dict()
         dtensor.copy_(src_dtensor)
 
-        # example 3: state dict
-        # post hook: always return DTensor
-        # torchrec ShardedEmbeddingCollection keeps a list _model_parallel_name_to_sharded_tensor
-        # which is initialized in _initialize_torch_state where torch.Tensor params are transformed
-        # into ShardedTensor by ShardedTensor._init_from_local_shards()
+        # example 4: transform local_shards into DTensor
+        # usage in TorchRec:
+        #   ShardedEmbeddingCollection stores model parallel params in
+        #   _model_parallel_name_to_sharded_tensor which is initialized in
+        #   _initialize_torch_state() and torch.Tensor params are transformed
+        #   into ShardedTensor by ShardedTensor._init_from_local_shards().
+        #
+        #   This allows state_dict() to always return ShardedTensor objects.
         dtensor = DTensor.from_local(
-            local_shard, device_mesh, placements, run_check=False
+            local_shard, device_mesh, row_wise_sharding_placements, run_check=False
         )
         self.assertEqual(dtensor.full_tensor(), global_tensor)
 
