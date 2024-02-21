@@ -318,15 +318,26 @@ developer_warnings = is_fbcode() or is_nightly_or_source
 # the default to spawn.
 worker_start_method = "fork"
 
-fuse_ddp_communication = True
+# Flags to turn on all_reduce fusion. These 2 flags should be automaticaly turned
+# on by DDP and should not be set by the users.
+fuse_ddp_communication = False
+fuse_ddp_bucket_size = 25
 
+# Flag to control which fusion passes to apply. Functions in the list will
+# be applied in order. There are two different different fusion passes
+# --"fuse_ddp_with_concat_op" and "fuse_ddp_with_coalescing_op". The default
+# one is "fuse_ddp_with_concat_op". Users can also change this to a customized
+# fusion function.
+#
+# "schedule_comm_wait" is used to delay the wait ops to maximize comm/comp
+# overlapping. At this moment, this pass performs better than
+# reorder_for_compute_comm_overlap_passes but we will add the logic of
+# "schedule_comm_wait" in the future and remove the one here.
 fuse_ddp_communication_passes = [
-    # "fuse_ddp_with_concat_op",
-    "fuse_ddp_with_coalescing_op",
+    "fuse_ddp_with_concat_op",
     "schedule_comm_wait",
 ]
 
-ddp_fusion_bucket_size = 25
 
 
 def decide_compile_threads():

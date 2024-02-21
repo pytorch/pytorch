@@ -6,12 +6,12 @@ import operator
 from collections import Counter, defaultdict
 from typing import Any, Dict, List, Optional, Set, Union
 
+from sympy import Expr
+
 import torch
 import torch._inductor as inductor
 import torch.utils._pytree as pytree
 from torch import fx
-
-from sympy import Expr
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters, optimus_scuba_log
 
@@ -98,7 +98,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         fuse_ddp_communication(
             gm.graph,
             config.fuse_ddp_communication_passes,
-            config.ddp_fusion_bucket_size,
+            config.fuse_ddp_bucket_size,
         )
 
     if config.post_grad_custom_post_pass is not None:

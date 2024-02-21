@@ -157,9 +157,19 @@ class ReplicateTest(MultiProcessTestCase):
         self.assertEqual(tuple(model.parameters()), tuple(compiled_model.parameters()))
 
     def test_compile_cpu(self):
+        # Test the coalescing_op with CPU.
+        torch._inductor.config.fuse_ddp_communication_passes = [
+            "fuse_ddp_with_coalescing_op",
+            "schedule_comm_wait",
+        ]
         self._test_compile(use_gpu=False, no_sync=False)
 
     def test_compile_cpu_no_sync(self):
+        # Test the coalescing_op with CPU.
+        torch._inductor.config.fuse_ddp_communication_passes = [
+            "fuse_ddp_with_coalescing_op",
+            "schedule_comm_wait",
+        ]
         self._test_compile(use_gpu=False, no_sync=True)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
@@ -237,7 +247,6 @@ class ReplicateTest(MultiProcessTestCase):
         return code
 
     def test_bucketing_coalesing_op(self):
-        torch._inductor.config.fuse_ddp_communication = True
         torch._inductor.config.fuse_ddp_communication_passes = [
             "fuse_ddp_with_coalescing_op",
             "schedule_comm_wait",
@@ -251,7 +260,6 @@ class ReplicateTest(MultiProcessTestCase):
             fc.check("_wait_tensor(").check("cpp_fused_").run(code)
 
     def test_bucketing_concat_op(self):
-        torch._inductor.config.fuse_ddp_communication = True
         torch._inductor.config.fuse_ddp_communication_passes = [
             "fuse_ddp_with_concat_op",
             "schedule_comm_wait",

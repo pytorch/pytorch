@@ -4,7 +4,6 @@ import inspect
 import logging
 import operator
 from dataclasses import dataclass
-from enum import Enum
 from functools import partial
 from typing import (
     Any,
@@ -46,10 +45,15 @@ def move_block_before(block: List[fx.Node], target_node: fx.Node) -> None:
 
 def call_function(
     graph: fx.Graph,
-    target: Callable[..., Any],
+    target: Union[str, Callable[..., Any]],
     args: Optional[Tuple[fx.node.Argument, ...]] = None,
     kwargs: Optional[Dict[str, fx.node.Argument]] = None,
 ) -> fx.Node:
+    # We accept target as a str to avoid typing error as the type of
+    # a node.target is Union[str, Callable[..., Any]].
+    # This also allows us to avoid writing check for every call.
+    if isinstance(target, str):
+        raise RuntimeError(f"Call function should not get a str target {target=}")
     node = graph.call_function(target, args, kwargs)
     _, args, kwargs = get_fake_args_kwargs(node)
     with V.fake_mode:
@@ -131,10 +135,11 @@ def get_comm_block(comm_node: fx.Node) -> Optional[CommBlock]:
                 break
 
     tensor_meta = input_nodes[0].meta["tensor_meta"]
+    shape: Union[torch.Size, List[torch.Size]]
     if isinstance(tensor_meta, TensorMetadata):
         shape = tensor_meta.shape
     elif isinstance(tensor_meta, (list, tuple)):
-        shape = tensor_meta
+        shape = [tm.shape for tm in tensor_meta]
     else:
         logger.warning("Unexpected type of tensor_meta %s", type(tensor_meta))
         return None
@@ -151,8 +156,8 @@ def get_comm_block(comm_node: fx.Node) -> Optional[CommBlock]:
 
 def get_all_comm_blocks(
     graph: fx.Graph,
-    comm_ops: torch._ops.OpOverload,
-    comm_filter: Optional[Callable] = None,
+    comm_ops: Tuple[torch._ops.OpOverload, ...],
+    comm_filter: Optional[Callable[..., bool]] = None,
 ) -> List[CommBlock]:
     if comm_filter is None:
 
@@ -163,7 +168,7 @@ def get_all_comm_blocks(
 
     blocks = []
     for node in graph.nodes:
-        if not node.target in comm_ops:
+        if node.target not in comm_ops:
             continue
         comm_block = get_comm_block(node)
         if comm_block is not None and comm_filter(comm_block):
@@ -174,15 +179,15 @@ def get_all_comm_blocks(
 def _fuse_allreduce_by_concat(
     graph: fx.Graph,
     last_input_node: fx.Node,
-    all_input_nodes: Union[fx.Node, List[fx.Node]],
+    all_input_nodes: List[fx.Node],
     last_comm_block: CommBlock,
-    n_commblock: int,
 ) -> CommBlock:
     """Given a list of inputs in order, create a fused allreduce using concat."""
     # Flatten all the inputs to the all_reduce nodes.
     with graph.inserting_after(last_input_node):
         cat_inputs = []
         for input_node in all_input_nodes:
+            assert isinstance(input_node.args[0], fx.Node)
             input_node = input_node.args[0]
             cat_inputs.append(
                 call_function(graph, aten.flatten.using_ints, (input_node,))
@@ -220,21 +225,20 @@ def _fuse_allreduce_by_concat(
     move_block_after(nodes_to_move, last_input_node)
 
     return CommBlock(
-        shape=cat_node.meta.get("tensor_meta").shape,
+        shape=cast(TensorMetadata, cat_node.meta.get("tensor_meta")).shape,
         node_list=[fused_comm_node, fused_wait_node],
         wait_nodes=[fused_wait_node],
         comm_node=fused_comm_node,
-        inputs=[cat_node],
+        inputs=[div_node],
         outputs={fused_wait_node},
     )
 
 
 def _fuse_with_coalescing_op(
-    graph: fx.GraphModule,
+    graph: fx.Graph,
     last_input_node: fx.Node,
-    all_input_nodes: Union[fx.Node, List[fx.Node]],
+    all_input_nodes: List[fx.Node],
     last_comm_block: CommBlock,
-    n_commblock: int,
 ) -> CommBlock:
     """Given a list of inputs in order, create a fused allreduce by coalescing."""
     last_comm_node = last_comm_block.comm_node
@@ -249,12 +253,12 @@ def _fuse_with_coalescing_op(
         last_input_node = call_function(
             graph, aten._foreach_div.Scalar, (dividends, divisors[0])
         )
-    all_input_nodes = last_input_node
+    input_node = last_input_node
 
     # Create a new Comm/all_reduce_coalesced node.
     with graph.inserting_after(last_comm_node):
         flatten_args, spec = tree_flatten((last_comm_node.args, last_comm_node.kwargs))
-        flatten_args[0] = all_input_nodes
+        flatten_args[0] = input_node
         args, kwargs = tree_unflatten(flatten_args, spec)
         fused_comm_node = call_function(
             graph, torch.ops.c10d_functional.all_reduce_coalesced.default, args, kwargs
@@ -264,7 +268,7 @@ def _fuse_with_coalescing_op(
     getitem_nodes = []
     wait_nodes = []
     flatten_args, spec = tree_flatten((last_wait_node.args, last_wait_node.kwargs))
-    for idx in range(n_commblock):
+    for idx in range(len(all_input_nodes)):
         with graph.inserting_after(fused_comm_node):
             gi_node = call_function(graph, operator.getitem, (fused_comm_node, idx))
         getitem_nodes.append(gi_node)
@@ -278,11 +282,16 @@ def _fuse_with_coalescing_op(
     move_block_after(nodes_to_move, last_input_node)
 
     return CommBlock(
-        shape=[tm.shape for tm in fused_comm_node.meta.get("tensor_meta")],
+        shape=[
+            tm.shape
+            for tm in cast(
+                List[TensorMetadata], fused_comm_node.meta.get("tensor_meta")
+            )
+        ],
         node_list=[fused_comm_node] + getitem_nodes + wait_nodes,
         wait_nodes=wait_nodes,
         comm_node=fused_comm_node,
-        inputs=all_input_nodes,
+        inputs=[input_node],
         outputs=set(wait_nodes),
     )
 
@@ -403,11 +412,11 @@ def _fuse_allreduce(
 
     if use_concat:
         fused_comm_block = _fuse_allreduce_by_concat(
-            graph, last_input_node, all_input_nodes, comm_blocks[-1], len(comm_blocks)
+            graph, last_input_node, all_input_nodes, comm_blocks[-1]
         )
     else:
         fused_comm_block = _fuse_with_coalescing_op(
-            graph, last_input_node, all_input_nodes, comm_blocks[-1], len(comm_blocks)
+            graph, last_input_node, all_input_nodes, comm_blocks[-1]
         )
 
     _scatter_fused_allreduce_waits(
@@ -466,13 +475,16 @@ def _fuse_ddp_communication(
     graph: fx.Graph, algorithm_fn: Callable[..., Any], fusion_fn: Callable[..., Any]
 ) -> None:
     def ddp_reducer_filter(block: CommBlock) -> bool:
-        if block.comm_node.args[0].target != aten.div.Tensor:
+        if (
+            not isinstance(block.comm_node.args[0], fx.Node)
+            or block.comm_node.args[0].target != aten.div.Tensor
+        ):
             return False
 
         # TODO: This may have to be changed if compiled_autograd changes
         if (
             len(block.wait_nodes[0].users) != 1
-            or list(block.wait_nodes[0].users)[0].target != aten.copy_.default
+            or next(iter(block.wait_nodes[0].users)).target != aten.copy_.default
         ):
             return False
 
@@ -550,14 +562,14 @@ def schedule_comm_wait(graph: fx.Graph) -> None:
 
 
 def fuse_ddp_communication(
-    graph: fx.Graph, passes: List[Callable], bucket_size_mb: int
+    graph: fx.Graph, passes: List[Callable[..., None]], bucket_size_mb: int
 ) -> None:
     for pa in passes:
         if isinstance(pa, str):
             pa = globals()[pa]
-        if "bucket_size_mb" in set(
+        if "bucket_size_mb" in {
             v.name for v in inspect.signature(pa).parameters.values()
-        ):
+        }:
             pa(graph, bucket_size_mb=bucket_size_mb)
         else:
             pa(graph)
