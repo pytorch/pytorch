@@ -482,12 +482,13 @@ class CompiledOptimizerTests(TestCase):
     @requires_cuda
     def test_basic_shampoo(self):
         mod = torch.nn.Linear(10, 10, device="cuda:0", bias=False)
-        for p in mod.parameters():
+        compiled_mod = deepcopy(mod)
+        for p, p_c in zip(mod.parameters(), compiled_mod.parameters()):
             p.grad = torch.rand_like(p)
+            p_c.grad = p.grad.clone().detach()
 
         # note this skips the root inverse because this has a lot of internal dependencies
         # we also don't compile it regardless
-        @torch.compile()
         @torch.no_grad()
         def shampoo_functional_basic(params):
             step = 1
@@ -497,18 +498,15 @@ class CompiledOptimizerTests(TestCase):
             beta2 = 1.0
             epsilon = 1e-10
             preconditioners = [torch.zeros_like(p) for p in params]
-            momentum_list = [torch.zeros_like(p) for p in params]
             lr = 0.01
 
+            # pt2 region 1
             # weight decay
             torch._foreach_add_(grads, params, alpha=weight_decay)
 
             # update preconditioners
             torch._foreach_addcmul_(preconditioners, grads, grads, value=1.0)
 
-            # skip root inverse
-
-            # Compute filtered gradient or EMA of the gradients.
             torch._foreach_mul_(grads, beta1)
             torch._foreach_add_(
                 grads,
@@ -518,12 +516,14 @@ class CompiledOptimizerTests(TestCase):
             bias_correction1 = 1.0 - beta1**step
             grad_list = torch._foreach_div(grads, bias_correction1)
 
+            # pt2 region 2
+            # precondition (with shampoo branch), with no grafting
             bias_correction2 = 1.0 - beta2**step
             bias_corrected_preconditioner_list = torch._foreach_div(
                 preconditioners, bias_correction2
             )
             torch._foreach_sqrt_(bias_corrected_preconditioner_list)
-            torch._foreach_add_(bias_corrected_preconditioner_list, self._epsilon)
+            torch._foreach_add_(bias_corrected_preconditioner_list, epsilon)
             search_directions = torch._foreach_div(
                 grad_list, bias_corrected_preconditioner_list
             )
@@ -535,6 +535,17 @@ class CompiledOptimizerTests(TestCase):
             )
 
             torch._foreach_mul_(search_directions, -lr)
+            # pt2 region 3 update params
+            torch._foreach_add_(params, search_directions)
+
+            return params, preconditioners, grads
+
+        compiled_fn = torch.compile(shampoo_functional_basic)
+
+        self.assertEqual(
+            compiled_fn(list(compiled_mod.parameters())),
+            shampoo_functional_basic(list(mod.parameters())),
+        )
 
 
 for optim_cls, name, kwargs in COMPILED_OPT_KWARG_DB:
