@@ -7,7 +7,7 @@
 #include <ATen/native/TensorIterator.h>
 
 
-// This file includes utilties for dynamic_casting done by TensorIterator, see CUDALoops.cuh and Loops.h.
+// This file includes utilities for dynamic_casting done by TensorIterator, see CUDALoops.cuh and Loops.h.
 
 // dynamic_casting handles when the types expected by the iterator do not match the types of the arguments
 // to the function that is being called.
