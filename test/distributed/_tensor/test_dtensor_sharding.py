@@ -18,7 +18,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 class DTensorShardingTest(DTensorTestBase):
     @with_comms
-    def test_dtensor_rowwise_sharding(self):
+    def test_dtensor_row_wise_sharding(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         placements = [Shard(0)]  # row-wise sharding
         local_shard_shape = [4, 4]
@@ -43,6 +43,30 @@ class DTensorShardingTest(DTensorTestBase):
         # into ShardedTensor by ShardedTensor._init_from_local_shards()
         dtensor = DTensor.from_local(local_shard, device_mesh, placements, run_check=False)
         self.assertEqual(dtensor.full_tensor(), global_tensor)
+
+    @with_comms
+    def test_dtensor_table_wise_sharding(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size))) # do we need this?
+        # initialize N tables
+        table_shape = [4, 4]
+        table_to_local_shard = {}  # map {table_id: local shard of table_id}
+        for i in range(self.world_size):
+            local_shard = torch.randn(*table_shape)
+            # table i is placed on rank i
+            table_to_local_shard[i] = local_shard if self.rank == i else torch.empty(0)
+
+        # example 1: transform local_shards into DTensor
+        table_to_dtensor = {}  # same purpose as _model_parallel_name_to_sharded_tensor
+        for table_id, local_shard in table_to_local_shard.items():
+            placements = [Replicate()]  # table-wise sharding
+            device_mesh = DeviceMesh(self.device_type, [table_id])  # table i is placed on rank i
+            dtensor = DTensor.from_local(local_shard, device_mesh, placements, run_check=False)
+            table_to_dtensor[table_id] = dtensor
+
+        # example 2: transform DTensor into torch.Tensor
+        for table_id, local_shard in table_to_local_shard.items():
+            dtensor_local_shard = table_to_dtensor[table_id].to_local()
+            self.assertEqual(dtensor_local_shard, local_shard)
 
 
 if __name__ == "__main__":
