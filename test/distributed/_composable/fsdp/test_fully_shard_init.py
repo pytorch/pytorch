@@ -513,7 +513,8 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
         const = 1337
         for tensor in itertools.chain(model.parameters(), model.buffers()):
             tensor.detach().fill_(const)
-        random.manual_seed(42, mesh)  # initialize a `CudaRNGStateTracker`
+        tp_dim = max(0, mesh.mesh.ndim - 1)  # only used for TP
+        random.manual_seed(42, mesh, tp_dim)  # initialize a `CudaRNGStateTracker`
         for module in model.modules():
             if hasattr(module, "reset_parameters"):
                 module.reset_parameters()
