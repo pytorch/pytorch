@@ -25,6 +25,7 @@ except ModuleNotFoundError:
 import torch
 import torch._logging
 from torch._guards import compile_context, CompileContext, CompileId, tracing
+from torch._logging import structured
 from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -664,6 +665,10 @@ def _compile(
             skip + 2,
             # -2: omit current frame, omit contextlib decorator
             "".join(traceback.format_list(traceback.extract_stack()[: -2 - skip])),
+        )
+        torch._logging.trace_structured(
+            "compile_stack",
+            lambda: structured.from_traceback(traceback.extract_stack()[: -2 - skip]),
         )
         try:
             guarded_code = compile_inner(code, one_graph, hooks, transform)

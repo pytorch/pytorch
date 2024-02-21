@@ -1,20 +1,35 @@
 import functools
 import itertools
+import json
 import logging
 import os
 import os.path
 import re
 from dataclasses import dataclass, field
 from importlib import __import__
-from typing import Dict, List, Optional, Set, Union
+from typing import Callable, Dict, List, Optional, Set, Union
 from weakref import WeakSet
 
 log = logging.getLogger(__name__)
+
+# This is a synthetic logger which doesn't correspond to an actual logger,
+# but handles all of our "tracing" logging, which is structured and doesn't go
+# to stderr but always goes to a dedicated log file.  We don't put these
+# loggers in the classic module hierarchy, because we don't want a suppression
+# of logs to also cause a trace to get suppressed (traces typically are not
+# collected, unless we are in prod, in which case they always are collected.)
+#
+# TODO: Maybe we should allow for some sub-hierarchy so you can control which
+# traces you want to collect, for performance reasons.
+#
+# See https://docs.google.com/document/d/1CX_hJ0PNy9f3R1y8TJrfkSeLkvGjjjLU84BSXgS2AZ8/edit
+trace_log = logging.getLogger("torch.__trace")
 
 DEFAULT_LOG_LEVEL = logging.WARNING
 LOG_ENV_VAR = "TORCH_LOGS"
 LOG_OUT_ENV_VAR = "TORCH_LOGS_OUT"
 LOG_FORMAT_ENV_VAR = "TORCH_LOGS_FORMAT"
+TRACE_ENV_VAR = "TORCH_TRACE"
 
 
 @dataclass
@@ -697,6 +712,10 @@ def _has_registered_parent(log_qname):
 
 # apply custom formats to artifacts when necessary
 class TorchLogsFormatter(logging.Formatter):
+    def __init__(self, *, trace: bool = False):
+        super().__init__()
+        self._is_trace = trace
+
     def format(self, record):
         artifact_name = getattr(logging.getLogger(record.name), "artifact_name", None)
         if artifact_name is not None:
@@ -731,7 +750,11 @@ class TorchLogsFormatter(logging.Formatter):
             record.rankprefix = f"[rank{dist.get_rank()}]:"
 
         record.traceid = ""
-        if (trace_id := torch._guards.CompileContext.current_trace_id()) is not None:
+        if (
+            not self._is_trace
+            and (trace_id := torch._guards.CompileContext.current_trace_id())
+            is not None
+        ):
             record.traceid = f" [{trace_id}]"
 
         glog_level_to_abbr = {
@@ -807,6 +830,10 @@ def _reset_logs():
         log.setLevel(logging.NOTSET)
         log.propagate = True
 
+    trace_log.setLevel(logging.WARNING)
+    trace_log.propagate = False
+    _clear_handlers(trace_log)
+
 
 def _get_log_state():
     return log_state
@@ -824,6 +851,8 @@ def _init_logs(log_file_name=None):
     out = os.environ.get(LOG_OUT_ENV_VAR, None)
     if out is not None:
         log_file_name = out
+
+    trace_file_name = os.environ.get(TRACE_ENV_VAR, None)
 
     # First, reset all known (registered) loggers to NOTSET, so that they
     # respect their parent log level
@@ -861,6 +890,17 @@ def _init_logs(log_file_name=None):
         log = logging.getLogger(artifact_log_qname)
         configure_artifact_log(log)
 
+    # Setup handler for the special trace_log, with different default
+    # configuration
+    #
+    # TODO: Automatically initialize this in Tupperware environment to point
+    # to /logs/dedicated_logs_XXX
+    if trace_file_name is not None:
+        trace_log.setLevel(logging.DEBUG)
+        trace_log_handler = _track_handler(logging.FileHandler(trace_file_name))
+        trace_log_handler.setFormatter(TorchLogsFormatter(trace=True))
+        trace_log.addHandler(trace_log_handler)
+
 
 @functools.lru_cache(None)
 def warning_once(logger_obj, *args, **kwargs):
@@ -881,6 +921,23 @@ class LazyString:
 
     def __str__(self):
         return self.func(*self.args, **self.kwargs)
+
+
+def trace_structured(name: str, factory: Callable[[], object]):
+    assert (
+        " " not in name
+    ), f"for ease of parsing, structured names should not include whitespace, but got {name}"
+    assert callable(factory), f"factory should be callable, but got {type(factory)}"
+    if trace_log.isEnabledFor(logging.DEBUG):
+        record = {}
+        record["value"] = factory()
+        if dist.is_available() and dist.is_initialized():
+            record["rank"] = dist.get_rank()
+        if (trace_id := torch._guards.CompileContext.current_trace_id()) is not None:
+            record["frame_id"] = trace_id.compile_id.frame_id
+            record["frame_compile_id"] = trace_id.compile_id.frame_compile_id
+            record["attempt"] = trace_id.attempt
+        trace_log.debug("%s %s", name, json.dumps(record), stacklevel=2)
 
 
 import torch._guards
