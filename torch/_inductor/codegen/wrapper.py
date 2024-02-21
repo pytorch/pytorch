@@ -1005,6 +1005,8 @@ class WrapperCodeGen(CodeGen):
         constants = {}
         non_constant_indices = []
         for idx, key in enumerate(kernel.arg_names):
+            if key not in kwargs:
+                continue
             arg = kwargs[key]
             if idx in kernel.constexprs:
                 constants[key] = arg
