@@ -1850,10 +1850,11 @@ def _get_batch_norm_reserve_tensor(
     running_mean: Tensor,
     running_var: Tensor,
     eps: float,
+    training: bool,
 ) -> Tensor:
     """
     Return a reserve tensor for batch norm, used only by cudnn to pass forward state to the
-    backward pass. This is needed for `batch_norm_with_update` and `batch_norm_no_update`,
+    backward pass. This is needed for `_batch_norm_with_update` and `_batch_norm_no_update`,
     which support a variety of backends including cudnn. We create this tensor here to get
     the correct shape in the traced graph if we detect that will call the cudnn kernel,
     and rely on DCE to avoid materializing this tensor.
@@ -1863,14 +1864,14 @@ def _get_batch_norm_reserve_tensor(
     )
     reserve_size = 0
     if backend == torch._C._BatchNormBackend.Cudnn:  # type: ignore[attr-defined]
-        reserve_size = torch._C._get_cudnn_batch_norm_reserve_space_size(input)  # type: ignore[attr-defined]
+        reserve_size = torch._C._get_cudnn_batch_norm_reserve_space_size(input, training)  # type: ignore[attr-defined]
     return torch.empty(
         reserve_size, dtype=torch.uint8, layout=input.layout, device=input.device
     )
 
 
-@register_decomposition(aten.batch_norm_with_update.default)
-def batch_norm_with_update(
+@register_decomposition(aten._batch_norm_with_update.default)
+def _batch_norm_with_update(
     input: Tensor,
     weight: Optional[Tensor],
     bias: Optional[Tensor],
@@ -1891,13 +1892,13 @@ def batch_norm_with_update(
         False,  # functional
     )
     reserve = _get_batch_norm_reserve_tensor(
-        input, weight, bias, running_mean, running_var, eps
+        input, weight, bias, running_mean, running_var, eps, training=True
     )
     return output, save_mean, save_rstd, reserve
 
 
-@register_decomposition(aten.batch_norm_with_update_functional.default)
-def batch_norm_with_update_functional(
+@register_decomposition(aten._batch_norm_with_update_functional.default)
+def _batch_norm_with_update_functional(
     input: Tensor,
     weight: Optional[Tensor],
     bias: Optional[Tensor],
@@ -1916,15 +1917,15 @@ def batch_norm_with_update_functional(
         input, weight, bias, running_mean, running_var, True, momentum, eps, True
     )
     reserve = _get_batch_norm_reserve_tensor(
-        input, weight, bias, running_mean, running_var, eps
+        input, weight, bias, running_mean, running_var, eps, training=True
     )
     assert new_rm is not None, "new_running_mean should not be None"
     assert new_rv is not None, "new_running_var should not be None"
     return (output, save_mean, save_rstd, reserve, new_rm, new_rv)
 
 
-@register_decomposition(aten.batch_norm_no_update.default)
-def batch_norm_no_update(
+@register_decomposition(aten._batch_norm_no_update.default)
+def _batch_norm_no_update(
     input: Tensor,
     weight: Optional[Tensor],
     bias: Optional[Tensor],
@@ -1945,7 +1946,7 @@ def batch_norm_no_update(
         False,  # functional
     )
     reserve = _get_batch_norm_reserve_tensor(
-        input, weight, bias, running_mean, running_var, eps
+        input, weight, bias, running_mean, running_var, eps, training=False
     )
     return output, save_mean, save_rstd, reserve
 

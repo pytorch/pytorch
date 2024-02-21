@@ -6,7 +6,7 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/batch_norm_with_update_native.h>
+#include <ATen/ops/_batch_norm_with_update_native.h>
 #include <ATen/ops/batch_norm_backward_native.h>
 #include <ATen/ops/_native_batch_norm_legit_native.h>
 #include <ATen/ops/_to_dense_native.h>
@@ -61,10 +61,10 @@ std::tuple<Tensor, Tensor, Tensor> _mkldnn_batch_norm_legit_no_stats(
   TORCH_CHECK(false, "_mkldnn_batch_norm_legit_no_stats: ATen not compiled with MKLDNN support");
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_with_update_mkldnn(
+std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_with_update_mkldnn(
     const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
     Tensor& running_mean, Tensor& running_var, double momentum, double eps) {
-  TORCH_CHECK(false, "batch_norm_with_update_mkldnn: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "_batch_norm_with_update_mkldnn: ATen not compiled with MKLDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
@@ -208,7 +208,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
 }
 
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_with_update_mkldnn(
+std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_with_update_mkldnn(
     const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
     Tensor& running_mean, Tensor& running_var, double momentum, double eps) {
   Tensor output, save_mean, save_var;

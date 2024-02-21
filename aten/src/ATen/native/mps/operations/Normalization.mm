@@ -10,9 +10,9 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_batch_norm_with_update_native.h>
 #include <ATen/ops/_native_batch_norm_legit_native.h>
 #include <ATen/ops/batch_norm_backward_native.h>
-#include <ATen/ops/batch_norm_with_update_native.h>
 #include <ATen/ops/native_batch_norm.h>
 #include <ATen/ops/native_batch_norm_backward_native.h>
 #include <ATen/ops/native_batch_norm_native.h>
@@ -408,13 +408,13 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_mps(const Tensor& self,
   return std::make_tuple(output, save_mean, save_var);
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_with_update_mps(const Tensor& input,
-                                                                      const c10::optional<Tensor>& weight_opt,
-                                                                      const c10::optional<Tensor>& bias_opt,
-                                                                      Tensor& running_mean,
-                                                                      Tensor& running_var,
-                                                                      double momentum,
-                                                                      double eps) {
+std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_with_update_mps(const Tensor& input,
+                                                                       const c10::optional<Tensor>& weight_opt,
+                                                                       const c10::optional<Tensor>& bias_opt,
+                                                                       Tensor& running_mean,
+                                                                       Tensor& running_var,
+                                                                       double momentum,
+                                                                       double eps) {
   Tensor output, save_mean, save_var;
   std::tie(output, save_mean, save_var) =
       batch_norm_mps(input, weight_opt, bias_opt, running_mean, running_var, /*train*/ true, momentum, eps);
@@ -422,17 +422,17 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_with_update_mps(const Tens
   return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, save_mean, save_var, reserve);
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> batch_norm_with_update_mps_out(const Tensor& input,
-                                                                              const c10::optional<Tensor>& weight_opt,
-                                                                              const c10::optional<Tensor>& bias_opt,
-                                                                              Tensor& running_mean,
-                                                                              Tensor& running_var,
-                                                                              double momentum,
-                                                                              double eps,
-                                                                              Tensor& out,
-                                                                              Tensor& save_mean,
-                                                                              Tensor& save_var,
-                                                                              Tensor& reserve) {
+std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> _batch_norm_with_update_mps_out(const Tensor& input,
+                                                                               const c10::optional<Tensor>& weight_opt,
+                                                                               const c10::optional<Tensor>& bias_opt,
+                                                                               Tensor& running_mean,
+                                                                               Tensor& running_var,
+                                                                               double momentum,
+                                                                               double eps,
+                                                                               Tensor& out,
+                                                                               Tensor& save_mean,
+                                                                               Tensor& save_var,
+                                                                               Tensor& reserve) {
   std::tie(out, save_mean, save_var) = batch_norm_mps_out(
       input, weight_opt, bias_opt, running_mean, running_var, /*update*/ true, momentum, eps, out, save_mean, save_var);
   return std::tuple<Tensor&, Tensor&, Tensor&, Tensor&>(out, save_mean, save_var, reserve);

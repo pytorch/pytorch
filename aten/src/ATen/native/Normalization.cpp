@@ -29,10 +29,10 @@
 #include <ATen/ops/_native_batch_norm_legit_native.h>
 #include <ATen/ops/_native_batch_norm_legit_no_training.h>
 #include <ATen/ops/_native_batch_norm_legit_no_training_native.h>
-#include <ATen/ops/batch_norm_with_update.h>
-#include <ATen/ops/batch_norm_with_update_native.h>
-#include <ATen/ops/batch_norm_no_update.h>
-#include <ATen/ops/batch_norm_no_update_native.h>
+#include <ATen/ops/_batch_norm_with_update.h>
+#include <ATen/ops/_batch_norm_with_update_native.h>
+#include <ATen/ops/_batch_norm_no_update.h>
+#include <ATen/ops/_batch_norm_no_update_native.h>
 #include <ATen/ops/batch_norm_backward_native.h>
 #include <ATen/ops/alias.h>
 #include <ATen/ops/batch_norm.h>
@@ -685,14 +685,14 @@ Tensor batch_norm(
       auto bias_c = bias.contiguous();
       auto rmean_c = running_mean.defined() ? running_mean.contiguous() : running_mean;
       auto rvar_c = running_var.defined() ? running_var.contiguous() : running_var;
-      return std::get<0>(at::batch_norm_with_update(input_c, weight_c, bias_c, const_cast<Tensor&>(rmean_c),
+      return std::get<0>(at::_batch_norm_with_update(input_c, weight_c, bias_c, const_cast<Tensor&>(rmean_c),
                                                     const_cast<Tensor&>(rvar_c), momentum, eps));
     } else {
-      return std::get<0>(at::batch_norm_with_update(input, weight, bias, const_cast<Tensor&>(running_mean),
+      return std::get<0>(at::_batch_norm_with_update(input, weight, bias, const_cast<Tensor&>(running_mean),
                                                     const_cast<Tensor&>(running_var), momentum, eps));
     }
   } else {
-    return std::get<0>(at::batch_norm_no_update(input, weight, bias, running_mean, running_var,
+    return std::get<0>(at::_batch_norm_no_update(input, weight, bias, running_mean, running_var,
                                                 momentum, eps));
   }
 }
@@ -846,7 +846,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const c10:
   return batch_norm_cpu_out(self, weight_opt, bias_opt, running_mean_opt, running_var_opt, train, momentum, eps, output, save_mean, save_var);
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_with_update_cpu(
+std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_with_update_cpu(
     const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
     Tensor& running_mean, Tensor& running_var, double momentum, double eps) {
   Tensor output, save_mean, save_var;
@@ -856,7 +856,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_with_update_cpu(
   return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, save_mean, save_var, reserve);
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> batch_norm_with_update_cpu_out(
+std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> _batch_norm_with_update_cpu_out(
     const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
     Tensor& running_mean, Tensor& running_var, double momentum, double eps,
     Tensor& out, Tensor& save_mean, Tensor& save_var, Tensor& reserve) {
@@ -866,7 +866,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> batch_norm_with_update_cpu_out(
 }
 
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_no_update(
+std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_no_update(
     const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
     const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
     double momentum, double eps) {

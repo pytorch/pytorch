@@ -508,7 +508,7 @@ def sample_inputs__native_batch_norm_legit(op_info, device, dtype, requires_grad
         else:
             yield SampleInput(sample.input, args=(args[2], args[3], training, momentum, eps))
 
-def sample_inputs_batch_norm_with_update(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs__batch_norm_with_update(op_info, device, dtype, requires_grad, **kwargs):
     samples = sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs)
     for sample in samples:
         # torch.native_batch_norm does not support 0 numel tensors
@@ -12974,14 +12974,14 @@ op_db: List[OpInfo] = [
                             "TestCompositeCompliance", "test_forward_ad"),
            )
            ),
-    OpInfo('batch_norm_with_update',
-           op=torch.ops.aten.batch_norm_with_update,
-           aten_name='batch_norm_with_update',
+    OpInfo('_batch_norm_with_update',
+           op=torch.ops.aten._batch_norm_with_update,
+           aten_name='_batch_norm_with_update',
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
-           sample_inputs_func=sample_inputs_batch_norm_with_update,
+           sample_inputs_func=sample_inputs__batch_norm_with_update,
            skips=(
                # NotImplementedError: Could not run
                # 'aten::native_batch_norm.out' with arguments from the 'CPU' backend.
@@ -12997,11 +12997,11 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-5)}),
                             "TestCompositeCompliance", "test_forward_ad"),
-               # batch_norm_with_update expects contiguous inputs for cudnn and miopen
+               # _batch_norm_with_update expects contiguous inputs for cudnn and miopen
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type="cuda"),
                DecorateInfo(unittest.expectedFailure,
                             'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides', device_type="cuda"),
-               # batch_norm_with_update does not have python bindings
+               # _batch_norm_with_update does not have python bindings
                DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # aten out variants do not accept out= kwarg, only python out variants
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),

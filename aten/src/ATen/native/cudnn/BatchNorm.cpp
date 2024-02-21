@@ -35,7 +35,9 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   AT_ERROR("cudnn_batch_norm_backward: ATen not compiled with cuDNN support");
 }
 
-size_t _get_cudnn_batch_norm_reserve_space_size(const Tensor& input_t) {
+size_t _get_cudnn_batch_norm_reserve_space_size(
+    const Tensor& input_t,
+    bool training) {
   AT_ERROR(
       "_get_cudnn_batch_norm_reserve_space_size: ATen not compiled with cuDNN support");
 }
@@ -103,15 +105,15 @@ cudnnBatchNormMode_t getCudnnBatchNormMode(
 
 } // namespace
 
-size_t _get_cudnn_batch_norm_reserve_space_size(const Tensor& input_t) {
+size_t _get_cudnn_batch_norm_reserve_space_size(
+    const Tensor& input_t,
+    bool training) {
   size_t reserve_size;
   TensorArg input{input_t, "input", 1};
   TensorDescriptor idesc{*input, 4};
   auto handle = getCudnnHandle();
   cudnnBatchNormMode_t mode = getCudnnBatchNormMode(
-      true, // training
-      input->suggest_memory_format(),
-      input->dim());
+      training, input->suggest_memory_format(), input->dim());
   auto op = CUDNN_BATCHNORM_OPS_BN;
   AT_CUDNN_CHECK(cudnnGetBatchNormalizationTrainingExReserveSpaceSize(
       handle, mode, op, nullptr, idesc.desc(), &reserve_size));
@@ -206,7 +208,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     Tensor workspace = at::empty(workspace_size, input->options().dtype(kByte));
 
     // get the reserved size and allocate as tensor
-    size_t reserve_size = _get_cudnn_batch_norm_reserve_space_size(input_t);
+    size_t reserve_size =
+        _get_cudnn_batch_norm_reserve_space_size(input_t, true /* training */);
     reserve = at::empty(reserve_size, input->options().dtype(kByte));
 
     AT_CUDNN_CHECK(cudnnBatchNormalizationForwardTrainingEx(

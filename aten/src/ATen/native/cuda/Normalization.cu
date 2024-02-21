@@ -14,7 +14,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/batch_norm_with_update_native.h>
+#include <ATen/ops/_batch_norm_with_update_native.h>
 #include <ATen/ops/batch_norm_backward_native.h>
 #include <ATen/ops/batch_norm_backward_elemt_native.h>
 #include <ATen/ops/batch_norm_backward_reduce_native.h>
@@ -481,7 +481,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const c10
   return std::make_tuple(output, save_mean, save_invstd);
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_with_update_cuda(
+std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_with_update_cuda(
     const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
     Tensor& running_mean, Tensor& running_var, double momentum, double eps) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -506,7 +506,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_with_update_cuda(
   return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, save_mean, save_var, reserve);
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> batch_norm_with_update_cuda_out(
+std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> _batch_norm_with_update_cuda_out(
     const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
     Tensor& running_mean, Tensor& running_var, double momentum, double eps,
     Tensor& out, Tensor& save_mean, Tensor& save_var, Tensor& reserve) {
@@ -577,7 +577,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
 
   const bool needs_reduction = train || grad_input_mask[1] || grad_input_mask[2];
 
-  // Fused reducion & elementwise kernel
+  // Fused reduction & elementwise kernel
   if (needs_reduction && grad_input_mask[0] &&
       !batch_norm_use_channels_last_kernels(input) &&
       cuda::detail::canUse32BitIndexMath(input) &&
