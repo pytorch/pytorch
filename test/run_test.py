@@ -384,6 +384,7 @@ def run_test(
     extra_unittest_args=None,
     env=None,
 ) -> int:
+    env = env or os.environ.copy()
     maybe_set_hip_visible_devies()
     unittest_args = options.additional_unittest_args.copy()
     test_file = test_module.name
