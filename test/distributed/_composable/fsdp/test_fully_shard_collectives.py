@@ -7,6 +7,7 @@ from typing import List, Union
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from torch.distributed._composable.fsdp import MixedPrecisionPolicy
 from torch.distributed._composable.fsdp._fsdp_collectives import (
     foreach_all_gather,
     foreach_all_gather_copy_out,
@@ -72,6 +73,7 @@ class TestFullyShardCollectives(FSDPTestMultiThread):
             mesh_info,
             post_forward_mesh_info,
             self.device,
+            MixedPrecisionPolicy(),
         )
         return fsdp_param_group
 
@@ -98,7 +100,6 @@ class TestFullyShardCollectives(FSDPTestMultiThread):
                 async_op=async_op,
                 all_gather_copy_in_stream=all_gather_copy_in_stream,
                 all_gather_stream=all_gather_stream,
-                all_gather_dtype=torch.float32,
             )
 
     def _test_all_gather(
@@ -108,7 +109,6 @@ class TestFullyShardCollectives(FSDPTestMultiThread):
         async_op: bool,
         all_gather_copy_in_stream: torch.cuda.Stream,
         all_gather_stream: torch.cuda.Stream,
-        all_gather_dtype: torch.dtype,
     ):
         def all_gather(fsdp_param_group: FSDPParamGroup, group: dist.ProcessGroup):
             all_gather_result = foreach_all_gather(
@@ -118,7 +118,6 @@ class TestFullyShardCollectives(FSDPTestMultiThread):
                 all_gather_copy_in_stream=all_gather_copy_in_stream,
                 all_gather_stream=all_gather_stream,
                 device=self.device,
-                dtype=all_gather_dtype,
             )
             foreach_all_gather_copy_out(all_gather_result, fsdp_params, group)
             # Transition to unsharded state to register unsharded parameters
