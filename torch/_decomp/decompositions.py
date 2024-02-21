@@ -98,6 +98,11 @@ def _unsqueeze_to_dim(x: Tensor, dim: int) -> Tensor:
     return x
 
 
+@register_decomposition(aten.print)
+def print_decomp(s):
+    return
+
+
 @register_decomposition(aten.tanh_backward)
 @out_wrapper("grad_input")
 @pw_cast_for_opmath
