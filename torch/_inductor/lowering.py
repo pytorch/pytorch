@@ -4139,6 +4139,8 @@ def _adaptive_avg_pool2d(x, output_size):
 
 
 def _adaptive_pooling_idx_max(kernel_maxes, in_sizes, out_sizes, return_index, loader):
+    # NOTE: There is some duplication between this and addaptive_avg_pool2d and max_pool2d
+    # Look into refactoring/deduplication after #116418 is merged.
     h_in, w_in = in_sizes
     h_out, w_out = out_sizes
 
