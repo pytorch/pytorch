@@ -1587,8 +1587,9 @@ void ProcessGroupNCCL::watchdogHandler() {
     // requests, but this is fine since all PG's feed into the same flight
     // recorder and dump.
     if (dumpPipe.has_value() && dumpPipe->shouldDump()) {
-      std::async(
+      std::future<bool> fut = std::async(
           std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
+      // best effort dump, watchdog is not waiting for the dump here
     }
     done = workMetaList_.empty();
   }
