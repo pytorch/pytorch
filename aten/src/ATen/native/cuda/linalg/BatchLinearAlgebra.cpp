@@ -2427,7 +2427,7 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
   // magma implementation of LU solve cannot handle a b tensor with last dim > 1024
   // See https://bitbucket.org/icl/magma/issues/19/dgesv_batched-dgetrs_batched-fails-for
   bool over_batched_magma_dim_limit = k > 1024;
-  // heuristics determined from tests dicussed in https://github.com/pytorch/pytorch/pull/72935
+  // heuristics determined from tests discussed in https://github.com/pytorch/pytorch/pull/72935
 
   // Computes X = U^{-1}L^{-1}P^T B via triangular solves
   // Helps mitigating the bugs in magma
