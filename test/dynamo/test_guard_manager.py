@@ -303,6 +303,15 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(guard_manager.check(f_locals_unaliased))
         self.assertFalse(guard_manager.check_verbose(f_locals_unaliased).result)
 
+    def test_weakref_alive_guard(self):
+        x = torch.rand(3, 4)
+        weakref_x = weakref.ref(x)
+
+        guard = guards.WEAKREF_ALIVE(["weakref_x is not None"])
+        self.assertTrue(guard(weakref_x()))
+        del x
+        self.assertFalse(guard(weakref_x()))
+
     def test_guard_manager_leaf_guard(self):
         guard_manager = RootGuardManager()
         guard_manager.add_type_match_guard(id_type(5), ["type(x) == int"])
