@@ -25,7 +25,7 @@ from typing import (
 
 import torch
 from torch import Tensor
-from torch._utils import _get_device_module, _get_available_device_type
+from torch._utils import _get_available_device_type, _get_device_module
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.futures import Future
 
@@ -268,7 +268,10 @@ def _write_files_from_queue(
             # should try to fix this and use _OverlappingCpuLoader for all threaded cases
             if (
                 thread_count == 1
-                and (torch.cuda.is_available() or (custom_device_mod and custom_device_mod.is_available()))
+                and (
+                    torch.cuda.is_available()
+                    or (custom_device_mod and custom_device_mod.is_available())
+                )
                 and inflight_threshhold > 0
             ):
                 loader = _OverlappingCpuLoader(
