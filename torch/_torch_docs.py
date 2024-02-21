@@ -6902,10 +6902,11 @@ add_docstr(
     r"""
 mean(input, *, dtype=None) -> Tensor
 
-Returns the mean value of all elements in the :attr:`input` tensor.
+Returns the mean value of all elements in the :attr:`input` tensor. Input must be floating point or complex.
 
 Args:
-    {input}
+    input (Tensor):
+      the input tensor, either of floating point or complex dtype
 
 Keyword args:
     {dtype}
