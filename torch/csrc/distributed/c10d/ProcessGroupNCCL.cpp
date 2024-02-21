@@ -2411,16 +2411,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   // Notify graphs before we check the capture status preemptively
   at::cuda::CUDAGraph::inc_pending_event_queries();
 
-  // if ((coalescing_state_ & CoalColl) &&
   if ((coalescing_state_) &&
       capture_status == c10::cuda::CaptureStatus::None) {
-    LOG(INFO) << "Collective endGroup enqueue work";
     workEnqueue(work);
-    // TODO: it seems we never enqueue work for single send/recv or batch P2P,
-    // see the `pointToPoint` function. This should be fixed. Otherwise, we risk
-    // not being able to abort hanged P2P ops.
   } else {
-    LOG(INFO) << "Collective endGroup no enqueue work";
     at::cuda::CUDAGraph::dec_pending_event_queries();
   }
 
