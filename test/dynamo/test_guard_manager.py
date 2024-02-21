@@ -228,6 +228,26 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(guard1(x))
         self.assertFalse(guard2(x))
 
+    def test_tensor_match_guard(self):
+        guard_manager = RootGuardManager()
+        x = torch.randn(4, 4)
+        size = list(x.size())
+        stride = list(x.stride())
+        guard_manager.add_tensor_match_guard(x, size, stride, "x", ["check_tensor(x)"])
+        self.assertTrue(guard_manager.check(x))
+        self.assertTrue(guard_manager.check_verbose(x).result)
+        self.assertTrue(guard_manager.check(torch.randn(4, 4)))
+        self.assertTrue(guard_manager.check_verbose(torch.randn(4, 4)).result)
+        self.assertFalse(guard_manager.check(x.t_()))
+
+        x = torch.randn(4, 4)
+        x.t_()
+        debug_info = guard_manager.check_verbose(x)
+        print(debug_info.verbose_code_parts[0])
+        self.assertTrue(
+            "tensor 'x' stride mismatch" in debug_info.verbose_code_parts[0]
+        )
+
     def test_no_tensor_aliasing_guard(self):
         guard_manager = RootGuardManager()
 
