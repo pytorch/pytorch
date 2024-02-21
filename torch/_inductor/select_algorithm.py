@@ -735,11 +735,6 @@ class ErrorFromChoice(RuntimeError):
         self.choice = choice
 
 
-# used in testing
-def filter_choice(choice):
-    return True
-
-
 class AlgorithmSelectorCache(PersistentCache):
     def __call__(
         self,
@@ -870,11 +865,12 @@ class AlgorithmSelectorCache(PersistentCache):
             if len(timings) == 1:
                 return next(iter(timings)).output_node()
 
-            timings = {
-                choice: time
-                for choice, time in timings.items()
-                if filter_choice(choice)
-            }
+            if config.debug_filter_choice:
+                timings = {
+                    choice: time
+                    for choice, time in timings.items()
+                    if config.debug_filter_choice(choice)
+                }
 
             return torch._inductor.ir.TensorBox.create(
                 torch._inductor.ir.MultiTemplateBuffer(
