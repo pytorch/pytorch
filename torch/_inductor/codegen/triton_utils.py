@@ -1,16 +1,14 @@
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import torch
 
 from .. import config
-from ..utils import instance_descriptor
+from ..utils import _type_of, instance_descriptor
 from ..virtualized import V
 from .common import KernelArgType, SizeArg, TensorArg, WorkspaceArg
 
 
 def signature_of(arg: KernelArgType, *, size_dtype: str) -> str:
-    from triton.runtime.jit import JITFunction
-
     if isinstance(arg, TensorArg):
         # TODO: Remove fp8 special handling when Triton supports PyTorch fp8 dtypes.
         # Related PR: https://github.com/openai/triton/pull/2279/
@@ -23,7 +21,7 @@ def signature_of(arg: KernelArgType, *, size_dtype: str) -> str:
         elif arg.dtype == torch.float8_e5m2fnuz:
             tye = "*fp8e5b16"
         else:
-            tye = JITFunction._type_of(arg.dtype)
+            tye = _type_of(arg.dtype)
         if V.graph.is_unspec_arg(arg.buffer):
             # had unwrapped 0d tensor as scalar
             new_tye = tye.lstrip("*")
@@ -59,17 +57,20 @@ def signature_to_meta(
     }
 
 
-def config_of(args: List[KernelArgType]) -> instance_descriptor:
+def config_of(args: List[KernelArgType]) -> Any:
     def is_aligned(x: KernelArgType, alignment: int, include_tensor: bool) -> bool:
         """
         Roughly follow triton code here:
         https://github.com/openai/triton/blob/5282ed890d453e10b9ee30076ef89115dd197761/python/triton/runtime/jit.py#L208-L222
         """
         if isinstance(x, TensorArg):
-            if not x.check_alignment:
-                return False
             if include_tensor:
-                return not V.graph.scheduler.is_unaligned_buffer(x.buffer)
+                offset_aligned = V.graph.sizevars.statically_known_multiple_of(
+                    x.offset * x.dtype.itemsize, alignment  # type: ignore[arg-type]
+                )
+                return offset_aligned and not V.graph.scheduler.is_unaligned_buffer(
+                    x.buffer
+                )
             else:
                 return False
         if isinstance(x, SizeArg):

@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 from typing import List, Tuple
+import sys
+import unittest
 
 import torch
 from torch._export import (
@@ -61,6 +63,7 @@ from torch.testing._internal.common_utils import (
 
 
 @skipIfNoQNNPACK
+@unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
 class TestQuantizePT2E(PT2EQuantizationTestCase):
     def test_simple_quantizer(self):
         # TODO: use OP_TO_ANNOTATOR
@@ -1697,6 +1700,14 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m.train()
         _assert_ops_are_correct(m, train=True)
 
+    def test_model_is_exported(self):
+        m = TestHelperModules.ConvWithBNRelu(relu=True)
+        example_inputs = (torch.rand(3, 3, 5, 5),)
+        exported_gm = capture_pre_autograd_graph(m, example_inputs)
+        fx_traced_gm = torch.fx.symbolic_trace(m, example_inputs)
+        self.assertTrue(torch.ao.quantization.pt2e.export_utils.model_is_exported(exported_gm))
+        self.assertFalse(torch.ao.quantization.pt2e.export_utils.model_is_exported(fx_traced_gm))
+
     def test_reentrant(self):
         """Test we can safely call quantization apis multiple times"""
         m = TestHelperModules.ConvBnReLU2dAndLinearReLU()
@@ -1744,7 +1755,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
     def test_observer_callback(self):
         from torch.library import Library, impl
-        test_lib = Library("test_int4", "DEF")
+        test_lib = Library("test_int4", "DEF")  # noqa: TOR901
         test_lib.define("quantize_per_tensor_int4(Tensor input, float scale, int zero_point) -> Tensor")
 
         @impl(test_lib, "quantize_per_tensor_int4", "CompositeExplicitAutograd")
