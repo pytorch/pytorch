@@ -224,6 +224,10 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(guard1(x))
         self.assertTrue(guard2(x))
 
+        x._dynamo_dynamic_indices = set({2})
+        self.assertFalse(guard1(x))
+        self.assertFalse(guard2(x))
+
     def test_no_tensor_aliasing_guard(self):
         guard_manager = RootGuardManager()
 
