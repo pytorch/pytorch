@@ -538,7 +538,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
 
   auto output = at::empty({num_samples}, grad.options());
 
-  // Early return when there is no samples in the batch. This saves unnecesary kernel
+  // Early return when there is no samples in the batch. This saves unnecessary kernel
   // launch, but also prevents cudaGetLastError() to complain about invalid launch args
   if (num_samples == 0) {
     return output;
