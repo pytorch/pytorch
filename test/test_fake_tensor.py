@@ -87,7 +87,7 @@ class FakeTensorTest(TestCase):
     def test_custom_op_fallback(self):
         from torch.library import Library, impl
 
-        test_lib = Library("my_test_op", "DEF")
+        test_lib = Library("my_test_op", "DEF")  # noqa: TOR901
         test_lib.define('foo(Tensor self) -> Tensor')
 
         @impl(test_lib, 'foo', 'CPU')
@@ -1286,6 +1286,7 @@ class FakeTensorPropTest(TestCase):
             graph_model = torch.fx.symbolic_trace(model, (value, None, another_optional_value))
             FakeTensorProp(graph_model, fake_mode).propagate(value, None, another_optional_value)
 
+
     def test_torch_load_with_fake_mode(self):
 
         class TheModelClass(torch.nn.Module):
@@ -1303,8 +1304,8 @@ class FakeTensorPropTest(TestCase):
 
             fake_mode = FakeTensorMode()
             with fake_mode:
-                # This is where the bug is triggered
-                torch.load(state_dict_file)
+                torch.load(state_dict_file)  # scenario 1
+                torch.load(state_dict_file, map_location="cpu")  # scenario 2
 
 
 class FakeTensorDispatchCache(TestCase):
@@ -1585,6 +1586,46 @@ class FakeTensorDispatchCache(TestCase):
             y = torch._efficientzerotensor(3)
             self.assertTrue(y._is_zerotensor())
             self.assertBypasses("dispatch_key_set mismatch", 2)
+
+    def test_inference_mode(self):
+        """
+        Test that caching handles inference mode correctly.
+        """
+        with FakeTensorMode():
+            x = torch.randn(4, 3)
+            y = torch.randn(4, 3)
+
+            FakeTensorMode.cache_clear()
+            self.assertHitsMisses(0, 0)
+
+            # Expect a miss when the inference mode is different
+            res1 = x + y
+            with torch.inference_mode():
+                res2 = x + y
+
+            self.assertHitsMisses(0, 2)
+            self.assertFalse(res1.is_inference())
+            self.assertTrue(res2.is_inference())
+
+            # Second tries should see hits
+            res3 = x + y
+
+            self.assertHitsMisses(1, 2)
+            self.assertFalse(res3.is_inference())
+            self.assertEqual(
+                extract_tensor_metadata(res1),
+                extract_tensor_metadata(res3),
+            )
+
+            with torch.inference_mode():
+                res4 = x + y
+
+            self.assertHitsMisses(2, 2)
+            self.assertTrue(res4.is_inference())
+            self.assertEqual(
+                extract_tensor_metadata(res2),
+                extract_tensor_metadata(res4),
+            )
 
 
 instantiate_parametrized_tests(FakeTensorTest)
