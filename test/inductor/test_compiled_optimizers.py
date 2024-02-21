@@ -488,8 +488,8 @@ class CompiledOptimizerTests(TestCase):
         param_buf = torch.rand((1024, 128))
         param_buf_c = param_buf.clone().detach()
 
-        params_c = [param_buf_c[0:512, :], param_buf_c[512:, :]]
-        params = [param_buf[0:512, :], param_buf[512:, :]]
+        params_c = [param_buf_c[0:512, :].t(), param_buf_c[512:, :].t()]
+        params = [param_buf[0:512, :].t(), param_buf[512:, :].t()]
 
         for p, p_c in zip(params, params_c):
             p.grad = torch.rand_like(p)
