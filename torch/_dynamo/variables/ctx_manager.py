@@ -282,8 +282,7 @@ class DualLevelContextManager(ContextWrappingVariable):
         self.new_level = torch.autograd.forward_ad.enter_dual_level()
         torch.autograd.forward_ad._current_level = self.new_level
         self.set_cleanup_hook(
-            tx,
-            lambda: torch.autograd.forward_ad.exit_dual_level(level=self.new_level)
+            tx, lambda: torch.autograd.forward_ad.exit_dual_level(level=self.new_level)
         )
         self.state.proxy = tx.output.create_node(
             "call_function",
