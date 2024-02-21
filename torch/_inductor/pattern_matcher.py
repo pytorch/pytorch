@@ -1214,12 +1214,15 @@ def compute_mutation_region_ids(graph: torch.fx.GraphModule):
 
 
 class PatternMatcherPass:
-    def __init__(self, prevent_match_across_mutations=False):
+    def __init__(
+        self, prevent_match_across_mutations=False, pass_name: Optional[str] = None
+    ):
         super().__init__()
         self.patterns: DefaultDict[
             torch.fx.node.Target, List[PatternEntry]
         ] = defaultdict(list)
         self.prevent_match_across_mutations = prevent_match_across_mutations
+        self.pass_name = pass_name
 
     def __getitem__(self, item: torch.fx.node.Target) -> List[PatternEntry]:
         return self.patterns[item]
