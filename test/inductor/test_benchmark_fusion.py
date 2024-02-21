@@ -61,6 +61,10 @@ class TestCase(TorchTestCase):
         super().tearDownClass()
 
 
+def filter_extern(choice):
+    return isinstance(choice, ExternKernelCaller)
+
+
 class BenchmarkFusionTestTemplate:
     def test_softmax(self):
         def f(x):
@@ -222,16 +226,11 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     out_code[0]
                 )
 
+        @torch._inductor.config.patch(debug_filter_choice=filter_extern)
         def test_equivalent_extern_code(self):
             torch._dynamo.reset()
 
-            def filter_choice(choice):
-                return isinstance(choice, ExternKernelCaller)
-
-            with unittest.mock.patch.object(
-                torch._inductor.select_algorithm, "filter_choice", filter_choice
-            ):
-                code, code2 = self._equivalent_output_code_impl()
+            code, code2 = self._equivalent_output_code_impl()
 
             for out_code in [code, code2]:
                 FileCheck().check("def call").check_count(
@@ -267,9 +266,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 def filter_choice(choice):
                     return isinstance(choice, allowed_type)
 
-                with unittest.mock.patch.object(
-                    torch._inductor.select_algorithm, "filter_choice", filter_choice
-                ):
+                with config.patch("debug_filter_choice", filter_choice):
                     expected = fn(*args)
                     actual = torch.compile(fn, mode="max-autotune")(*args)
                     self.assertEqual(expected, actual)
