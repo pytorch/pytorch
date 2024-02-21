@@ -1959,9 +1959,9 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
 
     # If not given, determine what's best for the GPU / CUDA version that can be found
     if not _arch_list:
-        print(
+        warnings.warn(
             "TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. \n"
-            "If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'].", file=sys.stderr)
+            "If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'].")
         arch_list = []
         # the assumption is that the extension should run on any of the currently visible cards,
         # which could be of different types - therefore all archs for visible cards should be included
@@ -2342,7 +2342,8 @@ def _write_ninja_file(path,
         cuda_compile_rule = ['rule cuda_compile']
         nvcc_gendeps = ''
         # --generate-dependencies-with-compile is not supported by ROCm
-        if torch.version.cuda is not None:
+        # Nvcc flag `--generate-dependencies-with-compile` is not supported by sccache, which may increase build time.
+        if torch.version.cuda is not None and os.getenv('TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES', '0') != '1':
             cuda_compile_rule.append('  depfile = $out.d')
             cuda_compile_rule.append('  deps = gcc')
             # Note: non-system deps with nvcc are only supported

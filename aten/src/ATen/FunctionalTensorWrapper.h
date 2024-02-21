@@ -211,6 +211,13 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
       VariableVersion&& version_counter,
       bool allow_tensor_metadata_change) const;
 
+  void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override;
+  void copy_tensor_metadata_and_refresh(
+      const FunctionalTensorWrapper* src_impl,
+      FunctionalTensorWrapper* dest_impl,
+      const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change) const;
+
   // Note that value is not taken by reference: internally, the wrapper will
   // change the value tensor that it points to over time.
   Tensor value_;
@@ -230,6 +237,13 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
 
   size_t generation_ = 0;
   std::vector<at::functionalization::ViewMeta> view_metas_;
+
+ protected:
+  static void copy_tensor_metadata(
+      const FunctionalTensorWrapper* src_impl,
+      FunctionalTensorWrapper* dest_impl,
+      const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change);
 };
 
 // Utility functions for the functionalization pass.

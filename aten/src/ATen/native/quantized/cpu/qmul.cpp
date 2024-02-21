@@ -100,8 +100,8 @@ Tensor _mul_out_xnnpack(
 
   if(ReLUFused) {
     /*
-     * FIXME: use acticationLimits<T>()
-     * With <T>, MSVC runs into "error C3862: indetifier activationLimits not
+     * FIXME: use activationLimits<T>()
+     * With <T>, MSVC runs into "error C3862: identifier activationLimits not
      * found".
      */
     constexpr int64_t qmin = std::numeric_limits<underlying_t>::min();

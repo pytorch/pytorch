@@ -19,6 +19,7 @@ from torch.fx.experimental.symbolic_shapes import (
     StatelessSymbolicContext,
 )
 from torch.nested._internal.nested_tensor import (
+    buffer_from_jagged,
     jagged_from_list,
     jagged_from_tensor_and_lengths,
     ViewBufferFromNested,
@@ -99,6 +100,8 @@ class ScaledTensor(torch.Tensor):
         cls,
         data: torch.Tensor,
         scale: torch.Tensor,
+        *,
+        constant: int = 0,
     ):
         return torch.Tensor._make_wrapper_subclass(
             cls,
@@ -111,24 +114,29 @@ class ScaledTensor(torch.Tensor):
             device=data.device,
         )
 
-    def __init__(self, data: torch.Tensor, scale: torch.Tensor):
+    def __init__(self, data: torch.Tensor, scale: torch.Tensor, constant: int = 0):
         self._data = data
         self._scale = scale
+        self._constant = constant
 
     def __tensor_flatten__(self):
-        ctx = {}
+        ctx = {"_constant": self._constant}
         return ["_data", "_scale"], ctx
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
         assert len(inner_tensors) == 2
-        return ScaledTensor(inner_tensors["_data"], inner_tensors["_scale"])
+        return ScaledTensor(
+            inner_tensors["_data"],
+            inner_tensors["_scale"],
+            constant=metadata["_constant"],
+        )
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
         scaled_tensor = args[0]
         out = func(scaled_tensor._data, *args[1:], **kwargs)
-        return ScaledTensor(out, scaled_tensor._scale)
+        return ScaledTensor(out, scaled_tensor._scale, constant=scaled_tensor._constant)
 
     def __repr__(self):
         return f"{self._data.__repr__()}\n{self._scale.__repr__()}"
@@ -1030,6 +1038,16 @@ class GraphModule(torch.nn.Module):
             ],
         )
 
+    def test_wrapper_subclass_dynamo_attribute_access_on_intermediate(self):
+        def f(x_subclass):
+            tmp_subclass = torch.add(x, 1)
+            return torch.mul(tmp_subclass._scale, tmp_subclass._constant)
+
+        x = ScaledTensor(torch.randn(2, 4), torch.randn(3), constant=2)
+        out_ref = f(x)
+        out_test = torch.compile(f, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(out_ref, out_test)
+
     def test_support_bases(self):
         import abc
 
@@ -1152,6 +1170,39 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
     @requires_cuda
     def test_basic_autograd_inductor(self):
         self._test_autograd("inductor")
+
+    def test_subclass_with_mutation_in_graph(self):
+        # In this graph, we have an in-graph mutation, i.e. a mutation that is allowed
+        # to remain in the graph. Normally this is allowed, but it's not allowed if
+        # the graph handles subclasses at all.
+        # Whether the mutation is allowed or not allowed in the graph alters the number
+        # of outputs from the forward graph. Previously, a bug in this handling meant
+        # that sometimes the expected number and actual number of outputs from the
+        # joint graph did not match, causing assertion failures.
+        def fn(x, y):
+            z = x.sin()
+            y.sin_()
+            return z.cos(), y.cos()
+
+        fn_c = torch.compile(fn, backend="inductor")
+
+        values = [torch.rand((i, 8), requires_grad=True) for i in range(1, 6)]
+        values_copy = [x.detach().clone().requires_grad_(True) for x in values]
+
+        nt, offsets = jagged_from_list(values, None)
+        nt_copy, offsets = jagged_from_list(values_copy, offsets)
+        y = torch.rand((4, 8))
+        y_copy = y.clone()
+
+        ret = fn_c(nt, y)[0]
+        ref = fn(nt_copy, y_copy)[0]
+
+        self.assertEqual(buffer_from_jagged(ret), buffer_from_jagged(ref))
+
+        buffer_from_jagged(ret).sum().backward()
+        buffer_from_jagged(ref).sum().backward()
+        for ref_v, res_v in zip(values_copy, values):
+            self.assertEqual(ref_v.grad, res_v.grad)
 
     def test_unbind(self):
         # NB: If we have shape e.g. (3, j0, 3), duck sizing will give us (s0, s1, s0).
