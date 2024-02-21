@@ -9,7 +9,10 @@ from typing import Callable, Optional
 import torch
 import torch.distributed as dist
 from torch import _inductor as inductor, nn
+from torch._C import FileCheck
 from torch._dynamo import compiled_autograd
+from torch._dynamo.utils import counters
+from torch._inductor.utils import run_and_get_triton_code
 from torch.distributed._composable.replicate import replicate
 from torch.distributed.algorithms.ddp_comm_hooks import (
     default_hooks as ddp_default_hooks,
@@ -44,7 +47,7 @@ class Net(nn.Module):
         return self.fc4(self.fc3(self.fc2(_fc1)))
 
 
-def compiler_fn(no_inductor):
+def compiler_fn(no_inductor=False):
     def _compiler_fn(gm):
         def inner_compiler(gm_, example_inputs_):
             if no_inductor:
@@ -205,6 +208,64 @@ class ReplicateTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_compile_backward_only(self):
         self._test_compile(use_gpu=True, no_sync=False, no_compile_forward=True)
+
+    def _test_bucketing(self):
+        dist.init_process_group(
+            backend="gloo",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=dist.FileStore(self.file_name, self.world_size),
+        )
+        model = Net()
+        input = torch.randn([1, DIM])
+        torch._dynamo.config.optimize_ddp = "python_reducer"
+        compiled_model = torch.compile(replicate(deepcopy(model)), fullgraph=True)
+        with compiled_autograd.enable(compiler_fn()):
+            for i in range(1):
+                loss = compiled_model(input).sum()
+                loss.backward()
+
+        with compiled_autograd.enable(compiler_fn()):
+            loss = compiled_model(input).sum()
+
+            def fn():
+                loss.backward()
+
+            code = run_and_get_triton_code(fn)
+
+        self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
+        return code
+
+    def test_bucketing_coalesing_op(self):
+        torch._inductor.config.fuse_ddp_communication = True
+        torch._inductor.config.fuse_ddp_communication_passes = [
+            "fuse_ddp_with_coalescing_op",
+            "schedule_comm_wait",
+        ]
+
+        code = self._test_bucketing()
+        fc = FileCheck()
+        for i in range(3):
+            fc.check("cpp_fused_").check("dist.all_reduce_coalesced(")
+        for i in range(3):
+            fc.check("_wait_tensor(").check("cpp_fused_").run(code)
+
+    def test_bucketing_concat_op(self):
+        torch._inductor.config.fuse_ddp_communication = True
+        torch._inductor.config.fuse_ddp_communication_passes = [
+            "fuse_ddp_with_concat_op",
+            "schedule_comm_wait",
+        ]
+
+        code = self._test_bucketing()
+        fc = FileCheck()
+        for i in range(3):
+            fc.check("aten.flatten.using_ints(").check("cpp_fused_").check(
+                "dist.all_reduce("
+            )
+        for i in range(3):
+            fc.check("_wait_tensor(").check("cpp_fused_")
+        fc.run(code)
 
 
 if __name__ == "__main__":

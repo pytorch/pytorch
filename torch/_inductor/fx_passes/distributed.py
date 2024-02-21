@@ -21,7 +21,8 @@ from typing import (
 
 import torch
 import torch.fx as fx
-from torch.fx.passes.shape_prop import _extract_tensor_metadata
+from torch._dynamo.utils import counters
+from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 from ..fx_utils import get_fake_args_kwargs
@@ -29,14 +30,6 @@ from ..virtualized import V
 
 aten = torch.ops.aten
 logger: logging.Logger = logging.getLogger("comm_fusion")
-
-
-class CommType(str, Enum):
-    ALLREDUCE = "allreduce_"
-    ALLGATHER = "allgather_"
-    BROADCAST = "broadcast_"
-    REDUCESCATTER = "reduce_scatter_"
-    SCATTER = "scatter_"
 
 
 def move_block_after(block: List[fx.Node], target_node: fx.Node) -> None:
@@ -58,10 +51,11 @@ def call_function(
     kwargs: Optional[Dict[str, fx.node.Argument]] = None,
 ) -> fx.Node:
     node = graph.call_function(target, args, kwargs)
-    is_valid, args, kwargs = get_fake_args_kwargs(node)
-    assert is_valid
+    _, args, kwargs = get_fake_args_kwargs(node)
     with V.fake_mode:
         node.meta["val"] = target(*args, **kwargs)
+        # node.meta["val"] may be a container. So we use tree_map here
+        # to recursively extract the tensor metadata.
         node.meta["tensor_meta"] = tree_map(
             _extract_tensor_metadata, (node.meta["val"],)
         )[0]
@@ -70,7 +64,7 @@ def call_function(
 
 @dataclass(unsafe_hash=True)
 class CommBlock:
-    shape: Optional[torch.Size]
+    shape: Union[torch.Size, List[torch.Size]]
     node_list: List[fx.Node]
     inputs: List[fx.Node]
     wait_nodes: List[fx.Node]
@@ -78,7 +72,7 @@ class CommBlock:
     outputs: Set[fx.Node]
 
 
-def get_comm_block(comm_node: fx.Node) -> CommBlock:
+def get_comm_block(comm_node: fx.Node) -> Optional[CommBlock]:
     """
     Given a collective node (e.g., allreduce), find out all the nodes belong to
     this communcation.
@@ -89,60 +83,63 @@ def get_comm_block(comm_node: fx.Node) -> CommBlock:
         The CommBlock that encapsulates the related nodes (e.g., wait_node) of
         the given comm_node.
     """
-    # We choose 5 to prevent some accidents that cause infinite loop. But
-    # with functional collective, the distance is 1.
-    MAX_WAIT_DISTANCE = 5
     node_list = []
     wait_nodes = []
     inputs, _ = tree_flatten((comm_node.args, comm_node.kwargs))
     input_nodes = [inp for inp in inputs if isinstance(inp, fx.Node)]
-    distance = 0
-    wait_prefixes = ("wait_comm", "wait_tensor")
-    non_end_users_nodes = ("split", "reshape", "getitem", "detach", "alias")
+    wait_prefixes = "wait_tensor"
+    # If the users of the wait node are following items, we consinder them
+    # to be a part of the output.
+    intermediate_outputs = ("split", "reshape", "getitem", "detach", "alias")
 
+    # The MAX_WAIT_DISTANCE is 2 because there is a getitem between the
+    # collective op and wait if the collective op is a coalescing op.
+    MAX_WAIT_DISTANCE = 2
+    distance = -1
     nodes = collections.deque([comm_node, None])
-    while nodes and distance < 5:
+    while nodes and distance < MAX_WAIT_DISTANCE:
         node = nodes.popleft()
         if node is None:
             distance += 1
             if nodes:
                 nodes.append(None)
             continue
+
         node_list.append(node)
         if node.name.startswith(wait_prefixes):
             wait_nodes.append(node)
         else:
-            for child in node.users:
-                if isinstance(child, fx.Node):
-                    nodes.append(child)
+            nodes.extend(child for child in node.users if isinstance(child, fx.Node))
 
     if not wait_nodes:
-        raise RuntimeError(
-            "The wait nodes are too far away from the comm node {comm_node}."
+        logger.warning(
+            "%s does not have the wait node or the wait node is too far way.", comm_node
         )
+        return None
 
     # Identify all the outputs of this collective block.
     outputs: Set[fx.Node] = set()
     nodes = collections.deque(wait_nodes)
     while nodes:
         node = nodes.popleft()
-        assert node is not None
         for user in node.users:
-            if isinstance(user, fx.Node) and user.name.startswith(non_end_users_nodes):
+            if isinstance(user, fx.Node) and user.name.startswith(intermediate_outputs):
                 nodes.append(user)
                 node_list.append(user)
             else:
                 outputs.add(node)
                 break
 
-    # TODO: populate all the tensor metadata and remove the default.
-    tensor_meta = input_nodes[0].meta.get("tensor_meta", None)
-    if isinstance(tensor_meta, (tuple, list)):
-        shape = tensor_meta[0]
-    elif tensor_meta is not None:
-        shape = torch.Size(int(s) for s in tensor_meta.shape)
+    tensor_meta = input_nodes[0].meta["tensor_meta"]
+    if isinstance(tensor_meta, TensorMetadata):
+        shape = tensor_meta.shape
+    elif isinstance(tensor_meta, (list, tuple)):
+        shape = tensor_meta
+    else:
+        logger.warning("Unexpected type of tensor_meta %s", type(tensor_meta))
+        return None
+
     return CommBlock(
-        # TODO: support symbolic shapes
         shape=shape,
         node_list=node_list,
         wait_nodes=wait_nodes,
@@ -153,88 +150,25 @@ def get_comm_block(comm_node: fx.Node) -> CommBlock:
 
 
 def get_all_comm_blocks(
-    graph: fx.Graph, comm_ops: Union[Tuple[str, ...], str]
-) -> List[CommBlock]:
-    return [
-        get_comm_block(node) for node in graph.nodes if node.name.startswith(comm_ops)
-    ]
-
-
-def _scatter_fused_allreduce_waits(
     graph: fx.Graph,
-    fused_comm_block: CommBlock,
-    comm_blocks: List[CommBlock],
-    node_indices: Dict[fx.Node, int],
-    split_and_reshape: bool = True,
-) -> None:
-    """
-    Scatters the result of the fused communication node to the original users.
-    If the fused method is concat splitting the output and reshape will be inserted,
-    before inserting getitem. Otherwise getitem will be used as the users of the
-    wait node.
-    """
-    last_wait_node_idx = 0
+    comm_ops: torch._ops.OpOverload,
+    comm_filter: Optional[Callable] = None,
+) -> List[CommBlock]:
+    if comm_filter is None:
+
+        def always_true(comm_block: CommBlock) -> bool:
+            return True
+
+        comm_filter = always_true
+
+    blocks = []
     for node in graph.nodes:
-        last_wait_node_idx = max(
-            node_indices.get(node, last_wait_node_idx), last_wait_node_idx
-        )
-        if node == comm_blocks[-1].wait_nodes[0]:
-            break
-
-    if split_and_reshape:
-        fused_wait_node = fused_comm_block.wait_nodes[0]
-        with graph.inserting_after(fused_wait_node):
-            split_node = call_function(
-                graph,
-                aten.split,
-                (
-                    fused_wait_node,
-                    # TODO(@fegin): support symbolic shapes
-                    [int(cast(torch.Size, cb.shape).numel()) for cb in comm_blocks],
-                ),
-            )
-        with graph.inserting_after(split_node):
-            fused_outputs = []
-            for idx, comm_block in enumerate(comm_blocks):
-                split_idx_node = call_function(
-                    graph, operator.getitem, (split_node, idx)
-                )
-                with graph.inserting_after(split_idx_node):
-                    fused_outputs.append(
-                        call_function(
-                            graph, aten.reshape, (split_idx_node, comm_block.shape)
-                        )
-                    )
-    else:
-        fused_outputs = fused_comm_block.wait_nodes
-
-    # Scatter the fused outputs.
-    need_sort_nodes = []
-    for comm_block, fused_output in zip(comm_blocks, fused_outputs):
-        # Some users of the original allreduce and wait are scheduled
-        # before the fused allreduce. We must move these users to a
-        # correct topological sort order -- right after the last fused
-        # allreduce result, the `last_fused_result` variable.
-        orig_wait = comm_block.wait_nodes[0]
-        nodes = collections.deque(list(orig_wait.users))
-        while nodes:
-            user_node = nodes.popleft()
-            if not isinstance(user_node, fx.Node):
-                continue
-            if node_indices[user_node] < last_wait_node_idx:
-                need_sort_nodes.append(user_node)
-                nodes.extend(list(user_node.users))
-
-        orig_wait.replace_all_uses_with(fused_output)
-
-    last_fused_result = fused_outputs[0]
-    fused_outputs_set = set(fused_outputs)
-    for node in graph.nodes:
-        if node in fused_outputs_set:
-            last_fused_result = node
-
-    need_sort_nodes = sorted(need_sort_nodes, key=lambda node: node_indices[node])
-    move_block_after(need_sort_nodes, last_fused_result)
+        if not node.target in comm_ops:
+            continue
+        comm_block = get_comm_block(node)
+        if comm_block is not None and comm_filter(comm_block):
+            blocks.append(comm_block)
+    return blocks
 
 
 def _fuse_allreduce_by_concat(
@@ -245,7 +179,7 @@ def _fuse_allreduce_by_concat(
     n_commblock: int,
 ) -> CommBlock:
     """Given a list of inputs in order, create a fused allreduce using concat."""
-    # Flatten all the inputs right after the last input is ready.
+    # Flatten all the inputs to the all_reduce nodes.
     with graph.inserting_after(last_input_node):
         cat_inputs = []
         for input_node in all_input_nodes:
@@ -254,17 +188,18 @@ def _fuse_allreduce_by_concat(
                 call_function(graph, aten.flatten.using_ints, (input_node,))
             )
 
+    # Concat all the flattened nodes.
     with graph.inserting_after(cat_inputs[0]):
         cat_node = call_function(graph, aten.cat, (cat_inputs,))
 
-    # Insert div node and remove the input div nodes.
-    # dividends = [div.args[0] for div in all_input_nodes]
+    # Insert the fused div node and remove the input div nodes.
+    # This is an optimization and is not mandatory for fusion.
     divisors = [div.args[1] for div in all_input_nodes]
     assert all(divisor == divisors[0] for divisor in divisors)
     with graph.inserting_after(cat_node):
         div_node = call_function(graph, last_input_node.target, (cat_node, divisors[0]))
 
-    # Create a new Comm node.
+    # Create a new Comm/all_reduce node.
     last_comm_node = last_comm_block.comm_node
     last_wait_node = last_comm_block.wait_nodes[0]
     with graph.inserting_after(div_node):
@@ -280,21 +215,18 @@ def _fuse_allreduce_by_concat(
         args, kwargs = tree_unflatten(flatten_args, spec)
         fused_wait_node = call_function(graph, last_wait_node.target, args, kwargs)
 
-    # Move the fused_comm_node and its args to right after the source node
+    # Move the fused all_reduce and its args to right after the input node
     nodes_to_move = cat_inputs + [cat_node, div_node, fused_comm_node, fused_wait_node]
     move_block_after(nodes_to_move, last_input_node)
 
-    tensor_meta = cat_node.meta.get("tensor_meta")
-    fused_comm_block = CommBlock(
-        shape=tensor_meta.shape,  # type: ignore[union-attr]
+    return CommBlock(
+        shape=cat_node.meta.get("tensor_meta").shape,
         node_list=[fused_comm_node, fused_wait_node],
         wait_nodes=[fused_wait_node],
         comm_node=fused_comm_node,
         inputs=[cat_node],
         outputs={fused_wait_node},
     )
-
-    return fused_comm_block
 
 
 def _fuse_with_coalescing_op(
@@ -305,9 +237,21 @@ def _fuse_with_coalescing_op(
     n_commblock: int,
 ) -> CommBlock:
     """Given a list of inputs in order, create a fused allreduce by coalescing."""
-    # Create a new Comm node.
     last_comm_node = last_comm_block.comm_node
     last_wait_node = last_comm_block.wait_nodes[0]
+
+    # Insert the fused div node and remove the input div nodes.
+    # This is an optimization and is not mandatory for fusion.
+    dividends = [div.args[0] for div in all_input_nodes]
+    divisors = [div.args[1] for div in all_input_nodes]
+    assert all(divisor == divisors[0] for divisor in divisors)
+    with graph.inserting_before(last_input_node):
+        last_input_node = call_function(
+            graph, aten._foreach_div.Scalar, (dividends, divisors[0])
+        )
+    all_input_nodes = last_input_node
+
+    # Create a new Comm/all_reduce_coalesced node.
     with graph.inserting_after(last_comm_node):
         flatten_args, spec = tree_flatten((last_comm_node.args, last_comm_node.kwargs))
         flatten_args[0] = all_input_nodes
@@ -329,52 +273,107 @@ def _fuse_with_coalescing_op(
         with graph.inserting_after(gi_node):
             wait_nodes.append(call_function(graph, last_wait_node.target, args, kwargs))
 
-    # Move the fused_comm_node and its args to right after the source node
+    # Move the new all_reduce_coalesced and its args to right after the input node
     nodes_to_move = [fused_comm_node] + getitem_nodes + wait_nodes
     move_block_after(nodes_to_move, last_input_node)
 
-    tensor_meta = last_comm_node.meta.get("tensor_meta")
-    fused_comm_block = CommBlock(
-        shape=tensor_meta.shape,  # type: ignore[union-attr]
+    return CommBlock(
+        shape=[tm.shape for tm in fused_comm_node.meta.get("tensor_meta")],
         node_list=[fused_comm_node] + getitem_nodes + wait_nodes,
         wait_nodes=wait_nodes,
         comm_node=fused_comm_node,
         inputs=all_input_nodes,
         outputs=set(wait_nodes),
     )
-    return fused_comm_block
 
 
-def _fuse_div(
-    graph,
-    last_input_node: fx.Node,
-    all_input_nodes,
+def _scatter_fused_allreduce_waits(
+    graph: fx.Graph,
+    fused_comm_block: CommBlock,
+    orig_comm_blocks: List[CommBlock],
     node_indices: Dict[fx.Node, int],
-) -> Optional[fx.Node]:
-    if len(all_input_nodes) == 1:
-        return None
+    split_and_reshape: bool = True,
+) -> None:
+    """
+    Scatters the result of the fused communication node to the original users.
+    If the fused method is concat splitting the output and reshape will be inserted,
+    before inserting getitem. Otherwise getitem will be used as the users of the
+    wait node.
+    """
 
-    dividends = []
-    divisor = 0
-    for div in all_input_nodes:
-        if div.target != aten.div.Tensor:
-            return None
+    # Before we mass up the order, we need to get the index of the last wait node
+    # in orig_comm_blocks. This index will be later used to determinee what users
+    # nodes need to be move to maintain a correct topological sort order.
+    last_wait_node_idx = 0
+    for node in graph.nodes:
+        last_wait_node_idx = max(
+            node_indices.get(node, last_wait_node_idx), last_wait_node_idx
+        )
+        if node == orig_comm_blocks[-1].wait_nodes[0]:
+            break
 
-        if len(div.users) != 1:
-            return None
+    if split_and_reshape:
+        fused_wait_node = fused_comm_block.wait_nodes[0]
+        with graph.inserting_after(fused_wait_node):
+            split_node = call_function(
+                graph,
+                aten.split,
+                (
+                    fused_wait_node,
+                    [
+                        int(cast(torch.Size, cb.shape).numel())
+                        for cb in orig_comm_blocks
+                    ],
+                ),
+            )
+        with graph.inserting_after(split_node):
+            fused_outputs = []
+            for idx, comm_block in enumerate(orig_comm_blocks):
+                split_idx_node = call_function(
+                    graph, operator.getitem, (split_node, idx)
+                )
+                with graph.inserting_after(split_idx_node):
+                    fused_outputs.append(
+                        call_function(
+                            graph, aten.reshape, (split_idx_node, comm_block.shape)
+                        )
+                    )
+    else:
+        fused_outputs = fused_comm_block.wait_nodes
 
-        divisor = div.args[1] if divisor == 0 else divisor
+    # Scatter the fused outputs.
+    incorrect_order_nodes = []
+    for comm_block, fused_output in zip(orig_comm_blocks, fused_outputs):
+        # Some descendant users of the orig_comm_blocks may be scheduled before
+        # the fused all_reduce. For example, the user nodes of the very first
+        # all_reduce may be scheduled before the second all_reduce. Since the
+        # fused all_reduce is inserted right after the last all_reudce, the
+        # order can be wrong.
+        # `incorrect_order_nodes` records these nodes.
 
-        if div.args[1] != divisor:
-            return None
+        orig_wait = comm_block.wait_nodes[0]
+        nodes = collections.deque(list(orig_wait.users))
+        while nodes:
+            user_node = nodes.popleft()
+            if not isinstance(user_node, fx.Node):
+                continue
+            if node_indices[user_node] < last_wait_node_idx:
+                incorrect_order_nodes.append(user_node)
+                nodes.extend(list(user_node.users))
 
-        dividends.append(div.args[0])
+        orig_wait.replace_all_uses_with(fused_output)
 
-    with graph.inserting_before(last_input_node):
-        node = call_function(graph, aten._foreach_div.Scalar, (dividends, divisor))
-        node_indices[node] = node_indices[last_input_node] - 1
+    last_fused_result = fused_outputs[0]
+    fused_outputs_set = set(fused_outputs)
+    for node in graph.nodes:
+        if node in fused_outputs_set:
+            last_fused_result = node
 
-    return node
+    # Move the incorrect_order_nodes to right after the last fused_result.
+    incorrect_order_nodes = sorted(
+        incorrect_order_nodes, key=lambda node: node_indices[node]
+    )
+    move_block_after(incorrect_order_nodes, last_fused_result)
 
 
 def _fuse_allreduce(
@@ -384,6 +383,12 @@ def _fuse_allreduce(
     use_concat: bool,
 ) -> CommBlock:
     """Given a list of allreduce CommBlock, fuse the CommBlocks into one CommBlock."""
+
+    if len(comm_blocks) == 1:
+        return comm_blocks[0]
+
+    # Find the last input node of all the CommBlocks. This node will be served
+    # as the inserting point of the new collective op.
     last_input_node = comm_blocks[0].inputs[0]
     last_input_index = -1
     all_input_nodes = []
@@ -401,9 +406,6 @@ def _fuse_allreduce(
             graph, last_input_node, all_input_nodes, comm_blocks[-1], len(comm_blocks)
         )
     else:
-        input_node = _fuse_div(graph, last_input_node, all_input_nodes, node_indices)
-        if input_node is not None:
-            all_input_nodes = input_node
         fused_comm_block = _fuse_with_coalescing_op(
             graph, last_input_node, all_input_nodes, comm_blocks[-1], len(comm_blocks)
         )
@@ -421,58 +423,63 @@ def _fuse_allreduce(
     return fused_comm_block
 
 
-def _expedite_comm_ops(graph: fx.Graph, comm_blocks: List[CommBlock]) -> None:
-    node_indices = {node: i for i, node in enumerate(graph.nodes)}
-    for comm_block in comm_blocks:
-        last_input = comm_block.comm_node
-        last_input_idx = -1
-        for input in comm_block.inputs:
-            input_idx = node_indices[input]
-            if input_idx > last_input_idx:
-                last_input = input
-                last_input_idx = input_idx
-        last_input.append(comm_block.comm_node)
-
-
 def _bucket_size_fusion(
     graph: fx.Graph, comm_blocks: List[CommBlock], bucket_size_mb: int
 ) -> Generator[List[CommBlock], None, None]:
-    bucket_size = 1 * 1024**2
-    bucket_cap_size = bucket_size_mb * 1024**2
+    MB = 1024**2
+    bucket_size = 1 * MB
+    bucket_cap_size = bucket_size_mb * MB
     curr_size = 0
     curr_blocks = []
 
     count = 0
-    for block in comm_blocks:
+    fuse_count = 0
+    for i, block in enumerate(comm_blocks):
         curr_blocks.append(block)
-        # TODO: determine the dtype
-        curr_size += cast(torch.Size, block.shape).numel() * 4
-        if curr_size < bucket_size:
+        itemsize = block.comm_node.meta["tensor_meta"].dtype.itemsize
+        curr_size += cast(torch.Size, block.shape).numel() * itemsize
+        count += 1
+        if curr_size < bucket_size and i != len(comm_blocks) - 1:
             continue
 
-        count += 1
+        fuse_count += 1
         if torch.distributed.get_rank() == 0:
-            logging.info(
-                f"DDP bucketing, new block {count=}, {curr_size=}, {bucket_size}"
+            logger.info(
+                "DDP bucketing: block%d, count=%d, curr_size=%d, bucket_size=%d",
+                fuse_count,
+                count,
+                curr_size,
+                bucket_size,
             )
+
+        # Set the debug counters
+        counters["inductor"]["ddp_buckets"] = fuse_count
         yield curr_blocks
 
         bucket_size = bucket_cap_size
         curr_blocks = []
         curr_size = 0
-
-    if curr_blocks:
-        yield curr_blocks
+        count = 0
 
 
 def _fuse_ddp_communication(
     graph: fx.Graph, algorithm_fn: Callable[..., Any], fusion_fn: Callable[..., Any]
 ) -> None:
-    comm_blocks = get_all_comm_blocks(graph, (CommType.ALLREDUCE, "all_reduce"))
-    # First ensure the allreduce are scheduled immediately right after the gradients.
-    _expedite_comm_ops(graph, comm_blocks)
-    # Get the comm_blocks based on the new order.
-    comm_blocks = get_all_comm_blocks(graph, (CommType.ALLREDUCE, "all_reduce"))
+    def ddp_reducer_filter(block: CommBlock) -> bool:
+        if block.comm_node.args[0].target != aten.div.Tensor:
+            return False
+
+        # TODO: This may have to be changed if compiled_autograd changes
+        if (
+            len(block.wait_nodes[0].users) != 1
+            or list(block.wait_nodes[0].users)[0].target != aten.copy_.default
+        ):
+            return False
+
+        return True
+
+    ops = (torch.ops.c10d_functional.all_reduce.default,)
+    comm_blocks = get_all_comm_blocks(graph, ops, comm_filter=ddp_reducer_filter)
     node_indices = {node: i for i, node in enumerate(graph.nodes)}
 
     for block in algorithm_fn(graph, comm_blocks):
@@ -494,11 +501,22 @@ def fuse_ddp_with_concat_op(graph: fx.Graph, bucket_size_mb: int) -> None:
         partial(_fuse_allreduce, use_concat=True),
     )
 
+
 def schedule_comm_wait(graph: fx.Graph) -> None:
     """
     Delay the execution of wait tensors of allreduce until its first user.
+
+    This algorithm considers the intermediate users, like split, getitem,
+    of the wait node and schedule those intermediate users as well.
+    This will result in a better overlapping result.
     """
-    comm_blocks = get_all_comm_blocks(graph, (CommType.ALLREDUCE, "all_reduce"))
+    ops = (
+        torch.ops.c10d_functional.all_reduce.default,
+        torch.ops.c10d_functional.all_reduce_coalesced.default,
+    )
+    comm_blocks = get_all_comm_blocks(graph, ops)
+    if not comm_blocks:
+        return
 
     # Find all the end users.
     allreduce_users: Set[fx.Node] = set()
@@ -508,11 +526,11 @@ def schedule_comm_wait(graph: fx.Graph) -> None:
 
     node_indices = {node: i for i, node in enumerate(graph.nodes)}
     for allreduce in comm_blocks:
-        # Find the earliest users.
+        # Find the earliest/first user -- target_node.
         assert (
             len(allreduce.outputs) >= 1
         ), f"Found a allreduce that has zero outputs/users -- {allreduce}."
-        # Initialize the target_node to be the first user of the first output.
+        # Initialize the target node to avoid typing issues.
         target_node = next(iter(next(iter(allreduce.outputs)).users))
         target_node_index = 2**31
         for user in (user for output in allreduce.outputs for user in output.users):
@@ -521,8 +539,8 @@ def schedule_comm_wait(graph: fx.Graph) -> None:
                 target_node = user
                 target_node_index = index
 
-        # Move wait nodes and all the subsequent output nodes before the
-        # earliest user.
+        # Move wait nodes and all the subsequent nodes in the comm_block to
+        # before the first user -- target_node.
         wait_idx = -1
         for wait_idx, node in enumerate(allreduce.node_list):
             if node == allreduce.wait_nodes[0]:
