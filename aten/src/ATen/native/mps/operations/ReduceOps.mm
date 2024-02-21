@@ -1431,7 +1431,7 @@ static std::tuple<Tensor, Tensor> min_mps(const Tensor& input_t, int64_t dim, bo
 Tensor median_mps(const Tensor& input_t) {
   if (!is_macos_13_or_newer()) {
     TORCH_WARN_ONCE("MPS: median op is supported natively starting from macOS 13.0. ",
-                    "Falling back on CPU. This may have performace implications.");
+                    "Falling back on CPU. This may have performance implications.");
     return at::median(input_t.to("cpu"));
   }
 
@@ -1646,7 +1646,7 @@ TORCH_API ::std::tuple<at::Tensor&, at::Tensor&> median_out_mps(const at::Tensor
 
   if (!is_macos_13_or_newer()) {
     TORCH_WARN_ONCE("MPS: median op is supported natively starting from macOS 13.0.",
-                    "Falling back on CPU. This may have performace implications.");
+                    "Falling back on CPU. This may have performance implications.");
     return median_from_cpu(input_t.to("cpu"),
                            dim,
                            keepdim,

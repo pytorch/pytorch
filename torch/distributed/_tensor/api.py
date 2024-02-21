@@ -292,7 +292,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
 
     __torch_function__ = torch._C._disabled_torch_function_impl
 
-    def __force_standard_metadata__(self):
+    def __coerce_tangent_metadata__(self):
         if not any(isinstance(p, _Partial) for p in self.placements):
             return self
         placements = [
@@ -302,7 +302,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             device_mesh=self.device_mesh, placements=placements, force_wait=True
         )
 
-    def __force_same_metadata__(self, metadata_tensor):
+    def __coerce_same_metadata_as_tangent__(self, metadata_tensor):
         return self.redistribute(
             device_mesh=self.device_mesh,
             placements=metadata_tensor.placements,
