@@ -325,9 +325,12 @@ fuse_ddp_bucket_size = 25
 
 # Flag to control which fusion passes to apply. Functions in the list will
 # be applied in order. There are two different different fusion passes
-# --"fuse_ddp_with_concat_op" and "fuse_ddp_with_coalescing_op". The default
+# --"fuse_ddp_with_concat_op" and "fuse_ddp_with_coalesced_op". The default
 # one is "fuse_ddp_with_concat_op". Users can also change this to a customized
 # fusion function.
+#
+# The fusion currently does not support multiple DDP with different PG or
+# data type. This feature will be added in the future PRs.
 #
 # "schedule_comm_wait" is used to delay the wait ops to maximize comm/comp
 # overlapping. At this moment, this pass performs better than

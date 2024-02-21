@@ -157,17 +157,17 @@ class ReplicateTest(MultiProcessTestCase):
         self.assertEqual(tuple(model.parameters()), tuple(compiled_model.parameters()))
 
     def test_compile_cpu(self):
-        # Test the coalescing_op with CPU.
+        # Test the coalesced_op with CPU.
         torch._inductor.config.fuse_ddp_communication_passes = [
-            "fuse_ddp_with_coalescing_op",
+            "fuse_ddp_with_coalesced_op",
             "schedule_comm_wait",
         ]
         self._test_compile(use_gpu=False, no_sync=False)
 
     def test_compile_cpu_no_sync(self):
-        # Test the coalescing_op with CPU.
+        # Test the coalesced_op with CPU.
         torch._inductor.config.fuse_ddp_communication_passes = [
-            "fuse_ddp_with_coalescing_op",
+            "fuse_ddp_with_coalesced_op",
             "schedule_comm_wait",
         ]
         self._test_compile(use_gpu=False, no_sync=True)
@@ -246,9 +246,9 @@ class ReplicateTest(MultiProcessTestCase):
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         return code
 
-    def test_bucketing_coalesing_op(self):
+    def test_bucketing_coalesced_op(self):
         torch._inductor.config.fuse_ddp_communication_passes = [
-            "fuse_ddp_with_coalescing_op",
+            "fuse_ddp_with_coalesced_op",
             "schedule_comm_wait",
         ]
 

@@ -884,7 +884,6 @@ class DistributedDataParallel(Module, Joinable):
         if self._use_python_reducer:
             self._register_accum_grad_hook()
 
-
     def _register_accum_grad_hook(self):
         import torch.distributed._functional_collectives as fcol
 

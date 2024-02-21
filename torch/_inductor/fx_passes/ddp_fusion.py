@@ -97,7 +97,7 @@ def get_comm_block(comm_node: fx.Node) -> Optional[CommBlock]:
     intermediate_outputs = ("split", "reshape", "getitem", "detach", "alias")
 
     # The MAX_WAIT_DISTANCE is 2 because there is a getitem between the
-    # collective op and wait if the collective op is a coalescing op.
+    # collective op and wait if the collective op is a coalesced op.
     MAX_WAIT_DISTANCE = 2
     distance = -1
     nodes = collections.deque([comm_node, None])
@@ -234,13 +234,13 @@ def _fuse_allreduce_by_concat(
     )
 
 
-def _fuse_with_coalescing_op(
+def _fuse_with_coalesced_op(
     graph: fx.Graph,
     last_input_node: fx.Node,
     all_input_nodes: List[fx.Node],
     last_comm_block: CommBlock,
 ) -> CommBlock:
-    """Given a list of inputs in order, create a fused allreduce by coalescing."""
+    """Given a list of inputs in order, create a fused allreduce by coalesced."""
     last_comm_node = last_comm_block.comm_node
     last_wait_node = last_comm_block.wait_nodes[0]
 
@@ -415,7 +415,7 @@ def _fuse_allreduce(
             graph, last_input_node, all_input_nodes, comm_blocks[-1]
         )
     else:
-        fused_comm_block = _fuse_with_coalescing_op(
+        fused_comm_block = _fuse_with_coalesced_op(
             graph, last_input_node, all_input_nodes, comm_blocks[-1]
         )
 
@@ -498,7 +498,7 @@ def _fuse_ddp_communication(
         fusion_fn(graph, block, node_indices)
 
 
-def fuse_ddp_with_coalescing_op(graph: fx.Graph, bucket_size_mb: int) -> None:
+def fuse_ddp_with_coalesced_op(graph: fx.Graph, bucket_size_mb: int) -> None:
     _fuse_ddp_communication(
         graph,
         partial(_bucket_size_fusion, bucket_size_mb=bucket_size_mb),
@@ -562,7 +562,7 @@ def schedule_comm_wait(graph: fx.Graph) -> None:
 
 
 def fuse_ddp_communication(
-    graph: fx.Graph, passes: List[Callable[..., None]], bucket_size_mb: int
+    graph: fx.Graph, passes: List[Union[Callable[..., None], str]], bucket_size_mb: int
 ) -> None:
     for pa in passes:
         if isinstance(pa, str):
