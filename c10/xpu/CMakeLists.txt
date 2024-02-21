@@ -5,10 +5,12 @@
 include(../../cmake/public/xpu.cmake)
 
 set(C10_XPU_SRCS
+    XPUCachingAllocator.cpp
     XPUFunctions.cpp
     XPUStream.cpp
 )
 set(C10_XPU_HEADERS
+    XPUCachingAllocator.h
     XPUDeviceProp.h
     XPUException.h
     XPUFunctions.h

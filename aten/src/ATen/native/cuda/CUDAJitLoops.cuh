@@ -18,7 +18,6 @@
 #include <c10/macros/Macros.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/SmallBuffer.h>
-#include <c10/util/C++17.h>
 
 #include <initializer_list>
 #include <type_traits>
