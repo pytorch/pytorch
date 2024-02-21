@@ -194,7 +194,7 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
             check_schema("self: jt_all, ...", func, *args, **kwargs)
             return functools.partial(jagged_unary_pointwise, func)
         elif num_tensor_args == 2:
-            check_schema("lhs: any, rhs: any", func, *args, **kwargs)
+            check_schema("lhs: any, rhs: any, ...", func, *args, **kwargs)
             return functools.partial(jagged_binary_pointwise, func)
 
     return None

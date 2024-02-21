@@ -3,8 +3,8 @@
 #include <c10/xpu/XPUCachingAllocator.h>
 
 #include <deque>
-#include <map>
 #include <mutex>
+#include <set>
 #include <vector>
 
 namespace c10::xpu::XPUCachingAllocator {
@@ -50,7 +50,12 @@ struct Block {
   Block* next{nullptr}; // next block if split from a larger allocation
   int event_count{0}; // number of outstanding XPU events
 
-  Block(int device, sycl::queue* queue, size_t size, BlockPool* pool, void* ptr)
+  Block(
+      DeviceIndex device,
+      sycl::queue* queue,
+      size_t size,
+      BlockPool* pool,
+      void* ptr)
       : device(device),
         queue(queue),
         stream_uses(),
@@ -60,7 +65,7 @@ struct Block {
         ptr(ptr) {}
 
   // constructor for search key
-  Block(int device, sycl::queue* queue, size_t size)
+  Block(DeviceIndex device, sycl::queue* queue, size_t size)
       : device(device),
         queue(queue),
         stream_uses(),
