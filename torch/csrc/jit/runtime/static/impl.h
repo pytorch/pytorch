@@ -240,7 +240,6 @@ class TORCH_API StaticRuntimeMetadata : public torch::CustomClassHolder {
 ///
 class MemoryPlanner;
 class StaticNodeInfo;
-class ProcessedFunction;
 class ProcessedNode;
 class StaticRuntime;
 
@@ -258,6 +257,42 @@ struct TORCH_API SROperatorObserver {
   static void onEnd(const Node* name);
 };
 #endif
+
+class TORCH_API ProcessedFunction {
+ public:
+  ProcessedFunction(
+      Node* node,
+      bool enable_out_variant,
+      bool check_memory_overlap);
+
+  enum class Kind : uint8_t {
+    kOutVariant,
+    kNativeFunction,
+    kInterpreterFallback,
+  };
+
+  void run(ProcessedNode* pnode) const {
+    return f_(pnode);
+  }
+
+  Kind kind() const {
+    return kind_;
+  }
+
+  bool checkMemoryOverlap() const {
+    return check_memory_overlap_;
+  }
+
+  size_t num_outputs() const {
+    return num_outputs_;
+  }
+
+ private:
+  SROperator f_;
+  Kind kind_{ProcessedFunction::Kind::kOutVariant};
+  bool check_memory_overlap_{false};
+  size_t num_outputs_{0};
+};
 
 // A `BlockInfo` instance stores all of the shared state that each
 // `BlockRunner` will need to access. Most of this information is
@@ -776,42 +811,6 @@ class TORCH_API BlockRunner {
 
   std::vector<IValue*> outputs_;
   std::vector<ProcessedNode> nodes_;
-};
-
-class TORCH_API ProcessedFunction {
- public:
-  ProcessedFunction(
-      Node* node,
-      bool enable_out_variant,
-      bool check_memory_overlap);
-
-  enum class Kind : uint8_t {
-    kOutVariant,
-    kNativeFunction,
-    kInterpreterFallback,
-  };
-
-  void run(ProcessedNode* pnode) const {
-    return f_(pnode);
-  }
-
-  Kind kind() const {
-    return kind_;
-  }
-
-  bool checkMemoryOverlap() const {
-    return check_memory_overlap_;
-  }
-
-  size_t num_outputs() const {
-    return num_outputs_;
-  }
-
- private:
-  SROperator f_;
-  Kind kind_{ProcessedFunction::Kind::kOutVariant};
-  bool check_memory_overlap_{false};
-  size_t num_outputs_{0};
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
