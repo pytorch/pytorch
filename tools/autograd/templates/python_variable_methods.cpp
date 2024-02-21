@@ -21,7 +21,7 @@
 #ifdef USE_CUDA
 #include "torch/csrc/cuda/Event.h"
 #endif
-#include "torch/csrc/utils/cuda_lazy_init.h"
+#include "torch/csrc/utils/device_lazy_init.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/pycfunction_helpers.h"
 #include "torch/csrc/utils/python_arg_parser.h"
@@ -495,7 +495,7 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   auto device = r.isNone(0) ? at::Device(at::DeviceType::CUDA) : r.device(0);
   auto opt_memory_format = r.memoryformatOptional(2);
   TORCH_CHECK(device.is_cuda(), "Invalid device, must be cuda device");
-  torch::utils::cuda_lazy_init();
+  torch::utils::device_lazy_init(at::kCUDA);
   return THPVariable_Wrap(dispatch_to(self_, device, r.toBool(1), false, opt_memory_format));
   END_HANDLE_TH_ERRORS
 }
@@ -518,6 +518,7 @@ static PyObject * THPVariable_xpu(PyObject* self, PyObject* args, PyObject* kwar
   auto device = r.isNone(0) ? at::Device(at::DeviceType::XPU) : r.device(0);
   auto opt_memory_format = r.memoryformatOptional(2);
   TORCH_CHECK(device.is_xpu(), "Invalid device, must be xpu device");
+  torch::utils::device_lazy_init(at::kXPU);
   return THPVariable_Wrap(dispatch_to(self_, device, r.toBool(1), false, opt_memory_format));
   END_HANDLE_TH_ERRORS
 }
@@ -973,9 +974,7 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
   auto copy = std::get<3>(parsed);
   auto opt_memory_format = std::get<4>(parsed);
   auto& self_ = THPVariable_Unpack(self);
-  if (device && device->is_cuda()) {
-    torch::utils::cuda_lazy_init();
-  }
+  torch::utils::maybe_initialize_device(device);
   if (device && device->is_privateuseone()) {
     at::globalContext().lazyInitPrivateUse1();
   }
@@ -1057,9 +1056,7 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   if (device_type != device.type()) {
     device = at::Device(device_type);
   }
-  if (device.is_cuda()) {
-    torch::utils::cuda_lazy_init();
-  }
+  torch::utils::maybe_initialize_device(device);
   if (device.is_privateuseone()) {
     at::globalContext().lazyInitPrivateUse1();
   }
