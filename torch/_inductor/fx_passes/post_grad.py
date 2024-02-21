@@ -1,3 +1,4 @@
+import copy
 import functools
 import itertools
 import logging
@@ -12,10 +13,11 @@ import torch._inductor as inductor
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
+from torch._dynamo.utils import counters, optimus_scuba_log
 
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 
-from torch._utils_internal import print_graph
+from torch._utils_internal import upload_graph
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 
 from .. import config, ir, pattern_matcher
@@ -26,8 +28,10 @@ from ..pattern_matcher import (
     _return_true,
     Arg,
     CallFunction,
+    CallFunctionVarArgs,
     filter_nodes,
     get_arg_value,
+    get_mutation_region_id,
     Ignored,
     init_once_fakemode,
     KeywordArg,
@@ -78,18 +82,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     if config.pattern_matcher:
         lazy_init()
-
-        print_graph(gm.graph, "Before group batch fusion in post grad pass.")
+        inductor_before_change = copy.deepcopy(counters["inductor"])
         group_batch_fusion_passes(gm.graph, pre_grad=False)
-        print_graph(gm.graph, "After group batch fusion in post grad pass.")
+        if counters["inductor"] != inductor_before_change:
+            optimus_scuba_log["group_batch_fusion_post_grad"] = upload_graph(gm.graph)
         remove_noop_ops(gm.graph)
-        print_graph(gm.graph, "Before split cat in post grad pass.")
         for patterns in pass_patterns:
             patterns.apply(gm.graph)  # type: ignore[arg-type]
-            print_graph(
-                gm.graph,
-                "Apply split cat pattern matcher PatternMatcherPass in post grad.",
-            )
         if is_inference:
             inference_patterns.apply(gm.graph)  # type: ignore[arg-type]
 
@@ -102,13 +101,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     fake_tensor_updater.incremental_update()
 
-    # Keep this last, since it introduces mutation. Look at
+    # Keep these last, since they introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     reinplace_inplaceable_ops(gm.graph)
+    decompose_auto_functionalized(gm.graph)
+
     gm.recompile()
     gm.graph.lint()
-
-    print_graph(gm.graph, "After recompile in post grad pass.")
 
 
 @init_once_fakemode
@@ -125,6 +124,8 @@ def reorder_for_locality(graph: torch.fx.Graph):
             other_node.op == "call_function"
             and other_node.target != operator.getitem
             and all((n in seen_nodes) for n in other_node.users)
+            and get_mutation_region_id(graph, node)
+            == get_mutation_region_id(graph, other_node)
         ):
             # move node's producers right before it
             node.prepend(other_node)
@@ -647,6 +648,34 @@ def remove_noop_ops(graph: torch.fx.Graph):
             if same_meta(node, src) and cond(*args, **kwargs):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
+
+
+def decompose_auto_functionalized(graph):
+    graph_pass = PatternMatcherPass()
+
+    @register_graph_pattern(
+        CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized),
+        pass_dict=graph_pass,
+    )
+    def replacement(match: Match, *args, **kwargs):
+        from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
+
+        flat_args, spec = pytree.tree_flatten((args, kwargs))
+
+        # NB: we combine (args, kwargs) into flat args for replacing.
+        # This is replace_by_example uses make_fx which does not support
+        # tracing a function with kwargs.
+        def decomp(*flat_args):
+            args, kwargs = pytree.tree_unflatten(flat_args, spec)
+            return auto_functionalized_dense(*args, **kwargs)
+
+        with V.fake_mode:
+            match.replace_by_example(decomp, flat_args, run_dce=False)
+
+    graph_pass.apply(graph)
+    for node in graph.nodes:
+        if node.target is torch.ops.higher_order.auto_functionalized:
+            raise AssertionError("auto_functionalized was not removed")
 
 
 @register_lowering_pattern(

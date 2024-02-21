@@ -10,7 +10,7 @@ namespace {
 
 /*
  * Currently, there is one generator pool containing XPU generator per device.
- * Each generator is lazily initialized when the first time generator is
+ * Each generator is lazily initialized the first time generator is
  * requested for a device.
  */
 c10::once_flag init_flag;
@@ -98,6 +98,7 @@ c10::intrusive_ptr<c10::TensorImpl> XPUGeneratorImpl::get_state() const {
   static const size_t offset_size = sizeof(uint64_t);
   static const size_t total_size = seed_size + offset_size;
 
+  // The internal state is returned as a CPU byte tensor.
   auto state_tensor = at::detail::empty_cpu(
       {(int64_t)total_size},
       ScalarType::Byte,
@@ -120,23 +121,15 @@ void XPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   static const size_t total_size = seed_size + offset_size;
 
   at::detail::check_rng_state(new_state);
-
-  bool no_philox_seed = false;
   auto new_state_size = new_state.numel();
-  if (new_state_size == total_size - offset_size) {
-    no_philox_seed = true;
-  } else {
-    TORCH_CHECK(new_state_size == total_size, "RNG state is wrong size");
-  }
+  TORCH_CHECK(new_state_size == total_size, "RNG state is wrong size");
 
   uint64_t input_seed;
   auto new_rng_state = new_state.data_dtype_initialized<uint8_t>();
   memcpy(&input_seed, new_rng_state, seed_size);
   this->set_current_seed(input_seed);
-  uint64_t philox_offset = 0;
-  if (!no_philox_seed) {
-    memcpy(&philox_offset, new_rng_state + seed_size, offset_size);
-  }
+  uint64_t philox_offset;
+  memcpy(&philox_offset, new_rng_state + seed_size, offset_size);
   this->set_philox_offset_per_thread(philox_offset);
 }
 
