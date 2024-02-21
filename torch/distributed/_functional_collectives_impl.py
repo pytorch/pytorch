@@ -24,7 +24,7 @@ _wait_all
 
 """
 
-_use_native_funcol = "_USE_NATIVE_C10D_FUNCTIONAL" in os.environ
+_use_native_funcol = "DISABLE_NATIVE_FUNCOL" not in os.environ
 
 
 def native_funcol_enabled():
