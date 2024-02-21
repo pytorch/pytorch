@@ -1873,15 +1873,13 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
       PyErr_Clear();
       return false;
     }
-    PyObject* x = PyObject_CallNoArgs(weakref); // new ref
-    if (x == nullptr) {
-      // The weakref is not valid.
-      PyErr_Clear();
+
+    if (!PyWeakref_Check(weakref)) {
       return false;
     }
-    bool result = _guard_manager->check_nopybind(x);
-    Py_DECREF(x);
-    return result;
+
+    PyObject* x = PyWeakref_GetObject(weakref); // borrowed ref
+    return _guard_manager->check_nopybind(x);
   }
 
   GuardDebugInfo check_verbose_nopybind(
@@ -1894,15 +1892,13 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
       PyErr_Clear();
       return GuardDebugInfo(false, std::string("KeyError ") + repr(), 0);
     }
-    PyObject* x = PyObject_CallNoArgs(weakref); // new ref
-    if (x == nullptr) {
-      // The weakref is not valid.
-      PyErr_Clear();
-      return GuardDebugInfo(false, std::string("Invalid weakref ") + repr(), 0);
+
+    if (!PyWeakref_Check(weakref)) {
+      return GuardDebugInfo(false, std::string("Not a weakref ") + repr(), 0);
     }
-    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
-    Py_DECREF(x);
-    return result;
+
+    PyObject* x = PyWeakref_GetObject(weakref); // borrowed ref
+    return _guard_manager->check_verbose_nopybind(x);
   }
 
   std::string repr() const override {

@@ -448,9 +448,9 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
     def test_global_weakref(self):
         guard_manager = RootGuardManager()
-        weakref_manager = guard_manager.globals_dict_manager(
-            globals(), None
-        ).global_weakref_manager("weakref_x", None)
+        globals_manager = guard_manager.globals_dict_manager(globals(), None)
+        weakref_manager = globals_manager.global_weakref_manager("weakref_x", None)
+
         weakref_manager.add_lambda_guard(
             lambda x: isinstance(x, torch.Tensor),
             "global weakref fail",
