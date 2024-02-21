@@ -162,7 +162,7 @@ def scaled_dot_product_attention_strategy(
         single_mesh_dim_strategies = []
 
         # placement list stores placements of [outputs, inputs]
-        # in the spda case, we have 7 tensor outputs and 3 tensor inputs
+        # in the spda case, we have 3 valid tensor outputs and 3 tensor inputs
         # first we can always accept full replication for inputs and output
         all_replicate: List[Placement] = [Replicate()] * 6
         single_mesh_dim_strategies.append(all_replicate)
@@ -172,8 +172,6 @@ def scaled_dot_product_attention_strategy(
         qkv_sharding = Shard(1)  # num head dim
         output_sharding = Shard(1)  # num head dim
         logsumexp_sharding = Shard(1)  # num head dim
-        philox_seed_sharding = Replicate()
-        philox_offset_sharding = Replicate()
         if return_debug_mask:
             debug_attn_mask_sharding: Placement = Shard(1)  # num head dim
         else:
@@ -183,8 +181,6 @@ def scaled_dot_product_attention_strategy(
         num_heads_dim_sharding = [
             output_sharding,
             logsumexp_sharding,
-            # None,  # philox seed scalar
-            # None,  # philox offset scalar
             debug_attn_mask_sharding,
             qkv_sharding,
             qkv_sharding,
@@ -205,7 +201,7 @@ def scaled_dot_product_attention_strategy(
         assert len(spec_list) == 6
         input_expected_specs = spec_list[3:]
         output_specs: List[Optional[DTensorSpec]] = list(spec_list[:3])
-        # fill in None for the int and empty tensor return values
+        # fix up ouput_specs and fill in None for the int and empty tensor return values
         for i in range(2, 8):
             output_specs.insert(i, None)
         if all(is_tensor_shardable(qkv_shape, spec) for spec in input_expected_specs):
