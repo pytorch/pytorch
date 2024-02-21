@@ -66,7 +66,7 @@ very_slow: &VERY_SLOW_MODELS
 
 # These benchmarks took >60s on an i9-11900K CPU
 slow:
-  <<: *VERY_SLOW_MODELS
+  - *VERY_SLOW_MODELS
   # 137s
   - BERT_pytorch
   # 116s
@@ -130,7 +130,7 @@ detectron2_models: &DETECTRON2_MODELS
 # These models support only train mode. So accuracy checking can't be done in
 # eval mode.
 only_training:
-  <<: *DETECTRON2_MODELS
+  - *DETECTRON2_MODELS
   - tts_angular
   - tacotron2
   - demucs
@@ -187,7 +187,7 @@ skip:
 
   test:
     training:
-      <<: *DETECTRON2_MODELS
+      - *DETECTRON2_MODELS
       # not designed for training
       - pyhpc_equation_of_state
       - pyhpc_isoneutral_mixing

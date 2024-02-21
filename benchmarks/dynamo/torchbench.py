@@ -56,11 +56,18 @@ def load_yaml_file():
     with open(filepath) as f:
         data = yaml.safe_load(f)
 
+    def flatten(lst):
+        for item in lst:
+            if isinstance(item, list):
+                yield from flatten(item)
+            else:
+                yield item
+
     def maybe_list_to_set(obj):
         if isinstance(obj, dict):
             return {k: maybe_list_to_set(v) for k, v in obj.items()}
         if isinstance(obj, list):
-            return set(obj)
+            return set(flatten(obj))
         return obj
 
     return maybe_list_to_set(data)
@@ -194,7 +201,11 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         )
         if cant_change_batch_size:
             batch_size = None
-        if batch_size is None and is_training and model_name in self._batch_size["training"]:
+        if (
+            batch_size is None
+            and is_training
+            and model_name in self._batch_size["training"]
+        ):
             batch_size = self._batch_size["training"][model_name]
         elif (
             batch_size is None
@@ -246,7 +257,9 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         model, example_inputs = benchmark.get_module()
 
         # Models that must be in train mode while training
-        if is_training and (not use_eval_mode or model_name in self._config["only_training"]):
+        if is_training and (
+            not use_eval_mode or model_name in self._config["only_training"]
+        ):
             model.train()
         else:
             model.eval()
