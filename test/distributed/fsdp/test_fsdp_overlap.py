@@ -88,10 +88,10 @@ class Min10:
         return mean(self.data)
 
 
-class TestForwardOverlap(FSDPTest):
+class TestForwardOverlapWorldSizeOne(FSDPTest):
     @property
     def world_size(self):
-        return 2
+        return 1
 
     def _dist_train(self):
         rank = self.rank
@@ -131,6 +131,10 @@ class TestForwardOverlap(FSDPTest):
                 all_gather_called = False
 
                 def _delayed_all_gather(*args, **kwargs):
+                    # No need to delay the all-gather if world size is 1 since
+                    # the all-gather would be a no-op anyway
+                    if self.world_size == 1:
+                        return orig_all_gather(*args, **kwargs)
                     nonlocal all_gather_called
                     all_gather_called = True
                     torch.cuda._sleep(all_gather_cycles)
@@ -243,6 +247,12 @@ class TestForwardOverlap(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_forward_overlap(self):
         self._dist_train()
+
+
+class TestForwardOverlapWorldSizeTwo(TestForwardOverlapWorldSizeOne):
+    @property
+    def world_size(self):
+        return 2
 
 
 if __name__ == "__main__":
