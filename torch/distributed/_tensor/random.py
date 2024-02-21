@@ -45,7 +45,8 @@ def manual_seed(seed: int, device_mesh: DeviceMesh, tp_dim: int = 0) -> None:
     Args:
         seed (int): The desired seed.
         device_mesh (:class:`DeviceMesh`): The device mesh to set the seed.
-        tp_dim (int, optional): The mesh dimension where to apply Tensor Parallel
+        tp_dim (int, optional): The mesh dimension where to apply Tensor Parallel.
+            For non-TP use, this argument should be omitted.
             Default: 0
 
     Returns:
