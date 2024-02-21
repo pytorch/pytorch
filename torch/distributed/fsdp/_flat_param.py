@@ -583,6 +583,13 @@ class FlatParamHandle:
             params, fully_sharded_module, self._aligned_numel, use_orig_params  # type: ignore[arg-type]
         )
         self._use_unsharded_views(as_params=False)
+        if not self.uses_sharded_strategy and self._use_orig_params:
+            # Since we always use unsharded views, we need the original
+            # parameters to be views into the unsharded flat parameter
+            views = self._get_unflat_views()
+            for i, view in enumerate(views):
+                assert self.flat_param._params is not None
+                self.flat_param._params[i] = nn.Parameter(view)
 
     def _init_setattr_fns(self):
         use_unsafe_setattr = os.environ.get(_FSDP_USE_UNSAFE_SETATTR, "") == "1"
@@ -2206,6 +2213,8 @@ class FlatParamHandle:
             if self.uses_sharded_strategy or not self._offload_params
             else flat_param._cpu_grad
         )
+        from torch.distributed._tensor import DTensor
+
         for i, (
             param,
             (in_shard, offset_in_shard, numel_in_shard, _, _),
@@ -2231,11 +2240,11 @@ class FlatParamHandle:
                     param is not None,
                     f"Expects to have saved tensor for {flat_param._fqns[i]}",
                 )
-            param_changed = getattr(module, param_name) is not param
-            needs_param_writeback = (
-                param_changed  # changed parameter variable itself
-                or not _same_storage(param, flat_param_tensor)
+            param_data = (
+                param if not isinstance(param, DTensor) else param._local_tensor
             )
+            param_changed = getattr(module, param_name) is not param
+            needs_param_writeback = not _same_storage(param_data, flat_param_tensor)
             if self._skipped_use_sharded_views and (
                 param_changed or needs_param_writeback
             ):
@@ -2250,7 +2259,7 @@ class FlatParamHandle:
             if needs_param_writeback:
                 expected_shape = torch.Size([numel_in_shard])
                 self._writeback_tensor(
-                    param, flat_param, i, expected_shape, offset_in_shard, True
+                    param_data, flat_param, i, expected_shape, offset_in_shard, True
                 )
                 wroteback = True
 
@@ -2275,15 +2284,20 @@ class FlatParamHandle:
                     # is `flat_param._cpu_grad`, which is on CPU
                     continue
 
+                grad_data = (
+                    param.grad
+                    if not isinstance(param.grad, DTensor)
+                    else param.grad._local_tensor
+                )
                 needs_grad_writeback = flat_param_grad is None or not _same_storage(
-                    param.grad, flat_param_grad
+                    grad_data, flat_param_grad
                 )
                 if needs_grad_writeback:
                     if flat_param_grad is None:
                         flat_param_grad = torch.zeros_like(flat_param)
                     expected_shape = torch.Size([numel_in_shard])
                     self._writeback_tensor(
-                        param.grad,
+                        grad_data,
                         flat_param_grad,
                         i,
                         expected_shape,
