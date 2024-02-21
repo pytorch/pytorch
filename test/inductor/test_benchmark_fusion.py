@@ -164,11 +164,25 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
     copy_tests(BenchmarkFusionTestTemplate, BenchmarkFusionCudaTest, "cuda")
 
-    class BenchmarkMultiTemplateFusionCudaTest(BenchmarkFusionCudaTest):
+    class BenchmarkMultiTemplateFusionCudaTest(TorchTestCase):
         @classmethod
         def setUpClass(cls):
             super().setUpClass()
-            cls._stack.enter_context(config.patch({"benchmark_multi_templates": True}))
+            cls._stack = contextlib.ExitStack()
+            cls._stack.enter_context(
+                config.patch(
+                    {
+                        "benchmark_kernel": True,
+                        "benchmark_fusion": True,
+                        "benchmark_multi_templates": True,
+                    }
+                )
+            )
+
+        @classmethod
+        def tearDownClass(cls):
+            cls._stack.close()
+            super().tearDownClass()
 
         def _equivalent_output_code_impl(self):
             def foo(m, inp):
