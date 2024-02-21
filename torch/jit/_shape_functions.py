@@ -1431,7 +1431,7 @@ add_shape_compute_mapping(
     native_batch_norm,
 )
 add_shape_compute_mapping(
-    "batch_norm_with_update(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, float momentum, float eps) -> (Tensor, Tensor, Tensor, Tensor)",
+    "_batch_norm_with_update(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, float momentum, float eps) -> (Tensor, Tensor, Tensor, Tensor)",
     native_batch_norm,
 )
 
