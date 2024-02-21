@@ -3832,6 +3832,12 @@ class TritonScheduling(BaseScheduling):
             # generating out of range indices for later calls.
             ms = do_bench(lambda: call(wrapped_jit_function.clone_args(*args)[0]))
 
+            # overhead of cloning args gives bias for fusing the kernel
+            # in the case of mutating/in-placeable second fusion
+            # TODO - would be better as a hook in triton do_bench that reset
+            # the input values between benchmarking
+            ms = ms - do_bench(lambda: wrapped_jit_function.clone_args(*args))
+
         log.debug(
             "The fused kernel for %s took %.3f ms to run",
             {n.get_name() for n in nodes},

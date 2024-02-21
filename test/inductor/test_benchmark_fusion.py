@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TestCase as TorchTestCase,
 )
+
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 # Make the helper files in test/ importable
@@ -34,6 +35,8 @@ if IS_WINDOWS and IS_CI:
     if __name__ == "__main__":
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")
+
+from torch._inductor.select_algorithm import ExternKernelCaller, TritonTemplateCaller
 
 from inductor.test_torchinductor import check_model, check_model_cuda, copy_tests
 
@@ -160,6 +163,105 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         device = "cuda"
 
     copy_tests(BenchmarkFusionTestTemplate, BenchmarkFusionCudaTest, "cuda")
+
+    class BenchmarkMultiTemplateFusionCudaTest(BenchmarkFusionCudaTest):
+        @classmethod
+        def setUpClass(cls):
+            super().setUpClass()
+            cls._stack.enter_context(config.patch({"benchmark_multi_templates": True}))
+
+        def _equivalent_output_code_impl(self):
+            def foo(m, inp):
+                a = m(inp)
+                return torch.nn.functional.relu(a)
+
+            foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
+
+            m = torch.nn.Linear(512, 512, bias=True).half().cuda()
+            inp = torch.rand([512, 512]).half().cuda()
+
+            with torch.no_grad():
+                res, code = run_and_get_code(foo_c, m, inp)
+
+            torch._dynamo.reset()
+            with unittest.mock.patch.object(
+                torch._inductor.config, "benchmark_multi_templates", False
+            ):
+                foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
+                with torch.no_grad():
+                    res2, code2 = run_and_get_code(foo_c, m, inp)
+
+            self.assertEqual(res, res2)
+            return code, code2
+
+        @torch._inductor.config.patch(max_autotune_gemm_backends="TRITON")
+        def test_equivalent_template_code(self):
+            code, code2 = self._equivalent_output_code_impl()
+            for out_code in [code, code2]:
+                FileCheck().check("def call").check_count(
+                    "empty_strided_cuda", 1, exactly=True
+                ).check("triton_tem_fused_relu_0.run").check_count(
+                    "del", 3, exactly=True
+                ).check(
+                    "return"
+                ).run(
+                    out_code[0]
+                )
+
+        def test_equivalent_extern_code(self):
+            torch._dynamo.reset()
+
+            def filter_choice(choice):
+                return isinstance(choice, ExternKernelCaller)
+
+            with unittest.mock.patch.object(
+                torch._inductor.select_algorithm, "filter_choice", filter_choice
+            ):
+                code, code2 = self._equivalent_output_code_impl()
+
+            for out_code in [code, code2]:
+                FileCheck().check("def call").check_count(
+                    "empty_strided_cuda", 1, exactly=True
+                ).check("extern_kernels.mm").check_count("del", 3, exactly=True).check(
+                    "reuse"
+                ).check(
+                    "return"
+                ).run(
+                    out_code[0]
+                )
+
+        def test_changed_layout(self):
+            # cat addmm planning will change layout - make sure propagated
+
+            for allowed_type in [ExternKernelCaller, TritonTemplateCaller]:
+
+                def fn(a: torch.Tensor, b: torch.Tensor, c: torch.Tensor):
+                    return torch.cat(
+                        [
+                            torch.addmm(a, b, c),
+                            torch.addmm(b, c, a),
+                        ],
+                        1,
+                    )
+
+                args = [
+                    torch.randn(4, 4, device="cuda"),
+                    torch.randn(4, 4, device="cuda"),
+                    torch.randn(4, 4, device="cuda"),
+                ]
+
+                def filter_choice(choice):
+                    return isinstance(choice, allowed_type)
+
+                with unittest.mock.patch.object(
+                    torch._inductor.select_algorithm, "filter_choice", filter_choice
+                ):
+                    expected = fn(*args)
+                    actual = torch.compile(fn, mode="max-autotune")(*args)
+                    self.assertEqual(expected, actual)
+
+                torch._dynamo.reset()
+
 
 if HAS_CPU and not torch.backends.mps.is_available():
 

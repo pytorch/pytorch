@@ -22,7 +22,7 @@ from torch._dynamo.utils import counters, identity, preserve_rng_state
 from . import config, ir
 from .autotune_process import TensorMeta, TritonBenchmarkRequest
 from .codecache import code_hash, PersistentCache, PyCodeCache
-from .codegen.common import ChoiceCaller, IndentedBuffer, KernelTemplate
+from .codegen.common import IndentedBuffer, KernelTemplate
 from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
@@ -621,7 +621,7 @@ class ExternKernelChoice:
         )
 
 
-class TritonTemplateCaller(ChoiceCaller):
+class TritonTemplateCaller(ir.TritonTemplateCallerBase):
     def __init__(
         self, name, input_nodes, layout, make_kernel_render, debug_extra, bmreq
     ):
@@ -657,8 +657,11 @@ class TritonTemplateCaller(ChoiceCaller):
             )
         )
 
+    def get_make_kernel_render(self):
+        return self.make_kernel_render
 
-class ExternKernelCaller(ChoiceCaller):
+
+class ExternKernelCaller(ir.ChoiceCaller):
     def __init__(
         self,
         choice: ExternKernelChoice,
@@ -726,17 +729,22 @@ class ExternKernelCaller(ChoiceCaller):
 
 
 class ErrorFromChoice(RuntimeError):
-    def __init__(self, msg, choice: ChoiceCaller, inputs_str):
+    def __init__(self, msg, choice: ir.ChoiceCaller, inputs_str):
         msg += f"\nFrom choice {choice}\n{inputs_str}"
         super().__init__(msg)
         self.choice = choice
+
+
+# used in testing
+def filter_choice(choice):
+    return True
 
 
 class AlgorithmSelectorCache(PersistentCache):
     def __call__(
         self,
         name,
-        choices: List[ChoiceCaller],
+        choices: List[ir.ChoiceCaller],
         input_nodes,
         layout,
         # optional dict mapping arg indices to the functions
@@ -746,6 +754,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # generating a random torch.Tensor for benchmarking.
         input_gen_fns: Optional[Dict[int, Callable[[ir.Buffer], torch.Tensor]]] = None,
         precompilation_timeout_seconds: int = 60 * 60,
+        return_multi_template=False,
     ):
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
@@ -842,6 +851,39 @@ class AlgorithmSelectorCache(PersistentCache):
             or log.getEffectiveLevel() == logging.DEBUG
         ):
             self.log_results(name, input_nodes, timings, autotune_elapse)
+
+        if return_multi_template:
+            min_extern_choice = float("inf")
+            for choice, timing in timings.items():
+                if isinstance(choice, ExternKernelCaller):
+                    min_extern_choice = min(min_extern_choice, timing)
+
+            timings = {
+                choice: time
+                for choice, time in timings.items()
+                if (
+                    time <= min_extern_choice
+                    or not isinstance(choice, ExternKernelCaller)
+                )
+            }
+
+            if len(timings) == 1:
+                return next(iter(timings)).output_node()
+
+            timings = {
+                choice: time
+                for choice, time in timings.items()
+                if filter_choice(choice)
+            }
+
+            return torch._inductor.ir.TensorBox.create(
+                torch._inductor.ir.MultiTemplateBuffer(
+                    layout,
+                    input_nodes,
+                    timings,
+                )
+            )
+
         selected_choice = builtins.min(timings, key=timings.__getitem__).output_node()
         log.debug("selected choice: %s", str(selected_choice))
         return selected_choice
@@ -1068,6 +1110,14 @@ def autotune_select_algorithm(*args, **kwargs):
     global _ALGORITHM_SELECTOR_CACHE
     if _ALGORITHM_SELECTOR_CACHE is None:
         _ALGORITHM_SELECTOR_CACHE = AlgorithmSelectorCache()
+
+    if "return_multi_template" not in kwargs:
+        # TODO - enable multi templates even if benchmark_fusion not enabled
+        kwargs["return_multi_template"] = (
+            torch._inductor.config.benchmark_multi_templates
+            and torch._inductor.config.benchmark_fusion
+        )
+
     return _ALGORITHM_SELECTOR_CACHE(*args, **kwargs)
 
 
