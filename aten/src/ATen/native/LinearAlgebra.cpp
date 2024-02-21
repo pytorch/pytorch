@@ -422,8 +422,7 @@ std::tuple<Tensor&, Tensor&> slogdet_out(const Tensor& A, Tensor& sign, Tensor& 
 Tensor logdet(const Tensor& A) {
   squareCheckInputs(A, "logdet");
   checkFloatingOrComplex(A, "logdet", /*low_precision*/false);
-  Tensor sign, logabsdet;
-  std::tie(sign, logabsdet) = at::linalg_slogdet(A);
+  auto [sign, logabsdet] = at::linalg_slogdet(A);
 
   if (A.is_complex()) {
     return sign.log() + logabsdet;
@@ -509,32 +508,28 @@ Tensor linalg_pinv(
               "linalg.pinv(", t, "{", input.sizes(), "}): expected a tensor with 2 or more dimensions "
               "of float, double, cfloat or cdouble types");
 
-  Tensor atol, rtol;
-  std::tie(atol, rtol) = get_atol_rtol(input, atol_opt, rtol_opt, "torch.linalg.pinv");
+  auto [atol, rtol] = get_atol_rtol(input, atol_opt, rtol_opt, "torch.linalg.pinv");
 
   if (input.sym_numel() == 0) {
     // The implementation below uses operations that do not work for zero numel tensors
     // therefore we need this early return for 'input.numel() == 0' case
-    Tensor U, S, V;
     // TODO: replace input.svd with linalg_svd when torch/xla can work with at::linalg_svd
-    std::tie(U, S, V) = input.svd();
+    auto [U, S, V] = input.svd();
     return at::matmul(V * S.reciprocal().unsqueeze(-2), U.mH());
   }
 
   // If not Hermitian use singular value decomposition, else use eigenvalue decomposition
   if (!hermitian) {
-    Tensor U, S, V;
     // TODO: replace input.svd with linalg_svd
     // using linalg_svd breaks pytorch/xla, see https://github.com/pytorch/xla/issues/2755
-    std::tie(U, S, V) = input.svd();
+    auto [U, S, V] = input.svd();
     Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);  // singular values are sorted in descending order
     Tensor tol = at::max(atol.unsqueeze(-1), rtol.unsqueeze(-1) * max_val);
     Tensor S_pseudoinv = at::where(S > tol, S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
     // computes V @ diag(S_pseudoinv) @ U.conj().T
     return at::matmul(V * S_pseudoinv.unsqueeze(-2), U.mH());
   } else {
-    Tensor S, U;
-    std::tie(S, U) = at::linalg_eigh(input);
+    auto [S, U] = at::linalg_eigh(input);
     // For Hermitian matrices, singular values equal to abs(eigenvalues)
     Tensor S_abs = S.abs();
     // eigenvalues are sorted in ascending order starting with negative values, we need a maximum value of abs(eigenvalues)
@@ -547,8 +542,7 @@ Tensor linalg_pinv(
 }
 
 Tensor linalg_pinv(const Tensor& input, optional<double> atol, optional<double> rtol, bool hermitian) {
-  Tensor atol_tensor, rtol_tensor;
-  std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, atol, rtol);
+  auto [atol_tensor, rtol_tensor] = get_atol_rtol(input, atol, rtol);
   return at::linalg_pinv(input, atol_tensor, rtol_tensor, hermitian);
 }
 
@@ -729,8 +723,7 @@ Tensor& matrix_rank_impl(
     const optional<Tensor>& rtol_opt,
     bool hermitian,
     Tensor& result) {
-  Tensor atol, rtol;
-  std::tie(atol, rtol) = get_atol_rtol(input, atol_opt, rtol_opt, "torch.linalg.matrix_rank");
+  auto [atol, rtol] = get_atol_rtol(input, atol_opt, rtol_opt, "torch.linalg.matrix_rank");
 
   checkSameDevice("torch.linalg.matrix_rank", result, input);
   checkSameDevice("torch.linalg.matrix_rank", atol, input, "atol");
@@ -804,8 +797,7 @@ Tensor& linalg_matrix_rank_out(
 }
 
 Tensor& linalg_matrix_rank_out(const Tensor& input, optional<double> atol, optional<double> rtol, bool hermitian, Tensor& result) {
-  Tensor atol_tensor, rtol_tensor;
-  std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, atol, rtol);
+  auto [atol_tensor, rtol_tensor] = get_atol_rtol(input, atol, rtol);
   result = linalg_matrix_rank_out(input, atol_tensor, rtol_tensor, hermitian, result);
   return result;
 }
@@ -818,8 +810,7 @@ Tensor linalg_matrix_rank(const Tensor& input, const optional<Tensor>& atol, con
 Tensor linalg_matrix_rank(const Tensor& input, optional<double> atol, optional<double> rtol, bool hermitian) {
   auto result = get_matrix_rank_result_tensor(input);
 
-  Tensor atol_tensor, rtol_tensor;
-  std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, atol, rtol);
+  auto [atol_tensor, rtol_tensor] = get_atol_rtol(input, atol, rtol);
 
   return matrix_rank_impl(input, atol_tensor, rtol_tensor, hermitian, result);
 }
@@ -847,8 +838,7 @@ Tensor linalg_matrix_rank(const Tensor& input, const Tensor& tol, bool hermitian
 Tensor linalg_matrix_rank(const Tensor& input, double tol, bool hermitian) {
   auto result = get_matrix_rank_result_tensor(input);
 
-  Tensor atol_tensor, rtol_tensor;
-  std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, tol, 0.0);
+  auto [atol_tensor, rtol_tensor] = get_atol_rtol(input, tol, 0.0);
 
   return matrix_rank_impl(input, atol_tensor, rtol_tensor, hermitian, result);
 }
@@ -2588,10 +2578,9 @@ Tensor compute_T18_scale_square(
   // gives us an opportunity to calculate the matrix multiplication in a batch.
   // The first thing we need to do is sort tensor `s`, which will be helpful to
   // do the matrix multiplication by range.
-  Tensor sorted_s, sorted_s_inds;
   // With above example, `sorted_s` is [0, 1, 1, 4], we also will need the index
   // info, so we can use it to compose the result back.
-  std::tie(sorted_s, sorted_s_inds) = at::sort(s, /*dim=*/0);
+  auto [sorted_s, sorted_s_inds] = at::sort(s, /*dim=*/0);
   sorted_s = sorted_s.to(at::kLong);
   // Then we call `unique_consecutive` and we will use it to split `sorted_s`,
   // with above example, `split_counts` is [1, 2, 1].
@@ -2610,7 +2599,7 @@ Tensor compute_T18_scale_square(
 
   TORCH_INTERNAL_ASSERT(section_values.is_contiguous());
   const auto section_numel = section_values.numel() / 2;
-  auto scs = section_values.data_ptr<int64_t>();
+  auto scs = section_values. template data_ptr<int64_t>();
   auto pts = &scs[section_numel];
 
   // We now will do the matrix muplication in a batch, with above example:
