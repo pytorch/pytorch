@@ -478,6 +478,64 @@ class CompiledOptimizerTests(TestCase):
         self.assertTrue(p_ref() is None)
         gc.enable()
 
+    # Basic shampoo test to verify we support compiling the various ops without error
+    @requires_cuda
+    def test_basic_shampoo(self):
+        mod = torch.nn.Linear(10, 10, device="cuda:0", bias=False)
+        for p in mod.parameters():
+            p.grad = torch.rand_like(p)
+
+        # note this skips the root inverse because this has a lot of internal dependencies
+        # we also don't compile it regardless
+        @torch.compile()
+        @torch.no_grad()
+        def shampoo_functional_basic(params):
+            step = 1
+            weight_decay = 0.1
+            grads = [p.grad for p in params]
+            beta1 = 0.9
+            beta2 = 1.0
+            epsilon = 1e-10
+            preconditioners = [torch.zeros_like(p) for p in params]
+            momentum_list = [torch.zeros_like(p) for p in params]
+            lr = 0.01
+
+            # weight decay
+            torch._foreach_add_(grads, params, alpha=weight_decay)
+
+            # update preconditioners
+            torch._foreach_addcmul_(preconditioners, grads, grads, value=1.0)
+
+            # skip root inverse
+
+            # Compute filtered gradient or EMA of the gradients.
+            torch._foreach_mul_(grads, beta1)
+            torch._foreach_add_(
+                grads,
+                grads,
+                alpha=1 - beta1,
+            )
+            bias_correction1 = 1.0 - beta1**step
+            grad_list = torch._foreach_div(grads, bias_correction1)
+
+            bias_correction2 = 1.0 - beta2**step
+            bias_corrected_preconditioner_list = torch._foreach_div(
+                preconditioners, bias_correction2
+            )
+            torch._foreach_sqrt_(bias_corrected_preconditioner_list)
+            torch._foreach_add_(bias_corrected_preconditioner_list, self._epsilon)
+            search_directions = torch._foreach_div(
+                grad_list, bias_corrected_preconditioner_list
+            )
+
+            torch._foreach_add_(
+                search_directions,
+                params,
+                alpha=weight_decay,
+            )
+
+            torch._foreach_mul_(search_directions, -lr)
+
 
 for optim_cls, name, kwargs in COMPILED_OPT_KWARG_DB:
     setattr(CompiledOptimizerTests, name, make_test(optim_cls, **kwargs))
