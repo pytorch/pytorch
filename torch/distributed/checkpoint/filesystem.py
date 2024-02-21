@@ -297,7 +297,10 @@ def _write_files_from_queue(
                     )
 
                 if use_fsync:
-                    os.fsync(stream.fileno())
+                    try:
+                        os.fsync(stream.fileno())
+                    except AttributeError:
+                        os.sync()
             result_queue.put(write_results)
     except queue.Empty:
         pass
@@ -331,6 +334,11 @@ class FileSystemBase(ABC):
     def mkdir(self, path: Union[str, os.PathLike]) -> None:
         ...
 
+    @classmethod
+    @abstractmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        ...
+
 
 class FileSystem(FileSystemBase):
     @contextmanager
@@ -357,6 +365,20 @@ class FileSystem(FileSystemBase):
 
     def mkdir(self, path: Union[str, os.PathLike]) -> None:
         cast(Path, path).mkdir(parents=True, exist_ok=True)
+
+    @classmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        if isinstance(checkpoint_id, Path):
+            return True
+
+        if "://" in str(checkpoint_id):
+            return False
+
+        for p in Path(checkpoint_id).parents:
+            if p.exists() and os.access(str(p), os.W_OK):
+                return True
+
+        return False
 
 
 class FileSystemWriter(StorageWriter):
@@ -498,9 +520,16 @@ class FileSystemWriter(StorageWriter):
         with self.fs.create_stream(tmp_path, "wb") as metadata_file:
             pickle.dump(metadata, metadata_file)
             if self.sync_files:
-                os.fsync(metadata_file.fileno())
+                try:
+                    os.fsync(metadata_file.fileno())
+                except AttributeError:
+                    os.sync()
 
         self.fs.rename(tmp_path, meta_path)
+
+    @classmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        return FileSystem.validate_checkpoint_id(checkpoint_id)
 
 
 class FileSystemReader(StorageReader):
@@ -572,3 +601,7 @@ class FileSystemReader(StorageReader):
 
     def prepare_global_plan(self, global_plan: List[LoadPlan]) -> List[LoadPlan]:
         return global_plan
+
+    @classmethod
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+        return FileSystem.validate_checkpoint_id(checkpoint_id)
