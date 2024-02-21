@@ -1692,7 +1692,9 @@ class Scheduler:
         if not config.benchmark_fusion:
             return True
 
-        if node1.is_template() and not isinstance(node1.get_template_node(), ir.TritonTemplateBuffer):
+        if node1.is_template() and not isinstance(
+            node1.get_template_node(), ir.TritonTemplateBuffer
+        ):
             return False
 
         node_list_1 = node1.get_nodes()
