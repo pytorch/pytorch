@@ -22,7 +22,7 @@ namespace at {
 namespace native {
 namespace {
 
-// pre calcuate interpolation params on width
+// pre calculate interpolation params on width
 struct UpsampleBilinearParamW {
   int64_t w1, w1p;
   float w0lambda, w1lambda;
