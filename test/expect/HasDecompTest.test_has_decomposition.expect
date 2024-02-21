@@ -30,6 +30,8 @@ aten::_amp_update_scale.out
 aten::_amp_update_scale_
 aten::_assert_async
 aten::_assert_async.msg
+aten::_batch_norm_no_update.out
+aten::_batch_norm_with_update.out
 aten::_cdist_backward
 aten::_cdist_backward.out
 aten::_cdist_forward
@@ -657,12 +659,10 @@ aten::batch_norm_gather_stats
 aten::batch_norm_gather_stats.out
 aten::batch_norm_gather_stats_with_counts
 aten::batch_norm_gather_stats_with_counts.out
-aten::batch_norm_no_update.out
 aten::batch_norm_stats
 aten::batch_norm_stats.out
 aten::batch_norm_update_stats
 aten::batch_norm_update_stats.out
-aten::batch_norm_with_update.out
 aten::bernoulli
 aten::bernoulli.Tensor
 aten::bernoulli.Tensor_out

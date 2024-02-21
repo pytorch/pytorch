@@ -161,10 +161,9 @@ _SKIP_PYTHON_BINDINGS = [
     "normal_functional",  # only used by the functionalization pass
     "nbytes",
     "itemsize",
-    "batch_norm_with_update",
-    "batch_norm_with_update.out",
-    "batch_norm_no_update",
-    "batch_norm_backward",
+    "_batch_norm_with_update",
+    "_batch_norm_with_update_out",
+    "_batch_norm_no_update",
 ]
 
 SKIP_PYTHON_BINDINGS = [

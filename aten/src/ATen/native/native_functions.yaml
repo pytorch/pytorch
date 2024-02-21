@@ -134,7 +134,7 @@
   autogen: _new_zeros_with_same_feature_meta.out
 
 # This function compares the storage numel of self with that of other, where
-# storage numel is cumputed as: `other.storage().nbytes() / other.itemsize()`.
+# storage numel is computed as: `other.storage().nbytes() / other.itemsize()`.
 # We create this function for composite compliance purposes. The batching rule
 # always returns true because vmapped as_strided does not support accessing
 # storage locations not indexable by the input tensor.
@@ -772,7 +772,7 @@
   dispatch:
     CompositeExplicitAutograd: arange
 
-# This operator should be named `aragne.start_out` if following the naming convention. However that
+# This operator should be named `arange.start_out` if following the naming convention. However that
 # name is already taken. Disabled because of CI job failures.
 # FIXME: enable this
 #- func: arange.start_out_(Scalar start, Scalar end, *, Tensor(a!) out) -> Tensor(a!)
@@ -2974,12 +2974,14 @@
   dispatch:
     CPU: _fft_r2c_mkl
     CUDA: _fft_r2c_cufft
+    MPS: _fft_r2c_mps
 
 - func: _fft_r2c.out(Tensor self, int[] dim, int normalization, bool onesided, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: _fft_r2c_mkl_out
     CUDA: _fft_r2c_cufft_out
+    MPS: _fft_r2c_mps_out
 
 # Complex to real inverse FFT
 - func: _fft_c2r(Tensor self, int[] dim, int normalization, SymInt last_dim_size) -> Tensor
@@ -2987,12 +2989,14 @@
   dispatch:
     CPU: _fft_c2r_mkl
     CUDA: _fft_c2r_cufft
+    MPS: _fft_c2r_mps
 
 - func: _fft_c2r.out(Tensor self, int[] dim, int normalization, SymInt last_dim_size, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: _fft_c2r_mkl_out
     CUDA: _fft_c2r_cufft_out
+    MPS: _fft_c2r_mps_out
 
 # Standard complex to complex FFT (forward or backward)
 - func: _fft_c2c(Tensor self, SymInt[] dim, int normalization, bool forward) -> Tensor
@@ -3000,12 +3004,14 @@
   dispatch:
     CPU: _fft_c2c_mkl
     CUDA: _fft_c2c_cufft
+    MPS: _fft_c2c_mps
 
 - func: _fft_c2c.out(Tensor self, SymInt[] dim, int normalization, bool forward, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: _fft_c2c_mkl_out
     CUDA: _fft_c2c_cufft_out
+    MPS: _fft_c2c_mps_out
 
 - func: _validate_compressed_sparse_indices(bool is_crow, Tensor compressed_idx, Tensor plain_idx, int cdim, int dim, int nnz) -> ()
   device_check: NoCheck
@@ -4463,7 +4469,6 @@
     MPS: pixel_shuffle_mps
     CompositeExplicitAutogradNonFunctional: math_pixel_shuffle
   autogen: pixel_shuffle.out
-  tags: core
 
 - func: pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
   dispatch:
@@ -6475,28 +6480,24 @@
     SparseCPU, SparseCUDA: norm_sparse
   autogen: native_norm.ScalarOpt_dim_dtype_out
 
-# TODO: add these to core aten opset
-# return values are: output, save_mean, save_var, reserve
-# reserve tensor is only used in cudnn
-# note: for cudnn and miopen backends, input, weight, bias, running_mean, and running_var are all expected to be contiguous
-- func: batch_norm_with_update(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, float momentum, float eps) -> (Tensor, Tensor, Tensor, Tensor)
+- func: _batch_norm_with_update(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, float momentum, float eps) -> (Tensor, Tensor, Tensor, Tensor)
   dispatch:
-    CPU: batch_norm_with_update_cpu
-    CUDA: batch_norm_with_update_cuda
-    MPS: batch_norm_with_update_mps
-    MkldnnCPU: batch_norm_with_update_mkldnn
-  autogen: batch_norm_with_update_functional
+    CPU: _batch_norm_with_update_cpu
+    CUDA: _batch_norm_with_update_cuda
+    MPS: _batch_norm_with_update_mps
+    MkldnnCPU: _batch_norm_with_update_mkldnn
+  autogen: _batch_norm_with_update_functional
 
-- func: batch_norm_no_update(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, float momentum, float eps) -> (Tensor, Tensor, Tensor, Tensor)
+- func: _batch_norm_with_update.out(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, float momentum, float eps, *, Tensor(d!) out, Tensor(e!) save_mean, Tensor(f!) save_invstd, Tensor(g!) reserve) -> (Tensor(d!), Tensor(e!), Tensor(f!), Tensor(g!))
   dispatch:
-    CompositeExplicitAutograd: batch_norm_no_update
-  autogen: batch_norm_no_update.out
+    CPU: _batch_norm_with_update_cpu_out
+    CUDA: _batch_norm_with_update_cuda_out
+    MPS: _batch_norm_with_update_mps_out
 
-- func: batch_norm_with_update.out(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, float momentum, float eps, *, Tensor(d!) out, Tensor(e!) save_mean, Tensor(f!) save_invstd, Tensor(g!) reserve) -> (Tensor(d!), Tensor(e!), Tensor(f!), Tensor(g!))
+- func: _batch_norm_no_update(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, float momentum, float eps) -> (Tensor, Tensor, Tensor, Tensor)
   dispatch:
-    CPU: batch_norm_with_update_cpu_out
-    CUDA: batch_norm_with_update_cuda_out
-    MPS: batch_norm_with_update_mps_out
+    CompositeExplicitAutograd: _batch_norm_no_update
+  autogen: _batch_norm_no_update.out
 
 - func: batch_norm_backward(Tensor grad_out, Tensor input, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, bool update, float eps, bool[3] output_mask, Tensor reserve) -> (Tensor, Tensor, Tensor)
   dispatch:
@@ -14601,7 +14602,7 @@
   dispatch:
     CUDA: _flash_attention_backward
 
-# Returns ouput, logsumexp if compute_logsumexp
+# Returns output, logsumexp if compute_logsumexp
 - func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, int? max_seqlen_k, float dropout_p, int custom_mask_type, bool compute_log_sumexp=False, *, float? scale=None, Tensor? causal_diagonal=None, Tensor? seqlen_k=None) -> (Tensor output, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, SymInt max_seqlen_batch_q, SymInt max_seqlen_batch_k)
   variants: function
   dispatch:

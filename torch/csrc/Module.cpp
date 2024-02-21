@@ -2097,18 +2097,16 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def(
       "_get_cudnn_batch_norm_reserve_space_size",
-      [](const at::Tensor& input) {
+      [](const at::Tensor& input, bool training) {
 #ifdef USE_CUDA
-#if AT_CUDNN_ENABLED()
-        return at::native::_get_cudnn_batch_norm_reserve_space_size(input);
-#else
-        TORCH_CHECK(false, "PyTorch was not built with cudnn");
-#endif
+        return at::native::_get_cudnn_batch_norm_reserve_space_size(
+            input, training);
 #else
         TORCH_CHECK(false, "PyTorch was not built with cuda");
 #endif
       },
-      py::arg("input"));
+      py::arg("input"),
+      py::arg("training"));
 
   py::enum_<at::native::BatchNormBackend>(py_module, "_BatchNormBackend")
       .value("Native", at::native::BatchNormBackend::Native)

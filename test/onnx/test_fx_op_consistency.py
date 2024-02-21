@@ -148,7 +148,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="fixme: Assertion error: result mismatch and type error",
     ),
     skip(
-        "batch_norm_with_update",
+        "_batch_norm_with_update",
         dtypes=(torch.float16,),
         reason="fixme: Assertion error: result mismatch and type error",
     ),
@@ -1370,7 +1370,7 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="https://github.com/pytorch/pytorch/issues/115106",
     ),
     skip(
-        "batch_norm_with_update",
+        "_batch_norm_with_update",
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="https://github.com/pytorch/pytorch/issues/115106",
     ),
@@ -1379,7 +1379,7 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
     # and `save_var` were tensor(-2.1268) instead of the correct tensor([-2.1268])
     # for example.
     skip(
-        "batch_norm_with_update",
+        "_batch_norm_with_update",
         model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
         reason="not supported yet",
     ),
