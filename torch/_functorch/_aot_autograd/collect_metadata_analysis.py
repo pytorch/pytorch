@@ -24,7 +24,6 @@ from torch.utils._python_dispatch import (
     transform_subclass,
 )
 from .functional_utils import (
-    _get_mutation_type,
     are_all_mutations_hidden_from_autograd,
     are_all_mutations_under_no_grad_or_inference_mode,
     from_fun,
@@ -74,7 +73,6 @@ def run_functionalized_fw_and_collect_metadata(
     keep_input_mutations: bool,
     # TODO: refactor to kill this flag
     is_train: bool = False,
-    requires_subclass_dispatch: bool = False,
     pre_dispatch: bool = False,
 ) -> Callable[..., ViewAndMutationMeta]:
     memo: Dict[Tensor, Tensor] = {}
@@ -174,14 +172,7 @@ def run_functionalized_fw_and_collect_metadata(
                     mutates_storage_metadata=mutates_storage_metadata,
                     mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
                     requires_grad=requires_grad,
-                    mutation_type=_get_mutation_type(
-                        keep_input_mutations,
-                        mutates_data,
-                        mutates_metadata,
-                        mutations_hidden_from_autograd,
-                        mutations_under_no_grad_or_inference_mode,
-                        requires_grad,
-                    ),
+                    keep_input_mutations=keep_input_mutations,
                 )
             )
 
@@ -538,17 +529,7 @@ from a multi-output view call"
         f_input_tangents = [
             inp
             for inp, info in zip(flat_f_args, input_info)
-            if _get_mutation_type(
-                keep_input_mutations,
-                mutates_data=info.mutates_data,
-                mutates_metadata=info.mutates_metadata,
-                mutations_hidden_from_autograd=info.mutations_hidden_from_autograd,
-                mutations_under_no_grad_or_inference_mode=info.mutations_under_no_grad_or_inference_mode,
-                requires_grad=info.requires_grad
-                # MUTATED_OUT_GRAPH corresponds to any input mutations that happen outside the graph.
-                # this can also include metadata mutations, and inputs that do not require grad,
-            )
-            == MutationType.MUTATED_OUT_GRAPH
+            if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
             and info.mutates_data
             and info.requires_grad
         ]
@@ -575,7 +556,7 @@ from a multi-output view call"
         f_mutated_inputs = [
             inp
             for inp, info in zip(flat_f_args, input_info)
-            if info.mutates_data or info.mutates_metadata
+            if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
         ]
         f_metadata_mutated_inputs = [
             inp for inp, info in zip(flat_f_args, input_info) if info.mutates_metadata
@@ -623,7 +604,6 @@ from a multi-output view call"
             subclass_tangent_meta=create_subclass_meta(traced_tangents),
             is_train=is_train,
             grad_enabled_mutation=grad_enabled_mutation,
-            requires_subclass_dispatch=requires_subclass_dispatch,
         )
         return metadata
 

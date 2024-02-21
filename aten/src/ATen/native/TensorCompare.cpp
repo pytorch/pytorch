@@ -441,7 +441,7 @@ Tensor _functional_assert_async_msg_cpu(
   return dep_token.clone();
 }
 
-void print(c10::string_view s) {
+void _print(c10::string_view s) {
   std::cout << s << "\n";
 }
 
