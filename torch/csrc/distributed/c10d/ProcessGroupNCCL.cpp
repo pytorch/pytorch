@@ -2301,6 +2301,14 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       desyncDebug_,
       enableTiming_.load(),
       dist_debug_level_);
+  r->trace_id_ = NCCLTraceBuffer::get()->record(
+      uid_,
+      seq_,
+      profilingTitle,
+      inputs,
+      outputs,
+      r->ncclStartEvents_.get(),
+      r->ncclEndEvents_.get());
   return r;
 }
 
@@ -2331,34 +2339,14 @@ uint64_t ProcessGroupNCCL::WorkNCCL::getSequencenumber() const {
 void ProcessGroupNCCL::workEnqueue(
     c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work) {
   if (!terminateProcessGroup_.load()) {
-    {
-      std::lock_guard<std::mutex> lock(workMetaListMutex_);
-      // Avoid view tensors to be processed in cleanup thread.
-      // View tensors' destruction invokes autograd_meta, which
-      // needs to be destructed in user thread. Otherwise will
-      // get deadlock. Here we enqueue work without outputs_.
-      workMetaList_.emplace_back(*work);
-      lastEnqueuedSeq_ = work->seq_;
-      lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
-    }
-
-    // Record every work that we enqueue, rather than every work we create.
-    // - we do not currently enqueue every created work, see coalescing in pointToPoint
-    // - but it is UNSAFE to steal start/end event refs from works that may go out of scope,
-    //   and enqueueing in workMetaList is the mechanism by which we ensure they stay in scope
-    //   long enough for flight recorder to finish using them
-
-    work->trace_id_ = NCCLTraceBuffer::get()->record(
-      uid_,
-      seq_,
-      "sad no title",
-      // work->profilingTitle,
-      // TODO some new way to pass in/out tensor shapes to record()
-      // we avoid keeping tensors alive by holding a work obj, so shouldn't store the inputs/outputs directly
-      std::vector<at::Tensor>{},
-      work->outputs_ ? *work->outputs_ : std::vector<at::Tensor>{},
-      work->ncclStartEvents_.get(),
-      work->ncclEndEvents_.get());
+    std::lock_guard<std::mutex> lock(workMetaListMutex_);
+    // Avoid view tensors to be processed in cleanup thread.
+    // View tensors' destruction invokes autograd_meta, which
+    // needs to be destructed in user thread. Otherwise will
+    // get deadlock. Here we enqueue work without outputs_.
+    workMetaList_.emplace_back(*work);
+    lastEnqueuedSeq_ = work->seq_;
+    lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
   }
 }
 
@@ -2423,13 +2411,16 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   // Notify graphs before we check the capture status preemptively
   at::cuda::CUDAGraph::inc_pending_event_queries();
 
-  if ((coalescing_state_ & CoalColl) &&
+  // if ((coalescing_state_ & CoalColl) &&
+  if ((coalescing_state_) &&
       capture_status == c10::cuda::CaptureStatus::None) {
+    LOG(INFO) << "Collective endGroup enqueue work";
     workEnqueue(work);
     // TODO: it seems we never enqueue work for single send/recv or batch P2P,
     // see the `pointToPoint` function. This should be fixed. Otherwise, we risk
     // not being able to abort hanged P2P ops.
   } else {
+    LOG(INFO) << "Collective endGroup no enqueue work";
     at::cuda::CUDAGraph::dec_pending_event_queries();
   }
 
@@ -2681,33 +2672,42 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   syncStreams(devices, ncclEvents_[key], ncclStreams_[key]);
 
   // Work itself will create the CUDA events on all GPUs of tensors
+
   bool can_profile = tensors.size() == 1;
-  auto work = initWork(
-      devices,
-      rank_,
-      opType,
-      can_profile ? profilingTitle : nullptr,
-      tensors,
-      {});
-
-  // Store references to outputs to be used by WorkNCCL::result and operator<<.
-  // Note that these outputs are only valid for recv(), as send() does not
-  // modify the inputs but we still create these outputs for use cases such as
-  // profiling.
-  work->outputs_ = std::make_shared<std::vector<at::Tensor>>(tensors);
-
-  at::cuda::OptionalCUDAGuard gpuGuard;
-
-  // Start event should only be recorded before the ncclGroupStart()
-  if (work->timingEnabled_) {
-    for (const auto i : c10::irange(tensors.size())) {
-      at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
-      (*work->ncclStartEvents_)[i].record(ncclStream);
-    }
+  c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work;
+  if (!coalescing_state_) {
+    work = initWork(
+        devices,
+        rank_,
+        opType,
+        can_profile ? profilingTitle : nullptr,
+        tensors,
+        {});
+    // Store references to outputs to be used by WorkNCCL::result and operator<<.
+    // Note that these outputs are only valid for recv(), as send() does not
+    // modify the inputs but we still create these outputs for use cases such as
+    // profiling.
+    work->outputs_ = std::make_shared<std::vector<at::Tensor>>(tensors);
   }
 
-  pre(ncclStreams_[key], work);
+  // is gpuGuard needed for the if block below, or can i swap them
+  at::cuda::OptionalCUDAGuard gpuGuard;
 
+  if (!coalescing_state_) {
+    // Start event should only be recorded before the ncclGroupStart()
+    if (work->timingEnabled_) {
+      for (const auto i : c10::irange(tensors.size())) {
+        at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+        (*work->ncclStartEvents_)[i].record(ncclStream);
+      }
+    }
+
+    pre(ncclStreams_[key], work);
+  }
+
+
+  // TODO do we want to avoid recordStream here? How?
+  // TODO double check, we do not handle recordStream during coalescing somewhere else, assuming we should do it now for coalescing
   for (const auto i : c10::irange(tensors.size())) {
     gpuGuard.set_index(devices[i].index());
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
@@ -2721,6 +2721,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         tensors[i].storage().data_ptr(), ncclStream);
   }
 
+  // This part seems common to both p2p and coalesced-p2p usage?
   std::vector<void*> comms_;
   if (nccl_use_nonblocking()) {
     for (const auto i : c10::irange(tensors.size())) {
@@ -2752,46 +2753,46 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     }
   }
 
-  post(ncclStreams_[key]);
+  if (!coalescing_state_) {
+    post(ncclStreams_[key]);
 
-  // End event should only be recorded after the ncclGroupEnd()
-  for (const auto i : c10::irange(tensors.size())) {
-    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
-    if (!coalescing_state_) {
+    // End event should only be recorded after the ncclGroupEnd()
+    for (const auto i : c10::irange(tensors.size())) {
+      at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
       (*work->ncclEndEvents_)[i].record(ncclStream);
+      work->ncclComms_[i] = ncclComms[i];
+      work->blockingWait_ = blockingWait_;
+      work->opTimeout_ = options_->timeout;
+      work->store_ = store_;
     }
-    work->ncclComms_[i] = ncclComms[i];
-    work->blockingWait_ = blockingWait_;
-    work->opTimeout_ = options_->timeout;
-    work->store_ = store_;
-  }
 
-  // Record size info for debug. We only record the size on the first device as
-  // multi-device per process is deprecated
-  work->numelIn_ = work->numelOut_ = tensors[0].numel();
+    // Record size info for debug. We only record the size on the first device as
+    // multi-device per process is deprecated
+    work->numelIn_ = work->numelOut_ = tensors[0].numel();
 
-  // Future only needs to be created and marked completed with outputs for
-  // recv(), but still create future for use cases such as profiling even for
-  // send().
-  {
-    c10::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
-    work->future_ = c10::make_intrusive<at::ivalue::Future>(
-        c10::ListType::create(c10::TensorType::get()), devices);
-    work->future_->markCompleted(at::IValue(*work->outputs_));
-  }
+    // Future only needs to be created and marked completed with outputs for
+    // recv(), but still create future for use cases such as profiling even for
+    // send().
+    {
+      c10::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
+      work->future_ = c10::make_intrusive<at::ivalue::Future>(
+          c10::ListType::create(c10::TensorType::get()), devices);
+      work->future_->markCompleted(at::IValue(*work->outputs_));
+    }
 
-  // Add a callback that runs profiling end callbacks. wrapCallback() in CUDA
-  // future blocks the stream this callback runs on the corresponding
-  // ncclEndEvents_ ensuring appropriate synchronization.
-  if (work->recordFunctionEndCallback_) {
-    work->future_->addCallback(
-        [work](at::ivalue::Future& /* unused */) {
-          work->recordFunctionEndCallback_();
-        },
-        // uses_future = false allows us to skip synchronization in
-        // ivalue::Future, but is only valid as long as the lambda doesn't use
-        // the "Future" argument.
-        /*uses_future=*/false);
+    // Add a callback that runs profiling end callbacks. wrapCallback() in CUDA
+    // future blocks the stream this callback runs on the corresponding
+    // ncclEndEvents_ ensuring appropriate synchronization.
+    if (work->recordFunctionEndCallback_) {
+      work->future_->addCallback(
+          [work](at::ivalue::Future& /* unused */) {
+            work->recordFunctionEndCallback_();
+          },
+          // uses_future = false allows us to skip synchronization in
+          // ivalue::Future, but is only valid as long as the lambda doesn't use
+          // the "Future" argument.
+          /*uses_future=*/false);
+    }
   }
 
   // Enqueue P2P op so that it can be cancelled by NCCL watchdog
@@ -2803,11 +2804,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
 
   if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);
+    return work;
   } else {
     at::cuda::CUDAGraph::dec_pending_event_queries();
+    return nullptr;
   }
-
-  return work;
 }
 
 template <typename Fn>
