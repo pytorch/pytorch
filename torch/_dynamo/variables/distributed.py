@@ -150,8 +150,11 @@ class PlacementVariable(DistributedVariable):
 
             args = [x.as_python_constant() for x in args]
             kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            method(self.value, *args, **kwargs)
-            return self
+            if name == "__setattr__":
+                method(self.value, *args, **kwargs)
+                return self
+            constant_val = method(self.value, *args, **kwargs)
+            return ConstantVariable.create(constant_val)
 
         return super().call_method(tx, name, args, kwargs)
 
