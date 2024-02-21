@@ -125,19 +125,29 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
 
   TORCH_CHECK(!has_error, "Invalid device string: '", device_string, "'");
 
-  try {
-    if (!device_index_str.empty()) {
-      index_ = static_cast<c10::DeviceIndex>(std::stoi(device_index_str));
+  if (!device_index_str.empty()) {
+    // If the user passed an index in the device string, check if it is a valid
+    // int between 0 and c10::Device::MAX_NUM_DEVICES - 1 inclusively
+    int full_index = -1;
+    try {
+      full_index = std::stoi(device_index_str);
+    } catch (const std::exception&) {
+      TORCH_CHECK(
+          false,
+          "Could not parse device index '",
+          device_index_str,
+          "' in device string '",
+          device_string,
+          "'");
     }
-  } catch (const std::exception&) {
     TORCH_CHECK(
-        false,
-        "Could not parse device index '",
-        device_index_str,
-        "' in device string '",
-        device_string,
-        "'");
+        0 <= full_index && full_index < c10::Device::MAX_NUM_DEVICES,
+        "Device index must be between 0 and ",
+        c10::Device::MAX_NUM_DEVICES - 1,
+        " inclusively.");
+    index_ = static_cast<c10::DeviceIndex>(full_index);
   }
+
   type_ = parse_type(device_name);
   validate();
 }

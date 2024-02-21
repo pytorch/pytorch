@@ -63,7 +63,6 @@ from ._aot_autograd.functional_utils import (  # noqa: F401
     are_all_mutations_under_no_grad_or_inference_mode,
     gen_alias_from_base,
     assert_functional_graph,
-    _get_mutation_type,
     _check_if_mutation_can_be_in_graph,
 )
 from ._aot_autograd.schemas import (  # noqa: F401
