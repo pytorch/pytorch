@@ -5,7 +5,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <cmath>
-#include <deque>
 #include <mutex>
 #include <vector>
 
@@ -90,10 +89,12 @@ void initDeviceProperties(DeviceProp* device_prop, int device) {
   return;
 }
 
-inline void check_device(int device) {
-  int total = static_cast<int>(gDevicePool.devices.size());
+inline void check_device(DeviceIndex device) {
   TORCH_CHECK(
-      device >= 0 && device < total,
+      device >= 0 &&
+          device < std::min(
+                       gDevicePool.devices.size(),
+                       std::numeric_limits<DeviceIndex>::max()),
       "device is out of range, device is ",
       device,
       ", total number of device is ",
@@ -103,7 +104,7 @@ inline void check_device(int device) {
 
 } // anonymous namespace
 
-sycl::device& get_raw_device(int device) {
+sycl::device& get_raw_device(DeviceIndex device) {
   initDevicePoolCallOnce();
   check_device(device);
   return *gDevicePool.devices[device];
@@ -117,7 +118,7 @@ sycl::context& get_device_context() {
   return *gDevicePool.context;
 }
 
-void get_device_properties(DeviceProp* device_prop, int device) {
+void get_device_properties(DeviceProp* device_prop, DeviceIndex device) {
   initDevicePoolCallOnce();
   TORCH_CHECK(device_prop, "device_prop is an invalid pointer.");
   check_device(device);
