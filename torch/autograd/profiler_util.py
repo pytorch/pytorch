@@ -252,7 +252,11 @@ class EventList(list):
                         else f'" node_id:{evt.node_id}, thread_id:{evt.thread} "',
                     )
                 )
-                for k in evt.kernels:
+                # We can always assume that kernels, xpu_kernels and privateuse1_kernels
+                # are mutually exclusive, that is, only one of them may not be empty.
+                # All entries will report as "cat": "cpu_to_cuda" in order to prevent
+                # keeping up-to-date the names in downstream analyzers
+                for k in evt.kernels + evt.xpu_kernels + evt.privateuse1_kernels:
                     # 's' and 'f' draw Flow arrows from
                     # the CPU launch to the GPU kernel
                     f.write(
@@ -263,36 +267,6 @@ class EventList(list):
                         '"pid": "CPU functions", '
                         f'"id": {next_id}, '
                         '"cat": "cpu_to_cuda", '
-                        '"args": {}}, '
-                    )
-                    # Note: use torch.profiler to get device kernel trace
-                    next_id += 1
-                for k in evt.xpu_kernels:
-                    # 's' and 'f' draw Flow arrows from
-                    # the CPU launch to the GPU kernel
-                    f.write(
-                        f'{{"name": "{evt.trace_name}", '
-                        '"ph": "s", '
-                        f'"ts": {evt.time_range.start}, '
-                        f'"tid": {evt.thread}, '
-                        '"pid": "CPU functions", '
-                        f'"id": {next_id}, '
-                        '"cat": "cpu_to_xpu", '
-                        '"args": {}}, '
-                    )
-                    # Note: use torch.profiler to get device kernel trace
-                    next_id += 1
-                for k in evt.privateuse1_kernels:
-                    # 's' and 'f' draw Flow arrows from
-                    # the CPU launch to the GPU kernel
-                    f.write(
-                        f'{{"name": "{evt.trace_name}", '
-                        '"ph": "s", '
-                        f'"ts": {evt.time_range.start}, '
-                        f'"tid": {evt.thread}, '
-                        '"pid": "CPU functions", '
-                        f'"id": {next_id}, '
-                        f'"cat": "cpu_to_{self._use_device}", '
                         '"args": {}}, '
                     )
                     # Note: use torch.profiler to get device kernel trace
