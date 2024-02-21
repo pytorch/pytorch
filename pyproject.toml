@@ -109,6 +109,7 @@ select = [
     "RUF015", # access first ele in constant time
     "RUF016", # type error non-integer index
     "RUF017",
+    "SLOT",
     "TRY200",
     "TRY302",
     "UP",
