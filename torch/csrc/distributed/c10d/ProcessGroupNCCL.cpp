@@ -706,7 +706,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   heartbeatTimeoutInSec_ =
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 10 /*10 Mins*/);
   waitTimeoutDumpInMilSec_ =
-      getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 2000);
+      getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 60 * 1000 /*60 Sec*/);
   coordCheckIntervalMilSec_ = getCvarInt(TORCH_NCCL_COORD_CHECK_MILSEC, 1000);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
   enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
@@ -945,65 +945,6 @@ void ProcessGroupNCCL::enableCollectivesTiming() {
   enableTiming_.store(true);
 }
 
-std::future<bool> ProcessGroupNCCL::launchAsyncDebugDump() {
-  std::promise<bool> resultPromise;
-  std::future<bool> resultFuture = resultPromise.get_future();
-
-  std::thread workerThread(
-      [promise = std::move(resultPromise), this]() mutable {
-        try {
-          promise.set_value(dumpDebuggingInfo());
-        } catch (...) {
-          promise.set_exception(std::current_exception());
-        }
-      });
-
-  // Detach the thread to allow it to run independently
-  workerThread.detach();
-
-  return resultFuture;
-}
-
-std::chrono::time_point<std::chrono::steady_clock> getWakeupTime(
-    int intervalInMilSec) {
-  return std::chrono::steady_clock::now() +
-      std::chrono::milliseconds(intervalInMilSec);
-}
-
-void ProcessGroupNCCL::waitForDumpOrTimeout(
-    std::future<bool>& fut,
-    const std::chrono::time_point<std::chrono::steady_clock>& wakeUpTime,
-    size_t timeout_sec) {
-  TORCH_CHECK(fut.valid(), "Expected a valid future");
-
-  auto futStatus = fut.wait_for(std::chrono::seconds(timeout_sec));
-  TORCH_CHECK(
-      futStatus != std::future_status::deferred, "Expected eager launch.");
-  if (futStatus == std::future_status::ready) {
-    // Calling .get() will re-raise any exception from the future, and we don't
-    // care about the retval
-    try {
-      fut.get();
-      std::this_thread::sleep_until(wakeUpTime);
-    } catch (const std::exception& e) {
-      LOG(ERROR) << logPrefix()
-                 << "Caught exception during async debug dump: \"" << e.what()
-                 << "\"\n";
-    } catch (...) {
-      LOG(ERROR) << logPrefix()
-                 << "Caught unknown exception during async debug dump.";
-    }
-  } else {
-    LOG(INFO)
-        << logPrefix() << "Debug dump timed out and is being abandoned."
-        << " This may be due to slow ADDR2LINE performance processing stacktraces."
-        << " Try TORCH_DISABLE_ADDR2LINE=1 and TORCH_NCCL_TRACE_CPP_STACK=0 to work around.";
-  }
-  // Ensure we sleep at least until wakeUpTime regardless of future execution
-  // time
-  std::this_thread::sleep_until(wakeUpTime);
-}
-
 void ProcessGroupNCCL::waitForFutureOrTimeout(
     std::future<bool>& fut,
     const std::chrono::milliseconds& timeOutMilSec,
@@ -1207,7 +1148,6 @@ void ProcessGroupNCCL::heartbeatMonitor() {
                                                : heartbeatTimeoutInSec_ * 1000;
   auto lastTimePollStore = std::chrono::steady_clock::now();
   auto lastTimeHeartBeatCheck = std::chrono::steady_clock::now();
-  std::future<bool> asyncDebugDump;
   while (true) {
     // This won't have any lock since this lock is only used here.
     // Please be aware that mutex `monitorMutex_` should not be used
@@ -1302,10 +1242,10 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     LOG(INFO) << "Dumping c++ stacktraces: " << cpp_dumper.value()();
   }
 
-  auto wakeUpTime = getWakeupTime(waitTimeoutDumpInMilSec_);
   // Store debug info to storage if no other thread does it. (By default to
   // local disk)
-  asyncDebugDump = launchAsyncDebugDump();
+  std::future<bool> asyncDebugDump = std::async(
+      std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
 
   if (get_gil_checker() != nullptr) {
     auto fut = launchAsyncGilCheck();
@@ -1348,7 +1288,10 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // We already log completion inside the thread, so it may not be necessary to
   // check the return value here.  We mainly use a future so we can exit early
   // if done.
-  waitForDumpOrTimeout(asyncDebugDump, wakeUpTime);
+  waitForFutureOrTimeout(
+      asyncDebugDump,
+      std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
+      "Flight recorder dump in heartbeat monitor");
 
   if (!terminateHeartbeatMonitorThread_.load()) {
     // Create a error message reported from MonitorThread, so
@@ -1568,10 +1511,11 @@ void ProcessGroupNCCL::watchdogHandler() {
               globalStore_->set(std::string(TIMEOUT_DUMP), vec);
             }
 
-            auto wakeUpTime = getWakeupTime(waitTimeoutDumpInMilSec_);
             if (dumpOnTimeout_ && !optAsyncDebugDump) {
               // Store debug info to storage. (By default to local disk)
-              optAsyncDebugDump = launchAsyncDebugDump();
+              optAsyncDebugDump = std::async(std::launch::async, [this]() {
+                return this->dumpDebuggingInfo();
+              });
             }
 
             if (desyncDebug_) {
@@ -1581,7 +1525,10 @@ void ProcessGroupNCCL::watchdogHandler() {
 
             if (dumpOnTimeout_) {
               // Store debug info to storage. (By default to local disk)
-              waitForDumpOrTimeout(*optAsyncDebugDump, wakeUpTime);
+              waitForFutureOrTimeout(
+                  *optAsyncDebugDump,
+                  std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
+                  "Flight recorder dump in watchdog");
             }
 
           } catch (const std::exception& e) {
@@ -1640,7 +1587,8 @@ void ProcessGroupNCCL::watchdogHandler() {
     // requests, but this is fine since all PG's feed into the same flight
     // recorder and dump.
     if (dumpPipe.has_value() && dumpPipe->shouldDump()) {
-      launchAsyncDebugDump();
+      std::async(
+          std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
     }
     done = workMetaList_.empty();
   }

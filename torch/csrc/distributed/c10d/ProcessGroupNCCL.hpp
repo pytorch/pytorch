@@ -600,6 +600,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       const std::vector<at::Tensor>& inputs = {},
       const std::vector<at::Tensor>& outputs = {});
 
+  // In the timeout case and we will dump debug info such as the NCCL flight
+  // recorder to storage. Down the road, if we have more complicated or blocking
+  // operations, we might need to use a side thread to do it.
+  bool dumpDebuggingInfo();
+
  private:
   int globalRankStart;
   int globalRankStride;
@@ -700,11 +705,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void runHookLoop();
 
-  // In the timeout case and we will dump debug info such as the NCCL flight
-  // recorder to storage. Down the road, if we have more complicated or blocking
-  // operations, we might need to use a side thread to do it.
-  bool dumpDebuggingInfo();
-
   // Desync debug helper
   void logWorkStart(WorkNCCL& work);
 
@@ -734,20 +734,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Function that directly trigger std::abort so that the whole process
   // gets terminated.
   virtual void terminateProcess(std::string errMsg);
-
-  // Create a thread that dumps debug info to the file specified as
-  // ${TORCH_NCCL_DEBUG_INFO_TEMP_FILE}{$RANK}
-  // Serializes all dumping activity, but allows concurrent calls.
-  // Each call returns a future, which can be checked or waited on
-  // for dump completion.
-  std::future<bool> launchAsyncDebugDump();
-
-  // Helper to wait up to the specified timeout and then abandon the dump.
-  // Logs on timeout, and asserts the future's status is as expected.
-  void waitForDumpOrTimeout(
-      std::future<bool>& fut,
-      const std::chrono::time_point<std::chrono::steady_clock>& wakeUpTime,
-      size_t timeout_sec = 30);
 
   // A helper function to wait for a future to complete or timeout.
   void waitForFutureOrTimeout(
