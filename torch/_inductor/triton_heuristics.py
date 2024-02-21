@@ -370,6 +370,9 @@ class CachingAutotuner(KernelInterface):
         scope = {
             "grid_meta": cfg.kwargs,
             "bin": binary,
+            "launch_enter_hook": binary.launch_enter_hook,
+            "launch_exit_hook": binary.launch_exit_hook,
+            "metadata": binary.metadata,
             "torch": torch,
             "set_device": self.gpu_device.set_device,
             "current_device": self.gpu_device.current_device,
@@ -406,9 +409,9 @@ class CachingAutotuner(KernelInterface):
                 runner(grid_0, grid_1, grid_2, num_warps,
                             *cta_args, shared,
                             stream, function,
-                            bin.launch_enter_hook,
-                            bin.launch_exit_hook,
-                            bin.metadata,
+                            launch_enter_hook,
+                            launch_exit_hook,
+                            metadata,
                             {', '.join(call_args)})
                 return bin
             """.lstrip(),
