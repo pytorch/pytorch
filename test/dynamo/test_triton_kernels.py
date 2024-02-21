@@ -1352,6 +1352,7 @@ class MutationTests(torch._dynamo.test_case.TestCase):
 
 if HAS_CUDA and HAS_LARK:
     t = torch.randn(4)
+    tt = torch.randn(4, 1)
     tests = [
         [
             add_kernel,
@@ -1414,6 +1415,16 @@ if HAS_CUDA and HAS_LARK:
                 "x_ptr": t,
                 "y_ptr": t,
                 "output_ptr": t,
+                "n_elements": 4,
+                "BLOCK_SIZE": 4,
+            },
+            ["output_ptr"],
+        ],
+        [
+            kernel_with_block_ptr_2d,
+            {
+                "x_ptr": tt,
+                "output_ptr": tt,
                 "n_elements": 4,
                 "BLOCK_SIZE": 4,
             },
