@@ -84,7 +84,18 @@ def _fsdp_state_post_forward(self, module: nn.Module, input: Any, output: Any) -
     return output
 
 def _fsdp_state_pre_backward(self, forward_grad_fns: Tuple[Node, ...], *unused: Any) -> None:
+    # NOTE(yf225): since under compile we use `register_hook` to call pre_backward, to mimic `multi_grad_hook` "any" mode behavior
+    # we only want to call pre_backward once, so doing this check here to early return if already called.
+    # TODO(yf225): update based on Andrew's comment:
+    """
+    one more thing to note is that the hook should run once per call to register_multi_grad_hook, where there is one call per forward
+    so if we run multiple forward before backward, we should run the pre-backward hook multiple times (one per forward)
+    as such, the bool to guard whether the pre-backward hook is a no-op or not needs to be per call to register_multi_grad_hook, not something global to the entire backward
+    """
+    if self._training_state == TrainingState.PRE_BACKWARD:
+        return
     self._training_state = TrainingState.PRE_BACKWARD
+    self._register_root_post_backward_final_callback()
     if self._fsdp_param_group:
         self._fsdp_param_group.pre_backward(forward_grad_fns, *unused)
 
@@ -235,22 +246,21 @@ class FSDPState(_State):
             if self._fsdp_param_group:
                 if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
                     self._fsdp_param_group.all_forward_output_grad_fns.add(grad_fns)
-        self._register_root_post_backward_final_callback()
         return output
 
     def _register_root_post_backward_final_callback(self):
-        # if self._state_ctx.post_backward_final_callback_queued:
-        #     return
-        # self._state_ctx.post_backward_final_callback_queued = True
-        # Variable._execution_engine.queue_callback(
-        #     functools.partial(_fsdp_state_root_post_backward_final_callback, self)
-        # )
-        # TODO(yf225): final_callback should be called after *all* gradients are ready.
-        # So here we should register post_accumulate_grad_hook on all params and wait for all their grads to be ready before executing post backward logic
-        for state in self._state_ctx.all_states:
-            for fsdp_param in state._fsdp_param_group.fsdp_params:
-                if fsdp_param.all_gather_output.is_leaf:
-                    fsdp_param.all_gather_output.register_post_accumulate_grad_hook(functools.partial(_fsdp_state_root_post_backward_final_callback, self))
+        if self._state_ctx.post_backward_final_callback_queued:
+            return
+        self._state_ctx.post_backward_final_callback_queued = True
+        Variable._execution_engine.queue_callback(
+            functools.partial(_fsdp_state_root_post_backward_final_callback, self)
+        )
+        # # TODO(yf225): final_callback should be called after *all* gradients are ready.
+        # # So here we should register post_accumulate_grad_hook on all params and wait for all their grads to be ready before executing post backward logic
+        # for state in self._state_ctx.all_states:
+        #     for fsdp_param in state._fsdp_param_group.fsdp_params:
+        #         if fsdp_param.all_gather_output.is_leaf:
+        #             fsdp_param.all_gather_output.register_post_accumulate_grad_hook(functools.partial(_fsdp_state_root_post_backward_final_callback, self))
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[FSDPState]:
