@@ -1,15 +1,15 @@
 import os
 import warnings
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Optional, Union
+from typing import cast, Optional, Union
 
 import torch
 import torch.distributed as dist
 from torch.distributed._state_dict_utils import _offload_state_dict_to_cpu
 from torch.distributed.checkpoint.stateful import Stateful
 
+from ._storage_utils import _storage_setup
 from .default_planner import DefaultSavePlanner
-from .filesystem import FileSystemWriter
 from .metadata import Metadata, STATE_DICT_TYPE
 from .planner import SavePlanner
 from .storage import StorageWriter
@@ -134,18 +134,9 @@ def save(
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
 
     with _profile():
-        if not storage_writer:
-            if not checkpoint_id:
-                raise RuntimeError(
-                    "`checkpoint_id` must be specificed if storage_writer is None."
-                )
-            # TODO: automatically decide whether to use FSSpecFileSystem
-            # https://github.com/pytorch/pytorch/issues/118033 and
-            # https://github.com/pytorch/pytorch/issues/118036
-            storage_writer = FileSystemWriter(checkpoint_id)
-
-        storage_writer.reset(checkpoint_id)
-
+        storage_writer = cast(
+            StorageWriter, _storage_setup(storage_writer, checkpoint_id, reader=False)
+        )
         return _save_state_dict(
             _stateful_to_state_dict(state_dict),
             storage_writer,

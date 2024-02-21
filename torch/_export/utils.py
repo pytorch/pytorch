@@ -3,9 +3,9 @@ import math
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Type
 
 import torch
-
-from torch._export import ExportedProgram
 from torch._subclasses.fake_tensor import FakeTensor
+
+from torch.export import ExportedProgram
 from torch.utils._pytree import (
     _register_pytree_node,
     Context,
@@ -232,6 +232,9 @@ def get_buffer(
 
     if is_buffer(program, node):
         buffer_name = program.graph_signature.inputs_to_buffers[node.name]
-        return program.state_dict[buffer_name]
+        if buffer_name in program.graph_signature.non_persistent_buffers:
+            return program.constants[buffer_name]
+        else:
+            return program.state_dict[buffer_name]
 
     return None

@@ -2,6 +2,7 @@
 #include <torch/csrc/inductor/aoti_runtime/interface.h>
 #include <torch/csrc/inductor/aoti_runtime/model_container.h>
 #include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
+#include <torch/csrc/inductor/aoti_runtime/thread_local.h>
 
 #include <iostream>
 #include <sstream>
@@ -341,8 +342,4 @@ AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
   })
 }
 
-#define CACHE_TORCH_DTYPE(typename) static auto cached_torch_dtype_##typename = aoti_torch_dtype_##typename()
-
-  static auto cached_torch_device_type_cpu = aoti_torch_device_type_cpu();
-  static auto cached_torch_device_type_cuda = aoti_torch_device_type_cuda();
 } // extern "C"

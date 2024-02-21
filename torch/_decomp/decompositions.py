@@ -1216,6 +1216,13 @@ def prod(x: List[int]):
 def split_with_sizes(
     self: Tensor, split_sizes: List[int], dim: int = 0
 ) -> List[Tensor]:
+    # NB: Perform the check_is_size tests first so that the
+    # sum test does not try to do a replacement
+    for i in range(len(split_sizes)):
+        torch._check_is_size(
+            split_sizes[i],
+            lambda: "split_with_sizes expects split_sizes have only non-negative entries",
+        )
     torch._check_with(
         ValueError,
         sum(split_sizes) == self.shape[dim],
@@ -1230,10 +1237,6 @@ def split_with_sizes(
 
     for i in range(num_splits):
         length = split_sizes[i]
-        torch._check_is_size(
-            length,
-            lambda: "split_with_sizes expects split_sizes have only non-negative entries",
-        )
         # We know this is true thanks to the sum, but this assertion helps
         # out our internal reasoning
         expect_true(start_idx + length <= self.shape[dim])
@@ -3364,14 +3367,8 @@ def upsample_bilinear2d(
     x = x_f32.to(torch.int64)
     y = y_f32.to(torch.int64)
 
-    # We are using torch.where instead of torch.clamp below due to an expected failure
-    # in test_aot_autograd_symbolic_exhaustive_nn_functional_interpolate_bilinear_cpu_float32 test
-    # torch.ops.aten.clamp.default(add, None, sub) on int64 input tensor is returning float32 and
-    # fails with torch.ops.aten._unsafe_index.Tensor(primals_1, [None, None, _to_copy_1, clamp_2])
-    # RuntimeError: _unsafe_index found unexpected index type Float
-    # xp1 = (x + 1).clamp(max=in_w - 1); yp1 = (y + 1).clamp(max=in_h - 1)
-    xp1 = torch.where(x < in_w - 1, x + 1, x)
-    yp1 = torch.where(y < in_h - 1, y + 1, y)
+    xp1 = (x + 1).clamp(max=in_w - 1)
+    yp1 = (y + 1).clamp(max=in_h - 1)
 
     v1 = aten._unsafe_index(input, [None, None, y, x])
     v2 = aten._unsafe_index(input, [None, None, y, xp1])
@@ -3848,13 +3845,15 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
 
     t1, t2 = (tensor1, tensor2) if tensor1.ndim >= tensor2.ndim else (tensor2, tensor1)
 
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     if not (t1.ndim >= 3 and t2.ndim <= 2):
         return False
     if t2.requires_grad and not is_out:
         return True
     if tensor1.ndim == 2:
         return False
-    if t1.numel() == 0:
+    if guard_size_oblivious(t1.numel() == 0):
         return True
 
     t1_shape = t1.shape
@@ -4312,16 +4311,9 @@ def scaled_dot_product_flash_attention_for_cpu(
     scale: Optional[float] = None,
 ) -> Tuple[Tensor, Tensor]:
     dtype = query.dtype
-    batchSize, num_head, qSize, headSize = (
-        query.shape[0],
-        query.shape[1],
-        query.shape[2],
-        query.shape[3],
-    )
-
     torch._check(
-        torch.is_floating_point(query) and dtype is not torch.half,
-        lambda: f"query must be FP32, FP64, BF16 but got {query.dtype}",
+        torch.is_floating_point(query),
+        lambda: f"query must be FP32, FP64, BF16, FP16 but got {query.dtype}",
     )
     torch._check(
         query.dim() == 4 and key.dim() == 4 and value.dim() == 4,

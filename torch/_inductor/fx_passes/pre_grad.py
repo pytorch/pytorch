@@ -50,7 +50,6 @@ pattern_matcher_passes: List[PatternMatcherPass] = [
     efficient_conv_bn_eval_pass,
 ]
 pattern_matcher_passes_aten: List[PatternMatcherPass] = [
-    normalization_pass_aten,
     merge_getitem_cat_pass_aten,
     merge_splits_pass_aten,
     split_cat_pass_aten,
@@ -86,6 +85,12 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
             gm_before_fx_passes = gm.__copy__()
         # explicitly run with predispatch atenIR based passes
         if config.is_predispatch:
+            # normalization pass
+            pass_execution_and_save(
+                normalization_pass_aten.apply,
+                gm,
+                "[Pre grad(predispatch IR)]Apply normalization pass",
+            )
             pass_execution_and_save(
                 group_batch_fusion_passes,
                 gm,

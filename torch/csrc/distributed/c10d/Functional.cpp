@@ -1,5 +1,3 @@
-#include <torch/csrc/distributed/c10d/Functional.hpp>
-
 #include <shared_mutex>
 
 #include <ATen/ATen.h>

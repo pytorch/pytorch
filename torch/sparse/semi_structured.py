@@ -357,7 +357,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                         input_B.compressed_tensor_cusparselt,
                         input_A_padded.t(),
                         bias=bias,  # type: ignore[arg-type]
-                        transpose_result=cls._FUSE_TRANSPOSE
+                        transpose_result=cls._FUSE_TRANSPOSE,
                     )
                     res = res if cls._FUSE_TRANSPOSE else res.t()
                 return res[:row, :]
@@ -382,7 +382,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                     res = torch._cslt_sparse_mm(
                         input_A.compressed_tensor_cusparselt,
                         input_B_padded,
-                        bias=None  # type: ignore[arg-type]
+                        bias=None,  # type: ignore[arg-type]
                     )
                 return res[:, :col]
 
@@ -403,7 +403,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
                         input_B.compressed_tensor_cusparselt,
                         input_A_padded.t(),
                         bias=None,  # type: ignore[arg-type]
-                        transpose_result=cls._FUSE_TRANSPOSE
+                        transpose_result=cls._FUSE_TRANSPOSE,
                     )
                     res = res if cls._FUSE_TRANSPOSE else res.t()
                 return res[:row, :]
