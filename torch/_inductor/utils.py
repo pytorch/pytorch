@@ -1286,3 +1286,18 @@ def is_wait(node):
     from . import ir
 
     return isinstance(node, ir.Wait) or type(node) == ir._WaitKernel
+
+
+@contextlib.contextmanager
+def collect_defined_kernels(kernel_list):
+    from .codegen.wrapper import WrapperCodeGen
+
+    orig_define_kernel = WrapperCodeGen.define_kernel
+
+    def new_define_kernel(wrapper, name, kernel_code, metadata, *args, **kwargs):
+        nonlocal kernel_list
+        kernel_list.append(kernel_code)
+        return orig_define_kernel(wrapper, name, kernel_code, metadata, *args, **kwargs)
+
+    with unittest.mock.patch.object(WrapperCodeGen, "define_kernel", new_define_kernel):
+        yield

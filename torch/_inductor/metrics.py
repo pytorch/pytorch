@@ -176,6 +176,7 @@ MetricTable.register_table(
         "num_load",
         "num_store",
         "num_for_loop",
+        "num_atomic_add",
         "num_args",
         # xyz numel can be different to size_hints since size_hints are rounded
         # up to the nearest power of 2.
@@ -185,6 +186,7 @@ MetricTable.register_table(
         "xnumel",
         "ynumel",
         "rnumel",
+        "kernel_args_num_gb",
     ],
 )
 
@@ -259,6 +261,16 @@ def _parse_numel(proper_kernel_fn_code, numel_arg_name):
         return None
 
 
+def _parse_kernel_args_num_gb(kernel_fn_code):
+    """
+    inductor meta looks like:
+        inductor_meta={... 'mutated_arg_names': [], 'no_x_dim': False, 'kernel_num_gb': 2.0},
+    """
+    m = re.search(r".kernel_num_gb.:\s*([0-9.]+)", kernel_fn_code)
+    assert m, "kernel_num_gb field missing"
+    return float(m.group(1))
+
+
 def log_kernel_metadata(kernel_name, kernel_path, kernel_module_code):
     """
     An utility to log kernel metadata. We may parse metadata from kernel source code here.
@@ -289,10 +301,12 @@ def log_kernel_metadata(kernel_name, kernel_path, kernel_module_code):
             "num_load": _count_pattern(proper_kernel_fn_code, "tl.load"),
             "num_store": _count_pattern(proper_kernel_fn_code, "tl.store"),
             "num_for_loop": _count_pattern(proper_kernel_fn_code, "for "),
+            "num_atomic_add": _count_pattern(proper_kernel_fn_code, "tl.atomic_add"),
             "num_args": _count_args(proper_kernel_fn_code),
             "xnumel": _parse_numel(proper_kernel_fn_code, "xnumel"),
             "ynumel": _parse_numel(proper_kernel_fn_code, "ynumel"),
             "rnumel": _parse_numel(proper_kernel_fn_code, "rnumel"),
+            "kernel_args_num_gb": _parse_kernel_args_num_gb(kernel_fn_code),
         }
     )
 
