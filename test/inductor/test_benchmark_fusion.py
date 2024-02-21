@@ -4,10 +4,13 @@ import os
 import sys
 
 import torch
+from torch._inductor.utils import run_and_get_code
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
     skipIfRocm,
+    slowTest,
     TEST_WITH_ASAN,
     TestCase as TorchTestCase,
 )
@@ -62,6 +65,7 @@ class BenchmarkFusionTestTemplate:
 
         self.common(f, (torch.rand(2, 8192),))
 
+    @slowTest
     @skipIfRocm  # fail accuracy check on ROCm
     def test_resnet18(self):
         import torchvision
@@ -114,6 +118,39 @@ class BenchmarkFusionTestTemplate:
             inputs = [torch.randn(S, 2560, device=self.device) for _ in range(N)]
             opt_f = torch.compile(f)
             opt_f(*inputs)
+
+    @torch._inductor.config.patch(max_autotune_gemm_backends="TRITON")
+    def test_avoid_register_spilling(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA only")
+
+        from torch.nn.functional import gelu
+
+        def foo(m, inp):
+            curr = m(inp)
+            tmps = []
+            for _ in range(10):
+                curr = gelu(curr)
+                for t in tmps:
+                    curr = curr + t
+                tmps.append(curr)
+
+            return curr
+
+        foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
+
+        with torch.no_grad():
+            m = torch.nn.Linear(2048, 2048, bias=True).half().cuda()
+            inp = torch.rand([2048, 2048]).half().cuda()
+
+            foo_c(m, inp)
+
+            _, out_code = run_and_get_code(foo_c, m, inp)
+
+            # should be multiple triton invocations
+            FileCheck().check("async_compile.wait").check_count(
+                ".run", 2, exactly=True
+            ).run(out_code[0])
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:

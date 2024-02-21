@@ -26,6 +26,7 @@ from ..pattern_matcher import (
     _return_true,
     Arg,
     CallFunction,
+    CallFunctionVarArgs,
     filter_nodes,
     get_arg_value,
     Ignored,
@@ -102,9 +103,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     fake_tensor_updater.incremental_update()
 
-    # Keep this last, since it introduces mutation. Look at
+    # Keep these last, since they introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     reinplace_inplaceable_ops(gm.graph)
+    decompose_auto_functionalized(gm.graph)
+
     gm.recompile()
     gm.graph.lint()
 
@@ -647,6 +650,34 @@ def remove_noop_ops(graph: torch.fx.Graph):
             if same_meta(node, src) and cond(*args, **kwargs):
                 node.replace_all_uses_with(src)
                 graph.erase_node(node)
+
+
+def decompose_auto_functionalized(graph):
+    graph_pass = PatternMatcherPass()
+
+    @register_graph_pattern(
+        CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized),
+        pass_dict=graph_pass,
+    )
+    def replacement(match: Match, *args, **kwargs):
+        from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
+
+        flat_args, spec = pytree.tree_flatten((args, kwargs))
+
+        # NB: we combine (args, kwargs) into flat args for replacing.
+        # This is replace_by_example uses make_fx which does not support
+        # tracing a function with kwargs.
+        def decomp(*flat_args):
+            args, kwargs = pytree.tree_unflatten(flat_args, spec)
+            return auto_functionalized_dense(*args, **kwargs)
+
+        with V.fake_mode:
+            match.replace_by_example(decomp, flat_args, run_dce=False)
+
+    graph_pass.apply(graph)
+    for node in graph.nodes:
+        if node.target is torch.ops.higher_order.auto_functionalized:
+            raise AssertionError("auto_functionalized was not removed")
 
 
 @register_lowering_pattern(

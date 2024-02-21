@@ -107,7 +107,7 @@ class GraphContext:
     @_beartype.beartype
     def onnxscript_op(
         self,
-        onnx_fn,  # TODO(titaiwang): annotate this when onnx-script becomes dependency
+        onnx_fn,
         *raw_args: Union[torch.Tensor, _C.Value],
         outputs: int = 1,
         **kwargs,

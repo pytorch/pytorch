@@ -44,6 +44,10 @@ def get_optimizer_step(opt, closure=None):
 
 
 def make_test(optim_cls, closure=None, **kwargs):
+    # Remove this conditional when #118230 is fixed
+    if optim_cls.__name__ == "Adamax":
+        kwargs["foreach"] = True
+
     opt = optim_cls(model.parameters(), **kwargs)
 
     def test_fn(self):

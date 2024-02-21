@@ -239,7 +239,6 @@ CI_SERIAL_LIST = [
     "test_utils",  # OOM
     "test_sort_and_select",  # OOM
     "test_backward_compatible_arguments",  # OOM
-    "test_module_init",  # OOM
     "test_autocast",  # OOM
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
@@ -434,7 +433,8 @@ def run_test(
         unittest_args.extend(test_module.get_pytest_args())
         unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
 
-    # TODO: These features are not available for C++ test yet
+    # NB: These features are not available for C++ tests, but there is little incentive
+    # to implement it because we have never seen a flaky C++ test before.
     if IS_CI and not is_cpp_test:
         ci_args = ["--import-slow-tests", "--import-disabled-tests"]
         if RERUN_DISABLED_TESTS:
@@ -1144,6 +1144,14 @@ def parse_args():
         action="store_true",
         help="Set a timeout based on the test times json file.  Only works if there are test times available",
         default=IS_CI and not strtobool(os.environ.get("NO_TEST_TIMEOUT", "False")),
+    )
+    parser.add_argument(
+        "--enable-td",
+        action="store_true",
+        help="Enables removing tests based on TD",
+        default=IS_CI
+        and os.getenv("BRANCH", "") != "main"
+        and not strtobool(os.environ.get("NO_TD", "False")),
     )
     parser.add_argument(
         "additional_unittest_args",

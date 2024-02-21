@@ -26,7 +26,7 @@ from torch.export import export, WrapperModule
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo
+from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo, IS_WINDOWS
 from torch.utils import _pytree as pytree
 
 
@@ -276,6 +276,7 @@ class TestPasses(TestCase):
         new_inp = torch.tensor([1, 1, 1, 1])
         self.assertEqual(mod(new_inp), ep.module()(new_inp))
 
+    @unittest.skipIf(IS_WINDOWS, "Windows not supported")
     def test_runtime_assert_inline_constraints_for_cond(self) -> None:
         class M(torch.nn.Module):
             def __init__(self):
@@ -305,12 +306,15 @@ class TestPasses(TestCase):
             ep.module()(torch.tensor(False), torch.tensor([6]), torch.tensor([6]))
 
     def test_functionalize_inline_constraints(self) -> None:
-        def f(x):
-            a = x.item()
-            torch._constrain_as_value(a, 4, 7)
-            return torch.empty((a, 4))
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                a = x.item()
+                torch._constrain_as_value(a, 4, 7)
+                return torch.empty((a, 4))
 
-        ep = torch._export.export(f, (torch.tensor([7]),))
+        f = Foo()
+
+        ep = torch.export.export(f, (torch.tensor([7]),))
         gm = ep.graph_module
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range.default",

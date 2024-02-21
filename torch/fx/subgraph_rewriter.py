@@ -39,7 +39,10 @@ def _replace_attributes(gm: GraphModule, replacement: torch.nn.Module) -> None:
 
     def try_get_attr(gm: torch.nn.Module, target: str) -> Optional[Any]:
         module_path, _, attr_name = target.rpartition(".")
-        mod: torch.nn.Module = gm.get_submodule(module_path)
+        try:
+            mod: torch.nn.Module = gm.get_submodule(module_path)
+        except AttributeError:
+            return None
         attr = getattr(mod, attr_name, None)
         return attr
 

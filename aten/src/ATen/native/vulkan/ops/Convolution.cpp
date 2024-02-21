@@ -4,6 +4,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/vulkan/api/Utils.h>
+#include <ATen/native/vulkan/impl/Packing.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Convolution.h>
 #include <ATen/native/vulkan/ops/Copy.h>
@@ -834,12 +835,32 @@ Tensor quantized_convolution(
 
 namespace conv1d {
 
-// This is a full implementation. For algorithm details, refer to the shader
-// kernel code.
-//
-// There are multiple perf improvement opportunities: e.g. width-packing
-// weight tensor.
+vTensor pack_weights_using_width_packing(const Tensor& weight_arg) {
+  Tensor weight = weight_arg;
 
+  if (weight.is_cpu()) {
+    weight = weight.vulkan();
+  }
+
+  TORCH_CHECK(weight.is_vulkan(), "Weight must be on Vulkan device!");
+
+  vTensor v_weight = convert(weight);
+  if (v_weight.gpu_memory_layout() ==
+      api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED) {
+    v_weight = packing::convert_image_channels_packed_to_width_packed(v_weight);
+  }
+
+  TORCH_CHECK(
+      v_weight.gpu_memory_layout() == api::GPUMemoryLayout::TENSOR_WIDTH_PACKED,
+      "After packing, the v_weight must be in TENSOR_WIDTH_PACKED format");
+
+  return v_weight;
+}
+
+/*
+ * This is a full implementation. For algorithm details, refer to the shader
+ * kernel code.
+ */
 Tensor run_conv1d_context_impl(
     const Tensor& input_arg,
     const Tensor& weight_arg,
@@ -1357,7 +1378,8 @@ Conv1dPackedContext::Conv1dPackedContext(
     const int64_t groups)
     : unpacked_{c10::AnyType::get()} {
   packed_.reserve(Packed::NumArgs);
-  packed_.emplace_back(weight.vulkan());
+  packed_.emplace_back(
+      convert(conv1d::pack_weights_using_width_packing(weight.vulkan())));
   packed_.emplace_back(bias->vulkan());
   packed_.emplace_back(stride_arg);
   packed_.emplace_back(padding_arg);

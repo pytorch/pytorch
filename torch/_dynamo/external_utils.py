@@ -70,3 +70,11 @@ def call_backward(backward_fn, saved_tensors, *args):
         grads = (grads,)
 
     return grads
+
+
+def untyped_storage_size(x: torch.Tensor):
+    return x.untyped_storage().size()
+
+
+def resize_storage_(x: torch.Tensor, new_size: int):
+    return x.untyped_storage().resize_(new_size)

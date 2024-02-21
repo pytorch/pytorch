@@ -610,6 +610,8 @@ def register_fast_op_impl(func: OpOverload):
 
 # infer_size_impl in ExpandUtils
 def infer_size(a, b):
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     dimsA = len(a)
     dimsB = len(b)
     ndim = max(dimsA, dimsB)
@@ -633,12 +635,14 @@ def infer_size(a, b):
         # were not the case, we'd need to write this using torch.sym_or() or
         # something like that).
         torch._check(
-            sizeA == 1 or sizeB == 1 or sizeA == sizeB,
+            guard_size_oblivious(sizeA == 1)
+            or guard_size_oblivious(sizeB == 1)
+            or sizeA == sizeB,
             lambda: f"The size of tensor a ({sizeA}) "
             f"must match the size of tensor b ({sizeB}) "
             f"at non-singleton dimension {i})",
         )
-        expandedSizes[i] = sizeB if sizeA == 1 else sizeA
+        expandedSizes[i] = sizeB if guard_size_oblivious(sizeA == 1) else sizeA
     return tuple(expandedSizes)
 
 

@@ -31,6 +31,7 @@
 #include <cuda_runtime.h>
 #endif
 
+#include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <ATen/native/Resize.h>
 
 #ifdef _MSC_VER
@@ -59,6 +60,13 @@ static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
       !invalid,
       "Attempted to access the data pointer on an invalid python storage.")
   return PyLong_FromVoidPtr(self_.mutable_data());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPStorage_resizable(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
+  return PyBool_FromLong(THPStorage_Unpack(self).resizable());
   END_HANDLE_TH_ERRORS
 }
 
@@ -149,7 +157,10 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
 #endif
   } else if (device_type == at::kMeta) {
     at::native::resize_bytes_meta(storage.unsafeGetStorageImpl(), newsize);
-  } else if (device_type == at::kXPU || device_type == at::kPrivateUse1) {
+  } else if (device_type == at::kPrivateUse1) {
+    at::GetPrivateUse1HooksInterface()->resizePrivateUse1Bytes(
+        storage, newsize);
+  } else if (device_type == at::kXPU) {
     ptrdiff_t size_bytes_i = newsize;
     TORCH_CHECK(
         !c10::overflows<int64_t>(size_bytes_i),
@@ -664,6 +675,7 @@ static PyMethodDef THPStorage_methods[] = {
     {"resize_", THPStorage_resize_, METH_O, nullptr},
     {"nbytes", THPStorage_nbytes, METH_NOARGS, nullptr},
     {"data_ptr", THPStorage_dataPtr, METH_NOARGS, nullptr},
+    {"resizable", THPStorage_resizable, METH_NOARGS, nullptr},
     {"_write_file", THPStorage_writeFile, METH_VARARGS, nullptr},
     {"_new_with_file",
      THPStorage_newWithFile,

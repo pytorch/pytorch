@@ -22,9 +22,6 @@
 
 #include <ATen/Context.h>
 
-#include <deque>
-#include <limits>
-#include <sstream>
 #include <stdexcept>
 #include <utility>
 

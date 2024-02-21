@@ -770,6 +770,7 @@ libtorch_python_cuda_sources = libtorch_python_cuda_core_sources + [
 
 libtorch_python_xpu_sources = [
     "torch/csrc/xpu/Module.cpp",
+    "torch/csrc/xpu/Stream.cpp",
 ]
 
 libtorch_python_core_sources = [
@@ -807,9 +808,11 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/python_variable.cpp",
     "torch/csrc/autograd/python_variable_indexing.cpp",
     "torch/csrc/dynamo/python_compiled_autograd.cpp",
+    "torch/csrc/dynamo/cache_entry.cpp",
     "torch/csrc/dynamo/cpp_shim.cpp",
     "torch/csrc/dynamo/cpython_defs.c",
     "torch/csrc/dynamo/eval_frame.c",
+    "torch/csrc/dynamo/extra_state.cpp",
     "torch/csrc/dynamo/guards.cpp",
     "torch/csrc/dynamo/init.cpp",
     "torch/csrc/functorch/init.cpp",
