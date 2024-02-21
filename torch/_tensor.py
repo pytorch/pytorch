@@ -619,6 +619,10 @@ class Tensor(torch._C.TensorBase):
                 "cannot register a hook on a tensor that doesn't require gradient"
             )
         if self.grad_fn is not None:
+            print(f"self: {self}")
+            print(f"self.grad_fn: {self.grad_fn}")
+            print(f"self._base: {self._base}")
+            print(f"self.requires_grad: {self.requires_grad}")
             raise RuntimeError(
                 "post accumulate grad hooks cannot be registered on non-leaf tensors"
             )

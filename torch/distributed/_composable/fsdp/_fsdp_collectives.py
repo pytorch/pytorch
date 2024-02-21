@@ -1,3 +1,4 @@
+import contextlib
 from typing import List, NamedTuple, Optional
 
 import torch
@@ -28,7 +29,10 @@ def foreach_all_gather(
 ) -> Optional[AllGatherResult]:
     world_size, rank = group.size(), group.rank()
     # - Copy in
-    with torch.cuda.stream(all_gather_copy_in_stream):
+    ctx = contextlib.nullcontext()
+    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        ctx = torch.cuda.stream(all_gather_copy_in_stream)
+    with ctx:
         param_all_gather_inputs = [
             fsdp_param.all_gather_input for fsdp_param in fsdp_params
         ]
@@ -46,10 +50,15 @@ def foreach_all_gather(
             0, all_gather_input_numel * rank, all_gather_input_numel
         )
         foreach_copy_dsts = torch.split(all_gather_input, inp_split_sizes)
-        torch._foreach_copy_(foreach_copy_dsts, param_all_gather_inputs)
+        with torch.no_grad():
+            torch._foreach_copy_(foreach_copy_dsts, param_all_gather_inputs)
         del param_all_gather_inputs
-    all_gather_stream.wait_stream(all_gather_copy_in_stream)
-    with torch.cuda.stream(all_gather_stream):
+    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        all_gather_stream.wait_stream(all_gather_copy_in_stream)
+    ctx = contextlib.nullcontext()
+    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        ctx = torch.cuda.stream(all_gather_stream)
+    with ctx:
         # - All-gather
         all_gather_work = dist.all_gather_into_tensor(
             output_tensor=all_gather_output,
@@ -57,7 +66,10 @@ def foreach_all_gather(
             group=group,
             async_op=async_op,
         )
-        all_gather_event = all_gather_stream.record_event()
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            all_gather_event = all_gather_stream.record_event()
+        else:
+            all_gather_event = None
         return AllGatherResult(
             all_gather_output, all_gather_event, all_gather_work, inp_split_sizes
         )
@@ -75,10 +87,11 @@ def foreach_all_gather_copy_out(
         all_gather_work,
         all_gather_input_numels,
     ) = all_gather_result
-    if all_gather_event is not None:  # sync op
-        torch.cuda.current_stream().wait_event(all_gather_event)
-    if all_gather_work is not None:  # async op
-        all_gather_work.wait()
+    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        if all_gather_event is not None:  # sync op
+            torch.cuda.current_stream().wait_event(all_gather_event)
+        if all_gather_work is not None:  # async op
+            all_gather_work.wait()
     world_size = group.size()
     dtype, device = all_gather_output.dtype, all_gather_output.device
     for all_gather_input_numel, fsdp_param in zip(all_gather_input_numels, fsdp_params):
@@ -90,9 +103,15 @@ def foreach_all_gather_copy_out(
     out = [
         fsdp_param.all_gather_output.view(world_size, -1) for fsdp_param in fsdp_params
     ]
-    torch.split_with_sizes_copy(
-        all_gather_output, all_gather_input_numels, dim=1, out=out
-    )
+    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        # TODO(yf225): ListVariable out variant is not supported by Dynamo yet
+        torch.split_with_sizes_copy(
+            all_gather_output, all_gather_input_numels, dim=1, out=out
+        )
+    else:
+        splits = torch.split(all_gather_output, all_gather_input_numels, dim=1)
+        with torch.no_grad():
+            torch._foreach_copy_(out, splits)
 
 
 @torch.no_grad()
@@ -126,9 +145,12 @@ def foreach_reduce_scatter(
     )
     reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
     reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
-    current_stream = torch.cuda.current_stream()
-    reduce_scatter_stream.wait_stream(current_stream)
-    with torch.cuda.stream(reduce_scatter_stream):
+    ctx = contextlib.nullcontext()
+    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        current_stream = torch.cuda.current_stream()
+        reduce_scatter_stream.wait_stream(current_stream)
+        ctx = torch.cuda.stream(reduce_scatter_stream)
+    with ctx:
         reduce_scatter_input = torch.empty(
             (reduce_scatter_input_numel,), dtype=reduce_dtype, device=device
         )
@@ -136,9 +158,10 @@ def foreach_reduce_scatter(
             unsharded_grads, reduce_scatter_input, world_size
         )
         _div_if_needed(reduce_scatter_input, predivide_factor)
-        # Only after the copy-in finishes can we free the gradients, which were
-        # computed in the default stream
-        current_stream.wait_stream(reduce_scatter_stream)
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            # Only after the copy-in finishes can we free the gradients, which were
+            # computed in the default stream
+            current_stream.wait_stream(reduce_scatter_stream)
         unsharded_grads.clear()
         reduce_scatter_output = reduce_scatter_input.new_empty(
             (reduce_scatter_output_numel,)
@@ -167,7 +190,10 @@ def foreach_reduce_scatter(
                 fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
             padded_sharded_numel = padded_unsharded_size.numel() // world_size
             flat_grad_offset += padded_sharded_numel
-        reduce_scatter_view_out_event = reduce_scatter_stream.record_event()
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            reduce_scatter_view_out_event = reduce_scatter_stream.record_event()
+        else:
+            reduce_scatter_view_out_event = None
     # The RS output is allocated in the RS stream and used in the default
     # stream (for optimizer). To ensure its memory is not reused for later
     # RSs, we do not need extra synchronization since the sharded parameters

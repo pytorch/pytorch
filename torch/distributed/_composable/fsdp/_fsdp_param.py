@@ -13,7 +13,7 @@ from torch.distributed._tensor.placement_types import DTensorSpec
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import (
     _chunk_with_empty,
-    _from_local_no_grad,
+    # _from_local_no_grad,
     _get_dim0_chunked_size,
     _raise_assert_with_print,
     _to_dtype_if_needed,
@@ -246,8 +246,9 @@ class FSDPParam:
         if self.all_gather_output.numel() > 0:
             return  # already initialized
         all_gather_output_size = torch.Size([all_gather_input_numel * world_size])
+        # NOTE(yf225): here we explicitly make fsdp_param.all_gather_output the leaf tensor (instead of unsharded_param being leaf tensor)
         self.all_gather_output = torch.empty(
-            all_gather_output_size, dtype=dtype, device=device
+            all_gather_output_size, dtype=dtype, device=device, requires_grad=True
         )
 
     def init_unsharded_param(self):
@@ -262,14 +263,14 @@ class FSDPParam:
             storage_offset=0,
         )
         if self.is_dtensor:
-            unsharded_param = _from_local_no_grad(
+            unsharded_param = DTensor.from_local(
                 unsharded_param,
                 self._tp_spec.mesh,
                 self._tp_spec.placements,
-                self._global_size,
-                self._global_stride,
+                shape=self._global_size,
+                stride=self._global_stride,
             )
-        self._unsharded_param = nn.Parameter(unsharded_param)
+        self._unsharded_param = unsharded_param
         self._unsharded_param.requires_grad_(self.sharded_param.requires_grad)
 
     def to_sharded(self) -> None:
@@ -339,12 +340,12 @@ class FSDPParam:
             _raise_assert_with_print(
                 f"Expects size {self.sharded_size} but got {tensor.shape}"
             )
-        return _from_local_no_grad(
+        return DTensor.from_local(
             tensor,
             self._global_mesh,
             self._global_placements,
-            self._global_size,
-            self._global_stride,
+            shape=self._global_size,
+            stride=self._global_stride,
         )
 
     def to_sharded_post_forward_dtensor(self, tensor: torch.Tensor) -> DTensor:
@@ -355,12 +356,12 @@ class FSDPParam:
         assert isinstance(self.post_forward_mesh_info, HSDPMeshInfo)
         # TODO: Prefer this DTensor to be read-only and generalize the
         # placement once we support TP.
-        return _from_local_no_grad(
+        return DTensor.from_local(
             tensor,
             self.post_forward_mesh_info.mesh,
             (Replicate(), Shard(0)),
-            self._global_size,
-            self._global_stride,
+            shape=self._global_size,
+            stride=self._global_stride,
         )
 
     def alloc_all_gather_output(self) -> None:
@@ -388,8 +389,15 @@ class FSDPParam:
 
     @property
     def unsharded_grad_data(self) -> torch.Tensor:
-        grad = self.unsharded_param.grad
-        assert grad is not None, "Expects unsharded_param.grad to not be None"
+        # grad = self.unsharded_param.grad
+        # assert grad is not None, "Expects unsharded_param.grad to not be None"
+        assert self.all_gather_output.grad is not None, "Expects all_gather_output.grad to not be None"
+        grad = torch.as_strided(
+            self.all_gather_output.grad,
+            self._orig_size,
+            self._contiguous_orig_stride,
+            storage_offset=0,
+        )
         return self._get_grad_inner_tensor(grad)
 
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:
@@ -412,12 +420,14 @@ class FSDPParam:
 def unsafe_alloc_storage(tensor: torch.Tensor) -> None:
     # Skip the already-allocated check and assume that `tensor` is the base
     # tensor to save CPU overhead
-    tensor.untyped_storage().resize_(tensor.numel() * tensor.itemsize)
+    # tensor.untyped_storage().resize_(tensor.numel() * tensor.itemsize)
+    pass
 
 
 def unsafe_free_storage(tensor: torch.Tensor) -> None:
     # Skip the already-freed check to save CPU overhead
-    tensor.untyped_storage().resize_(0)
+    # tensor.untyped_storage().resize_(0)
+    pass
 
 
 # NOTE: These bypass `nn.Module.__setattr__` checks, which incur non-trivial
@@ -426,7 +436,7 @@ def unsafe_free_storage(tensor: torch.Tensor) -> None:
 def unsafe_setattr_param(
     module: nn.Module, param_name: str, param: nn.Parameter
 ) -> None:
-    if getattr(module.__setattr__, "__func__", None) is nn.Module.__setattr__:
+    if (getattr(module.__setattr__, "__func__", None) is nn.Module.__setattr__):
         module._parameters[param_name] = param
         super(nn.Module, module).__setattr__(param_name, param)
     else:  # slow path
