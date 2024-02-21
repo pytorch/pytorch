@@ -948,7 +948,8 @@ void ProcessGroupNCCL::enableCollectivesTiming() {
 void ProcessGroupNCCL::waitForFutureOrTimeout(
     std::future<bool>& fut,
     const std::chrono::milliseconds& timeOutMilSec,
-    const std::string& futDescription) {
+    const std::string& futDescription,
+    bool throwException) {
   TORCH_CHECK(fut.valid(), "Expected a valid future");
   std::future_status status = fut.wait_for(timeOutMilSec);
   if (status == std::future_status::ready) {
@@ -961,32 +962,38 @@ void ProcessGroupNCCL::waitForFutureOrTimeout(
                   << "future is successfully executed for: " << futDescription;
       }
     } catch (const std::exception& e) {
-      C10_THROW_ERROR(
-          DistBackendError,
-          c10::str(
-              logPrefix(),
-              "Exception thrown when waitng for future ",
-              futDescription,
-              ": ",
-              e.what()));
+      auto errorMsg = c10::str(
+          logPrefix(),
+          "Exception thrown when waitng for future ",
+          futDescription,
+          ": ",
+          e.what());
+      LOG(ERROR) << errorMsg;
+      if (throwException) {
+        C10_THROW_ERROR(DistBackendError, errorMsg);
+      }
     } catch (...) {
-      C10_THROW_ERROR(
-          DistBackendError,
-          c10::str(
-              logPrefix(),
-              "Unknown exception thrown when waitng for future ",
-              futDescription));
+      auto errorMsg = c10::str(
+          logPrefix(),
+          "Unknown exception thrown when waitng for future ",
+          futDescription);
+      LOG(ERROR) << errorMsg;
+      if (throwException) {
+        C10_THROW_ERROR(DistBackendError, errorMsg);
+      }
     }
   } else {
-    C10_THROW_ERROR(
-        DistBackendError,
-        c10::str(
-            logPrefix(),
-            "Future for ",
-            futDescription,
-            " timed out after ",
-            timeOutMilSec.count(),
-            " ms"));
+    auto errorMsg = c10::str(
+        logPrefix(),
+        "Future for ",
+        futDescription,
+        " timed out after ",
+        timeOutMilSec.count(),
+        " ms");
+    LOG(ERROR) << errorMsg;
+    if (throwException) {
+      C10_THROW_ERROR(DistBackendError, errorMsg);
+    }
   }
 }
 
@@ -1059,7 +1066,7 @@ void ProcessGroupNCCL::shutdown() {
     return this->abort(abortReason);
   });
 
-  waitForFutureOrTimeout(fut, options_->timeout, "ProcessGroup abort");
+  waitForFutureOrTimeout(fut, options_->timeout, "ProcessGroup abort", true);
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL aborts successfully.";
 
   // We need to wait for abort to finish before we can safely shut down
@@ -1246,6 +1253,13 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // local disk)
   std::future<bool> asyncDebugDump = std::async(
       std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
+  auto dumpStartTime = std::chrono::steady_clock::now();
+
+  // wait the dump until timeout
+  waitForFutureOrTimeout(
+      asyncDebugDump,
+      std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
+      "Flight recorder dump in heartbeatMonitor");
 
   if (get_gil_checker() != nullptr) {
     auto fut = launchAsyncGilCheck();
@@ -1288,10 +1302,6 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // We already log completion inside the thread, so it may not be necessary to
   // check the return value here.  We mainly use a future so we can exit early
   // if done.
-  waitForFutureOrTimeout(
-      asyncDebugDump,
-      std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
-      "Flight recorder dump in heartbeat monitor");
 
   if (!terminateHeartbeatMonitorThread_.load()) {
     // Create a error message reported from MonitorThread, so
@@ -1516,21 +1526,17 @@ void ProcessGroupNCCL::watchdogHandler() {
               optAsyncDebugDump = std::async(std::launch::async, [this]() {
                 return this->dumpDebuggingInfo();
               });
-            }
-
-            if (desyncDebug_) {
-              auto desyncMsg = getNCCLWatchdogDebugInfo();
-              LOG(ERROR) << logPrefix() << desyncMsg;
-            }
-
-            if (dumpOnTimeout_) {
-              // Store debug info to storage. (By default to local disk)
+              // wait the dump until timeout
               waitForFutureOrTimeout(
                   *optAsyncDebugDump,
                   std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
                   "Flight recorder dump in watchdog");
             }
 
+            if (desyncDebug_) {
+              auto desyncMsg = getNCCLWatchdogDebugInfo();
+              LOG(ERROR) << logPrefix() << desyncMsg;
+            }
           } catch (const std::exception& e) {
             LOG(ERROR) << logPrefix()
                        << "Failed to retrieve TORCH_NCCL_DESYNC_DEBUG report. "

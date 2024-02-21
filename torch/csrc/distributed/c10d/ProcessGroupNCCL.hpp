@@ -739,7 +739,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void waitForFutureOrTimeout(
       std::future<bool>& fut,
       const std::chrono::milliseconds& timeOutMilSec,
-      const std::string& futDescription);
+      const std::string& futDescription,
+      bool throwException = false);
 
   // When watchdog timeout, this function will be called and return debug info
   // for users. For now we only get information from retrieveDesyncReport.
@@ -820,7 +821,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // The time interval used for deciding whether there is no watchdog heartbeat.
   int heartbeatTimeoutInSec_;
 
-  // Extra time of sleep when waiting for timeout dump to finish.
+  // timeout for dump to finish.
   int waitTimeoutDumpInMilSec_;
 
   // Interval of check coordinated signals in ProcessGroupNCCL from other ranks
