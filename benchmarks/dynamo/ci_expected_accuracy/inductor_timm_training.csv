@@ -6,7 +6,7 @@ adv_inception_v3,pass,6
 
 
 
-beit_base_patch16_224,pass,6
+beit_base_patch16_224,pass,7
 
 
 
@@ -30,23 +30,23 @@ convmixer_768_32,pass,5
 
 
 
-convnext_base,pass,6
+convnext_base,pass,7
 
 
 
-crossvit_9_240,pass,6
+crossvit_9_240,pass,7
 
 
 
-cspdarknet53,pass,6
+cspdarknet53,pass,7
 
 
 
-deit_base_distilled_patch16_224,pass,6
+deit_base_distilled_patch16_224,pass,7
 
 
 
-dla102,pass,6
+dla102,pass,7
 
 
 
@@ -58,19 +58,19 @@ dpn107,pass,6
 
 
 
-eca_botnext26ts_256,pass,6
+eca_botnext26ts_256,pass,7
 
 
 
-eca_halonext26ts,pass,6
+eca_halonext26ts,pass,7
 
 
 
-ese_vovnet19b_dw,pass,6
+ese_vovnet19b_dw,pass,7
 
 
 
-fbnetc_100,pass,6
+fbnetc_100,pass,7
 
 
 
@@ -86,7 +86,7 @@ ghostnet_100,pass,6
 
 
 
-gluon_inception_v3,pass,6
+gluon_inception_v3,pass,7
 
 
 
@@ -94,7 +94,7 @@ gmixer_24_224,pass,6
 
 
 
-gmlp_s16_224,pass,6
+gmlp_s16_224,pass,7
 
 
 
@@ -106,7 +106,7 @@ inception_v3,pass,6
 
 
 
-jx_nest_base,pass,6
+jx_nest_base,pass,7
 
 
 
@@ -114,11 +114,11 @@ lcnet_050,pass,6
 
 
 
-levit_128,pass,6
+levit_128,pass,7
 
 
 
-mixer_b16_224,pass,6
+mixer_b16_224,pass,7
 
 
 
@@ -126,15 +126,15 @@ mixnet_l,pass,6
 
 
 
-mnasnet_100,pass,6
+mnasnet_100,pass,7
 
 
 
-mobilenetv2_100,pass,6
+mobilenetv2_100,pass,7
 
 
 
-mobilenetv3_large_100,pass,6
+mobilenetv3_large_100,pass,7
 
 
 
@@ -142,7 +142,7 @@ mobilevit_s,pass,6
 
 
 
-nfnet_l0,pass,6
+nfnet_l0,pass,7
 
 
 
@@ -162,7 +162,7 @@ regnety_002,pass,6
 
 
 
-repvgg_a2,pass,6
+repvgg_a2,pass,7
 
 
 
@@ -186,7 +186,7 @@ resnest101e,pass,6
 
 
 
-rexnet_100,pass,6
+rexnet_100,pass,7
 
 
 
@@ -198,11 +198,11 @@ selecsls42b,pass,6
 
 
 
-spnasnet_100,pass,6
+spnasnet_100,pass,7
 
 
 
-swin_base_patch4_window7_224,pass,6
+swin_base_patch4_window7_224,pass,7
 
 
 
@@ -222,24 +222,24 @@ tinynet_a,pass,6
 
 
 
-tnt_s_patch16_224,pass,6
+tnt_s_patch16_224,pass,7
 
 
 
-twins_pcpvt_base,pass,6
+twins_pcpvt_base,pass,7
 
 
 
-visformer_small,pass,6
+visformer_small,pass,7
 
 
 
-vit_base_patch16_224,pass,6
+vit_base_patch16_224,pass,7
 
 
 
-volo_d1_224,pass,6
+volo_d1_224,pass,7
 
 
 
-xcit_large_24_p8_224,pass_due_to_skip,6
+xcit_large_24_p8_224,pass_due_to_skip,7
