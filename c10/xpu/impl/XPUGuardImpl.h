@@ -34,11 +34,6 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return Device(kXPU, device);
   }
 
-  c10::optional<Device> uncheckedGetDevice() const noexcept {
-    auto device = c10::xpu::current_device();
-    return Device(kXPU, device);
-  }
-
   void setDevice(Device d) const override {
     TORCH_INTERNAL_ASSERT(d.is_xpu());
     c10::xpu::set_device(d.index());
