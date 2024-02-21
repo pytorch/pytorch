@@ -31,10 +31,7 @@ PyObject* THPDevice_repr(THPDevice* self) {
   std::ostringstream oss;
   oss << "device(type=\'" << self->device.type() << "\'";
   if (self->device.has_index()) {
-    // `self->device.index()` returns uint8_t which is treated as ascii while
-    // printing, hence casting it to uint16_t.
-    // https://stackoverflow.com/questions/19562103/uint8-t-cant-be-printed-with-cout
-    oss << ", index=" << static_cast<uint16_t>(self->device.index());
+    oss << ", index=" << self->device.index();
   }
   oss << ")";
   return THPUtils_packString(oss.str().c_str());
@@ -77,7 +74,11 @@ PyObject* THPDevice_pynew(
       device_index = r.toInt64(1);
       // -1 is allowed in ATen/C++, to mean the default device, but not in
       // Python.
-      TORCH_CHECK(device_index >= 0, "Device index must not be negative");
+      TORCH_CHECK(
+          device_index >= 0 && device_index < c10::Device::MAX_NUM_DEVICES,
+          "Device index must be between 0 and ",
+          c10::Device::MAX_NUM_DEVICES - 1,
+          " inclusively.");
     }
     at::Device device(
         as_device.type(), static_cast<c10::DeviceIndex>(device_index));
