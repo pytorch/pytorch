@@ -5,6 +5,7 @@ import itertools
 from typing import cast, List, Optional
 
 import torch
+import torch.nn.functional as F
 from torch.distributed._tensor import DeviceMesh, distribute_tensor
 from torch.distributed._tensor.api import DTensor
 from torch.distributed._tensor.placement_types import (
@@ -263,6 +264,46 @@ class DistMatrixOpsTest(DTensorTestBase):
         # tests that currently pass
         for spec in shard_specs_comb:
             test_placement_comb([spec[0]], [spec[1]])
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_scaled_dot_product_attention(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        # bsz, n_heads, slen, head_dim
+        query = torch.rand(
+            (4, 8, 8, 8),
+            device=self.device_type,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+        key = torch.rand(
+            (4, 8, 8, 8),
+            device=self.device_type,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+        value = torch.rand(
+            (4, 8, 8, 8),
+            device=self.device_type,
+            dtype=torch.bfloat16,
+            requires_grad=True,
+        )
+
+        dist_query = distribute_tensor(query, device_mesh, [Shard(1)])
+        dist_key = distribute_tensor(query, device_mesh, [Shard(1)])
+        dist_value = distribute_tensor(query, device_mesh, [Shard(1)])
+
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+
+        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+            out = F.scaled_dot_product_attention(
+                query, key, value, dropout_p=0.0, is_causal=True
+            )
+            dist_out = F.scaled_dot_product_attention(
+                dist_query, dist_key, dist_value, dropout_p=0.0, is_causal=True
+            )
+
+        # TODO: add backward test once we support the backward op
 
 
 if __name__ == "__main__":
