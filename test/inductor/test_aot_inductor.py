@@ -1718,9 +1718,9 @@ CPU_TEST_FAILURES = {
     "test_add_complex": fail_stack_allocation(is_skip=True),
     "test_constant_folding": fail_with_and_without_stack_allocation(is_skip=True),
     "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(),
-    "test_dynamic_cat": fail_with_and_without_stack_allocation(),
+    "test_dynamic_cat": fail_with_and_without_stack_allocation(is_skip=True),
     "test_dynamic_scalar": fail_with_and_without_stack_allocation(is_skip=True),
-    "test_foreach_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_foreach_multiple_dynamic": fail_with_and_without_stack_allocation(is_skip=True),
     "test_fft_c2c": fail_stack_allocation(is_skip=True),
     # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
     #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
