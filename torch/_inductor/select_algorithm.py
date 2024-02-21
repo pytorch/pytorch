@@ -1113,10 +1113,7 @@ def autotune_select_algorithm(*args, **kwargs):
 
     if "return_multi_template" not in kwargs:
         # TODO - enable multi templates even if benchmark_fusion not enabled
-        kwargs["return_multi_template"] = (
-            torch._inductor.config.benchmark_multi_templates
-            and torch._inductor.config.benchmark_fusion
-        )
+        kwargs["return_multi_template"] = torch._inductor.config.benchmark_multi_templates
 
     return _ALGORITHM_SELECTOR_CACHE(*args, **kwargs)
 
