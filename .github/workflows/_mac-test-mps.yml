@@ -36,6 +36,7 @@ jobs:
       keep-going: ${{ steps.filter.outputs.keep-going }}
       ci-verbose-test-logs: ${{ steps.filter.outputs.ci-verbose-test-logs }}
       ci-no-test-timeout: ${{ steps.filter.outputs.ci-no-test-timeout }}
+      ci-no-td: ${{ steps.filter.outputs.ci-no-td }}
       reenabled-issues: ${{ steps.filter.outputs.reenabled-issues }}
     steps:
       - name: Checkout PyTorch
@@ -98,6 +99,7 @@ jobs:
           CONTINUE_THROUGH_ERROR: ${{ needs.filter.outputs.keep-going }}
           VERBOSE_TEST_LOGS: ${{ needs.filter.outputs.ci-verbose-test-logs }}
           NO_TEST_TIMEOUT: ${{ needs.filter.outputs.ci-no-test-timeout }}
+          NO_TD: ${{ needs.filter.outputs.ci-no-td }}
           PIP_REQUIREMENTS_FILE: .github/requirements/pip-requirements-${{ runner.os }}.txt
           REENABLED_ISSUES: ${{ needs.filter.outputs.reenabled-issues }}
         run: |
