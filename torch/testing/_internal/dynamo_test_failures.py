@@ -400,13 +400,11 @@ dynamo_expected_failures = {
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_7_float64_cpu_float64",
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_0_float16_cpu_float16",
     "TestSDPACPU.test_fused_sdp_choice_cpu_type_dense_dropout_0_7_bfloat16_cpu_bfloat16",
-    "TestAssertCloseSparseCOO.test_matching_coalesced",  # test_testing
     "TestImports.test_circular_dependencies",  # test_testing
     "TestAssertCloseSparseCSR.test_mismatching_crow_indices_msg",  # test_testing
     "TestAssertCloseSparseBSC.test_mismatching_row_indices_msg",  # test_testing
     "TestAssertCloseSparseCOO.test_mismatching_values_msg",  # test_testing
     "TestAssertCloseQuantized.test_matching_per_channel",  # test_testing
-    "TestAssertCloseSparseCOO.test_matching_uncoalesced",  # test_testing
     "TestAssertCloseSparseCSR.test_matching",  # test_testing
     "TestAssertCloseSparseBSR.test_mismatching_crow_indices_msg",  # test_testing
     "TestAssertCloseSparseBSR.test_matching",  # test_testing
@@ -565,7 +563,7 @@ dynamo_expected_failures = {
     "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_conv1d_cpu_float64",  # test_expanded_weights  # noqa: B950
     "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_layer_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
     "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_conv2d_cpu_float64",  # test_expanded_weights  # noqa: B950
-    "TestTorchDlPackCPU.test_dlpack_export_non_strided_cpu",  # test_dlpack
+    # "TestTorchDlPackCPU.test_dlpack_export_non_strided_cpu",  # test_dlpack
     "TestIterDataPipeGraphFastForward.test_simple_snapshot_custom_self_next",  # test_datapipe
     "TestIterDataPipeGraphFastForward.test_simple_snapshot_custom_non_generator",  # test_datapipe
     "TestGraph.test_traverse_circular_datapipe",  # test_datapipe

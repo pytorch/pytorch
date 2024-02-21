@@ -12,7 +12,7 @@
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/NonSymbolicBC.h>
 #include <ATen/NamedTensorUtils.h>
-
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/CPUBlas.h>
 #include <c10/util/irange.h>
@@ -448,16 +448,29 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRe
       is_coalesced);
 }
 
-Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, at::IntArrayRef size,
+Tensor _sparse_coo_tensor_unsafe(
+    const Tensor& indices,
+    const Tensor& values_,
+    at::IntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory,
     c10::optional<bool> is_coalesced) {
-  if (at::globalContext().checkSparseTensorInvariants()) {
-    at::native::_validate_sparse_coo_tensor_args(indices, values_, size, is_coalesced);
+  if (!areAnyTensorSubclassLike({indices, values_}) &&
+      at::globalContext().checkSparseTensorInvariants()) {
+    at::native::_validate_sparse_coo_tensor_args(
+        indices, values_, size, is_coalesced);
   }
-  return at::native::_sparse_coo_tensor_unsafe_symint(indices, values_, c10::fromIntArrayRefSlow(size), dtype, layout, device, pin_memory, is_coalesced);
+  return at::native::_sparse_coo_tensor_unsafe_symint(
+      indices,
+      values_,
+      c10::fromIntArrayRefSlow(size),
+      dtype,
+      layout,
+      device,
+      pin_memory,
+      is_coalesced);
 }
 
 // NOTE: _sparse_coo_tensor_unsafe() differs from sparse_coo_tensor()
