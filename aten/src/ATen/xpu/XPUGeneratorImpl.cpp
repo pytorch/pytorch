@@ -71,7 +71,7 @@ XPUGeneratorImpl::XPUGeneratorImpl(DeviceIndex device_index)
 
 void XPUGeneratorImpl::set_current_seed(uint64_t seed) {
   seed_ = seed;
-  philox_offset_per_thread_ = 0;
+  set_philox_offset_per_thread(0);
 }
 
 void XPUGeneratorImpl::set_offset(uint64_t offset) {
