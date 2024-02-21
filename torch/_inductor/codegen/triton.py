@@ -2567,6 +2567,9 @@ class TritonKernel(Kernel):
         import AttrsDescriptor if the triton version is new enough to have this
         class defined.
         """
+        if not has_triton_package():
+            return ""
+
         import triton.compiler.compiler
 
         if hasattr(triton.compiler.compiler, "AttrsDescriptor"):
