@@ -30,6 +30,7 @@ import sympy
 
 import torch
 import torch._logging
+from torch._dynamo.utils import preserve_rng_state
 
 from torch._inductor.metrics import is_metric_table_enabled, log_kernel_metadata
 from torch._prims_common import is_integer_dtype
@@ -3760,7 +3761,18 @@ class TritonScheduling(BaseScheduling):
     def ready_to_flush(self) -> bool:
         return False
 
+    @preserve_rng_state()
     def benchmark_fused_nodes(self, nodes):
+        @dataclasses.dataclass
+        class LastUsageHolder:
+            n: Any
+            last_usage: Any
+
+            def __del__(self):
+                self.n.last_usage = self.last_usage
+
+        last_usage_holders = [LastUsageHolder(n, n.last_usage) for n in nodes]
+
         # empty last_usage. May cause more aggressive 'evict_last'. Should be fine.
         for n in nodes:
             n.last_usage = set()
