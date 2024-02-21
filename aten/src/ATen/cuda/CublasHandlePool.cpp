@@ -1,4 +1,5 @@
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/cuda/detail/DeviceThreadHandles.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
