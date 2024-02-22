@@ -1,6 +1,8 @@
 import os
+from typing import Dict, List, Set
+
 import onnx
-from typing import List, Dict, Set
+
 
 def build_uses_and_sources(onnx_graph):
     # Build a dictionary of uses and sources for each node in the model
@@ -108,6 +110,20 @@ def search_for_pattern(
         pattern_to_main_value_bindings = {}
 
         def try_bind_values(bindings, node, pattern_node):
+            # TODO: examine type and shape bindings for graph inputs and outputs
+            # We need something like try_bind_values(
+            #   bindings,
+            #   type_bindings,
+            #   shape_bindings,
+            #   node,
+            #   pattern_node,
+            #   main_graph,
+            #   pattern_graph
+            # )
+            # If a variable in main_graph "x_main" is bound to pattern_graph "x",
+            # then we examin if they have the same type in the corresponding value_info's.
+            # Similarly, shapes should checked too.
+
             for name, pattern_name in zip(node.input, pattern_node.input):
                 if pattern_name in bindings and bindings[pattern_name] != name:
                     print_message(
@@ -260,7 +276,13 @@ def search_for_patterns(main_graph, pattern_graph):
     return matches
 
 
-def fuse(graph, pattern, fusion_node, pattern_to_main_node_bindings, pattern_to_main_value_bindings):
+def fuse(
+    graph,
+    pattern,
+    fusion_node,
+    pattern_to_main_node_bindings,
+    pattern_to_main_value_bindings,
+):
     main_node_names = {value for value in pattern_to_main_node_bindings.values()}
 
     main_node_indices = []
@@ -282,21 +304,13 @@ def fuse(graph, pattern, fusion_node, pattern_to_main_node_bindings, pattern_to_
 
     graph.value_info.extend(value_infos)
 
-try:
-    import onnxscript
-    from onnxscript import opset18, FLOAT
-
-    _REGISTER_PREDEFINED_FUSION = True
-except ImportError:
-    _REGISTER_PREDEFINED_FUSION = False
-
 
 def apply_fusion(model, pattern_graph, fusion_node_type, fusion_node_attributes):
     matches = search_for_patterns(model.graph, pattern_graph)
     for pattern_to_main_node_bindings, pattern_to_main_value_bindings in matches:
         if (
-            pattern_to_main_node_bindings is None or
-            pattern_to_main_value_bindings is None
+            pattern_to_main_node_bindings is None
+            or pattern_to_main_value_bindings is None
         ):
             # This is not a match.
             continue
@@ -323,18 +337,34 @@ def apply_fusion(model, pattern_graph, fusion_node_type, fusion_node_attributes)
             pattern_to_main_value_bindings,
         )
 
+
+try:
+    import onnxscript
+    from onnxscript import FLOAT, opset18
+
+    _REGISTER_PREDEFINED_FUSION = True
+except ImportError:
+    _REGISTER_PREDEFINED_FUSION = False
+
+
 aten_opset = onnxscript.values.Opset(domain="pkg.onnxscript.torch_lib", version=1)
+
+
 @onnxscript.script(default_opset=opset18)
-def softmax_backward(dY, Y):
+def softmax_backward(dY: FLOAT, Y: FLOAT):
     dYY = aten_opset.aten_mul(dY, Y)
     sum = aten_opset._aten_sum_dim_onnx(dYY, -1)
     scaled = aten_opset.aten_mul(Y, sum)
     dX = aten_opset.aten_sub(dYY, scaled)
     return dX
 
+
 softmax_backward_model = softmax_backward.to_model_proto(
     input_types=[FLOAT["S", "H"], FLOAT["S", "H"]], output_types=[FLOAT["S", "H"]]
 )
 
+
 def apply_all_fusions(onnx_model):
-    apply_fusion(onnx_model, softmax_backward_model.graph, "SoftmaxBackward", {"axis": -1})
+    apply_fusion(
+        onnx_model, softmax_backward_model.graph, "SoftmaxBackward", {"axis": -1}
+    )
