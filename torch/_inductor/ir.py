@@ -3256,16 +3256,8 @@ class ComputedBuffer(Buffer):
                 expected_var_ranges,
                 extra_indexing_ranges,
             )
-
-            extra_indexing_symbols = set.union(
-                *[f.free_symbols for f in extra_indexing_expr]
-            )
-            indexing_symbols = set.union(*[f.free_symbols for f in index_formulas])
-
-            assert len(indexing_symbols - extra_indexing_symbols) == 0, (
-                extra_indexing_symbols,
-                indexing_symbols,
-            )
+            # remove already existing expressions
+            extra_indexing_expr = [e for e in extra_indexing_expr if e not in index_formulas]
             index_formulas += extra_indexing_expr
 
         reads_bufs = [
