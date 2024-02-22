@@ -179,7 +179,7 @@ def get_mutable_arg_names(op: torch._ops.OpOverload) -> List[str]:
 
 
 def do_auto_functionalize(
-    op: torch._ops.OpOverload, args: Tuple[Any, ...], kwargs: Dict[str, Any], mode
+    op: torch._ops.OpOverload, args: Tuple[Any, ...], kwargs: Dict[str, Any]
 ) -> Any:
     """Functionalizes a call to op(*args, **kwargs) by emitting a call to
     `outs = auto_functionalized(op, normalized_kwargs)`
@@ -190,7 +190,7 @@ def do_auto_functionalize(
     """
     from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
 
-    ctx = PythonFunctionalizeAPI(mode)
+    ctx = PythonFunctionalizeAPI()
 
     # All of the (args, kwargs), but all as kwargs. The names for the
     # args come from the schema. This makes it easier for us to work with them.

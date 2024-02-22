@@ -339,7 +339,11 @@ class FunctionalTensorMode(TorchDispatchMode):
         ) and not torch._C._dispatch_has_kernel_for_dispatch_key(
             func.name(), torch._C.DispatchKey.Functionalize
         ):
-            return do_auto_functionalize(func, args, kwargs, self)
+            if self.pre_dispatch:
+                raise NotImplementedError(
+                    "Auto functionalization is not supported on pre-dispatch tracing"
+                )
+            return do_auto_functionalize(func, args, kwargs)
 
         args_unwrapped, kwargs_unwrapped = pytree.tree_map_only(
             FunctionalTensor, unwrap, (args, kwargs)

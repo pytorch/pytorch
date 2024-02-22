@@ -3024,8 +3024,9 @@ def forward(self, arg0_1):
             def forward(self, x):
                 def true_fn(x):
                     y = x.sin()
-                    y.add_(5)
-                    return y.cos()
+                    z = torch.ops.aten.linear.default(y, torch.randn(2, 2))
+                    z.add_(5)
+                    return z.cos()
 
                 def false_fn(x):
                     z = x.cos()
@@ -3052,7 +3053,9 @@ def forward(self, arg0_1):
         self.assertExpectedInline(str(gm.true_graph_0.code).strip(), """\
 def forward(self, arg0_1):
     sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
-    add = torch.ops.aten.add.Tensor(sin, 5);  sin = None
+    randn = torch.ops.aten.randn.default([2, 2], device = device(type='cpu'), pin_memory = False)
+    linear = torch.ops.aten.linear.default(sin, randn);  sin = randn = None
+    add = torch.ops.aten.add.Tensor(linear, 5);  linear = None
     cos = torch.ops.aten.cos.default(add);  add = None
     return (cos,)""")
 
