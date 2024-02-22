@@ -142,23 +142,8 @@ local_rank = int(os.environ["LOCAL_RANK"])
 world_size = 2
 
 
-def create_input(use_dtensor):
-    if not use_dtensor:
-        inp = torch.randn((2, hidden_dim), device=device_type, requires_grad=False)
-    else:
-        # TODO(yf225): per-param FSDP + torch.compile needs DTensor input otherwise throws mixed DTensor / non-DTensor error
-        device_mesh = DeviceMesh(device_type, list(range(world_size)))
-        placements = [Shard(0)]
-        local_tensor = torch.randn(1, hidden_dim, device=device_type, requires_grad=False)
-        inp = torch.distributed._tensor.DTensor(
-            local_tensor,
-            device_mesh,
-            placements,
-            shape=(2, hidden_dim),
-            dtype=local_tensor.dtype,
-            requires_grad=False,
-            stride=local_tensor.stride(),
-        )
+def create_input():
+    inp = torch.randn((2, hidden_dim), device=device_type, requires_grad=False)
     return inp
 
 
@@ -167,7 +152,7 @@ def run(model, optim):
     losses = []
     for _ in range(1):
         optim.zero_grad(set_to_none=True)
-        inp = create_input(use_dtensor=False)
+        inp = create_input()
         torch.storage.resize_count_and_loc = {}
         torch_log.warning("FORWARD")
         out = model(inp)

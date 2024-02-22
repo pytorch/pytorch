@@ -854,11 +854,6 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        # print("here123")
-        # func_name = self.value_type.__name__
-        # # TODO(yf225): I don't know why we need this re-routing, need to figure out.
-        # if func_name == "_pre_forward":
-        #     return super().call_method(tx, name, args, kwargs)
         return super().call_function(tx, args, kwargs)
 
     def var_getattr(self, tx, name):
