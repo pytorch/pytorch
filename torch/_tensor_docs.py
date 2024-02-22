@@ -4487,7 +4487,7 @@ Args:
     index (LongTensor): the indices of elements to scatter, can be either empty
         or of the same dimensionality as ``src``. When empty, the operation
         returns ``self`` unchanged.
-    value (int, float, bool or complex): the value to scatter.
+    value (Scalar): the value to scatter.
 
 Keyword args:
     reduce (str, optional): reduction operation to apply, can be either
