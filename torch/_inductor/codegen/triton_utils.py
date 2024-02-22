@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import torch
 
@@ -50,14 +50,23 @@ def signature_of(arg: KernelArgType, *, size_dtype: str) -> str:
 
 
 def signature_to_meta(
-    signature: List[KernelArgType], *, size_dtype: str
+    signature: List[KernelArgType],
+    *,
+    size_dtype: str,
+    indices: Optional[List[int]] = None,
 ) -> Dict[int, str]:
+    if indices is None:
+        indices = list(range(len(signature)))
     return {
-        i: signature_of(arg, size_dtype=size_dtype) for i, arg in enumerate(signature)
+        i: signature_of(arg, size_dtype=size_dtype)
+        for i, arg in zip(indices, signature)
     }
 
 
-def config_of(args: List[KernelArgType]) -> Any:
+def config_of(args: List[KernelArgType], *, indices: Optional[List[int]] = None) -> Any:
+    if indices is None:
+        indices = list(range(len(args)))
+
     def is_aligned(x: KernelArgType, alignment: int, include_tensor: bool) -> bool:
         """
         Roughly follow triton code here:
@@ -90,14 +99,14 @@ def config_of(args: List[KernelArgType]) -> Any:
     if config.triton.divisible_by_16:
         divisible_by_16 = tuple(
             i
-            for i, arg in enumerate(args)
+            for i, arg in zip(indices, args)
             if is_aligned(arg, alignment=16, include_tensor=True)
         )
     else:
         divisible_by_16 = ()
     divisible_by_8 = tuple(
         i
-        for i, arg in enumerate(args)
+        for i, arg in zip(indices, args)
         if is_aligned(arg, alignment=8, include_tensor=False)
     )
     return instance_descriptor(divisible_by_16, (), (), divisible_by_8)
