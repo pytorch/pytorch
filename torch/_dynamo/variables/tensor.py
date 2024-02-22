@@ -1187,3 +1187,12 @@ class ParameterVariable(VariableTracker):
         else:
             codegen(variables.ConstantVariable.create(False))
             codegen.extend_output(create_call_function(2, True))
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self.tensor.call_method(tx, name, args, kwargs)
