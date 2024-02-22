@@ -314,9 +314,6 @@ Tensor FunctionalInverses::_nested_view_from_jagged_inverse(const Tensor& base, 
 }
 
 Tensor FunctionalInverses::_nested_strided_to_jagged_inverse(const at::Tensor & base, const at::Tensor & mutated_view, at::functionalization::InverseReturnMode inverse_return_mode, const at::Tensor & dummy) {
-  // base is a strided NT
-  auto base_ptr = at::native::get_nested_tensor_impl(base);
-
   // Mutated view is a jagged NT
   auto values = at::_nested_get_values(mutated_view);
   auto offsets = at::_nested_get_offsets(mutated_view);
