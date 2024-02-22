@@ -37,6 +37,10 @@ on:
         required: false
         type: string
         default: ""
+      s3-bucket:
+        description: S3 bucket to download builds
+        required: false
+        default: ""
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -116,6 +120,7 @@ jobs:
         uses: ./.github/actions/download-build-artifacts
         with:
           name: ${{ inputs.build-environment }}
+          s3-bucket: ${{ inputs.s3-bucket }}
 
       - name: Download TD artifacts
         continue-on-error: true
