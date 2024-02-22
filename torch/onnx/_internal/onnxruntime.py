@@ -5,6 +5,7 @@ import os
 
 from typing import (
     Any,
+    Callable,
     Dict,
     Final,
     List,
@@ -63,6 +64,8 @@ __all__ = [
     "OrtExecutionProvider",
     "OrtBackendOptions",
     "OrtBackend",
+    "register_backend_graph_transforms",
+    "unregister_backend_graph_transforms",
 ]
 
 
@@ -87,6 +90,22 @@ def is_onnxrt_backend_supported() -> bool:
 
 
 _dumped_onnx_model: Dict[str, int] = {}
+# Functions sequentially applies to the ONNX model before it is executed by ONNX Runtime.
+_GRAPH_TRANSFORMS: List[Callable[["onnx.ModelProto"], None]] = []
+
+
+def register_backend_graph_transform(
+    transform: Callable[["onnx.ModelProto"], None]
+) -> None:
+    _GRAPH_TRANSFORMS.append(transform)
+
+
+def unregister_backend_graph_transform(
+    transform: Callable[["onnx.ModelProto"], None]
+) -> None:
+    for i, t in enumerate(reversed(_GRAPH_TRANSFORMS)):
+        if t == transform:
+            _GRAPH_TRANSFORMS.pop(len(_GRAPH_TRANSFORMS) - 1 - i)
 
 
 def _dump_onnx_model(
@@ -918,6 +937,10 @@ class OrtBackend:
             onnx_model = exported.to_model_proto(
                 opset_version=self._resolved_onnx_exporter_options.onnx_registry.opset_version,
             )
+
+            # Apply post-conversion modifications to ONNX model.
+            for transform in _GRAPH_TRANSFORMS:
+                transform(onnx_model)
 
             onnx_model_bytes = onnx_model.SerializeToString()
             if os.environ.get("ONNXRT_DUMP_PATH", None):
