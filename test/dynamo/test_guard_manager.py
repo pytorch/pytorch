@@ -214,6 +214,17 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         self.assertFalse(guard_manager.check(f_locals_unaliased))
 
+    def test_dict_version_guard(self):
+        foo = {"a": 1, "b": 2}
+        guard = guards.DICT_VERSION(foo, ["x.version == foo.version"])
+
+        self.assertTrue(guard(foo))
+        self.assertFalse(guard(dict(foo)))
+        foo["a"] = 2
+        self.assertFalse(guard(foo))
+        self.assertFalse(guard({"a": 1, "b": 2}))
+        self.assertFalse(guard({}))
+
     def test_dynamic_indices_guard(self):
         guard1 = guards.DYNAMIC_INDICES(False, set(), ["x.size(0) == y.size(0)"])
         guard2 = guards.DYNAMIC_INDICES(True, set({0, 1}), ["x.size(0) == y.size(0)"])
