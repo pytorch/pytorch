@@ -314,9 +314,7 @@ class DistMatrixOpsTest(DTensorTestBase):
                 dropout_p=dropout_p,
                 is_causal=is_causal,
             )
-            full_out = dist_out.full_tensor()
-            if self.rank == 0:
-                self.assertEqual(full_out, out)
+            self.assertEqual(dist_out.full_tensor(), out)
 
         # TODO: add backward test once we support the backward op
 
