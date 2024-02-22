@@ -40,7 +40,8 @@ on:
       s3-bucket:
         description: S3 bucket to download builds
         required: false
-        default: ""
+        type: string
+        default: "gha-artifacts"
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
