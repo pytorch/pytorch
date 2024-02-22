@@ -137,7 +137,7 @@ def _iterate_state_dict(
                 ret = ret.to(cpu_device)
             else:
                 # TODO: support DTensor
-                companion_obj.copy_(ret)
+                companion_obj.copy_(ret, non_blocking=True)
     else:
         ret = {} if isinstance(ret, dict) else None
 
