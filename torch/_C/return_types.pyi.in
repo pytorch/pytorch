@@ -30,6 +30,6 @@ from torch.types import (
     Number,
 )
 
-all_return_types: List[Type] = []
+${structseq_defs}
 
-${namedtuple_defs}
+all_return_types: List[Type] = []
