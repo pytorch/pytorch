@@ -77,6 +77,9 @@ jobs:
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -105,6 +108,13 @@ jobs:
         uses: ./.github/actions/setup-linux
         with:
           is_arc: true
+
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::391835788720:role/gha-pytorch-ci-artifacts-role
+          role-session-name: gha-arc-runner
+          aws-region: us-east-1
 
       - name: Calculate docker image
         id: calculate-docker-image
@@ -148,12 +158,12 @@ jobs:
           job-name: ${{ steps.get-job-id.outputs.job-name }}
 
 #      TODO - rollback it after we're done with S3 setup
-#      - name: Download pytest cache
-#        uses: ./.github/actions/pytest-cache-download
-#        continue-on-error: true
-#        with:
-#          cache_dir: .pytest_cache
-#          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
+      - name: Download pytest cache
+        uses: ./.github/actions/pytest-cache-download
+        continue-on-error: true
+        with:
+          cache_dir: .pytest_cache
+          job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
 
       - name: Build
         if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
@@ -211,13 +221,6 @@ jobs:
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
         run: |
           sudo zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .additional_ci_files
-
-      - name: configure aws credentials
-        uses: aws-actions/configure-aws-credentials@v3
-        with:
-          role-to-assume: arn:aws:iam::391835788720:role/gha-pytorch-ci-artifacts-role
-          role-session-name: gha-arc-runner
-          aws-region: us-east-1
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@v5
