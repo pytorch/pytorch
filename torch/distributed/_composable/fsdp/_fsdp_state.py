@@ -188,7 +188,8 @@ class FSDPState(_State):
             self._state_ctx.all_states.append(state)
             if state._fsdp_param_group:
                 state._fsdp_param_group.lazy_init()
-        # NOTE(yf225): I believe this causes issue during compile (post_forward hook thinks that `post_forward_mesh_info` is None thus not doing resharding).
+        # NOTE(yf225): I believe this causes issue during compile
+        # (post_forward hook thinks that `post_forward_mesh_info` is None thus not doing resharding and not doing .resize_(0). Is it expected eager behavior?)
         # Need to understand why.
         # if self._fsdp_param_group:
         #     # For the root, do not reshard after forward since for training,
