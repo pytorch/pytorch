@@ -76,7 +76,7 @@ def _maybe_run_with_interpreter(fn):
     return maybe_interpreted_fn
 
 
-# We'll use the current decomposition table to make sure operatos in subgraphs are
+# We'll use the current decomposition table to make sure operators in subgraphs are
 # decomposed properly.
 # We also need to maybe run with interpreter for propagating stack_trace
 def reenter_make_fx(fn, pre_dispatch=False):
