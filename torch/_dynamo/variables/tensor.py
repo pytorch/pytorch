@@ -1160,7 +1160,6 @@ class ParameterVariable(VariableTracker):
 
     def __init__(self, tensor, **kwargs):
         super().__init__(**kwargs)
-        assert isinstance(tensor, TensorVariable)
         self.tensor = tensor
 
     def as_proxy(self):
