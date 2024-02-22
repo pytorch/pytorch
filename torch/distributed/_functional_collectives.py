@@ -12,8 +12,6 @@ from torch.fx.experimental.proxy_tensor import get_innermost_proxy_mode
 from . import _functional_collectives_impl as fun_col_impl
 from ._functional_collectives_impl import (  # noqa: F401
     _register_tensor_wrapper,
-    disable_native_funcol,
-    enable_native_funcol,
     native_funcol_enabled,
 )
 
@@ -482,6 +480,13 @@ def all_to_all_single(
     if native_funcol_enabled():
         group_name = _resolve_group_name(group, tag)
         group_size = c10d._get_group_size_by_name(group_name)
+        if output_split_sizes is None or input_split_sizes is None:
+            assert output_split_sizes is None and input_split_sizes is None, (
+                "output_split_sizes and input_split_sizes must either be "
+                "specified together or both set to None"
+            )
+            output_split_sizes = [self.shape[0] // group_size] * group_size
+            input_split_sizes = output_split_sizes
         tensor = torch.ops._c10d_functional.all_to_all_single(  # type: ignore[attr-defined]
             self,
             output_split_sizes,

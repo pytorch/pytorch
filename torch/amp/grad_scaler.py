@@ -19,11 +19,6 @@ class _MultiDeviceReplicator:
     """
 
     def __init__(self, master_tensor: torch.Tensor) -> None:
-        assert (
-            master_tensor.is_cuda
-            or master_tensor.device.type == "xla"
-            or master_tensor.device.type == "cpu"
-        )
         self.master = master_tensor
         self._per_device_tensors: Dict[torch.device, torch.Tensor] = {}
 
@@ -131,7 +126,6 @@ class GradScaler:
     ) -> None:
         self._device = device
         self._enabled = enabled
-        assert self._device in ["cuda", "cpu"], "GradScaler only supports CUDA and CPU"
         if self._device == "cuda":
             if enabled and torch.cuda.amp.common.amp_definitely_not_available():
                 warnings.warn(
@@ -209,10 +203,6 @@ class GradScaler:
 
         # Short-circuit for the common case.
         if isinstance(outputs, torch.Tensor):
-            if self._device == "cuda":
-                assert outputs.is_cuda or outputs.device.type == "xla"
-            else:
-                assert outputs.device.type == "cpu"
             if self._scale is None:
                 self._lazy_init_scale_growth_tracker(outputs.device)
             assert self._scale is not None
@@ -225,10 +215,6 @@ class GradScaler:
 
         def apply_scale(val: Union[torch.Tensor, Iterable[torch.Tensor]]):
             if isinstance(val, torch.Tensor):
-                if self._device == "cuda":
-                    assert val.is_cuda or val.device.type == "xla"
-                else:
-                    assert val.device.type == "cpu"
                 if len(stash) == 0:
                     if self._scale is None:
                         self._lazy_init_scale_growth_tracker(val.device)
