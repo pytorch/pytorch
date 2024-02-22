@@ -1,7 +1,6 @@
 """
-The following example contains a simple MLP model that uses
-different DTensor layouts, and use the checkpointing API to
-checkpoint save/load the model.
+The following example demonstrates how to represent torchrec's embedding
+sharding with the DTensor API.
 """
 import argparse
 import os
