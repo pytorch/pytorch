@@ -5127,7 +5127,7 @@ def cummax(x, axis=None):
         **kwargs, combine_fn=combine_fn, init=min_value
     )
     if values is None:
-        return fallback_cummax(x, dim=axis, dtype=dtype)
+        return fallback_cummax(x, dim=axis)
     return values, indices
 
 
@@ -5150,7 +5150,7 @@ def cummin(x, axis=None):
         **kwargs, combine_fn=combine_fn, init=max_value
     )
     if values is None:
-        return fallback_cummin(x, dim=axis, dtype=dtype)
+        return fallback_cummin(x, dim=axis)
     return values, indices
 
 
