@@ -821,7 +821,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // The time interval used for deciding whether there is no watchdog heartbeat.
   int heartbeatTimeoutInSec_;
 
-  // timeout for dump to finish.
+  // timeout for the dump to finish.
   int waitTimeoutDumpInMilSec_;
 
   // Interval of check coordinated signals in ProcessGroupNCCL from other ranks

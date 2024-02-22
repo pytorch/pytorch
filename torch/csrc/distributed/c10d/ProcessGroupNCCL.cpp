@@ -950,6 +950,7 @@ void ProcessGroupNCCL::waitForFutureOrTimeout(
     const std::chrono::milliseconds& timeOutMilSec,
     const std::string& futDescription,
     bool throwException) {
+  std::string errorMsg;
   TORCH_CHECK(fut.valid(), "Expected a valid future");
   std::future_status status = fut.wait_for(timeOutMilSec);
   if (status == std::future_status::ready) {
@@ -962,28 +963,22 @@ void ProcessGroupNCCL::waitForFutureOrTimeout(
                   << "future is successfully executed for: " << futDescription;
       }
     } catch (const std::exception& e) {
-      auto errorMsg = c10::str(
+      errorMsg = c10::str(
           logPrefix(),
           "Exception thrown when waitng for future ",
           futDescription,
           ": ",
           e.what());
       LOG(ERROR) << errorMsg;
-      if (throwException) {
-        C10_THROW_ERROR(DistBackendError, errorMsg);
-      }
     } catch (...) {
-      auto errorMsg = c10::str(
+      errorMsg = c10::str(
           logPrefix(),
           "Unknown exception thrown when waitng for future ",
           futDescription);
       LOG(ERROR) << errorMsg;
-      if (throwException) {
-        C10_THROW_ERROR(DistBackendError, errorMsg);
-      }
     }
   } else {
-    auto errorMsg = c10::str(
+    errorMsg = c10::str(
         logPrefix(),
         "Future for ",
         futDescription,
@@ -991,9 +986,9 @@ void ProcessGroupNCCL::waitForFutureOrTimeout(
         timeOutMilSec.count(),
         " ms");
     LOG(ERROR) << errorMsg;
-    if (throwException) {
-      C10_THROW_ERROR(DistBackendError, errorMsg);
-    }
+  }
+  if (throwException && !errorMsg.empty()) {
+    C10_THROW_ERROR(DistBackendError, errorMsg);
   }
 }
 
