@@ -2231,7 +2231,6 @@ void ProcessGroupNCCL::workEnqueue(
       uid_,
       seq_,
       work->profilingTitle_,
-
       // TODO some new way to pass in/out tensor shapes to record()
       // we avoid keeping tensors alive by holding a work obj, so shouldn't
       // store the inputs/outputs directly
@@ -2698,7 +2697,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     if (!coalescing_state_) {
       // Bump sequence number. Don't do so if it's a batch P2P, it will be
       // bumped in `endCoalescing`.
-      LOG(ERROR) << "Bumping seq_ inside pointToPoint" << seq_;
+      // TODO(whc) move this till the end of the op?
+      // and should
       seq_++;
     }
   }
