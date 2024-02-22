@@ -441,7 +441,7 @@ def unsafe_free_storage(tensor: torch.Tensor) -> None:
 def unsafe_setattr_param(
     module: nn.Module, param_name: str, param: nn.Parameter
 ) -> None:
-    if (getattr(module.__setattr__, "__func__", None) is nn.Module.__setattr__):
+    if getattr(module.__setattr__, "__func__", None) is nn.Module.__setattr__:
         module._parameters[param_name] = param
         super(nn.Module, module).__setattr__(param_name, param)
     else:  # slow path
