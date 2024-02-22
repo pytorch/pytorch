@@ -981,7 +981,6 @@ class RelationalGuard : public LeafGuard {
   virtual void reset_state() = 0;
 };
 
-
 /**
  * Checks that tensor x is tensor y.
  */
