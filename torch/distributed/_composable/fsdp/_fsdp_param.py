@@ -240,27 +240,35 @@ class FSDPParam:
         self,
         all_gather_input_numel: int,
         world_size: int,
-        dtype: torch.dtype,
-        device: torch.device,
     ):
         if self.all_gather_output.numel() > 0:
             return  # already initialized
         all_gather_output_size = torch.Size([all_gather_input_numel * world_size])
-        # NOTE(yf225): here we explicitly make fsdp_param.all_gather_output the leaf tensor (instead of unsharded_param being leaf tensor)
-        self.all_gather_output = torch.empty(
-            all_gather_output_size, dtype=dtype, device=device, requires_grad=True
+        # self.all_gather_output = torch.empty(
+        #     all_gather_output_size, dtype=dtype, device=device, requires_grad=True
+        # )
+        self.all_gather_output = torch.as_strided(
+            self._unsharded_param,
+            all_gather_output_size,
+            (1,),
         )
 
-    def init_unsharded_param(self):
+    def init_unsharded_param(self, dtype, device):
         if hasattr(self, "_unsharded_param"):
             return  # already initialized
         # For the default path (no post-all-gather), the all-gather output
         # gives the unsharded parameter data directly
-        unsharded_param = torch.as_strided(
-            self.all_gather_output,
+        # unsharded_param = torch.as_strided(
+        #     self.all_gather_output,
+        #     self._orig_size,
+        #     self._contiguous_orig_stride,
+        #     storage_offset=0,
+        # )
+        # NOTE(yf225): unsharded_param is the leaf tensor, all_gather_output is a view into it
+        unsharded_param = torch.empty(
             self._orig_size,
-            self._contiguous_orig_stride,
-            storage_offset=0,
+            dtype=dtype,
+            device=device,
         )
         if self.is_dtensor:
             unsharded_param = DTensor.from_local(
@@ -365,10 +373,12 @@ class FSDPParam:
         )
 
     def alloc_all_gather_output(self) -> None:
-        unsafe_alloc_storage(self.all_gather_output)
+        # unsafe_alloc_storage(self.all_gather_output)
+        unsafe_alloc_storage(self._unsharded_param)
 
     def free_all_gather_output(self) -> None:
-        unsafe_free_storage(self.all_gather_output)
+        # unsafe_free_storage(self.all_gather_output)
+        unsafe_free_storage(self._unsharded_param)
 
     @property
     def all_gather_input(self) -> torch.Tensor:  # 1D

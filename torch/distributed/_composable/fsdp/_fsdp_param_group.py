@@ -218,11 +218,13 @@ class FSDPParamGroup:
                 if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
                     self._wait_all_gather_streams_on_event(prev_all_gather_state.event)
                 self.comm_ctx.all_gather_state = None  # free the all-gather result
+        all_gather_output = self._all_gather_result[0]
+        dtype, device = all_gather_output.dtype, all_gather_output.device
+        for fsdp_param in self.fsdp_params:
+            fsdp_param.init_unsharded_param(dtype, device)  # no-op after 1st call
         foreach_all_gather_copy_out(
             self._all_gather_result, self.fsdp_params, self._all_gather_process_group
         )
-        for fsdp_param in self.fsdp_params:
-            fsdp_param.init_unsharded_param()  # no-op after 1st call
         self._to_unsharded()
         all_gather_copy_out_event = torch.cuda.Event()
         all_gather_copy_out_event.record()
