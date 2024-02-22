@@ -3535,8 +3535,9 @@ class TritonScheduling(BaseScheduling):
         assert rnumel == 1
         kernel, render = template_node.node.make_kernel_render(template_node.node)
         with kernel:
-            for node in [template_node, *epilogue_nodes]:
-                node.mark_run()
+            if not only_gen_src_code:
+                for node in [template_node, *epilogue_nodes]:
+                    node.mark_run()
             partial_code = render()
             for node in epilogue_nodes:
                 node.codegen(kernel.split_and_set_ranges(node.get_ranges()))

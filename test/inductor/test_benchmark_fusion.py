@@ -136,7 +136,7 @@ class BenchmarkFusionTestTemplate:
         def foo(m, inp):
             curr = m(inp)
             tmps = []
-            for _ in range(10):
+            for _ in range(4):
                 curr = gelu(curr)
                 for t in tmps:
                     curr = curr + t
@@ -144,13 +144,11 @@ class BenchmarkFusionTestTemplate:
 
             return curr
 
-        foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
+        m = torch.nn.Linear(2048, 2048, bias=True).half().cuda()
+        inp = torch.rand([2048, 2048]).half().cuda()
 
         with torch.no_grad():
-            m = torch.nn.Linear(2048, 2048, bias=True).half().cuda()
-            inp = torch.rand([2048, 2048]).half().cuda()
-
-            foo_c(m, inp)
+            foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
 
             _, out_code = run_and_get_code(foo_c, m, inp)
 
@@ -158,6 +156,20 @@ class BenchmarkFusionTestTemplate:
             FileCheck().check("async_compile.wait").check_count(
                 ".run", 2, exactly=True
             ).run(out_code[0])
+
+        with config.patch(
+            {"benchmark_fusion": False, "epilogue_fusion": False}
+        ), torch.no_grad():
+            torch._dynamo.reset()
+
+            foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
+
+            _, out_code2 = run_and_get_code(foo_c, m, inp)
+
+        for c in out_code[0], out_code2[0]:
+            FileCheck().check("async_compile.wait").check("DeviceGuard").check_count(
+                "empty_strided_cuda", 2, exactly=True
+            ).check("return").run(c)
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:
