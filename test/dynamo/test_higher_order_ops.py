@@ -49,10 +49,6 @@ def count_ops(gm, args, freq, op):
     return gm
 
 
-def xfailIfDynamicShape(func):
-    return unittest.expectedFailure(func) if not check_dynamic_shape_capture() else func
-
-
 class Obj:
     pass
 
@@ -3515,8 +3511,10 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(actual, expected)
 
     @config.patch(capture_func_transforms=True)
-    @xfailIfDynamicShape
     def test_jvp_simple(self):
+        if check_dynamic_shape_capture():
+            self.skipTest("test fails with dynamic shapes")
+
         counters.clear()
 
         def fn(x):
@@ -3573,8 +3571,10 @@ class GraphModule(torch.nn.Module):
         )
 
     @config.patch(capture_func_transforms=True)
-    @xfailIfDynamicShape
     def test_jvp_has_aux(self):
+        if check_dynamic_shape_capture():
+            self.skipTest("test fails with dynamic shapes")
+
         counters.clear()
 
         def fn(x):
@@ -3633,8 +3633,10 @@ class GraphModule(torch.nn.Module):
         )
 
     @config.patch(capture_func_transforms=True)
-    @xfailIfDynamicShape
     def test_jvp_two_tensors_has_aux(self):
+        if check_dynamic_shape_capture():
+            self.skipTest("test fails with dynamic shapes")
+
         counters.clear()
 
         def fn(x, y):
@@ -3698,8 +3700,10 @@ class GraphModule(torch.nn.Module):
         )
 
     @config.patch(capture_func_transforms=True)
-    @xfailIfDynamicShape
     def test_jvp_two_tensors_disable_grad(self):
+        if check_dynamic_shape_capture():
+            self.skipTest("test fails with dynamic shapes")
+
         counters.clear()
 
         def fn(x):
@@ -3759,8 +3763,10 @@ class GraphModule(torch.nn.Module):
         )
 
     @config.patch(capture_func_transforms=True)
-    @xfailIfDynamicShape
     def test_jvp_two_tensors_disable_enable_disable_grad(self):
+        if check_dynamic_shape_capture():
+            self.skipTest("test fails with dynamic shapes")
+
         counters.clear()
 
         def fn(x):
@@ -3835,8 +3841,10 @@ class GraphModule(torch.nn.Module):
         )
 
     @config.patch(capture_func_transforms=True)
-    @xfailIfDynamicShape
     def test_jvp_freevar_tensor(self):
+        if check_dynamic_shape_capture():
+            self.skipTest("test fails with dynamic shapes")
+
         counters.clear()
         y = torch.randn(3, 3)
 

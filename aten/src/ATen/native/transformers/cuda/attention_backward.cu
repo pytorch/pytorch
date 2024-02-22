@@ -540,8 +540,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
   Tensor grad_out_t = grad_out_.transpose(1,2);
   Tensor out_t = out.transpose(1,2);
 
-  Tensor grad_q, grad_k, grad_v;
-  std::tie(grad_q, grad_k, grad_v) = at::_flash_attention_backward(
+  auto [grad_q, grad_k, grad_v] = at::_flash_attention_backward(
     grad_out_t,
     q_t,
     k_t,
