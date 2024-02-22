@@ -3879,22 +3879,37 @@ class GraphModule(torch.nn.Module):
         actual = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(actual, expected)
 
-    # @unittest.expectedFailure
-    # @config.patch(capture_func_transforms=True)
-    # def test_jvp_freevar_python_scalar(self):
-    #     counters.clear()
-    #     y = 3
+    @config.patch(capture_func_transforms=True)
+    def test_jvp_jvp(self):
+        counters.clear()
 
-    #     def fn(x):
-    #         return (x.sin() + y).sum()
+        def fn(x):
+            return torch.func.jvp(torch.sin, (x,), (x,))
 
-    #     def wrapper_fn(x):
-    #         return torch.func.jvp(fn, (x,), (x,))
+        def wrapper_fn(x):
+            return torch.func.jvp(fn, (x,), (x,))
 
-    #     x = torch.randn(3, 3, 3)
-    #     expected = wrapper_fn(x)
-    #     actual = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(x)
-    #     self.assertEqual(actual, expected)
+        x = torch.randn(3, 3, 3)
+        expected = wrapper_fn(x)
+        actual = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+
+    @unittest.expectedFailure
+    @config.patch(capture_func_transforms=True)
+    def test_jvp_freevar_python_scalar(self):
+        counters.clear()
+        y = 3
+
+        def fn(x):
+            return (x.sin() + y).sum()
+
+        def wrapper_fn(x):
+            return torch.func.jvp(fn, (x,), (x,))
+
+        x = torch.randn(3, 3, 3)
+        expected = wrapper_fn(x)
+        actual = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(actual, expected)
 
     @config.patch(capture_func_transforms=True)
     @config.patch(error_on_recompile=True)

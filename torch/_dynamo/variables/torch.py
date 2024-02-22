@@ -189,6 +189,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             JvpIncrementNestingCtxManagerVariable,
             SetFwdGradEnabledContextManager,
             StreamVariable,
+            NoOpContextManager,
             VmapIncrementNestingCtxManagerVariable,
         )
 
@@ -263,6 +264,9 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         elif self.value is torch.autograd.forward_ad.dual_level:
             assert len(args) == 0
             return DualLevelContextManager.create(tx)
+        elif self.value is torch._functorch.eager_transforms.noop:
+            assert len(args) == 0
+            return NoOpContextManager.create(tx)
         elif self.value is torch._functorch.eager_transforms.grad_increment_nesting:
             assert len(args) == 0
             return GradIncrementNestingCtxManagerVariable.create(tx)
