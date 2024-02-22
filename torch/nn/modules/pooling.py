@@ -524,8 +524,9 @@ class AvgPool1d(_AvgPoolNd):
               L_{out} = \left\lfloor \frac{L_{in} +
               2 \times \text{padding} - \text{kernel\_size}}{\text{stride}} + 1\right\rfloor
 
-          If ``ceil_mode`` is True and :math:`(L_{out} - 1) \times \text{stride} \geq L_{in} + \text{padding}`,
-          we skip the last window, resulting in :math:`L_{out}` being reduced by one.
+          Per the note above, if``ceil_mode`` is True and :math:`(L_{out} - 1) \times \text{stride} \geq L_{in}
+          + \text{padding}`, we skip the last window as it would start in the right padded region, resulting in
+          :math:`L_{out}` being reduced by one.
 
     Examples::
 
@@ -602,11 +603,11 @@ class AvgPool2d(_AvgPoolNd):
               W_{out} = \left\lfloor\frac{W_{in}  + 2 \times \text{padding}[1] -
                 \text{kernel\_size}[1]}{\text{stride}[1]} + 1\right\rfloor
 
-          If ``ceil_mode`` is True and :math:`(H_{out} - 1)\times \text{stride}[0]\geq H_{in}
-          + \text{padding}[0]`, we skip the last window, resulting in :math:`H_{out}` being reduced by one.
+          Per the note above, if ``ceil_mode`` is True and :math:`(H_{out} - 1)\times \text{stride}[0]\geq H_{in}
+          + \text{padding}[0]`, we skip the last window as it would start in the bottom padded region,
+          resulting in :math:`H_{out}` being reduced by one.
 
-          Same for :math:`W_{out}`, if ``ceil_mode`` is True and :math:`(W_{out} - 1)\times
-          \text{stride}[1]\geq W_{in} + \text{padding}[1]`, :math:`W_{out}` is reduced by one.
+          The same applies for :math:`W_{out}`.
 
     Examples::
 
@@ -694,15 +695,11 @@ class AvgPool3d(_AvgPoolNd):
               W_{out} = \left\lfloor\frac{W_{in} + 2 \times \text{padding}[2] -
                     \text{kernel\_size}[2]}{\text{stride}[2]} + 1\right\rfloor
 
-          If ``ceil_mode`` is True and :math:`(D_{out} - 1)\times \text{stride}[0]\geq D_{in}
-          + \text{padding}[0]`, we skip the last window, resulting in :math:`D_{out}` being
-          reduced by one.
+          Per the note above, if ``ceil_mode`` is True and :math:`(D_{out} - 1)\times \text{stride}[0]\geq D_{in}
+          + \text{padding}[0]`, we skip the last window as it would start in the padded region,
+          resulting in :math:`D_{out}` being reduced by one.
 
-          Same for :math:`H_{out}`, if ``ceil_mode`` is True and :math:`(H_{out} - 1)\times
-          \text{stride}[1]\geq H_{in} + \text{padding}[1]`, :math:`H_{out}` is reduced by one.
-
-          And for :math:`W_{out}`, if ``ceil_mode`` is True and :math:`(W_{out} - 1)\times
-          \text{stride}[2]\geq W_{in} + \text{padding}[2]`, :math:`W_{out}` is reduced by one.
+          The same applies for :math:`W_{out}` and :math:`H_{out}`.
 
     Examples::
 
