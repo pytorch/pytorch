@@ -1555,7 +1555,7 @@ void ProcessGroupNCCL::watchdogHandler() {
 // Some versions of GLOG support less-spammy version of LOG_EVERY_MS
 // in which case we don't want to spam the logs.
 #ifdef LOG_EVERY_MS
-    // Log the progress of this PG every periodically
+    // Log the progress of this PG periodically
     C10_LOG_EVERY_MS(INFO, kWorkStatusUpdatePeriodMs) << c10::str(
         logPrefix(),
         "NCCL Work update periodically: ",
