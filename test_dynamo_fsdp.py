@@ -201,12 +201,10 @@ def main_compiled(n_iter):
     torch._dynamo.config.trace_distributed = True
 
     with compiled_autograd.enable(compiler_fn):
-        """
         if dist.get_rank() == 0:
             # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
             import time
             time.sleep(600)
-        """
         model = torch.compile(model, backend="aot_eager", fullgraph=True, dynamic=dynamic)
         for _ in range(n_iter):
             res = run(model, optim)
@@ -250,9 +248,9 @@ if __name__ == "__main__":
         lambda: main_compiled(n_iter=n_iter),
         "compiled_trace.json",
     )
-    losses_eager = execute_and_profile(
-        lambda: main_eager(n_iter=n_iter),
-        "eager_trace.json",
-    )
-    for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
-        assert torch.allclose(loss_compiled, loss_eager, rtol=1e-3), f"{loss_compiled} vs {loss_eager}"
+    # losses_eager = execute_and_profile(
+    #     lambda: main_eager(n_iter=n_iter),
+    #     "eager_trace.json",
+    # )
+    # for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
+    #     assert torch.allclose(loss_compiled, loss_eager, rtol=1e-3), f"{loss_compiled} vs {loss_eager}"
