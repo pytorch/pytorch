@@ -90,7 +90,11 @@ void initDeviceProperties(DeviceProp* device_prop, int device) {
 }
 
 inline void check_device(DeviceIndex device) {
-  auto total = static_cast<int16_t>(gDevicePool.devices.size());
+  // TODO: Use c10::Device::MAX_NUM_DEVICES directly.
+  TORCH_CHECK(
+      gDevicePool.devices.size() <= std::numeric_limits<DeviceIndex>::max(),
+      "Too many XPU devices, DeviceIndex overflowed");
+  auto total = static_cast<DeviceIndex>(gDevicePool.devices.size());
   TORCH_CHECK(
       device >= 0 && device < total,
       "device is out of range, device is ",
