@@ -99,7 +99,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
     * For unique_dim, we are taking the unique with respect to a index
     * tensor, but during the processes, we override the compare and equal
     * operator by checking the data underlying it instead. After the
-    * algorithm, we would use index_select to map the resulting indicies
+    * algorithm, we would use index_select to map the resulting indices
     * to the result on the actual data.
     */
 
