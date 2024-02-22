@@ -358,8 +358,8 @@ def create_functionalized_fn(
             # operator
             tokens = f_args[: len(meta.tokens)]
             f_args = f_args[len(meta.tokens) :]
-            functional_tensor_mode = torch._C._get_dispatch_mode(
-                torch._C._TorchDispatchModeKey.FUNCTIONAL
+            functional_tensor_mode = (
+                torch.utils._python_dispatch._detect_functional_mode()
             )
             assert functional_tensor_mode is not None
             for i, k in enumerate(meta.tokens.keys()):
@@ -369,7 +369,7 @@ def create_functionalized_fn(
             f_outs = fn(*f_args)
 
             # Return both the tokens and the outputs
-            f_outs = [*functional_tensor_mode._tokens.values(), *f_outs]
+            f_outs = tuple([*functional_tensor_mode._tokens.values(), *f_outs])
 
         if trace_joint:
             # We support a limited amount of mutation of graph inputs during the backward pass.

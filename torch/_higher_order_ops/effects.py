@@ -62,7 +62,11 @@ def has_aliasing(op: torch._ops.OpOverload):
 
 
 def has_effects(op, args, kwargs) -> bool:
-    return get_effect_key(op, args, kwargs) is not None
+    return (
+        isinstance(op, torch._ops.OpOverload) and
+        not has_aliasing(op) and
+        get_effect_key(op, args, kwargs) is not None
+    )
 
 
 def get_effect_key(op, args, kwargs) -> Optional[_EffectType]:
