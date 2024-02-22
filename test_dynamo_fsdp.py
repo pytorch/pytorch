@@ -3,13 +3,9 @@ Adapted from fsdp.py in https://github.com/pytorch/pytorch/pull/110609.
 """
 
 """
-CUDA_VISIBLE_DEVICES=6,7 TORCH_COMPILE_DEBUG=1 TORCH_LOGS_RANKS=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py
-
-CUDA_VISIBLE_DEVICES=6,7 TORCH_COMPILE_DEBUG=1 TORCH_LOGS_RANKS=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py
-
-CUDA_VISIBLE_DEVICES=6,7 TORCH_LOGS_RANKS=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py
-
 CUDA_VISIBLE_DEVICES=6,7 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py
+
+CUDA_VISIBLE_DEVICES=6,7 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py
 """
 import contextlib
 import logging
@@ -170,7 +166,6 @@ def run(model, optim):
     return losses
 
 
-# def main(compiled_fwd, compiled_bwd, aot_eager):
 def main_compiled(n_iter):
     model, optim = init()
     # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
@@ -226,16 +221,15 @@ if __name__ == "__main__":
     dist.init_process_group(backend="nccl")
     device = f"{device_type}:{local_rank}"
     torch.cuda.set_device(device)
-    # res = main(compiled_fwd=args.compiled_fwd, compiled_bwd=args.compiled_bwd, aot_eager=args.aot_eager)
 
     n_iter = 5
     losses_compiled = execute_and_profile(
         lambda: main_compiled(n_iter=n_iter),
         "compiled_trace.json",
     )
-    # losses_eager = execute_and_profile(
-    #     lambda: main_eager(n_iter=n_iter),
-    #     "eager_trace.json",
-    # )
-    # for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
-    #     assert torch.allclose(loss_compiled, loss_eager, rtol=1e-3), f"{loss_compiled} vs {loss_eager}"
+    losses_eager = execute_and_profile(
+        lambda: main_eager(n_iter=n_iter),
+        "eager_trace.json",
+    )
+    for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
+        assert torch.allclose(loss_compiled, loss_eager, rtol=1e-3), f"{loss_compiled} vs {loss_eager}"

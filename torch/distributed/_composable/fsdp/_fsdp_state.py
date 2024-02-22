@@ -237,6 +237,8 @@ class FSDPState(_State):
         flat_outputs, _ = tree_flatten(output)
         tensors = tuple(t for t in flat_outputs if t.requires_grad)
         if tensors:
+            # NOTE(yf225): unfortunately `t.grad_fn` is not supported by Dynamo yet, so we set grad_fns = [] here
+            # and unconditionally do unshard in `_prefetch_unshard()`
             if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
                 grad_fns = tuple(t.grad_fn for t in tensors if t.grad_fn is not None)
             else:

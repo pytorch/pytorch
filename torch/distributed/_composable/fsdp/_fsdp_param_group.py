@@ -336,7 +336,8 @@ class FSDPParamGroup:
             if (target_index := curr_index - 1) < 0:
                 return
             target_fsdp_param_group = self.comm_ctx.post_forward_order[target_index]
-            # When compile, we always do unshard and rely on Inductor DCE to remove the unnecessary ops
+            # NOTE(yf225): since compile doesn't support `t.grad_fn` access or `torch._C._will_engine_execute_node()` yet,
+            # when compile, we always do unshard and rely on Inductor DCE to remove the unnecessary ops
             if torch.distributed._functional_collectives.is_torchdynamo_compiling() or \
             any(
                 torch._C._will_engine_execute_node(grad_fn)  # type: ignore[attr-defined]
