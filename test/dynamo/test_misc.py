@@ -5857,6 +5857,31 @@ def fn():
         self.assertEqual(f(), torch.zeros(2, 2))
         self.assertEqual(opt_f(), torch.ones(2, 2))
 
+    def test_is_fullgraph_compiling(self):
+        def f():
+            if torch._dynamo.is_fullgraph_compiling():
+                return torch.ones(2, 2)
+            else:
+                return torch.zeros(2, 2)
+
+        def g():
+            if torch._dynamo.is_fullgraph_compiling():
+                return torch.ones(2, 2)
+            else:
+                return torch.zeros(2, 2)
+
+        self.assertEqual(f(), torch.zeros(2, 2))
+
+        opt_f = torch.compile(f, fullgraph=True)
+
+        self.assertEqual(f(), torch.zeros(2, 2))
+        self.assertEqual(opt_f(), torch.ones(2, 2))
+
+        opt_g = torch.compile(g, fullgraph=False)
+
+        self.assertEqual(g(), torch.zeros(2, 2))
+        self.assertEqual(opt_g(), torch.zeros(2, 2))
+
     def test_torch_generator_set_state(self):
         def fn():
             default_state = torch.default_generator.get_state()

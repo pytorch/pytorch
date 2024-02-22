@@ -2433,6 +2433,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             inline_depth=parent.inline_depth + 1,
             speculation_log=parent.speculation_log,
         )
+        self.one_graph = parent.one_graph
         self.parent = parent
         self.symbolic_result = None
         self.closure_cells = closure_cells

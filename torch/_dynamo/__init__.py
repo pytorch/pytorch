@@ -27,7 +27,7 @@ from .eval_frame import (
     OptimizedModule,
     reset_code,
 )
-from .external_utils import is_compiling
+from .external_utils import is_compiling, is_fullgraph_compiling
 from .utils import graph_break_reasons, guard_failures, orig_code_map, reset_frame_count
 
 __all__ = [
@@ -50,6 +50,7 @@ __all__ = [
     "reset",
     "OptimizedModule",
     "is_compiling",
+    "is_fullgraph_compiling",
     "register_backend",
     "list_backends",
     "lookup_backend",

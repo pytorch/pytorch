@@ -284,6 +284,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
                 ),
             )
+        elif self.value == torch._dynamo.external_utils.is_fullgraph_compiling:
+            # See: https://github.com/pytorch/pytorch/issues/110765
+            tx.mark_inconsistent_side_effects()
+
+            return ConstantVariable.create(tx.one_graph)
         elif self.value in tracing_state_functions:
             assert not args and not kwargs
             # See: https://github.com/pytorch/pytorch/issues/110765
@@ -292,6 +297,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 torch._dynamo.external_utils.is_compiling,
             ):
                 tx.mark_inconsistent_side_effects()
+
             return ConstantVariable.create(tracing_state_functions[self.value])
         elif self.value in (torch._functorch.eager_transforms.grad_impl,):
             return TorchHigherOrderOperatorVariable.make(
