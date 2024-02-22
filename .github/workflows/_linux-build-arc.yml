@@ -77,9 +77,6 @@ jobs:
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
-    permissions:
-      id-token: write
-      contents: read
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
