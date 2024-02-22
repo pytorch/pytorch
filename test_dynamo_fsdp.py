@@ -129,7 +129,7 @@ def init():
             model,
             **fsdp_kwargs,
         )
-    optim = torch.optim.SGD(model.parameters(), lr=1e-3)
+    optim = torch.optim.SGD(model.parameters(), lr=1e-6)
     return model, optim
 
 
