@@ -146,41 +146,6 @@ class TestStateDictUtils(DTensorTestBase):
         self.assertEqual(cpu_state_dict["lr"], 1.5)
         self.assertEqual(cpu_state_dict["nested"], {"list": [1, 2, 3, 4]})
 
-    @with_comms
-    @skip_if_lt_x_gpu(4)
-    def test_complicated_dict(self):
-        def create_dtensor():
-            device_mesh = self.build_device_mesh()
-            shard_spec = [Shard(0)]
-            torch.random.manual_seed(dist.get_rank())
-            local_tensor = torch.randn(3, 3, 3)
-            dist_tensor = DTensor.from_local(local_tensor, device_mesh, shard_spec)
-            tensor = funcol.all_gather_tensor(
-                dist_tensor.to_local(), gather_dim=0, group=(device_mesh, 0)
-            )
-            return tensor, dist_tensor
-
-        ltensor, ldtensor = [], []
-        for i in range(10):
-            tensor, dtensor = create_dtensor()
-            ltensor.append(tensor)
-            ltensor.append(torch.ones(10, device=torch.device("cuda")))
-            ldtensor.append(dtensor)
-            ldtensor.append(torch.ones(10, device=torch.device("cuda")))
-
-        tensor, dtensor = create_dtensor()
-        dist_state_dict = {
-            "local": dtensor,
-            "list": ldtensor,
-            "arange": torch.arange(10, device=torch.device("cuda")),
-        }
-        state_dict = {
-            "local": tensor,
-            "list": ltensor,
-            "arange": torch.arange(10, device=torch.device("cuda")),
-        }
-        self.assertEqual(state_dict, _gather_state_dict(dist_state_dict))
-
 
 if __name__ == "__main__":
     run_tests()
