@@ -545,11 +545,14 @@ class TestNestedTensor(TestCase):
 
         # Strided to jagged (not implemented yet)
         if layout == torch.strided:
-            jagged_nt = torch.ops.aten._to_copy(nt, layout=torch.jagged)
+            convertible_nt = random_nt_from_dims((7, None, 10), torch.device('cpu'), torch.float32, layout=torch.strided)
+            with self.assertRaisesRegex(AssertionError, "Only strided NTs with 1 jagged dim can be converted to jagged NT"):
+                jagged_nt = torch.ops.aten._to_copy(nt, layout=torch.jagged)
+            jagged_nt = torch.ops.aten._to_copy(convertible_nt, layout=torch.jagged)
+            print(jagged_nt)
             self.assertIs(jagged_nt.layout, torch.jagged)
             self.assertEqual(jagged_nt.device, nt.device)
-            self.assertEqual(jagged_nt.size(2), nt.size(2))
-            self.assertEqual(jagged_nt.unbind(), nt.unbind())
+            self.assertEqual(jagged_nt.unbind(), convertible_nt.unbind())
 
     def test_copy_(self):
         ntensors = 4

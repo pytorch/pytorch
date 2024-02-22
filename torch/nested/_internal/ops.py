@@ -1117,10 +1117,69 @@ def _nested_get_ragged_idx(func, *args, **kwargs):
     return inp._ragged_idx
 
 
-@torch.ops.aten._nested_get_jagged_dummy.default.py_impl(torch._C.DispatchKey.CPU)
-@torch.ops.aten._nested_get_jagged_dummy.default.py_impl(torch._C.DispatchKey.CUDA)
-@torch.ops.aten._nested_get_jagged_dummy.default.py_impl(torch._C.DispatchKey.Meta)
+@register_jagged_func(
+    torch.ops.aten._nested_strided_to_jagged.default, "self: t, dummy: jt_all"
+)
+def _nested_strided_to_jagged(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp: torch.Tensor = new_kwargs.pop("input")
+
+    # All jagged NT can be converted into strided NTs, but the opposite is not True
+    # Only strided NTs with a single jagged dimension might be converted into
+    # jagged NTs, so first we check for that
+    ragged_dims_count = 0
+    ragged_idx = -1
+    for i in range(inp.dim()):
+        try:
+            inp.size(i)
+        except RuntimeError:
+            ragged_dims_count += 1
+            ragged_idx = i
+    assert (
+        ragged_dims_count == 1
+    ), "Only strided NTs with 1 jagged dim can be converted to jagged NT"
+
+    # Once that's checked, we convert the offsets + sizes in strided NT to
+    # offsets + (optionally) lengths for the jagged NT
+    nested_sizes = inp._nested_tensor_size()
+    nested_strides = inp._nested_tensor_strides()
+    nested_offsets = inp._nested_tensor_storage_offsets()
+
+    post_ragged_stride = nested_strides[0, ragged_idx - 1].item()
+    batch_size = nested_offsets.size(0)
+    jagged_offsets = torch.empty(
+        (batch_size + 1,), device=inp.device, dtype=torch.int64
+    )
+    jagged_lengths = torch.empty((batch_size,), device=inp.device, dtype=torch.int64)
+
+    jagged_offsets[:batch_size] = nested_offsets / post_ragged_stride
+    jagged_offsets[-1] = jagged_offsets[-2] + nested_sizes[-1][ragged_idx - 1]
+    jagged_lengths = nested_sizes[:, ragged_idx - 1]
+    lengths_needed = not torch.all(jagged_lengths == jagged_offsets.diff())
+
+    nested_values = inp._nested_tensor_buffer()
+    values_shape = [
+        size for i, size in enumerate(nested_sizes[0].tolist()) if i != ragged_idx - 1
+    ]
+    return NestedTensor(
+        nested_values.view(-1, *values_shape),
+        jagged_offsets,
+        lengths=jagged_lengths if lengths_needed else None,
+        _ragged_idx=ragged_idx,
+    )
+
+
 def _nested_get_jagged_dummy(_):
     return NestedTensor(
         values=torch.randn(1, 1, device="meta"), offsets=torch.randn(1, device="meta")
     )
+
+
+aten = torch.library.Library("aten", "IMPL")
+# aten.define("_nested_get_jagged_dummy(Tensor any) -> Tensor")
+aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "CPU")
+aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "CUDA")
+aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "Meta")
