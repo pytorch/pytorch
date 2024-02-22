@@ -18,7 +18,7 @@ class AllGatherResult(NamedTuple):
     all_gather_input_numels: List[int]
 
 
-@torch.no_grad()
+# @torch.no_grad()
 def foreach_all_gather(
     fsdp_params: List[FSDPParam],
     group: dist.ProcessGroup,
@@ -75,7 +75,7 @@ def foreach_all_gather(
         )
 
 
-@torch.no_grad()
+# @torch.no_grad()
 def foreach_all_gather_copy_out(
     all_gather_result: AllGatherResult,
     fsdp_params: List[FSDPParam],
@@ -114,7 +114,7 @@ def foreach_all_gather_copy_out(
             torch._foreach_copy_(out, splits)
 
 
-@torch.no_grad()
+# @torch.no_grad()
 def foreach_reduce_scatter(
     fsdp_params: List[FSDPParam],
     unsharded_grads: List[torch.Tensor],
