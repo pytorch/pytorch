@@ -423,14 +423,16 @@ def unsafe_alloc_storage(tensor: torch.Tensor) -> None:
     if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
         tensor.untyped_storage().resize_(tensor.numel() * tensor.itemsize)
     else:
-        # NOTE(yf225): we rely on Inductor to do the DCE
         pass
 
 
 def unsafe_free_storage(tensor: torch.Tensor) -> None:
     # Skip the already-freed check to save CPU overhead
-    tensor.untyped_storage().resize_(0)
-    # pass
+    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        tensor.untyped_storage().resize_(0)
+    else:
+        # NOTE(yf225): we rely on Inductor to do the DCE
+        pass
 
 
 # NOTE: These bypass `nn.Module.__setattr__` checks, which incur non-trivial
