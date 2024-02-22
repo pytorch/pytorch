@@ -25,12 +25,12 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
   Device exchangeDevice(Device d) const override {
     TORCH_INTERNAL_ASSERT(d.is_xpu());
-    auto old_device_index = c10::xpu::exchange_device(d.index());
+    const auto old_device_index = c10::xpu::exchange_device(d.index());
     return Device(kXPU, old_device_index);
   }
 
   Device getDevice() const override {
-    auto device = c10::xpu::current_device();
+    const auto device = c10::xpu::current_device();
     return Device(kXPU, device);
   }
 
@@ -54,8 +54,8 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
   // NB: These do NOT set the current device
   Stream exchangeStream(Stream s) const noexcept override {
-    XPUStream stream(s);
-    auto old_stream = getCurrentXPUStream(s.device().index());
+    const XPUStream stream(s);
+    const auto old_stream = getCurrentXPUStream(s.device().index());
     setCurrentXPUStream(stream);
     return old_stream.unwrap();
   }
@@ -82,7 +82,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
         ".");
 
     auto* xpu_event = reinterpret_cast<sycl::event*>(*event);
-    XPUStream xpu_stream{stream};
+    const XPUStream xpu_stream{stream};
     *xpu_event = xpu_stream.queue().ext_oneapi_submit_barrier();
   }
 
@@ -91,7 +91,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       return;
     auto* xpu_event = reinterpret_cast<sycl::event*>(event);
     std::vector<sycl::event> event_list{*xpu_event};
-    XPUStream xpu_stream(stream);
+    const XPUStream xpu_stream(stream);
     xpu_stream.queue().ext_oneapi_submit_barrier(event_list);
   }
 
@@ -106,18 +106,18 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
   // Stream-related functions
   bool queryStream(const Stream& stream) const override {
-    XPUStream xpu_stream{stream};
+    const XPUStream xpu_stream{stream};
     return xpu_stream.query();
   }
 
   void synchronizeStream(const Stream& stream) const override {
-    XPUStream xpu_stream{stream};
+    const XPUStream xpu_stream{stream};
     xpu_stream.synchronize();
   }
 
   void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)
       const override {
-    XPUStream xpu_stream{stream};
+    const XPUStream xpu_stream{stream};
     XPUCachingAllocator::recordStream(data_ptr, xpu_stream);
   }
 };
