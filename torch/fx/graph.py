@@ -505,7 +505,7 @@ class CodeGen:
 
             if node.op not in {'placeholder', 'output'}:
                 if node.stack_trace:
-                    if node.stack_trace != prev_stacktrace:
+                    if node.stack_trace != prev_stacktrace:  # type: ignore[has-type]
                         prev_stacktrace = node.stack_trace
                         summary_str = ""
 
