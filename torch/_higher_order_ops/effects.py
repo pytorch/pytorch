@@ -1,10 +1,10 @@
-from typing import Any, Callable, Dict, List, Tuple, Union
+from enum import Enum
+from typing import Any, Dict, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._ops import HigherOrderOperator
-from torch._prims_common import clone_preserve_strides
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
@@ -13,15 +13,25 @@ from torch.fx.experimental.proxy_tensor import (
 )
 
 
-SIDE_EFFECTFUL_OPS = {
-    torch.ops.aten.print.default
-}
+SIDE_EFFECTFUL_OPS = {torch.ops.aten._print.default}
 
 
-with_effects = HigherOrderOperator("with_effects")
+class _EffectType(Enum):
+    ORDERED = "Ordered"
+
+
 class WithEffects(HigherOrderOperator):
     """
     with_effects(token, op, args, kwargs) -> (new_token, op_results)
+
+    This HOP helps ensure ordering between side effectful ops like prints or ops
+    using torchbind objects. This is needed to ensure a traced graph from
+    AOTAutograd is functional so that future optimization passes do not reorder
+    these operators. This is done through threading "effect tokens" through the
+    graph to enforce data dependence between side effectful ops.
+
+    The tokens are basically dummy values (torch.tensor([])). We create a token
+    per "effect type", which are enumerated in the _EffectType enum.
     """
 
     def __init__(self):
@@ -34,6 +44,8 @@ class WithEffects(HigherOrderOperator):
         *args: Tuple[Any, ...],
         **kwargs: Dict[str, Any],
     ) -> Tuple[Any, ...]:
+        assert isinstance(op, torch._ops.OpOverload)
+        assert not has_aliasing(op), "Ops with aliasing is not supported"
         assert has_effects(op, args, kwargs)
         assert isinstance(kwargs, dict)
         return super().__call__(token, op, *args, **kwargs)
@@ -42,17 +54,24 @@ class WithEffects(HigherOrderOperator):
 with_effects = WithEffects()
 
 
-def has_effects(op, args, kwargs):
-    return get_tokenize_key(op, args, kwargs) is not None
+def has_aliasing(op: torch._ops.OpOverload):
+    for arg in op._schema.arguments:
+        if arg.alias_info is not None:
+            return True
+    return False
 
 
-def get_tokenize_key(op, args, kwargs):
+def has_effects(op, args, kwargs) -> bool:
+    return get_effect_key(op, args, kwargs) is not None
+
+
+def get_effect_key(op, args, kwargs) -> Optional[_EffectType]:
     if op in SIDE_EFFECTFUL_OPS:
-        return op
+        return _EffectType.ORDERED
 
     for arg in args:
         if isinstance(arg, torch.ScriptObject):
-            return arg
+            return _EffectType.ORDERED
 
     return None
 
@@ -117,16 +136,31 @@ with_effects.fallthrough(DispatchKey.AutogradCUDA)
 
 
 def handle_effects(
-    tokens: Dict[Any, torch.Tensor],
+    tracing: bool,
+    tokens: Dict[_EffectType, torch.Tensor],
     op: torch._ops.OpOverload,
     args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
-) -> Tuple[List[torch.Tensor], Any]:
+) -> Any:
+    """
+    Args:
+        tracing: Whether or not we are currently tracing. If we are not tracing,
+        we will create tokens for every effect seen that does not already have a
+        token. If we ware tracing, then the `tokens` dict should already be
+        populated, and we will query tokens from there.
+
+        tokens: Map of effect type to tokens. This is to chain operators of the
+        same effects together so that they do not get reordered in later
+        optimization passes.
+    """
+
     # Get a token. We can't do `tokens.get(op, torch.tensor([]))` because
     # this will create an empty tensor during proxy mode tracing if the token
     # doesn't exist. But the tokens should always exist during proxy mode tracing.
-    key = get_tokenize_key(op, args, kwargs)
+    key = get_effect_key(op, args, kwargs)
+    assert key is not None
     if key not in tokens:
+        assert not tracing, f"Could not find a token for effect {key}"
         tokens[key] = torch.tensor([])
     token = tokens[key]
 
@@ -144,7 +178,7 @@ def handle_effects(
 
     if len(op._schema.returns) == 0:
         assert unwrapped_outs[0] is None
-        unwrapped_outs = None
+        unwrapped_outs = None  # type: ignore[assignment]
     elif len(op._schema.returns) == 1:
         assert len(unwrapped_outs) == 1
         unwrapped_outs = unwrapped_outs[0]
@@ -153,6 +187,8 @@ def handle_effects(
 
     # Add the newly created token into the tokens map for a following call to
     # use this token.
-    tokens[key] = new_token
+    wrapped_token = ctx.wrap_tensors(new_token)
+    assert isinstance(wrapped_token, torch.Tensor)
+    tokens[key] = wrapped_token
 
     return ctx.wrap_tensors(unwrapped_outs)  # type: ignore[arg-type]

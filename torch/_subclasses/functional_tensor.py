@@ -1,6 +1,6 @@
 import contextlib
 from abc import ABC, abstractmethod
-from typing import Any, Callable, ContextManager, Dict, Tuple, Union
+from typing import Any, Callable, ContextManager, Dict, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -211,7 +211,7 @@ class FunctionalTensor(torch.Tensor):
 
 
 class FunctionalTensorMode(TorchDispatchMode):
-    def __init__(self, pre_dispatch=False, export=False):
+    def __init__(self, pre_dispatch=False, export=False, _tracing=True):
         self.export = export
         self.is_on_stack = False
         self.enter_stack = []
@@ -220,12 +220,21 @@ class FunctionalTensorMode(TorchDispatchMode):
         self._mode_key = torch._C._TorchDispatchModeKey.FUNCTIONAL
         # This will be turned off later for pre-dispatch functionalization
         self._dispatch_key = torch._C.DispatchKey.PreDispatch if pre_dispatch else None  # type: ignore[attr-defined]
-        # Map of functions or ScriptObjects to a token. The tokens help keep
-        # track of the ordering between side effectful operations. We have a
-        # token per ScriptObject and a token per function.
-        self._tokens: Dict[
-            Union[torch._ops.OpOverload, torch.ScriptObject], torch.Tensor
-        ] = {}
+        # Map of effect type (ex. _EffectType.ORDERED) to a token. The tokens help keep
+        # track of the ordering between side effectful operations.
+        self._tokens: Dict[Any, torch.Tensor] = {}
+
+        # Functionalization runs twice in AOTAutograd, once in
+        # `run_functionalized_fw_and_collect_metadata` to collect metadata to
+        # see which tensors need to be functionalized and how many tokens we
+        # need, and another time in `make_fx` which does the actual tracing to
+        # replace ops with their functional variants and handling side-effectful
+        # ops. We need to distinguish these two tracing modes for handling
+        # side-effectful ops. In the first functionalization pass, where
+        # tracing=False, we will count the number of tokens needed. In the
+        # second functionalization pass, when tracing=True, we will insert
+        # tokens into the graph.
+        self._tracing = _tracing
 
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):
@@ -340,12 +349,11 @@ class FunctionalTensorMode(TorchDispatchMode):
 
         from torch._higher_order_ops.effects import handle_effects, has_effects
 
-        if has_effects(
-            func, args, kwargs
-        ) and not torch._C._dispatch_has_kernel_for_dispatch_key(
-            func.name(), torch._C.DispatchKey.Functionalize
-        ):
-            return handle_effects(self._tokens, func, args, kwargs)
+        if has_effects(func, args, kwargs):
+            assert not torch._C._dispatch_has_kernel_for_dispatch_key(
+                func.name(), torch._C.DispatchKey.Functionalize
+            )
+            return handle_effects(self._tracing, self._tokens, func, args, kwargs)
 
         args_unwrapped, kwargs_unwrapped = pytree.tree_map_only(
             FunctionalTensor, unwrap, (args, kwargs)

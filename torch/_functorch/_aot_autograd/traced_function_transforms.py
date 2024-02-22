@@ -23,7 +23,6 @@ from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
 from torch._prims_common import CUDARngStateHelper
-from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.symbolic_shapes import definitely_false, sym_eq
 from torch.nn.utils import stateless
 
@@ -351,8 +350,7 @@ def create_functionalized_fn(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
 
-        mode = FunctionalTensorMode(aot_config.pre_dispatch, aot_config.is_export)
-        with disable_above, mode:
+        with disable_above:
             # Wrap inputs into functional wrappers
             f_args = pytree.tree_map(to_fun, args)
 
@@ -360,14 +358,18 @@ def create_functionalized_fn(
             # operator
             tokens = f_args[: len(meta.tokens)]
             f_args = f_args[len(meta.tokens) :]
+            functional_tensor_mode = torch._C._get_dispatch_mode(
+                torch._C._TorchDispatchModeKey.FUNCTIONAL
+            )
+            assert functional_tensor_mode is not None
             for i, k in enumerate(meta.tokens.keys()):
-                mode._tokens[k] = tokens[i]
+                functional_tensor_mode._tokens[k] = tokens[i]
 
             # Run the joint
             f_outs = fn(*f_args)
 
             # Return both the tokens and the outputs
-            f_outs = [*mode._tokens.values(), *f_outs]
+            f_outs = [*functional_tensor_mode._tokens.values(), *f_outs]
 
         if trace_joint:
             # We support a limited amount of mutation of graph inputs during the backward pass.
@@ -591,7 +593,6 @@ def aot_dispatch_subclass(
         metadata_fn,
         keep_input_mutations=meta.keep_input_mutations,
         is_train=meta.is_train,
-        requires_subclass_dispatch=True,
     )(*primals_unwrapped)
 
     subclass_meta.fw_metadata = meta_updated
