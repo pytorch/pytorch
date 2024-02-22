@@ -49,6 +49,7 @@ namespace at {
 // mutation removal.
 struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   explicit FunctionalTensorWrapper(const Tensor& value);
+  explicit FunctionalTensorWrapper(const Tensor& value, const Storage& storage);
   // Additional constructor to create a FunctionalTensorWrapper directly from an
   // underlying tensor that was created from a view. For example, the code b =
   // a.view1() will generate a constructor call to FunctionalTensorWrapper(b, a,
@@ -143,6 +144,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   bool was_storage_changed() {
     return was_storage_changed_;
   }
+
+  Tensor get_base_functional_tensor() const;
 
   // The functionalization pass can be used to remove mutations.
   // It does so by replacing any mutation op with it's corresponding

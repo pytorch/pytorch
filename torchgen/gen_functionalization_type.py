@@ -716,7 +716,7 @@ def gen_functionalization_registration(
     if isinstance(g, NativeFunctionsViewGroup):
         # functionalization needs to register kernels for view + view_inplace ops
         # See Note [Functionalization <> torch.Tensor constructor]
-        if str(g.view.func.name) == "lift_fresh":
+        if str(g.view.func.name) in ("lift_fresh", "as_strided"):
             return []
         view_str = []
         if not g.view.has_composite_implicit_autograd_kernel:

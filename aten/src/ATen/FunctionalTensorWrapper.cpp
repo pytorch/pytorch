@@ -61,6 +61,12 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
   set_constructor_metadata();
 }
 
+FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value, const Storage& storage)
+  : FunctionalTensorWrapper(value)
+{
+    storage_ = storage;
+}
+
 void FunctionalTensorWrapper::freeze_storage() const {
   functional_storage_impl()->freeze();
 }
@@ -241,6 +247,10 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
 bool FunctionalTensorWrapper::has_data_mutation() {
   // Current tensor's data was mutated if its storage saw any mutations.
   return functional_storage_impl()->generation() > 0;
+}
+
+Tensor FunctionalTensorWrapper::get_base_functional_tensor() const {
+  return at::detail::make_tensor<FunctionalTensorWrapper>(functional_storage_impl()->base(), storage_);
 }
 
 void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
