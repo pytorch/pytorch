@@ -100,6 +100,7 @@ def _fsdp_state_pre_backward(self, forward_grad_fns: Tuple[Node, ...], grad) -> 
     self._register_root_post_backward_final_callback()
     if self._fsdp_param_group:
         self._fsdp_param_group.pre_backward(forward_grad_fns)
+    # NOTE(yf225): this is only needed because we are using `register_hook`. Not needed if we use `register_multi_grad_hook`.
     return grad
 
 def _fsdp_state_root_post_backward_final_callback(self, *unused) -> None:
