@@ -29,4 +29,4 @@ from torch.types import (
     Number,
 )
 
-${namedtuple_defs}
+${structseq_defs}
