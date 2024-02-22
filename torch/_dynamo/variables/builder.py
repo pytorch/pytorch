@@ -1387,7 +1387,7 @@ def wrap_fx_proxy_cls(
             maybe_get_fake_mode(example_value) is not tx.fake_mode
         ):
             raise InternalTorchDynamoError(
-                "`example_value` needs to be a `FakeTensor`"
+                "`example_value` needs to be a `FakeTensor` "
                 f"wrapped by this instance of Dynamo. Found: {example_value}"
             )
 

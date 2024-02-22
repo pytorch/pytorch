@@ -401,12 +401,9 @@ dynamo_expected_failures = {
     "TestImports.test_circular_dependencies",  # test_testing
     "TestAssertCloseSparseCSR.test_mismatching_crow_indices_msg",  # test_testing
     "TestAssertCloseSparseBSC.test_mismatching_row_indices_msg",  # test_testing
-    "TestAssertCloseSparseCOO.test_mismatching_values_msg",  # test_testing
-    "TestAssertCloseSparseCOO.test_matching_uncoalesced",  # test_testing
     "TestAssertCloseSparseCSR.test_matching",  # test_testing
     "TestAssertCloseSparseBSR.test_mismatching_crow_indices_msg",  # test_testing
     "TestAssertCloseSparseBSR.test_matching",  # test_testing
-    "TestAssertCloseSparseCOO.test_mismatching_indices_msg",  # test_testing
     "TestAssertCloseSparseBSC.test_mismatching_ccol_indices_msg",  # test_testing
     "TestAssertCloseSparseBSC.test_mismatching_values_msg",  # test_testing
     "TestAssertCloseSparseCSC.test_mismatching_row_indices_msg",  # test_testing
@@ -416,7 +413,6 @@ dynamo_expected_failures = {
     "TestAssertCloseSparseBSR.test_mismatching_values_msg",  # test_testing
     "TestAssertCloseSparseCSC.test_mismatching_values_msg",  # test_testing
     "TestAssertCloseSparseBSR.test_mismatching_col_indices_msg",  # test_testing
-    "TestAssertCloseSparseCOO.test_mismatching_nnz",  # test_testing
     "TestAssertCloseSparseCSR.test_mismatching_col_indices_msg",  # test_testing
     "TestAssertCloseSparseCSC.test_mismatching_ccol_indices_msg",  # test_testing
     "TestTensorBoardUtils.test_to_HWC",  # test_tensorboard
@@ -556,7 +552,6 @@ dynamo_expected_failures = {
     "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_conv1d_cpu_float64",  # test_expanded_weights  # noqa: B950
     "TestExpandedWeightFunctionalCPU.test_expanded_weight_per_sample_grad_mean_nn_functional_layer_norm_cpu_float64",  # test_expanded_weights  # noqa: B950
     "TestExpandedWeightFunctionalCPU.test_expanded_weights_per_sample_grad_input_no_grad_nn_functional_conv2d_cpu_float64",  # test_expanded_weights  # noqa: B950
-    "TestTorchDlPackCPU.test_dlpack_export_non_strided_cpu",  # test_dlpack
     "TestIterDataPipeGraphFastForward.test_simple_snapshot_custom_self_next",  # test_datapipe
     "TestIterDataPipeGraphFastForward.test_simple_snapshot_custom_non_generator",  # test_datapipe
     "TestGraph.test_traverse_circular_datapipe",  # test_datapipe
@@ -1569,7 +1564,6 @@ dynamo_expected_failures = {
     "TestAutograd.test_increment_version",  # test_autograd
     "TestAutograd.test_record_function_callbacks",  # test_autograd
     "TestAutograd.test_save_on_cpu_and_checkpoint",  # test_autograd
-    "TestAutogradDeviceTypeCPU.test_sparse_ctor_getter_backward_cpu_complex128",  # test_autograd
     "TestNestedCheckpoint.test_nested_checkpoint_non_tensor_inputs_and_outputs_early_stop_False",  # test_autograd
     "TestAutograd.test_gradcheck_nondeterministic",  # test_autograd
     "TestAutograd.test_custom_function_forward_mode_forward_is_no_op",  # test_autograd
@@ -1584,13 +1578,11 @@ dynamo_expected_failures = {
     "TestNestedCheckpoint.test_nested_checkpoint_two_children_early_stop_False",  # test_autograd
     "TestAutograd.test_custom_autograd_repeated_grad_grad",  # test_autograd
     "TestAutograd.test_setitem_mask",  # test_autograd
-    "TestAutogradDeviceTypeCPU.test_sparse_ctor_getter_backward_cpu_float64",  # test_autograd
     "TestAutograd.test_anomaly_mode_no_check_nan",  # test_autograd
     "TestAutograd.test_return_duplicate",  # test_autograd
     "TestAutogradForwardMode.test_create_new_zeros_with_same_meta",  # test_autograd
     "TestAutogradInferenceMode.test_inference_mode_tensor_creation",  # test_autograd
     "TestAutograd.test_set_grad_coroutines",  # test_autograd
-    "TestAutograd.test_no_grad_copy_sparse",  # test_autograd
     "TestAutograd.test_set_grad_coroutines_exit",  # test_autograd
     "TestNestedCheckpoint.test_nested_checkpoint_reentrant_backwards_early_stop_True",  # test_autograd
     "TestAutograd.test_saved_tensor_hooks_custom_function_intermediates",  # test_autograd
@@ -2423,86 +2415,54 @@ dynamo_skips = {
     "TestSparseCPU.test_index_select_parallelization_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sparse_spdiags_cpu_uint8",  # known py38 fail
     "TestSparseCPU.test_sparse_to_numpy_cpu",  # known py38 fail
-    "TestSparseCPU.test_shared_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_sparse_sparse_mul_cpu_float32",  # known py38 fail
-    "TestSparseCPU.test_asin_arcsin_cpu_int32",  # known py38 fail
     "TestSparseCPU.test_cat_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_add_zeros_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sparse_mask_hybrid_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_index_select_exhaustive_index_large_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_select_cpu_float64",  # known py38 fail
-    "TestSparseCPU.test_to_dense_with_gradcheck_masked_cpu_float16",  # known py38 fail
     "TestSparseCPU.test_sparse_dense_mul_cpu_int8",  # known py38 fail
     "TestSparseCPU.test_index_select_parallelization_cpu_complex128",  # known py38 fail
     "TestSparseAnyCPU.test_gradcheck_mm_SparseCOO_sparse_slow_cpu_complex128",  # known py38 fail
-    "TestSparseCPU.test_asin_arcsin_cpu_int64",  # known py38 fail
-    "TestSparseCPU.test_sparse_add_coalesce_cpu_float32",  # known py38 fail
     "TestSparseAnyCPU.test_constructor_autograd_SparseCSR_cpu",  # known py38 fail
     "TestSparseCPU.test_zeros_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_clone_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sum_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_permute_sparse_cpu_float64",  # known py38 fail
-    "TestSparseAnyCPU.test_constructor_autograd_SparseCOO_cpu",  # known py38 fail
     "TestSparseCPU.test_basic_cpu_float64",  # known py38 fail
-    "TestSparseCPU.test_to_dense_with_gradcheck_sparse_cpu_float32",  # known py38 fail
     "TestSparseCPU.test_norm_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sparse_mask_hybrid_cpu_float64",  # known py38 fail
-    "TestSparseCPU.test_factory_cpu_float32",  # known py38 fail
     "TestSparseAnyCPU.test_gradcheck_mm_SparseCOO_masked_fast_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_factory_type_inference_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sparse_dense_mul_cpu_int16",  # known py38 fail
     "TestSparseCPU.test_print_uncoalesced_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_index_select_empty_and_non_contiguous_index_cpu_float64",  # known py38 fail
     "TestSparseAnyCPU.test_check_sparse_tensor_invariants_SparseBSR_cpu",  # known py38 fail
-    "TestSparseCPU.test_resize_cpu_complex128",  # known py38 fail
-    "TestSparseCPU.test_to_dense_with_gradcheck_masked_cpu_complex64",  # known py38 fail
-    "TestSparseCPU.test_neg_negative_cpu_complex128",  # known py38 fail
-    "TestSparseCPU.test_factory_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_sum_cpu_int8",  # known py38 fail
     "TestSparseAnyCPU.test_constructor_autograd_SparseBSC_cpu",  # known py38 fail
-    "TestSparseCPU.test_asin_arcsin_cpu_float32",  # known py38 fail
     "TestSparseCPU.test_sparse_mask_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_factory_type_inference_cpu_complex128",  # known py38 fail
-    "TestSparseCPU.test_select_no_type_promotion_cpu_uint8",  # known py38 fail
     "TestSparseCPU.test_sparse_dense_mul_cpu_bool",  # known py38 fail
     "TestSparseCPU.test_sparse_dense_mul_cpu_float32",  # known py38 fail
     "TestSparseCPU.test_index_select_empty_and_non_contiguous_index_cpu_complex128",  # known py38 fail
     "TestSparseAnyCPU.test_check_sparse_tensor_invariants_SparseCOO_cpu",  # known py38 fail
     "TestSparseCPU.test_mv_cpu_float64",  # known py38 fail
-    "TestSparseCPU.test_to_dense_with_gradcheck_sparse_cpu_complex128",  # known py38 fail
-    "TestSparseCPU.test_to_dense_with_gradcheck_masked_cpu_float32",  # known py38 fail
     "TestSparseCPU.test_sparse_spdiags_cpu_int8",  # known py38 fail
-    "TestSparseCPU.test_sparse_add_coalesce_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sparse_spdiags_cpu_bool",  # known py38 fail
-    "TestSparseCPU.test_to_dense_with_gradcheck_sparse_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_ctor_is_coalesced_with_gradcheck_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sparse_spdiags_cpu_int32",  # known py38 fail
-    "TestSparseCPU.test_neg_negative_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sum_cpu_complex64",  # known py38 fail
     "TestSparseCPU.test_sum_cpu_bool",  # known py38 fail
     "TestSparseCPU.test_transpose_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_factory_type_inference_cpu_int64",  # known py38 fail
     "TestSparseCPU.test_div_rounding_mode_cpu_float64",  # known py38 fail
-    "TestSparseCPU.test_legacy_new_device_cpu",  # known py38 fail
     "TestSparseCPU.test_empty_like_cpu_float64",  # known py38 fail
-    "TestSparseCPU.test_pickle_cpu_float64",  # known py38 fail
-    "TestSparseCPU.test_to_dense_hybrid_masked_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_index_select_exhaustive_index_large_cpu_float64",  # known py38 fail
-    "TestSparseCPU.test_is_nonzero_cpu",  # known py38 fail
-    "TestSparseCPU.test_log1p_cpu_uint8",  # known py38 fail
-    "TestSparseCPU.test_log1p_cpu_int32",  # known py38 fail
     "TestSparseCPU.test_sparse_broadcast_to_cpu_complex128",  # known py38 fail
-    "TestSparseCPU.test_sparse_add_coalesce_cpu_complex128",  # known py38 fail
-    "TestSparseCPU.test_to_dense_hybrid_sparse_cpu_float64",  # known py38 fail
-    "TestSparseCPU.test_asin_arcsin_cpu_uint8",  # known py38 fail
     "TestSparseCPU.test_sparse_sum_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sparse_spdiags_cpu_int16",  # known py38 fail
-    "TestSparseCPU.test_to_dense_with_gradcheck_sparse_cpu_float16",  # known py38 fail
     "TestSparseCPU.test_sum_cpu_float64",  # known py38 fail
-    "TestSparseCPU.test_log1p_cpu_float32",  # known py38 fail
     "TestSparseAnyCPU.test_gradcheck_mm_SparseCOO_masked_fast_cpu_float64",  # known py38 fail
-    "TestSparseCPU.test_to_dense_with_gradcheck_sparse_cpu_bfloat16",  # known py38 fail
-    "TestSparseCPU.test_log1p_cpu_int16",  # known py38 fail
     "TestSparseCPU.test_sparse_mm_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_hsmm_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_permute_masked_cpu_complex128",  # known py38 fail
@@ -2519,82 +2479,58 @@ dynamo_skips = {
     "TestSparseCPU.test_basic_ops_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_factory_type_inference_cpu_complex64",  # known py38 fail
     "TestSparseCPU.test_factory_copy_cpu",  # known py38 fail
-    "TestSparseCPU.test_small_nnz_coalesced_cpu",  # known py38 fail
     "TestSparseCPU.test_sparse_sparse_mul_cpu_int8",  # known py38 fail
     "TestSparseCPU.test_dsmm_cpu_float64",  # known py38 fail
     "TestSparseAnyCPU.test_gradcheck_mm_SparseCOO_sparse_fast_cpu_complex128",  # known py38 fail
-    "TestSparseCPU.test_factory_cpu_float16",  # known py38 fail
-    "TestSparseCPU.test_factory_cpu_float64",  # known py38 fail
-    "TestSparseCPU.test_asin_arcsin_cpu_int16",  # known py38 fail
     "TestSparseAnyCPU.test_check_sparse_tensor_invariants_SparseCSR_cpu",  # known py38 fail
     "TestSparseCPU.test_select_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_change_tensor_metadata_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_isnan_cpu",  # known py38 fail
-    "TestSparseCPU.test_contig_hybrid_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_index_select_cpu_float64",  # known py38 fail
-    "TestSparseCPU.test_select_no_type_promotion_cpu_int32",  # known py38 fail
     "TestSparseCPU.test_zeros_like_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_index_select_cpu_complex128",  # known py38 fail
-    "TestSparseCPU.test_log1p_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_saddmm_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_sparse_sparse_mul_cpu_int16",  # known py38 fail
     "TestSparseCPU.test_sparse_broadcast_to_cpu_float64",  # known py38 fail
-    "TestSparseCPU.test_asin_arcsin_cpu_int8",  # known py38 fail
     "TestSparseCPU.test_factory_type_inference_cpu_float16",  # known py38 fail
     "TestSparseCPU.test_index_select_exhaustive_index_small_cpu_complex128",  # known py38 fail
-    "TestSparseCPU.test_select_no_type_promotion_cpu_int64",  # known py38 fail
     "TestSparseCPU.test_norm_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_sparse_dense_mul_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sum_cpu_float32",  # known py38 fail
     "TestSparseCPU.test_new_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sparse_addmm_cpu_bfloat16",  # known py38 fail
     "TestSparseCPU.test_sparse_addmm_cpu_complex128",  # known py38 fail
-    "TestSparseCPU.test_to_dense_hybrid_sparse_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_cat_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sparse_spdiags_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sparse_spdiags_cpu_complex128",  # known py38 fail
     "TestSparseAnyCPU.test_gradcheck_mm_SparseCOO_sparse_slow_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_mm_cpu_float64",  # known py38 fail
-    "TestSparseCPU.test_factory_cpu_complex64",  # known py38 fail
     "TestSparseCPU.test_sparse_dense_mul_cpu_int64",  # known py38 fail
     "TestSparseCPU.test_sparse_add_out_bfloat16_cpu_float32",  # known py38 fail
-    "TestSparseCPU.test_to_dense_with_gradcheck_masked_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_factory_type_inference_cpu_float32",  # known py38 fail
     "TestSparseCPU.test_index_select_exhaustive_index_small_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sum_cpu_int32",  # known py38 fail
-    "TestSparseCPU.test_resize_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sparse_addmm_cpu_float64",  # known py38 fail
-    "TestSparseCPU.test_add_dense_sparse_mismatch_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_bmm_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_basic_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_sparse_sparse_mul_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_clone_cpu_complex128",  # known py38 fail
-    "TestSparseCPU.test_log1p_cpu_int64",  # known py38 fail
     "TestSparseCPU.test_sparse_spdiags_cpu_int64",  # known py38 fail
     "TestSparseCPU.test_sum_cpu_int16",  # known py38 fail
-    "TestSparseCPU.test_to_dense_hybrid_masked_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sum_cpu_uint8",  # known py38 fail
-    "TestSparseCPU.test_add_dense_sparse_mismatch_cpu_float64",  # known py38 fail
-    "TestSparseCPU.test_contig_hybrid_cpu_float64",  # known py38 fail
-    "TestSparseCPU.test_sparse_add_coalesce_cpu_complex64",  # known py38 fail
-    "TestSparseCPU.test_log1p_cpu_int8",  # known py38 fail
     "TestSparseCPU.test_permute_masked_cpu_float64",  # known py38 fail
-    "TestSparseCPU.test_to_dense_with_gradcheck_sparse_cpu_complex64",  # known py38 fail
     "TestSparseAnyCPU.test_check_sparse_tensor_invariants_SparseCSC_cpu",  # known py38 fail
     "TestSparseCPU.test_div_rounding_mode_cpu_float32",  # known py38 fail
     "TestSparseCPU.test_any_cpu",  # known py38 fail
     "TestSparseMeta.test_basic",  # known py38 fail
     "TestSparseAnyCPU.test_constructor_autograd_SparseBSR_cpu",  # known py38 fail
-    "TestSparseCPU.test_to_dense_with_gradcheck_masked_cpu_bfloat16",  # known py38 fail
     "TestSparseCPU.test_saddmm_cpu_float64",  # known py38 fail
-    "TestSparseCPU.test_shared_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_transpose_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_assign_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_permute_sparse_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_spadd_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sparse_sparse_mul_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_sparse_dense_mul_cpu_int32",  # known py38 fail
-    "TestSparseCPU.test_asin_arcsin_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_change_tensor_metadata_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_sparse_sparse_mul_cpu_int32",  # known py38 fail
     "TestSparseCPU.test_sparse_sparse_mul_cpu_complex64",  # known py38 fail
@@ -2603,19 +2539,14 @@ dynamo_skips = {
     "TestSparseCPU.test_sparse_spdiags_cpu_complex64",  # known py38 fail
     "TestSparseCPU.test_add_zeros_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_new_cpu_complex128",  # known py38 fail
-    "TestSparseCPU.test_contig_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_empty_like_cpu_complex128",  # known py38 fail
     "TestSparseAnyCPU.test_check_sparse_tensor_invariants_SparseBSC_cpu",  # known py38 fail
     "TestSparseAnyCPU.test_gradcheck_mm_SparseCOO_masked_slow_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sparse_sparse_mul_cpu_uint8",  # known py38 fail
     "TestSparseCPU.test_sparse_sparse_mul_cpu_int64",  # known py38 fail
-    "TestSparseCPU.test_select_no_type_promotion_cpu_int16",  # known py38 fail
-    "TestSparseCPU.test_select_no_type_promotion_cpu_int8",  # known py38 fail
     "TestSparseCPU.test_zeros_cpu_complex128",  # known py38 fail
     "TestSparseCPU.test_sparse_mask_cpu_complex128",  # known py38 fail
     "TestSparseAnyCPU.test_gradcheck_mm_SparseCOO_sparse_fast_cpu_float64",  # known py38 fail
-    "TestSparseCPU.test_contig_cpu_complex128",  # known py38 fail
-    "TestSparseCPU.test_to_dense_with_gradcheck_masked_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_coalesce_transpose_mm_cpu_float64",  # known py38 fail
     "TestSparseCPU.test_sum_cpu_int64",  # known py38 fail
     "TestReductionsCPU.test_histogramdd_cpu_float32",  # known py38 fail
@@ -5949,7 +5880,6 @@ dynamo_skips = {
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_nn_functional_elu_cpu_float32",  # known py38 fail
     "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_cat_cpu_float32",  # known py38 fail
     "TestBasicsCPU.test_invalid_sparse_csr_values_cpu",  # known py38 fail
-    "TestBasicsCPU.test_invalid_sparse_coo_values_cpu",  # known py38 fail
     "TestBinaryUfuncsCPU.test_long_tensor_pow_floats_cpu",  # known py38 fail
     "TestBinaryUfuncsCPU.test_add_cpu",  # known py38 fail
     "TestBinaryUfuncsCPU.test_int_tensor_pow_neg_ints_cpu",  # known py38 fail

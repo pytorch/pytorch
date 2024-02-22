@@ -12,6 +12,7 @@
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/NonSymbolicBC.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 #include <ATen/native/Copy.h>
 #include <ATen/native/CPUBlas.h>
@@ -379,34 +380,36 @@ void _validate_sparse_coo_tensor_args(
       size.size());
 
   // Check to make sure all indices are within the boundaries of `size`
-  if (indices.numel() > 0 && indices.has_storage() && indices.storage().device_type() != DeviceType::Meta) {
-    Tensor min_indices =
+  if (!indices.getIntrusivePtr()->has_symbolic_sizes_strides() && indices.numel() > 0) {
+    // subclass-like tensors may not have data available...
+    if (!isTensorSubclassLike(indices)) {
+      Tensor min_indices =
         std::get</* values */ 0>(indices.min(/* dim */ 1, /* keepdim */ false));
-    Tensor max_indices =
+      Tensor max_indices =
         std::get</* values */ 0>(indices.max(/* dim */ 1, /* keepdim */ false));
-    Tensor cpu_min_indices, cpu_max_indices;
-    if (!indices.is_cpu()) {
-      cpu_min_indices = min_indices.to(at::DeviceType::CPU);
-      cpu_max_indices = max_indices.to(at::DeviceType::CPU);
-    } else {
-      cpu_min_indices = min_indices;
-      cpu_max_indices = max_indices;
-    }
-    auto cpu_min_indices_accessor = cpu_min_indices.accessor<int64_t, 1>();
-    auto cpu_max_indices_accessor = cpu_max_indices.accessor<int64_t, 1>();
-    for (const auto d : c10::irange(sparse_dim)) {
-      // NB: This used to sync ndim times to access each entry; now we copy
-      // everything to CPU first and then access it.
-      int64_t min_index_in_dim = cpu_min_indices_accessor[d];
-      TORCH_CHECK(
+      Tensor cpu_min_indices, cpu_max_indices;
+      if (!indices.is_cpu()) {
+        cpu_min_indices = min_indices.to(at::DeviceType::CPU);
+        cpu_max_indices = max_indices.to(at::DeviceType::CPU);
+      } else {
+        cpu_min_indices = min_indices;
+        cpu_max_indices = max_indices;
+      }
+      auto cpu_min_indices_accessor = cpu_min_indices.accessor<int64_t, 1>();
+      auto cpu_max_indices_accessor = cpu_max_indices.accessor<int64_t, 1>();
+      for (const auto d : c10::irange(sparse_dim)) {
+        // NB: This used to sync ndim times to access each entry; now we copy
+        // everything to CPU first and then access it.
+        int64_t min_index_in_dim = cpu_min_indices_accessor[d];
+        TORCH_CHECK(
           min_index_in_dim >= 0,
           "found negative index ",
           min_index_in_dim,
           " for dim ",
           d);
-      int64_t max_index_in_dim = cpu_max_indices_accessor[d];
-      int64_t dim_size = size[static_cast<size_t>(d)];
-      TORCH_CHECK(
+        int64_t max_index_in_dim = cpu_max_indices_accessor[d];
+        int64_t dim_size = size[static_cast<size_t>(d)];
+        TORCH_CHECK(
           max_index_in_dim < dim_size,
           "size is inconsistent with indices: for dim ",
           d,
@@ -414,6 +417,7 @@ void _validate_sparse_coo_tensor_args(
           dim_size,
           " but found index ",
           max_index_in_dim);
+      }
     }
     if (is_coalesced && values.size(0) > 1) {
       Tensor indices_scalar = flatten_indices(indices, size);

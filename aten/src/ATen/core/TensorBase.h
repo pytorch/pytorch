@@ -57,7 +57,7 @@ inline bool variable_excluded_from_dispatch() {
 // NOTE: [Tensor vs. TensorBase]
 //
 // Tensor, being the central data structure in PyTorch, gets used and
-// it's header included almost everywhere. Unfortunately this means
+// its header included almost everywhere. Unfortunately this means
 // every time an operator signature is updated or changed in
 // native_functions.yaml, you (and every other PyTorch developer) need
 // to recompile all of ATen and it's dependencies.
@@ -66,7 +66,7 @@ inline bool variable_excluded_from_dispatch() {
 // incremental build times for all PyTorch developers. TensorBase
 // represents a reference counted handle to TensorImpl, exactly the
 // same as Tensor. However, TensorBase doesn't have code generated
-// methods in it's API and thus no dependence on native_functions.yaml.
+// methods in its API and thus no dependence on native_functions.yaml.
 //
 // Usage tips
 // ----------

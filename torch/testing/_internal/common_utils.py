@@ -1388,28 +1388,6 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
     return decorator
 
 
-def skipIfTorchAotEager(msg="test doesn't currently work with aot_eager",
-                        condition=TEST_WITH_AOT_EAGER):  # noqa: F821
-    def decorator(fn):
-        if not isinstance(fn, type):
-            @wraps(fn)
-            def wrapper(*args, **kwargs):
-                if condition:
-                    raise unittest.SkipTest(msg)
-                else:
-                    fn(*args, **kwargs)
-            return wrapper
-
-        assert isinstance(fn, type)
-        if condition:
-            fn.__unittest_skip__ = True
-            fn.__unittest_skip_why__ = msg
-
-        return fn
-
-    return decorator
-
-
 def unMarkDynamoStrictTest(cls=None):
     def decorator(cls):
         cls.dynamo_strict = False
