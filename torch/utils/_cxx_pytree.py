@@ -597,6 +597,16 @@ def tree_map_only(
     ...
 
 
+@overload
+def tree_map_only(
+    __type_or_types_or_pred: Callable[[Any], bool],
+    func: FnAny[Any],
+    tree: PyTree,
+    is_leaf: Optional[Callable[[PyTree], bool]] = None,
+) -> PyTree:
+    ...
+
+
 def tree_map_only(
     __type_or_types_or_pred: Union[TypeAny, Callable[[Any], bool]],
     func: FnAny[Any],
@@ -630,6 +640,16 @@ def tree_map_only_(
 def tree_map_only_(
     __type_or_types_or_pred: Type3[T, S, U],
     func: Fn3[T, S, U, Any],
+    tree: PyTree,
+    is_leaf: Optional[Callable[[PyTree], bool]] = None,
+) -> PyTree:
+    ...
+
+
+@overload
+def tree_map_only_(
+    __type_or_types_or_pred: Callable[[Any], bool],
+    func: FnAny[Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
