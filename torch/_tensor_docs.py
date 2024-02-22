@@ -4494,6 +4494,7 @@ Keyword args:
         ``'add'`` or ``'multiply'``.
 
 Example::
+
     >>> index = torch.tensor([[0, 1]])
     >>> value = 2
     >>> torch.zeros(3, 5).scatter_(0, index, value)
