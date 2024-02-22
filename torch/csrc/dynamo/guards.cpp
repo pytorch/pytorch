@@ -896,6 +896,34 @@ class EQUALS_MATCH : public LeafGuard {
   PyTypeObject* _value_type;
 };
 
+class TUPLE_ITERATOR_LEN : public LeafGuard {
+ public:
+  TUPLE_ITERATOR_LEN(
+      py::object length,
+      py::object type_id,
+      py::object verbose_code_parts)
+      : LeafGuard(verbose_code_parts),
+        _length(py::cast<Py_ssize_t>(length)),
+        _type_id(py::cast<intptr_t>(type_id)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    // Do a type match first.
+    if (Py_TYPE(value) != (void*)_type_id) {
+      return false;
+    }
+    _PyTupleIterObject* it = (_PyTupleIterObject*)value;
+    Py_ssize_t length = 0;
+    if (it->it_seq)
+      length = PyTuple_GET_SIZE(it->it_seq) - it->it_index;
+    return length == _length;
+  }
+
+ private:
+  // Length of the guarded list
+  Py_ssize_t _length;
+  intptr_t _type_id;
+};
+
 class DEFAULT_DEVICE : public LeafGuard {
  public:
   DEFAULT_DEVICE(py::object verbose_code_parts)
@@ -1902,6 +1930,12 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DEFAULT_DEVICE")
       .def(py::init<py::list>())
       .def("__call__", &DEFAULT_DEVICE::check);
+  py::class_<
+      TUPLE_ITERATOR_LEN,
+      LeafGuard,
+      std::shared_ptr<TUPLE_ITERATOR_LEN>>(py_m, "TUPLE_ITERATOR_LEN")
+      .def(py::init<py::object, py::object, py::list>())
+      .def("__call__", &TUPLE_ITERATOR_LEN::check);
   py::class_<GLOBAL_STATE, LeafGuard, std::shared_ptr<GLOBAL_STATE>>(
       py_m, "GLOBAL_STATE")
       .def(py::init<py::list>())
@@ -1996,6 +2030,15 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(
                 std::make_shared<EQUALS_MATCH>(value, verbose_code_parts));
+          })
+      .def(
+          "add_tuple_iterator_length_guard",
+          [](GuardManager& self,
+             py::object length,
+             py::object type_id,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<TUPLE_ITERATOR_LEN>(
+                length, type_id, verbose_code_parts));
           })
       .def(
           "add_default_device_guard",
