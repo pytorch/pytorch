@@ -2345,17 +2345,20 @@ class TritonKernel(Kernel):
 
         with helper.indent(), V.set_ops_handler(CSEProxy()):
             outputs = fn(*args)
+            if isinstance(outputs, tuple):
+                outputs = ", ".join(str(output) for output in outputs)
+                outputs = f"({outputs})"
             helper.writeline(f"return {outputs}")
 
         return self.helper_functions.add(helper.getvalue())
 
     def scan(
         self,
-        dtype: torch.dtype,
-        combine_fn: Callable[[CSEVariable, CSEVariable], CSEVariable],
-        value: CSEVariable,
-        init: int,
-    ) -> CSEVariable:
+        dtypes: Tuple[torch.dtype, ...],
+        combine_fn: Callable[..., Tuple[CSEVariable, ...]],
+        values: Tuple[CSEVariable, ...],
+        inits: Tuple[int, ...],
+    ) -> Tuple[CSEVariable, ...]:
         assert self.inside_reduction
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
@@ -2364,63 +2367,98 @@ class TritonKernel(Kernel):
             masks.append(self._load_mask)
         reduction_range_prefix = self.range_trees[-1].prefix
 
-        value = self.cse.generate(
-            self.compute, f"tl.broadcast_to({value}, {self.dense_size_str()})"
-        )
+        masked_values = []
+        accumulators = []
+        partials_reduce = []
 
-        default = triton_constant(init)
+        combine_helper_fn = self._lift_helper(combine_fn, 2 * len(values))
         dim = self.triton_tensor_ndim() - 1
-        acc_type = triton_acc_type(dtype)
-        cond = " & ".join(masks)
 
-        combine_helper_fn = self._lift_helper(combine_fn, 2)
+        for value, init, dtype in zip(values, inits, dtypes):
+            default = triton_constant(init)
+            acc_type = triton_acc_type(dtype)
+            cond = " & ".join(masks)
 
-        def where_cond(value):
-            if not cond:
-                return value
+            def where_cond(value):
+                if not cond:
+                    return value
+                default_tensor = self.cse.generate(
+                    self.body,
+                    f"tl.full({[1] * self.triton_tensor_ndim()}, {default}, {triton_compute_type(dtype)})",
+                )
+                return self.cse.generate(
+                    self.compute, f"tl.where({cond}, {value}, {default_tensor})"
+                )
+
+            value = self.cse.generate(
+                self.compute,
+                f"tl.broadcast_to({value}.to({triton_compute_type(dtype)}), {self.dense_size_str()})",
+            )
+
+            default = triton_constant(init)
             default_tensor = self.cse.generate(
                 self.body,
                 f"tl.full({[1] * self.triton_tensor_ndim()}, {default}, {triton_compute_type(dtype)})",
             )
-            return self.cse.generate(
-                self.compute, f"tl.where({cond}, {value}, {default_tensor})"
-            )
+            dim = len(self.range_trees) - 1 - int(bool(self.no_x_dim))
+            acc_type = triton_acc_type(dtype)
+            cond = " & ".join(masks)
 
-        if self.persistent_reduction:
-            masked_value = where_cond(value)
-            result_var = self.cse.generate(
-                self.compute,
-                f"tl.associative_scan({masked_value}, {dim}, {combine_helper_fn})",
-            )
+            if self.persistent_reduction:
+                masked_value = where_cond(value)
+                masked_values.append(masked_value)
+            else:
+                accumulator = self.cse.newvar()
+                reduced_size = self.dense_size_list()
+                reduced_size[-1] = "1"
+                reduced_size = f"[{', '.join(reduced_size)}]"
+
+                self.body.writeline(
+                    f"{accumulator} = tl.full({reduced_size}, {default}, {acc_type})"
+                )
+
+                masked_value = where_cond(value)
+                partial_reduce = self.cse.generate(
+                    self.compute,
+                    self.reduction_resize(
+                        f"tl.reduce({value}, {dim}, {combine_helper_fn})"
+                    ),
+                )
+
+                masked_values.append(masked_value)
+                accumulators.append(accumulator)
+                partials_reduce.append(partial_reduce)
+
+        result_vars = [self.cse.newvar() for _ in range(len(values))]
+        result_vars_str = ", ".join([str(result_var) for result_var in result_vars])
+        if len(masked_values) == 1:
+            masked_values_str = str(masked_values[0])
         else:
-            accumulator = self.cse.newvar()
-            reduced_size = self.dense_size_list()
-            reduced_size[-1] = "1"
-            reduced_size = f"[{', '.join(reduced_size)}]"
+            masked_values_str = ", ".join(
+                [str(masked_value) for masked_value in masked_values]
+            )
+            masked_values_str = f"({masked_values_str})"
+        self.compute.writeline(
+            f"{result_vars_str} = tl.associative_scan({masked_values_str}, {dim}, {combine_helper_fn})",
+        )
 
-            self.body.writeline(
-                f"{accumulator} = tl.full({reduced_size}, {default}, {acc_type})"
+        if not self.persistent_reduction:
+            accs_next = combine_fn(
+                *itertools.chain(*zip(accumulators, partials_reduce))
             )
+            new_result_vars = combine_fn(
+                *itertools.chain(*zip(accumulators, result_vars))
+            )
+            result_vars = [
+                self.cse.generate(self.compute, var) for var in new_result_vars
+            ]
+            for acc_next, accumulator in zip(accs_next, accumulators):
+                self.compute.writeline(f"{accumulator} = {acc_next}")
 
-            masked_value = where_cond(value)
-            partial_reduce = self.cse.generate(
-                self.compute,
-                self.reduction_resize(
-                    f"tl.reduce({value}, {dim}, {combine_helper_fn})"
-                ),
-            )
-            acc_next = combine_fn(accumulator, partial_reduce)
-            partial_scan = self.cse.generate(
-                self.compute,
-                f"tl.associative_scan({masked_value}, {dim}, {combine_helper_fn})",
-            )
-            result_var = self.cse.generate(
-                self.compute, combine_fn(accumulator, partial_scan)
-            )
-            self.compute.writeline(f"{accumulator} = {acc_next}")
+        for result_var in result_vars:
+            result_var.mask_vars = masks  # type: ignore[attr-defined]
 
-        result_var.mask_vars = masks  # type: ignore[attr-defined]
-        return result_var
+        return tuple(result_vars)
 
     def codegen_body(self):
         """

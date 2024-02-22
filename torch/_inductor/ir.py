@@ -1604,7 +1604,7 @@ class Scan(Loops):
     def store_reduction(self, output_name, indexer, vars, scan_vars):
         idx = self.reindex(vars, scan_vars)
         value = self.inner_fn(idx)
-        result = ops.scan(self.dtype, self.combine_fn, value, self.init)
+        (result,) = ops.scan((self.dtype,), self.combine_fn, (value,), (self.init,))
         return ops.store(output_name, indexer(idx), result)
 
     def get_reduction_type(self):
@@ -1646,6 +1646,7 @@ class Scan(Loops):
         combine_fn: Callable[..., Any],
         init: Any,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
+        **kwargs,
     ) -> Optional["TensorBox"]:
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
@@ -1676,7 +1677,7 @@ class Scan(Loops):
             combine_fn=combine_fn,
             scan_numel=scan_numel,
         )
-        scan_type = Scan if num_splits <= 1 else SplitScan
+        scan_type = cls if cls != Scan else (Scan if num_splits <= 1 else SplitScan)
 
         if num_splits > 1 and torch.version.hip is not None:
             # Fallback for split-scan on ROCm
@@ -1699,6 +1700,7 @@ class Scan(Loops):
                 reindex=reindex,
                 init=init,
                 reduction_hint=reduction_hint,
+                **kwargs,
             )
         )
         result.realize()
@@ -1736,6 +1738,79 @@ class Scan(Loops):
 @dataclasses.dataclass
 class SplitScan(Scan):
     pass
+
+
+@dataclasses.dataclass
+class ArgScan(Scan):
+    ioutput: int
+
+    def store_reduction(self, output_name, indexer, vars, scan_vars):
+        idx = self.reindex(vars, scan_vars)
+        value = self.inner_fn(idx)
+        rindex = self._index(self.scan_ranges, "r")[0]
+        result = ops.scan(
+            (self.dtype, torch.int64),
+            self.combine_fn,
+            (value, "rindex"),
+            (self.init, 0),
+        )[self.ioutput]
+        return ops.store(output_name, indexer(idx), result)
+
+    @classmethod
+    def create_argscan(
+        cls,
+        device: torch.device,
+        dtype: torch.dtype,
+        inner_fn: Callable[[List[Expr]], Any],
+        size: List[Expr],
+        axis: int,
+        combine_fn: Callable[..., Any],
+        init: Any,
+        reduction_hint: ReductionHint = ReductionHint.DEFAULT,
+        **kwargs,
+    ) -> Tuple[Optional["TensorBox"], Optional["TensorBox"]]:
+        pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
+        scan_ranges = [size[axis]]
+
+        sizevars = V.graph.sizevars
+        scan_numel = sizevars.simplify(sympy_product(scan_ranges))
+
+        # Scan with a single element is just a copy
+        if sizevars.is_expr_static_and_true(sympy.Le(scan_numel, 1)):  # type: ignore[arg-type]
+
+            def inner_fn_idx(idx):
+                return ops.constant(0, dtype=torch.int64)
+
+            value = Pointwise.create(
+                device=device,
+                dtype=dtype,
+                inner_fn=inner_fn,
+                ranges=size,
+            )
+            index = Pointwise.create(
+                device=device,
+                dtype=dtype,
+                inner_fn=inner_fn_idx,
+                ranges=size,
+            )
+            return value, index
+
+        values, indices = (
+            super(ArgScan, cls).create(
+                device=device,
+                dtype=dtype,
+                inner_fn=inner_fn,
+                size=size,
+                axis=axis,
+                combine_fn=combine_fn,
+                init=init,
+                reduction_hint=reduction_hint,
+                ioutput=ioutput,
+            )
+            for ioutput in (0, 1)
+        )
+
+        return values, indices
 
 
 def is_storage_and_layout(x):
@@ -7025,15 +7100,23 @@ class LoopBodyBlock:
 
             @staticmethod
             def scan(
-                dtype_proxy, combine_fn: Callable[..., Any], value_proxy, init_proxy
+                dtype_proxy,
+                combine_fn: Callable[..., Any],
+                value_proxy,
+                init_proxy,
             ):
-                def shim(dtype, value, init):
-                    return V.ops.scan(dtype, combine_fn, value, init)
+                def shim(dtypes, values, inits):
+                    return V.ops.scan(dtypes, combine_fn, values, inits)
 
                 name = self.body.add_submodule(shim, "scan")
-                return tracer.create_proxy(
-                    "call_module", name, (dtype_proxy, value_proxy, init_proxy), {}
+                result = tracer.create_proxy(
+                    "call_module",
+                    name,
+                    (dtype_proxy, value_proxy, init_proxy),
+                    {},
                 )
+                # Proxies are iterable, but some methods expect tuples/lists
+                return tuple(result[i] for i in range(len(value_proxy)))
 
             def frexp(self, value_proxy):
                 result = self._inner.frexp(value_proxy)

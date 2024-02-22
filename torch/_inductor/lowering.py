@@ -2304,8 +2304,6 @@ make_fallback(aten.addmv, warn=False)
 make_fallback(aten._addmm_activation, warn=False)
 make_fallback(aten.avg_pool3d)
 make_fallback(aten._cdist_forward)
-make_fallback(aten.cummax)
-make_fallback(aten.cummin)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
 make_fallback(aten._efficientzerotensor)
@@ -5048,6 +5046,8 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
 fallback_cumsum = fallback_handler(aten.cumsum.default)
 fallback_cumprod = fallback_handler(aten.cumprod.default)
 fallback_logcumsumexp = fallback_handler(aten.logcumsumexp.default)
+fallback_cummax = fallback_handler(aten.cummax.default)
+fallback_cummin = fallback_handler(aten.cummin.default)
 
 
 @register_lowering(aten.cumsum)
@@ -5106,6 +5106,52 @@ def logcumsumexp(x, dim):
     if result is None:
         return fallback_logcumsumexp(x, dim=dim)
     return result
+
+
+@register_lowering(aten.cummax)
+def cummax(x, axis=None):
+    if len(x.get_size()) == 0:
+        assert axis in [0, -1]
+        return clone(x), torch.empty_like(x, dtype=torch.int64)
+
+    def combine_fn(value1, index1, value2, index2):
+        gt = ops.gt(value1, value2)
+        return (ops.where(gt, value1, value2), ops.where(gt, index1, index2))
+
+    dtype = x.get_dtype()
+    min_value = (
+        torch.finfo(dtype).min if dtype.is_floating_point else torch.iinfo(dtype).min
+    )
+    kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
+    values, indices = ir.ArgScan.create_argscan(
+        **kwargs, combine_fn=combine_fn, init=min_value
+    )
+    if values is None:
+        return fallback_cummax(x, dim=axis, dtype=dtype)
+    return values, indices
+
+
+@register_lowering(aten.cummin)
+def cummin(x, axis=None):
+    if len(x.get_size()) == 0:
+        assert axis in [0, -1]
+        return clone(x), torch.empty_like(x, dtype=torch.int64)
+
+    def combine_fn(value1, index1, value2, index2):
+        gt = ops.gt(value1, value2)
+        return (ops.where(gt, value1, value2), ops.where(gt, index1, index2))
+
+    dtype = x.get_dtype()
+    max_value = (
+        torch.finfo(dtype).max if dtype.is_floating_point else torch.iinfo(dtype).max
+    )
+    kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
+    values, indices = ir.ArgScan.create_argscan(
+        **kwargs, combine_fn=combine_fn, init=max_value
+    )
+    if values is None:
+        return fallback_cummin(x, dim=axis, dtype=dtype)
+    return values, indices
 
 
 @register_lowering(aten.prod)
