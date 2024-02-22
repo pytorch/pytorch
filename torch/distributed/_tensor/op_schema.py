@@ -399,9 +399,17 @@ class OpInfo:
     """
 
     mesh: DeviceMesh
+    # softmax
+    # DTensorSpec -> Strategy, dim, _
+    # add
+    # DTensorSpec -> Strategy, DTensorSpec -> Strategy, dim, _
+    #
     schema: OpSchema
+
     flat_args_schema: List[object]
+    # Unwrap DTensor local_tensor, int, float...
     local_args: Sequence[object]
+    # kwargs
     local_kwargs: Dict[str, object]
     args_tree_spec: Optional[TreeSpec] = None
 

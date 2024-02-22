@@ -433,8 +433,8 @@ class TestDTensorOptimizer(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
         asgd_configs = [
-            {"lr": 0.1},
-            # {"lr": 0.01, "foreach": True},
+            # {"lr": 0.1},
+            {"lr": 0.01, "foreach": True},
         ]
 
         for config in asgd_configs:

@@ -252,6 +252,11 @@ class OpDispatcher:
             reshard_arg_spec = flatten_args_schema_to_reshard[i]
             if isinstance(arg_spec, DTensorSpec):
                 local_tensor = cast(torch.Tensor, op_info.local_args[i])
+                # import torch.distributed as dist
+                # print(f"rank: {dist.get_rank()}, {arg_spec=}, {reshard_arg_spec=}")
+                # if arg_spec.tensor_meta.shape == torch.Size([]):
+                #     reshard_arg_spec = arg_spec
+
                 if arg_spec != reshard_arg_spec:
                     resharded_local_tensor = redistribute_local_tensor(
                         local_tensor, arg_spec, reshard_arg_spec
@@ -342,6 +347,8 @@ class OpDispatcher:
                 kwargs_schema[k] = v
                 local_kwargs[k] = v
 
+        import torch.distributed as dist
+        print(f"rank: {dist.get_rank()}, op_call:{op_call}")
         assert mesh is not None, f"found no DeviceMesh from dtensor args for {op_call}!"
         op_info = OpInfo(
             mesh,

@@ -548,6 +548,7 @@ for_each_ops = [
     aten._foreach_zero_.default,
 ]
 
+
 for_each_linearity_ops = [
     aten._foreach_add.Scalar,
     aten._foreach_add_.Scalar,
@@ -567,7 +568,10 @@ def foreach_list_strategy(
     """
 
     def args_tuple_strategies(args_schema: Tuple[object, ...]) -> List[TupleStrategy]:
+
+        import torch.distributed as dist
         first_arg = args_schema[0]
+        print(f"rank:{dist.get_rank()}, {first_arg=}")
         assert isinstance(first_arg, TupleStrategy)
         strategy_len = len(first_arg.childs)
         tuple_strategies: List[TupleStrategy] = []
@@ -584,6 +588,8 @@ def foreach_list_strategy(
 
     # foreach op should follow the first arg strategy
     follow_strategy = args_strategies[0]
+    # import torch.distributed as dist
+    # print(f"rank:{dist.get_rank()}, {follow_strategy=}")
 
     foreach_strategy_list = []
     for idx, child_strtgy in enumerate(follow_strategy.childs):

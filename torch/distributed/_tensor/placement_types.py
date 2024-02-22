@@ -56,6 +56,8 @@ class Shard(Placement):
         ), f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
 
         # chunk tensor over dimension `dim` into n slices with padding if necessary
+        import torch.distributed as dist
+        print(f"rank: {dist.get_rank()}, tensor:{tensor}")
         tensor_list = list(torch.chunk(tensor, num_chunks, dim=self.dim))
         # compute the chunk size inline with ``torch.chunk``
         full_chunk_size = (tensor.size(self.dim) + num_chunks - 1) // num_chunks
