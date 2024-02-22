@@ -17,8 +17,6 @@ import re
 import warnings
 from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
 
-from typing_extensions import ParamSpec
-
 import torch
 from torch._jit_internal import (
     _qualified_name,
@@ -32,6 +30,8 @@ from torch.jit._state import _enabled, _python_cu
 from torch.nn import Module
 
 from torch.testing._comparison import default_tolerances
+
+from typing_extensions import ParamSpec
 
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
@@ -802,7 +802,10 @@ def trace(
             if isinstance(example_kwarg_inputs, dict):
                 example_inputs = example_kwarg_inputs
             else:
-                raise RuntimeError("example_kwarg_inputs should be a dict")
+                raise RuntimeError(
+                    "example_inputs or example_kwarg_inputs should be a dict but are "
+                    f"{type(example_inputs)}, {type(example_kwarg_inputs)}"
+                )
         return trace_module(
             func,
             {"forward": example_inputs},
@@ -825,7 +828,10 @@ def trace(
             if isinstance(example_kwarg_inputs, dict):
                 example_inputs = example_kwarg_inputs
             else:
-                raise RuntimeError("example_kwarg_inputs should be a dict")
+                raise RuntimeError(
+                    "example_inputs or example_kwarg_inputs should be a dict but are "
+                    f"{type(example_inputs)}, {type(example_kwarg_inputs)}"
+                )
         return trace_module(
             func.__self__,
             {"forward": example_inputs},
