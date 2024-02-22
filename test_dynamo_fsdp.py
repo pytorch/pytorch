@@ -3,13 +3,13 @@ Adapted from fsdp.py in https://github.com/pytorch/pytorch/pull/110609.
 """
 
 """
-TORCH_COMPILE_DEBUG=1 TORCH_LOGS_RANKS=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py
+CUDA_VISIBLE_DEVICES=6,7 TORCH_COMPILE_DEBUG=1 TORCH_LOGS_RANKS=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py
 
-TORCH_COMPILE_DEBUG=1 TORCH_LOGS_RANKS=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py
+CUDA_VISIBLE_DEVICES=6,7 TORCH_COMPILE_DEBUG=1 TORCH_LOGS_RANKS=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py
 
-TORCH_LOGS_RANKS=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py
+CUDA_VISIBLE_DEVICES=6,7 TORCH_LOGS_RANKS=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py
 
-TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py
+CUDA_VISIBLE_DEVICES=6,7 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py
 """
 import contextlib
 import logging
