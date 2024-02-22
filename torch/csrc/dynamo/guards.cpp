@@ -7,6 +7,7 @@
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_symnode.h>
+#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/extension.h>
 
 #ifdef USE_CUDA
@@ -1166,7 +1167,14 @@ class DYNAMIC_INDICES : public LeafGuard {
     static PyObject* dynamic_indices_str =
         PyUnicode_InternFromString("_dynamo_dynamic_indices");
 
-    bool has_attr = PyObject_HasAttr(value, dynamic_indices_str);
+    PyObject* indices = PyObject_GetAttr(value, dynamic_indices_str); // new ref
+    bool has_attr = true;
+    if (indices == nullptr) {
+      // Attr absent. Clear exception.
+      PyErr_Clear();
+      has_attr = false;
+    }
+
     // Common case - hasattr({tensor_name}, '_dynamo_dynamic_indices') == False
     if (!_has_attr) {
       return !has_attr;
@@ -1178,15 +1186,12 @@ class DYNAMIC_INDICES : public LeafGuard {
       return true;
     }
 
-    PyObject* indices = PyObject_GetAttr(value, dynamic_indices_str); // new ref
     static PyObject* issubset_str = PyUnicode_InternFromString("issubset");
-    PyObject* issubset = PyObject_GetAttr(indices, issubset_str); // new ref
-    PyObject* call_result =
-        PyObject_CallOneArg(issubset, _dynamic_indices.ptr()); // new ref
+    PyObject* call_result = PyObject_CallMethodOneArg(
+        indices, issubset_str, _dynamic_indices.ptr()); // new ref
     bool result = PyObject_IsTrue(call_result);
     Py_DECREF(call_result);
     Py_DECREF(indices);
-    Py_DECREF(issubset);
     return result;
   }
 
