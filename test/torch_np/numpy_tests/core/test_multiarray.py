@@ -3613,7 +3613,7 @@ class TestPutmask(TestCase):
     def test_mask_size(self):
         assert_raises(ValueError, np.putmask, np.array([1, 2, 3]), [True], 5)
 
-    @parametrize("dtype", (True, False))
+    @parametrize("greater", (True, False))
     def test_byteorder(self, greater):
         dtype = ">i4" if greater else "<i4"
         x = np.array([1, 2, 3], dtype)
