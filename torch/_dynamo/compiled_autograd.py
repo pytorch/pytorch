@@ -21,24 +21,9 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.fx.proxy import Proxy
+from torch.autograd.variable import exec_post_processing
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
-
-
-compiled_autograd_final_callbacks = []
-
-
-def queue_callback(cb):
-    global compiled_autograd_final_callbacks
-    compiled_autograd_final_callbacks.append(cb)
-
-
-def exec_post_processing():
-    # TODO(yf225): use lock to be thread-safe (and local to the graph)
-    global compiled_autograd_final_callbacks
-    for cb in compiled_autograd_final_callbacks:
-        cb()
-    compiled_autograd_final_callbacks.clear()
 
 
 def maybe_clone(x):
