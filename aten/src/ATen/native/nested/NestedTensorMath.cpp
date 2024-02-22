@@ -15,6 +15,7 @@
 #include <ATen/native/nested/NestedTensorUtils.h>
 
 #include <tuple>
+#include <iostream>
 
 namespace at {
 namespace native {
@@ -861,6 +862,11 @@ Tensor _nested_view_from_buffer(
     storage_offsets);
 }
 
+Tensor _nested_tensor_buffer(const Tensor& self) {
+  auto nt_self = get_nested_tensor_impl(self);
+  return nt_self->get_buffer();
+}
+
 Tensor _nested_view_from_jagged(
     const Tensor& values,
     const Tensor& offsets,
@@ -894,6 +900,18 @@ int64_t _nested_get_ragged_idx(const Tensor& self) {
   TORCH_INTERNAL_ASSERT(
       false, "_nested_get_ragged_idx(): expected to be implemented from Python");
   return 0;
+}
+
+Tensor _nested_strided_to_jagged(const Tensor& self, const Tensor& dummy) {
+  TORCH_INTERNAL_ASSERT(
+      false, "_nested_strided_to_jagged(): expected to be implemented from Python");
+  return Tensor();
+}
+
+Tensor _nested_get_jagged_dummy(const Tensor& any) {
+  TORCH_INTERNAL_ASSERT(
+      false, "_nested_get_jagged_dummy(): expected to be implemented from Python");
+  return Tensor();
 }
 
 // See Note [Special size rule for nested tensor]

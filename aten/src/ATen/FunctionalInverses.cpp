@@ -4,6 +4,7 @@
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/NestedTensorImpl.h>
 
 #include <utility>
 namespace at::functionalization {
@@ -309,6 +310,77 @@ Tensor FunctionalInverses::_nested_view_from_jagged_inverse(const Tensor& base, 
     return values;
   } else {
     return values.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
+  }
+}
+
+Tensor FunctionalInverses::_nested_strided_to_jagged_inverse(const at::Tensor & base, const at::Tensor & mutated_view, at::functionalization::InverseReturnMode inverse_return_mode, const at::Tensor & dummy) {
+  // Mutated view is a jagged NT
+  auto values = at::_nested_get_values(mutated_view);
+  auto offsets = at::_nested_get_offsets(mutated_view);
+  auto lengths = at::_nested_get_lengths(mutated_view);
+  auto ragged_idx = at::_nested_get_ragged_idx(mutated_view);
+
+  // Create a new C++ NT from the Python NestedTensor
+  // Start by creating metadata needed by C++ NT
+  auto options = TensorOptions().dtype(kLong);
+  auto nested_sizes = at::empty({offsets.size(0) - 1, values.dim()}, options);
+
+  auto non_ragged_dims = at::empty({values.dim()});
+  auto non_ragged_sizes = at::empty({values.dim()});
+  auto curr_dim = 0;
+  for (int64_t i = 0; i < values.dim() + 1; ++i) {
+    if (i != ragged_idx) {
+      non_ragged_dims[curr_dim] = i;
+      non_ragged_sizes[curr_dim] = mutated_view.size(i + 1);
+      ++curr_dim;
+    }
+  }
+
+  nested_sizes.index_put_(
+    {indexing::Slice(), non_ragged_dims},
+    non_ragged_sizes
+  );
+  auto ragged_source = lengths.defined() ? lengths : offsets.diff();
+  nested_sizes.index_put_({indexing::Slice(), ragged_idx - 1}, ragged_source);
+  auto nested_strides = at::empty_like(nested_sizes);
+  nested_strides.index_put_(
+    {indexing::Slice(), indexing::Slice()},
+    at::tensor(mutated_view.strides()).index({indexing::Slice(1, indexing::None)})
+  );
+  int64_t offset_multiplier = 1;
+  for (int64_t i = 1; i < values.dim(); ++i) {
+    offset_multiplier *= values.size(i);
+  }
+  auto nested_offsets = offsets.to(at::Device("cpu")) * offset_multiplier;
+  nested_offsets = nested_offsets.index({indexing::Slice(indexing::None, -1)});
+
+  auto cpp_nt = at::_nested_view_from_buffer(
+    values.view(-1),
+    nested_sizes,
+    nested_strides,
+    nested_offsets
+  );
+
+  if (inverse_return_mode != InverseReturnMode::NeverView) {
+    return cpp_nt;
+  } else {
+    return cpp_nt.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
+  }
+}
+
+Tensor FunctionalInverses::_nested_tensor_buffer_inverse(const Tensor & base, const Tensor & mutated_view, InverseReturnMode inverse_return_mode) {
+  auto base_ptr = at::native::get_nested_tensor_impl(base);
+  auto nt = at::_nested_view_from_buffer(
+    mutated_view,
+    base_ptr->get_nested_sizes(),
+    base_ptr->get_nested_strides(),
+    base_ptr->get_storage_offsets()
+  );
+
+  if (inverse_return_mode != InverseReturnMode::NeverView) {
+    return nt;
+  } else {
+    return nt.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
   }
 }
 
