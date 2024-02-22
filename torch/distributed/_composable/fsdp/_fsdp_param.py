@@ -147,7 +147,7 @@ class FSDPParam:
         self.reduce_dtype = reduce_dtype
         # None indicates that the mixed precision is not enabled
 
-    # @torch.no_grad()
+    @torch.no_grad()
     def _init_sharded_param(self, param: nn.Parameter, device: torch.device):
         if param.device != device:
             raise AssertionError(
