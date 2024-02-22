@@ -524,7 +524,7 @@ class AvgPool1d(_AvgPoolNd):
               L_{out} = \left\lfloor \frac{L_{in} +
               2 \times \text{padding} - \text{kernel\_size}}{\text{stride}} + 1\right\rfloor
 
-          Per the note above, if``ceil_mode`` is True and :math:`(L_{out} - 1) \times \text{stride} \geq L_{in}
+          Per the note above, if ``ceil_mode`` is True and :math:`(L_{out} - 1) \times \text{stride} \geq L_{in}
           + \text{padding}`, we skip the last window as it would start in the right padded region, resulting in
           :math:`L_{out}` being reduced by one.
 
