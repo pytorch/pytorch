@@ -4332,6 +4332,64 @@ class NCCLTraceTest(NCCLTraceTestBase):
             else:
                 self.assertTrue('duration_ms' not in t['entries'][coalesced_op])
 
+    @parametrize("op_sizes", [
+        [(2, 3)],
+        [(2, 3), (5, 5), (1,)],
+    ])
+    @parametrize("timing_enabled", [True, False])
+    def test_individual_send_recv(self, op_sizes, timing_enabled):
+        """
+        'WorkEnqueue' was skipped for isendirecv, leading to segfault on dump_entries when update_state tried to use
+        a destructed Work obj's cuda events
+        """
+
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+        pg = self._create_process_group_nccl()
+        if timing_enabled:
+            pg._enable_collectives_timing()
+
+        num_repeats = 20
+        ops_per_repeat = len(op_sizes)
+        for i in range (num_repeats):
+            for input_sizes in op_sizes:
+                tensor = torch.zeros(input_sizes).to(self.local_device)
+                if self.rank == 0:
+                    dist.recv(tensor, 1)
+                elif self.rank == 1:
+                    tensor *= 2
+                    dist.send(tensor, 0)
+
+        torch.cuda.synchronize()
+
+        if timing_enabled:
+            # wait for watchdog thread to process the queue of works
+            time.sleep(1)
+
+        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
+        ver = t['version']
+        self.assertEqual(ver, "1.1")
+        self.assertEqual(len(t['entries']), num_repeats * (ops_per_repeat))
+        if self.rank == 0:
+            for id, entry in enumerate(t['entries']):
+                print(f"{id}: seq {entry['seq_id']}, name {entry['profiling_name']} sz {entry['input_sizes']}")
+        for seq in range(num_repeats * ops_per_repeat):
+            input_sizes = op_sizes[seq % ops_per_repeat]
+            profiling_name = 'nccl:recv 0<-1' if self.rank == 0 else 'nccl:send 1->0'
+            # TODO(whc) clarify if this off by one is expected or a bug. and if we can fix it or if that breaks BC.
+            # (observed that first p2p op gets seq 1 instead of seq 0, bc we bump seq before we initwork/flightrecord in p2p)
+            expected_seq = seq + 1
+            self.assertEqual(t['entries'][seq]['profiling_name'], profiling_name)
+            self.assertEqual(t['entries'][seq]['seq_id'], expected_seq)
+            self.assertEqual(t['entries'][seq]['input_sizes'], [input_sizes])
+            self.assertEqual(t['entries'][seq]['output_sizes'], [input_sizes])
+            self.assertEqual(t['entries'][seq]['state'], 'completed')
+
+            if timing_enabled:
+                duration = t['entries'][seq]['duration_ms']
+                self.assertTrue(0.001 < duration < 10000, duration)
+            else:
+                self.assertTrue('duration_ms' not in t['entries'][seq])
 
 class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
     timeout_sec = 1
