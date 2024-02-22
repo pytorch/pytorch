@@ -4259,8 +4259,12 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("op_sizes_per_coalesce", [
+        [(2, 3)],
+        [(2, 3), (5, 5), (1,)],
+    ])
     @parametrize("timing_enabled", [True, False])
-    def test_batched_send_recv(self, timing_enabled):
+    def test_batched_send_recv(self, op_sizes_per_coalesce, timing_enabled):
         """
         'WorkEnqueue' was skipped for isendirecv, leading to segfault on dump_entries when update_state tried to use
         a destructed Work obj's cuda events
@@ -4272,20 +4276,17 @@ class NCCLTraceTest(NCCLTraceTestBase):
         if timing_enabled:
             pg._enable_collectives_timing()
 
-        print(os.getpid())
-        time.sleep(10)
-
         num_coalesced_ops = 20
-        ops_per_coalesce = 1
-        input_sizes = (2, 3)
+        ops_per_coalesce = len(op_sizes_per_coalesce)
         for i in range (num_coalesced_ops):
             ops = []
-            tensor = torch.zeros(input_sizes).to(self.local_device)
-            if self.rank == 0:
-                ops.append(dist.P2POp(dist.irecv, tensor, 1))
-            elif self.rank == 1:
-                tensor *= 2
-                ops.append(dist.P2POp(dist.isend, tensor, 0))
+            for input_sizes in op_sizes_per_coalesce:
+                tensor = torch.zeros(input_sizes).to(self.local_device)
+                if self.rank == 0:
+                    ops.append(dist.P2POp(dist.irecv, tensor, 1))
+                elif self.rank == 1:
+                    tensor *= 2
+                    ops.append(dist.P2POp(dist.isend, tensor, 0))
 
             dist.batch_isend_irecv(ops).pop().wait()
 
@@ -4299,19 +4300,23 @@ class NCCLTraceTest(NCCLTraceTestBase):
         ver = t['version']
         self.assertEqual(ver, "1.1")
         self.assertEqual(len(t['entries']), num_coalesced_ops * (ops_per_coalesce + 1))
+        # if self.rank == 0:
+        #     for id, entry in enumerate(t['entries']):
+        #         print(f"{id}: seq {entry['seq_id']}, name {entry['profiling_name']} sz {entry['input_sizes']}")
         for seq in range(num_coalesced_ops):
-            first_op = seq * 2
-            coalesced_op = first_op + 1
-            # the indivudal ops inside the coalescing group the individual op metadata,
-            # but not the timing info coming from the actual coalesced kernel
-            profiling_name = 'nccl:recv 0<-1' if self.rank == 0 else 'nccl:send 1->0'
-            self.assertEqual(t['entries'][first_op]['profiling_name'], profiling_name)
-            self.assertEqual(t['entries'][first_op]['seq_id'], seq)
-            self.assertEqual(t['entries'][first_op]['input_sizes'], [input_sizes])
-            self.assertEqual(t['entries'][first_op]['output_sizes'], [input_sizes])
-            # duration doesn't get tagged onto individual ops yet, nor is their state updated
-            self.assertEqual(t['entries'][first_op]['state'], 'scheduled')
-            self.assertTrue('duration_ms' not in t['entries'][first_op])
+            first_op = seq * (ops_per_coalesce + 1)
+            coalesced_op = first_op + ops_per_coalesce
+            for p2p_op_idx, input_sizes in zip(range(first_op, coalesced_op, 1), op_sizes_per_coalesce):
+                # the indivudal ops inside the coalescing group the individual op metadata,
+                # but not the timing info coming from the actual coalesced kernel
+                profiling_name = 'nccl:recv 0<-1' if self.rank == 0 else 'nccl:send 1->0'
+                self.assertEqual(t['entries'][p2p_op_idx]['profiling_name'], profiling_name)
+                self.assertEqual(t['entries'][p2p_op_idx]['seq_id'], seq)
+                self.assertEqual(t['entries'][p2p_op_idx]['input_sizes'], [input_sizes])
+                self.assertEqual(t['entries'][p2p_op_idx]['output_sizes'], [input_sizes])
+                # duration doesn't get tagged onto individual ops yet, nor is their state updated
+                self.assertEqual(t['entries'][p2p_op_idx]['state'], 'scheduled')
+                self.assertTrue('duration_ms' not in t['entries'][p2p_op_idx])
 
             # the coalesced op has no metadata but indicates that coalescing was used,
             # and accurately reflects the timing and state info for the whole group
