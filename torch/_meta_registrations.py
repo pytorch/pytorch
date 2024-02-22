@@ -597,7 +597,7 @@ def assert_async_meta(val, assert_msg):
     return
 
 
-@register_meta(aten.print.default)
+@register_meta(aten._print.default)
 def print_meta(s):
     return
 
