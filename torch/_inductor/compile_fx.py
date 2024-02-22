@@ -303,6 +303,7 @@ def count_bytes_inner(
         metrics.num_bytes_accessed += num_bytes
         metrics.nodes_num_elem += nodes_num_elem
         metrics.node_runtimes += node_runtimes
+        print(metrics.num_bytes_accessed, metrics.nodes_num_elem)
     return make_boxed_func(gm.forward)
 
 

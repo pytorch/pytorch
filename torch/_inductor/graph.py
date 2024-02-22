@@ -897,6 +897,9 @@ class GraphLowering(torch.fx.Interpreter):
         )
 
     def finalize(self):
+        # print(self.buffers)
+        # if len(self.buffers) > 10:
+        #     print(self.buffers)
         for buf in self.buffers:
             buf.decide_layout()
 
@@ -990,6 +993,16 @@ class GraphLowering(torch.fx.Interpreter):
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
             num_users = len(set(n.users))
+            if isinstance(result, TensorBox):
+                # print("cur: ", n.meta['val'])
+                for user in n.users:
+                    if isinstance(user.meta['val'], torch.Tensor):
+                        if user.meta['val'].numel() > n.meta['val'].numel():
+                            result.realize()
+                        if user.meta['val'].dtype.itemsize > n.meta['val'].dtype.itemsize:
+                            result.realize()
+                    # print("nxt: ", user.meta['val'])
+
             if num_users > 1 and isinstance(result, TensorBox):
                 for user in n.users:
                     if user.target in needs_realized_inputs:

@@ -6664,6 +6664,9 @@ class StorageBox(MutableBox):
             )
         ):
             self.realize()
+        else:
+            pass
+            # print("not realizing: ", self)
 
     @cache_on_self
     def num_reads(self):

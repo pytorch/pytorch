@@ -756,8 +756,10 @@ def _default_formatter():
     fmt = os.environ.get(LOG_FORMAT_ENV_VAR, None)
     if fmt is None:
         return TorchLogsFormatter()
-    else:
-        return logging.Formatter(fmt)
+    elif fmt == "none":
+        fmt = "%(message)s"
+
+    return logging.Formatter(fmt)
 
 
 DEFAULT_FORMATTER = _default_formatter()

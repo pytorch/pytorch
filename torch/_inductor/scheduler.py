@@ -1282,7 +1282,9 @@ class Scheduler:
         self.create_foreach_nodes()
         self.topological_sort_schedule()
         self.logged_slow_fusion = set()
+        # print("pre fusion: ", self.nodes)
         self.fuse_nodes()
+        # print("post fusion: ", self.nodes)
         if config.reorder_for_compute_comm_overlap:
             # Refresh node_users and inverse_users to reflect fused nodes
             self.compute_node_users()
