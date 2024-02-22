@@ -84,11 +84,12 @@ def _fsdp_state_post_forward(self, module: nn.Module, input: Any, output: Any) -
             )
     return output
 
-def _fsdp_state_pre_backward(self, forward_grad_fns: Tuple[Node, ...], *unused: Any) -> None:
-    # NOTE(yf225): since under compile we use `register_hook` to call pre_backward, to mimic `multi_grad_hook` "any" mode behavior
-    # we only want to call pre_backward once, so doing this check here to early return if already called.
-    # TODO(yf225): update based on Andrew's comment:
+def _fsdp_state_pre_backward(self, forward_grad_fns: Tuple[Node, ...], grad) -> None:
     """
+    NOTE(yf225): since under compile we use `register_hook` to call pre_backward, to mimic `multi_grad_hook` "any" mode behavior
+    we only want to call pre_backward once, so doing this check here to early return if already called.
+    
+    Comment from Andrew:
     one more thing to note is that the hook should run once per call to register_multi_grad_hook, where there is one call per forward
     so if we run multiple forward before backward, we should run the pre-backward hook multiple times (one per forward)
     as such, the bool to guard whether the pre-backward hook is a no-op or not needs to be per call to register_multi_grad_hook, not something global to the entire backward
@@ -98,7 +99,8 @@ def _fsdp_state_pre_backward(self, forward_grad_fns: Tuple[Node, ...], *unused: 
     self._training_state = TrainingState.PRE_BACKWARD
     self._register_root_post_backward_final_callback()
     if self._fsdp_param_group:
-        self._fsdp_param_group.pre_backward(forward_grad_fns, *unused)
+        self._fsdp_param_group.pre_backward(forward_grad_fns)
+    return grad
 
 def _fsdp_state_root_post_backward_final_callback(self, *unused) -> None:
     with torch.profiler.record_function("FSDP::root_post_backward_callback"):
