@@ -1808,6 +1808,69 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
   Py_ssize_t _index;
 };
 
+/**
+ * GlobalWeakRef accessor. Dynamo can insert a weakref object into the frame
+ * globals. This accessor reads the globals and then calls the weakref object
+ * to get the underlying object. This is a child of GlobalsGuardAccessor.
+ * Therefore, we will get the globals dict while caling check_nopybind.
+ */
+class GlobalWeakRefGuardAccessor : public GuardAccessor {
+ public:
+  GlobalWeakRefGuardAccessor(
+      RootGuardManager* root,
+      py::object global_name,
+      py::handle example_value)
+      : GuardAccessor(root, global_name, example_value),
+        _global_name(global_name.ptr()) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    // obj is globals dict because GlobalWeakRefGuardAccessor has to be a
+    // child of GlobalsGuardAccessor.
+    PyObject* weakref = PyDict_GetItem(obj, _global_name); // borrowed ref
+    if (weakref == nullptr) {
+      // The weakref is not in the globals dict.
+      PyErr_Clear();
+      return false;
+    }
+
+    if (!PyWeakref_Check(weakref)) {
+      return false;
+    }
+
+    PyObject* x = PyWeakref_GetObject(weakref); // borrowed ref
+    return _guard_manager->check_nopybind(x);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    // obj is globals dict because GlobalWeakRefGuardAccessor has to be a
+    // child of GlobalsGuardAccessor.
+    PyObject* weakref = PyDict_GetItem(obj, _global_name); // borrowed ref
+    if (weakref == nullptr) {
+      // The weakref is not in the globals dict.
+      PyErr_Clear();
+      return GuardDebugInfo(false, std::string("KeyError ") + repr(), 0);
+    }
+
+    if (!PyWeakref_Check(weakref)) {
+      return GuardDebugInfo(false, std::string("Not a weakref ") + repr(), 0);
+    }
+
+    PyObject* x = PyWeakref_GetObject(weakref); // borrowed ref
+    return _guard_manager->check_verbose_nopybind(x);
+  }
+
+  std::string repr() const override {
+    return "GlobalWeakRefGuardAccessor(" +
+        py::str(_global_name).cast<std::string>() + ")";
+  }
+
+ private:
+  PyObject* _global_name;
+};
+
 void install_tensor_aliasing_guard(
     GuardManager* x,
     GuardManager* y,
@@ -1998,6 +2061,11 @@ PyObject* torch_c_dynamo_guards_init() {
       GuardAccessor,
       std::unique_ptr<TupleIteratorGetItemAccessor>>(
       py_m, "TupleIteratorGetItemAccessor");
+  py::class_<
+      GlobalWeakRefGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<GlobalWeakRefGuardAccessor>>(
+      py_m, "GlobalWeakRefGuardAccessor");
 
   // Guard Manager - No constructor in python, python should use
   // RootGuardManager.
@@ -2116,6 +2184,12 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "tuple_iterator_getitem_manager",
           &GuardManager::get_child_manager<TupleIteratorGetItemAccessor>,
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "global_weakref_manager",
+          &GuardManager::get_child_manager<GlobalWeakRefGuardAccessor>,
           py::return_value_policy::reference)
       // return by reference because C++ GuardManager has the ownership of
       // accessors and guard managers
