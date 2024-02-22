@@ -2881,7 +2881,7 @@ class CPUReproTests(TestCase):
 
             def forward(self, x):
                 self.conv.weight = nn.Parameter(self.conv_weight)
-                self.conv.bias = nn.Parameter(self.conv_bias)
+                self.conv.bias = nn.Parameter(self.conv_bias, requires_grad=False)
                 self.conv.eval()
                 x = self.conv(x)
                 x = self.batchnorm(x)

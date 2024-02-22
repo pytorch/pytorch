@@ -1158,9 +1158,22 @@ class UntypedStorageVariable(VariableTracker):
 class ParameterVariable(VariableTracker):
     """Represents a call to torch.nn.Parameter"""
 
-    def __init__(self, tensor, **kwargs):
+    @staticmethod
+    def create(data=None, requires_grad=True):
+        if isinstance(requires_grad, variables.VariableTracker):
+            try:
+                requires_grad = requires_grad.as_python_constant()
+            except NotImplementedError:
+                unimplemented("Parameter(requires_grad=...) not constant")
+        if data is None:
+            unimplemented("Parameter(data=None) not implemented")
+        return ParameterVariable(data, requires_grad)
+
+    def __init__(self, tensor, requires_grad, **kwargs):
         super().__init__(**kwargs)
         self.tensor = tensor
+        assert isinstance(requires_grad, bool)
+        self.requires_grad = requires_grad
 
     def as_proxy(self):
         # torch.nn.Parameter is not traceable, so doesn't belong in graph
@@ -1169,4 +1182,8 @@ class ParameterVariable(VariableTracker):
     def reconstruct(self, codegen):
         codegen.load_import_from("torch.nn", "Parameter")
         codegen(self.tensor)
-        codegen.extend_output(create_call_function(1, True))
+        if self.requires_grad:
+            codegen.extend_output(create_call_function(1, True))
+        else:
+            codegen(variables.ConstantVariable.create(False))
+            codegen.extend_output(create_call_function(2, True))
