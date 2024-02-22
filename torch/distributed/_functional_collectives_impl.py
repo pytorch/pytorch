@@ -28,7 +28,7 @@ try:
     import torch_xla  # noqa: F401
 
     _use_native_funcol = False
-except:
+except Exception:
     _use_native_funcol = "DISABLE_NATIVE_FUNCOL" in os.environ
 
 

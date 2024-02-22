@@ -1,12 +1,11 @@
 #pragma once
 
-#include <c10/core/Device.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <bitset>
 #include <cstddef>
 
 namespace torch {
 
-using device_set = std::bitset<c10::Device::MAX_NUM_DEVICES>;
+using device_set = std::bitset<C10_COMPILE_TIME_MAX_GPUS>;
 
 } // namespace torch
