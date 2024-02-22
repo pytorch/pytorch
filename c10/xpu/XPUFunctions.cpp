@@ -90,7 +90,11 @@ void initDeviceProperties(DeviceProp* device_prop, int device) {
 }
 
 inline void check_device(DeviceIndex device) {
-  // TODO: Use c10::Device::MAX_NUM_DEVICES directly.
+  // TODO: Use c10::Device::MAX_NUM_DEVICES directly. DeviceIndex is a int8_t
+  // value, and the maximum number of GPUs that PyTorch recognizes is 64. So, we
+  // have to check if there is an overflow happen. When DeviceIndex changes to
+  // int16_t and c10::Device::MAX_NUM_DEVICES is provided, we should use it
+  // directly to check if too many XPU devices are detected.
   TORCH_CHECK(
       gDevicePool.devices.size() <= std::numeric_limits<DeviceIndex>::max(),
       "Too many XPU devices, DeviceIndex overflowed");
