@@ -7,6 +7,7 @@
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_symnode.h>
+#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/extension.h>
 
 #ifdef USE_CUDA
@@ -1140,6 +1141,67 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
   long unsigned int _counter = 0;
 };
 
+class DYNAMIC_INDICES : public LeafGuard {
+  // C++ equivalent of
+  // if hasattr(value, "_dynamo_dynamic_indices"):
+  //     code.append(
+  //         f"(({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices}))
+  //         if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  #
+  //         noqa: B950
+  //     )
+  // else:
+  //     code.append(
+  //         f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
+  //     )
+ public:
+  DYNAMIC_INDICES(
+      bool has_attr,
+      py::set dynamic_indices,
+      py::object verbose_code_parts)
+      : LeafGuard(verbose_code_parts),
+        _has_attr(has_attr),
+        _dynamic_indices(dynamic_indices) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    // Make an interned string
+    static PyObject* dynamic_indices_str =
+        PyUnicode_InternFromString("_dynamo_dynamic_indices");
+
+    PyObject* indices = PyObject_GetAttr(value, dynamic_indices_str); // new ref
+    bool has_attr = true;
+    if (indices == nullptr) {
+      // Attr absent. Clear exception.
+      PyErr_Clear();
+      has_attr = false;
+    }
+
+    // Common case - hasattr({tensor_name}, '_dynamo_dynamic_indices') == False
+    if (!_has_attr) {
+      return !has_attr;
+    }
+
+    // "((x._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices}))
+    //       if hasattr(x, '_dynamo_dynamic_indices') else True)
+    if (!has_attr) {
+      return true;
+    }
+
+    static PyObject* issubset_str = PyUnicode_InternFromString("issubset");
+    PyObject* call_result = PyObject_CallMethodOneArg(
+        indices, issubset_str, _dynamic_indices.ptr()); // new ref
+    bool result = PyObject_IsTrue(call_result);
+    Py_DECREF(call_result);
+    Py_DECREF(indices);
+    return result;
+  }
+
+ private:
+  // _has_attr is for the common case - hasattr(x, "_dynamo_dynamic_indices') ==
+  // False
+  bool _has_attr;
+  py::set _dynamic_indices;
+};
+
 class GuardManager;
 class RootGuardManager;
 class DictGuardManager;
@@ -2027,6 +2089,10 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DATA_PTR_MATCH")
       .def(py::init<py::object, py::list>())
       .def("__call__", &DATA_PTR_MATCH::check);
+  py::class_<DYNAMIC_INDICES, LeafGuard, std::shared_ptr<DYNAMIC_INDICES>>(
+      py_m, "DYNAMIC_INDICES")
+      .def(py::init<bool, py::set, py::list>())
+      .def("__call__", &DYNAMIC_INDICES::check);
   py::class_<TENSOR_ALIASING, LeafGuard, std::shared_ptr<TENSOR_ALIASING>>(
       py_m, "TENSOR_ALIASING");
   py::class_<
@@ -2155,6 +2221,15 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(
                 std::make_shared<DATA_PTR_MATCH>(data_ptr, verbose_code_parts));
+          })
+      .def(
+          "add_dynamic_indices_guard",
+          [](GuardManager& self,
+             bool has_attr,
+             py::set value,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<DYNAMIC_INDICES>(
+                has_attr, value, verbose_code_parts));
           })
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
