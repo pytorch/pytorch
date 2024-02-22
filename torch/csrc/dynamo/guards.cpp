@@ -1235,11 +1235,7 @@ class DICT_VERSION : public LeafGuard {
     if (!PyDict_Check(value.ptr())) {
       throw py::type_error("DICT_VERSION expects a dict");
     }
-#if IS_PYTHON_3_12_PLUS
-    throw std::runtime_error("Dynamo does not support CPython 3.12 yet.");
-#else
     _tag = get_dict_version(value.ptr());
-#endif
   }
   bool check_nopybind(PyObject* value) override { // borrowed ref
     return PyDict_Check(value) && get_dict_version(value) == _tag;
@@ -1247,11 +1243,15 @@ class DICT_VERSION : public LeafGuard {
 
  private:
   int64_t get_dict_version(PyObject* dict) {
+#if IS_PYTHON_3_12_PLUS
+    throw std::runtime_error("Dynamo does not support CPython 3.12 yet.");
+#else
     // ma_version_tag is deprecated since 3.12. We will need to transition
     // to use the appropriate API for later versions.
     // This warning is an error on some clang builds, so we have to ifdef it
     // away for now.
     return ((PyDictObject*)dict)->ma_version_tag;
+#endif
   }
 
   // Saved dict version.
