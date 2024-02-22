@@ -161,6 +161,7 @@ jobs:
         with:
           cache_dir: .pytest_cache
           job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
+          s3_bucket: pytorch-ci-artifacts
 
       - name: Build
         if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
@@ -238,6 +239,7 @@ jobs:
           retention-days: 365
           if-no-files-found: warn
           path: sccache-stats-*.json
+          s3-bucket: pytorch-ci-artifacts
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
