@@ -368,6 +368,38 @@ class class_ : public ::torch::detail::class_base {
     return *this;
   }
 
+  template <typename GetMetadataFn>
+  class_& def_meta(GetMetadataFn&& get_metadata) {
+    static_assert(
+        c10::guts::is_stateless_lambda<std::decay_t<GetMetadataFn>>::value,
+        "def_meta() currently only supports lambdas as "
+        "def_meta argument.");
+    def("__get_metadata__", std::forward<GetMetadataFn>(get_metadata));
+
+    // type validation
+    auto get_metadata_schema = classTypePtr->getMethod("__get_metadata__").getSchema();
+    auto format_get_metadata_schema = [&get_metadata_schema]() {
+      std::stringstream ss;
+      ss << get_metadata_schema;
+      return ss.str();
+    };
+    TORCH_CHECK(
+        get_metadata_schema.arguments().size() == 1,
+        "__get_metadata__ should take exactly one argument: self. Got: ",
+        format_get_metadata_schema());
+    auto first_arg_type = get_metadata_schema.arguments().at(0).type();
+    TORCH_CHECK(
+        *first_arg_type == *classTypePtr,
+        "self argument of __get_metadatea__ must be the custom class type. Got ",
+        first_arg_type->repr_str());
+    TORCH_CHECK(
+        get_metadata_schema.returns().size() == 1,
+        "__get_metadata__ should return exactly one value for metadata. Got: ",
+        format_get_metadata_schema());
+
+    return *this;
+  }
+
  private:
   template <typename Func>
   torch::jit::Function* defineMethod(

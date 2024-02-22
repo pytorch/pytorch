@@ -1,5 +1,6 @@
 import torch
 
+
 @torch.library.impl_abstract_class("_TorchScriptTesting::_Foo")
 class FakeFoo:
     def __init__(self, x, y):
@@ -7,8 +8,8 @@ class FakeFoo:
         self.y = y
 
     @staticmethod
-    def from_real(obj):
-        (x, y), classname = obj.__getstate__()
+    def from_metadata(foo_meta):
+        x, y = foo_meta
         return FakeFoo(x, y)
 
     def add_tensor(self, z):

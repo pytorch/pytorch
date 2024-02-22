@@ -1228,7 +1228,20 @@ class FakeTensorMode(TorchDispatchMode):
                     f" fake modes for the operator by e.g. wrappping it with maybe_disable_fake_tensor_mode()."
                 )
             fake_class = torch.library.registered_class[full_qualname]
-            return fake_class.from_real(x)
+            if not hasattr(fake_class, "from_metadata"):
+                raise RuntimeError(
+                    f"Trying to fake tensor dispatch {func} that takes ScriptObject {full_qualname} "
+                    f" as input but the fake class {fake_class} doesn't have a from_metadata method. "
+                    f" Please add a from_metadata method to the fake class to support fake tensor dispatch."
+                )
+
+            if not hasattr(x, "__get_metadata__"):
+                raise RuntimeError(
+                    f"Trying to fake tensor dispatch {func} that takes ScriptObject {full_qualname} "
+                    f" as input but the script object doesn't have a __get_metadata__ method. "
+                    f" Please add a __get_metadata__ method to the script object with .def_meta() to support fake tensor dispatch."
+                )
+            return fake_class.from_metadata(x.__get_metadata__())
 
         args, kwargs = pytree.tree_map_only(
             torch.ScriptObject, lambda x: _wrap_script_object(x), (args, kwargs)
