@@ -115,8 +115,6 @@ jobs:
           conda activate tdenv
           cd "${GITHUB_WORKSPACE}"/llm-target-determinator
 
-          python create_filelist.py
-
           torchrun \
             --standalone \
             --nnodes=1 \
