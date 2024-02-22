@@ -998,8 +998,12 @@ class GraphLowering(torch.fx.Interpreter):
                     if isinstance(user.meta['val'], torch.Tensor):
                         if user.meta['val'].numel() > n.meta['val'].numel():
                             result.realize()
-                        if user.meta['val'].dtype.itemsize > n.meta['val'].dtype.itemsize:
+                        if user.meta['val'].dtype.itemsize > n.meta['val'].dtype.itemsize and user.target == torch.ops.prims.convert_element_type:
                             result.realize()
+                        elif user.meta['val'].dtype.itemsize > n.meta['val'].dtype.itemsize and user.target != torch.ops.prims.convert_element_type.default:
+                            # print(user, user.meta['val'], n.meta['val'])
+                            pass
+
 
             if num_users > 1 and isinstance(result, TensorBox):
                 for user in n.users:
