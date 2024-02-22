@@ -185,9 +185,6 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
             "s": original_stateful_obj,
         }
 
-        import fbvscode
-
-        fbvscode.attach_debugger()
         if async_op:
             f = saver._async_save(sd, checkpoint_id=self.temp_dir)
             t = time.monotonic()
