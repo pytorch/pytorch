@@ -265,13 +265,6 @@ class FSDPState(_State):
                 functools.partial(_fsdp_state_root_post_backward_final_callback, self)
             )
 
-        # # TODO(yf225): final_callback should be called after *all* gradients are ready.
-        # # So here we should register post_accumulate_grad_hook on all params and wait for all their grads to be ready before executing post backward logic
-        # for state in self._state_ctx.all_states:
-        #     for fsdp_param in state._fsdp_param_group.fsdp_params:
-        #         if fsdp_param.all_gather_output.is_leaf:
-        #             fsdp_param.all_gather_output.register_post_accumulate_grad_hook(functools.partial(_fsdp_state_root_post_backward_final_callback, self))
-
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[FSDPState]:
     state = _get_module_state(module)

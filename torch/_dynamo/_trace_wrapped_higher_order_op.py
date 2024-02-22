@@ -71,18 +71,13 @@ def inner_trace(mode, *args, fn):
         "call_function", self_invoke, proxy_args, {}, name="trace_wrapped"
     )
     grad = torch.zeros_like(grad)
-    print(f"here1: grad: {grad}")
     grad = track_tensor_tree(grad, out_proxy, constant=None, tracer=mode.tracer)
-    print(f"here2: grad: {grad}")
 
     # We have a little shortcut here, wherein we DO NOT yet run a meta func, and so
     # we take on an assumption that input and output meta matches. As such, we must introduce
     # a runtime assert
-    arg1 = mode.tracer.unwrap_proxy(grad)
-    print(f"here3: arg1: {arg1}")
     proxy_args = (
-        # mode.tracer.unwrap_proxy(grad),
-        arg1,
+        mode.tracer.unwrap_proxy(grad),
         grad.size(),
         grad.stride(),
         grad.dtype,
