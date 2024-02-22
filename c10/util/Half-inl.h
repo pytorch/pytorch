@@ -5,7 +5,6 @@
 
 #include <cstring>
 #include <limits>
-#include "c10/util/Half.h"
 
 #ifdef __CUDACC__
 #include <cuda_fp16.h>
@@ -35,8 +34,10 @@ namespace c10 {
 
 #if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
 /// Constructors
-inline Half::Half(float16_t value): x(detail::fp16_to_bits(value)) {}
-inline Half::operator float16_t() const { return detail::fp16_from_bits(x); }
+inline Half::Half(float16_t value) : x(detail::fp16_to_bits(value)) {}
+inline Half::operator float16_t() const {
+  return detail::fp16_from_bits(x);
+}
 #else
 
 inline C10_HOST_DEVICE Half::Half(float value)
@@ -71,7 +72,8 @@ inline C10_HOST_DEVICE Half::operator float() const {
 #endif
 }
 
-#endif /* !defined(__aarch64__) || defined(C10_MOBILE) || defined(__CUDACC__) */
+#endif /* !defined(__aarch64__) || defined(C10_MOBILE) || defined(__CUDACC__) \
+        */
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
 inline C10_HOST_DEVICE Half::Half(const __half& value) {
