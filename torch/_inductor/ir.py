@@ -1743,13 +1743,14 @@ class SplitScan(Scan):
 @dataclasses.dataclass
 class ArgScan(Scan):
     ioutput: int
+    src_dtype: torch.dtype
 
     def store_reduction(self, output_name, indexer, vars, scan_vars):
         idx = self.reindex(vars, scan_vars)
         value = self.inner_fn(idx)
         rindex = self._index(self.scan_ranges, "r")[0]
         result = ops.scan(
-            (self.dtype, torch.int64),
+            (self.src_dtype, torch.int64),
             self.combine_fn,
             (value, "rindex"),
             (self.init, 0),
@@ -1795,10 +1796,13 @@ class ArgScan(Scan):
             )
             return value, index
 
+        dtypes = (dtype, torch.int64)
+
         values, indices = (
             super(ArgScan, cls).create(
                 device=device,
-                dtype=dtype,
+                dtype=dtypes[ioutput],
+                src_dtype=dtype,
                 inner_fn=inner_fn,
                 size=size,
                 axis=axis,
