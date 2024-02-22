@@ -290,18 +290,33 @@ class DistMatrixOpsTest(DTensorTestBase):
         )
 
         dist_query = distribute_tensor(query, device_mesh, [Shard(1)])
-        dist_key = distribute_tensor(query, device_mesh, [Shard(1)])
-        dist_value = distribute_tensor(query, device_mesh, [Shard(1)])
+        dist_key = distribute_tensor(key, device_mesh, [Shard(1)])
+        dist_value = distribute_tensor(value, device_mesh, [Shard(1)])
 
         from torch.nn.attention import sdpa_kernel, SDPBackend
 
         with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+            dropout_p = 0.0
+            is_causal = True
+            params = torch.backends.cuda.SDPAParams(
+                query, key, value, None, dropout_p, is_causal
+            )
+            if not torch.backends.cuda.can_use_flash_attention(params, debug=False):
+                self.skipTest("Flash attention is not available")
+
             out = F.scaled_dot_product_attention(
-                query, key, value, dropout_p=0.0, is_causal=True
+                query, key, value, dropout_p=dropout_p, is_causal=is_causal
             )
             dist_out = F.scaled_dot_product_attention(
-                dist_query, dist_key, dist_value, dropout_p=0.0, is_causal=True
+                dist_query,
+                dist_key,
+                dist_value,
+                dropout_p=dropout_p,
+                is_causal=is_causal,
             )
+            full_out = dist_out.full_tensor()
+            if self.rank == 0:
+                self.assertEqual(full_out, out)
 
         # TODO: add backward test once we support the backward op
 
