@@ -957,6 +957,16 @@ class LENGTH_CHECK : public LeafGuard {
   Py_ssize_t _length;
 };
 
+class WEAKREF_ALIVE : public LeafGuard {
+ public:
+  WEAKREF_ALIVE(py::object verbose_code_parts)
+      : LeafGuard(verbose_code_parts) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    return value != Py_None;
+  }
+};
+
 class DEFAULT_DEVICE : public LeafGuard {
  public:
   DEFAULT_DEVICE(py::object verbose_code_parts)
@@ -2178,6 +2188,10 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DEFAULT_DEVICE")
       .def(py::init<py::list>())
       .def("__call__", &DEFAULT_DEVICE::check);
+  py::class_<WEAKREF_ALIVE, LeafGuard, std::shared_ptr<WEAKREF_ALIVE>>(
+      py_m, "WEAKREF_ALIVE")
+      .def(py::init<py::list>())
+      .def("__call__", &WEAKREF_ALIVE::check);
   py::class_<
       TUPLE_ITERATOR_LEN,
       LeafGuard,
@@ -2320,6 +2334,12 @@ PyObject* torch_c_dynamo_guards_init() {
           [](GuardManager& self, py::object verbose_code_parts) -> void {
             self.add_leaf_guard(
                 std::make_shared<DEFAULT_DEVICE>(verbose_code_parts));
+          })
+      .def(
+          "add_weakref_alive_guard",
+          [](GuardManager& self, py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(
+                std::make_shared<WEAKREF_ALIVE>(verbose_code_parts));
           })
       .def(
           "add_global_state_guard",
