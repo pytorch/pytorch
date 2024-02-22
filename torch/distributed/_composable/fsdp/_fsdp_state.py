@@ -252,9 +252,15 @@ class FSDPState(_State):
         if self._state_ctx.post_backward_final_callback_queued:
             return
         self._state_ctx.post_backward_final_callback_queued = True
-        Variable._execution_engine.queue_callback(
-            functools.partial(_fsdp_state_root_post_backward_final_callback, self)
-        )
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            Variable._execution_engine.queue_callback(
+                functools.partial(_fsdp_state_root_post_backward_final_callback, self)
+            )
+        else:
+            torch._dynamo.compiled_autograd.queue_callback(
+                functools.partial(_fsdp_state_root_post_backward_final_callback, self)
+            )
+
         # # TODO(yf225): final_callback should be called after *all* gradients are ready.
         # # So here we should register post_accumulate_grad_hook on all params and wait for all their grads to be ready before executing post backward logic
         # for state in self._state_ctx.all_states:
