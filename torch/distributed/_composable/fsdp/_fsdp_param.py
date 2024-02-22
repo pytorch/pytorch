@@ -256,13 +256,12 @@ class FSDPParam:
             return  # already initialized
         # For the default path (no post-all-gather), the all-gather output
         # gives the unsharded parameter data directly
-        # unsharded_param = torch.as_strided(
-        #     self.all_gather_output,
-        #     self._orig_size,
-        #     self._contiguous_orig_stride,
-        #     storage_offset=0,
-        # )
-        unsharded_param = self.all_gather_output.view(self._orig_size)
+        unsharded_param = torch.as_strided(
+            self.all_gather_output,
+            self._orig_size,
+            self._contiguous_orig_stride,
+            storage_offset=0,
+        )
         if self.is_dtensor:
             unsharded_param = DTensor.from_local(
                 unsharded_param,
@@ -421,8 +420,11 @@ class FSDPParam:
 def unsafe_alloc_storage(tensor: torch.Tensor) -> None:
     # Skip the already-allocated check and assume that `tensor` is the base
     # tensor to save CPU overhead
-    tensor.untyped_storage().resize_(tensor.numel() * tensor.itemsize)
-    # pass
+    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        tensor.untyped_storage().resize_(tensor.numel() * tensor.itemsize)
+    else:
+        # NOTE(yf225): we rely on Inductor to do the DCE
+        pass
 
 
 def unsafe_free_storage(tensor: torch.Tensor) -> None:

@@ -189,7 +189,7 @@ def run(model, optim):
 def main_compiled(n_iter):
     model, optim = init()
     # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
-    run(model, optim)
+    # run(model, optim)
     print("done eager 1st run!")
 
     dynamic = False
@@ -200,12 +200,12 @@ def main_compiled(n_iter):
 
     torch._dynamo.config.trace_distributed = True
 
+    if dist.get_rank() == 0:
+        # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
+        import time
+        time.sleep(600)
+    model = torch.compile(model, backend="aot_eager", fullgraph=True, dynamic=dynamic)
     with compiled_autograd.enable(compiler_fn):
-        if dist.get_rank() == 0:
-            # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
-            import time
-            time.sleep(600)
-        model = torch.compile(model, backend="aot_eager", fullgraph=True, dynamic=dynamic)
         for _ in range(n_iter):
             res = run(model, optim)
     return res
@@ -214,7 +214,7 @@ def main_compiled(n_iter):
 def main_eager(n_iter):
     model, optim = init()
     # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
-    run(model, optim)
+    # run(model, optim)
 
     for _ in range(n_iter):
         res = run(model, optim)
