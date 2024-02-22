@@ -150,8 +150,11 @@ class PlacementVariable(DistributedVariable):
 
             args = [x.as_python_constant() for x in args]
             kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            method(self.value, *args, **kwargs)
-            return self
+            if name == "__setattr__":
+                method(self.value, *args, **kwargs)
+                return self
+            constant_val = method(self.value, *args, **kwargs)
+            return ConstantVariable.create(constant_val)
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -232,6 +235,8 @@ class ProcessGroupVariable(DistributedVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx, name):
+        if name == "group_name":
+            return variables.ConstantVariable.create(self.value.group_name)
         if name in ["rank", "size"]:
             return variables.LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
