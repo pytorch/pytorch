@@ -26,7 +26,6 @@ from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     get_report_path,
     IS_CI,
-    IS_MACOS,
     parser as common_parser,
     retry_shell,
     set_cwd,
@@ -385,6 +384,7 @@ def run_test(
     extra_unittest_args=None,
     env=None,
 ) -> int:
+    env = env or os.environ.copy()
     maybe_set_hip_visible_devies()
     unittest_args = options.additional_unittest_args.copy()
     test_file = test_module.name
@@ -617,16 +617,6 @@ def run_test_retries(
         else:
             sc_command = f"--sc={stepcurrent_key}"
         print_to_file("Retrying...")
-        # Print full c++ stack traces during retries
-        # Don't do it for macos inductor tests as it makes them
-        # segfault for some reason
-        if not (
-            IS_MACOS
-            and len(command) >= 2
-            and command[2].startswith(INDUCTOR_TEST_PREFIX)
-        ):
-            env = env or {}
-            env["TORCH_SHOW_CPP_STACKTRACES"] = "1"
         print_items = []  # do not continue printing them, massive waste of space
 
     consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
@@ -1563,6 +1553,25 @@ def run_tests(
             pool.terminate()
 
     try:
+        for test in selected_tests_serial:
+            options_clone = copy.deepcopy(options)
+            if can_run_in_pytest(test):
+                options_clone.pytest = True
+            failure = run_test_module(test, test_directory, options_clone)
+            test_failed = handle_error_messages(failure)
+            if (
+                test_failed
+                and not options.continue_through_error
+                and not RERUN_DISABLED_TESTS
+            ):
+                raise RuntimeError(
+                    failure.message
+                    + "\n\nTip: You can keep running tests even on failure by "
+                    "passing --keep-going to run_test.py.\n"
+                    "If running on CI, add the 'keep-going' label to "
+                    "your PR and rerun your jobs."
+                )
+
         os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
         for test in selected_tests_parallel:
             options_clone = copy.deepcopy(options)
@@ -1576,32 +1585,6 @@ def run_tests(
         pool.close()
         pool.join()
         del os.environ["NUM_PARALLEL_PROCS"]
-
-        if (
-            not options.continue_through_error
-            and not RERUN_DISABLED_TESTS
-            and len(failures) != 0
-        ):
-            raise RuntimeError(
-                "\n".join(x.message for x in failures)
-                + "\n\nTip: You can keep running tests even on failure by "
-                "passing --keep-going to run_test.py.\n"
-                "If running on CI, add the 'keep-going' label to "
-                "your PR and rerun your jobs."
-            )
-
-        for test in selected_tests_serial:
-            options_clone = copy.deepcopy(options)
-            if can_run_in_pytest(test):
-                options_clone.pytest = True
-            failure = run_test_module(test, test_directory, options_clone)
-            test_failed = handle_error_messages(failure)
-            if (
-                test_failed
-                and not options.continue_through_error
-                and not RERUN_DISABLED_TESTS
-            ):
-                raise RuntimeError(failure.message)
 
     finally:
         pool.terminate()
@@ -1684,13 +1667,13 @@ def main():
 
         def __str__(self):
             s = f"Name: {self.name}\n"
-            s += "  Parallel tests:\n"
-            s += "".join(
-                f"    {test}\n" for test in self.sharded_tests if not must_serial(test)
-            )
             s += "  Serial tests:\n"
             s += "".join(
                 f"    {test}\n" for test in self.sharded_tests if must_serial(test)
+            )
+            s += "  Parallel tests:\n"
+            s += "".join(
+                f"    {test}\n" for test in self.sharded_tests if not must_serial(test)
             )
             return s.strip()
 
