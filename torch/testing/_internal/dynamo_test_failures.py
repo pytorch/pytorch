@@ -33,6 +33,20 @@ FIXME_inductor_non_strict = {
 #
 # This lists exists so we can more easily add large numbers of failing tests,
 failures_directory = os.path.join(current_dir, "dynamo_expected_failures")
+
+if not os.path.exists(failures_directory):
+    # We must be in CI
+    # Try an alternative way to find directory
+
+    import inspect
+
+    frame = inspect.stack()[-1]
+    RUN_TEST_FILE = "test/run_test.py"
+    if not frame.filename.endswith(RUN_TEST_FILE):
+        raise Exception("Cannot find base directory")
+    current_dir = os.path.dirname(frame.filename[: -len(RUN_TEST_FILE)])
+    failures_directory = os.path.join(current_dir, "dynamo_expected_failures")
+
 dynamo_expected_failures = set(os.listdir(failures_directory))
 
 # see NOTE [dynamo_test_failures.py] for more details
