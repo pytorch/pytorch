@@ -929,7 +929,7 @@ def forward(self, x_1, output_1):
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
-    def test_triton_kernel_dynamic_shape_tensor(self, backend):
+    def test_triton_kernel_unbacked_shape_tensor(self, backend):
         @triton.jit
         def square(
             in_ptr,
@@ -955,7 +955,7 @@ def forward(self, x_1, output_1):
 
         x = torch.randn(4, device="cuda")
         eager_out = f(x)
-        compiled_out = torch.compile(f, backend=backend)(x)
+        compiled_out = torch.compile(f, fullgraph=True, backend=backend)(x)
         self.assertEqual(compiled_out, eager_out)
 
 
