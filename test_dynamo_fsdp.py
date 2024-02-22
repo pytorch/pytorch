@@ -31,7 +31,7 @@ from torch.distributed.device_mesh import DeviceMesh
 
 torch_log = logging.getLogger("torch")
 
-hidden_dim = 123400
+hidden_dim = 12340
 
 device_type = "cuda"
 
