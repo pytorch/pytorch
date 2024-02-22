@@ -173,7 +173,7 @@ void slow_conv2d_forward(
                                   "slow_conv2d_cuda", [&] {
     // For each elt in batch, do:
     for (int elt = 0; elt < batchSize; elt ++) {
-      // Matrix mulitply per output:
+      // Matrix multiply per output:
       auto input_n = input.select(0, elt);
       auto output_n = output.select(0, elt);
 
@@ -255,7 +255,7 @@ void slow_conv2d_backward(
                                   "slow_conv2d_backward_cuda", [&] {
     // For each elt in batch, do:
     for (int elt = 0; elt < batchSize; elt ++) {
-      // Matrix mulitply per sample:
+      // Matrix multiply per sample:
       auto grad_input_n = grad_input.select(0, elt);
       auto grad_output_n = grad_output.select(0, elt);
 
@@ -327,10 +327,10 @@ void slow_conv2d_grad_weight(
                                   "slow_conv2d_grad_weight_cuda", [&] {
     // For each elt in batch, do:
     for (int elt = 0; elt < batchSize; elt ++) {
-      // Matrix mulitply per output:
+      // Matrix multiply per output:
       auto grad_output_n = grad_output.select(0, elt);
 
-      // Matrix mulitply per output:
+      // Matrix multiply per output:
       auto input_n = input.select(0, elt);
 
       if (requires_columns) {
