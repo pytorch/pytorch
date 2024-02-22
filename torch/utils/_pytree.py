@@ -821,24 +821,6 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
     return treespec.unflatten(leaves)
 
 
-def _tree_leaves_helper(
-    tree: PyTree,
-    leaves: List[Any],
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> None:
-    if _is_leaf(tree, is_leaf=is_leaf):
-        leaves.append(tree)
-        return
-
-    node_type = _get_node_type(tree)
-    flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-    child_pytrees, _ = flatten_fn(tree)
-
-    # Recursively flatten the children
-    for child in child_pytrees:
-        _tree_leaves_helper(child, leaves, is_leaf=is_leaf)
-
-
 def tree_iter(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
@@ -846,15 +828,14 @@ def tree_iter(
     """Get an iterator over the leaves of a pytree."""
     if _is_leaf(tree, is_leaf=is_leaf):
         yield tree
-        return
+    else:
+        node_type = _get_node_type(tree)
+        flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
+        child_pytrees, _ = flatten_fn(tree)
 
-    node_type = _get_node_type(tree)
-    flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-    child_pytrees, _ = flatten_fn(tree)
-
-    # Recursively flatten the children
-    for child in child_pytrees:
-        yield from tree_iter(child, is_leaf=is_leaf)
+        # Recursively flatten the children
+        for child in child_pytrees:
+            yield from tree_iter(child, is_leaf=is_leaf)
 
 
 def tree_leaves(
@@ -862,9 +843,7 @@ def tree_leaves(
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> List[Any]:
     """Get a list of leaves of a pytree."""
-    leaves: List[Any] = []
-    _tree_leaves_helper(tree, leaves, is_leaf=is_leaf)
-    return leaves
+    return list(tree_iter(tree, is_leaf=is_leaf))
 
 
 def tree_structure(
@@ -1442,9 +1421,9 @@ def arg_tree_leaves(*args: PyTree, **kwargs: PyTree) -> List[Any]:
     """
     leaves: List[Any] = []
     for a in args:
-        _tree_leaves_helper(a, leaves)
+        leaves.extend(tree_iter(a))
     for a in kwargs.values():
-        _tree_leaves_helper(a, leaves)
+        leaves.extend(tree_iter(a))
     return leaves
 
 
