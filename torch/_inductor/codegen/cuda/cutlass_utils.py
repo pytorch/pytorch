@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 # then the CUDA / CUTLASS backend is entirely disabled, including it's unit tests
 _DISABLE_CUTLASS_BACKEND = False
 
+
 def _rename_cutlass_import(content: str, cutlass_modules: List[str]) -> str:
     for cutlass_module in cutlass_modules:
         content = content.replace(
