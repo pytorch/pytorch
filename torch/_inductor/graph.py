@@ -994,14 +994,12 @@ class GraphLowering(torch.fx.Interpreter):
             # already too many reads and rematerializing can be bad.
             num_users = len(set(n.users))
             if isinstance(result, TensorBox):
-                # print("cur: ", n.meta['val'])
                 for user in n.users:
                     if isinstance(user.meta['val'], torch.Tensor):
                         if user.meta['val'].numel() > n.meta['val'].numel():
                             result.realize()
                         if user.meta['val'].dtype.itemsize > n.meta['val'].dtype.itemsize:
                             result.realize()
-                    # print("nxt: ", user.meta['val'])
 
             if num_users > 1 and isinstance(result, TensorBox):
                 for user in n.users:
