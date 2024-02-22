@@ -248,7 +248,7 @@ class FSDPParam:
         all_gather_output_size = torch.Size([all_gather_input_numel * world_size])
         # NOTE(yf225): here we explicitly make fsdp_param.all_gather_output the leaf tensor (instead of unsharded_param being leaf tensor)
         self.all_gather_output = torch.empty(
-            all_gather_output_size, dtype=dtype, device=device, requires_grad=True
+            all_gather_output_size, dtype=dtype, device=device
         )
 
     def init_unsharded_param(self):
@@ -270,7 +270,7 @@ class FSDPParam:
                 shape=self._global_size,
                 stride=self._global_stride,
             )
-        self._unsharded_param = unsharded_param
+        self._unsharded_param = nn.Parameter(unsharded_param)
         self._unsharded_param.requires_grad_(self.sharded_param.requires_grad)
 
     def to_sharded(self) -> None:
