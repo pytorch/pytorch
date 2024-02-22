@@ -105,6 +105,7 @@ def fully_shard(
     post_forward_mesh_info = _get_post_forward_mesh_info(
         reshard_after_forward, mesh_info
     )
+    assert post_forward_mesh_info is not None, "DEBUG yf225: if reshard_after_forward=True, this shouldn't be None"
 
     state = fully_shard.state(module)
     state.init(module, device, mp_policy)
