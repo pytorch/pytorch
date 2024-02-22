@@ -188,10 +188,12 @@ class FSDPState(_State):
             self._state_ctx.all_states.append(state)
             if state._fsdp_param_group:
                 state._fsdp_param_group.lazy_init()
-        if self._fsdp_param_group:
-            # For the root, do not reshard after forward since for training,
-            # the parameters would be freed and all-gathered immediately
-            self._fsdp_param_group.post_forward_mesh_info = None
+        # NOTE(yf225): I believe this causes issue during compile (post_forward hook thinks that `post_forward_mesh_info` is None thus not doing resharding).
+        # Need to understand why.
+        # if self._fsdp_param_group:
+        #     # For the root, do not reshard after forward since for training,
+        #     # the parameters would be freed and all-gathered immediately
+        #     self._fsdp_param_group.post_forward_mesh_info = None
         self._init_fqns()
         self._init_shared_state()
 
