@@ -17,7 +17,7 @@ from torch._inductor.utils import IndentedBuffer
 _MAGIC_SYMPY_ERROR_STRING = "[!sympy: unsupported expr!]"
 
 
-def _arg_str(a):
+def _arg_parse(a):
     if isinstance(a, sympy.Expr):
         return a
     return str(a)
