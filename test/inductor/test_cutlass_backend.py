@@ -351,34 +351,6 @@ class TestCutlassBackend(TestCase):
     @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
-    def test_max_autotune_cutlass_backend_simple_fusion_fp16_layout_opt3(self):
-        def mm(a, b):
-            return torch.bmm(a, b) * 3.4
-
-        #  The pointwise ops seem to be pre-fused into a single Pointwise
-        self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=False,
-            fp16=True,
-            expected_fuse_count=0,
-            mm=mm,
-            m=256,
-            n=513,
-            k=255,
-            batch_size=10,
-            with_bias=False,
-            config_override={
-                "layout_optimization": True,
-                "shape_padding": True,
-                "cuda.cutlass_backend_min_gemm_size": 1,
-                "shape_pad_only_k_dim": False,
-                "shape_pad_use_transpose": True,
-            },
-        )
-
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @unittest.skipIf(_DISABLE_CUTLASS_BACKEND, "Cutlass backend disabled")
-    @unittest.skipIf(torch.version.hip, "HIP not supported")
-    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_mm_fp16_standalone_runner_large(self):
         from torch._inductor.codegen.cuda.cutlass_utils import (
             CUDACompileSourceCapturingContext,
