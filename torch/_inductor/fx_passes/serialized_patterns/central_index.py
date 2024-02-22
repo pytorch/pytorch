@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # This is an auto-generated file. Please do not modify it by hand.
 # To re-generate, run:
 # cd ~/pytorch && python

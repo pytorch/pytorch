@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import torch
 import time
 import torch.distributed.rpc as rpc

@@ -12,7 +12,8 @@
 #include <ATen/ops/cudnn_convolution_transpose_native.h>
 #endif
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 // ---------------------------------------------------------------------
 //
@@ -25,89 +26,180 @@ namespace at { namespace native {
 // See Note [ATen preprocessor philosophy]
 
 at::Tensor cudnn_convolution(
-    const at::Tensor& input, const at::Tensor& weight,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool benchmark, bool deterministic, bool allow_tf32) {
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32) {
   AT_ERROR("cudnn_convolution: ATen not compiled with cuDNN support");
 }
 
 at::Tensor& cudnn_convolution_out(
-    const Tensor& input_t, const Tensor& weight_t, IntArrayRef padding,
-    IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool benchmark,
-    bool deterministic, bool allow_tf32, Tensor& output_t) {
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32,
+    Tensor& output_t) {
   AT_ERROR("cudnn_convolution_out: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_backward_input(
-    IntArrayRef input_size, const at::Tensor& grad_output, const at::Tensor& weight,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, bool allow_tf32) {
-  AT_ERROR("cudnn_convolution_backward_input: ATen not compiled with cuDNN support");
+    IntArrayRef input_size,
+    const at::Tensor& grad_output,
+    const at::Tensor& weight,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32) {
+  AT_ERROR(
+      "cudnn_convolution_backward_input: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_backward_weight(
-    IntArrayRef weight_size, const at::Tensor& grad_output, const at::Tensor& input,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, bool allow_tf32) {
-  AT_ERROR("cudnn_convolution_backward_weight: ATen not compiled with cuDNN support");
+    IntArrayRef weight_size,
+    const at::Tensor& grad_output,
+    const at::Tensor& input,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32) {
+  AT_ERROR(
+      "cudnn_convolution_backward_weight: ATen not compiled with cuDNN support");
 }
 
-std::tuple<at::Tensor,at::Tensor> cudnn_convolution_backward(
-    const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, bool allow_tf32, std::array<bool,2> output_mask) {
+std::tuple<at::Tensor, at::Tensor> cudnn_convolution_backward(
+    const at::Tensor& input,
+    const at::Tensor& grad_output,
+    const at::Tensor& weight,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32,
+    std::array<bool, 2> output_mask) {
   AT_ERROR("cudnn_convolution_backward: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_transpose(
-    const at::Tensor& input, const at::Tensor& weight,
-    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool benchmark, bool deterministic, bool allow_tf32) {
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    IntArrayRef padding,
+    IntArrayRef output_padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32) {
   AT_ERROR("cudnn_convolution_transpose: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_transpose_backward_input(
-    const at::Tensor& grad_output, const at::Tensor& weight,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool benchmark, bool deterministic, bool allow_tf32) {
-  AT_ERROR("cudnn_convolution_transpose_backward: ATen not compiled with cuDNN support");
+    const at::Tensor& grad_output,
+    const at::Tensor& weight,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32) {
+  AT_ERROR(
+      "cudnn_convolution_transpose_backward: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_transpose_backward_weight(
-    IntArrayRef weight_size, const at::Tensor& grad_output, const at::Tensor& input,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, bool allow_tf32) {
-  AT_ERROR("cudnn_convolution_transpose_backward_weight: ATen not compiled with cuDNN support");
+    IntArrayRef weight_size,
+    const at::Tensor& grad_output,
+    const at::Tensor& input,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32) {
+  AT_ERROR(
+      "cudnn_convolution_transpose_backward_weight: ATen not compiled with cuDNN support");
 }
 
-std::tuple<at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
-    const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
-    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, bool allow_tf32, std::array<bool,2> output_mask) {
-  AT_ERROR("cudnn_convolution_transpose_backward: ATen not compiled with cuDNN support");
+std::tuple<at::Tensor, at::Tensor> cudnn_convolution_transpose_backward(
+    const at::Tensor& input,
+    const at::Tensor& grad_output,
+    const at::Tensor& weight,
+    IntArrayRef padding,
+    IntArrayRef output_padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32,
+    std::array<bool, 2> output_mask) {
+  AT_ERROR(
+      "cudnn_convolution_transpose_backward: ATen not compiled with cuDNN support");
 }
 
 void raw_cudnn_convolution_forward_out(
-    const Tensor& output, const Tensor& input, const Tensor& weight,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, bool allow_tf32) {
-  AT_ERROR("raw_cudnn_convolution_forward_out: ATen not compiled with cuDNN support");
+    const Tensor& output,
+    const Tensor& input,
+    const Tensor& weight,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32) {
+  AT_ERROR(
+      "raw_cudnn_convolution_forward_out: ATen not compiled with cuDNN support");
 }
 
 void raw_cudnn_convolution_backward_input_out(
     const at::Tensor& grad_input,
     const at::Tensor& grad_output,
     const at::Tensor& weight,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, bool allow_tf32) {
-  AT_ERROR("raw_cudnn_convolution_backward_input_out: ATen not compiled with cuDNN support");
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32) {
+  AT_ERROR(
+      "raw_cudnn_convolution_backward_input_out: ATen not compiled with cuDNN support");
 }
 
 void raw_cudnn_convolution_backward_weight_out(
-    const Tensor& grad_weight, const Tensor& grad_output, const Tensor& input,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, bool allow_tf32) {
-  AT_ERROR("raw_cudnn_convolution_backward_weight_out: ATen not compiled with cuDNN support");
+    const Tensor& grad_weight,
+    const Tensor& grad_output,
+    const Tensor& input,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32) {
+  AT_ERROR(
+      "raw_cudnn_convolution_backward_weight_out: ATen not compiled with cuDNN support");
 }
 
 Tensor cudnn_convolution_relu(
@@ -134,6 +226,7 @@ Tensor cudnn_convolution_add_relu(
   AT_ERROR("cudnn_convolution_add_relu: ATen not compiled with cuDNN support");
 }
 
-#endif  // AT_CUDNN_ENABLED
+#endif // AT_CUDNN_ENABLED
 
-}}
+} // namespace native
+} // namespace at

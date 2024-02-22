@@ -53,7 +53,7 @@ static inline void cpu_cum_base_kernel(const Tensor& result,
     // NOLINTNEXTLINE(bugprone-argument-comment)
     .declare_static_shape(self.sizes(), /*squash_dim=*/dim)
     .add_output(result)
-    .add_input(self)
+    .add_const_input(self)
     .build();
 
   auto result_dim_stride = ensure_nonempty_stride(result, dim);
@@ -183,8 +183,7 @@ inline void norm_two_reduce_step(Vectorized<acc_t>& acc_vec, Vectorized<scalar_t
 
 template <>
 inline void norm_two_reduce_step(Vectorized<float>& acc_fvec, Vectorized<BFloat16>& data_bvec) {
-  Vectorized<float> data_fvec0, data_fvec1;
-  std::tie(data_fvec0, data_fvec1) = convert_bfloat16_float(data_bvec);
+  auto [data_fvec0, data_fvec1] = convert_bfloat16_float(data_bvec);
   acc_fvec += data_fvec0 * data_fvec0;
   acc_fvec += data_fvec1 * data_fvec1;
 }

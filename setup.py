@@ -365,7 +365,7 @@ def get_submodule_folders():
     with open(git_modules_path) as f:
         return [
             os.path.join(cwd, line.split("=", 1)[1].strip())
-            for line in f.readlines()
+            for line in f
             if line.strip().startswith("path")
         ]
 
@@ -1130,7 +1130,7 @@ def main():
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
         long_description = f.read()
 
-    version_range_max = max(sys.version_info[1], 10) + 1
+    version_range_max = max(sys.version_info[1], 12) + 1
     torch_package_data = [
         "py.typed",
         "bin/*",
@@ -1166,6 +1166,7 @@ def main():
         "include/ATen/cuda/*.h",
         "include/ATen/cuda/detail/*.cuh",
         "include/ATen/cuda/detail/*.h",
+        "include/ATen/cuda/tunable/*.h",
         "include/ATen/cudnn/*.h",
         "include/ATen/functorch/*.h",
         "include/ATen/ops/*.h",
@@ -1174,6 +1175,7 @@ def main():
         "include/ATen/hip/detail/*.cuh",
         "include/ATen/hip/detail/*.h",
         "include/ATen/hip/impl/*.h",
+        "include/ATen/hip/tunable/*.h",
         "include/ATen/mps/*.h",
         "include/ATen/miopen/*.h",
         "include/ATen/detail/*.h",
@@ -1186,6 +1188,7 @@ def main():
         "include/ATen/native/mps/*.h",
         "include/ATen/native/quantized/*.h",
         "include/ATen/native/quantized/cpu/*.h",
+        "include/ATen/native/sparse/*.h",
         "include/ATen/native/utils/*.h",
         "include/ATen/quantized/*.h",
         "include/caffe2/serialize/*.h",
@@ -1271,6 +1274,7 @@ def main():
         "include/torch/csrc/lazy/core/ops/*.h",
         "include/torch/csrc/lazy/python/python_util.h",
         "include/torch/csrc/lazy/ts_backend/*.h",
+        "include/torch/csrc/xpu/*.h",
         "include/pybind11/*.h",
         "include/pybind11/detail/*.h",
         "include/pybind11/eigen/*.h",
@@ -1285,6 +1289,7 @@ def main():
         "include/sleef.h",
         "_inductor/codegen/*.h",
         "_inductor/codegen/aoti_runtime/*.cpp",
+        "_export/serde/*.yaml",
         "share/cmake/ATen/*.cmake",
         "share/cmake/Caffe2/*.cmake",
         "share/cmake/Caffe2/public/*.cmake",
