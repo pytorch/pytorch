@@ -570,6 +570,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         f_locals["d"]["a"] = 2
         self.assertFalse(root.check(f_locals))
+        self.assertFalse(root.check_verbose(f_locals).result)
 
         f_locals["d"]["a"] = 1
         self.assertTrue(root.check(f_locals))

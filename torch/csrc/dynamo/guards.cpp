@@ -1723,16 +1723,12 @@ class KeyValueDictGuardManager : public GuardManager {
     return _value_manager.get();
   }
 
-  virtual bool check_nopybind(PyObject* item) override { // borrowed ref
+  // NB: These are not override of the virtual functions. The signature is
+  // different. This is ok because we will call this only from DictGuardManager.
+  bool check_nopybind(PyObject* key, PyObject* value) { // borrowed ref
     // We get the key, value pair from the DictGuardManager here. Check the
     // key guard manager and then value guard manager. There is no need to do
     // any shuffling here.
-
-    // Get key, value pair. No need to check for nullptr here as item is result
-    // of PyDict_Items.
-    PyObject* key = PyTuple_GET_ITEM(item, 0); // borrowed ref
-    PyObject* value = PyTuple_GET_ITEM(item, 1); // borrowed ref
-
     if (_key_manager) {
       if (!_key_manager->check_nopybind(key)) {
         _fail_count += 1;
@@ -1748,16 +1744,13 @@ class KeyValueDictGuardManager : public GuardManager {
     return true;
   }
 
-  virtual GuardDebugInfo check_verbose_nopybind(
-      PyObject* item) override { // borrowed ref
+  // NB: These are not override of the virtual functions. The signature is
+  // different. This is ok because we will call this only from DictGuardManager.
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* key,
+      PyObject* value) { // borrowed ref
     // We get the key, value pair from the DictGuardManager here. Check the
     // key guard manager and then value guard manager.
-
-    // Get key, value pair. No need to check for nullptr here as item is result
-    // of PyDict_Items.
-    PyObject* key = PyTuple_GET_ITEM(item, 0); // borrowed ref
-    PyObject* value = PyTuple_GET_ITEM(item, 1); // borrowed ref
-
     int num_guards_executed = 0;
     if (_key_manager) {
       GuardDebugInfo debug_info = _key_manager->check_verbose_nopybind(key);
@@ -1781,7 +1774,8 @@ class KeyValueDictGuardManager : public GuardManager {
     // If you are calling this, you probably want to go through a key, value
     // child manager and then add a leaf guard on them. DictGuardManager already
     // has TYPE_MATCH and LENGTH_CHECK built in.
-    throw std::runtime_error("DictGuardManager does not support a leaf_guard");
+    throw std::runtime_error(
+        "KeyValueDictGuardManager does not support a leaf_guard");
   }
 
   // Debug helper - Nobody should call this. Call child_managers to directly get
@@ -1816,9 +1810,8 @@ class KeyValueDictGuardManager : public GuardManager {
  * because of no ref count increments/decrements.
  *
  * DictGuardManager is composed of a vector of KeyValueDictGuardManager - an
- * encapsulation of a manager for (key, value) pair. On guard failure, we just
- * shuffle the KeyValueDictGuardManagers. This ensures that key guard managers
- * are always run before value guard managers.
+ * encapsulation of a manager for (key, value) pair. This ensures that key guard
+ * managers are always run before value guard managers.
  *
  * DictGuardManager relies on the order of dict.keys(). It keeps track of the
  * indices of dict.keys() to access the key, value pair.
@@ -1841,6 +1834,8 @@ class DictGuardManager : public GuardManager {
       return it->second.get();
     }
     _indices.push_back(index);
+    // Always keep the _indices array sorted
+    std::sort(_indices.begin(), _indices.end());
     _key_value_managers[index] =
         std::make_unique<KeyValueDictGuardManager>(this->get_root());
     return _key_value_managers[index].get();
@@ -1859,38 +1854,25 @@ class DictGuardManager : public GuardManager {
       return false;
     }
 
-    // This is the dict object, here we use the indices to retrieve key value
-    // pairs and call the _key_value_managers.
-    PyObject* items = PyDict_Items(obj); // new ref
+    PyObject *key, *value;
+    Py_ssize_t pos = 0;
 
-    bool failed_on_first = true;
-    bool result = true;
-    for (Py_ssize_t index : _indices) {
-      // Use PyList_GET_ITEM instead of PyList_GetItem as we already have a
-      // length check. So, it will not throw an exception.
-      PyObject* item = PyList_GET_ITEM(items, index); // borrowed ref
-      result = result && _key_value_managers[index]->check_nopybind(item);
-      if (!result) {
-        _fail_count += 1;
-        break;
+    // Points to an element in the _indices vector.
+    size_t index_pointer = 0;
+
+    while (index_pointer < _indices.size() &&
+           PyDict_Next(obj, &pos, &key, &value)) {
+      // Pos moves with PyDict_Next
+      Py_ssize_t pos_minus_1 = pos - 1;
+      // Skip if pos_minus_1 is not a saved index.
+      if (pos_minus_1 == _indices[index_pointer]) {
+        index_pointer += 1;
+        if (!_key_value_managers[pos_minus_1]->check_nopybind(key, value)) {
+          return false;
+        }
       }
-      failed_on_first = false;
     }
-    Py_DECREF(items);
-
-    if (!result && !failed_on_first) {
-      // Inplace sort the indices by the fail count. This moves the child
-      // guards with higher fail count earlier in the queue, and enables fail
-      // fast for the next check.
-      std::sort(
-          _indices.begin(),
-          _indices.end(),
-          [this](const Py_ssize_t& a, const Py_ssize_t& b) {
-            return this->_key_value_managers[a]->fail_count() >
-                this->_key_value_managers[b]->fail_count();
-          });
-    }
-    return result;
+    return true;
   }
 
   virtual GuardDebugInfo check_verbose_nopybind(
@@ -1903,22 +1885,30 @@ class DictGuardManager : public GuardManager {
       return GuardDebugInfo(false, "len(dict) does not match", 0);
     }
 
-    // This is the dict object, here we use the indices to retrieve key value
-    // pairs and call the _key_value_managers.
-    PyObject* items = PyDict_Items(obj); // new ref
+    PyObject *key, *value;
+    Py_ssize_t pos = 0;
+
+    // Points to an element in the _indices vector.
+    size_t index_pointer = 0;
 
     int num_guards_executed = 0;
-    for (Py_ssize_t index : _indices) {
-      PyObject* item = PyList_GetItem(items, index); // borrowed ref
-      GuardDebugInfo debug_info =
-          _key_value_managers[index]->check_verbose_nopybind(item);
-      num_guards_executed += debug_info.num_guards_executed;
-      if (!debug_info.result) {
-        return GuardDebugInfo(
-            false, debug_info.verbose_code_parts, num_guards_executed);
+    while (index_pointer < _indices.size() &&
+           PyDict_Next(obj, &pos, &key, &value)) {
+      // Skip if pos is not a saved index.
+      Py_ssize_t pos_minus_1 = pos - 1;
+      if (pos_minus_1 == _indices[index_pointer]) {
+        index_pointer += 1;
+        // Pos moves with PyDict_Next
+        GuardDebugInfo debug_info =
+            _key_value_managers[pos_minus_1]->check_verbose_nopybind(
+                key, value);
+        num_guards_executed += debug_info.num_guards_executed;
+        if (!debug_info.result) {
+          return GuardDebugInfo(
+              false, debug_info.verbose_code_parts, num_guards_executed);
+        }
       }
     }
-    Py_DECREF(items);
     return GuardDebugInfo(true, num_guards_executed);
   }
 
@@ -1954,7 +1944,7 @@ class DictGuardManager : public GuardManager {
  private:
   Py_ssize_t _size;
   std::vector<Py_ssize_t> _indices;
-  std::unordered_map<Py_ssize_t, std::unique_ptr<GuardManager>>
+  std::unordered_map<Py_ssize_t, std::unique_ptr<KeyValueDictGuardManager>>
       _key_value_managers;
 };
 
