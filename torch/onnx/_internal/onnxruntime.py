@@ -89,7 +89,6 @@ def is_onnxrt_backend_supported() -> bool:
     return _SUPPORT_ONNXRT
 
 
-_dumped_onnx_model: Dict[str, int] = {}
 # Functions sequentially applies to the ONNX model before it is fed to ONNXRuntime's
 # InferenceSession.
 _GRAPH_TRANSFORMS: List[Callable[["onnx.ModelProto"], "onnx.ModelProto"]] = []
@@ -109,29 +108,25 @@ def unregister_backend_graph_transform(
             _GRAPH_TRANSFORMS.pop(len(_GRAPH_TRANSFORMS) - 1 - i)
 
 
-def _dump_onnx_model(
-    model_string: bytes, graph_module: Optional[torch.fx.GraphModule] = None
-) -> str:
-    """Stores the onnx model into a file.
-    The name is "{ONNXRT_DUMP_PATH}{N}.onnx"
-    where *N* is the number of files already stored with
-    this prefix.
-    If graph_module is not None, the graph is stored as a string with
-    the same filename except the extension (.txt).
+def _dump_onnx_model_or_graph_module(
+    model: Union["onnx.ModelProto", torch.fx.GraphModule],
+    prefix: str,
+    tag: str,
+):
+    """Stores the onnx model or GraphModule into a file.
+
+    The model path is `"{prefix}{tag}.onnx"` for onnx.ModelProto.
+    For torch.fx.GraphModule, its graph is stored to
+    `"{prefix}{tag}.txt"`.
     """
-    prefix = os.environ.get("ONNXRT_DUMP_PATH", None)
-    if not prefix:
-        return ""
-    n = _dumped_onnx_model.get(prefix, -1) + 1
-    filename = f"{prefix}{n}.onnx"
-    with open(filename, "wb") as f:
-        f.write(model_string)
-    _dumped_onnx_model[prefix] = n
-    if graph_module is not None:
-        filename_txt = f"{prefix}{n}.txt"
+    if isinstance(model, onnx.ModelProto):
+        onnx.save(model, f"{prefix}{tag}.onnx")
+    elif isinstance(model, torch.fx.GraphModule):
+        filename_txt = f"{prefix}{tag}.txt"
         with open(filename_txt, "w", encoding="utf-8") as f:
-            f.write(str(graph_module.graph))
-    return filename
+            f.write(str(model.graph))
+    else:
+        raise ValueError("Unsupported model type: " + str(type(model)))
 
 
 def _infer_default_eps() -> Sequence[str]:
@@ -939,21 +934,28 @@ class OrtBackend:
                 opset_version=self._resolved_onnx_exporter_options.onnx_registry.opset_version,
             )
 
+            if os.environ.get("ONNXRT_DUMP_PATH", None):
+                _dump_onnx_model_or_graph_module(
+                    graph_module,
+                    prefix=os.environ.get("ONNXRT_DUMP_PATH", ""),
+                    tag=f"_fx_{self.execution_count}",
+                )
+                _dump_onnx_model_or_graph_module(
+                    onnx_model,
+                    prefix=os.environ.get("ONNXRT_DUMP_PATH", ""),
+                    tag=f"_init_{self.execution_count}",
+                )
+
             # Apply post-conversion modifications to ONNX model.
             for transform in _GRAPH_TRANSFORMS:
                 onnx_model = transform(onnx_model)
 
-            onnx_model_bytes = onnx_model.SerializeToString()
             if os.environ.get("ONNXRT_DUMP_PATH", None):
-                # If not empty, environment variable ONNXRT_DUMP_PATH defined the path
-                # where generated onnx files should be stored.
-                # This module keeps a global variables keeping track of the
-                # stored models.
-                # If ONNXRT_DUMP_PATH="dumped/dumped_model_"
-                # The first file name will be 'dumped/dumped_model_0.onnx'.
-                # For every dumped model, a text file 'dumped/dumped_model_0.txt'
-                # is created as well to contain the string representing the graph_module.
-                _dump_onnx_model(onnx_model_bytes, graph_module=graph_module)
+                _dump_onnx_model_or_graph_module(
+                    onnx_model,
+                    prefix=os.environ.get("ONNXRT_DUMP_PATH", ""),
+                    tag=f"_transformed_{self.execution_count}",
+                )
 
             # Initialize a ORT session to execute this ONNX model.
             # Note that TorchDynamo assumes all inputs/outputs are on the
@@ -964,6 +966,7 @@ class OrtBackend:
             #
             # TODO(wschin): enable external allocators.
             # See https://github.com/pytorch/pytorch/issues/106867
+            onnx_model_bytes = onnx_model.SerializeToString()
             onnx_session = onnxruntime.InferenceSession(
                 path_or_bytes=onnx_model_bytes,
                 sess_options=self._options.ort_session_options,
