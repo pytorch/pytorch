@@ -39,7 +39,16 @@ if TYPE_CHECKING:
 DimList = List
 
 log = logging.getLogger(__name__)
-not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
+
+# TODO: Hack to unblock https://github.com/pytorch/pytorch/pull/108186
+# Proper fix tracked by https://github.com/pytorch/pytorch/issues/120105
+try:
+    not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
+except ValueError as e:
+    if "'not_implemented' not registered" in str(e):
+        import logging as not_implemented_log
+    else:
+        raise e
 
 pytree = torch.utils._pytree
 T = TypeVar("T")
@@ -1000,6 +1009,9 @@ class FakeTensorMode(TorchDispatchMode):
             # Capture the current device to support, e.g., cache tensor creation,
             # where there isn't necessarily a tensor to take the device from.
             torch._C._get_default_device(),
+            # We want to create tensors from cached metadata only when the inference
+            # mode is the same.
+            torch.is_inference_mode_enabled(),
             # Shape env settings could affect behavior. One example seen in the wild:
             # Disasllowing dynamic shapes can introduce a DynamicOutputShapeException
             # where it wasn't seen on a previous instance of the same op.
