@@ -36,6 +36,7 @@ inline void check_device(DeviceIndex device) {
 
 } // anonymous namespace
 
+// Get the default generator with a random seed for a specific xpu device.
 const Generator& getDefaultXPUGenerator(DeviceIndex device) {
   c10::call_once(init_flag, initXPUGenVector);
   if (device == -1) {
@@ -49,6 +50,7 @@ const Generator& getDefaultXPUGenerator(DeviceIndex device) {
   return default_gens_xpu[device];
 }
 
+// Create a generator with a fixed seed for a specific xpu device.
 Generator createXPUGenerator(DeviceIndex device) {
   c10::call_once(init_flag, initXPUGenVector);
   if (device == -1) {
@@ -100,7 +102,7 @@ c10::intrusive_ptr<c10::TensorImpl> XPUGeneratorImpl::get_state() const {
 
   // The internal state is returned as a CPU byte tensor.
   auto state_tensor = at::detail::empty_cpu(
-      {(int64_t)total_size},
+      {static_cast<int64_t>(total_size)},
       ScalarType::Byte,
       c10::nullopt,
       c10::nullopt,
