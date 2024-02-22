@@ -236,6 +236,41 @@ def next_power_of_2(n: int) -> int:
     return n
 
 
+def _type_of(key):
+    # Use the function here to get rid of dependencies on the Triton during the codegen.
+    # Refer to Triton implementation here:
+    # https://github.com/openai/triton/blob/98b5945d2aef679e00ebca8e07c35c3658ec76de/python/triton/runtime/jit.py#L238
+    # `None` is nullptr.  Implicitly convert to *i8.
+    if key is None:
+        return "*i8"
+    dtype_str = str(key).split(".")[-1]
+    tys = {
+        "bool": "i1",
+        "float8e4nv": "fp8e4nv",
+        "float8e5": "fp8e5",
+        "float8e4b15": "fp8e4b15",
+        "float8e4b15x4": "fp8e4b15x4",
+        "float8_e4m3fn": "fp8e4nv",
+        "float8_e5m2": "fp8e5",
+        "float16": "fp16",
+        "bfloat16": "bf16",
+        "float32": "fp32",
+        "float64": "fp64",
+        "int8": "i8",
+        "int16": "i16",
+        "int32": "i32",
+        "int64": "i64",
+        "uint8": "u8",
+        "uint16": "u16",
+        "uint32": "u32",
+        "uint64": "u64",
+    }
+    # reinterpret can create triton type
+    for v in list(tys.values()):
+        tys[v] = v
+    return key if isinstance(key, str) else f"*{tys[dtype_str]}"
+
+
 def convert_shape_to_inductor(
     lst: Iterable[Union[int, torch.SymInt]]
 ) -> List[sympy.Expr]:
