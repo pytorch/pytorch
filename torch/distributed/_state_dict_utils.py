@@ -12,6 +12,15 @@ if dist.is_available() or TYPE_CHECKING:
     from torch.distributed._tensor import DTensor, Replicate
 
 
+def _identity_func(
+    obj: torch.Tensor,
+    pg: Optional[dist.ProcessGroup],
+    device: Optional[torch.device],
+    companion_obj: Any,
+) -> torch.Tensor:
+    return obj
+
+
 def _all_gather_sharded_tensor(
     sharded_tensor: "ShardedTensor",
     pg: Optional[dist.ProcessGroup] = None,
@@ -54,56 +63,77 @@ def _iterate_state_dict(
     iter_object: Any,
     sharded_tensor_func: Callable,
     dtensor_func: Callable,
+    tensor_func: Callable,
     *,
     pg: Optional[dist.ProcessGroup] = None,
     device: Optional[torch.device] = None,
     cpu_offload: bool = False,
+    companion_obj: Any = None,
     ranks_only: Tuple[int, ...] = tuple(),
+    type_check: bool = True,
 ) -> Dict[str, Any]:
     # TODO: should we use pytree?
     cpu_device = torch.device("cpu")
     if isinstance(iter_object, ShardedTensor):
-        ret = sharded_tensor_func(iter_object, pg, device)
+        ret = sharded_tensor_func(iter_object, pg, device, companion_obj)
     elif isinstance(iter_object, DTensor):
-        ret = dtensor_func(iter_object, pg, device)
-    elif (
-        isinstance(iter_object, (torch.Tensor, int, float, str)) or iter_object is None
-    ):
+        ret = dtensor_func(iter_object, pg, device, companion_obj)
+    elif isinstance(iter_object, torch.Tensor):
+        ret = tensor_func(iter_object, pg, device, companion_obj)
+    elif isinstance(iter_object, (int, float, str)) or iter_object is None:
         ret = iter_object
     elif isinstance(iter_object, dict):
+        if companion_obj is None:
+            companion_obj = {k: None for k in iter_object}
+        assert isinstance(companion_obj, dict)
         ret = {
             key: _iterate_state_dict(
                 value,
                 sharded_tensor_func,
                 dtensor_func,
+                tensor_func,
                 pg=pg,
                 device=device,
                 cpu_offload=cpu_offload,
+                companion_obj=companion_obj[key],
                 ranks_only=ranks_only,
+                type_check=type_check,
             )
             for key, value in iter_object.items()
         }
     elif isinstance(iter_object, (list, tuple)):
+        if companion_obj is None:
+            companion_obj = [None for _ in iter_object]
+        assert isinstance(companion_obj, (list, tuple))
         ret = [
             _iterate_state_dict(
                 v,
                 sharded_tensor_func,
                 dtensor_func,
+                tensor_func,
                 pg=pg,
                 device=device,
                 cpu_offload=cpu_offload,
+                companion_obj=cpu_v,
                 ranks_only=ranks_only,
+                type_check=type_check,
             )
-            for v in iter_object
+            for (v, cpu_v) in zip(iter_object, companion_obj)
         ]
         if isinstance(iter_object, tuple):
             ret = tuple(ret)
+    elif not type_check:
+        ret = iter_object
     else:
         raise ValueError(f"Unexpected value type {type(iter_object)}")
 
     if not ranks_only or dist.get_rank(pg) in ranks_only:
         if isinstance(ret, torch.Tensor) and cpu_offload:
-            ret = ret.to(cpu_device)
+            if companion_obj is None:
+                ret = ret.to(cpu_device)
+            else:
+                # TODO: support DTensor
+                companion_obj.copy_(ret)
     else:
         ret = {} if isinstance(ret, dict) else None
 
@@ -117,6 +147,7 @@ def _gather_state_dict(
     device: Optional[torch.device] = None,
     cpu_offload: bool = False,
     ranks_only: Tuple[int, ...] = tuple(),
+    type_check: bool = True,
 ) -> Dict[str, Any]:
     """
     Given a state_dict, this API gathers all the ShardedTensors or DTensors in
@@ -138,12 +169,15 @@ def _gather_state_dict(
         ranks_only: (Tuple[int, ...]): if this tuple is empty, all ranks will
             have the same state_dicts. Otherwise only ranks that in ``ranks_only``
             have the same state_dicts. Other ranks will get empty state_dicts.
+        type_check: (bool): check if the instance data type is a supported type
+            that can be saved by DCP.  The current supported data types are
+            torch.Tensor, DTensor, int, float, str, list, dict, None.
 
     Returns:
         The gathered state dictionary.
     """
 
-    def sharded_tensor_func(value, pg, device):
+    def sharded_tensor_func(value, pg, device, companion_obj):
         # ShardedTensor does not seem to record the original device type.
         # So if the tensor is moved to CPU, we won't know the original type.
         # As a result, we have to rely on the user to tell us the correct one.
@@ -160,7 +194,7 @@ def _gather_state_dict(
             value = output_tensor
         return value
 
-    def dtensor_func(value, pg, device):
+    def dtensor_func(value, pg, device, companion_obj):
         if value.device != value.device_mesh.device_type:
             value = value.to(value.device_mesh.device_type)
         # FSDP all_gather: [Shard(0)] -> [Replicate()]
@@ -185,26 +219,91 @@ def _gather_state_dict(
         state_dict,
         sharded_tensor_func,
         dtensor_func,
+        _identity_func,
         pg=pg,
         device=device,
         cpu_offload=cpu_offload,
         ranks_only=ranks_only,
+        type_check=type_check,
     )
 
 
 def _offload_state_dict_to_cpu(
     state_dict: Dict[str, Any],
     *,
-    pg: Optional[dist.ProcessGroup] = None,
-    device: Optional[torch.device] = None,
     ranks_only: Tuple[int, ...] = tuple(),
+    cpu_offload_state_dict: Optional[Dict[str, Any]] = None,
+    cpu_offload_sync: bool = True,
+    type_check: bool = True,
 ) -> Dict[str, Any]:
-    return _iterate_state_dict(
+    """
+    Given a state_dict, this API offload all the tensors to CPU memory.
+
+    Args:
+        state_dict (Dict[str, Any]): the target state_dict.
+        pg (Optional[dist.ProcessGroup]): the process group that is used to
+            gather ShardedTensor. Note that gathering a DTensor will use
+            the DeviceMesh. So this argument will be ignored when gathering a
+            DTensor.
+        ranks_only: (Tuple[int, ...]): if this tuple is empty, all ranks will
+            have the same state_dicts. Otherwise only ranks that in ``ranks_only``
+            have the same state_dicts. Other ranks will get empty state_dicts.
+        cpu_offload_state_dict (Optional[Dict[str, Any]]): the CPU state_dict
+            that will be returned. If this is not None, this API will use
+            `copy_` to copy the GPU tensor to the tensor in this CPU state_dict.
+            This CPU state_dict must have exactly the same structure as the
+            `state_dict` the only difference is that all the tensors in this
+            CPU state_dict are on CPU memory.
+        cpu_offload_sync: (bool): flag to decide whether to call `synchronize()`
+            before this API returns.
+        type_check: (bool): check if the instance data type is a supported type
+            that can be saved by DCP.  The current supported data types are
+            torch.Tensor, DTensor, int, float, str, list, dict, None.
+
+    Returns:
+        The gathered state dictionary.
+    """
+
+    ret = _iterate_state_dict(
         state_dict,
-        lambda value, pg, device: value,
-        lambda value, pg, device: value,
-        pg=pg,
-        device=device,
+        _identity_func,
+        _identity_func,
+        _identity_func,
+        pg=None,
+        device=None,
         cpu_offload=True,
         ranks_only=ranks_only,
+        companion_obj=cpu_offload_state_dict,
+        type_check=type_check,
     )
+    if cpu_offload_state_dict is not None and cpu_offload_sync:
+        torch.cuda.synchronize()
+    return ret
+
+
+def _create_pin_state_dict(
+    state_dict: Dict[str, Any],
+) -> Dict[str, Any]:
+    def tensor_func(
+        obj: torch.Tensor,
+        pg: Optional[dist.ProcessGroup],
+        device: Optional[torch.device],
+        companion_obj: Any,
+    ) -> torch.Tensor:
+        return torch.empty(
+            *tuple(companion_obj.size()), dtype=companion_obj.dtype, pin_memory=True
+        )
+
+    ret = _iterate_state_dict(
+        state_dict,
+        _identity_func,
+        _identity_func,
+        tensor_func,
+        pg=None,
+        device=None,
+        cpu_offload=False,
+        ranks_only=tuple(),
+        companion_obj=state_dict,
+        type_check=False,
+    )
+    return ret
