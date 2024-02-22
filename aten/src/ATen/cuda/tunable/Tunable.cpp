@@ -298,7 +298,7 @@ TuningContext::TuningContext() :
     max_tuning_iterations_{100},
     max_warmup_duration_ms_{0},
     max_warmup_iterations_{0},
-    filename_{"tunableop_results.csv"},
+    filename_{},
     results_count_from_input_file_{0}
 {
 }
@@ -425,6 +425,12 @@ void TuningContext::DisableTunableOpAndTuning() {
 TuningResultsManager& TuningContext::GetTuningResultsManager() {
   c10::call_once(manager_init_once_, [this]() {
     manager_initialized_ = true;
+    if (GetFilename().empty()) {
+      // if SetFilename() was not already called, call it now with the default or env var
+      const char *env = std::getenv("PYTORCH_TUNABLEOP_FILENAME");
+      std::string filename = (env == nullptr) ? "tunableop_results.csv" : env;
+      SetFilename(filename);
+    }
     auto filename = GetFilename();
     if (!filename.empty()) {
       ReadFile(filename);
@@ -457,45 +463,36 @@ TuningStatus TuningContext::LoadTuningResults(const TuningResults& tr) {
 
 void TuningContext::SetFilename(const std::string& filename) {
   filename_ = filename;
-}
 
-std::string TuningContext::GetFilename() const {
-  static const char *env = std::getenv("PYTORCH_TUNABLEOP_FILENAME");
-  std::string filename = (env == nullptr) ? filename_ : env;
-  if (filename.empty()) {
-    TUNABLE_LOG("no filename from TuningContext::GetFilename()");
-    return filename; // empty string
+  if (filename_.empty()) {
+    return;
   }
-
-  // Using static with lambda here so that we don't make a cuda call during static shutdown.
-  // Do this the first and only time GetFilename() is called because it is called
-  // the first time a TunableOp is instantiated but also during static destruction
-  // when the cuda or hip runtime is no longer available.
-  static std::string device = []() {
-    return c10::str(int(c10::cuda::current_device()));
-  }();
 
   // differentiate filename based on device ordinal to avoid
   // use case of one process per device writing to same file
+  std::string device = c10::str(int(c10::cuda::current_device()));
 
   // does filename contain %d to insert device ordinal in specific location?
   const std::string TOKEN("%d");
-  std::size_t found = filename.find(TOKEN);
+  std::size_t found = filename_.find(TOKEN);
   if (found != std::string::npos) {
-    filename.replace(found, TOKEN.length(), device);
+    filename_.replace(found, TOKEN.length(), device);
   }
   else {
     // no %d present, so append device ordinal before final '.'
-    found = filename.rfind(".");
+    found = filename_.rfind(".");
     if (found != std::string::npos) {
-      filename.insert(found, device);
+      filename_.insert(found, device);
     }
     else {
-      // all else fails, just prepend
-      filename.insert(0, device);
+      // all else fails, just append
+      filename_.append(device);
     }
   }
-  return filename;
+}
+
+std::string TuningContext::GetFilename() const {
+  return filename_;
 }
 
 bool TuningContext::ReadFile(const std::string& filename) {
