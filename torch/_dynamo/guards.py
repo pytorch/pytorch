@@ -67,6 +67,7 @@ from .utils import (
     tensor_always_has_static_shape,
     tuple_iterator_getitem,
     tuple_iterator_len,
+    unwrap_if_wrapper,
 )
 
 log = logging.getLogger(__name__)
@@ -190,7 +191,10 @@ class GuardBuilder(GuardBuilderBase):
         self.id_ref = id_ref
         self.source_ref = source_ref
         self.lookup_weakrefs = lookup_weakrefs
-        self.scope: Dict[str, Dict[str, object]] = {"L": local_scope, "G": global_scope}
+        self.scope: Dict[str, Dict[str, object]] = {
+            "L": {k: unwrap_if_wrapper(v) for k, v in local_scope.items()},
+            "G": {k: unwrap_if_wrapper(v) for k, v in global_scope.items()},
+        }
         self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
             name,
