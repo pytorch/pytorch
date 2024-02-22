@@ -4,7 +4,11 @@ import sys
 
 
 def find_test_dir():
-    file = sys.modules["__main__"].__file__
+    main = sys.modules["__main__"]
+    file = getattr(main, "__file__", None)
+    if file is None:
+        # Generated file do not have a module.__file__
+        return None
     main_dir = os.path.dirname(os.path.abspath(file))
     components = ["/"]
     for c in main_dir.split(os.path.sep):
@@ -48,8 +52,11 @@ FIXME_inductor_non_strict = {
 #
 # This lists exists so we can more easily add large numbers of failing tests,
 
-failures_directory = os.path.join(test_dir, "dynamo_expected_failures")
-dynamo_expected_failures = set(os.listdir(failures_directory))
+if test_dir is None:
+    dynamo_expected_failures = set()
+else:
+    failures_directory = os.path.join(test_dir, "dynamo_expected_failures")
+    dynamo_expected_failures = set(os.listdir(failures_directory))
 
 # see NOTE [dynamo_test_failures.py] for more details
 dynamo_skips = {
