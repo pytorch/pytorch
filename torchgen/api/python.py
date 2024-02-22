@@ -1015,10 +1015,10 @@ def returns_structseq_pyi(signature: PythonSignature) -> Optional[Tuple[str, str
             )
         structseq_def_lines.extend(
             [
-                f"    def __new__(self, sequence: {seq_type}): ...",
-                f"    n_fields: int = {len(field_names)}",
-                f"    n_sequeunce_fields: int = {len(field_names)}",
-                "    n_unnamed_fields: int = 0",
+                f"    def __new__(cls, sequence: {seq_type}): ...",
+                f"    n_fields: _int = {len(field_names)}",
+                f"    n_sequeunce_fields: _int = {len(field_names)}",
+                "    n_unnamed_fields: _int = 0",
                 "    def __init_subclass__(cls) -> NoReturn: ...  # prohibit subclassing",
                 "",  # add an extra newline
             ]
@@ -1031,7 +1031,11 @@ def returns_structseq_pyi(signature: PythonSignature) -> Optional[Tuple[str, str
         #     "    def values(self) -> Tensor: ...\n"
         #     "    @property\n"
         #     "    def indices(self) -> Tensor: ...\n"
-        #     "    def __init__(self, sequence: Tuple[Tensor, Tensor]): ...\n"
+        #     "    def __new__(cls, sequence: Tuple[Tensor, Tensor]): ...\n"
+        #     "    n_fields: _int = 2",
+        #     "    n_sequeunce_fields: _int = 2",
+        #     "    n_unnamed_fields: _int = 0",
+        #     "    def __init_subclass__(cls) -> NoReturn: ...  # prohibit subclassing",
         # )
         return structseq_name, structseq_def
     return None
