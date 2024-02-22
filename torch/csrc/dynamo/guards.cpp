@@ -750,13 +750,24 @@ class GuardDebugInfo {
   int num_guards_executed;
 };
 
+class GuardManager;
+class RootGuardManager;
+class DictGuardManager;
+
 /**
  * Base class for the leaf guard in the GuardManager hierarchy.
  */
 class LeafGuard {
  public:
+  // Most guards do not need root guard manager.
   LeafGuard(py::object verbose_code_parts)
       : _verbose_code_parts(verbose_code_parts) {}
+
+  // Guards like TENSOR_MATCH require root_guard_manager to access local_state
+  // shared across all leaf guards.
+  LeafGuard(RootGuardManager* root_guard_manager, py::object verbose_code_parts)
+      : _root_guard_manager(root_guard_manager),
+        _verbose_code_parts(verbose_code_parts) {}
 
   // check function could be called from python. This is useful for debugging
   // purpose.
@@ -785,6 +796,11 @@ class LeafGuard {
   // is not exposed to Python and can only be called from C++.
   virtual bool check_nopybind(PyObject* value) = 0;
   virtual ~LeafGuard() = default;
+
+ protected:
+  // RootGuardManager has state that is common across all guards like
+  // LocalState.
+  RootGuardManager* _root_guard_manager;
 
  private:
   // This is set while constructing the leaf guard. This is used for identifying
@@ -1027,82 +1043,6 @@ class DATA_PTR_MATCH : public LeafGuard {
   void* _data_ptr;
 };
 
-class TENSOR_MATCH : public LeafGuard {
- public:
-  TENSOR_MATCH(
-      py::object value,
-      py::object dynamic_dims_sizes_py,
-      py::object dynamic_dims_strides_py,
-      py::object tensor_name,
-      py::object verbose_code_parts)
-      : LeafGuard(verbose_code_parts),
-        _tensor_name(py::cast<py::str>(tensor_name)) {
-    PyObject* item = value.ptr();
-    if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
-      PyErr_SetString(PyExc_TypeError, "expected Tensor()");
-      return;
-    }
-    auto tensor = THPVariable_Unpack(item);
-
-    std::vector<std::optional<c10::SymInt>> tensor_dims_size =
-        pyListToVecOptInt(dynamic_dims_sizes_py.ptr());
-    std::vector<std::optional<c10::SymInt>> tensor_dims_stride =
-        pyListToVecOptInt(dynamic_dims_strides_py.ptr());
-
-    tensor_dims_size = tensor_dims_size.empty()
-        ? wrapIntegersInOptional(tensor.sym_sizes())
-        : tensor_dims_size;
-    tensor_dims_stride = tensor_dims_stride.empty()
-        ? wrapIntegersInOptional(tensor.sym_strides())
-        : tensor_dims_stride;
-    LocalState state;
-    _tensor_check = std::make_unique<TensorCheck>(
-        state,
-        Py_TYPE(item),
-        std::move(tensor),
-        std::move(tensor_dims_size),
-        std::move(tensor_dims_stride));
-  }
-
-  bool check_nopybind(PyObject* value) override { // borrowed ref
-    LocalState state;
-    if (Py_TYPE(value) != _tensor_check->pytype) {
-      return false;
-    }
-    return _tensor_check->check(state, THPVariable_Unpack(value));
-  }
-
-  virtual GuardDebugInfo check_verbose_nopybind(
-      PyObject* value) override { // borrowed ref
-
-    if (Py_TYPE(value) != _tensor_check->pytype) {
-      std::stringstream fail_reason;
-      PyObject* type_str = PyObject_Str(PyObject_Type(value));
-      fail_reason << "expected type of '" << _tensor_name
-                  << "' to be a tensor type, ";
-      if (!type_str) {
-        fail_reason << "but found a different type";
-      } else {
-        fail_reason << "' but found " << PyUnicode_AsUTF8(type_str);
-      }
-      return GuardDebugInfo(false, fail_reason.str(), 0);
-    }
-
-    LocalState state;
-    std::string fail_reason = _tensor_check->check_verbose(
-        state, THPVariable_Unpack(value), _tensor_name);
-
-    if (fail_reason != "") {
-      return GuardDebugInfo(false, fail_reason, 0);
-    }
-    return GuardDebugInfo(true, 1);
-  }
-
- private:
-  std::string _tensor_name;
-  std::unique_ptr<TensorCheck> _tensor_check;
-};
-
 /**
  * Relational guards compare more than one value. We implement Relational
  * guards by capturing some state in the guard object. For example for tensor
@@ -1288,9 +1228,6 @@ class DYNAMIC_INDICES : public LeafGuard {
   py::set _dynamic_indices;
 };
 
-class GuardManager;
-class RootGuardManager;
-class DictGuardManager;
 // GuardManager can be a pointer to DictGuardManager, but at this point the
 // compiler does not know that DictGuardManager is a derived class of
 // GuardManager (no way to define inheritance relationships in forward
@@ -1622,6 +1559,10 @@ class RootGuardManager : public GuardManager {
     std::lock_guard<std::mutex> lock_guard(_lock);
     Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
 
+    // Get the local state. This will be used for TENSOR_MATCH guards.
+    LocalState state;
+    _local_state = state;
+
     if (!GuardManager::check_nopybind(value)) {
       _reset_relational_guard_state();
       return false;
@@ -1646,6 +1587,10 @@ class RootGuardManager : public GuardManager {
     Py_UNBLOCK_THREADS; // ; is added to avoid clang-formatting
     std::lock_guard<std::mutex> lock_guard(_lock);
     Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
+
+    // Get the local state. This will be used for TENSOR_MATCH guards.
+    LocalState state;
+    _local_state = state;
 
     GuardDebugInfo debug_info = GuardManager::check_verbose_nopybind(value);
     if (!debug_info.result) {
@@ -1690,6 +1635,10 @@ class RootGuardManager : public GuardManager {
       guard->reset_state();
     }
   }
+
+ public:
+  // Local state for TENSOR_MATCH guards.
+  LocalState _local_state;
 
  private:
   // All the relational guards under this guard mananger. We only use these
@@ -1737,6 +1686,84 @@ std::unique_ptr<GuardManager> make_guard_manager(
   // }
   return std::make_unique<GuardManager>(root);
 }
+
+class TENSOR_MATCH : public LeafGuard {
+ public:
+  TENSOR_MATCH(
+      RootGuardManager* root_guard_manager,
+      py::object value,
+      py::object dynamic_dims_sizes_py,
+      py::object dynamic_dims_strides_py,
+      py::object tensor_name,
+      py::object verbose_code_parts)
+      : LeafGuard(root_guard_manager, verbose_code_parts),
+        _tensor_name(py::cast<py::str>(tensor_name)) {
+    PyObject* item = value.ptr();
+    if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
+      PyErr_SetString(PyExc_TypeError, "expected Tensor()");
+      return;
+    }
+    auto tensor = THPVariable_Unpack(item);
+
+    std::vector<std::optional<c10::SymInt>> tensor_dims_size =
+        pyListToVecOptInt(dynamic_dims_sizes_py.ptr());
+    std::vector<std::optional<c10::SymInt>> tensor_dims_stride =
+        pyListToVecOptInt(dynamic_dims_strides_py.ptr());
+
+    tensor_dims_size = tensor_dims_size.empty()
+        ? wrapIntegersInOptional(tensor.sym_sizes())
+        : tensor_dims_size;
+    tensor_dims_stride = tensor_dims_stride.empty()
+        ? wrapIntegersInOptional(tensor.sym_strides())
+        : tensor_dims_stride;
+    LocalState state;
+    _tensor_check = std::make_unique<TensorCheck>(
+        state,
+        Py_TYPE(item),
+        std::move(tensor),
+        std::move(tensor_dims_size),
+        std::move(tensor_dims_stride));
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    if (Py_TYPE(value) != _tensor_check->pytype) {
+      return false;
+    }
+    return _tensor_check->check(
+        _root_guard_manager->_local_state, THPVariable_Unpack(value));
+  }
+
+  virtual GuardDebugInfo check_verbose_nopybind(
+      PyObject* value) override { // borrowed ref
+
+    if (Py_TYPE(value) != _tensor_check->pytype) {
+      std::stringstream fail_reason;
+      PyObject* type_str = PyObject_Str(PyObject_Type(value));
+      fail_reason << "expected type of '" << _tensor_name
+                  << "' to be a tensor type, ";
+      if (!type_str) {
+        fail_reason << "but found a different type";
+      } else {
+        fail_reason << "' but found " << PyUnicode_AsUTF8(type_str);
+      }
+      return GuardDebugInfo(false, fail_reason.str(), 0);
+    }
+
+    std::string fail_reason = _tensor_check->check_verbose(
+        _root_guard_manager->_local_state,
+        THPVariable_Unpack(value),
+        _tensor_name);
+
+    if (fail_reason != "") {
+      return GuardDebugInfo(false, fail_reason, 0);
+    }
+    return GuardDebugInfo(true, 1);
+  }
+
+ private:
+  std::string _tensor_name;
+  std::unique_ptr<TensorCheck> _tensor_check;
+};
 
 /**
  * Represents __getattr__ acccessor.
@@ -2185,7 +2212,13 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("__call__", &DYNAMIC_INDICES::check);
   py::class_<TENSOR_MATCH, LeafGuard, std::shared_ptr<TENSOR_MATCH>>(
       py_m, "TENSOR_MATCH")
-      .def(py::init<py::object, py::object, py::object, py::str, py::list>())
+      .def(py::init<
+           RootGuardManager*,
+           py::object,
+           py::object,
+           py::object,
+           py::str,
+           py::list>())
       .def("__call__", &TENSOR_MATCH::check);
   py::class_<TENSOR_ALIASING, LeafGuard, std::shared_ptr<TENSOR_ALIASING>>(
       py_m, "TENSOR_ALIASING");
@@ -2340,7 +2373,12 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object tensor_name,
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(std::make_shared<TENSOR_MATCH>(
-                value, sizes, strides, tensor_name, verbose_code_parts));
+                self.get_root(),
+                value,
+                sizes,
+                strides,
+                tensor_name,
+                verbose_code_parts));
           })
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
