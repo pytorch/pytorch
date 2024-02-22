@@ -1723,9 +1723,16 @@ class KeyValueDictGuardManager : public GuardManager {
     return _value_manager.get();
   }
 
-  // NB: These are not override of the virtual functions. The signature is
-  // different. This is ok because we will call this only from DictGuardManager.
-  bool check_nopybind(PyObject* key, PyObject* value) { // borrowed ref
+  bool check_nopybind(PyObject* obj) override {
+    throw std::runtime_error("Should use check_nopybind_key_value instead");
+  }
+
+  // NB: These are not override of the usual check_nopybind functions. The
+  // signature is different. This is ok because we will call this only from
+  // DictGuardManager.
+  bool check_nopybind_key_value(
+      PyObject* key,
+      PyObject* value) { // borrowed ref
     // We get the key, value pair from the DictGuardManager here. Check the
     // key guard manager and then value guard manager. There is no need to do
     // any shuffling here.
@@ -1744,9 +1751,13 @@ class KeyValueDictGuardManager : public GuardManager {
     return true;
   }
 
+  GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
+    throw std::runtime_error("Should use check_verbose_nopybind_key_value");
+  }
+
   // NB: These are not override of the virtual functions. The signature is
   // different. This is ok because we will call this only from DictGuardManager.
-  GuardDebugInfo check_verbose_nopybind(
+  GuardDebugInfo check_verbose_nopybind_key_value(
       PyObject* key,
       PyObject* value) { // borrowed ref
     // We get the key, value pair from the DictGuardManager here. Check the
@@ -1867,7 +1878,8 @@ class DictGuardManager : public GuardManager {
       // Skip if pos_minus_1 is not a saved index.
       if (pos_minus_1 == _indices[index_pointer]) {
         index_pointer += 1;
-        if (!_key_value_managers[pos_minus_1]->check_nopybind(key, value)) {
+        if (!_key_value_managers[pos_minus_1]->check_nopybind_key_value(
+                key, value)) {
           return false;
         }
       }
@@ -1900,7 +1912,7 @@ class DictGuardManager : public GuardManager {
         index_pointer += 1;
         // Pos moves with PyDict_Next
         GuardDebugInfo debug_info =
-            _key_value_managers[pos_minus_1]->check_verbose_nopybind(
+            _key_value_managers[pos_minus_1]->check_verbose_nopybind_key_value(
                 key, value);
         num_guards_executed += debug_info.num_guards_executed;
         if (!debug_info.result) {
