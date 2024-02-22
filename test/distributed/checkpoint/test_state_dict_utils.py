@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: distributed"]
+import copy
 import io
 
 import torch
@@ -118,7 +119,7 @@ class TestStateDictUtils(DTensorTestBase):
         self.assertEqual(state_dict, _gather_state_dict(dist_state_dict))
 
     @with_comms
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(2)
     def test_cpu_pin_memory(self):
         device = torch.device("cuda")
         buffer = io.BytesIO()
@@ -127,14 +128,15 @@ class TestStateDictUtils(DTensorTestBase):
         state_dict = {
             "tensor1": torch.arange(10, device=device),
             "tensor2": torch.ones(10, device=device),
-            "non_tensor": buffer.read(),
+            "non_tensor_bytes_io": copy.deepcopy(buffer),
+            "non_tensor_bytes": buffer.read(),
             "lr": 1.5,
             "nested": {"list": [1, 2, 3, 4]},
         }
         cpu_state_dict = _create_pin_state_dict(state_dict)
 
         _offload_state_dict_to_cpu(
-            state_dict, cpu_offload_state_dict=cpu_state_dict, type_check=False
+            state_dict, cpu_offload_state_dict=cpu_state_dict, type_check=True
         )
         for v in cpu_state_dict.values():
             if isinstance(v, torch.Tensor):
@@ -142,7 +144,9 @@ class TestStateDictUtils(DTensorTestBase):
         self.assertEqual(cpu_state_dict["tensor1"], torch.arange(10))
         self.assertEqual(cpu_state_dict["tensor2"], torch.ones(10))
         buffer.seek(0)
-        self.assertEqual(cpu_state_dict["non_tensor"], buffer.read())
+        self.assertEqual(cpu_state_dict["non_tensor_bytes_io"].read(), buffer.read())
+        buffer.seek(0)
+        self.assertEqual(cpu_state_dict["non_tensor_bytes"], buffer.read())
         self.assertEqual(cpu_state_dict["lr"], 1.5)
         self.assertEqual(cpu_state_dict["nested"], {"list": [1, 2, 3, 4]})
 

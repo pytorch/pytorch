@@ -1,3 +1,4 @@
+import io
 import math
 from typing import Any, Callable, Dict, Optional, Tuple, TYPE_CHECKING
 
@@ -80,7 +81,10 @@ def _iterate_state_dict(
         ret = dtensor_func(iter_object, pg, device, companion_obj)
     elif isinstance(iter_object, torch.Tensor):
         ret = tensor_func(iter_object, pg, device, companion_obj)
-    elif isinstance(iter_object, (int, float, str)) or iter_object is None:
+    elif (
+        isinstance(iter_object, (int, float, str, bytes, io.BytesIO))
+        or iter_object is None
+    ):
         ret = iter_object
     elif isinstance(iter_object, dict):
         if companion_obj is None:
