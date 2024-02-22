@@ -34,6 +34,7 @@ OpFunction& OperatorRegistry::getOpsFn(const std::string& name) {
   return OperatorRegistry::kTable.find(name)->second;
 }
 
+// @lint-ignore-every CLANGTIDY modernize-avoid-bind
 // clang-format off
 #define OPERATOR_ENTRY(name, function) \
   { #name, std::bind(&at::native::vulkan::function, std::placeholders::_1, std::placeholders::_2) }
