@@ -1,6 +1,7 @@
 name: Index PyTorch Tests for Target Determination
 
 on:
+  pull_request:
   workflow_dispatch:
   # TODO: Trigger every few hours
 
@@ -115,37 +116,16 @@ jobs:
             --nnodes=1 \
             --nproc-per-node=1 \
             indexer.py \
-            --experiment-name indexer-files
+            --experiment-name indexer-functions \
+            --function
 
-      - name: Upload Index to S3
-        shell: bash -l {0}
-        if: ${{ steps.indexer.outcome == 'success' }}
-        run: |
-          set -euxo pipefail
-          conda activate tdenv
-          cd "${GITHUB_WORKSPACE}"/llm-target-determinator/assets
-
-          TIMESTAMP=$(date -Iseconds)
-          ZIP_NAME = "indexer-files-${TIMESTAMP}.zip"
-
-          # Create a zipfile with all the generated indices
-          zip -r "${ZIP_NAME}" indexer-files
-
-          # Move the old index into the archived/ folder
-          aws s3 cp \
-            "s3://target-determinator-assets/indexes/latest/*" \
-            "s3://target-determinator-assets/indexes/archived/"
-
-          # Move the new index into the latestl/ folder
-          aws s3 cp \
-            "${ZIP_NAME}" \
-            "s3://target-determinator-assets/indexes/latest/${ZIP_NAME}"
-
-          # Note that because the above 2 operations are not atomic, there will
-          # be a period of a few seconds between these where there is no index
-          # present in the latest/ folder. To account for this, the retriever
-          # should have some retry logic with backoff to ensure fetching the
-          # index doesn't fail.
+          torchrun \
+            --standalone \
+            --nnodes=1 \
+            --nproc-per-node=1 \
+            indexer.py \
+            --experiment-name indexer-files \
+            --file
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
