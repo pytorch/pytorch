@@ -934,7 +934,8 @@ def trace_structured(
     name: str,
     metadata_fn: Callable[[], object] = lambda: True,
     *,
-    payload_fn: Callable[[], Optional[str]] = lambda: None,
+    payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
+    suppress_context: bool = False,
 ):
     """
     metadata is an arbitrary JSON compatible struct, but it's expected to not be
@@ -953,14 +954,27 @@ def trace_structured(
     if trace_log.isEnabledFor(logging.DEBUG):
         record = {}
         record[name] = metadata_fn()
-        if dist.is_available() and dist.is_initialized():
-            record["rank"] = dist.get_rank()
-        if (trace_id := torch._guards.CompileContext.current_trace_id()) is not None:
-            record["frame_id"] = trace_id.compile_id.frame_id
-            record["frame_compile_id"] = trace_id.compile_id.frame_compile_id
-            record["attempt"] = trace_id.attempt
+        if not suppress_context:
+            # TODO: Actually, the rank probably should just be emitted once at
+            # the top, and not repeatedly spammed in all the logs, since it
+            # never changes and we assume no interleaving
+            if dist.is_available() and dist.is_initialized():
+                record["rank"] = dist.get_rank()
+            if (
+                trace_id := torch._guards.CompileContext.current_trace_id()
+            ) is not None:
+                record["frame_id"] = trace_id.compile_id.frame_id
+                record["frame_compile_id"] = trace_id.compile_id.frame_compile_id
+                record["attempt"] = trace_id.attempt
         payload = payload_fn()
         if payload is not None:
+            if not isinstance(payload, str):
+                if isinstance(payload, list):
+                    # special case to look better
+                    payload = "[\n" + ",\n".join(json.dumps(i) for i in payload) + "\n]"
+                else:
+                    # force newlines so we are unlikely to overflow line limit
+                    payload = json.dumps(payload, indent=0)
             h = hashlib.md5()
             h.update(payload.encode("utf-8"))
             record["has_payload"] = h.hexdigest()

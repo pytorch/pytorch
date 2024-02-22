@@ -1,27 +1,20 @@
 # Owner(s): ["module: dynamo"]
-import contextlib
 import functools
-import logging
-import json
-import os
-import re
 import io
+import json
+import logging
+import os
 import unittest.mock
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+import torch._logging.structured
 import torch.distributed as dist
-from torch._dynamo.testing import skipIfNotPy311
 
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from torch.testing._internal.common_utils import (
-    find_free_port,
-    munge_exc,
-    skipIfTorchDynamo,
-    TestCase,
-)
+from torch.testing._internal.common_utils import find_free_port, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
@@ -55,7 +48,14 @@ def inductor_schedule_fn(a):
 ARGS = (torch.ones(1000, 1000, requires_grad=True),)
 
 
-class StructuredTraceTestingFormatter:
+class StructuredTraceTestingFilter(logging.Filter):
+    def filter(self, record):
+        if "str" in record.metadata:
+            return False
+        return True
+
+
+class StructuredTraceTestingFormatter(logging.Formatter):
     def format(self, record):
         metadata = dict(record.metadata)
 
@@ -76,11 +76,13 @@ class StructuredTraceTest(TestCase):
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
+        torch._logging.structured.INTERN_TABLE.clear()
         self.buffer = io.StringIO()
         self.old_level = trace_log.level
         trace_log.setLevel(logging.DEBUG)
         self.handler = logging.StreamHandler(self.buffer)
         self.handler.setFormatter(StructuredTraceTestingFormatter())
+        self.handler.addFilter(StructuredTraceTestingFilter())
         trace_log.addHandler(self.handler)
 
     def tearDown(self):
@@ -91,27 +93,35 @@ class StructuredTraceTest(TestCase):
     def test_schedule(self):
         fn_opt = torch._dynamo.optimize("inductor")(inductor_schedule_fn)
         fn_opt(torch.ones(1000, 1000, device="cuda"))
-        self.assertExpectedInline(self.buffer.getvalue(), """\
+        self.assertExpectedInline(
+            self.buffer.getvalue(),
+            """\
 {"compile_stack": "STACK", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"dynamo_output_graph": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_output_graph_sizes": {"l_a_": [1000, 1000], "ones": [1000, 1000], "output": [1000, 1000]}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"aot_forward_graph": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_post_grad_graph": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_output_code": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
-""")  # noqa: B950
+{"dynamo_guards": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+""",  # noqa: B950
+        )
 
     @requires_cuda
     def test_cudagraphs(self):
         fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)
         fn_opt(torch.ones(1000, 1000, device="cuda"))
-        self.assertExpectedInline(self.buffer.getvalue(), """\
+        self.assertExpectedInline(
+            self.buffer.getvalue(),
+            """\
 {"compile_stack": "STACK", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"dynamo_output_graph": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_output_graph_sizes": {"l_a_": [1000, 1000], "ones": [1000, 1000], "output": [1000, 1000]}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"aot_forward_graph": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_post_grad_graph": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_output_code": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
-""")  # noqa: B950
+{"dynamo_guards": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+""",  # noqa: B950
+        )
 
     def test_recompiles(self):
         def fn(x, y):
@@ -121,32 +131,41 @@ class StructuredTraceTest(TestCase):
         fn_opt(torch.ones(1000, 1000), torch.ones(1000, 1000))
         fn_opt(torch.ones(1000, 1000), 1)
 
-        self.assertExpectedInline(self.buffer.getvalue(), """\
+        self.assertExpectedInline(
+            self.buffer.getvalue(),
+            """\
 {"compile_stack": "STACK", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"dynamo_output_graph": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_output_graph_sizes": {"l_x_": [1000, 1000], "l_y_": [1000, 1000], "add": [1000, 1000]}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"aot_forward_graph": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_post_grad_graph": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_output_code": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+{"dynamo_guards": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compile_stack": "STACK", "frame_id": 0, "frame_compile_id": 1, "attempt": 0}
 {"dynamo_output_graph": true, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_output_graph_sizes": {"l_x_": [1000, 1000], "add": [1000, 1000]}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0}
 {"aot_forward_graph": true, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
 {"inductor_post_grad_graph": true, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
 {"inductor_output_code": true, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
-""")  # noqa: B950
+{"dynamo_guards": true, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
+""",  # noqa: B950
+        )
 
     def test_example_fn(self):
         fn_opt = torch._dynamo.optimize("inductor")(example_fn)
         fn_opt(torch.ones(1000, 1000))
-        self.assertExpectedInline(self.buffer.getvalue(), """\
+        self.assertExpectedInline(
+            self.buffer.getvalue(),
+            """\
 {"compile_stack": "STACK", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"dynamo_output_graph": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_output_graph_sizes": {"l_a_": [1000, 1000], "ones": [1000, 1000], "output": [1000, 1000], "ones_1": [1000, 1000], "output_1": [1000, 1000]}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"aot_forward_graph": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_post_grad_graph": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_output_code": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
-""")  # noqa: B950
+{"dynamo_guards": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+""",  # noqa: B950
+        )
 
     def test_dynamo_error(self):
         try:
@@ -154,9 +173,12 @@ class StructuredTraceTest(TestCase):
             fn_opt(*ARGS)
         except Exception:
             pass
-        self.assertExpectedInline(self.buffer.getvalue(), """\
+        self.assertExpectedInline(
+            self.buffer.getvalue(),
+            """\
 {"compile_stack": "STACK", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
-""")  # noqa: B950
+""",  # noqa: B950
+        )
 
     def test_inductor_error(self):
         import torch._inductor.lowering
@@ -177,7 +199,9 @@ class StructuredTraceTest(TestCase):
             except Exception:
                 pass
 
-        self.assertExpectedInline(self.buffer.getvalue(), """\
+        self.assertExpectedInline(
+            self.buffer.getvalue(),
+            """\
 {"compile_stack": "STACK", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"dynamo_output_graph": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_output_graph_sizes": {"l_a_": [1000, 1000], "output": [1000, 1000]}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
@@ -185,7 +209,8 @@ class StructuredTraceTest(TestCase):
 {"aot_forward_graph": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"aot_backward_graph": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_post_grad_graph": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
-""")  # noqa: B950
+""",  # noqa: B950
+        )
 
     @requires_distributed()
     @requires_cuda
@@ -214,8 +239,11 @@ class StructuredTraceTest(TestCase):
 
         dist.destroy_process_group()
 
-        self.assertExpectedInline(self.buffer.getvalue(), """\
+        self.assertExpectedInline(
+            self.buffer.getvalue(),
+            """\
 {"compile_stack": "STACK", "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"dynamo_guards": true, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"compile_stack": "STACK", "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 0}
 {"dynamo_output_graph": true, "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_output_graph_sizes": {"l_x_": [1024, 1024], "l__self___layers_0": [1024, 1024], "l__self___layers_1": [1024, 1024]}, "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 0}
@@ -232,7 +260,9 @@ class StructuredTraceTest(TestCase):
 {"aot_backward_graph": true, "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_post_grad_graph": true, "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_output_code": true, "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
-""")  # noqa: B950
+{"dynamo_guards": true, "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+""",  # noqa: B950
+        )
 
     def test_graph_breaks(self):
         @torch._dynamo.optimize("inductor")
@@ -242,15 +272,20 @@ class StructuredTraceTest(TestCase):
 
         fn(torch.ones(1))
 
-        self.assertExpectedInline(self.buffer.getvalue(), """\
+        self.assertExpectedInline(
+            self.buffer.getvalue(),
+            """\
 {"compile_stack": "STACK", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"dynamo_guards": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
 {"compile_stack": "STACK", "frame_id": 1, "frame_compile_id": 0, "attempt": 0}
 {"dynamo_output_graph": true, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_output_graph_sizes": {"l_x_": [1], "add": [1]}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0}
 {"aot_forward_graph": true, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_post_grad_graph": true, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"inductor_output_code": true, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
-""")  # noqa: B950
+{"dynamo_guards": true, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
+""",  # noqa: B950
+        )
 
     # TODO: bring in the trace_source tests once we start emitting bytecode
 
@@ -264,15 +299,19 @@ class StructuredTraceTest(TestCase):
         fn_opt2 = torch._dynamo.optimize("eager", dynamic=True)(fn)
         fn_opt2(torch.randn(5, 10), torch.randn(10, 15))
 
-        self.assertExpectedInline(self.buffer.getvalue(), """\
+        self.assertExpectedInline(
+            self.buffer.getvalue(),
+            """\
 {"compile_stack": "STACK", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"dynamo_output_graph": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_output_graph_sizes": {"l_a_": [10, 20], "l_b_": [20, 30], "matmul": [10, 30]}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"dynamo_guards": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compile_stack": "STACK", "frame_id": 0, "frame_compile_id": 1, "attempt": 0}
 {"dynamo_output_graph": true, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_output_graph_sizes": {"l_a_": ["s0", "s1"], "l_b_": ["s1", "s3"], "matmul": ["s0", "s3"]}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0}
-""")  # noqa: B950
-
+{"dynamo_guards": true, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
+""",  # noqa: B950
+        )
 
     def test_guards_recompiles(self):
         def fn(x, ys, zs):
@@ -291,14 +330,19 @@ class StructuredTraceTest(TestCase):
         fn_opt(x, ys, zs)
         fn_opt(x, ys[:1], zs)
 
-        self.assertExpectedInline(self.buffer.getvalue(), """\
+        self.assertExpectedInline(
+            self.buffer.getvalue(),
+            """\
 {"compile_stack": "STACK", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"dynamo_output_graph": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_output_graph_sizes": {"l_x_": [1], "x": [1]}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"dynamo_guards": true, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compile_stack": "STACK", "frame_id": 0, "frame_compile_id": 1, "attempt": 0}
 {"dynamo_output_graph": true, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_output_graph_sizes": {"l_x_": [1], "x": [1]}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0}
-""")  # noqa: B950
+{"dynamo_guards": true, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
+""",  # noqa: B950
+        )
 
 
 if __name__ == "__main__":
