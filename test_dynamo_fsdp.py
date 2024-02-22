@@ -3,7 +3,7 @@ Adapted from fsdp.py in https://github.com/pytorch/pytorch/pull/110609.
 """
 
 """
-CUDA_VISIBLE_DEVICES=6,7 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py
+git pull && CUDA_VISIBLE_DEVICES=6,7 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >output.txt 2>&1
 
 CUDA_VISIBLE_DEVICES=6,7 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py
 """
