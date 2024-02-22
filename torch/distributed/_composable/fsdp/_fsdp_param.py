@@ -256,12 +256,13 @@ class FSDPParam:
             return  # already initialized
         # For the default path (no post-all-gather), the all-gather output
         # gives the unsharded parameter data directly
-        unsharded_param = torch.as_strided(
-            self.all_gather_output,
-            self._orig_size,
-            self._contiguous_orig_stride,
-            storage_offset=0,
-        )
+        # unsharded_param = torch.as_strided(
+        #     self.all_gather_output,
+        #     self._orig_size,
+        #     self._contiguous_orig_stride,
+        #     storage_offset=0,
+        # )
+        unsharded_param = self.all_gather_output.view(self._orig_size)
         if self.is_dtensor:
             unsharded_param = DTensor.from_local(
                 unsharded_param,
