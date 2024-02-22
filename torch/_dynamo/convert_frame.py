@@ -666,9 +666,10 @@ def _compile(
             # -2: omit current frame, omit contextlib decorator
             "".join(traceback.format_list(traceback.extract_stack()[: -2 - skip])),
         )
+        # -4: -2 as above, plus trace_structured frames
         torch._logging.trace_structured(
             "compile_stack",
-            lambda: structured.from_traceback(traceback.extract_stack()[: -2 - skip]),
+            lambda: structured.from_traceback(traceback.extract_stack()[: -4 - skip]),
         )
         try:
             guarded_code = compile_inner(code, one_graph, hooks, transform)

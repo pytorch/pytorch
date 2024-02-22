@@ -1,4 +1,5 @@
 import functools
+import hashlib
 import itertools
 import json
 import logging
@@ -744,9 +745,8 @@ class TorchLogsFormatter(logging.Formatter):
                 s = s + "\n"
             s = s + self.formatStack(record.stack_info)
 
-        lines = s.split("\n")
         record.rankprefix = ""
-        if dist.is_available() and dist.is_initialized():
+        if not self._is_trace and dist.is_available() and dist.is_initialized():
             record.rankprefix = f"[rank{dist.get_rank()}]:"
 
         record.traceid = ""
@@ -772,7 +772,14 @@ class TorchLogsFormatter(logging.Formatter):
             f"{os.path.relpath(record.pathname, os.path.dirname(os.path.dirname(torch.__file__)))}:"
             f"{record.lineno}]{record.traceid}"
         )
-        return "\n".join(f"{prefix} {l}" for l in lines)
+        if self._is_trace:
+            r = f"{prefix} {s}"
+            if record.payload is not None:
+                r += "".join(f"\n\t{l}" for l in record.payload.split("\n"))
+            return r
+        else:
+            lines = s.split("\n")
+            return "\n".join(f"{prefix} {l}" for l in lines)
 
 
 def _default_formatter():
@@ -923,21 +930,43 @@ class LazyString:
         return self.func(*self.args, **self.kwargs)
 
 
-def trace_structured(name: str, factory: Callable[[], object]):
-    assert (
-        " " not in name
-    ), f"for ease of parsing, structured names should not include whitespace, but got {name}"
-    assert callable(factory), f"factory should be callable, but got {type(factory)}"
+def trace_structured(
+    name: str,
+    metadata_fn: Callable[[], object] = lambda: True,
+    *,
+    payload_fn: Callable[[], Optional[str]] = lambda: None,
+):
+    """
+    metadata is an arbitrary JSON compatible struct, but it's expected to not be
+    too long (e.g., less than 1MB)
+
+    payload is an arbitrary string, which can be arbitrarily long (but expected to have
+    newlines so no lines are too long)
+    """
+    assert "name" not in ["rank", "frame_id", "frame_compile_id", "attempt"]
+    assert callable(
+        metadata_fn
+    ), f"metadata_fn should be callable, but got {type(metadata_fn)}"
+    assert callable(
+        payload_fn
+    ), f"payload_fn should be callable, but got {type(payload_fn)}"
     if trace_log.isEnabledFor(logging.DEBUG):
         record = {}
-        record["value"] = factory()
+        record[name] = metadata_fn()
         if dist.is_available() and dist.is_initialized():
             record["rank"] = dist.get_rank()
         if (trace_id := torch._guards.CompileContext.current_trace_id()) is not None:
             record["frame_id"] = trace_id.compile_id.frame_id
             record["frame_compile_id"] = trace_id.compile_id.frame_compile_id
             record["attempt"] = trace_id.attempt
-        trace_log.debug("%s %s", name, json.dumps(record), stacklevel=2)
+        payload = payload_fn()
+        if payload is not None:
+            h = hashlib.md5()
+            h.update(payload.encode("utf-8"))
+            record["has_payload"] = h.hexdigest()
+        trace_log.debug(
+            "%s", json.dumps(record), extra={"payload": payload}, stacklevel=2
+        )
 
 
 import torch._guards

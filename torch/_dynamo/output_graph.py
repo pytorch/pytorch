@@ -999,38 +999,39 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     self.graph.erase_node(node1)
                     self.graph.erase_node(node2)
 
-    def get_graph_sizes(self, *, structured, name=None):
-        if not structured:
-            graph_sizes_str = "TRACED GRAPH TENSOR SIZES\n"
-            graph_sizes_str += f"===== {name} =====\n"
-        else:
-            ret = {}
+    def get_graph_sizes_structured(self):
+        ret = {}
         for node in self.graph.nodes:
             example_value = node.meta.get("example_value", None)
             if isinstance(example_value, torch._subclasses.FakeTensor):
                 size = example_value.size()
-                if structured:
-                    ret[node.name] = [
-                        s if isinstance(s, int) else repr(s) for s in size
-                    ]
-                else:
-                    graph_sizes_str += f"{node.name}: {tuple(size)}\n"
-                    concrete_size = []
-                    has_symint = False
-                    for sz in size:
-                        if isinstance(sz, int):
-                            concrete_size.append(sz)
-                        elif isinstance(sz, torch.SymInt):
-                            has_symint = True
-                            concrete_size.append(sz.node.hint)
-                        else:
-                            break
+                ret[node.name] = [s if isinstance(s, int) else repr(s) for s in size]
+        return ret
+
+    def get_graph_sizes(self, name: str):
+        graph_sizes_str = "TRACED GRAPH TENSOR SIZES\n"
+        graph_sizes_str += f"===== {name} =====\n"
+        for node in self.graph.nodes:
+            example_value = node.meta.get("example_value", None)
+            if isinstance(example_value, torch._subclasses.FakeTensor):
+                size = example_value.size()
+                graph_sizes_str += f"{node.name}: {tuple(size)}\n"
+                concrete_size = []
+                has_symint = False
+                for sz in size:
+                    if isinstance(sz, int):
+                        concrete_size.append(sz)
+                    elif isinstance(sz, torch.SymInt):
+                        has_symint = True
+                        concrete_size.append(sz.node.hint)
                     else:
-                        if has_symint:
-                            graph_sizes_str += (
-                                f"{node.name} (concrete): {tuple(concrete_size)}\n"
-                            )
-        return graph_sizes_str if not structured else ret
+                        break
+                else:
+                    if has_symint:
+                        graph_sizes_str += (
+                            f"{node.name} (concrete): {tuple(concrete_size)}\n"
+                        )
+        return graph_sizes_str
 
     @contextlib.contextmanager
     def restore_global_state(self):
@@ -1091,14 +1092,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
         torch._logging.trace_structured(
-            "dynamo_output_graph", lambda: gm.print_readable(print_output=False)
+            "dynamo_output_graph",
+            payload_fn=lambda: gm.print_readable(print_output=False),
         )
         graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
-        graph_sizes_log.debug(
-            "%s", LazyString(lambda: self.get_graph_sizes(structured=False, name=name))
-        )
+        graph_sizes_log.debug("%s", LazyString(lambda: self.get_graph_sizes(name)))
         torch._logging.trace_structured(
-            "dynamo_output_graph_sizes", lambda: self.get_graph_sizes(structured=True)
+            "dynamo_output_graph_sizes", lambda: self.get_graph_sizes_structured()
         )
         self.call_cleanup_hooks()
         old_fake_mode = self.tracing_context.fake_mode
