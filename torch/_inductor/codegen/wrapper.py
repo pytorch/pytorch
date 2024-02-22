@@ -546,9 +546,10 @@ class WrapperCodeGen(CodeGen):
         with self.prefix.indent():
             if config.triton.debug_sync_graph:
                 self.prefix.writeline(V.graph.device_ops.synchronize())
-            inp_len = len(V.graph.graph_inputs.keys())
-            if inp_len != 0:
-                lhs = f"{', '.join(V.graph.graph_inputs.keys())}{'' if inp_len != 1 else ','}"
+            if V.graph.graph_inputs:
+                lhs = ", ".join(V.graph.graph_input_names)
+                if len(V.graph.graph_input_names) == 1:
+                    lhs += ","
                 self.prefix.writeline(f"{lhs} = args")
                 self.prefix.writeline("args.clear()")
 

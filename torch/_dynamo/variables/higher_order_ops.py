@@ -1445,13 +1445,13 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from . import TensorVariable
 
-        assert "fn" in kwargs
-        fn = kwargs["fn"]
+        kwargs = dict(kwargs)
+        fn = kwargs.pop("fn")
         assert len(args) == 1
         grad = args[0]
         assert isinstance(grad, TensorVariable)
 
-        return fn.call_function(tx, args, {})
+        return fn.call_function(tx, args, kwargs)
 
 
 class AutogradFunctionApplyVariable(VariableTracker):

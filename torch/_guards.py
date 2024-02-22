@@ -86,6 +86,7 @@ class GuardSource(enum.Enum):
     SHAPE_ENV = 6
     LOCAL_FSDP_MODULE = 7
     GLOBAL_FSDP_MODULE = 8
+    BACKWARD_STATE = 9
 
     def is_fsdp_module(self) -> bool:
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)

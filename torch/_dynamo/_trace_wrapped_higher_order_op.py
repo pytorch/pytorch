@@ -1,8 +1,10 @@
+import torch
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import autograd_not_implemented
 
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
+from torch.fx.experimental.backward_state import BackwardState
 
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils._python_dispatch import _get_current_dispatch_mode
@@ -41,10 +43,12 @@ __all__ = ["trace_wrapped"]
 # compiled autograd do we inline into the function.
 
 
-def trace_wrapped(*args, fn):
-    return _trace_wrapped_op(*args, fn=fn)
+def trace_wrapped(*args, **kwargs):
+    with torch.no_grad():
+        return _trace_wrapped_op(*args, **kwargs)
 
 
+# TODO(jansel): need to ensure this does not get DCEed
 _trace_wrapped_op = HigherOrderOperator("trace_wrapped")
 
 
@@ -56,19 +60,24 @@ def _assert_meta(grad, size, stride, dtype):
 
 
 @_trace_wrapped_op.py_impl(ProxyTorchDispatchMode)
-def inner_trace(mode, *args, fn):
+def inner_trace(mode, *args, bw_state, **kwargs):
     import torch
 
     assert len(args) == 1
     grad = args[0]
-    assert isinstance(grad, torch.Tensor)
+    assert isinstance(grad, torch.Tensor), grad
+    assert isinstance(bw_state, BackwardState) and bw_state.proxy is not None, bw_state
 
-    def self_invoke(*args):
-        return _trace_wrapped_op(*args, fn=fn)
+    def self_invoke(*args, bw_state):
+        with torch.no_grad():
+            return _trace_wrapped_op(*args, **{"bw_state": bw_state, **kwargs})
 
-    proxy_args = (mode.tracer.unwrap_proxy(grad),)
     out_proxy = mode.tracer.create_proxy(
-        "call_function", self_invoke, proxy_args, {}, name="trace_wrapped"
+        "call_function",
+        self_invoke,
+        (mode.tracer.unwrap_proxy(grad),),
+        {"bw_state": bw_state.proxy},
+        name="trace_wrapped",
     )
     grad = torch.zeros_like(grad)
     grad = track_tensor_tree(grad, out_proxy, constant=None, tracer=mode.tracer)
@@ -95,15 +104,15 @@ def inner_trace(mode, *args, fn):
 
 
 @_trace_wrapped_op.py_impl(FakeTensorMode)
-def inner_fake(*args, fn):
+def inner_fake(*args, **kwargs):
     raise RuntimeError("This op should never be invoked here")
 
 
 @_trace_wrapped_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def _trace_wrapped_op_dense(*args, fn):
+def _trace_wrapped_op_dense(*args, fn, **kwargs):
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
-    return fn(*args)
+    return fn(*args, **kwargs)
 
 
 _trace_wrapped_op.py_impl(DispatchKey.Autograd)(
@@ -112,7 +121,7 @@ _trace_wrapped_op.py_impl(DispatchKey.Autograd)(
 
 
 @_trace_wrapped_op.py_functionalize_impl
-def _trace_wrapped_functionalized(ctx, *args, fn):
+def _trace_wrapped_functionalized(ctx, *args, **kwargs):
     unwrapped_args = ctx.unwrap_tensors(args)
     with ctx.redispatch_to_next():
-        return ctx.wrap_tensors(_trace_wrapped_op(*unwrapped_args, fn=fn))
+        return ctx.wrap_tensors(_trace_wrapped_op(*unwrapped_args, **kwargs))

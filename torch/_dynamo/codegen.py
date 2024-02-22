@@ -268,8 +268,19 @@ class PyCodegen:
             self.code_options["co_names"] += (name,)
         return create_instruction("LOAD_ATTR", argval=name)
 
+    def load_attr(self, name):
+        self.append_output(self.create_load_attr(name))
+
     def create_load_attrs(self, names):
         return [self.create_load_attr(name) for name in names.split(".")]
+
+    def create_store_attr(self, name) -> Instruction:
+        if name not in self.code_options["co_names"]:
+            self.code_options["co_names"] += (name,)
+        return create_instruction("STORE_ATTR", argval=name)
+
+    def store_attr(self, name):
+        self.append_output(self.create_store_attr(name))
 
     def load_function_name(self, fn_name, push_null, num_on_stack=0):
         """Load the global fn_name on the stack num_on_stack down"""
@@ -308,6 +319,15 @@ class PyCodegen:
             *create_call_function(0, False),
             create_instruction("POP_TOP"),
         ]
+
+    def call_function(self, nargs: int, push_null: bool):
+        self.extend_output(create_call_function(nargs, push_null=push_null))
+
+    def dup_top(self):
+        self.append_output(create_dup_top())
+
+    def store(self, varname):
+        self.append_output(self.create_store(varname))
 
     def make_function_with_closure(
         self, fn_name: str, code: types.CodeType, push_null: bool, num_on_stack=0
