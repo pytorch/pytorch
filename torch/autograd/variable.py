@@ -20,11 +20,3 @@ compiled_autograd_final_callbacks = []
 def queue_callback(cb):
     global compiled_autograd_final_callbacks
     compiled_autograd_final_callbacks.append(cb)
-
-
-def exec_post_processing():
-    # TODO(yf225): use lock to be thread-safe (and local to the graph)
-    global compiled_autograd_final_callbacks
-    for cb in compiled_autograd_final_callbacks:
-        cb()
-    compiled_autograd_final_callbacks.clear()

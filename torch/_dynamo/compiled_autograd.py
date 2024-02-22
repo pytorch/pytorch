@@ -3,7 +3,7 @@ import functools
 from typing import List, Optional
 
 import torch
-from torch._dynamo.external_utils import call_backward, call_hook
+from torch._dynamo.external_utils import call_backward, call_hook, exec_post_processing
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import counters, lazy_format_graph_code
 from torch._logging import getArtifactLogger
@@ -21,7 +21,6 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.fx.proxy import Proxy
-from torch.autograd.variable import exec_post_processing
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 

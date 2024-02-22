@@ -4,6 +4,7 @@ import functools
 
 import torch
 import torch.utils._pytree as pytree
+from torch.autograd.variable import compiled_autograd_final_callbacks
 
 try:
     import numpy as np
@@ -74,3 +75,11 @@ def call_backward(backward_fn, saved_tensors, *args):
 
 def untyped_storage_size(x: torch.Tensor):
     return x.untyped_storage().size()
+
+
+def exec_post_processing():
+    # TODO(yf225): use lock to be thread-safe (and local to the graph)
+    for cb in compiled_autograd_final_callbacks:
+        cb()
+    # TODO(yf225): does this work without `global` keyword?
+    compiled_autograd_final_callbacks.clear()
