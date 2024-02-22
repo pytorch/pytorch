@@ -1253,9 +1253,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // local disk)
   std::future<bool> asyncDebugDump = std::async(
       std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
-  auto dumpStartTime = std::chrono::steady_clock::now();
 
-  // wait the dump until timeout
+  // wait for the dump until timeout
   waitForFutureOrTimeout(
       asyncDebugDump,
       std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
@@ -1526,7 +1525,7 @@ void ProcessGroupNCCL::watchdogHandler() {
               optAsyncDebugDump = std::async(std::launch::async, [this]() {
                 return this->dumpDebuggingInfo();
               });
-              // wait the dump until timeout
+              // wait for the dump until timeout
               waitForFutureOrTimeout(
                   *optAsyncDebugDump,
                   std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
