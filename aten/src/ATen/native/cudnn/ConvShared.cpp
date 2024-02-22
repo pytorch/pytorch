@@ -30,7 +30,7 @@
 // ConvPlaceholders.cpp contains placeholder implementation of cudnn
 // convolution when cudnn is not enabled. These operators only raises
 // errors, and do no real computation. These operators are implemented
-// using currnet operators.
+// using current operators.
 //
 // cuDNN v7 and v8 have different API. ConvShared.{cpp, h} contains
 // code shared by v7 and v8. Conv_v7.cpp contains implementation of
@@ -54,7 +54,7 @@
 //      Function that has different implementation on Conv_v7.cpp
 //      and Conv_v8.cpp
 //
-// The raw API directly invokes CuDNN and are implemeted differently
+// The raw API directly invokes CuDNN and are implemented differently
 // on cuDNN v7 and cuDNN v8
 //
 // There are a few reasons this should never be directly exposed
