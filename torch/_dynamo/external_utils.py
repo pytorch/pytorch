@@ -77,7 +77,7 @@ def untyped_storage_size(x: torch.Tensor):
     return x.untyped_storage().size()
 
 
-def exec_post_processing():
+def exec_final_callbacks():
     # TODO(yf225): use lock to be thread-safe (and local to the graph)
     for cb in compiled_autograd_final_callbacks:
         cb()

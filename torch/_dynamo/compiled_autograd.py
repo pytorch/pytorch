@@ -3,7 +3,7 @@ import functools
 from typing import List, Optional
 
 import torch
-from torch._dynamo.external_utils import call_backward, call_hook, exec_post_processing
+from torch._dynamo.external_utils import call_backward, call_hook, exec_final_callbacks
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import counters, lazy_format_graph_code
 from torch._logging import getArtifactLogger
@@ -190,7 +190,7 @@ class AutogradCompilerInstance:
     def end_capture(self, outputs):
         self.fx_tracer.create_proxy(
             "call_function",
-            exec_post_processing,
+            exec_final_callbacks,
             (),
             {},
         )
