@@ -2013,8 +2013,6 @@ def nnmodule_has_hooks(
 
 def to_numpy_helper(value):
     """Convert tensor and tnp.ndarray to numpy.ndarray."""
-    if is_fake(value):
-        return value
     if isinstance(value, tnp.ndarray):
         return to_numpy_helper(value.tensor)
     elif isinstance(value, torch.Tensor):
