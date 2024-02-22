@@ -39,8 +39,7 @@ class OperatorRegistry {
  private:
   // TODO: Input string corresponds to target_name. We may need to pass kwargs.
   using OpTable = std::unordered_map<std::string, OpFunction>;
-  // NOTE: Per the lint warning, consider wrapping inside a function if OpTable
-  // ever depends on other static objects.
+  // @lint-ignore CLANGTIDY facebook-hte-NonPodStaticDeclaration
   static const OpTable kTable;
 
   OperatorRegistry() = default;
