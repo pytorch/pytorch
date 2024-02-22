@@ -13,7 +13,7 @@ from torch.fx._compatibility import compatibility
 @compatibility(is_backward_compatible=False)
 def topo_sort(nodes: NodeList) -> NodeList:
     # sort nodes according to the topological order
-    indegree_map = {node : 0 for node in nodes}
+    indegree_map = dict.fromkeys(nodes, 0)
     candidates: SimpleQueue = SimpleQueue()
 
     for node in nodes:

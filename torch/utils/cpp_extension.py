@@ -931,7 +931,8 @@ def CppExtension(name, sources, *args, **kwargs):
     bare minimum (but often sufficient) arguments to build a C++ extension.
 
     All arguments are forwarded to the :class:`setuptools.Extension`
-    constructor.
+    constructor. Full list arguments can be found at
+    https://setuptools.pypa.io/en/latest/userguide/ext_modules.html#extension-api-reference
 
     Example:
         >>> # xdoctest: +SKIP
@@ -944,7 +945,8 @@ def CppExtension(name, sources, *args, **kwargs):
         ...         CppExtension(
         ...             name='extension',
         ...             sources=['extension.cpp'],
-        ...             extra_compile_args=['-g']),
+        ...             extra_compile_args=['-g'],
+        ...             extra_link_flags=['-Wl,--no-as-needed', '-lm'])
         ...     ],
         ...     cmdclass={
         ...         'build_ext': BuildExtension
@@ -979,7 +981,8 @@ def CUDAExtension(name, sources, *args, **kwargs):
     library.
 
     All arguments are forwarded to the :class:`setuptools.Extension`
-    constructor.
+    constructor. Full list arguments can be found at
+    https://setuptools.pypa.io/en/latest/userguide/ext_modules.html#extension-api-reference
 
     Example:
         >>> # xdoctest: +SKIP
@@ -993,7 +996,8 @@ def CUDAExtension(name, sources, *args, **kwargs):
         ...                 name='cuda_extension',
         ...                 sources=['extension.cpp', 'extension_kernel.cu'],
         ...                 extra_compile_args={'cxx': ['-g'],
-        ...                                     'nvcc': ['-O2']})
+        ...                                     'nvcc': ['-O2']},
+        ...                 extra_link_flags=['-Wl,--no-as-needed', '-lcuda'])
         ...     ],
         ...     cmdclass={
         ...         'build_ext': BuildExtension
@@ -1955,6 +1959,9 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
 
     # If not given, determine what's best for the GPU / CUDA version that can be found
     if not _arch_list:
+        warnings.warn(
+            "TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. \n"
+            "If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'].")
         arch_list = []
         # the assumption is that the extension should run on any of the currently visible cards,
         # which could be of different types - therefore all archs for visible cards should be included
@@ -2335,7 +2342,8 @@ def _write_ninja_file(path,
         cuda_compile_rule = ['rule cuda_compile']
         nvcc_gendeps = ''
         # --generate-dependencies-with-compile is not supported by ROCm
-        if torch.version.cuda is not None:
+        # Nvcc flag `--generate-dependencies-with-compile` is not supported by sccache, which may increase build time.
+        if torch.version.cuda is not None and os.getenv('TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES', '0') != '1':
             cuda_compile_rule.append('  depfile = $out.d')
             cuda_compile_rule.append('  deps = gcc')
             # Note: non-system deps with nvcc are only supported
@@ -2388,7 +2396,7 @@ def _write_ninja_file(path,
     # 'Blocks' should be separated by newlines, for visual benefit.
     blocks = [config, flags, compile_rule]
     if with_cuda:
-        blocks.append(cuda_compile_rule)
+        blocks.append(cuda_compile_rule)  # type: ignore[possibly-undefined]
     blocks += [devlink_rule, link_rule, build, devlink, link, default]
     content = "\n\n".join("\n".join(b) for b in blocks)
     # Ninja requires a new lines at the end of the .ninja file

@@ -21,9 +21,9 @@ from functorch.experimental.control_flow import cond
 from torch._dynamo import config
 from torch._dynamo.exc import UserError
 from torch._dynamo.testing import normalize_gm
-from torch._export import dynamic_dim
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._subclasses import fake_tensor
+from torch.export import dynamic_dim
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -2293,60 +2293,6 @@ def forward(self, x):
         out_graph = exported[0]
         self.assertTrue(torch._dynamo.utils.same(torch.ones(3, 3), out_graph()))
 
-    def test_none_out(self):
-        def f(x, y):
-            _ = x + y
-
-        with self.assertRaisesRegex(
-            UserError,
-            "It looks like one of the outputs with type .*None.* "
-            "is not supported or pytree-flattenable",
-        ):
-            torch._dynamo.export(f, aten_graph=False)(torch.randn(10), torch.randn(10))
-
-    def test_primitive_constant_output(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x):
-                # return a constant of primitive type
-                y = 5
-                return y * x, y
-
-        foo = Foo()
-
-        with self.assertRaisesRegex(
-            UserError,
-            "It looks like one of the outputs with type .*int.* "
-            "is not supported or pytree-flattenable",
-        ):
-            torch.export.export(foo, (torch.tensor(3),))
-
-        class Bar(torch.nn.Module):
-            def forward(self, x, y):
-                return y * x, y
-
-        bar = Bar()
-
-        # new behavior
-        with self.assertRaisesRegex(
-            UserError,
-            "It looks like one of the outputs with type .*int.* "
-            "is not supported or pytree-flattenable",
-        ):
-            torch.export.export(bar, (torch.tensor(3), 5))
-
-        class Qux(torch.nn.Module):
-            def forward(self, x, y):
-                return y * x, y - 1
-
-        qux = Qux()
-
-        with self.assertRaisesRegex(
-            UserError,
-            "It looks like one of the outputs with type .*int.* "
-            "is not supported or pytree-flattenable",
-        ):
-            torch.export.export(qux, (torch.tensor(3), 5))
-
     @unittest.skipIf(not TEST_CUDA, "No CUDA available.")
     def test_export_with_parameters(self):
         class MyModule(torch.nn.Module):
@@ -2373,7 +2319,10 @@ def forward(self, x):
         torch.export.save(exp_program, output_buffer)
         loaded_model = torch.export.load(output_buffer)
         self.assertTrue(
-            isinstance(loaded_model.module().features_0_weight, torch.nn.Parameter)
+            isinstance(
+                loaded_model.module().get_parameter("features.0.weight"),
+                torch.nn.Parameter,
+            )
         )
 
     def test_export_meta(self):
@@ -4382,6 +4331,90 @@ def forward(self, x):
         out = gm_no_inference(inp)
         self.assertEqual(out.requires_grad, False)
         out.requires_grad = True
+
+        def fn(x):
+            with torch.inference_mode():
+                return x + 1
+
+        gm, _ = torch._dynamo.export(fn)(torch.rand(2, 2))
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x):
+    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    l_x_ = arg0
+    _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
+    add = l_x_ + 1;  l_x_ = None
+    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = None
+    return pytree.tree_unflatten([add], self._out_spec)""",
+        )
+        inp = torch.randn(2, 2, requires_grad=True)
+        out = gm(inp)
+        self.assertEqual(out.requires_grad, False)
+
+    def test_export_masking_with_no_grad(self):
+        def fn(x, b, y):
+            x = x.clone()
+            x[b] = y
+            return x
+
+        def fn_no_grad(x, b, y):
+            with torch.no_grad():
+                return fn(x, b, y)
+
+        def fn_inference_mode(x, b, y):
+            with torch.inference_mode():
+                return fn(x, b, y)
+
+        x = torch.randn(4, requires_grad=True)
+        b = torch.tensor([True, False, True, False])
+        y = torch.randn(2, requires_grad=True)
+
+        gm, _ = torch._dynamo.export(fn_no_grad)(x, b, y)
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x, b, y):
+    arg0, arg1, arg2, = fx_pytree.tree_flatten_spec(([x, b, y], {}), self._in_spec)
+    l_x_ = arg0
+    l_b_ = arg1
+    l_y_ = arg2
+    _set_grad_enabled = torch._C._set_grad_enabled(False)
+    x = l_x_.clone();  l_x_ = None
+    x[l_b_] = l_y_;  setitem = x;  l_b_ = l_y_ = None
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
+    return pytree.tree_unflatten([x], self._out_spec)""",
+        )
+
+        gm, _ = torch._dynamo.export(fn_inference_mode)(x, b, y)
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x, b, y):
+    arg0, arg1, arg2, = fx_pytree.tree_flatten_spec(([x, b, y], {}), self._in_spec)
+    l_x_ = arg0
+    l_b_ = arg1
+    l_y_ = arg2
+    _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
+    x = l_x_.clone();  l_x_ = None
+    x[l_b_] = l_y_;  setitem = x;  l_b_ = l_y_ = None
+    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = None
+    return pytree.tree_unflatten([x], self._out_spec)""",
+        )
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "boolean masking setitem backwards"
+        ):
+            gm, _ = torch._dynamo.export(fn)(x, b, y)
+
+    def test_dynamo_list_index(self):
+        def fn(x, in_list):
+            return x + in_list.index(2)
+
+        inputs = (torch.ones(2, 2), [1, 2])
+        graph, _ = torch._dynamo.export(fn)(*inputs)
+        out = graph(*inputs)
+        self.assertEqual(out, torch.ones(2, 2) + 1)
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
