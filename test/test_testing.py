@@ -19,7 +19,8 @@ import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
     (IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
-     parametrize, subtest, instantiate_parametrized_tests, dtype_name, TEST_WITH_ROCM, decorateIf)
+     parametrize, subtest, instantiate_parametrized_tests, dtype_name, TEST_WITH_ROCM, decorateIf,
+     skipIfTorchInductor, skipIfTorchAotEager)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
@@ -1018,6 +1019,8 @@ class TestAssertCloseContainer(TestCase):
 
 
 class TestAssertCloseSparseCOO(TestCase):
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/120413")
+    @skipIfTorchAotEager("https://github.com/pytorch/pytorch/issues/120413")
     def test_matching_coalesced(self):
         indices = (
             (0, 1),

@@ -1569,11 +1569,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (C10_UNLIKELY(!has_storage())) {
       throw_data_ptr_access_error();
     }
-    TORCH_CHECK(
-        storage_initialized(),
-        "The tensor has a non-zero number of elements, but its data is not allocated yet. "
-        "Caffe2 uses a lazy allocation, so you will need to call "
-        "mutable_data() or raw_mutable_data() to actually allocate memory.");
+    if (!storage_initialized()) {
+      throw_storage_uninit_error();
+    }
     // Caller does the type check.
     // Note: storage_offset_ can be non-null even for zero-elements tensors
     // (for example if created as `torch.empty(5)[10:]`) that triggers
@@ -1696,6 +1694,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
  private:
   [[noreturn]] void throw_storage_access_error() const;
+  [[noreturn]] void throw_storage_uninit_error() const;
   [[noreturn]] void throw_data_ptr_access_error() const;
 
   ExtraMeta& get_extra_meta() {

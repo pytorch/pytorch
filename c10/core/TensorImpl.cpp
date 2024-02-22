@@ -317,6 +317,14 @@ void TensorImpl::throw_data_ptr_access_error() const {
       false, "Cannot access data pointer of Tensor that doesn't have storage");
 }
 
+void TensorImpl::throw_storage_uninit_error() const {
+  TORCH_CHECK(
+      false,
+      "The tensor has a non-zero number of elements, but its data is not allocated yet. "
+      "Caffe2 uses a lazy allocation, so you will need to call "
+      "mutable_data() or raw_mutable_data() to actually allocate memory.");
+}
+
 bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
     return pyobj_slot_.load_pyobj_interpreter()->is_contiguous(

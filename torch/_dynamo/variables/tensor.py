@@ -1156,4 +1156,3 @@ class UntypedStorageVariable(VariableTracker):
         codegen(self.from_tensor)
         codegen.append_output(codegen.create_load_method("untyped_storage"))
         codegen.extend_output(create_call_method(0))
-        return ()
