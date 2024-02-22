@@ -3244,6 +3244,30 @@ class TestExportCustomClass(TorchTestCase):
                 arg = node.args[0]
                 self.assertTrue(arg.op == "placeholder")
 
+    def test_autograd_function_in_predispatch(self):
+        class CustomFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.x = x
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                y = ctx.x
+                return grad_output + 1 + y
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                f = CustomFn.apply(x)
+                return f.cos()
+
+        ep = torch.export._trace._export(M(), (torch.randn(4, 4, requires_grad=True),), pre_dispatch=True)
+        print(ep.graph)
+
+        gm = torch.export._trace._export_to_torch_ir(M(), (torch.randn(4, 4, requires_grad=True),))
+        print(gm.graph)
+
+
 
 if __name__ == '__main__':
     run_tests()

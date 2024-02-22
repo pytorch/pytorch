@@ -657,3 +657,82 @@ class AutogradFunctionApply(HigherOrderOperator):
 
 
 autograd_function_apply = AutogradFunctionApply()
+
+def trace_autograd_function_apply(proxy_mode, func_overload, fwd, bwd, *operands):
+    assert all(
+        isinstance(o, torch.Tensor) for o in operands
+    ), "autograd_function_apply operands must be a list of tensors"
+
+    pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
+
+    with disable_proxy_modes_tracing(pre_dispatch=pre_dispatch):
+        fwd_graph = make_fx(
+            _maybe_run_with_interpreter(fwd), pre_dispatch=pre_dispatch
+        )(*operands)
+        bwd_graph = make_fx(
+            _maybe_run_with_interpreter(bwd), pre_dispatch=pre_dispatch
+        )(*operands)
+
+
+    next_name = None
+    i = 0
+    while not next_name:
+        candidate = f"fwd_body_{i}"
+        if hasattr(proxy_mode.tracer.root, candidate):
+            i += 1
+        else:
+            next_name = candidate
+
+    fwd_name = next_name
+    bwd_name = f"bwd_graph_{i}"
+    assert not hasattr(proxy_mode.tracer.root, bwd_name)
+
+    proxy_mode.tracer.root.register_module(fwd_name, fwd_graph)
+    proxy_mode.tracer.root.register_module(bwd_name, bwd_graph)
+
+    args = (fwd_graph, bwd_graph, *operands)
+
+    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
+
+    out_proxy = proxy_mode.tracer.create_proxy(
+        "call_function", func_overload, proxy_args, {}, name="autograd_function"
+    )
+
+    out = fwd(*operands)
+
+    return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
+
+@autograd_function_apply.py_impl(ProxyTorchDispatchMode)
+def inner(mode, fwd, bwd, *operands):
+    if mode.enable_tracing:
+        return trace_autograd_function_apply(mode, autograd_function_apply, fwd, bwd, *operands)
+    else:
+        return autograd_function_apply(fwd, bwd, *operands)
+
+
+@autograd_function_apply.py_functionalize_impl
+def autograd_function_apply_func(ctx, fwd, bwd, *operands):
+    unwrapped_inputs = ctx.unwrap_tensors(operands)
+    with ctx.redispatch_to_next() as m:
+        functional_fwd = ctx.functionalize(fwd)
+        functional_bwd = ctx.functionalize(bwd)
+        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
+        for branch in [functional_fwd, functional_bwd]:
+            if _has_potential_branch_input_mutation(
+                branch, unwrapped_inputs, pre_dispatch=pre_dispatch
+            ):
+                raise UnsupportedAliasMutationException(
+                    "One of torch.cond branch might be modifying the input!"
+                )
+        for branch in [fwd, bwd]:
+            if _has_potential_branch_input_alias(
+                branch, unwrapped_inputs, pre_dispatch=pre_dispatch
+            ):
+                raise UnsupportedAliasMutationException(
+                    "One of torch.cond branch might be aliasing the input!"
+                )
+
+        autograd_function_apply_return = autograd_function_apply(
+            functional_fwd, functional_bwd, unwrapped_inputs
+        )
+        return ctx.wrap_tensors(autograd_function_apply_return)
