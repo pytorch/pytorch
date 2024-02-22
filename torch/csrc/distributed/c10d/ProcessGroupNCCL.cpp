@@ -2688,7 +2688,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     p2pRank = rank_;
     p2pTargetRank = peer;
   } else {
-    // For single P2P, preserve theworkEnqueue old two-rank behavior (to avoid perf diff)
+    // For single P2P, preserve theworkEnqueue old two-rank behavior (to avoid
+    // perf diff)
     key = getKeySendRecv(rank_, peer);
     p2pRank = rank_ <= peer ? 0 : 1;
     isSendRecvSelf = rank_ == peer;
@@ -2724,8 +2725,12 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         profilingTitle,
         {tensor},
         {tensor},
-        enableTiming_.load() ? coalescedStartEvent_.get() : nullptr,
-        coalescedEndEvent_.get());
+        // We'd like to include events here and have them updated, but it
+        // complicates event lifetime. currently, event lifetime is managed by
+        // the Work that owns the event, which may be destroyed before this
+        // particular flight record gets updated during dumping.
+        nullptr,
+        nullptr);
     // TODO accumulate the trace_ids into a list and later stuff those into the
     // work for recording
   } else {

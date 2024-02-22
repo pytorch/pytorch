@@ -4307,17 +4307,14 @@ class NCCLTraceTest(NCCLTraceTestBase):
             profiling_name = 'nccl:recv 0<-1' if self.rank == 0 else 'nccl:send 1->0'
             self.assertEqual(t['entries'][first_op]['profiling_name'], profiling_name)
             self.assertEqual(t['entries'][first_op]['seq_id'], seq)
-            self.assertEqual(t['entries'][first_op]['state'], 'completed')
             self.assertEqual(t['entries'][first_op]['input_sizes'], [input_sizes])
             self.assertEqual(t['entries'][first_op]['output_sizes'], [input_sizes])
-            # if timing_enabled:
-                # self.assertEqual(t['entries'][first_op]['duration'], 1)
-            # else:
-                # self.assertTrue('duration' not in t['entries'][first_op])
-            # duration doesn't get tagged onto individual ops yet
-            self.assertTrue('duration' not in t['entries'][first_op])
+            # duration doesn't get tagged onto individual ops yet, nor is their state updated
+            self.assertEqual(t['entries'][first_op]['state'], 'scheduled')
+            self.assertTrue('duration_ms' not in t['entries'][first_op])
 
-            # the coalesced op has no metadata but indicates that coalescing was used
+            # the coalesced op has no metadata but indicates that coalescing was used,
+            # and accurately reflects the timing and state info for the whole group
             self.assertEqual(t['entries'][coalesced_op]['profiling_name'], 'nccl:coalesced')
             self.assertEqual(t['entries'][coalesced_op]['seq_id'], seq)
             self.assertEqual(t['entries'][coalesced_op]['state'], 'completed')
@@ -4325,9 +4322,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
             self.assertEqual(t['entries'][coalesced_op]['output_sizes'], [])
 
             if timing_enabled:
-                self.assertEqual(t['entries'][coalesced_op]['duration'], 1)
+                duration = t['entries'][coalesced_op]['duration_ms']
+                self.assertTrue(0.001 < duration < 10000, duration)
             else:
-                self.assertTrue('duration' not in t['entries'][coalesced_op])
+                self.assertTrue('duration_ms' not in t['entries'][coalesced_op])
 
 
 class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):

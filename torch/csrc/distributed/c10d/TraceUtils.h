@@ -477,19 +477,14 @@ struct NCCLTraceBuffer {
 
   void update_state(Entry& r) {
     if (r.start_ != nullptr) {
-      LOG(ERROR) << "querying r.start_";
-
       bool started = r.start_->query();
       if (started && !r.time_discovered_started_) {
-        LOG(ERROR) << "getting time started";
         r.time_discovered_started_ = c10::getTime();
       }
     }
     if (r.end_ != nullptr) {
-      LOG(ERROR) << "querying end_";
       bool completed = r.end_->query();
       if (completed && !r.time_discovered_completed_) {
-        LOG(ERROR) << "getting time completed";
         r.time_discovered_completed_ = c10::getTime();
       }
     }
