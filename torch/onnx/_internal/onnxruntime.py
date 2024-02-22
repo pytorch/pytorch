@@ -90,18 +90,19 @@ def is_onnxrt_backend_supported() -> bool:
 
 
 _dumped_onnx_model: Dict[str, int] = {}
-# Functions sequentially applies to the ONNX model before it is executed by ONNX Runtime.
-_GRAPH_TRANSFORMS: List[Callable[["onnx.ModelProto"], None]] = []
+# Functions sequentially applies to the ONNX model before it is fed to ONNXRuntime's
+# InferenceSession.
+_GRAPH_TRANSFORMS: List[Callable[["onnx.ModelProto"], "onnx.ModelProto"]] = []
 
 
 def register_backend_graph_transform(
-    transform: Callable[["onnx.ModelProto"], None]
+    transform: Callable[["onnx.ModelProto"], "onnx.ModelProto"]
 ) -> None:
     _GRAPH_TRANSFORMS.append(transform)
 
 
 def unregister_backend_graph_transform(
-    transform: Callable[["onnx.ModelProto"], None]
+    transform: Callable[["onnx.ModelProto"], "onnx.ModelProto"]
 ) -> None:
     for i, t in enumerate(reversed(_GRAPH_TRANSFORMS)):
         if t == transform:
@@ -940,7 +941,7 @@ class OrtBackend:
 
             # Apply post-conversion modifications to ONNX model.
             for transform in _GRAPH_TRANSFORMS:
-                transform(onnx_model)
+                onnx_model = transform(onnx_model)
 
             onnx_model_bytes = onnx_model.SerializeToString()
             if os.environ.get("ONNXRT_DUMP_PATH", None):

@@ -61,8 +61,8 @@ from ._internal.onnxruntime import (
     OrtBackend as _OrtBackend,
     OrtBackendOptions as _OrtBackendOptions,
     OrtExecutionProvider as _OrtExecutionProvider,
-    register_backend_graph_transforms,
-    unregister_backend_graph_transforms,
+    register_backend_graph_transform,
+    unregister_backend_graph_transform,
 )
 
 __all__ = [

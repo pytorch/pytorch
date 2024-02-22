@@ -1,3 +1,5 @@
+import copy
+import itertools
 import os
 from typing import Dict, List, Set
 
@@ -284,6 +286,7 @@ def fuse(
     pattern_to_main_value_bindings,
 ):
     main_node_names = {value for value in pattern_to_main_node_bindings.values()}
+    main_value_names = {value for value in pattern_to_main_value_bindings.values()}
 
     main_node_indices = []
     for i, node in enumerate(graph.node):
@@ -291,6 +294,7 @@ def fuse(
             main_node_indices.append(i)
 
     graph.node.insert(main_node_indices[-1] + 1, fusion_node)
+
     deleted_output_names = set()
     for i in sorted(main_node_indices, reverse=True):
         deleted_output_names.update(graph.node[i].output)
@@ -299,6 +303,7 @@ def fuse(
         value_info
         for value_info in graph.value_info
         if value_info.name not in deleted_output_names
+        or value_info.name in main_value_names
     ]
     del graph.value_info[:]
 
@@ -327,7 +332,7 @@ def apply_fusion(model, pattern_graph, fusion_node_type, fusion_node_attributes)
                 ],
                 outputs=[
                     pattern_to_main_value_bindings[value_info.name]
-                    for value_info in pattern_graph.graph.output
+                    for value_info in pattern_graph.output
                 ],
                 name=pattern_to_main_node_bindings[pattern_graph.node[-1].name],
                 domain="com.microsoft",
@@ -365,6 +370,16 @@ softmax_backward_model = softmax_backward.to_model_proto(
 
 
 def apply_all_fusions(onnx_model):
+    # Make this function immutable for `onnx_model`.
+
+    fused_onnx_model = copy.deepcopy(onnx_model)
+    # Apply fusion for SoftmaxBackward in-place (i.e., the input graph is changed)
     apply_fusion(
-        onnx_model, softmax_backward_model.graph, "SoftmaxBackward", {"axis": -1}
+        fused_onnx_model, softmax_backward_model.graph, "SoftmaxGrad", {"axis": -1}
     )
+
+    opset = fused_onnx_model.opset_import.add()
+    opset.domain = "com.microsoft"
+    opset.version = 1
+
+    return fused_onnx_model
