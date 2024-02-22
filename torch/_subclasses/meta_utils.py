@@ -307,6 +307,61 @@ class MetaConverter:
                 outer_stride=outer_stride,
             )
 
+        # Returns a fake-ified version of t with the same view relationship wrt the given
+        # fake base. For views involving subclasses, this performs view replay, while
+        # dense -> dense views can be simplified to an as_strided() call. Note that view
+        # replay involves handling any closed-over state present in the view func:
+        #   * Closed-over tensors are fake-ified
+        #   * Closed-over SymInts are made symbolic
+        def view_from_base(base, t, source=source, shape_env=shape_env):
+            # fake-ify t naively; view relationship isn't correct yet
+            (sizes, strides, storage_offset) = sym_sizes_strides_storage_offset(
+                t, source
+            )
+            if not is_traceable_wrapper_subclass(
+                t
+            ) and not is_traceable_wrapper_subclass(base):
+                # Dense -> Dense view case uses as_strided() to construct view relationship.
+                # TODO: Change this logic to use view replay for consistency?
+                # It's likely there is no view func available.
+                return base.as_strided(sizes, strides, storage_offset)
+
+            def symint_visitor_fn(s):
+                if shape_env is None:
+                    return s
+
+                from torch._dynamo.source import ConstantSource
+
+                # NB: The source is meaningless; the symbol here is expected to be simplified out.
+                sym_source = ConstantSource("view_func")
+                val = int(s)
+                symbol = shape_env.create_symbol(val, sym_source)
+                return shape_env.create_symintnode(symbol, hint=val, source=sym_source)
+
+            # Assume the only closed-over tensors encountered will be subclass inner tensors.
+            real_to_fake_mapping = {}
+            if is_traceable_wrapper_subclass(t):
+                fake_t = empty_create_subclass(
+                    t, outer_size=sizes, outer_stride=strides
+                )
+                attrs, _ = fake_t.__tensor_flatten__()
+                for attr in attrs:
+                    real_to_fake_mapping[getattr(t, attr)] = getattr(fake_t, attr)
+
+            def tensor_visitor_fn(t):
+                return real_to_fake_mapping.get(t, t)
+
+            # Replay the view, swapping out any non-symbolic SymInts or real tensors
+            # for symbolic SymInts or fake tensors.
+            fake_t = t._view_func_unsafe(base, symint_visitor_fn, tensor_visitor_fn)
+
+            # Ensure the output has symbolic shapes according to the symbolic context.
+            # NB: These asserts simplify out any symbolicized closed-over view func state.
+            assert fake_t.size() == sizes
+            assert fake_t.stride() == strides
+            assert fake_t.storage_offset() == storage_offset
+            return fake_t
+
         # see expired-storages
         self.check_expired_count += 1
         if self.check_expired_count >= self.check_expired_frequency:
@@ -462,92 +517,18 @@ class MetaConverter:
                         #
                         # So we may have to do *two* views out of the base to
                         # recreate this situation.
-                        def _view_from_base(base, t):
-                            if is_traceable_wrapper_subclass(t):
-                                # Covers:
-                                #     Dense -> Subclass views
-                                #     Subclass -> Subclass views
-
-                                # fake-ify t naively; view relationship isn't correct yet
-                                (
-                                    sizes,
-                                    strides,
-                                    storage_offset,
-                                ) = sym_sizes_strides_storage_offset(t, source)
-
-                                fake_t = empty_create_subclass(
-                                    t, outer_size=sizes, outer_stride=strides
-                                )
-
-                                real_to_fake_mapping = {}
-                                attrs, _ = fake_t.__tensor_flatten__()
-                                for attr in attrs:
-                                    real_to_fake_mapping[getattr(t, attr)] = getattr(
-                                        fake_t, attr
-                                    )
-
-                                from torch._dynamo.source import (
-                                    TensorProperty,
-                                    TensorPropertySource,
-                                )
-
-                                def symint_visitor_fn(s):
-                                    if shape_env is None:
-                                        return s
-
-                                    # TODO: Fix the source
-                                    sym_source = TensorPropertySource(
-                                        source, TensorProperty.SIZE, 0
-                                    )
-                                    val = int(s)
-                                    symbol = shape_env.create_symbol(val, sym_source)
-                                    sym = shape_env.create_symintnode(
-                                        symbol,
-                                        hint=val,
-                                        source=sym_source,
-                                    )
-                                    return sym
-
-                                def tensor_visitor_fn(t):
-                                    # assume the only closed-over tensors we run into
-                                    # will be one of the inner tensors
-                                    return real_to_fake_mapping.get(t, t)
-
-                                # replay the view, swapping out any non-symbolic SymInts
-                                # or real tensors for symbolic SymInts or fake tensors
-                                fake_t = t._view_func_unsafe(
-                                    base, symint_visitor_fn, tensor_visitor_fn
-                                )
-                                return fake_t
-
-                            elif is_traceable_wrapper_subclass(base):
-                                # Covers Subclass -> Dense views
-                                # NB: For simplicitly, assume no tensors / SymInts will be
-                                # closed over for this type of view.
-                                return t._view_func_unsafe(base)
-
-                            else:
-                                # Covers Dense -> Dense views
-                                # TODO: Change this logic to use view replay for consistency
-                                (
-                                    sizes,
-                                    strides,
-                                    storage_offset,
-                                ) = sym_sizes_strides_storage_offset(t, source)
-                                return base.as_strided(sizes, strides, storage_offset)
-
                         if safe_is_leaf(t):
                             # Leaf views that track view metadata are created by
                             # creating a view inside a no_grad block
                             with torch.no_grad(), maybe_suppress():
-                                r = _view_from_base(base, t)
+                                r = view_from_base(base, t)
                             # As it's a leaf, we can directly assign requires_grad
                             r.requires_grad = t.requires_grad
                         else:
                             if t._base.requires_grad == t.requires_grad:
                                 # Easy case, just run the view op
                                 with torch.enable_grad(), maybe_suppress():
-                                    r = _view_from_base(base, t)
+                                    r = view_from_base(base, t)
 
                                 # NB: We don't actaully faithfully replicate
                                 # autograd connectivity, but that doesn't matter
@@ -562,7 +543,7 @@ class MetaConverter:
                                     mid = base.view(base.shape)
                                 mid.requires_grad = t.requires_grad
                                 with torch.enable_grad(), maybe_suppress():
-                                    r = _view_from_base(mid, t)
+                                    r = view_from_base(mid, t)
                         # The CreationMeta influences whether or not inplace
                         # mutation is an error or not.  So we need to make
                         # sure we properly propagate this as well.
