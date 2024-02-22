@@ -302,6 +302,24 @@ class DualLevelContextManager(ContextWrappingVariable):
         return variables.ConstantVariable.create(None)
 
 
+class NoOpContextManager(ContextWrappingVariable):
+    """"""
+
+    @staticmethod
+    def create(tx, **kwargs):
+        return NoOpContextManager(
+            target_values=None,
+            initial_values=None,
+            **kwargs,
+        )
+
+    def enter(self, tx):
+        return variables.ConstantVariable.create(None)
+
+    def exit(self, tx, *args):
+        return variables.ConstantVariable.create(None)
+
+
 class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     """represents torch.func.grad increment/decrement nesting"""
 
