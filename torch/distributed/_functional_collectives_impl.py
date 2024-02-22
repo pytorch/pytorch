@@ -24,7 +24,12 @@ _wait_all
 
 """
 
-_use_native_funcol = "DISABLE_NATIVE_FUNCOL" not in os.environ
+try:
+    import torch_xla  # noqa: F401
+
+    _use_native_funcol = False
+except:
+    _use_native_funcol = "DISABLE_NATIVE_FUNCOL" in os.environ
 
 
 def native_funcol_enabled():
