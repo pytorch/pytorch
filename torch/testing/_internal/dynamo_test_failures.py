@@ -386,9 +386,7 @@ dynamo_expected_failures = {
     "TestDLPack.test_higher_dims_ndim_19",  # torch_np/numpy_tests/core/test_dlpack
     "TestDLPack.test_higher_dims_ndim_26",  # torch_np/numpy_tests/core/test_dlpack
     "TestDLPack.test_higher_dims_ndim_8",  # torch_np/numpy_tests/core/test_dlpack
-    "TestViewOpsLAZY.test_advanced_indexing_assignment_lazy",  # test_view_ops
     "TestOldViewOpsCPU.test_crow_col_indices_cpu",  # test_view_ops
-    "TestViewOpsLAZY.test_advanced_indexing_nonview_lazy",  # test_view_ops
     "TestTypePromotionCPU.test_alpha_mismatch_cpu",  # test_type_promotion
     "TestTypePromotionCPU.test_alternate_result_cpu",  # test_type_promotion
     "TestTypeHints.test_doc_examples",  # test_type_hints
@@ -405,12 +403,10 @@ dynamo_expected_failures = {
     "TestAssertCloseSparseCSR.test_mismatching_crow_indices_msg",  # test_testing
     "TestAssertCloseSparseBSC.test_mismatching_row_indices_msg",  # test_testing
     "TestAssertCloseSparseCOO.test_mismatching_values_msg",  # test_testing
-    "TestAssertCloseQuantized.test_matching_per_channel",  # test_testing
     "TestAssertCloseSparseCOO.test_matching_uncoalesced",  # test_testing
     "TestAssertCloseSparseCSR.test_matching",  # test_testing
     "TestAssertCloseSparseBSR.test_mismatching_crow_indices_msg",  # test_testing
     "TestAssertCloseSparseBSR.test_matching",  # test_testing
-    "TestAssertCloseQuantized.test_mismatching_is_quantized",  # test_testing
     "TestAssertCloseSparseCOO.test_mismatching_indices_msg",  # test_testing
     "TestAssertCloseSparseBSC.test_mismatching_ccol_indices_msg",  # test_testing
     "TestAssertCloseSparseBSC.test_mismatching_values_msg",  # test_testing
@@ -423,8 +419,6 @@ dynamo_expected_failures = {
     "TestAssertCloseSparseBSR.test_mismatching_col_indices_msg",  # test_testing
     "TestAssertCloseSparseCOO.test_mismatching_nnz",  # test_testing
     "TestAssertCloseSparseCSR.test_mismatching_col_indices_msg",  # test_testing
-    "TestAssertCloseQuantized.test_mismatching_qscheme",  # test_testing
-    "TestAssertCloseQuantized.test_matching_per_tensor",  # test_testing
     "TestAssertCloseSparseCSC.test_mismatching_ccol_indices_msg",  # test_testing
     "TestTensorBoardUtils.test_to_HWC",  # test_tensorboard
     "TestTensorBoardEmbedding.test_embedding",  # test_tensorboard
@@ -458,7 +452,6 @@ dynamo_expected_failures = {
     "TestStatelessFunctionalAPI.test_reparametrize_module_fail_reset_to_original_stateless",  # test_stateless
     "TestSortAndSelectCPU.test_isin_cpu_int32",  # test_sort_and_select
     "TestSortAndSelectCPU.test_sort_overflow_cpu_int16",  # test_sort_and_select
-    "TestSortAndSelectCPU.test_topk_quantized_scalar_input_cpu",  # test_sort_and_select
     "TestSortAndSelectCPU.test_isin_cpu_float64",  # test_sort_and_select
     "TestSortAndSelectCPU.test_isin_cpu_uint8",  # test_sort_and_select
     "TestSortAndSelectCPU.test_isin_cpu_int8",  # test_sort_and_select
@@ -467,7 +460,6 @@ dynamo_expected_failures = {
     "TestSortAndSelectCPU.test_isin_cpu_int64",  # test_sort_and_select
     "TestSortAndSelectCPU.test_isin_cpu_float32",  # test_sort_and_select
     "TestShapeOpsCUDA.test_flip_cuda_float32",  # test_shape_ops
-    "TestShapeOpsCPU.test_flip_cpu_float32",  # test_shape_ops
     "TestSubclassSerialization.test_tensor_subclass_deepcopy",  # test_serialization
     "TestSubclassSerialization.test_tensor_subclass_getstate_overwrite",  # test_serialization
     "TestSubclassSerialization.test_tensor_subclass_wrapper_serialization",  # test_serialization
@@ -1316,7 +1308,6 @@ dynamo_expected_failures = {
     "TestFX.test_pytree_concrete",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_Mutation_cpu",  # test_fx
     "TestFX.test_custom_traceback_raised_when_exception_source_is_graphmodule",  # test_fx
-    "TestConstFold.test_check_skip_folding_quant_dequant_pattern",  # test_fx
     "TestFX.test_immutable_list_pytree_ops",  # test_fx
     "TestCommonPass.test_correctness_CSEPass_TakeList_cpu",  # test_fx
     "TestPassManager.test_pass_manager",  # test_fx
@@ -1329,7 +1320,6 @@ dynamo_expected_failures = {
     "TestCommonPass.test_correctness_CSEPass_ReturnList_cpu",  # test_fx
     "TestFXAPIBackwardCompatibility.test_public_api_surface",  # test_fx
     "TestContentStoreCPU.test_repeated_hash_cpu",  # test_content_store
-    "TestLazyTensor.test_tensor_ctr",  # lazy/test_ts_opinfo
     "TestAnalyze.test_trace_dependencies",  # test_package
     "TestProfilerTree.test_profiler_experimental_tree_with_memory",  # profiler/test_profiler_tree
     "TestProfilerTree.test_profiler_experimental_tree_with_memory_and_stack",  # profiler/test_profiler_tree
@@ -1646,351 +1636,155 @@ dynamo_expected_failures = {
     "TestComposability.test_q_prep_before_s_prep",  # test_ao_sparsity
     "TestComposability.test_s_prep_before_fusion",  # test_ao_sparsity
     "TestBaseStructuredSparsifier.test_prepare_conv2d",  # test_ao_sparsity
-    "TestQuantizeFx.test_conv_transpose_relu_not_reference",  # test_quantization
     "TestPT2ERepresentation.test_qdq",  # test_quantization
-    "TestQuantizeFx.test_custom_module_class",  # test_quantization
-    "TestStaticQuantizedModule.test_batch_norm3d",  # test_quantization
-    "TestQuantizeFxOps.test_conv_transpose_1d",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn2d.test_qat_conv_bn_relu_fusion",  # test_quantization
-    "TestQuantizeFxOps.test_fixed_qparams_ops_qint8",  # test_quantization
-    "TestQuantizedTensor.test_qtensor_resize",  # test_quantization
-    "TestQuantizeFx.test_state_dict",  # test_quantization
-    "TestFXNumericSuiteCoreAPIs.test_extract_weights_conv_fun_qat",  # test_quantization
-    "TestQuantizeFx.test__convert_to_reference_decomposed_fx_dynamic_quant",  # test_quantization
     "TestQuantizedOps.test_qtanh",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn2d.test_qat_conv_bn_fusion",  # test_quantization
     "TestQuantizePT2E.test_fold_quantize",  # test_quantization
     "TestQuantizeFx.test_static_lstm_with_custom_fixed_qparams",  # test_quantization
-    "TestEqualizeFx.test_input_weight_equalization_graphs",  # test_quantization
     "TestComparatorOps.test_compare_tensor_scalar",  # test_quantization
-    "TestQuantizedFunctionalOps.test_grid_sample",  # test_quantization
-    "TestQuantizeFxOps.test_chunk",  # test_quantization
     "TestXNNPACKQuantizer.test_gru",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn2d.test_prepare_qat_conv_bn_fusion_getitem_placeholder",  # test_quantization
-    "TestDynamicQuantizedModule.test_dynamic_conv3d",  # test_quantization
-    "TestQuantizeFx.test_quantized_model_type",  # test_quantization
     "TestQuantizedOps.test_equal",  # test_quantization
     "TestQuantizedOps.test_qelu",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn2d.test_qat_conv_bn_relu_fusion_no_conv_bias",  # test_quantization
-    "TestQuantizedTensor.test_qtensor_equal",  # test_quantization
-    "TestQuantizedConv.test_qconv3d_relu",  # test_quantization
-    "TestQuantizedConv.test_qconv3d",  # test_quantization
     "TestXNNPACKQuantizer.test_propagate_annotation",  # test_quantization
     "TestQuantizedTensor.test_choose_qparams_optimized",  # test_quantization
     "TestXNNPACKQuantizer.test_linear_gru",  # test_quantization
-    "TestDynamicQuantizedModule.test_cell_api",  # test_quantization
     "TestQuantizedOps.test_interpolate",  # test_quantization
-    "TestQuantizeFx.test_conv_transpose_reference",  # test_quantization
     "TestPT2ERepresentation.test_conv2d",  # test_quantization
-    "TestQuantizeFxOps.test_embedding",  # test_quantization
-    "TestQuantizedTensor.test_qtensor_float_assignment",  # test_quantization
-    "TestFXNumericSuiteNShadows.test_qconfig_multi_mapping_from_list",  # test_quantization
     "TestXNNPACKQuantizer.test_conv_linear",  # test_quantization
-    "TestQuantizedOps.test_qadd_broadcast",  # test_quantization
     "TestQuantizedOps.test_sigmoid_non_observed",  # test_quantization
-    "TestStaticQuantizedModule.test_sigmoid",  # test_quantization
-    "TestQuantizedOps.test_mean",  # test_quantization
-    "TestQuantizeFx.test_shape_followed_by_quantized_op",  # test_quantization
     "TestQuantizedTensor.test_decomposed_quantize_per_tensor_bfloat16_input",  # test_quantization
-    "TestQuantizeFxOps.test_clamp",  # test_quantization
-    "TestQuantizeFxOps.test_conv_module",  # test_quantization
-    "TestQuantizeFx.test_attention",  # test_quantization
-    "TestQuantizeFxOps.test_conv_transpose_2d",  # test_quantization
-    "TestStaticQuantizedModule.test_relu",  # test_quantization
-    "TestQuantizedOps.test_linear_bias_unpack",  # test_quantization
     "TestPT2ERepresentation.test_dynamic_linear",  # test_quantization
-    "TestFXNumericSuiteCoreAPIs.test_extract_weights_linear_fun_qat",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn1d.test_qat_update_shared_qspec",  # test_quantization
-    "TestQuantizeFxModels.test_qat_embedding_linear",  # test_quantization
     "TestQuantizePT2E.test_fold_all_ops_before_quantize",  # test_quantization
-    "TestFXNumericSuiteCoreAPIs.test_int8_shadows_fp32_coverage",  # test_quantization
     "TestQuantizePT2E.test_fold_quantize_per_channel",  # test_quantization
     "TestQuantizationDocs.test_quantization_doc_qat",  # test_quantization
     "TestQuantizedOps.test_custom_module_lstm",  # test_quantization
-    "TestQuantizeFx.test_quant_output_always_observed",  # test_quantization
-    "TestQuantizeEagerOps.test_functional_module",  # test_quantization
     "TestFakeQuantizeOps.test_learnable_backward_per_channel_cuda",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn1d.test_qat_conv_no_bias",  # test_quantization
     "TestQuantizedConv.test_qconv1d_unpack",  # test_quantization
-    "TestQuantizeFx.test_custom_module_class_input_has_duplicate_nodes",  # test_quantization
     "TestXNNPACKQuantizer.test_linear_relu",  # test_quantization
-    "TestSerialization.test_linear_relu_package_quantization_transforms",  # test_quantization
-    "TestDynamicQuantizedModule.test_gru_api",  # test_quantization
-    "TestQuantizeFx.test_qconfig_for_call_method",  # test_quantization
     "TestXNNPACKQuantizer.test_conv1d_with_conv2d",  # test_quantization
-    "TestQuantizedOps.test_qsoftmax",  # test_quantization
     "TestQuantizedEmbeddingOps.test_embedding_bag_2bit",  # test_quantization
     "TestObserver.test_per_tensor_observers",  # test_quantization
-    "TestQuantizedTensor.test_qtensor_per_channel_load_save",  # test_quantization
     "TestQuantizedOps.test_max_pool2d_nhwc",  # test_quantization
-    "TestEqualizeFx.test_selective_equalization",  # test_quantization
-    "TestQuantizeFx.test__convert_to_reference_decomposed_fx",  # test_quantization
-    "TestQuantizeFx.test_remove_qconfig",  # test_quantization
     "TestQuantizePT2E.test_constant_prop_preserve_metadata",  # test_quantization
-    "TestQuantizedTensor.test_qtensor_permute",  # test_quantization
     "TestQuantizedTensor.test_quantize_per_channel_sub_byte",  # test_quantization
     "TestPT2ERepresentation.test_add_relu",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn2d.test_qat_conv_bn_fusion_no_conv_bias",  # test_quantization
-    "TestQuantizeFxOps.test_add_relu",  # test_quantization
     "TestQuantizedOps.test_qthreshold",  # test_quantization
     "TestXNNPACKQuantizer.test_dynamic_linear_with_conv",  # test_quantization
-    "TestQuantizeFx.test_custom_module_class_input_has_multiple_users",  # test_quantization
     "TestXNNPACKQuantizer.test_add_mul_scalar",  # test_quantization
-    "TestFXNumericSuiteNShadows.test_add_loggers_functions",  # test_quantization
-    "TestFXNumericSuiteNShadows.test_linear_mod",  # test_quantization
     "TestXNNPACKQuantizer.test_add_and_inplace_add",  # test_quantization
-    "TestQuantizeFx.test_conv_lowering",  # test_quantization
-    "TestQuantizeFx.test_lowering_functional_linear_with_kwargs",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn1d.test_qat_conv_bn_fusion_literal_args",  # test_quantization
     "TestQuantizedTensor.test_per_tensor_qtensor_to_memory_format",  # test_quantization
     "TestQuantizedOps.test_cat_nhwc",  # test_quantization
     "TestQuantizeFx.test_prepare_custom_config_set_standalone_module_class",  # test_quantization
-    "TestQuantizeFxOps.test_mul",  # test_quantization
-    "TestQuantizedTensor.test_qtensor_quant_dequant",  # test_quantization
-    "TestQuantizeFx.test_qconfig_module_name_regex",  # test_quantization
-    "TestQuantizeFx.test_qconfig_module_type",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn2d.test_qat_inplace_add_relu",  # test_quantization
     "TestStaticQuantizedModule.test_embedding_api",  # test_quantization
     "TestQuantizePT2E.test_speed",  # test_quantization
-    "TestStaticQuantizedModule.test_dropout",  # test_quantization
-    "TestFXNumericSuiteCoreAPIs.test_match_activations_fun_qat",  # test_quantization
     "TestQuantizedOps.test_qclamp",  # test_quantization
     "TestQuantizedOps.test_avg_pool2d",  # test_quantization
     "TestQuantizedOps.test_add_scalar_relu",  # test_quantization
     "TestQuantizedTensor.test_decomposed_dequantize_per_tensor",  # test_quantization
-    "TestFXNumericSuiteCoreAPIs.test_int8_shadows_int8_mod",  # test_quantization
-    "TestQuantizedTensor.test_qtensor_dtypes",  # test_quantization
-    "TestQuantizeFx.test_fold_quant_dequant",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn1d.test_prepare_qat_conv_bn_fusion_getitem_placeholder",  # test_quantization
     "TestFakeQuantizeOps.test_fake_quant_per_channel_qparam_range",  # test_quantization
     "TestQuantizedTensor.test_fp16_saturate_op",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn1d.test_qat_conv_bn_fusion",  # test_quantization
     "TestQuantizedOps.test_avg_pool2d_nhwc",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn2d.test_qat_update_shared_qspec",  # test_quantization
-    "TestQuantizeFx.test_fp32_sum",  # test_quantization
     "TestQuantizedTensor.test_per_channel_qtensor_to_memory_format",  # test_quantization
-    "TestQuantizeFx.test_dict_output",  # test_quantization
     "TestQuantizedLinear.test_qlinear_unpack",  # test_quantization
-    "TestQuantizeFx.test_lowering_functional_conv_with_kwargs",  # test_quantization
     "TestQuantizePT2E.test_reentrant",  # test_quantization
-    "TestFXNumericSuiteNShadows.test_add_loggers_conv_bn_relu_fusion_quant",  # test_quantization
     "TestQuantizedLinear.test_qlinear_qnnpack_free_memory_and_unpack",  # test_quantization
-    "TestDynamicQuantizedOps.test_qrnncell",  # test_quantization
-    "TestQuantizedOps.test_qmul_broadcast",  # test_quantization
-    "TestQuantizeFx.test_dequantize",  # test_quantization
-    "TestDynamicQuantizedModule.test_dynamic_convtranspose3d",  # test_quantization
-    "TestQuantizeFx.test_static_lstm_consume_tuple",  # test_quantization
     "TestXNNPACKQuantizer.test_conv_linear_no_permute",  # test_quantization
-    "TestReferenceQuantizedModule.test_rnn_cell",  # test_quantization
-    "TestQuantizedConv.test_qconv2d_relu_pt2e",  # test_quantization
     "TestPT2ERepresentation.test_add",  # test_quantization
     "TestQuantizedEmbeddingOps.test_embedding_bag_4bit",  # test_quantization
-    "TestQuantizedTensor.test_qtensor_channel_float_assignment",  # test_quantization
-    "TestFXNumericSuiteCoreAPIs.test_match_activations_fun_ptq",  # test_quantization
     "TestXNNPACKQuantizer.test_mul_float32_max",  # test_quantization
-    "TestQuantizeFx.test_standalone_module_float_interface",  # test_quantization
-    "TestFXNumericSuiteNShadows.test_custom_functions_and_tracer",  # test_quantization
-    "TestQuantizeFxOps.test_multiple_qconfigs_for_single_value",  # test_quantization
     "TestQuantizedOps.test_leaky_relu_observed_output",  # test_quantization
     "TestFakeQuantizeOps.test_learnable_forward_per_tensor_cuda",  # test_quantization
-    "TestQuantizedTensor.test_repeat",  # test_quantization
-    "TestStaticQuantizedModule.test_linear_leaky_relu",  # test_quantization
     "TestFakeQuantizeOps.test_learnable_backward_per_channel_cpu",  # test_quantization
-    "TestFXNumericSuiteCoreAPIs.test_add_shadow_loggers_fun_ptq",  # test_quantization
-    "TestQuantizeFx.test_static_lstm",  # test_quantization
-    "TestQuantizeFx.test_qconfig_qat_module_type",  # test_quantization
     "TestQuantizedOps.test_mul_scalar_relu",  # test_quantization
-    "TestQuantizedTensor.test_qtensor_per_channel_permute",  # test_quantization
-    "TestStaticQuantizedModule.test_batch_norm2d",  # test_quantization
     "TestGenerateNumericDebugHandle.test_quantize_pt2e_preserve_handle",  # test_quantization
-    "TestQuantizeFx.test_conv_linear_reference",  # test_quantization
     "TestQuantizePT2E.test_composable_quantizer_linear_conv",  # test_quantization
     "TestFakeQuantizeOps.test_learnable_backward_per_tensor_cuda",  # test_quantization
     "TestXNNPACKQuantizer.test_linear_with_dynamic_shape",  # test_quantization
-    "TestQuantizedOps.test_empty_batch",  # test_quantization
-    "TestQuantizeFx.test_symmetric_qnnpack_qconfig_mapping",  # test_quantization
     "TestQuantizedEmbeddingOps.test_embedding_bag_2d_indices",  # test_quantization
-    "TestQuantizeFx.test_symmetric_qnnpack_qat_qconfig_mapping",  # test_quantization
     "TestQuantizePT2E.test_save_load",  # test_quantization
     "TestPT2ERepresentation.test_qdq_per_channel",  # test_quantization
-    "TestQuantizeFxOps.test_prelu",  # test_quantization
-    "TestQuantizeFx.test_assert_on_size_after_quant_layer",  # test_quantization
-    "TestQuantizedConv.test_qconv1d_pt2e",  # test_quantization
-    "TestQuantizeFx.test_conv_linear_not_reference",  # test_quantization
     "TestFakeQuantizeOps.test_forward_per_channel",  # test_quantization
-    "TestQuantizeFx.test_qconfig_none",  # test_quantization
-    "TestQuantizeFx.test__convert_to_reference_decomposed_fx_per_channel_quant",  # test_quantization
-    "TestPadding.test_reflection_pad2d",  # test_quantization
-    "TestStaticQuantizedModule.test_quant_dequant_api",  # test_quantization
-    "TestFXNumericSuiteCoreAPIs.test_add_shadow_loggers_fun_qat",  # test_quantization
-    "TestQuantizedOps.test_qsoftmax_qnnpack",  # test_quantization
-    "TestStaticQuantizedModule.test_prelu",  # test_quantization
     "TestQuantizedEmbeddingOps.test_embedding_bag_byte",  # test_quantization
     "TestQuantizedOps.test_qcelu",  # test_quantization
-    "TestReferenceQuantizedModule.test_sparse",  # test_quantization
-    "TestPadding.test_reflection_pad1d",  # test_quantization
-    "TestQuantizedConv.test_qconv2d_sum_relu_pt2e",  # test_quantization
-    "TestDynamicQuantizedOps.test_qlstmGRU",  # test_quantization
     "TestFakeQuantizeOps.test_fixed_qparams_fq_module",  # test_quantization
-    "TestQuantizeFxOps.test_qmatmul",  # test_quantization
-    "TestQuantizeFx.test_conv_transpose_not_reference",  # test_quantization
     "TestUtils.test_get_fqn_to_example_inputs_default_kwargs",  # test_quantization
-    "TestFXNumericSuiteCoreAPIs.test_extract_weights_linear_fun_ptq",  # test_quantization
-    "TestQuantizeFxOps.test_cat",  # test_quantization
-    "TestQuantizeFx.test_sequential",  # test_quantization
     "TestFakeQuantizeOps.test_learnable_backward_per_tensor_cpu",  # test_quantization
-    "TestQuantizedTensor.test_qtensor_quantize_per_channel",  # test_quantization
-    "TestDynamicQuantizedModule.test_linear_api",  # test_quantization
-    "TestQuantizedTensor.test_qtensor_unsqueeze",  # test_quantization
-    "TestQuantizedFunctionalOps.test_relu_api",  # test_quantization
-    "TestDynamicQuantizedModule.test_dynamic_convtranspose1d",  # test_quantization
-    "TestQuantizeFxOps.test_add",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn2d.test_qat_conv_bn_fusion_literal_args",  # test_quantization
-    "TestQuantizedTensor.test_qtensor_fill_per_channel",  # test_quantization
-    "TestQuantizeFx.test_dynamic_with_fusion",  # test_quantization
-    "TestQuantizeFx.test_convert_qconfig_mapping",  # test_quantization
-    "TestQuantizeFx.test_save_observer_state_dict",  # test_quantization
     "TestQuantizePT2E.test_derived_qspec",  # test_quantization
-    "TestDynamicQuantizedModule.test_dynamic_convtranspose2d",  # test_quantization
-    "TestFuseFx.test_fuse_conv_bn_add_relu_lowering",  # test_quantization
-    "TestDynamicQuantizedOps.test_dynamic_convtranspose2d",  # test_quantization
     "TestPT2ERepresentation.test_maxpool2d",  # test_quantization
-    "TestQuantizeFx.test_lowering_functional_conv_transpose_with_kwargs",  # test_quantization
     "TestQuantizedOps.test_avg_pool3d_nhwc",  # test_quantization
-    "TestQuantizeFx.test_qparams_buffers",  # test_quantization
-    "TestQuantizeFxOps.test_functional_conv",  # test_quantization
     "TestXNNPACKQuantizer.test_qat_dynamic_linear",  # test_quantization
-    "TestQuantizedLinear.test_qlinear",  # test_quantization
-    "TestQuantizeFx.test_no_obs_between_unmatched_node_and_copy_node",  # test_quantization
     "TestXNNPACKQuantizer.test_linear",  # test_quantization
-    "TestQuantizeFxOps.test_norm_weight_bias",  # test_quantization
-    "TestQuantizeFxOps.test_reshape_fp16",  # test_quantization
     "TestStaticQuantizedModule.test_embedding_bag_api",  # test_quantization
-    "TestQuantizedOps.test_advanced_indexing",  # test_quantization
-    "TestQuantizeFx.test_conv_bn_relu",  # test_quantization
-    "TestQuantizeFx.test_qconfig_for_call_func",  # test_quantization
     "TestQuantizedConv.test_qconv3d_unpack",  # test_quantization
     "TestFakeQuantizeOps.test_fq_module_per_tensor",  # test_quantization
     "TestDynamicQuantizedOps.test_qlinear",  # test_quantization
-    "TestQuantizedOps.test_leaky_relu",  # test_quantization
     "TestFakeQuantize.test_fq_module_per_channel",  # test_quantization
-    "TestQuantizeFxOps.test_getitem",  # test_quantization
-    "TestQuantizeFx.test_mixed_dtypes",  # test_quantization
-    "TestQuantizeFx.test_linear_tanh_lowering",  # test_quantization
-    "TestStaticQuantizedModule.test_conv3d_api",  # test_quantization
-    "TestStaticQuantizedModule.test_linear_tanh",  # test_quantization
     "TestQuantizedOps.test_sigmoid",  # test_quantization
     "TestQuantizedConv.test_qconv2d_unpack",  # test_quantization
-    "TestQuantizedOps.test_qgelu",  # test_quantization
-    "TestQuantizedTensor.test_qtensor_view",  # test_quantization
     "TestUtils.test_get_fqn_to_example_inputs_complex_args",  # test_quantization
-    "TestQuantizeFxOps.test_embedding_bag",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn1d.test_qat_inplace_add_relu",  # test_quantization
     "TestQuantizePT2E.test_embedding_conv_linear_quantization",  # test_quantization
     "TestFakeQuantizeOps.test_learnable_forward_per_channel_cuda",  # test_quantization
     "TestPT2ERepresentation.test_static_linear",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn1d.test_qat_conv_bn_fusion_no_conv_bias",  # test_quantization
-    "TestQuantizedOps.test_qadd_relu_different_qparams",  # test_quantization
-    "TestQuantizeFxOps.test_qbatch_norm_relu",  # test_quantization
-    "TestFXNumericSuiteCoreAPIs.test_shadow_activations_fqn",  # test_quantization
-    "TestDynamicQuantizedOps.test_dynamic_conv3d",  # test_quantization
-    "TestFXNumericSuiteNShadows.test_add_loggers_linear_mod_quant_fp32",  # test_quantization
-    "TestFXNumericSuiteNShadows.test_qconfig_multi_mapping_end_to_end",  # test_quantization
-    "TestQuantizedConv.test_qconv2d",  # test_quantization
-    "TestFXNumericSuiteNShadows.test_logger_enabled_and_save_activations_flags",  # test_quantization
     "TestXNNPACKQuantizer.test_add_mul_long",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn1d.test_qat_conv_bn_relu_fusion",  # test_quantization
-    "TestDynamicQuantizedModule.test_lstm_api",  # test_quantization
     "TestComparatorOps.test_compare_tensor_tensor",  # test_quantization
-    "TestQuantizeFxModels.test_qat_functional_linear",  # test_quantization
-    "TestQuantizeFxOps.test_functional_linear",  # test_quantization
-    "TestQuantizedTensor.test_per_channel_qtensor_creation_cpu",  # test_quantization
     "TestQuantizedOps.test_max_pool2d_cudnn",  # test_quantization
     "TestQNNPackOps.test_qnnpack_mul",  # test_quantization
     "TestUtils.test_get_fqn_to_example_inputs_simple",  # test_quantization
     "TestQuantizeEagerQATNumerics.test_conv_bn_folded_vs_unfolded",  # test_quantization
     "TestQNNPackOps.test_qnnpack_maxpool2d",  # test_quantization
-    "TestFXNumericSuiteCoreAPIs.test_extract_weights_conv_fun_ptq",  # test_quantization
-    "TestQuantizeFx.test_qconfig_module_name_object_type_order",  # test_quantization
-    "TestDynamicQuantizedModule.test_dynamic_conv1d",  # test_quantization
-    "TestFXNumericSuiteNShadows.test_add_loggers_linear_mod_fp32_quant",  # test_quantization
     "TestQNNPackOps.test_qnnpack_add",  # test_quantization
-    "TestStaticQuantizedModule.test_conv2d_api",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn2d.test_qat_conv_bn_bias_derived_qspec",  # test_quantization
-    "TestQuantizedOps.test_std",  # test_quantization
     "TestBitsCPU.test_cat_cpu",  # test_quantization
     "TestFakeQuantizeOps.test_forward_per_tensor",  # test_quantization
-    "TestQNNPackOps.test_qnnpack_tanh",  # test_quantization
-    "TestDynamicQuantizedOps.test_qlinear_legacy",  # test_quantization
     "TestQuantizedOps.test_cat",  # test_quantization
     "TestXNNPACKQuantizer.test_conv1d",  # test_quantization
-    "TestFXNumericSuiteCoreAPIs.test_shadow_loggers_preserve_qat_numerics",  # test_quantization
     "TestXNNPACKQuantizer.test_dynamic_linear",  # test_quantization
     "TestXNNPACKQuantizer.test_dynamic_linear_int4_weight",  # test_quantization
     "TestFakeQuantizeOps.test_learnable_forward_per_channel_cpu",  # test_quantization
-    "TestFXNumericSuiteCoreAPIs.test_int8_shadows_fp32_simple",  # test_quantization
     "TestXNNPACKQuantizer.test_conv2d",  # test_quantization
-    "TestQuantizeFx.test_linear_leaky_relu_lowering",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn1d.test_qat_conv_bn_bias_derived_qspec",  # test_quantization
     "TestFakeQuantizeOps.test_backward_per_tensor",  # test_quantization
-    "TestQuantizedTensor.test_qtensor_int_repr",  # test_quantization
-    "TestQuantizedEmbeddingOps.test_embedding_2d_indices",  # test_quantization
-    "TestQuantizedTensor.test_qtensor_sub_byte_aligned_cols",  # test_quantization
-    "TestQuantizeFxOps.test_leaky_relu",  # test_quantization
     "TestXNNPACKQuantizer.test_mul_and_inplace_mul",  # test_quantization
     "TestQuantizedOps.test_max_pool2d",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn2d.test_qat_preserve_source_fn_stack",  # test_quantization
-    "TestQuantizeFx.test_qparams_fqn",  # test_quantization
     "TestFakeQuantizeOps.test_backward_per_channel",  # test_quantization
-    "TestQuantizeFx.test_conv_transpose_relu_reference",  # test_quantization
-    "TestQuantizedConv.test_qconv2d_hardtanh_pt2e",  # test_quantization
     "TestQuantizedTensor.test_decomposed_quantize_per_tensor",  # test_quantization
-    "TestQuantizeFxOps.test_linear_module",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn2d.test_qat_conv_no_bias",  # test_quantization
     "TestFakeQuantizeOps.test_learnable_forward_per_tensor_cpu",  # test_quantization
-    "TestQuantizeFxModels.test_qat_embeddingbag_linear",  # test_quantization
     "TestQuantizedOps.test_interpolate3d",  # test_quantization
-    "TestDynamicQuantizedOps.test_dynamic_convtranspose3d",  # test_quantization
     "TestQNNPackOps.test_qnnpack_relu",  # test_quantization
-    "TestFXNumericSuiteCoreAPIs.test_int8_shadows_int8_fun",  # test_quantization
     "TestQuantizationDocs.test_quantization_doc_fx",  # test_quantization
     "TestQuantizedOps.test_hardtanh",  # test_quantization
-    "TestQuantizeFx.test_qconfig_function",  # test_quantization
-    "TestQuantizeFx.test_ref_conv_module",  # test_quantization
     "TestQuantizedOps.test_max_pool1d",  # test_quantization
-    "TestStaticQuantizedModule.test_linear",  # test_quantization
-    "TestQuantizeFxOps.test_mul_relu",  # test_quantization
     "TestQuantizePT2E.test_groupwise_per_channel_quant",  # test_quantization
-    "TestQuantizeFxOps.test_hardswish",  # test_quantization
     "TestQuantizedTensor.test_qtensor_cpu",  # test_quantization
-    "TestEqualizeFx.test_input_weight_equalization_results",  # test_quantization
-    "TestQuantizedFunctionalOps.test_conv3d_api",  # test_quantization
-    "TestQuantizeFx.test_linear_bn",  # test_quantization
-    "TestQuantizeFx.test_standalone_module_quantized_interface",  # test_quantization
-    "TestQuantizedOps.test_qprelu",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn1d.test_qat_preserve_source_fn_stack",  # test_quantization
-    "TestQuantizedOps.test_qmatmul",  # test_quantization
     "TestPadding.test_constant_padNd",  # test_quantization
-    "TestQuantizedConv.test_qconv2d_relu",  # test_quantization
-    "TestQuantizedConv.test_qconv2d_add",  # test_quantization
-    "TestQuantizedTensor.test_qtensor_reshape",  # test_quantization
-    "TestQuantizeFx.test_ref_linear_module",  # test_quantization
     "TestQuantizePT2EQAT_ConvBn1d.test_qat_conv_bn_relu_fusion_no_conv_bias",  # test_quantization
-    "TestReferenceQuantizedModule.test_rnn",  # test_quantization
-    "TestQuantizedConv.test_qconv1d",  # test_quantization
     "TestQuantizedTensor.test_choose_qparams",  # test_quantization
-    "TestQuantizedConv.test_qconv1d_relu",  # test_quantization
-    "TestStaticQuantizedModule.test_leaky_relu",  # test_quantization
-    "TestQuantizedTensor.test_torch_qtensor_deepcopy",  # test_quantization
     "TestXNNPACKQuantizer.test_obs_sharing_ops",  # test_quantization
-    "TestStaticQuantizedModule.test_linear_relu",  # test_quantization
     "TestQuantizedOps.test_avg_pool3d",  # test_quantization
-    "TestQuantizedTensor.test_quantize_per_channel_float_qparams",  # test_quantization
     "TestXNNPACKQuantizerModels.test_resnet18",  # test_quantization.py
     "TestFXGraphMatcherModels.test_mobilenet_v2_qat",  # test_quantization.py
     "TestQuantizePT2EQATModels.test_qat_resnet18",  # test_quantization.py
     "TestQuantizePT2EQATModels.test_qat_mobilenet_v2",  # test_quantization.py
     "TestObserver.test_per_channel_observers",  # test_quantization.py
+    "TestQuantizedOps.test_channel_shuffle",  # test_quantization.py
     "TestCustomOp.test_impl_device_cpu",  # test_custom_ops
     "TestCustomOp.test_impl_device_function",  # test_custom_ops
     "TestCustomOpTestingCPU.test_missing_functionalization_cpu",  # test_custom_ops
@@ -6294,6 +6088,7 @@ dynamo_skips = {
     "TestSlice.test_tuple_slicing",  # test_jit
     "TestTensorBuiltins.test_scalar_to_num_conversions",  # test_jit
     "TestNnapiBackend.test_pointwise_binary",  # test_jit
+    "TestLazyTensor.test_tensor_ctr",  # lazy/test_ts_opinfo
     "TestFrozenOptimizations.test_conv_bn_folding",  # test_jit.py
     "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_1_shape0_cpu",  # test_transformers.py
     "TestAttnBiasCPU.test_causal_variants_compile_causal_variant_2_shape0_cpu",  # test_transformers.py

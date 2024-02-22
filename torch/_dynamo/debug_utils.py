@@ -704,16 +704,19 @@ class InputWriter:
 
 
 def aot_graph_input_parser(
-    func: Callable[[List[Tensor]], List[Tensor]], device="cuda"
+    func: Callable[[List[Tensor]], List[Tensor]],
+    device: str = "cuda",
+    sym_shapes: Optional[Dict[str, int]] = None,
+    default_sym_shape: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Takes in a function which has been printed with print_readable() and constructs kwargs to run it.
 
-    Currently only handles Tensor inputs and a graph module which might have tensor constants.
+    Handles Tensor inputs, Symints, and a graph module which might have tensor constants.
 
     Consider a function `forward` defined as follows:
 
-    def forward(self, primals_1: "f32[1001, 6]"):
+    def forward(self, primals_1: "f32[1001, 6]", primals_2: "f32[s0]", primals_3: "Sym(s0)",):
         _tensor_constant0: "i64[4190]" = self._tensor_constant0
         # Further implementation
 
@@ -731,20 +734,43 @@ def aot_graph_input_parser(
 
     # Regular expressions
     tensor_assignment_regex = rf"(_tensor_constant\d+): \"({dtype_pattern})\[\s*(.*?)\s*\]\" = self\.(_tensor_constant\d+)"
-
     tensor_regex = rf"({dtype_pattern})\[\s*(.*?)\s*\]"
+    sym_shape_regex = r"Sym\((s\d+)\)"
 
     class TensorContainer:
         "Container for tensors as attributes"
         pass
 
-    container = TensorContainer()
     # Dictionary for tensors from annotations
     kwargs: Dict[str, Any] = {}
 
+    sym_shapes = sym_shapes or {}
+
+    def get_sym_int(symint):
+        torch._check(
+            symint in sym_shapes or default_sym_shape is not None,
+            lambda: f"{symint} not in symbolic_shapes and default sym shape not passed in",
+        )
+        return sym_shapes.get(symint, default_sym_shape)
+
     def gen_tensor(shape, dtype) -> Tensor:
+        # Resolve symbolic shapes to concrete values
+        resolved_shape = []
+        dynamic_dims = []
+        for i, dim in enumerate(shape):
+            dim = dim.strip()
+            if "s" in dim:
+                s = get_sym_int(dim)
+                resolved_shape.append(s)
+                dynamic_dims.append(i)
+            else:
+                resolved_shape.append(int(dim))
+
         constructor = torch.randn if dtype.is_floating_point else torch.zeros
-        return constructor(shape, dtype=dtype, device=device)
+        out = constructor(resolved_shape, dtype=dtype, device=device)  # type: ignore[call-arg]
+        for d in dynamic_dims:
+            torch._dynamo.mark_dynamic(out, d)
+        return out
 
     # Parse function annotations for tensor generation
     annotations = func.__annotations__
@@ -756,18 +782,21 @@ def aot_graph_input_parser(
         match = re.search(tensor_regex, annotation)
         if match:
             data_type, shape_str = match.groups()
+            shape = tuple(shape_str.split(","))
             dtype = dtype_map[data_type]
-            shape = tuple(map(int, shape_str.split(",")))
             kwargs[param] = gen_tensor(shape, dtype)
 
-    # Parse function body for tensor constant assignments
-    for match in re.finditer(tensor_assignment_regex, source):
-        attr_name, data_type, shape_str, _ = match.groups()
-        shape = tuple(map(int, shape_str.split(",")))
-        dtype = dtype_map[data_type]
-        setattr(container, attr_name, gen_tensor(shape, dtype))
+        match = re.search(sym_shape_regex, annotation)
+        if match:
+            kwargs[param] = get_sym_int(match.group(1))
 
-        if "self" not in kwargs:
-            kwargs["self"] = container
+    if "self" in inspect.signature(func).parameters:
+        container = TensorContainer()
+        kwargs["self"] = container
+        for match in re.finditer(tensor_assignment_regex, source):
+            attr_name, data_type, shape_str, _ = match.groups()
+            shape = tuple(shape_str.split(","))
+            dtype = dtype_map[data_type]
+            setattr(container, attr_name, gen_tensor(shape, dtype))
 
     return kwargs
