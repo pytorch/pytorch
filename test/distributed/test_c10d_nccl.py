@@ -3298,6 +3298,8 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         c10d.init_process_group(backend="nccl", store=store, rank=self.rank, world_size=self.world_size)
         process_group = c10d.distributed_c10d._get_default_group()
         device = torch.device("cuda:%d" % self.rank)
+        print(os.getpid())
+        time.sleep(10)
         tensors = [torch.full((60 + i,), self.rank + 1 + i, device=device, dtype=torch.float) for i in range(5)]
         torch.distributed.all_reduce_coalesced(tensors, group=process_group)
         for i, t in enumerate(tensors):
@@ -4391,6 +4393,59 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 self.assertTrue(0.001 < duration < 10000, duration)
             else:
                 self.assertTrue('duration_ms' not in t['entries'][seq])
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @parametrize("timing_enabled", [True, False])
+    def test_coalesced_collective(self, timing_enabled):
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+        pg = self._create_process_group_nccl()
+        if timing_enabled:
+            pg._enable_collectives_timing()
+
+        output_tensors = torch.zeros(2, 2).to(self.rank)
+        input_tensors = [torch.ones(2, 2).to(self.rank) for _ in range(self.world_size)]
+
+        self.assertEqual(self.world_size, 2, self.world_size)
+
+        with dist._coalescing_manager():
+            for i in range(self.world_size):
+                dist.reduce_scatter_tensor(output_tensors[i], input_tensors[i])
+        self.assertEqual(output_tensors, input_tensors[self.rank] * self.world_size)
+
+        torch.cuda.synchronize()
+
+        if timing_enabled:
+            # wait for watchdog thread to process the queue of works
+            time.sleep(1)
+
+        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
+        if self.rank == 0:
+            for id, entry in enumerate(t['entries']):
+                print(f"{id}: seq {entry['seq_id']}, name {entry['profiling_name']} osz {entry['output_sizes']}")
+
+        # TODO can we change the behavior so indiviual reduce_scatter_tensors get logged?
+        self.assertEqual(len(t['entries']), 2)  # one for the reduce_scatter_tensor_coalesced, one for the endCoalescing
+        self.assertEqual(t['entries'][0]['profiling_name'], "nccl:reduce_scatter_tensor_coalesced")
+        self.assertEqual(t['entries'][0]['seq_id'], 1)
+        self.assertEqual(t['entries'][0]['input_sizes'], [input_sizes])
+        self.assertEqual(t['entries'][0]['output_sizes'], [input_sizes])
+        self.assertEqual(t['entries'][0]['state'], 'scheduled')
+        self.assertTrue('duration_ms' not in t['entries'][0])
+
+        self.assertEqual(t['entries'][1]['profiling_name'], "nccl:coalesced_collective")
+        self.assertEqual(t['entries'][1]['seq_id'], 1)
+        self.assertEqual(t['entries'][1]['input_sizes'], [])
+        # TODO whc is it consistent that coalesced_collective op has sizes?
+        self.assertEqual(t['entries'][1]['output_sizes'], [input_sizes])
+        self.assertEqual(t['entries'][1]['state'], 'completed')
+
+        if timing_enabled:
+            duration = t['entries'][1]['duration_ms']
+            self.assertTrue(0.001 < duration < 10000, duration)
+        else:
+            self.assertTrue('duration_ms' not in t['entries'][1])
 
 class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
     timeout_sec = 1

@@ -2262,6 +2262,7 @@ void ProcessGroupNCCL::startCoalescing() {
   coalescedDevices_.clear();
   coalescedComms_.clear();
   coalescing_state_ |= CoalActive;
+  LOG(ERROR) << "startCoal state active";
 
   bool enableTiming = enableTiming_.load();
 
@@ -2278,6 +2279,7 @@ void ProcessGroupNCCL::startCoalescing() {
 // `optype` is for specifying a composite optype, such as ALLGATHER and
 // REDUCE_SCATTER
 c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
+  LOG(ERROR) << "endCoal ";
   if (coalescedComms_.size() == 0) {
     LOG(ERROR) << "endcoalescing bailed bc comms size";
     // There is no actual work being coalesced, return here
@@ -2532,7 +2534,25 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   // First let NCCL streams wait for input tensors allocation streams
   syncStream(device, ncclEvents_[key], ncclStream);
 
-  auto work = initWork(device, rank_, opType, nullptr, inputs, outputs);
+  auto work = initWork(device, rank_, opType, "nccl:coalesced_collective", inputs, outputs);
+
+  // TODO(whc) if possible, don't create a work here.
+  // or else, only create it when we're not in coalescing mode and still calling this helper
+  auto trace_id = NCCLTraceBuffer::get()->record(
+    uid_,
+    seq_,
+    profilingTitle,
+    inputs,
+    outputs,
+    // We'd like to include events here and have them updated, but it
+    // complicates event lifetime. currently, event lifetime is managed by
+    // the Work that owns the event, which may be destroyed before this
+    // particular flight record gets updated during dumping.
+    nullptr,
+    nullptr);
+  // TODO accumulate the trace_ids into a list and later stuff those into the
+  // work for recording
+  (void)trace_id;
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
@@ -2544,10 +2564,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
+  // TODO(whc) i think we do not want to record events (start/end) in this function.  Because we record them in ProcessGroupNCCL::endCoalescing right before/after calling groupEnd()
   // Start event should only be recorded before the ncclGroupStart()
-  if (work->timingEnabled_) {
-    work->ncclStartEvent_->record(ncclStream);
-  }
+  // if (work->timingEnabled_) {
+  //   work->ncclStartEvent_->record(ncclStream);
+  // }
 
   ncclComm_t comm = ncclComm->getNcclComm();
 
@@ -2600,11 +2621,12 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
 #endif
     }
   }
-
-  // End event should only be recorded after the ncclGroupEnd()
-  if (!coalescing_state_) {
-    work->ncclEndEvent_->record(ncclStream);
-  }
+  TORCH_CHECK(coalescing_state_, "Logic error, coalescing_state_ should be active when collectiveCoalesced is called");
+  // TODO(whc) we dont need this, bc coalescing_state_ is asserted
+  // // End event should only be recorded after the ncclGroupEnd()
+  // if (!coalescing_state_) {
+  //   work->ncclEndEvent_->record(ncclStream);
+  // }
   work->ncclComm_ = ncclComm;
 
   {
@@ -2642,11 +2664,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   // Notify graphs before we check the capture status preemptively
   at::cuda::CUDAGraph::inc_pending_event_queries();
 
-  if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
-    workEnqueue(work);
-  } else {
-    at::cuda::CUDAGraph::dec_pending_event_queries();
-  }
+  // if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
+  //   workEnqueue(work);
+  // } else {
+  at::cuda::CUDAGraph::dec_pending_event_queries();
+  // }
 
   return work;
 }
@@ -2733,6 +2755,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         nullptr);
     // TODO accumulate the trace_ids into a list and later stuff those into the
     // work for recording
+    (void)trace_id;
+
   } else {
     work = initWork(device, rank_, opType, profilingTitle, {tensor}, {});
     // Store references to outputs to be used by WorkNCCL::result and
