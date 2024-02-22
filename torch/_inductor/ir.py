@@ -6590,7 +6590,10 @@ class TensorBox(MutableBox):
 class StorageBox(MutableBox):
     def is_input_buffer(self):
         if isinstance(self.data, (InputBuffer, ReinterpretView)):
-            return self.data.get_name() in V.graph.graph_inputs
+            if self.data.get_name() in V.graph.graph_inputs:
+                return True
+        if isinstance(self.data, ConstantBuffer):
+            return self.data.get_name() in dict(V.graph.module.named_buffers())
         return False
 
     def realize(self):
