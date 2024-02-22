@@ -1149,9 +1149,6 @@ class AOTInductorTestsTemplate:
                 super().__init__()
 
             def forward(self, x, y):
-                # AOT export does not allow for input mutation
-                x = x.clone()
-                y = y.clone()
                 output = torch.zeros_like(x)
                 if autotune and num_dims == 2:
                     x_elements = output.size()[0]
@@ -1227,8 +1224,6 @@ class AOTInductorTestsTemplate:
                 super().__init__()
 
             def forward(self, x):
-                # AOT export does not allow for input mutation
-                x = x.clone()
                 num = x.numel() // 4
 
                 grid = lambda meta: (triton.cdiv(num, 16),)  # noqa: E731
@@ -1254,8 +1249,6 @@ class AOTInductorTestsTemplate:
                 super().__init__()
 
             def forward(self, x):
-                # AOT export does not allow for input mutation
-                x = x.clone()
                 out = torch.zeros_like(x[:, 4:])
                 # the slicing below creates two ReinterpretView
                 # instances: with offset=3 and offset=4
@@ -1281,12 +1274,9 @@ class AOTInductorTestsTemplate:
                 super().__init__()
 
             def forward(self, x, y):
-                # AOT export does not allow for input mutation
                 n_elements = x.size()[0]
                 BLOCK_SIZE = 1024
 
-                x = x.clone()
-                y = y.clone()
                 output_wo_y = torch.empty_like(x)
                 output_with_y = torch.empty_like(x)
 
@@ -1614,9 +1604,6 @@ class AOTInductorTestsTemplate:
 
         class Model(torch.nn.Module):
             def forward(self, x, y):
-                # AOT export does not allow for input mutation
-                x = x.clone()
-                y = y.clone()
                 out = torch.zeros_like(x)
                 # torch.mm is ExternKernelOut
                 add_kernel[(4,)](x, torch.mm(x, y), out, 4, 16)
@@ -1636,9 +1623,6 @@ class AOTInductorTestsTemplate:
 
         class Model(torch.nn.Module):
             def forward(self, x, y):
-                # AOT export does not allow for input mutation
-                x = x.clone()
-                y = y.clone()
                 out = torch.zeros_like(x)
                 # torch.sort creates fallback kernel and hence MultiOutput
                 add_kernel[(4,)](x, torch.sort(y).values, out, 4, 16)
@@ -1663,8 +1647,6 @@ class AOTInductorTestsTemplate:
                 super().__init__()
 
             def forward(self, x, y):
-                # AOT export does not allow for input mutation
-                x = x.clone()
                 out = torch.zeros_like(x)
                 yy = y * y
                 # reshape creates a ReinterpretView
