@@ -3257,7 +3257,9 @@ class ComputedBuffer(Buffer):
                 extra_indexing_ranges,
             )
             # remove already existing expressions
-            extra_indexing_expr = [e for e in extra_indexing_expr if e not in index_formulas]
+            extra_indexing_expr = [
+                e for e in extra_indexing_expr if e not in index_formulas
+            ]
             index_formulas += extra_indexing_expr
 
         reads_bufs = [
