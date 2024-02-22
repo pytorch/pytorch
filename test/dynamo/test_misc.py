@@ -58,9 +58,9 @@ from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
     constrain_range,
     constrain_unify,
-    guard_size_oblivious,
     ConstraintViolationError,
     expect_true,
+    guard_size_oblivious,
     ShapeEnv,
 )
 from torch.nn import functional as F
