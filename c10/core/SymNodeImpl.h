@@ -37,6 +37,9 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual bool is_float() {
     TORCH_CHECK(false, "NYI");
   };
+  virtual bool is_nested_int() const {
+    return false;
+  };
   virtual SymNode add(const SymNode& other) {
     TORCH_CHECK(false, "NYI");
   };
