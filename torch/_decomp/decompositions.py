@@ -3594,7 +3594,9 @@ def _compute_source_index(scale, dst_index, align_corners):
         return scale * (dst_index + 0.5) - 0.5
 
 
-def _sum_tensors_uint8(src, weights, weights_precision):
+def _sum_tensors_uint8(
+    src: Iterable[Tensor], weights: Iterable[Tensor], weights_precision: Tensor
+) -> Tensor:
     output = _sum_tensors(
         s.to(torch.int32) * c.to(torch.int32) for s, c in zip(src, weights)
     ) + (1 << (weights_precision - 1))
@@ -3602,7 +3604,7 @@ def _sum_tensors_uint8(src, weights, weights_precision):
     return torch.clamp(output, 0, 255).to(torch.uint8)
 
 
-def _compute_weight_precision(weights: Tuple[Tensor]) -> Tensor:
+def _compute_weight_precision(weights: TensorSequenceType) -> Tensor:
     max_weight = torch.stack(weights).max()
     max_weight_precision = 22
     precisions = torch.arange(max_weight_precision, device=max_weight.device)
@@ -4310,6 +4312,7 @@ def upsample_bicubic2d_default(
     weights_x = _upsample_get_cubic_coefficients(xscale)
     weights_y = _upsample_get_cubic_coefficients(yscale)
 
+    weights_precision_x, weights_precision_y = None, None
     if input.dtype == torch.uint8:
         weights_precision_x = _compute_weight_precision(weights_x)
         weights_precision_y = _compute_weight_precision(weights_y)
@@ -4332,11 +4335,13 @@ def upsample_bicubic2d_default(
     def get_x_interp(y):
         src_x = tuple(load_bounded(y, x_ofs) for x_ofs in ixs_ofs)
         if input.dtype == torch.uint8:
+            assert weights_precision_x is not None
             return _sum_tensors_uint8(src_x, weights_x, weights_precision_x)
         return _sum_tensors(c1 * c2 for (c1, c2) in zip(src_x, weights_x))
 
     src_y = tuple(get_x_interp(y_ofs) for y_ofs in iys_ofs)
     if input.dtype == torch.uint8:
+        assert weights_precision_y is not None
         result = _sum_tensors_uint8(src_y, weights_y, weights_precision_y)
     else:
         result = _sum_tensors(c1 * c2 for (c1, c2) in zip(src_y, weights_y))
