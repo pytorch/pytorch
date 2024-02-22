@@ -189,7 +189,7 @@ def run(model, optim):
 def main_compiled(n_iter):
     model, optim = init()
     # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
-    # run(model, optim)
+    run(model, optim)
     print("done eager 1st run!")
 
     dynamic = False
@@ -214,7 +214,7 @@ def main_compiled(n_iter):
 def main_eager(n_iter):
     model, optim = init()
     # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
-    # run(model, optim)
+    run(model, optim)
 
     for _ in range(n_iter):
         res = run(model, optim)
