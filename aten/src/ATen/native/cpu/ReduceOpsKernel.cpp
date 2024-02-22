@@ -183,8 +183,7 @@ inline void norm_two_reduce_step(Vectorized<acc_t>& acc_vec, Vectorized<scalar_t
 
 template <>
 inline void norm_two_reduce_step(Vectorized<float>& acc_fvec, Vectorized<BFloat16>& data_bvec) {
-  Vectorized<float> data_fvec0, data_fvec1;
-  std::tie(data_fvec0, data_fvec1) = convert_bfloat16_float(data_bvec);
+  auto [data_fvec0, data_fvec1] = convert_bfloat16_float(data_bvec);
   acc_fvec += data_fvec0 * data_fvec0;
   acc_fvec += data_fvec1 * data_fvec1;
 }
