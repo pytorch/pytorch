@@ -75,7 +75,7 @@ def foreach_all_gather(
         )
 
 
-# @torch.no_grad()
+@torch.no_grad()
 def foreach_all_gather_copy_out(
     all_gather_result: AllGatherResult,
     fsdp_params: List[FSDPParam],
@@ -93,9 +93,10 @@ def foreach_all_gather_copy_out(
         if all_gather_work is not None:  # async op
             all_gather_work.wait()
     world_size = group.size()
+    dtype, device = all_gather_output.dtype, all_gather_output.device
     for all_gather_input_numel, fsdp_param in zip(all_gather_input_numels, fsdp_params):
         fsdp_param.init_all_gather_output(
-            all_gather_input_numel, world_size
+            all_gather_input_numel, world_size, dtype, device
         )  # no-op after 1st call
         fsdp_param.alloc_all_gather_output()
     all_gather_output = all_gather_output.view(world_size, -1)
