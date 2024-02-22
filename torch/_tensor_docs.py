@@ -4475,7 +4475,7 @@ Example::
     tensor([[2.0000, 2.0000, 3.2300, 2.0000],
             [2.0000, 2.0000, 2.0000, 3.2300]])
 
-.. function:: scatter_(dim, index, value, *, reduce: str) -> Tensor:
+.. function:: scatter_(dim, index, value, *, reduce=None) -> Tensor:
    :noindex:
 
 Writes the value from :attr:`value` into :attr:`self` at the indices
