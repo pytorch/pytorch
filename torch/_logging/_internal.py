@@ -773,7 +773,8 @@ class TorchLogsFormatter(logging.Formatter):
             f"{record.lineno}]{record.traceid}"
         )
         if self._is_trace:
-            r = f"{prefix} {s}"
+            assert s == ""
+            r = f"{prefix} {json.dumps(record.metadata)}"
             if record.payload is not None:
                 r += "".join(f"\n\t{l}" for l in record.payload.split("\n"))
             return r
@@ -859,8 +860,6 @@ def _init_logs(log_file_name=None):
     if out is not None:
         log_file_name = out
 
-    trace_file_name = os.environ.get(TRACE_ENV_VAR, None)
-
     # First, reset all known (registered) loggers to NOTSET, so that they
     # respect their parent log level
     for log_qname in log_registry.get_log_qnames():
@@ -902,6 +901,7 @@ def _init_logs(log_file_name=None):
     #
     # TODO: Automatically initialize this in Tupperware environment to point
     # to /logs/dedicated_logs_XXX
+    trace_file_name = os.environ.get(TRACE_ENV_VAR, None)
     if trace_file_name is not None:
         trace_log.setLevel(logging.DEBUG)
         trace_log_handler = _track_handler(logging.FileHandler(trace_file_name))
@@ -965,7 +965,7 @@ def trace_structured(
             h.update(payload.encode("utf-8"))
             record["has_payload"] = h.hexdigest()
         trace_log.debug(
-            "%s", json.dumps(record), extra={"payload": payload}, stacklevel=2
+            "", extra={"metadata": record, "payload": payload}, stacklevel=2
         )
 
 
