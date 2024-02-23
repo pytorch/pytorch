@@ -79,11 +79,6 @@ from torch.nn import (
     ParameterList,
     Sequential,
 )
-from .dynamo_test_failures import (
-    dynamo_expected_failures,
-    dynamo_skips,
-    FIXME_inductor_non_strict,
-)
 from torch.onnx import (
     register_custom_op_symbolic,
     unregister_custom_op_symbolic,
@@ -2765,6 +2760,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 if match is not None:
                     filename = match.group(1)
                     if TEST_WITH_TORCHINDUCTOR:  # noqa: F821
+                        from .dynamo_test_failures import FIXME_inductor_non_strict
                         strict_default = filename not in FIXME_inductor_non_strict
                     else:
                         strict_default = True
@@ -2805,6 +2801,7 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 # TorchDynamo optimize annotation
                 super_run = torch._dynamo.optimize("eager", nopython=nopython)(super_run)
                 key = f"{self.__class__.__name__}.{self._testMethodName}"
+                from .dynamo_test_failures import dynamo_expected_failures, dynamo_skips
 
                 def expect_failure(f):
                     @wraps(f)
