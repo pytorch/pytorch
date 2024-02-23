@@ -1835,6 +1835,8 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
                 r, r, batch1.select(0, b), batch2.select(0, b), 0, 1);
           }
         };
+        // Materialize if COW, since we cannot do so during parallel_for
+        self_or_result.mutable_data_ptr();
         at::parallel_for(0, bs, 1, bmm_out_fn);
       } else {
         for (const auto b : c10::irange(bs)) {
@@ -1851,6 +1853,8 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
                 batch1.select(0, b), batch2.select(0, b), beta, alpha);
           }
         };
+        // Materialize if COW, since we cannot do so during parallel_for
+        self_or_result.mutable_data_ptr();
         at::parallel_for(0, bs, 1, bmm_fn);
       } else {
         for (const auto b : c10::irange(bs)) {

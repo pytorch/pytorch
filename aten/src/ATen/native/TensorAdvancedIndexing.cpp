@@ -2293,6 +2293,8 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
     return result;
   }
 
+  auto out_accessor = result.accessor<int64_t, 2>();
+
   // Pass 2: Write indexes
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       kComplexHalf, kHalf, kBFloat16, kBool, self.scalar_type(), "nonzero_cpu", [&] {
@@ -2313,7 +2315,6 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
         }
       }
 
-      auto out_accessor = result.accessor<int64_t, 2>();
       auto out_ptr = out_accessor[thread_count_nonzero[tid]].data();
 
       auto loop = [&](char** data, const int64_t* strides, int64_t n1, int64_t n2) {

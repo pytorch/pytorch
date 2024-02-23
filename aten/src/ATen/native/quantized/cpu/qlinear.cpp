@@ -123,6 +123,8 @@ at::Tensor& PackedLinearWeight::apply_impl(
   // Allocate a buffer for fbgemmPacked to use
   auto buffer = at::empty(out_sizes, output.options().dtype(at::kInt));
 
+  auto output_data = reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>());
+
   int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
     for (const auto task_id : c10::irange(begin, end)) {
@@ -184,7 +186,7 @@ at::Tensor& PackedLinearWeight::apply_impl(
         fbgemm::fbgemmPacked(
             /*packA=*/packA,
             /*packB=*/*packB,
-            /*C=*/reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
+            /*C=*/output_data,
             /*C_buffer=*/buffer.data_ptr<int32_t>(),
             /*ldc=*/N,
             /*outProcess=*/outputProcObj,
@@ -220,7 +222,7 @@ at::Tensor& PackedLinearWeight::apply_impl(
         fbgemm::fbgemmPacked(
             /*packA=*/packA,
             /*packB=*/*packB,
-            /*C=*/reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
+            /*C=*/output_data,
             /*C_buffer=*/buffer.data_ptr<int32_t>(),
             /*ldc=*/N,
             /*outProcess=*/outputProcObj,
@@ -358,6 +360,8 @@ at::Tensor PackedLinearWeight::apply_with_input_q_dq_qweight_dq_output_fp32_impl
       output.options().dtype(at::kInt),
       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
+  auto output_data = output.data_ptr<float>();
+
   int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
     fbgemm::PackAWithQuantRowOffset<uint8_t> packA(
@@ -396,7 +400,7 @@ at::Tensor PackedLinearWeight::apply_with_input_q_dq_qweight_dq_output_fp32_impl
         fbgemm::fbgemmPacked(
             /*packA=*/packA,
             /*packB=*/*packB,
-            /*C=*/output.data_ptr<float>(),
+            /*C=*/output_data,
             /*C_buffer=*/buffer.data_ptr<int32_t>(),
             /*ldc=*/N,
             /*outProcess=*/outputProcObj,
@@ -428,7 +432,7 @@ at::Tensor PackedLinearWeight::apply_with_input_q_dq_qweight_dq_output_fp32_impl
         fbgemm::fbgemmPacked(
             /*packA=*/packA,
             /*packB=*/*packB,
-            /*C=*/output.data_ptr<float>(),
+            /*C=*/output_data,
             /*C_buffer=*/buffer.data_ptr<int32_t>(),
             /*ldc=*/N,
             /*outProcess=*/outputProcObj,
