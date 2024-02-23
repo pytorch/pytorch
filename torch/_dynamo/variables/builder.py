@@ -566,6 +566,7 @@ class VariableBuilder:
                 "apply",
             )
         elif value == torch._dynamo.external_utils.is_fullgraph_compiling:
+            self.install_guards(GuardBuilder.FULLGRAPH)
             return trace_rules.lookup_callable(value).create_with_source(
                 value, source=self.source
             )
