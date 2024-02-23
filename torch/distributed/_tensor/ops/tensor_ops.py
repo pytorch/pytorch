@@ -416,8 +416,8 @@ def stack_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # there are no such valid strategies, then we replicate.
     for arg_strategy in child_strategy.strategies:
         arg_spec = arg_strategy.output_spec
-        # For each arg strategy, we replicate the stack dim since we cannot
-        # stack on a sharded dim
+        # For each arg strategy (whether the one to follow or other), we
+        # replicate the stack dim since we cannot stack on a sharded dim
         if is_tensor_dim_sharded(arg_spec, dim):
             arg_spec = DTensorSpec(
                 mesh, unshard_tensor_dim(arg_spec.placements, dim=dim)
