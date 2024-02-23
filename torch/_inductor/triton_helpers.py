@@ -1,3 +1,4 @@
+import torch
 import triton
 import triton.language as tl
 
@@ -96,18 +97,31 @@ def div_approx(a, b):
     return a * tl.math.rcp_rn(b)
 
 
-@triton.jit
-def welford_reduce(value, mean, m2, weight, first_iteration):
-    if first_iteration:
-        new_weight = tl.full(weight.shape, 1, weight.dtype)
-        new_mean = value
-        new_m2 = tl.zeros_like(m2)
-    else:
+# Causing timeouts in CI with triton-rocm
+if torch.version.hip is None:
+
+    @triton.jit
+    def welford_reduce(value, mean, m2, weight, first_iteration):
+        if first_iteration:
+            new_weight = tl.full(weight.shape, 1, weight.dtype)
+            new_mean = value
+            new_m2 = tl.zeros_like(m2)
+        else:
+            delta = value - mean
+            new_weight = weight + 1
+            new_mean = mean + div_approx(delta, new_weight)
+            new_m2 = m2 + delta * (value - new_mean)
+        return new_mean, new_m2, new_weight
+
+else:
+
+    @triton.jit
+    def welford_reduce(value, mean, m2, weight, first_iteration):
         delta = value - mean
         new_weight = weight + 1
         new_mean = mean + div_approx(delta, new_weight)
         new_m2 = m2 + delta * (value - new_mean)
-    return new_mean, new_m2, new_weight
+        return new_mean, new_m2, new_weight
 
 
 @triton.jit
