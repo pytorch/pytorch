@@ -4273,9 +4273,12 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
 
     def _check_return_codes(self, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
-        # but we want rank0 to abort and rank1 to exit cleanly in this test
+        # but we want rank0 to abort after timeout, rank1 would also abort either
+        # due to its PG destruction stuck in ncclCommAbort as rank0 never joins
+        # the ncclComm abort or due to rank1 receiving a dump signal from rank 0
+        # and abort itself.
         self.assertEqual(self.processes[0].exitcode, -6)
-        self.assertEqual(self.processes[1].exitcode, 0)
+        self.assertEqual(self.processes[1].exitcode, -6)
 
     def _wait_process(self, rank, timeout):
         try:
@@ -4285,6 +4288,7 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
             return None
 
 class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
+
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("timing_enabled", [True, False])
@@ -4325,23 +4329,19 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
             if self.rank == 0:
                 pg.allreduce(a).wait()
 
-            # rank 0 will crash before it passes the sync, but rank1 will exit quickly and cleanly
+            # rank 0 will crash before it passes the sync
+            # but rank1 will crash on the timeout of PG destruction
+            # as rank0 never joins the ncclCommAbort
             torch.cuda.synchronize()
 
 instantiate_parametrized_tests(NCCLTraceTestDumpOnTimeout)
 instantiate_parametrized_tests(NCCLTraceTest)
 
 class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
-    def _check_return_codes(self, elapsed_time):
-        # the base test infra assumes processes exit with matching return codes,
-        # but we want rank0 to abort and rank1 to exit cleanly in this test
-        self.assertEqual(self.processes[0].exitcode, -6)
-        self.assertEqual(self.processes[1].exitcode, -6)
-
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_timeout_dumps_on_stuck_ranks(self):
-         # need rank0 to crash quicker after timeout
+        # need rank0 to crash quicker after detecting timeout
         os.environ['TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC'] = '1'
 
         if self.rank == self.MAIN_PROCESS_RANK:
