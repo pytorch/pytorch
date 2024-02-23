@@ -411,11 +411,11 @@ def stack_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     assert isinstance(child_strategy, OpStrategy), f"{child_strategy}"
     strategies: List[PlacementStrategy] = []
 
-    # For every placement (arg) strategy, we replicate the stack dim since we
+    # For every arg strategy, we replicate the stack dim since we
     # cannot stack on a sharded dim.
-    # For each placement (arg) strategy of the child to follow, we check if
-    # every other child has an equal strategy. If so, then that is a valid
-    # strategy. If there are no such valid strategies, then we replicate.
+    # For each arg strategy of the child to follow, we check if every other
+    # child has an equal strategy. If so, then that is a valid strategy. If
+    # there are no such valid strategies, then we replicate.
     for arg_strategy in child_strategy.strategies:
         arg_spec = arg_strategy.output_spec
         if is_tensor_dim_sharded(arg_spec, dim):  # cannot stack on this dim
