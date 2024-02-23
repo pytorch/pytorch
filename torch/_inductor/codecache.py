@@ -965,7 +965,7 @@ extern "C" void __avx_chk_kernel() {
     auto tmp1 = tmp0.exp();
     tmp1.store(in_out_ptr0);
 }
-"""
+"""  # noqa: B950
 
     _avx_py_load = """
 import torch
