@@ -50,8 +50,6 @@ FIXME_inductor_non_strict = {
 # see NOTE [dynamo_test_failures.py] for more details
 #
 # This lists exists so we can more easily add large numbers of failing tests,
-test_dir = None
-
 if test_dir is None:
     dynamo_expected_failures = set()
     dynamo_skips = set()
