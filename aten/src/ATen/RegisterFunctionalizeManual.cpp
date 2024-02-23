@@ -264,7 +264,7 @@ static at::Tensor as_strided_functionalize(
       at::functionalization::impl::create_functional_tensor_from_base(self);
   auto self_base_ =
       at::functionalization::impl::from_functional_tensor(self_base);
-  auto storage_offset_ = storage_offset.value_or(self.storage_offset());
+  auto storage_offset_ = storage_offset.value_or(self.sym_storage_offset());
 
   auto reapply_views =
       at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
@@ -347,7 +347,7 @@ static const at::Tensor& as_strided__functionalize(
     return at::_ops::as_strided_::call(self, size, stride, storage_offset);
   }
 
-  auto storage_offset_ = storage_offset.value_or(self.storage_offset());
+  auto storage_offset_ = storage_offset.value_or(self.sym_storage_offset());
 
   auto reapply_views =
       at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
