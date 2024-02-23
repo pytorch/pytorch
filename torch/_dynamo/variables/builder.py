@@ -565,11 +565,6 @@ class VariableBuilder:
                 ),
                 "apply",
             )
-        elif value == torch._dynamo.external_utils.is_fullgraph_compiling:
-            self.install_guards(GuardBuilder.FULLGRAPH)
-            return trace_rules.lookup_callable(value).create_with_source(
-                value, source=self.source
-            )
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
@@ -713,6 +708,11 @@ class VariableBuilder:
         elif TorchCtxManagerClassVariable.is_matching_cls(value):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return TorchCtxManagerClassVariable(value, source=self.source)
+        elif value == torch._dynamo.external_utils.is_fullgraph_compiling:
+            self.install_guards(GuardBuilder.FULLGRAPH)
+            return trace_rules.lookup(value).create_with_source(
+                value, source=self.source
+            )
         elif is_function_or_wrapper(value):
             value = unwrap_if_wrapper(value)
             return trace_rules.lookup(value).create_with_source(

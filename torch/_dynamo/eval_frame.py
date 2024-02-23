@@ -123,18 +123,22 @@ def check_current_backend(backend_obj_id: int):
         or current_backend == cached_backends.get(backend_obj_id, None)
     )
 
+def check_nopython(ref_nopython: bool):
+    return guarded_backend_cache.nopython is ref_nopython
+
 
 def _reset_guarded_backend_cache():
     global cached_backends
     guarded_backend_cache.skip_backend_check_for_run_only_mode = False
     guarded_backend_cache.current_backend = None
+    guarded_backend_cache.nopython = False
     for backend in cached_backends.values():
         if hasattr(backend, "reset"):
             backend.reset()
     cached_backends.clear()
 
 
-def backend_cache_manager(callback: DynamoCallback):
+def backend_cache_manager(callback: DynamoCallback, nopython: bool):
     # callback is False for RunOnlyContext. RunOnlyContext is used
     # as a way to re-use the previous compiled cache.
     # We therefore skip the check and re-use whatever code that's already cached.
@@ -162,10 +166,18 @@ def backend_cache_manager(callback: DynamoCallback):
                 prev_backend = guarded_backend_cache.current_backend
             except AttributeError:
                 prev_backend = None
+
+            try:
+                prev_nopython = guarded_backend_cache.nopython
+            except AttributeError:
+                prev_nopython = False
+
             guarded_backend_cache.current_backend = backend
+            guarded_backend_cache.nopython = nopython
 
             def revert():
                 guarded_backend_cache.current_backend = prev_backend
+                guarded_backend_cache.nopython = prev_nopython
 
             return revert
 
@@ -316,16 +328,18 @@ class _TorchDynamoContext:
         export=False,
         dynamic=None,
         compiler_config=None,
+        nopython=False,
     ):
         super().__init__()
         assert callable(callback) or callback is False or callback is None
         self.callback: DynamoCallback = callback
         self.prior: Union[Unset, DynamoCallback] = unset
         self.first_ctx = first_ctx
+        self.nopython = nopython
         self.export = export
         self.compiler_config = compiler_config
         self.cleanup_fns: List[Callable[[], Any]] = []
-        self.enter_exit_hooks = [backend_cache_manager(self.callback)]
+        self.enter_exit_hooks = [backend_cache_manager(self.callback, nopython=nopython)]
         patch_fn()
 
         if dynamic is not None:
@@ -525,6 +539,7 @@ class OptimizeContext(_TorchDynamoContext):
         export=False,
         dynamic=None,
         compiler_config=None,
+        nopython=False,
     ):
         def on_enter():
             install_generation_tagging_init()
@@ -538,6 +553,7 @@ class OptimizeContext(_TorchDynamoContext):
             export=export,
             dynamic=dynamic,
             compiler_config=compiler_config,
+            nopython=nopython,
         )
 
 
@@ -562,6 +578,7 @@ def _optimize_catch_errors(
     export=False,
     dynamic=None,
     compiler_config=None,
+    nopython=False,
 ):
     return OptimizeContext(
         convert_frame.catch_errors_wrapper(compile_fn, hooks),
@@ -570,6 +587,7 @@ def _optimize_catch_errors(
         export=export,
         dynamic=dynamic,
         compiler_config=compiler_config,
+        nopython=nopython,
     )
 
 
@@ -685,6 +703,7 @@ def optimize(
         compiler_config=backend.get_compiler_config()
         if hasattr(backend, "get_compiler_config")
         else None,
+        nopython=False,
     )
 
 
@@ -1472,6 +1491,7 @@ def optimize_assert(
         backend_ctx_ctor,
         export=export,
         dynamic=dynamic,
+        nopython=True,
     )
 
 

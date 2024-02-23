@@ -5870,17 +5870,52 @@ def fn():
             else:
                 return torch.zeros(2, 2)
 
-        self.assertEqual(f(), torch.zeros(2, 2))
+        FULLGRAPH_REF_OUTPUT = torch.ones(2, 2)
+        NON_FULLGRAPH_REF_OUTPUT = torch.zeros(2, 2)
+
+        self.assertEqual(f(), NON_FULLGRAPH_REF_OUTPUT)
+
+        # Case where we first compile with `fullgraph=True`. Repeat multiple times torch.compile to test that the graph is correctly recaptured.
+        opt_f = torch.compile(f, fullgraph=True)
+
+        self.assertEqual(f(), NON_FULLGRAPH_REF_OUTPUT)
+        self.assertEqual(opt_f(), FULLGRAPH_REF_OUTPUT)
+
+        opt_f = torch.compile(f, fullgraph=False)
+
+        self.assertEqual(f(), NON_FULLGRAPH_REF_OUTPUT)
+        self.assertEqual(opt_f(), NON_FULLGRAPH_REF_OUTPUT)
 
         opt_f = torch.compile(f, fullgraph=True)
 
-        self.assertEqual(f(), torch.zeros(2, 2))
-        self.assertEqual(opt_f(), torch.ones(2, 2))
+        self.assertEqual(f(), NON_FULLGRAPH_REF_OUTPUT)
+        self.assertEqual(opt_f(), FULLGRAPH_REF_OUTPUT)
+
+        opt_f = torch.compile(f, fullgraph=False)
+
+        self.assertEqual(f(), NON_FULLGRAPH_REF_OUTPUT)
+        self.assertEqual(opt_f(), NON_FULLGRAPH_REF_OUTPUT)
+
+        # Case where we first compile with `fullgraph=False`.
+        opt_g = torch.compile(g, fullgraph=False)
+
+        self.assertEqual(g(), NON_FULLGRAPH_REF_OUTPUT)
+        self.assertEqual(opt_g(), NON_FULLGRAPH_REF_OUTPUT)
+
+        opt_g = torch.compile(g, fullgraph=True)
+
+        self.assertEqual(g(), NON_FULLGRAPH_REF_OUTPUT)
+        self.assertEqual(opt_g(), FULLGRAPH_REF_OUTPUT)
 
         opt_g = torch.compile(g, fullgraph=False)
 
-        self.assertEqual(g(), torch.zeros(2, 2))
-        self.assertEqual(opt_g(), torch.zeros(2, 2))
+        self.assertEqual(g(), NON_FULLGRAPH_REF_OUTPUT)
+        self.assertEqual(opt_g(), NON_FULLGRAPH_REF_OUTPUT)
+
+        opt_g = torch.compile(g, fullgraph=True)
+
+        self.assertEqual(g(), NON_FULLGRAPH_REF_OUTPUT)
+        self.assertEqual(opt_g(), FULLGRAPH_REF_OUTPUT)
 
     def test_torch_generator_set_state(self):
         def fn():
