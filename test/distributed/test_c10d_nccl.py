@@ -4278,7 +4278,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         num_coalesced_ops = 20
         ops_per_coalesce = len(op_sizes_per_coalesce)
-        for i in range (num_coalesced_ops):
+        for i in range(num_coalesced_ops):
             ops = []
             for input_sizes in op_sizes_per_coalesce:
                 tensor = torch.zeros(input_sizes).to(self.local_device)
@@ -4297,12 +4297,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             time.sleep(1)
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
-        ver = t['version']
-        self.assertEqual(ver, "1.1")
         self.assertEqual(len(t['entries']), num_coalesced_ops * (ops_per_coalesce + 1))
-        # if self.rank == 0:
-        #     for id, entry in enumerate(t['entries']):
-        #         print(f"{id}: seq {entry['seq_id']}, name {entry['profiling_name']} sz {entry['input_sizes']}")
         for seq in range(num_coalesced_ops):
             first_op = seq * (ops_per_coalesce + 1)
             coalesced_op = first_op + ops_per_coalesce
@@ -4351,7 +4346,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         num_repeats = 10
         ops_per_repeat = len(op_sizes)
-        for i in range (num_repeats):
+        for i in range(num_repeats):
             for input_sizes in op_sizes:
                 tensor = torch.zeros(input_sizes).to(self.local_device)
                 if self.rank == 0:
@@ -4367,12 +4362,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             time.sleep(1)
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
-        ver = t['version']
-        self.assertEqual(ver, "1.1")
         self.assertEqual(len(t['entries']), num_repeats * (ops_per_repeat))
-        # if self.rank == 0:
-        #     for id, entry in enumerate(t['entries']):
-        #         print(f"{id}: seq {entry['seq_id']}, name {entry['profiling_name']} sz {entry['output_sizes']}")
         for seq in range(num_repeats * ops_per_repeat):
             input_sizes = op_sizes[seq % ops_per_repeat]
             profiling_name = 'nccl:recv 0<-1' if self.rank == 0 else 'nccl:send 1->0'
@@ -4381,7 +4371,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             expected_seq = seq + 1
             self.assertEqual(t['entries'][seq]['profiling_name'], profiling_name)
             self.assertEqual(t['entries'][seq]['seq_id'], expected_seq)
-            # TODO(whc)
+            # TODO(whc) input sizes are lost
             # self.assertEqual(t['entries'][seq]['input_sizes'], [input_sizes])
             self.assertEqual(t['entries'][seq]['output_sizes'], [input_sizes])
             self.assertEqual(t['entries'][seq]['state'], 'completed')

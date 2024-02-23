@@ -2733,6 +2733,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         nullptr);
     // TODO accumulate the trace_ids into a list and later stuff those into the
     // work for recording
+    (void)trace_id;
   } else {
     work = initWork(device, rank_, opType, profilingTitle, {tensor}, {});
     // Store references to outputs to be used by WorkNCCL::result and
