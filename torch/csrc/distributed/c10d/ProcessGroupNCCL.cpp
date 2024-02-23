@@ -2266,6 +2266,15 @@ void ProcessGroupNCCL::startCoalescing() {
   coalescedComms_.clear();
   coalescing_state_ |= CoalActive;
   groupStart();
+  // Other collective ops bump seq_ before creating a work. Thus, if coalesced
+  // ops bump seq_ only after initing a work they will collide with (reuse) the
+  // seq_ of the last non-coalesced collective.  Previously, seq_ was bumped
+  // inside endCoalescing, but before initWork. Since we now record individual
+  // ops from a coalesce group into the flight recorder, we want to have the
+  // same seq_ for those ops and its 'endCoalescing' op. Hence we bump during
+  // start, which has one minor downside- we burn a seq_ if someone ever does a
+  // 'start' and 'end' coalescing region without doing an operation inbetween.
+  seq_++;
 }
 
 // `optype` is for specifying a composite optype, such as ALLGATHER and
@@ -2329,11 +2338,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   } else {
     at::cuda::CUDAGraph::dec_pending_event_queries();
   }
-
-  // Bump collective counter after creating the work-
-  // this way all the flight-recorder events inside the coalesing group share
-  // the seq_ with the coalsed op and the work that goes with it
-  seq_++;
 
   coalescing_state_ = 0;
   return work;
@@ -2690,8 +2694,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     if (!coalescing_state_) {
       // Bump sequence number. Don't do so if it's a batch P2P, it will be
       // bumped in `endCoalescing`.
-      // TODO(whc) move this till the end of the op?
-      // and should
       seq_++;
     }
   }
@@ -2726,14 +2728,28 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // apply it to multiple entries
     (void)trace_id;
   } else {
-    work = initWork(
-        device, rank_, opType, profilingTitle, {tensor}, {}, /*record=*/true);
     // Store references to outputs to be used by WorkNCCL::result and
     // operator<<. Note that these outputs are only valid for recv(), as send()
     // does not modify the inputs but we still create these outputs for use
     // cases such as profiling.
+
+    work = initWork(
+        device, rank_, opType, profilingTitle, {tensor}, {}, /*record=*/false);
+    // This bypasses something in Work() that crashes if {tensor} is given as
+    // output, not sure what
     work->outputs_ = std::make_shared<std::vector<at::Tensor>>();
     work->outputs_->push_back(tensor);
+    // TODO(whc) becuase we don't pass output {tensor} to initWork, we tell
+    // initWork to not record, and then we manually call record passing all the
+    // information it wants.
+    work->trace_id_ = NCCLTraceBuffer::get()->record(
+        uid_,
+        seq_,
+        profilingTitle,
+        {tensor},
+        {tensor},
+        work->ncclStartEvent_.get(),
+        work->ncclEndEvent_.get());
   }
 
   // is gpuGuard needed for the if block below, or can i swap them
