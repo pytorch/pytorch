@@ -21,9 +21,10 @@ import sys
 # test/dynamo_expected_failures. They're individual files rather than a list so
 # git will merge changes easier.
 
+
 def find_test_dir():
     # Find the path to the dynamo expected failure and skip files.
-    from os.path import abspath, basename, dirname, exists, join, normpath, sep
+    from os.path import abspath, basename, dirname, exists, join, normpath
 
     if sys.platform == "win32":
         return None
@@ -41,7 +42,9 @@ def find_test_dir():
         return None
     test_dir = dirname(abspath(file))
     while dirname(test_dir) != test_dir:
-        if basename(test_dir) == "test" and exists(join, test_dir, "dynamo_expected_failures"):
+        if basename(test_dir) == "test" and exists(
+            join(test_dir, "dynamo_expected_failures")
+        ):
             return test_dir
         test_dir = dirname(test_dir)
 
@@ -52,7 +55,9 @@ def find_test_dir():
 test_dir = find_test_dir()
 if not test_dir:
     logger = logging.getLogger(__name__)
-    logger.warn("test/dynamo_expected_failures directory not found - known dynamo errors won't be skipped.")
+    logger.warning(
+        "test/dynamo_expected_failures directory not found - known dynamo errors won't be skipped."
+    )
 
 # Tests that run without strict mode in PYTORCH_TEST_WITH_INDUCTOR=1.
 # Please don't add anything to this list.
