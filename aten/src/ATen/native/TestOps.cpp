@@ -4,6 +4,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/FunctionalInverses.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/Parallel.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -13,6 +14,7 @@
 #include <ATen/ops/_test_autograd_multiple_dispatch_native.h>
 #include <ATen/ops/_test_autograd_multiple_dispatch_view_native.h>
 #include <ATen/ops/_test_check_tensor_native.h>
+#include <ATen/ops/_test_parallel_materialize_native.h>
 #include <ATen/ops/_test_optional_filled_intlist_native.h>
 #include <ATen/ops/_test_optional_floatlist_native.h>
 #include <ATen/ops/_test_optional_intlist_native.h>
@@ -22,6 +24,8 @@
 #endif
 
 #include <c10/util/irange.h>
+
+#include <thread>
 
 namespace at::native {
 
@@ -109,6 +113,19 @@ Tensor _test_autograd_multiple_dispatch_view(const Tensor &self) {
 Tensor _test_check_tensor(const Tensor& self) {
   TORCH_CHECK_TENSOR_ALL(self, "Test message for TORCH_CHECK_TENSOR_ALL");
   return self.clone();
+}
+
+Tensor _test_parallel_materialize(const Tensor& self, int64_t num_parallel, bool skip_main_thread) {
+  std::thread::id main_thread_id = std::this_thread::get_id();
+  at::parallel_for(0, num_parallel, 1, [&](int64_t begin, int64_t end){
+    std::thread::id this_thread_id = std::this_thread::get_id();
+    if (skip_main_thread && this_thread_id == main_thread_id) {
+      return;
+    } else {
+      self.mutable_data_ptr();
+    }
+  });
+  return self;
 }
 
 } // namespace at::native
