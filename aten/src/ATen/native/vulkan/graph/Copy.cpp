@@ -19,10 +19,7 @@ ValueRef add_copy_node(ComputeGraph& graph, const ValueRef from) {
   return to;
 }
 
-CopyNode::CopyNode(const ValueRef from, const ValueRef to) {
-  inputs_.emplace_back(from);
-  outputs_.emplace_back(to);
-}
+CopyNode::CopyNode(const ValueRef from, const ValueRef to) : OpNode(from, to) {}
 
 void CopyNode::encode_execute(ComputeGraph* graph) const {
   api::PipelineBarrier pipeline_barrier{};
