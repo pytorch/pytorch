@@ -9530,6 +9530,15 @@ fn
         self.assertEqual(fn(torch.tensor([0])), torch.zeros(0))
 
     def _test_compile_model_free(self, model_inp_ctr, weakref_watch):
+        """
+        Args:
+        model_inp_ctr
+            - constructor that returns a new model and inputs to that model
+        weakref_watch
+            - function that returns a layer of the model for weakref to
+              finalize on, so we can check that the layer is freed after
+              the model goes out of scope
+        """
         cleared = False
 
         def finalize():

@@ -85,6 +85,11 @@ if TEST_Z3:
         DynamicShapesReproTests.test_dynamic_shapes_float_guard_dynamic_shapes  # noqa: F821
     )
 
+    # TODO model is somehow not being freed when z3 is available
+    unittest.expectedFailure(
+        DynamicShapesMiscTests.test_custom_module_free_dynamic_shapes  # noqa: F821
+    )
+
 unittest.expectedFailure(
     # Test is only valid without dynamic shapes
     DynamicShapesReproTests.test_many_views_with_mutation_dynamic_shapes  # noqa: F821
