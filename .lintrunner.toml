@@ -193,6 +193,8 @@ include_patterns = [
     'torch/csrc/*.h',
     'torch/csrc/autograd/**/*.h',
     'torch/csrc/**/*.cpp',
+    'torch/csrc/cuda/**/*.h',
+    'torch/csrc/cuda/**/*.cpp',
 ]
 exclude_patterns = [
     # The negative filters below are to exclude files that include onnx_pb.h or
@@ -200,6 +202,8 @@ exclude_patterns = [
     # CUDA files are also excluded.
     '**/fb/**',
     '**/*pb.h',
+    'c10/**/cuda/*pp',
+    'aten/**/cuda/*pp',
     '**/cuda/*pp',
     '**/*XPU*',
     '**/xpu/*pp',
@@ -220,7 +224,6 @@ exclude_patterns = [
     'torch/csrc/api/**',
     'torch/csrc/autograd/generated/**',
     'torch/csrc/autograd/profiler_legacy.cpp',
-    'torch/csrc/cuda/**',
     'torch/csrc/dynamo/*',
     'torch/csrc/distributed/**/*',
     'torch/csrc/inductor/**/*',
