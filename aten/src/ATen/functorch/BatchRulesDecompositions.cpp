@@ -328,6 +328,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(swapdims_);
   OP_DECOMPOSE(swapaxes_);
   OP_DECOMPOSE(unfold_copy);
+  OP_DECOMPOSE(_unsafe_masked_index);
+  OP_DECOMPOSE(_unsafe_masked_index_put);
+  OP_DECOMPOSE2(_unsafe_index, Tensor);
+  OP_DECOMPOSE(_unsafe_index_put);
   // Easy way to decompose upsample*.vec overloads instead of introducing *_symint methods
   // if used OP_DECOMPOSE2.
   m.impl("upsample_bilinear2d.vec", native::upsample_bilinear2d);

@@ -464,6 +464,7 @@ class TestOperators(TestCase):
             self.assertEqual(result, expected)
             self.assertEqual(result_noncontig, expected)
 
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_jvp', set({
         # Composite ops that do bad things. Need to be fixed in PyTorch core.
@@ -595,6 +596,7 @@ class TestOperators(TestCase):
         self.assertEqual(noncontig_primal_outs, expected_primal_outs)
         self.assertEqual(noncontig_tangent_outs, expected_tangent_outs)
 
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
         xfail('sparse.sampled_addmm', ''),
@@ -966,6 +968,7 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmapvjp', vmapvjp_fail.union({
         xfail('as_strided'),
         xfail('as_strided', 'partial_views'),
+        xfail("_unsafe_masked_index"),  # inplace arithmetic(self, *extra_args) is not possible because there exists a Tensor `other`
     }))
     def test_vmapvjp(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1230,6 +1233,7 @@ class TestOperators(TestCase):
         xfail("_native_batch_norm_legit"),
         xfail("native_dropout_backward"),
         xfail("index_fill"),  # aten::_unique hit the vmap fallback which is currently disabled
+        xfail("_unsafe_masked_index"),  # inplace arithmetic(self, *extra_args) is not possible because there exists a Tensor `other`
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1305,6 +1309,7 @@ class TestOperators(TestCase):
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
         xfail('as_strided', 'partial_views'),
+        xfail("_unsafe_masked_index"),  # inplace arithmetic(self, *extra_args) is not possible because there exists a Tensor `other`
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost

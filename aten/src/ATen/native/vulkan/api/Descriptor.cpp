@@ -1,6 +1,7 @@
 #include <ATen/native/vulkan/api/Descriptor.h>
 #include <ATen/native/vulkan/api/Utils.h>
 
+#include <algorithm>
 #include <utility>
 
 namespace at {
@@ -43,6 +44,10 @@ DescriptorSet& DescriptorSet::operator=(DescriptorSet&& other) noexcept {
 DescriptorSet& DescriptorSet::bind(
     const uint32_t idx,
     const VulkanBuffer& buffer) {
+  VK_CHECK_COND(
+      buffer.has_memory(),
+      "Buffer must be bound to memory for it to be usable");
+
   DescriptorSet::ResourceBinding binder{};
   binder.binding_idx = idx; // binding_idx
   binder.descriptor_type = shader_layout_signature_[idx]; // descriptor_type
@@ -58,6 +63,9 @@ DescriptorSet& DescriptorSet::bind(
 DescriptorSet& DescriptorSet::bind(
     const uint32_t idx,
     const VulkanImage& image) {
+  VK_CHECK_COND(
+      image.has_memory(), "Image must be bound to memory for it to be usable");
+
   VkImageLayout binding_layout = image.layout();
   if (shader_layout_signature_[idx] == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
     binding_layout = VK_IMAGE_LAYOUT_GENERAL;
@@ -76,7 +84,7 @@ DescriptorSet& DescriptorSet::bind(
 }
 
 VkDescriptorSet DescriptorSet::get_bind_handle() const {
-  c10::SmallVector<VkWriteDescriptorSet, 6u> write_descriptor_sets;
+  std::vector<VkWriteDescriptorSet> write_descriptor_sets;
 
   for (const ResourceBinding& binding : bindings_) {
     VkWriteDescriptorSet write{
@@ -159,7 +167,7 @@ VkDescriptorSet DescriptorSetPile::get_descriptor_set() {
 }
 
 void DescriptorSetPile::allocate_new_batch() {
-  // No-ops if there are still descriptor sets availble
+  // No-ops if there are still descriptor sets available
   if (in_use_ < descriptors_.size() &&
       descriptors_[in_use_] != VK_NULL_HANDLE) {
     return;
@@ -194,7 +202,7 @@ DescriptorPool::DescriptorPool(
       config_(config),
       mutex_{},
       piles_{} {
-  c10::SmallVector<VkDescriptorPoolSize, 4u> type_sizes{
+  std::vector<VkDescriptorPoolSize> type_sizes{
       {
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           config_.descriptorUniformBufferCount,

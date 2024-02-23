@@ -634,8 +634,7 @@ class Optimizer:
                 fused = pg["fused"] if "fused" in pg else False
                 capturable = pg["capturable"] if "capturable" in pg else False
                 break
-
-        if key == 'step':
+        if key == "step":
             if capturable or fused:
                 return value.to(dtype=torch.float32, device=param.device)
             else:

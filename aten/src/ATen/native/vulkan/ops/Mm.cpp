@@ -128,7 +128,8 @@ vTensor pack_weights(const Tensor& weight_arg, const bool use_batch = false) {
       dst_kw_sz,
   };
 
-  vTensor v_weight{context, dst_vtensor_sizes, weight_arg.scalar_type()};
+  vTensor v_weight{
+      context, dst_vtensor_sizes, convert_dtype(weight_arg.scalar_type())};
 
   v_weight.set_is_quantized();
   v_weight.set_scale(weight_arg.q_scale());
@@ -286,8 +287,12 @@ bool usable(
 
 static Tensor reshape_to_2d(const Tensor& input_arg) {
   TORCH_CHECK(
-      input_arg.dim() >= 2,
-      "Vulkan Linear op only supports input tensor with dim >= 2");
+      input_arg.dim() >= 1,
+      "Vulkan Linear op only supports input tensor with dim >= 1");
+
+  if (input_arg.dim() == 1) {
+    return input_arg.unsqueeze(0);
+  }
   const IntArrayRef input_sizes = input_arg.sizes();
   const auto d =
       c10::multiply_integers(input_sizes.cbegin(), input_sizes.end() - 1);
@@ -342,7 +347,7 @@ Tensor run_quantized_addmm_context(
           input_arg_2d.sizes()[Layout::Parameter::height],
           unpacked_weight_sizes[Layout::Parameter::width],
       },
-      input_arg.scalar_type(),
+      v_input.dtype(),
   };
 
   v_output.set_is_quantized();
@@ -569,7 +574,7 @@ Tensor run_addmm_context(
           input_arg_2d.sizes()[Layout::Parameter::height],
           unpacked_weight_sizes[Layout::Parameter::width],
       },
-      input_arg.scalar_type(),
+      v_input.dtype(),
   };
 
   api::UniformParamsBuffer params;
@@ -695,7 +700,7 @@ Tensor run_baddbmm_context(
           packed_v_input.sizes()[Layout::BatchMatrices::height],
           unpacked_weight_sizes.back(), // "w" dimension in weight matrix
       },
-      input_arg.scalar_type(),
+      packed_v_input.dtype(),
   };
 
   const struct {

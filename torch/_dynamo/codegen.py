@@ -76,10 +76,14 @@ class PyCodegen:
     def graph_output_vars(self):
         return [x.variable for x in self.graph_outputs.values()]
 
+    def call_reconstruct(self, value):
+        res = value.reconstruct(self)
+        assert res is None, f"reconstruct!=None {value}"
+
     def __call__(self, value, allow_cache=True):
         """Generate code such that top-of-stack (TOS) is set to value"""
         if isinstance(value, Source):
-            self._output.extend(value.reconstruct(self))
+            self.call_reconstruct(value)
             self.clear_tos()
             return
 
@@ -113,7 +117,7 @@ class PyCodegen:
                 return
 
         if value.source is not None and allow_cache and self.value_from_source:
-            output.extend(value.source.reconstruct(self))
+            self.call_reconstruct(value.source)
         elif value.is_python_constant() and is_safe_constant(
             value.as_python_constant()
         ):
@@ -125,7 +129,7 @@ class PyCodegen:
             self.load_graph_output(graph_outputs[graph_outputs_key].index)
             output.append(
                 self.create_load_global(
-                    value.global_mangled_class_name(), False, add=True
+                    value.global_mangled_class_name(self.tx), False, add=True
                 )
             )
             output.extend(create_call_function(2, True))
@@ -164,7 +168,7 @@ class PyCodegen:
         else:
             self.uses[value] += 1
             try:
-                output.extend(value.reconstruct(self))
+                self.call_reconstruct(value)
             except NotImplementedError:
                 unimplemented(f"reconstruct: {value}")
             if allow_cache and value in self.tempvars:
@@ -255,6 +259,10 @@ class PyCodegen:
 
     create_load_output = _create_load_const
 
+    def create_load_method(self, name):
+        self.tx.output.update_co_names(name)
+        return create_instruction("LOAD_METHOD", argval=name)
+
     def create_load_attr(self, name) -> Instruction:
         if name not in self.code_options["co_names"]:
             self.code_options["co_names"] += (name,)
@@ -325,14 +333,14 @@ class PyCodegen:
         """
         Generate a LOAD_GLOBAL instruction to fetch a given python module.
         """
-        global_scope = self.tx.output.global_scope
+        output = self.tx.output
+        global_scope = output.global_scope
         name = re.sub(r"^.*[.]", "", mod.__name__)
         if global_scope.get(name, None) is mod:
             return self.create_load_global(name, push_null, add=True)
-        mangled_name = f"___module_{name}_{id(mod)}"
-        if mangled_name not in global_scope:
-            self.tx.output.install_global(mangled_name, mod)
-        return self.create_load_global(mangled_name, push_null, add=True)
+        prefix = f"___module_{name}"
+        global_name = self.tx.output.install_global_by_id(prefix, mod)
+        return self.create_load_global(global_name, push_null, add=True)
 
     def make_call_generated_code(self, fn_name: str) -> None:
         """Call the generated code function stored in fn_name"""
@@ -347,20 +355,15 @@ class PyCodegen:
                         self.create_load_attr("as_tensor"),
                     ]
                 )
-                self.extend_output(arg.load(self))
+                self.call_reconstruct(arg)
                 self.extend_output(create_call_function(1, False))
             else:
-                self.extend_output(arg.load(self))
+                self.call_reconstruct(arg)
 
         self.extend_output(create_call_function(len(graphargs), False))
 
-    def create_load_import_from(self, module_name, object_name) -> List[Instruction]:
-        return AttrSource(self.tx.import_source(module_name), object_name).reconstruct(
-            self
-        )
-
     def load_import_from(self, module_name, object_name) -> None:
-        self.extend_output(self.create_load_import_from(module_name, object_name))
+        self(AttrSource(self.tx.import_source(module_name), object_name))
 
     def create_call_function_kw(self, nargs, kw_names, push_null) -> List[Instruction]:
         if sys.version_info >= (3, 11):

@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
@@ -70,7 +71,7 @@ static void reduced_float_copy_kernel(TensorIteratorBase &iter, bool requires_ne
       using Vecs = Vectorized<scalar_t>;
       c10::SmallBuffer<char*, 2> ptrs(2);
       dest_t* output_data = iter.tensor_base(0).data_ptr<dest_t>();
-      scalar_t* input_data = iter.tensor_base(1).data_ptr<scalar_t>();
+      scalar_t* input_data = const_cast<scalar_t*>(iter.tensor_base(1).const_data_ptr<scalar_t>());
       ptrs[0] = reinterpret_cast<char*>(output_data);
       ptrs[1] = reinterpret_cast<char*>(input_data);
 
@@ -138,7 +139,7 @@ static void reduced_float_copy_kernel(TensorIteratorBase &iter, bool requires_ne
       using Vecs = Vectorized<source_t>;
       c10::SmallBuffer<char*, 2> ptrs(2);
       dest_t* output_data = iter.tensor_base(0).data_ptr<dest_t>();
-      source_t* input_data = iter.tensor_base(1).data_ptr<source_t>();
+      source_t* input_data = const_cast<source_t*>(iter.tensor_base(1).const_data_ptr<source_t>());
 
       ptrs[0] = reinterpret_cast<char*>(output_data);
       ptrs[1] = reinterpret_cast<char*>(input_data);
@@ -201,15 +202,14 @@ static void reduced_float_copy_kernel(TensorIteratorBase &iter, bool requires_ne
 
 #if !defined(C10_MOBILE)
 #define _AT_DISPATCH_ALL_TYPES(TYPE, NAME, ...)                                       \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND8(                                       \
-            ScalarType::ComplexHalf, ScalarType::Half, ScalarType::Bool,              \
-            ScalarType::BFloat16, ScalarType::Float8_e5m2, ScalarType::Float8_e4m3fn, \
-            ScalarType::Float8_e5m2fnuz, ScalarType::Float8_e4m3fnuz,                 \
-            TYPE, NAME, __VA_ARGS__)
+        AT_DISPATCH_V2(TYPE, NAME, AT_WRAP(__VA_ARGS__),                                       \
+            kComplexHalf, kHalf, kBool,              \
+            kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, \
+            kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
 #define _AT_DISPATCH_ALL_TYPES_NO_CF(TYPE, NAME, ...)              \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND7(                    \
+        AT_DISPATCH_V2(TYPE, NAME, AT_WRAP(__VA_ARGS__),                    \
             kBool, kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, \
-            kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, TYPE, NAME, __VA_ARGS__)
+            kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
 #else
 #define _AT_DISPATCH_ALL_TYPES(TYPE, NAME, ...)                                               \
         AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(                                               \

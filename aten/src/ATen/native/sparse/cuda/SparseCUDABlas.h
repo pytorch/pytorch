@@ -2,7 +2,7 @@
 
 #include <ATen/cuda/ATenCUDAGeneral.h>
 
-namespace at { namespace native { namespace sparse { namespace cuda {
+namespace at::native::sparse::cuda{
 
 TORCH_CUDA_CU_API void Xcoo2csr(
     const int* coorowind,
@@ -61,4 +61,4 @@ TORCH_CUDA_CU_API void XcoosortByRow(
     int* cooCols,
     int* P,
     void* pBuffer);
-}}}} // namespace at::native::sparse::cuda
+} // namespace at::native::sparse::cuda
