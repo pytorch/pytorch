@@ -2772,7 +2772,7 @@ Tensor linalg_eigvalsh(const Tensor& A, c10::string_view uplo) {
 
 Tensor& linalg_eigvalsh_out(const Tensor& A, c10::string_view uplo, Tensor& L) {
   auto V = at::empty({0}, A.options());
-  at::_linalg_eigh_out(L, V, A, uplo, /*comptue_v=*/false);
+  at::_linalg_eigh_out(L, V, A, uplo, /*compute_v=*/false);
   return L;
 }
 
@@ -3153,7 +3153,7 @@ TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
   TORCH_CHECK(use_cusolver || !driver.has_value(),
     "torch.linalg.svd: keyword argument `driver=` is only supported on CUDA inputs with cuSOLVER backend.");
 
-  // A always needs to be copied as its contents will be destroyed during the computaton of the SVD
+  // A always needs to be copied as its contents will be destroyed during the computation of the SVD
   // Now, MAGMA needs the copy to be on CPU, while cuSOLVER needs it to be on CUDA, so we'll defer
   // the copy as a column major matrix to the backends.
   const auto info = at::zeros(IntArrayRef(A.sizes().begin(), A.sizes().end() - 2), A.options().dtype(kInt));
@@ -3202,7 +3202,7 @@ Tensor& linalg_svdvals_out(const Tensor& A, c10::optional<c10::string_view> driv
   // Dummies
   auto U = at::empty({0}, A.options());
   auto Vh = at::empty({0}, A.options());
-  at::_linalg_svd_out(U, S, Vh, A, /*full_matrices=*/false, /*comptue_uv=*/false, /*driver=*/driver);
+  at::_linalg_svd_out(U, S, Vh, A, /*full_matrices=*/false, /*compute_uv=*/false, /*driver=*/driver);
   return S;
 }
 
@@ -3900,7 +3900,7 @@ Tensor& linalg_solve_triangular_out(
   }
 
   // No need to conjugate anything if out_f is conj as AX = conj(B) <=> conj(A)conj(X) = B
-  // and X = B after the algortihm. We just anotate that A is conjugated later on
+  // and X = B after the algorithm. We just annotate that A is conjugated later on
   // The solution will be written into out_f, so it'll be conjugated already
 
   Tensor A_f = std::move(A_);  // The A that will go into fortran
@@ -3909,7 +3909,7 @@ Tensor& linalg_solve_triangular_out(
   bool A_is_neg = A_f.is_neg() != out_f.is_neg();
   bool A_is_f_contig = (A_f.stride(-1) == 1) == transpose_A;
   if C10_UNLIKELY (!is_row_or_column_contiguous(A_f)) {
-    // We first anotate with flags on A_f all the conj / transpose / neg coming from out
+    // We first annotate with flags on A_f all the conj / transpose / neg coming from out
     // and then we clone the resulting tensor to resolve all of them in memory
     if (out_f.is_conj()) {
       A_f = A_f.conj();
