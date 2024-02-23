@@ -302,8 +302,12 @@ void run_mha_bwd_hdim256(Flash_bwd_params &params, cudaStream_t stream) {
     DROPOUT_SWITCH(params.p_dropout < 1.f, Is_dropout, [&] {
         if (max_smem_per_block >= 176 * 1024) {  // H100
             run_flash_bwd<Flash_bwd_kernel_traits<Headdim, 64, 64, 8, 4, 2, 2, false, false, T>, Is_dropout>(params, stream);
-        } else {  // A100, we don't do double buffering to save smem
+        } else if (max_smem_per_block >= 144 * 1024) {  // A100, we don't do double buffering to save smem
             run_flash_bwd<Flash_bwd_kernel_traits<Headdim, 64, 64, 8, 4, 2, 2, false, true, T>, Is_dropout>(params, stream);
+        } else { // sm86 and sm89, max smem is 99 KB. Only works without dropout. V in regs and no double buffering.
+            if constexpr (!Is_dropout) {
+                run_flash_bwd<Flash_bwd_kernel_traits<Headdim, 64, 32, 8, 4, 1, 2, true, true, T>, false>(params, stream);
+            }
         }
     });
 }

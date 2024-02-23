@@ -1328,13 +1328,17 @@ class TestSDPAFailureModes(NNTestCase):
     _do_cuda_non_default_stream = True
 
     @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION or not isSM8XDevice,
-                     "Does not support fused SDPA or not SM86+ hardware")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION or not isSM8XDevice,
+        "Does not support fused SDPA or not SM86+ hardware",
+    )
     @parametrize("head_dim", [193, 204, 256])
-    def test_flash_backward_failure_sm86plus(self, device, head_dim: int):
+    @parametrize("dropout_p", [0.0, 0.2])
+    def test_flash_backward_failure_sm86plus(self, device, head_dim: int, dropout_p: float):
         dtype = torch.float16
         make_tensor = partial(torch.rand, device=device, dtype=dtype)
-        # See check_requires_grad_and_head_dim_gt64_and_sm_ge86 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
+        # See check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89 in
+        # pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
         size = (2, 2, 4, head_dim)
         q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
 
@@ -1351,8 +1355,22 @@ class TestSDPAFailureModes(NNTestCase):
             q = make_tensor(size, requires_grad=True)
             k = make_tensor(size, requires_grad=True)
             v = make_tensor(size, requires_grad=True)
-            self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, None, 0.0, False))
+            if 192 < head_dim <= 224:
+                self.assertRaises(
+                    RuntimeError,
+                    lambda: torch.nn.functional.scaled_dot_product_attention(
+                        q, k, v, None, 0.0, False
+                    ),
+                )
+            elif head_dim > 224 and dropout_p > 0.0:
+                self.assertRaises(
+                    RuntimeError,
+                    lambda: torch.nn.functional.scaled_dot_product_attention(
+                        q, k, v, None, 0.0, False
+                    ),
+                )
+            else:
+                flash_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
 
     @onlyCUDA
     def test_dispatch_fails_no_backend(self, device):
@@ -1588,7 +1606,6 @@ class TestSDPAFailureModes(NNTestCase):
             with self.assertWarnsRegex(UserWarning, "For NestedTensor inputs, Flash attention requires"):
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
-
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION or not isLessThanSM80Device,

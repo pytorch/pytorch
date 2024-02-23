@@ -230,9 +230,11 @@ struct Flash_bwd_kernel_traits : public Base {
     // TODO: generalize to other values of kBlockN
     // TODO: what should be the Swizzle here? 3 is faster than 1, and 1 is faster than 2
     // static constexpr int kPBlockN = kBlockN;
-    static_assert(kBlockN >= 64);
+    // Temporarily disabling this for hdim 256 on sm86 and sm89
+    // static_assert(kBlockN >= 64);
+    static_assert(kBlockN >= 32);
     // TD [2023-03-19]: Idk why kPBlockN = 16 and kSwizzlePdS=3 is the fastest.
-    static constexpr int kPBlockN = 64;
+    static constexpr int kPBlockN = kBlockN >= 64 ? 64 : 32;
     static_assert(kPBlockN == 16 || kPBlockN == 32 || kPBlockN == 64);
     // static constexpr int kSwizzlePdS = kPBlockN == 16 ? 1 : (kPBlockN == 32 ? 2 : 3);
     static constexpr int kSwizzlePdS = 3;
