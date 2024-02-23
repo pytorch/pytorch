@@ -14,7 +14,7 @@
 #include <c10/util/irange.h>
 
 #ifdef USE_ROCM
-#if ROCM_VERSION >= 60000
+#ifdef HIPBLASLT
 #include <hipblaslt/hipblaslt-ext.hpp>
 #endif
 // until hipblas has an API to accept flags, we must use rocblas here
@@ -788,7 +788,7 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   }
 }
 
-#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
+#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && defined(HIPBLASLT))
 
 #if defined(USE_ROCM) && ROCM_VERSION >= 50700 && ROCM_VERSION < 60000
 // only for rocm 5.7 where we first supported hipblaslt, it was difficult
@@ -919,6 +919,7 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
 };
 } // namespace
 
+#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && defined(HIPBLASLT))
 template <typename Dtype>
 void gemm_and_bias(
     bool transpose_mat1,
@@ -1131,7 +1132,7 @@ template void gemm_and_bias(
     at::BFloat16* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation);
-
+#endif
 void scaled_gemm(
     char transa,
     char transb,
