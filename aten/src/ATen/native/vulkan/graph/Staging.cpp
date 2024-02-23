@@ -90,10 +90,7 @@ void encode_copy_from_vtensor(
       VK_NULL_HANDLE);
 }
 
-StagingNode::StagingNode(ValueRef from, ValueRef to) {
-  inputs_.emplace_back(from);
-  outputs_.emplace_back(to);
-}
+StagingNode::StagingNode(ValueRef from, ValueRef to) : OpNode(from, to) {}
 
 void StagingNode::encode_execute(ComputeGraph* graph) const {
   Value& in_val = graph->get_val(inputs_[0]);
