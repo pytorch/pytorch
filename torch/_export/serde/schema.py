@@ -1,14 +1,14 @@
 # NOTE: This is a placeholder for iterating on export serialization schema design.
 #       Anything is subject to change and no guarantee is provided at this point.
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Dict, List, Optional, Tuple
 
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (3, 1)
+SCHEMA_VERSION = (4, 2)
 TREESPEC_VERSION = 1
 
 
@@ -142,6 +142,7 @@ class GraphArgument:
 @dataclass
 class CustomObjArgument:
     name: str
+    class_fqn: str
 
 
 # This is actually a union type
@@ -169,6 +170,7 @@ class Argument(_Union):
     as_graph: GraphArgument
     as_optional_tensors: List[OptionalTensorArgument]
     as_custom_obj: CustomObjArgument
+    as_operator: str
 
 
 @dataclass
@@ -199,6 +201,7 @@ class Graph:
     # tensor, rather than following export schema and returning a singleton
     # list.
     is_single_tensor_return: bool = False
+    custom_obj_values: Dict[str, CustomObjArgument] = field(default_factory=dict)
 
 
 @dataclass
@@ -217,6 +220,8 @@ class InputToParameterSpec:
 class InputToBufferSpec:
     arg: TensorArgument
     buffer_name: str
+    persistent: bool
+
 
 
 @dataclass
@@ -225,12 +230,19 @@ class InputToTensorConstantSpec:
     tensor_constant_name: str
 
 
+@dataclass
+class InputToCustomObjSpec:
+    arg: CustomObjArgument
+    custom_obj_name: str
+
+
 @dataclass(repr=False)
 class InputSpec(_Union):
     user_input: UserInputSpec
     parameter: InputToParameterSpec
     buffer: InputToBufferSpec
     tensor_constant: InputToTensorConstantSpec
+    custom_obj: InputToCustomObjSpec
 
 
 @dataclass
@@ -261,6 +273,12 @@ class GradientToUserInputSpec:
     user_input_name: str
 
 
+@dataclass
+class UserInputMutationSpec:
+    arg: TensorArgument
+    user_input_name: str
+
+
 @dataclass(repr=False)
 class OutputSpec(_Union):
     user_output: UserOutputSpec
@@ -268,6 +286,7 @@ class OutputSpec(_Union):
     buffer_mutation: BufferMutationSpec
     gradient_to_parameter: GradientToParameterSpec
     gradient_to_user_input: GradientToUserInputSpec
+    user_input_mutation: UserInputMutationSpec
 
 
 @dataclass

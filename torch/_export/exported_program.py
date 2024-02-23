@@ -1,11 +1,8 @@
-import dataclasses
-from typing import Optional
 import warnings
 
 
 import torch
 import torch.fx
-import torch.utils._pytree as pytree
 
 
 # TODO(ycao): This is added to avoid breaking existing code temporarily.
@@ -30,13 +27,6 @@ __all__ = [
     "ModuleCallEntry",
     "ModuleCallSignature",
 ]
-
-
-# Information to maintain user calling/returning specs
-@dataclasses.dataclass
-class CallSpec:
-    in_spec: Optional[pytree.TreeSpec]
-    out_spec: Optional[pytree.TreeSpec]
 
 
 def _create_graph_module_for_export(root, graph):

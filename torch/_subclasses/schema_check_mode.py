@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 from collections import namedtuple
 from copy import deepcopy
 from itertools import combinations

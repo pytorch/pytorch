@@ -10,9 +10,11 @@ from torch.distributed.utils import _free_storage
 class _AllreduceUpcastHookState:
     """
     State to manage DDP mixed precision in backward / gradient communication.
+
     This contains a weakref to the DDP module for access to reducer and process
     group, and a stream to run parameter and gradient upcasts.
     """
+
     ddp_weakref: Any
     upcast_stream: torch.cuda.Stream
     wait_for_stream_enqueued: bool = False
@@ -22,6 +24,8 @@ def _reducer_allreduce_and_upcast_hook(
     hook_state: _AllreduceUpcastHookState, bucket: dist.GradBucket
 ) -> torch.futures.Future[torch.Tensor]:
     """
+    Perform allreduce in precision ``reduce_dtype``, upcast to prepare for optimizer.
+
     Performs allreduce in the reduced precision given by DDP's mixed precision
     reduce_dtype, and upcasts parameters and gradients to fp32 in preparation
     to run the optimizer.

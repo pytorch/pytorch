@@ -24,7 +24,7 @@ Tensor _clamp(
   vTensor v_output{
       context,
       v_self.sizes(),
-      self_arg.scalar_type(),
+      v_self.dtype(),
   };
 
   const struct Block final {
@@ -152,7 +152,7 @@ Tensor activation(
   vTensor v_output{
       context,
       v_self.sizes(),
-      self_arg.scalar_type(),
+      v_self.dtype(),
   };
 
   const struct Block final {
@@ -277,22 +277,45 @@ Tensor activation_scalar(
   vTensor v_output{
       context,
       v_self.sizes(),
-      self_arg.scalar_type(),
+      v_self.dtype(),
   };
 
   api::UniformParamsBuffer params;
 
+  if (v_self.is_quantized()) {
+    v_output.set_is_quantized();
+    v_output.set_scale(v_self.get_scale());
+    v_output.set_zero_point(v_self.get_zero_point());
+  }
+
   if (scalar_arg.size() == 1) {
-    const struct Block final {
-      uvec3 extents;
-      uint32_t _;
-      float scalar_value;
-    } block{
-        v_output.extents(),
-        0u,
-        scalar_arg[0].to<float>(),
-    };
-    params = api::UniformParamsBuffer(context, block);
+    if (v_self.is_quantized()) {
+      const struct Block final {
+        uvec3 extents;
+        uint32_t _;
+        float scalar_value;
+        float scale;
+        int zero_point;
+      } block{
+          v_output.extents(),
+          0u,
+          scalar_arg[0].to<float>(),
+          safe_downcast<float>(v_self.get_scale()),
+          safe_downcast<int32_t>(v_self.get_zero_point()),
+      };
+      params = api::UniformParamsBuffer(context, block);
+    } else {
+      const struct Block final {
+        uvec3 extents;
+        uint32_t _;
+        float scalar_value;
+      } block{
+          v_output.extents(),
+          0u,
+          scalar_arg[0].to<float>(),
+      };
+      params = api::UniformParamsBuffer(context, block);
+    }
   } else {
     const struct Block final {
       uvec3 extents;
@@ -348,16 +371,33 @@ Tensor& activation_scalar_(
   api::UniformParamsBuffer params;
 
   if (scalar_arg.size() == 1) {
-    const struct Block final {
-      uvec3 extents;
-      uint32_t _;
-      float scalar_value;
-    } block{
-        v_self.extents(),
-        0u,
-        scalar_arg[0].to<float>(),
-    };
-    params = api::UniformParamsBuffer(context, block);
+    if (v_self.is_quantized()) {
+      const struct Block final {
+        uvec3 extents;
+        uint32_t _;
+        float scalar_value;
+        float scale;
+        int zero_point;
+      } block{
+          v_self.extents(),
+          0u,
+          scalar_arg[0].to<float>(),
+          safe_downcast<float>(v_self.get_scale()),
+          safe_downcast<int32_t>(v_self.get_zero_point()),
+      };
+      params = api::UniformParamsBuffer(context, block);
+    } else {
+      const struct Block final {
+        uvec3 extents;
+        uint32_t _;
+        float scalar_value;
+      } block{
+          v_self.extents(),
+          0u,
+          scalar_arg[0].to<float>(),
+      };
+      params = api::UniformParamsBuffer(context, block);
+    }
   } else {
     const struct Block final {
       uvec3 extents;
@@ -397,13 +437,24 @@ Tensor& activation_scalar_(
   return self_arg;
 }
 
-Tensor gelu(const Tensor& self_arg, c10::string_view approximate) {
+Tensor gelu(const Tensor& self, c10::string_view approximate) {
   TORCH_CHECK(
       approximate == "tanh", "Vulkan: gelu only supported for tanh type");
   Scalar kBetaVec = M_SQRT2 * M_2_SQRTPI * 0.5;
   std::vector<Scalar> scalar;
   scalar.push_back(kBetaVec);
-  return ops::activation_scalar(self_arg, scalar, VK_KERNEL(gelu_tanh));
+
+  if (self.scalar_type() == at::kQUInt8) {
+    return ops::activation_scalar(
+        self, scalar, VK_KERNEL(quantized_gelu_tanh_quint8));
+  }
+
+  if (self.scalar_type() == at::kQInt8) {
+    return ops::activation_scalar(
+        self, scalar, VK_KERNEL(quantized_gelu_tanh_qint8));
+  }
+
+  return ops::activation_scalar(self, scalar, VK_KERNEL(gelu_tanh));
 }
 
 Tensor& gelu_(Tensor& self, c10::string_view approximate) {
@@ -412,6 +463,17 @@ Tensor& gelu_(Tensor& self, c10::string_view approximate) {
   Scalar kBetaVec = M_SQRT2 * M_2_SQRTPI * 0.5;
   std::vector<Scalar> scalar;
   scalar.push_back(kBetaVec);
+
+  if (self.scalar_type() == at::kQUInt8) {
+    return ops::activation_scalar_(
+        self, scalar, VK_KERNEL(quantized_gelu_tanh_quint8_));
+  }
+
+  if (self.scalar_type() == at::kQInt8) {
+    return ops::activation_scalar_(
+        self, scalar, VK_KERNEL(quantized_gelu_tanh_qint8_));
+  }
+
   return ops::activation_scalar_(self, scalar, VK_KERNEL(gelu_tanh_));
 }
 

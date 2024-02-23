@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # Torch
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
 import torch.nn.functional as F

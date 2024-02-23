@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import inspect
 from typing import Dict, List
 
@@ -10,10 +12,24 @@ from .constant import ConstantVariable
 
 
 class DistributedVariable(VariableTracker):
-    def __init__(self, **kwargs):
+    """
+    The base distributed variable that encapsulates common methods
+    for the distributed objects (i.e. ProcessGroup, DeviceMesh, etc.).
+    Concrete distributed objects could inherit this class and add object
+    specific logic.
+
+    i.e. It provides the check on the distributed package existance
+    and hold the tracking value for the corresponding distributed object.
+    """
+
+    def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         if not DistributedVariable.is_available():
             unimplemented("torch.distributed package is not available!")
+        self.value = value
+
+    def python_type(self):
+        return type(self.value)
 
     @staticmethod
     def is_available():
@@ -34,23 +50,25 @@ def is_constant_pg_functions(value):
         return False
 
     from torch.distributed.distributed_c10d import (
+        _get_group_size_by_name,
         _get_group_tag,
+        _rank_not_in_group,
+        _resolve_group_name_by_ranks_and_tag,
         get_process_group_ranks,
     )
 
     constant_processgroup_functions = [
-        get_process_group_ranks,
+        _get_group_size_by_name,
         _get_group_tag,
+        _rank_not_in_group,
+        get_process_group_ranks,
+        _resolve_group_name_by_ranks_and_tag,
     ]
 
     return inspect.isfunction(value) and value in constant_processgroup_functions
 
 
 class PlacementClassVariable(DistributedVariable):
-    def __init__(self, value, **kwargs):
-        super().__init__(**kwargs)
-        self.value = value
-
     @staticmethod
     def is_placement_type(value):
         # we can't rely on importing/accessing torch distributed, it is not always built.
@@ -80,10 +98,6 @@ class PlacementClassVariable(DistributedVariable):
 
 
 class PlacementVariable(DistributedVariable):
-    def __init__(self, value, **kwargs):
-        super().__init__(**kwargs)
-        self.value = value
-
     @staticmethod
     def is_placement(value):
         # we can't rely on importing/accessing torch distributed, it is not always built.
@@ -97,6 +111,11 @@ class PlacementVariable(DistributedVariable):
     def as_python_constant(self):
         return self.value
 
+    def var_getattr(self, tx, name: str) -> VariableTracker:
+        if name == "dim":
+            return ConstantVariable.create(self.value.dim)
+        return super().var_getattr(tx, name)
+
     def call_method(
         self,
         tx,
@@ -106,10 +125,20 @@ class PlacementVariable(DistributedVariable):
     ) -> "VariableTracker":
         from . import ConstantVariable
 
-        allowed_methods = ["__init__", "__setattr__"]
-        # placement types dynamo tracking allows only __init__
-        # and __setattr__ methods, the latter is for case like `Shard(dim)`
-        if name in allowed_methods:
+        # Placement types dynamo tracking only allows following methods
+        # and __setattr__  is for case like `Shard(dim)` and methods.
+        # Methods in the list must satisfy:
+        #    1. Input arguments are constants and do not need to be guarded on;
+        #    2. Output is constant with respect to their inputs
+        constant_fold_functions = [
+            "__init__",
+            "__setattr__",
+            "is_shard",
+            "is_partial",
+            "is_replicate",
+        ]
+
+        if name in constant_fold_functions:
             try:
                 value_type = type(self.value)
                 assert (
@@ -123,17 +152,16 @@ class PlacementVariable(DistributedVariable):
 
             args = [x.as_python_constant() for x in args]
             kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            method(self.value, *args, **kwargs)
-            return self
+            if name == "__setattr__":
+                method(self.value, *args, **kwargs)
+                return self
+            constant_val = method(self.value, *args, **kwargs)
+            return ConstantVariable.create(constant_val)
 
         return super().call_method(tx, name, args, kwargs)
 
 
 class DeviceMeshVariable(DistributedVariable):
-    def __init__(self, value, **kwargs):
-        super().__init__(**kwargs)
-        self.value = value
-
     @staticmethod
     def is_device_mesh(value):
         # we can't rely on importing/accessing torch distributed, it is not always built.
@@ -151,6 +179,25 @@ class DeviceMeshVariable(DistributedVariable):
         if name == "ndim":
             return ConstantVariable.create(self.value.ndim)
         return super().var_getattr(tx, name)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "size":
+            const_args = [x.as_python_constant() for x in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            return ConstantVariable.create(self.value.size(*const_args, **const_kwargs))
+        if name == "get_coordinate":
+            return ConstantVariable.create(self.value.get_coordinate())
+        if name == "get_group":
+            return ConstantVariable.create(self.value.get_group())
+        if name == "_get_or_create_default_group":
+            return ProcessGroupVariable(self.value._get_or_create_default_group())
+        return super().call_method(tx, name, args, kwargs)
 
 
 class ProcessGroupVariable(DistributedVariable):
@@ -172,15 +219,8 @@ class ProcessGroupVariable(DistributedVariable):
           or just graph-break whenever one of our special cases is not hit?
     """
 
-    def __init__(self, value, **kwargs):
-        super().__init__(**kwargs)
-        self.value = value
-
     def as_python_constant(self):
         return self.value
-
-    def python_type(self):
-        return type(self.value)
 
     def call_method(
         self,
@@ -197,6 +237,8 @@ class ProcessGroupVariable(DistributedVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx, name):
+        if name == "group_name":
+            return variables.ConstantVariable.create(self.value.group_name)
         if name in ["rank", "size"]:
             return variables.LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
