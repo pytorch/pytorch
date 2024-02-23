@@ -6,6 +6,7 @@ import sympy
 from typing_extensions import Protocol
 
 import torch
+import torch.utils._pytree as pytree
 from torch.fx.graph import inplace_methods, magic_methods
 from .utils import IndentedBuffer, reduction_num_outputs, sympy_index_symbol, sympy_str
 
@@ -304,6 +305,9 @@ class OpsHandler(Protocol[T]):
     def erfinv(self, x0: T) -> T:
         ...
 
+    def frexp(self, x0: T):
+        ...
+
     def hypot(self, x0: T, x1: T) -> T:
         ...
 
@@ -503,6 +507,10 @@ class MockHandler:
         return f"ops.masked({mask}, {body()}, {other})"
 
     @staticmethod
+    def frexp(x):
+        return (f"ops.frexp({x})[0]", f"ops.frexp({x})[1]")
+
+    @staticmethod
     def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
         return sympy_index_symbol(f"({str(index_var)})")
 
@@ -567,10 +575,14 @@ class KernelFormatterHandler:
             line = getattr(self.parent_handler, name)(*args, **kwargs)
             if name == "indirect_indexing":
                 return line
-            # replace line with a new variable name
-            varname = f"tmp{next(self.var_counter)}"
-            self.output.writeline(f"{varname} = {line}")
-            return varname
+
+            def write(line):
+                # replace line with a new variable name
+                varname = f"tmp{next(self.var_counter)}"
+                self.output.writeline(f"{varname} = {line}")
+                return varname
+
+            return pytree.tree_map(write, line)
 
         return inner
 
@@ -624,13 +636,17 @@ class OpCounterCSE:
             val = getattr(self.parent_handler, name)(*args, **kwargs)
             if name == "indirect_indexing":
                 return val
-            if val not in self.var_names:
-                varname = f"tmp{self.op_count}"
-                self.op_count += 1
-                self.var_names[val] = varname
-                return varname
-            else:
-                return self.var_names[val]
+
+            def count(val):
+                if val not in self.var_names:
+                    varname = f"tmp{self.op_count}"
+                    self.op_count += 1
+                    self.var_names[val] = varname
+                    return varname
+                else:
+                    return self.var_names[val]
+
+            return pytree.tree_map(count, val)
 
         return inner
 
