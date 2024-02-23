@@ -57,6 +57,10 @@ class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
     return false;
   }
 
+  bool is_nested_int() const override {
+    return true;
+  }
+
   bool has_hint() override {
     return true;
   }

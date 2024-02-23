@@ -7,6 +7,7 @@ from torch._functorch.aot_autograd import AOTConfig, create_joint, from_fun
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
+    reenter_make_fx,
     UnsupportedAliasMutationException,
 )
 from torch._ops import HigherOrderOperator
@@ -228,8 +229,9 @@ def trace_map(proxy_mode, func_overload, f, xs, pos_args):
 
     example_input = _unstack_pytree(xs)[0]
     body_graph = f
-    if not isinstance(body_graph, torch.fx.GraphModule):
-        body_graph = make_fx(body_graph)(*example_input, *pos_args)
+
+    pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
+    body_graph = reenter_make_fx(body_graph, pre_dispatch)(*example_input, *pos_args)
 
     next_name = None
     i = 0

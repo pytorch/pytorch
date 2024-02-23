@@ -76,6 +76,18 @@ def _maybe_run_with_interpreter(fn):
     return maybe_interpreted_fn
 
 
+# We'll use the current decomposition table to make sure operators in subgraphs are
+# decomposed properly.
+# We also need to maybe run with interpreter for propagating stack_trace
+def reenter_make_fx(fn, pre_dispatch=False):
+    decomp_table = torch.fx.experimental.proxy_tensor.CURRENT_DECOMPOSITION_TABLE
+    return make_fx(
+        _maybe_run_with_interpreter(fn),
+        decomposition_table=decomp_table,
+        pre_dispatch=pre_dispatch,
+    )
+
+
 @contextmanager
 def _set_compilation_env():
     _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
