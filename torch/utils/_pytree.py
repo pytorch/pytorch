@@ -18,7 +18,9 @@ To improve the performance we can move parts of the implementation to C++.
 import dataclasses
 import importlib
 import json
+import sys
 import threading
+import types
 import warnings
 from collections import defaultdict, deque, namedtuple, OrderedDict
 from typing import (
@@ -934,7 +936,10 @@ def tree_map_(
 
 Type2 = Tuple[Type[T], Type[S]]
 Type3 = Tuple[Type[T], Type[S], Type[U]]
-TypeAny = Union[Type[Any], Tuple[Type[Any], ...]]
+if sys.version_info >= (3, 10):
+    TypeAny = Union[Type[Any], Tuple[Type[Any], ...], types.UnionType]
+else:
+    TypeAny = Union[Type[Any], Tuple[Type[Any], ...]]
 
 Fn2 = Callable[[Union[T, S]], R]
 Fn3 = Callable[[Union[T, S, U]], R]
@@ -993,15 +998,19 @@ def map_only(
 
     You can also directly use 'tree_map_only'
     """
-    if isinstance(__type_or_types_or_pred, (tuple, type)):
-        return _map_only(lambda x: isinstance(x, __type_or_types_or_pred))
+    if isinstance(__type_or_types_or_pred, (type, tuple)) or (
+        sys.version_info >= (3, 10)
+        and isinstance(__type_or_types_or_pred, types.UnionType)
+    ):
+
+        def pred(x: Any) -> bool:
+            return isinstance(x, __type_or_types_or_pred)  # type: ignore[arg-type]
+
     elif callable(__type_or_types_or_pred):
-        return _map_only(__type_or_types_or_pred)
+        pred = __type_or_types_or_pred  # type: ignore[assignment]
     else:
         raise TypeError("Argument must be a type, a tuple of types, or a callable.")
 
-
-def _map_only(pred: Callable[[Any], bool]) -> MapOnlyFn[FnAny[Any]]:
     def wrapper(func: Callable[[T], Any]) -> Callable[[Any], Any]:
         # @functools.wraps(func)  # torch dynamo doesn't support this yet
         def wrapped(x: T) -> Any:
@@ -1087,6 +1096,16 @@ def tree_map_only_(
 def tree_map_only_(
     __type_or_types_or_pred: Type3[T, S, U],
     func: Fn3[T, S, U, Any],
+    tree: PyTree,
+    is_leaf: Optional[Callable[[PyTree], bool]] = None,
+) -> PyTree:
+    ...
+
+
+@overload
+def tree_map_only_(
+    __type_or_types_or_pred: Callable[[Any], bool],
+    func: FnAny[Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:

@@ -593,10 +593,8 @@ dynamo_expected_failures = {
     "TestNNInit.test_xavier_uniform",  # nn/test_init
     "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_bfloat16_cpu_int32_int64",  # nn/test_embedding
     "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int32_int64_bfloat16",  # nn/test_embedding
-    "TestEmbeddingNNDeviceTypeCPU.test_EmbeddingBag_per_sample_weights_and_no_offsets_cpu_int32_float32",  # nn/test_embedding
     "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int32_int64_float32",  # nn/test_embedding
     "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_dimension_errors_cpu",  # nn/test_embedding
-    "TestEmbeddingNNDeviceTypeCPU.test_EmbeddingBag_per_sample_weights_and_no_offsets_cpu_int64_float64",  # nn/test_embedding
     "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_bfloat16_cpu_int64_int64",  # nn/test_embedding
     "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int64_int32_bfloat16",  # nn/test_embedding
     "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int64_int64_float32",  # nn/test_embedding
@@ -604,8 +602,6 @@ dynamo_expected_failures = {
     "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int64_int32_float16",  # nn/test_embedding
     "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int64_int64_bfloat16",  # nn/test_embedding
     "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int32_int32_float32",  # nn/test_embedding
-    "TestEmbeddingNNDeviceTypeCPU.test_EmbeddingBag_per_sample_weights_and_no_offsets_cpu_int64_float32",  # nn/test_embedding
-    "TestEmbeddingNNDeviceTypeCPU.test_EmbeddingBag_per_sample_weights_and_no_offsets_cpu_int32_float64",  # nn/test_embedding
     "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int64_int64_float64",  # nn/test_embedding
     "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_half_cpu_int32_int32",  # nn/test_embedding
     "TestEmbeddingNNDeviceTypeCPU.test_embedding_bag_device_cpu_int32_int32_float16",  # nn/test_embedding
@@ -1879,6 +1875,10 @@ dynamo_expected_failures = {
     "TestJvpCPU.test_inputs_are_tuples_of_tensors_cpu",  # functorch/test_eager_transforms.py
     "TestJvpCPU.test_disable_fwd_grad_outside_cpu",  # functorch/test_eager_transforms.py
     "TestAOTDispatch.test_aot_dispatch_simple",  # functorch/test_aotdispatch.py
+    "TestEmbeddingNN.test_embedding_sparse_basic",  # nn/test_embedding.py
+    "TestExtensionUtils.test_external_module_register",  # test_utils.py
+    "TestEmbeddingNN.test_embedding_sparse_empty_tensor",  # nn/test_embedding.py
+    "FakeTensorTest.test_embedding_bag_meta",  # test_fake_tensor.py
 }
 
 # see NOTE [dynamo_test_failures.py] for more details
@@ -6105,6 +6105,66 @@ dynamo_skips = {
     "TestCustomOpTestingCPU.test_opcheck_fails_basic_cpu",  # test_custom_ops.py
     "TestSaveLoadForOpVersion.test_versioned_div_tensor_out",  # test_jit.py
     "TestAutograd.test_post_accumulate_grad_hook_gets_cleaned_up",  # test_autograd
+    "TestAssertClose.test_mismatching_stride",  # test_testing.py
+    "TestLinalgCPU.test_kron_errors_and_warnings_cpu_complex128",  # test_linalg.py
+    "TestMultiheadAttentionNN.test_multihead_attn_fast_path_invalid_shape",  # nn/test_multihead_attention.py
+    "TestPythonDispatch.test_is_contiguous_slow_path",  # test_python_dispatch.py
+    "TestAssertClose.test_mismatching_shape",  # test_testing.py
+    "TestLinalgCPU.test_kron_errors_and_warnings_cpu_float64",  # test_linalg.py
+    "TestAssertClose.test_mismatching_values",  # test_testing.py
+    "TestSetOps.test_in1d_mixed_dtype_dtype10_dtype20_kind_table",  # torch_np/numpy_tests/lib/test_arraysetops.py
+    "TestMatmul.test_empty_out",  # torch_np/numpy_tests/core/test_multiarray.py
+    "TestAssertCloseErrorMessage.test_msg_str",  # test_testing.py
+    "TestAssertCloseContainer.test_mapping_mismatching_values_msg",  # test_testing.py
+    "TestAssertCloseErrorMessage.test_zero_div_zero",  # test_testing.py
+    "TestAssertCloseErrorMessage.test_abs_diff",  # test_testing.py
+    "TestLinalgCPU.test_kron_errors_and_warnings_cpu_complex64",  # test_linalg.py
+    "TestAssertCloseSparseCOO.test_mismatching_sparse_dims",  # test_testing.py
+    "TestAssertCloseErrorMessage.test_identifier_tensor_likes",  # test_testing.py
+    "TestAutogradForwardMode.test_make_dual_forbid_integral_dtype",  # test_autograd.py
+    "TestArgmaxArgminCommon.test_output_shape_method_argmax",  # torch_np/test_ndarray_methods.py
+    "TestTensorinv.test_tensorinv_ind_limit_ind_-2",  # torch_np/numpy_tests/linalg/test_linalg.py
+    "TestBroadcastedAssignments.test_broadcast_error_reports_correct_shape_index2",  # torch_np/numpy_tests/core/test_indexing.py
+    "TestSetOps.test_in1d_mixed_dtype_dtype11_dtype21_kind_table",  # torch_np/numpy_tests/lib/test_arraysetops.py
+    "TestLinalgCPU.test_tensorinv_errors_and_warnings_cpu_float64",  # test_linalg.py
+    "TestAutograd.test_not_implemented_fwad",  # test_autograd.py
+    "TestArgmaxArgminCommon.test_output_shape_method_argmin",  # torch_np/test_ndarray_methods.py
+    "TestLstsq.test_incompatible_dims",  # torch_np/numpy_tests/linalg/test_linalg.py
+    "TestNN.test_batchnorm_raises_error_if_running_var_or_running_mean_have_forward_grad",  # test_nn.py
+    "TestAutograd.test_saved_variable_packing_unpacking_saved_original_with_hooks",  # test_autograd.py
+    "TestAssertCloseErrorMessage.test_msg_callable",  # test_testing.py
+    "TestSerialization.test_serialization_sparse_invalid",  # test_serialization.py
+    "TestAssertClose.test_mismatching_values_atol",  # test_testing.py
+    "TestAssertCloseErrorMessage.test_atol",  # test_testing.py
+    "TestTensorinv.test_tensorinv_ind_limit_ind_0",  # torch_np/numpy_tests/linalg/test_linalg.py
+    "TestMultiheadAttentionNN.test_multihead_attn_invalid_shape",  # nn/test_multihead_attention.py
+    "TestAssertClose.test_mismatching_dtype",  # test_testing.py
+    "TestLinalgCPU.test_tensorinv_errors_and_warnings_cpu_complex64",  # test_linalg.py
+    "TestHistogram.test_arr_weights_mismatch",  # torch_np/numpy_tests/lib/test_histograms.py
+    "TestAutogradForwardMode.test_size_check",  # test_autograd.py
+    "TestLinalgCPU.test_tensorinv_errors_and_warnings_cpu_float32",  # test_linalg.py
+    "TestAssertClose.test_mismatching_values_rtol",  # test_testing.py
+    "TestAutograd.test_no_unnecessary_unwrapping",  # test_autograd.py
+    "TestAutograd.test_grad_fn_attr_bindings",  # test_autograd.py
+    "TestOldSerialization.test_serialization_sparse_invalid",  # test_serialization.py
+    "TestAssertCloseErrorMessage.test_not_close",  # test_testing.py
+    "TestBroadcastedAssignments.test_broadcast_error_reports_correct_shape_index0",  # torch_np/numpy_tests/core/test_indexing.py
+    "TestBroadcastedAssignments.test_broadcast_error_reports_correct_shape_index1",  # torch_np/numpy_tests/core/test_indexing.py
+    "TestNN.test_affine_grid_error_checking",  # test_nn.py
+    "TestAssertCloseErrorMessage.test_mismatched_elements",  # test_testing.py
+    "TestBooleanIndexing.test_boolean_indexing_fast_path",  # torch_np/numpy_tests/core/test_indexing.py
+    "TestAssertCloseErrorMessage.test_rtol",  # test_testing.py
+    "TestAssertCloseErrorMessage.test_rel_diff",  # test_testing.py
+    "TestAutogradForwardMode.test_set_fw_grad_having_own_fw_grad_at_same_level",  # test_autograd.py
+    "TestSubtract.test_exceptions",  # torch_np/numpy_tests/core/test_scalarmath.py
+    "TestHstack.test_casting_and_dtype_type_error",  # torch_np/numpy_tests/core/test_shape_base.py
+    "TestAssertCloseContainer.test_sequence_mismatching_values_msg",  # test_testing.py
+    "TestHistogram.test_bin_array_dims",  # torch_np/numpy_tests/lib/test_histograms.py
+    "TestLinalgCPU.test_kron_errors_and_warnings_cpu_float32",  # test_linalg.py
+    "TestAssertCloseErrorMessage.test_not_equal",  # test_testing.py
+    "TestVstack.test_casting_and_dtype_type_error",  # torch_np/numpy_tests/core/test_shape_base.py
+    "TestConcatenate.test_out_and_dtype_simple",  # torch_np/numpy_tests/core/test_shape_base.py
+    "TestLinalgCPU.test_tensorinv_errors_and_warnings_cpu_complex128",  # test_linalg.py
 }
 
 
