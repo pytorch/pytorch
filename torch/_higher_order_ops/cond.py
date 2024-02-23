@@ -294,9 +294,7 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
                     "One of torch.cond branch might be modifying the input!"
                 )
         for branch in [true_fn, false_fn]:
-            if _has_potential_branch_input_alias(
-                branch, unwrapped_inputs, pre_dispatch=pre_dispatch
-            ):
+            if _has_potential_branch_input_alias(branch, unwrapped_inputs):
                 raise UnsupportedAliasMutationException(
                     "One of torch.cond branch might be aliasing the input!"
                 )
