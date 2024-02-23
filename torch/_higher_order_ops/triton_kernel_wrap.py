@@ -156,7 +156,116 @@ def generate_ttir(kernel, kwargs):
     ttir_module = src.make_ir(options, context)
     if not ttir_module.verify():
         raise Exception("Verification for TTIR module has failed")
-    return str(ttir_module), ordered_tensor_names
+
+    return ttir_module, ordered_tensor_names
+
+
+def ttir_to_functions(ttir_module):
+    """
+    Walk the `ttir_module` to mine the `functions` from the
+    MLIR entities representing the Triton kernel (operations,
+    blocks, and regions).
+    """
+    functions = {}
+    op_stack = defaultdict(lambda: defaultdict(list))
+    region_id_to_block_ids = defaultdict(list)
+    block_id_to_block_arg_ids = {}
+    next_fake_intermediate = 0
+
+    def mlir_to_functions(op):
+        name = op.get_name()
+        if name == "builtin.module":
+            # this wraps all tt.func ops
+            return
+
+        operand_ids = [op.get_operand(i).id() for i in range(op.get_num_operands())]
+        result_ids = [op.get_result(i).id() for i in range(op.get_num_results())]
+
+        child_block_ids = []
+        for i in [op.get_region(i).id() for i in range(op.get_num_regions())]:
+            # as the walk is bottom-up, the region_id_to_block_ids[i]
+            # must be populated by the time we process the enclosing op
+            child_block_ids.extend(region_id_to_block_ids[i])
+
+        parent_block_id = -1
+        parent_block = op.get_block()
+        if parent_block is not None:
+            parent_block_id = parent_block.id()
+            if parent_block_id not in block_id_to_block_arg_ids:
+                block_id_to_block_arg_ids[parent_block_id] = []
+                for i in range(parent_block.get_num_arguments()):
+                    block_id_to_block_arg_ids[parent_block_id].append(
+                        parent_block.get_argument(i).id(),
+                    )
+                # the region info is collected via ops' parent blocks to be
+                # used later when the region's encloding op is traversed
+                parent_region = parent_block.get_parent()
+                if parent_region is not None:
+                    region_id_to_block_ids[parent_region.id()].append(parent_block_id)
+
+        if name == "tt.func":
+            # for function ops: gather the ops from all child blocks
+            fn_ops = defaultdict(list)
+            for child_block_id in child_block_ids:
+                for result, block_fn_ops in op_stack.pop(child_block_id).items():
+                    for block_fn_op in block_fn_ops:
+                        fn_ops[result].append(block_fn_op)
+
+            # replace the corresponding Intermediates in the child op
+            # args with the function arguments (Params)
+            params = {
+                idx: Param(i)
+                for i, idx in enumerate(block_id_to_block_arg_ids[child_block_ids[0]])
+            }
+            for fn_op_list in fn_ops.values():
+                for fn_op in fn_op_list:
+                    for i in range(len(fn_op.args)):
+                        arg_idx = fn_op.args[i].idx
+                        if arg_idx in params:
+                            fn_op.args[i] = params[arg_idx]
+
+            fn_name = op.get_str_attr("sym_name")
+            functions[fn_name] = fn_ops
+        elif child_block_ids:
+            if name in ("scf.if", "scf.for", "scf.while"):
+                # for blocked control flow ops: inline the enclosed
+                # ops into the parent block + rewire the last op in
+                # each child block (yield) to return the scf result
+                yield_ops = []
+                for block_id in child_block_ids:
+                    if block_id in op_stack:
+                        block_ops = op_stack.pop(block_id)
+                        yield_ops.extend(block_ops.popitem()[1])
+                        for result, child_ops in block_ops.items():
+                            op_stack[parent_block_id][result].extend(child_ops)
+
+                scf_results = [Intermediate(idx) for idx in result_ids]
+                for result in scf_results:
+                    for yield_op in yield_ops:
+                        op_stack[parent_block_id][result].append(yield_op)
+            else:
+                raise Exception(
+                    f"Unknown blocked function: {name}. Can't capture the TTIR."
+                )
+        else:
+            callee = None
+            if name == "tt.call":
+                callee = op.get_flat_symbol_ref_attr("callee")
+            args = [Intermediate(operand) for operand in operand_ids]
+            block_ops = op_stack[parent_block_id]
+            if result_ids:
+                for result in result_ids:
+                    res = Intermediate(result)
+                    block_ops[res].append(Op(name, callee, args, res))
+            else:
+                nonlocal next_fake_intermediate
+                next_fake_intermediate -= 1
+                fake_res = Intermediate(next_fake_intermediate)
+                block_ops[fake_res].append(Op(name, callee, args, None))
+
+    ttir_module.walk(mlir_to_functions)
+
+    return functions
 
 
 def parse_ttir(ttir, kwargs):
@@ -436,8 +545,15 @@ def identify_mutated_tensors(kernel, kwargs):
         if not config.optimize_user_defined_triton_kernels:
             raise Exception("optimize_user_defined_triton_kernels is False")
 
-        ttir, ordered_tensor_names = generate_ttir(kernel, kwargs)
-        functions = parse_ttir(ttir, kwargs)
+        ttir_module, ordered_tensor_names = generate_ttir(kernel, kwargs)
+
+        # extract functions from TTIR
+        if hasattr(ttir_module, "walk"):
+            # use MLIR bindings exposed by Triton code
+            functions = ttir_to_functions(ttir_module)
+        else:
+            # parse string representation of Triton IR
+            functions = parse_ttir(str(ttir_module), kwargs)
 
         kernel_name = next(iter(functions.keys()))
         # Triton codegen modifies the name
@@ -457,9 +573,8 @@ def identify_mutated_tensors(kernel, kwargs):
         import traceback
 
         warnings.warn(
-            "Encountered an exception in identify_mutated_tensors, assuming every input is mutated"
-        )
-        log.debug(
+            "Encountered an exception in identify_mutated_tensors, "
+            "assuming every input is mutated:\n"
             "".join(
                 traceback.TracebackException.from_exception(e).format()  # noqa: G001
             )
