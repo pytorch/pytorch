@@ -260,8 +260,8 @@ static at::Tensor as_strided_functionalize(
     return at::_ops::as_strided::call(self_, size, stride, storage_offset);
   }
 
-  auto self_base = at::functionalization::impl::unsafeGetFunctionalWrapper(self)
-                       ->get_base_functional_tensor();
+  auto self_base =
+      at::functionalization::impl::create_functional_tensor_from_base(self);
   auto self_base_ =
       at::functionalization::impl::from_functional_tensor(self_base);
   auto storage_offset_ = storage_offset.value_or(self.storage_offset());
@@ -385,8 +385,8 @@ static const at::Tensor& as_strided__functionalize(
             storage_offset);
       });
 
-  auto self_base = at::functionalization::impl::unsafeGetFunctionalWrapper(self)
-                       ->get_base_functional_tensor();
+  auto self_base =
+      at::functionalization::impl::create_functional_tensor_from_base(self);
   auto compute_reference_meta =
       self.key_set().has_backend(c10::BackendComponent::XLABit) ||
       self.key_set().has_backend(c10::BackendComponent::LazyBit);

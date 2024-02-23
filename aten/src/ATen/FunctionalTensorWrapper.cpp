@@ -61,10 +61,11 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
   set_constructor_metadata();
 }
 
-FunctionalTensorWrapper::FunctionalTensorWrapper(
-    const Tensor& value,
-    const Storage& storage)
-    : FunctionalTensorWrapper(value) {
+FunctionalTensorWrapper::FunctionalTensorWrapper(const Storage& storage)
+    : FunctionalTensorWrapper(
+          static_cast<functionalization::FunctionalStorageImpl*>(
+              storage.unsafeGetStorageImpl())
+              ->base()) {
   storage_ = storage;
 }
 
@@ -248,11 +249,6 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
 bool FunctionalTensorWrapper::has_data_mutation() {
   // Current tensor's data was mutated if its storage saw any mutations.
   return functional_storage_impl()->generation() > 0;
-}
-
-Tensor FunctionalTensorWrapper::get_base_functional_tensor() const {
-  return at::detail::make_tensor<FunctionalTensorWrapper>(
-      functional_storage_impl()->base(), storage_);
 }
 
 void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
@@ -722,6 +718,12 @@ std::vector<Tensor> create_functional_tensor_with_view_meta(ITensorListRef view_
     i++;
   }
   return outputs;
+}
+
+Tensor create_functional_tensor_from_base(const at::Tensor& tensor) {
+  TORCH_INTERNAL_ASSERT(
+      at::functionalization::impl::isFunctionalTensor(tensor));
+  return at::detail::make_tensor<FunctionalTensorWrapper>(tensor.storage());
 }
 
 void mutate_view_meta(const at::Tensor& self, functionalization::ViewMeta meta) {
