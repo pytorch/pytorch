@@ -26,7 +26,6 @@ from torch.optim.lr_scheduler import (
     OneCycleLR,
     ChainedScheduler,
     PolynomialLR,
-    EPOCH_DEPRECATION_WARNING,
 )
 from torch.optim.swa_utils import SWALR
 from torch.testing._internal.common_utils import (
@@ -77,17 +76,6 @@ class TestLRScheduler(TestCase):
             ],
             lr=0.05,
         )
-
-    def _check_warning_is_epoch_deprecation_warning(self, w, *, num_warnings: int = 1):
-        """This function swallows the epoch deprecation warning which is produced when we
-        call `scheduler.step(epoch)` with some not `None` value of `epoch`.
-        this is deprecated, and this function will need to be removed/updated when
-        the schedulers no longer accept the parameter at all.
-        """
-        self.assertEqual(len(w), num_warnings)
-        for warning in w:
-            self.assertEqual(len(warning.message.args), 1)
-            self.assertEqual(warning.message.args[0], EPOCH_DEPRECATION_WARNING)
 
     def test_error_when_getlr_has_epoch(self):
         class MultiStepLR(torch.optim.lr_scheduler.LRScheduler):
@@ -306,10 +294,7 @@ class TestLRScheduler(TestCase):
 
         for _ in range(10):
             scheduler.optimizer.step()
-            with warnings.catch_warnings(record=True) as w:
-                scheduler.step(2)
-                self._check_warning_is_epoch_deprecation_warning(w)
-
+            scheduler.step(2)
             l.append(self.opt.param_groups[0]["lr"])
         self.assertEqual(min(l), max(l))
 
@@ -2041,13 +2026,7 @@ class TestLRScheduler(TestCase):
         optimizers = {scheduler.optimizer for scheduler in schedulers}
         for epoch in range(epochs):
             [optimizer.step() for optimizer in optimizers]
-            with warnings.catch_warnings(record=True) as w:
-                [
-                    scheduler.step(epoch) for scheduler in schedulers
-                ]  # step before assert: skip initial lr
-                self._check_warning_is_epoch_deprecation_warning(
-                    w, num_warnings=len(schedulers)
-                )
+            [scheduler.step(epoch) for scheduler in schedulers]
             for param_group, target in zip(self.opt.param_groups, targets):
                 self.assertEqual(
                     target[epoch],
@@ -2109,9 +2088,7 @@ class TestLRScheduler(TestCase):
         targets = []
         for epoch in range(epochs):
             closed_form_scheduler.optimizer.step()
-            with warnings.catch_warnings(record=True) as w:
-                closed_form_scheduler.step(epoch)
-                self._check_warning_is_epoch_deprecation_warning(w)
+            closed_form_scheduler.step(epoch)
             targets.append([group["lr"] for group in self.opt.param_groups])
         self.setUp()
         for epoch in range(epochs):
