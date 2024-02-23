@@ -1,34 +1,10 @@
 #pragma once
 
-#include <stddef.h>
-#include <stdint.h>
-
 // WARNING: Be careful when adding new includes here. This header will be used
 // in model.so, and should not refer to any aten/c10 headers except the stable
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
-#include <torch/csrc/inductor/aoti_torch/c/shim.h>
-
-#ifdef __GNUC__
-#define AOT_INDUCTOR_EXPORT __attribute__((__visibility__("default")))
-#else // !__GNUC__
-#ifdef _WIN32
-#define AOT_INDUCTOR_EXPORT __declspec(dllexport)
-#else // !_WIN32
-#define AOT_INDUCTOR_EXPORT
-#endif // _WIN32
-#endif // __GNUC__
-
-using AOTIRuntimeError = int32_t;
-#define AOTI_RUNTIME_SUCCESS 0
-#define AOTI_RUNTIME_FAILURE 1
-
-#define AOTI_RUNTIME_ERROR_CODE_CHECK(call)                                \
-  if ((call) != AOTI_RUNTIME_SUCCESS) {                                    \
-    throw std::runtime_error(                                              \
-        std::string(#call " API call failed at ") + __FILE__ + ", line " + \
-        std::to_string(__LINE__));                                         \
-  }
+#include <torch/csrc/inductor/aoti_runtime/utils.h>
 
 extern "C" {
 struct AOTInductorModelOpaque;
@@ -43,13 +19,25 @@ using AOTInductorStreamHandle = AOTInductorStreamOpaque*;
 struct AOTInductorConstantMap;
 using AOTInductorConstantMapHandle = AOTInductorConstantMap*;
 
-// Creates an AOTInductor model container. The parameter num_models
-// specifies the number of model instances that may be run concurrently for
-// the same input model.
+// TODO: Deprecate this API. This was kept for BC compatibility.
+// Please use AOTInductorModelContainerCreateWithDevice instead.
 AOTIRuntimeError AOTInductorModelContainerCreate(
     AOTInductorModelContainerHandle* container_handle,
     size_t num_models,
     bool is_cpu,
+    const char* cubin_dir);
+
+// Creates an AOTInductor model container. The parameter num_models
+// specifies the number of model instances that may be run concurrently for
+// the same input model.
+// `device_str` MUST NOT be nullptr. It must be a valid device string, e.g.
+// "cpu", "cuda", "cuda:0", etc. If the device index is not specified for CUDA
+// device, runtime will use the device index returned by
+// "cudaGetDevice(&device_idx)"
+AOTIRuntimeError AOTInductorModelContainerCreateWithDevice(
+    AOTInductorModelContainerHandle* container_handle,
+    size_t num_models,
+    const char* device_str,
     const char* cubin_dir);
 
 // Deletes the AOTInductor model container.
@@ -76,18 +64,32 @@ AOTIRuntimeError AOTInductorModelContainerGetNumConstants(
     size_t* num_constants);
 
 // Retrieves a constant's name.
+// idx is the index of the internal's constants.
+// Need idx < num_constants from AOTInductorModelContainerGetNumConstants
 AOTIRuntimeError AOTInductorModelContainerGetConstantName(
     AOTInductorModelContainerHandle container_handle,
     size_t idx,
     const char** name);
 
 // Retrieves a constant's original FQN.
+// idx is the index of the internal's constants.
+// Need idx < num_constants from AOTInductorModelContainerGetNumConstants
 AOTIRuntimeError AOTInductorModelContainerGetConstantOriginalFQN(
     AOTInductorModelContainerHandle container_handle,
     size_t idx,
     const char** original_fqn);
 
+// Retrieves whether a constant is from folded.
+// idx is the index of the internal's constants.
+// Need idx < num_constants from AOTInductorModelContainerGetNumConstants
+AOTIRuntimeError AOTInductorModelContainerGetConstantFromFolded(
+    AOTInductorModelContainerHandle container_handle,
+    size_t idx,
+    bool* from_folded);
+
 // Retrieves a constant's dtype.
+// idx is the index of the internal's constants.
+// Need idx < num_constants from AOTInductorModelContainerGetNumConstants
 AOTIRuntimeError AOTInductorModelContainerGetConstantDtype(
     AOTInductorModelContainerHandle container_handle,
     size_t idx,
@@ -107,6 +109,13 @@ AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
 AOTIRuntimeError AOTInductorModelContainerUpdateInactiveConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle);
+
+// Run constant folding on constant buffer.
+AOTIRuntimeError AOTInductorModelContainerRunConstantFolding(
+    AOTInductorModelContainerHandle container_handle,
+    bool use_inactive,
+    AOTInductorStreamHandle stream_handle,
+    AOTIProxyExecutorHandle proxy_executor_handle);
 
 // Swap the constant buffer being used to the inactive one.
 AOTIRuntimeError AOTInductorModelContainerSwapConstantBuffer(
