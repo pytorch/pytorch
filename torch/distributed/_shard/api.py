@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from typing import Optional
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -120,7 +121,7 @@ def shard_parameter(
     module.register_parameter(param_name, nn.Parameter(st))
 
 # Tracks the current process group in the load context manager.
-_CURRENT_PROCESS_GROUP = None
+_CURRENT_PROCESS_GROUP: Optional[dist.ProcessGroup] = None
 
 @contextmanager
 def load_with_process_group(process_group):

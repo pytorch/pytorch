@@ -5,6 +5,7 @@ import functools
 import inspect
 import itertools
 import logging
+import operator
 import os
 import re
 from collections import defaultdict
@@ -32,6 +33,7 @@ from torch._dynamo.utils import counters
 from torch._prims_common import is_integer_dtype
 from torch.fx import Node
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
+from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
 from .._functorch import config as functorch_config
@@ -121,10 +123,10 @@ class Match:
             self, self.ctx.graph, replacement_graph, args
         )
 
-    def replace_by_example(self, replacement_fn, args, trace_fn=None):
+    def replace_by_example(self, replacement_fn, args, trace_fn=None, run_dce=True):
         assert self.ctx
         if trace_fn is None:
-            trace_fn = fwd_only
+            trace_fn = functools.partial(fwd_only, run_dce=run_dce)
         replacement = trace_fn(
             replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])
         )
@@ -551,7 +553,7 @@ class ListOf(PatternExpr):
     def __repr__(self):
         return f"{self.__class__.__name__}({self.pattern})"
 
-    def _match(self, node: List[torch.fx.Node], ctx: MatchContext):
+    def _match(self, node: List[torch.fx.Node], ctx: MatchContext):  # type: ignore[override]
         if not isinstance(node, (list, tuple)) or len(node) == 0:
             return FailedMatch("non_list")
         m = Match(self)
@@ -780,9 +782,9 @@ class ReplacementPatternEntry(PatternEntry):
         first_node = output_nodes[0]
 
         class Replacer(torch.fx.Interpreter):
-            call_method = None
-            call_module = None
-            get_attr = None
+            call_method = None  # type: ignore[assignment]
+            call_module = None  # type: ignore[assignment]
+            get_attr = None  # type: ignore[assignment]
 
             def run_node(self, node) -> Any:
                 if node.op in ("placeholder", "output"):
@@ -813,38 +815,103 @@ class ReplacementPatternEntry(PatternEntry):
             ]
             last_node = min(indices, key=lambda tup: tup[0])[1]
 
-        def percolate_tags(node, recompute_tag):
-            for arg in node.all_input_nodes:
-                if hasattr(arg, "meta"):
+        def percolate_tags(node, recompute_tag, input_stops):
+            queue = [node]
+            visited = set()
+
+            while queue:
+                arg = queue.pop()
+                if (
+                    arg not in visited
+                    and arg not in input_stops
+                    and hasattr(arg, "meta")
+                ):
+                    visited.add(arg)
                     arg.meta["recompute"] = recompute_tag
-                    percolate_tags(arg, recompute_tag)
+                    queue.extend(arg.all_input_nodes)
 
         with graph.inserting_before(last_node):
             replacement = Replacer(replacement_graph).run(*args)
             if isinstance(replacement, torch.fx.Node):
                 replacement = [replacement]
-            assert len(replacement) == len(output_nodes)
-            for old, new in zip(output_nodes, replacement):
+
+            def maybe_getitem(node):
+                if node.op != "call_function":
+                    return None
+                if node.target != operator.getitem:
+                    return None
+                assert len(node.args) == 2
+                return node.args[1]
+
+            def replace(old, new):
                 if old is None:
                     assert new is None
-                elif new is None:
+                    return
+                assert isinstance(old, torch.fx.Node)
+                if new is None:
                     old.replace_all_uses_with(None)
-                else:
+                    graph.erase_node(old)
+                    return
+                if isinstance(new, torch.fx.Node):
                     if "val" not in new.meta:
                         new.meta.update(old.meta)
 
                     # Preserve the recompute tags in the replacement graph. We
                     # look at the recompute tags of the original output node to
                     # propagate the tag from the output all the way to the input
-                    # args in the replacement graph.
+                    # args (named as args in the replace_with_graph).
                     # Note that this is best effort. Since patterns are from
                     # many to many, there is no easy way to correctly map the
                     # recomputable tags. It is possible in some scenarios that we
                     # incorrectly tag some nodes as recomputables.
                     if "recompute" in old.meta:
-                        percolate_tags(new, old.meta["recompute"])
+                        percolate_tags(new, old.meta["recompute"], args)
 
                     old.replace_all_uses_with(new)
+                    graph.erase_node(old)
+                    return
+
+                # `new` is not a node: it's a list of nodes.
+                #
+                # This happens when we want to replace a node that has a single
+                # packed return with multiple unpacked returns. We need to do
+                # some graph surgery here.
+                #
+                # Example:
+                #   def original_graph(x):
+                #      a = op(x)
+                #      b = a[0]
+                #      c = a[1]
+                #      ...
+                #
+                # Assume that we want to replace op(x) with the graph
+                #   def new_op(x):
+                #      w = x + 1
+                #      z = x + 2
+                #      return (w, z)
+                #
+                # We need to replace `op` with the contents of `new_op`,
+                # and then rewrite a[0] to be w and a[1] to be z, as so:
+                #   def new_graph(x):
+                #     w = x + 1
+                #     z = x + 2
+                #     b = w
+                #     c = z
+                #     ...
+                old_uses = list(old.users.keys())
+                for user in old_uses:
+                    idx = maybe_getitem(user)
+                    if idx is None:
+                        raise AssertionError("can't handle")
+                    replace(user, new[idx])
+                graph.erase_node(old)
+
+            if len(output_nodes) == len(replacement):
+                for old, new in zip(output_nodes, replacement):
+                    replace(old, new)
+            else:
+                assert len(output_nodes) == 1
+                replace(output_nodes[0], replacement)
 
         match.erase_nodes(graph)
 
@@ -852,13 +919,21 @@ class ReplacementPatternEntry(PatternEntry):
         self.replace_with_graph(
             match,
             graph,
-            match.replacement_graph,
+            match.replacement_graph,  # type: ignore[arg-type]
             self.normalize_args(*match.args, **match.kwargs),
         )
 
 
 def _return_true(match):
     return True
+
+
+def log_trace_failure(search_fn, e):
+    log.info(
+        "Replacement pattern %s failed to apply due to shape mismatch: %s",
+        search_fn.__name__,
+        e,
+    )
 
 
 def register_replacement(
@@ -885,7 +960,7 @@ def register_replacement(
         pass_dict: dict of passes to register to
         extra_check: additional check to run on match(using real shapes)
     """
-    argnames = [*inspect.signature(search_fn).parameters.keys()]
+    argnames_static = [*inspect.signature(search_fn).parameters.keys()]
 
     def check_fn(match: Match):
         """
@@ -894,6 +969,7 @@ def register_replacement(
 
         Recheck the match with the correct shapes.
         """
+        argnames = list(argnames_static)
         for name in argnames:
             if name not in match.kwargs:
                 raise RuntimeError(
@@ -906,6 +982,7 @@ def register_replacement(
                 [match.kwargs[name] for name in argnames], lambda n: n.meta["val"]
             )
         )
+        sym_args: List[torch.SymInt] = []
         with torch._dynamo.utils.detect_fake_mode(args):
             for i, grad in enumerate(requires_grad):
                 if isinstance(args[i], torch.Tensor):
@@ -919,31 +996,71 @@ def register_replacement(
                         device=args[i].device,
                         requires_grad=grad,
                     )
-            try:
-                specific_graph = trace_fn(search_fn, args)
-            except RuntimeError as e:
-                log.info(
-                    "Replacement pattern %s failed to apply due to shape mismatch: %s",
-                    search_fn.__name__,
-                    e,
-                )
-                return False
+                    for v in itertools.chain(args[i].shape, args[i].stride()):
+                        if isinstance(v, torch.SymInt) and all(
+                            guard_size_oblivious(v != a) for a in sym_args
+                        ):
+                            sym_args.append(v)
+
+            if sym_args:
+                # AOT Autograd and make fx will dedupe symbolic shape size
+                # accesses of sym ints that appear as inputs
+                # We don't want the sym_size uses to interfere with pattern matching
+                # so we provide them as inputs.
+                # Later, when we actually do the replacement, the symbolic shape
+                # sizes will get re-traced and added to the graph.
+
+                def search_fn_new(*args_new):
+                    return search_fn(*args_new[len(args_new) - len(args) :])
+
+                try:
+                    specific_graph = trace_fn(search_fn_new, sym_args + args)
+                except RuntimeError as e:
+                    log_trace_failure(search_fn, e)
+                    return False
+
+                # correct argnames in the graph
+                sym_arg_names = []
+                for i, placeholder in zip(
+                    range(len(sym_args) + len(args)),
+                    specific_graph.graph.nodes,
+                ):
+                    if i < len(sym_args):
+                        sym_arg_names.append(placeholder.target)
+                        continue
+
+                    with specific_graph.graph.inserting_after(placeholder):
+                        new_node = specific_graph.graph.placeholder(
+                            argnames[i - len(sym_args)]
+                        )
+                        new_node.target = new_node.name
+                        placeholder.replace_all_uses_with(new_node)
+                        specific_graph.graph.erase_node(placeholder)
+
+                argnames = sym_arg_names + argnames
+            else:
+                try:
+                    specific_graph = trace_fn(search_fn, args)
+                except RuntimeError as e:
+                    log_trace_failure(search_fn, e)
+                    return False
+
             specific_pattern = fx_to_pattern(
                 specific_graph,
                 argnames=argnames,
                 exclusive_arg_names=exclusive_arg_names,
                 scalar_workaround=scalar_workaround,
             )
-            specific_pattern_match = specific_pattern.match(match.output_nodes()[0])
+            specific_pattern_match = specific_pattern.match(match.output_nodes()[0])  # type: ignore[arg-type]
             if specific_pattern_match and extra_check(specific_pattern_match):
                 # trace the pattern using the shapes from the user program
-                match.replacement_graph = trace_fn(replace_fn, args)
+                match.replacement_graph = trace_fn(replace_fn, args)  # type: ignore[assignment]
                 return True
             return False
 
     def normalize_args(**kwargs):
         args = []
-        for name in argnames:
+        for name in argnames_static:
             args.append(kwargs.pop(name))
         for i in range(1, len(kwargs) + 1):
             if f"tangents_{i}" not in kwargs:
@@ -1052,26 +1169,26 @@ def register_graph_pattern(
     return decorator
 
 
-def is_start_of_fx_graph(graph: torch.fx.GraphModule, node: torch.fx.Node) -> bool:
+def is_start_of_fx_graph(graph: torch.fx.Graph, node: torch.fx.Node) -> bool:
     # first node in the graph
     return node is next(iter(graph.nodes))
 
 
 # match: copy_, relu_, _set_grad_enabled, manual_seed, enter_functional_autocast, etc
-_mutation_op_re = re.compile(r"_$|(\b|_)(set|enter|exit|seed)(\b|_)")
+_mutation_op_re = re.compile(r"_$|_[.]|(\b|_)(set|enter|exit|seed)(\b|_)")
 
 
 def is_mutation_op(node: torch.fx.Node) -> bool:
     if node.op == "call_function":
-        if _mutation_op_re.search(node.target.__name__):
+        if _mutation_op_re.search(node.target.__name__):  # type: ignore[union-attr]
             return True
     elif node.op == "call_method":
-        if _mutation_op_re.search(node.target):
+        if _mutation_op_re.search(node.target):  # type: ignore[union-attr, arg-type]
             return True
     return node.kwargs.get("out") is not None
 
 
-def get_mutation_region_id(graph: torch.fx.GraphModule, node: torch.fx.Node) -> int:
+def get_mutation_region_id(graph: torch.fx.Graph, node: torch.fx.Node) -> int:
     n = node
     while "mutation_region_id" not in n.meta and not is_start_of_fx_graph(graph, n):
         n = n.prev
@@ -1097,12 +1214,15 @@ def compute_mutation_region_ids(graph: torch.fx.GraphModule):
 
 
 class PatternMatcherPass:
-    def __init__(self, prevent_match_across_mutations=False):
+    def __init__(
+        self, prevent_match_across_mutations=False, pass_name: Optional[str] = None
+    ):
         super().__init__()
         self.patterns: DefaultDict[
             torch.fx.node.Target, List[PatternEntry]
         ] = defaultdict(list)
         self.prevent_match_across_mutations = prevent_match_across_mutations
+        self.pass_name = pass_name
 
     def __getitem__(self, item: torch.fx.node.Target) -> List[PatternEntry]:
         return self.patterns[item]
@@ -1139,14 +1259,14 @@ class PatternMatcherPass:
                     if (
                         self.prevent_match_across_mutations
                         and is_match(m)
-                        and len(set(map(get_mutation_region_id_partial, m.nodes))) != 1
+                        and len(set(map(get_mutation_region_id_partial, m.nodes))) != 1  # type: ignore[possibly-undefined]
                     ):
                         continue
                     if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
                         log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
                     if is_match(m) and entry.extra_check(m):
                         count += 1
-                        entry.apply(m, graph, node)
+                        entry.apply(m, graph, node)  # type: ignore[arg-type]
                         counters["inductor"]["pattern_matcher_count"] += 1
                         counters["inductor"]["pattern_matcher_nodes"] += len(m.nodes)
         return count
@@ -1232,12 +1352,16 @@ def fx_to_pattern(
 
 
 @torch.no_grad()
-def fwd_only(fn, args) -> torch.fx.GraphModule:
+def fwd_only(fn, args, *, run_dce=True) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
     # TODO - look into using aot autograd, asserting no mutating ops here
     with enable_python_dispatcher():
-        gm = make_fx(fn, select_decomp_table())(*args)
-    gm.graph.eliminate_dead_code()
+        mode = (
+            "real" if not torch._inductor.utils.any_is_symbolic(*args) else "symbolic"
+        )
+        gm = make_fx(fn, select_decomp_table(), tracing_mode=mode)(*args)
+    if run_dce:
+        gm.graph.eliminate_dead_code()
     gm.recompile()
     return gm
 
@@ -1274,7 +1398,7 @@ def joint_fwd_bwd(fn, args) -> torch.fx.GraphModule:
     GraphPatternEntry(
         pattern=pattern, handler=pointless_view, extra_check=_return_true
     ).register(matcher_pass.patterns)
-    matcher_pass.apply(gm.graph)
+    matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
 
     # remove in/out specs
     gm.graph._codegen = torch.fx.graph.CodeGen()
@@ -1378,7 +1502,7 @@ def get_arg_value(
     return (
         node.args[arg_number]
         if len(node.args) > arg_number
-        else node.kwargs.get(kwarg_name)
+        else node.kwargs.get(kwarg_name)  # type: ignore[arg-type]
     )
 
 
@@ -1396,5 +1520,5 @@ def extract_target(node: Node):
      as a function.
     """
     if node.op == "call_module":
-        return getattr(node.graph.owning_module, node.target).__class__
+        return getattr(node.graph.owning_module, node.target).__class__  # type: ignore[arg-type]
     return node.target

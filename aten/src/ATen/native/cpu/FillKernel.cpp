@@ -1,5 +1,5 @@
 #define TORCH_ASSERT_NO_OPERATORS
-#include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vec/functional.h>
@@ -44,13 +44,16 @@ void fill_kernel(TensorIterator& iter, const Scalar& value_scalar) {
   } else if (iter.dtype() == ScalarType::ComplexHalf) {
     fill_non_native_type<c10::complex<at::Half>>(iter, value_scalar);
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Bool, iter.dtype(), "fill_cpu", [&]() {
-      scalar_t value = value_scalar.to<scalar_t>();
-      cpu_kernel_vec(
-          iter,
-          [=]() -> scalar_t { return value; },
-          [=]() { return Vectorized<scalar_t>(value); });
-    });
+    AT_DISPATCH_V2(
+      iter.dtype(), "fill_cpu", AT_WRAP([&]() {
+        scalar_t value = value_scalar.to<scalar_t>();
+        cpu_kernel_vec(
+            iter,
+            [=]() -> scalar_t { return value; },
+            [=]() { return Vectorized<scalar_t>(value); });
+      }),
+      AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), kBool, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES)
+    );
   }
 }
 
