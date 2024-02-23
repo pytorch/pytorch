@@ -1,6 +1,6 @@
 #include <ATen/native/vulkan/impl/Packing.h>
 
-#include <ATen/native/vulkan/graph/Staging.h>
+#include <ATen/native/vulkan/graph/ops/Staging.h>
 
 namespace at {
 namespace native {

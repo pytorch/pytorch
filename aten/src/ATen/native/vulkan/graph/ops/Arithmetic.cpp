@@ -1,7 +1,7 @@
 #include <ATen/native/vulkan/impl/Common.h>
 
-#include <ATen/native/vulkan/graph/Arithmetic.h>
-#include <ATen/native/vulkan/graph/Staging.h>
+#include <ATen/native/vulkan/graph/ops/Arithmetic.h>
+#include <ATen/native/vulkan/graph/ops/Staging.h>
 
 namespace at {
 namespace native {
