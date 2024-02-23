@@ -892,6 +892,72 @@ def forward(self, x_1, output_1):
         compiled_out = torch.compile(f)(x, y)
         self.assertEqual(compiled_out, eager_out)
 
+    @requires_cuda
+    @skipIfRocm
+    def test_triton_kernel_out_of_order(self):
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            BLOCK_SIZE: "tl.constexpr",
+            out_ptr,
+            n_elements,
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def f(x, y):
+            out = torch.zeros_like(x)
+            n_elements = x.numel()
+            add_kernel[(n_elements,)](x, y, 4, out, n_elements)
+            return out
+
+        x = torch.randn(4, device="cuda")
+        y = torch.randn(4, device="cuda")
+        eager_out = f(x, y)
+        compiled_out = torch.compile(f)(x, y)
+        self.assertEqual(compiled_out, eager_out)
+
+    @requires_cuda
+    @skipIfRocm
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_kernel_unbacked_shape_tensor(self, backend):
+        @triton.jit
+        def square(
+            in_ptr,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            output = x * x
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def f(x):
+            x = x[x > 2]
+            n_elements = x.numel()
+            output = torch.zeros_like(x)
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            square[grid](x, output, n_elements, BLOCK_SIZE=16)
+            return output
+
+        x = torch.randn(4, device="cuda")
+        eager_out = f(x)
+        compiled_out = torch.compile(f, fullgraph=True, backend=backend)(x)
+        self.assertEqual(compiled_out, eager_out)
+
 
 def make_mutation_test(fn):
     @requires_cuda
