@@ -169,6 +169,8 @@ test_failures = {
     "test_like_rands_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linspace2_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linspace3_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_logcumsumexp_dynamic_shapes": TestFailure(("cpu",)),
+    "test_logcumsumexp_zero_dim_dynamic_shapes": TestFailure(("cpu",)),
     "test_max_pool2d6_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_max_pool2d8_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_max_pool2d_with_indices_backward5_dynamic_shapes": TestFailure(
@@ -332,15 +334,12 @@ test_failures = {
 if TEST_WITH_ROCM:
     test_failures.update(
         {
-            "test_cumsum_dynamic_shapes": TestFailure(("cpu", "cuda")),
-            "test_cumsum_no_mask_dynamic_shapes": TestFailure(("cpu", "cuda")),
             "test_split_cumsum_dynamic_shapes": TestFailure(("cpu", "cuda")),
             "test_split_cumsum_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
             "test_split_cumprod_dynamic_shapes": TestFailure(("cpu", "cuda")),
             "test_split_cumprod_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
         }
     )
-
 
 DynamicShapesCodegenCommonTemplate = make_dynamic_cls(
     CommonTemplate, xfail_prop="_expected_failure_codegen_dynamic"

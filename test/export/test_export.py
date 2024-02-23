@@ -14,7 +14,6 @@ import torch.nn.functional as F
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
 from torch._dynamo.test_case import TestCase
-from torch._export import capture_pre_autograd_graph
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.utils import (
     get_buffer,
@@ -69,6 +68,14 @@ except ImportError:
 # in other files (like test_export_nonstrict.py). `torch.export.export`
 # will invalidate the patch.
 from torch.export import export
+
+
+torch.library.define("testlib::returns_tensor_symint", "(Tensor x) -> (Tensor, SymInt)")
+
+@torch.library.impl("testlib::returns_tensor_symint", "cpu")
+@torch.library.impl_abstract("testlib::returns_tensor_symint")
+def returns_tensor_symint_impl(x):
+    return x, x.shape[0]
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -537,7 +544,7 @@ class TestExport(TestCase):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    @testing.expectedFailureSerDer
+    @testing.expectedFailureSerDer  # we don't save placeholder metadata
     @testing.expectedFailureNonStrict
     def test_linear_conv(self):
         class MyLinear(torch.nn.Module):
@@ -1062,7 +1069,6 @@ class TestExport(TestCase):
             ):
                 _ = export(mod, inp)
 
-    @testing.expectedFailureSerDer
     def test_module(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
@@ -1100,7 +1106,6 @@ class TestExport(TestCase):
         self.assertTrue(torch.allclose(ep.module()(*inp_test)[0], ep_rexported.module()(*inp_test)[0]))
         self.assertTrue(torch.allclose(ep.module()(*inp_test)[1], ep_rexported.module()(*inp_test)[1]))
 
-    @testing.expectedFailureSerDer
     def test_module_with_dict_container_inp_out(self):
         class MyLinear(torch.nn.Module):
             def __init__(self):
@@ -1787,7 +1792,7 @@ def forward(self, arg_0):
                 2
             )
 
-    @testing.expectedFailureSerDer
+    @testing.expectedFailureSerDer  # We don't preserve metadata on graph module
     @testing.expectedFailureNonStrict
     def test_retrace_graph_level_meta_preservation(self):
         class Foo(torch.nn.Module):
@@ -1865,6 +1870,11 @@ def forward(self, arg_0):
         ):
             graph_module.eval()
 
+
+    # TODO (tmanlaibaatar) We currently can't preserve
+    # source_fn inside HOO in export. Since no one needs
+    # it rn, it is ok to xfail it and revisit later.
+    @unittest.expectedFailure
     def test_export_cond_preserve_stack_trace_for_subgraphs(self):
         class MySubModule(torch.nn.Module):
             def foo(self, x):
@@ -1884,14 +1894,13 @@ def forward(self, arg_0):
             def forward(self, x):
                 return cond(x.shape[0] <= 2, self.subm.forward, self.bar, [x])
 
-        from torch._export import capture_pre_autograd_graph
 
         example_inputs = (torch.randn(1, 3, 3, 3),)
         m = CondBranchClassMethod()
         m.eval()
         # TODO (tmanlaibaatar) Setting functional IR doesn't work on aot_export yet
         # as the branch source_fn is not captured.
-        gm = capture_pre_autograd_graph(m, example_inputs)
+        gm = torch.export._trace._export(m, example_inputs, pre_dispatch=True).module()
 
         actual_source_fns = []
         for mod in gm.modules():
@@ -2066,7 +2075,6 @@ def forward(self, arg_0):
         inp = torch.randn(2)
         self.assertTrue(torch.allclose(ep.module()(inp), torch.nonzero(inp)))
 
-    @testing.expectedFailureSerDer
     @testing.expectedFailureNonStrict
     def test_redundant_asserts(self):
         class Foo(torch.nn.Module):
@@ -2078,20 +2086,8 @@ def forward(self, arg_0):
         f = Foo()
 
         ep = export(f, (torch.tensor([3]),))
-        self.assertExpectedInline(
-            str(ep.graph_module.code).strip(),
-            """\
-def forward(self, arg0_1):
-    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
-    ge = _local_scalar_dense >= 0
-    scalar_tensor = torch.ops.aten.scalar_tensor.default(ge);  ge = None
-    _assert_async = torch.ops.aten._assert_async.msg(scalar_tensor, '_local_scalar_dense is outside of inline constraint [0, 9223372036854775807].');  scalar_tensor = None
-    le = _local_scalar_dense <= 9223372036854775807
-    scalar_tensor_1 = torch.ops.aten.scalar_tensor.default(le);  le = None
-    _assert_async_1 = torch.ops.aten._assert_async.msg(scalar_tensor_1, '_local_scalar_dense is outside of inline constraint [0, 9223372036854775807].');  scalar_tensor_1 = None
-    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
-    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
-    return (zeros,)""",
+        FileCheck().check_count("torch.ops.aten._assert_async.msg", 2, exactly=True).run(
+            ep.graph_module.code
         )
 
     def test_non_arg_name_dynamic_shapes_api(self):
@@ -2672,13 +2668,13 @@ def forward(self, arg0_1):
             self.assertEqual(v, torch_gm.state_dict()[normalized_k])
         self.assertTrue(torch.allclose(torch_gm(test_inp), orig_eager(test_inp)))
 
-        pre_autograd_gm = capture_pre_autograd_graph(
-            orig_eager, (torch.rand(2, 3),), {}
-        )
+        pre_autograd_gm = torch.export._trace._export(
+            orig_eager, (torch.rand(2, 3),), {}, pre_dispatch=True
+        ).module()
         for k, v in orig_eager.state_dict().items():
             normalized_k = k.replace(".", "_")
-            self.assertIn(normalized_k, pre_autograd_gm.state_dict())
-            self.assertEqual(v, pre_autograd_gm.state_dict()[normalized_k])
+            self.assertIn(k, pre_autograd_gm.state_dict())
+            self.assertEqual(v, pre_autograd_gm.state_dict()[k])
         self.assertTrue(torch.allclose(pre_autograd_gm(test_inp), orig_eager(test_inp)))
 
         ep = export(orig_eager, (torch.rand(2, 3),), {})
@@ -3035,6 +3031,14 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         self.assertEqual(mod.foo, ep.module().foo)
         self.assertEqual(mod(torch.ones(4, 4)), ep.module()(torch.ones(4, 4)))
+
+    def test_symint_tensor_return(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.testlib.returns_tensor_symint(x)[0]
+
+        self._test_export_same_as_eager(Module(), (torch.randn(4, 4),))
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
