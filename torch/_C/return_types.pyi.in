@@ -8,6 +8,7 @@ from typing import (
     List,
     Literal,
     NamedTuple,
+    NoReturn,
     Optional,
     overload,
     Sequence,
@@ -29,4 +30,4 @@ from torch.types import (
     Number,
 )
 
-${namedtuple_defs}
+${structseq_defs}
