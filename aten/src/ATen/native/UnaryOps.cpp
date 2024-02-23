@@ -932,7 +932,7 @@ Tensor& mvlgamma_out(const Tensor& self, int64_t p, Tensor& result) {
   return result.copy_(out);
 }
 
-Tensor _test_parallel_materialize(const Tensor& self, int64_t num_parallel, bool skip_main_thread=false) {
+Tensor _test_parallel_materialize(const Tensor& self, int64_t num_parallel, bool skip_main_thread) {
   std::thread::id main_thread_id = std::this_thread::get_id();
   at::parallel_for(0, num_parallel, 1, [&](int64_t begin, int64_t end){
     std::thread::id this_thread_id = std::this_thread::get_id();
