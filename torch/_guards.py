@@ -481,13 +481,14 @@ class GuardsSet:
     def __bool__(self):
         return bool(self.inner)
 
-    def add(self, guard: Guard, *, skip=0):
+    def add(self, guard: Guard, *, collect_debug_stack=True, skip=0):
         if guard in self.inner:
             return
-        if guard.stack is None:
-            guard.stack = CapturedTraceback.extract(skip=1 + skip)
-        if guard.user_stack is None:
-            guard.user_stack = TracingContext.extract_stack()
+        if collect_debug_stack:
+            if guard.stack is None:
+                guard.stack = CapturedTraceback.extract(skip=1 + skip)
+            if guard.user_stack is None:
+                guard.user_stack = TracingContext.extract_stack()
         self.inner.add(guard)
 
     def update(self, *others: Set[Guard]):
