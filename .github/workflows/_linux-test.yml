@@ -50,6 +50,7 @@ on:
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+  ACTIONS_STEP_DEBUG: true
 
 jobs:
   test:
