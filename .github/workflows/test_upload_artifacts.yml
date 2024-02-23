@@ -1,0 +1,43 @@
+name: test-upload-artifacts
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/test_upload_artifacts.yml
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on:
+      group: arc-lf-linux.2xlarge.arc-rootless.canary
+    steps:
+      - name: Create artifact
+        run: |
+          echo "some text" > test.txt
+
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::391835788720:role/gha-pytorch-ci-artifacts-role
+          role-session-name: gha-arc-runner
+          aws-region: us-east-1
+
+      - name: Upload artifact
+        uses: seemethere/upload-artifact-s3@v5
+        with:
+          name: test-run
+          retention-days: 14
+          if-no-files-found: error
+          path: test.txt
+          s3-bucket: pytorch-ci-artifacts
+
+      - name: Download artifact
+        uses: seemethere/download-artifact-s3@v4
+        with:
+          name: test-run
+          s3-bucket: pytorch-ci-artifacts
+
+
+
+
+
