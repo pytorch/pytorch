@@ -60,6 +60,10 @@ def _all_gather_sharded_tensor(
     return tensor
 
 
+class CompanionMismatch(Exception):
+    ...
+
+
 def _iterate_state_dict(
     iter_object: Any,
     sharded_tensor_func: Callable,
@@ -89,6 +93,11 @@ def _iterate_state_dict(
     elif isinstance(iter_object, dict):
         if companion_obj is None:
             companion_obj = {k: None for k in iter_object}
+        elif not isinstance(companion_obj, dict) or set(companion_obj.keys()) != set(
+            iter_object.keys()
+        ):
+            raise CompanionMismatch()
+
         assert isinstance(companion_obj, dict)
         ret = {
             key: _iterate_state_dict(
@@ -108,7 +117,11 @@ def _iterate_state_dict(
     elif isinstance(iter_object, (list, tuple)):
         if companion_obj is None:
             companion_obj = [None for _ in iter_object]
-        assert isinstance(companion_obj, (list, tuple))
+        elif not isinstance(companion_obj, (list, tuple)) or len(companion_obj) != len(
+            iter_object
+        ):
+            raise CompanionMismatch()
+
         ret = [
             _iterate_state_dict(
                 v,
@@ -288,6 +301,12 @@ def _offload_state_dict_to_cpu(
 def _create_pin_state_dict(
     state_dict: Dict[str, Any],
 ) -> Dict[str, Any]:
+    """
+    Given a state_dict, create another state_dict, which has the same structure and
+    elements. But all the tensors in the returned state_dict are empty and
+    memory-pinned (pin_memory==True).
+    """
+
     def tensor_func(
         obj: torch.Tensor,
         pg: Optional[dist.ProcessGroup],
@@ -311,3 +330,45 @@ def _create_pin_state_dict(
         type_check=False,
     )
     return ret
+
+
+def _check_state_dict_similarity(
+    state_dict: Dict[str, Any],
+    compared_state_dict: Dict[str, Any],
+) -> bool:
+    """
+    Given two state_dicts, check if the structures are the same. And
+    if a [key, tensor] pair exist in one state_dict there must be
+    the a corresponding pait, [key, other_tensor], in the other state_dict,
+    where tensor and other_tensor have the same size and dtype.
+
+    Return the check result.
+    """
+
+    def tensor_func(
+        obj: torch.Tensor,
+        pg: Optional[dist.ProcessGroup],
+        device: Optional[torch.device],
+        companion_obj: Any,
+    ) -> torch.Tensor:
+        if companion_obj.dtype != obj.dtype or companion_obj.size() != obj.size():
+            raise CompanionMismatch()
+        return obj
+
+    try:
+        _iterate_state_dict(
+            state_dict,
+            _identity_func,
+            _identity_func,
+            tensor_func,
+            pg=None,
+            device=None,
+            cpu_offload=False,
+            ranks_only=tuple(),
+            companion_obj=compared_state_dict,
+            type_check=False,
+        )
+    except CompanionMismatch:
+        return False
+
+    return True

@@ -7,6 +7,7 @@ import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 
 from torch.distributed._state_dict_utils import (
+    _check_state_dict_similarity,
     _create_pin_state_dict,
     _gather_state_dict,
     _offload_state_dict_to_cpu,
@@ -133,11 +134,21 @@ class TestStateDictUtils(DTensorTestBase):
             "lr": 1.5,
             "nested": {"list": [1, 2, 3, 4]},
         }
+
+        # Create a pin state_dict
         cpu_state_dict = _create_pin_state_dict(state_dict)
+        # Verify the correctness of _check_state_dict_similarity()
+        self.assertTrue(_check_state_dict_similarity(state_dict, cpu_state_dict))
+        tensor1 = cpu_state_dict["tensor1"]
+        cpu_state_dict["tensor1"] = torch.arange(11)
+        self.assertFalse(_check_state_dict_similarity(state_dict, cpu_state_dict))
+        cpu_state_dict["tensor1"] = tensor1
 
         _offload_state_dict_to_cpu(
             state_dict, cpu_offload_state_dict=cpu_state_dict, type_check=True
         )
+
+        # Verify if _offload_state_dict_to_cpu works
         for v in cpu_state_dict.values():
             if isinstance(v, torch.Tensor):
                 self.assertFalse(v.is_cuda)
