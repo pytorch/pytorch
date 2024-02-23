@@ -175,7 +175,7 @@ class TritonSplitScanKernel(TritonKernel):
         block_scan = cse_compute(
             f"tl.associative_scan({masked_value}, {dim}, {combine_helper_fn})"
         )
-        return cse_compute(f"{combine_helper_fn}({exclusive_prefix}, {block_scan})")
+        return (cse_compute(f"{combine_helper_fn}({exclusive_prefix}, {block_scan})"),)
 
     def _get_heuristic(self):
         return "split_scan"
