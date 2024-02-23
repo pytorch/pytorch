@@ -61,10 +61,11 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
   set_constructor_metadata();
 }
 
-FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value, const Storage& storage)
-  : FunctionalTensorWrapper(value)
-{
-    storage_ = storage;
+FunctionalTensorWrapper::FunctionalTensorWrapper(
+    const Tensor& value,
+    const Storage& storage)
+    : FunctionalTensorWrapper(value) {
+  storage_ = storage;
 }
 
 void FunctionalTensorWrapper::freeze_storage() const {
@@ -250,7 +251,8 @@ bool FunctionalTensorWrapper::has_data_mutation() {
 }
 
 Tensor FunctionalTensorWrapper::get_base_functional_tensor() const {
-  return at::detail::make_tensor<FunctionalTensorWrapper>(functional_storage_impl()->base(), storage_);
+  return at::detail::make_tensor<FunctionalTensorWrapper>(
+      functional_storage_impl()->base(), storage_);
 }
 
 void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
@@ -258,18 +260,20 @@ void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
   value_ = other->value_;
   generation_ = other->generation_;
   view_metas_ = other->view_metas_;
-  // FREEZE the old storage, preventing mutations to it.
-  // this is a huge pain to handle properly in all cases, so we ban it.
-  functional_storage_impl()->freeze();
-  // Unsafely swap out the storage with other's storage,
-  // disconnecting `self` with its view chain
-  storage_ = other->storage_;
-  /// explicitly mark the tensor as having its storage changed from set_()
-  // Otherwise, we don't actually have a 100% accurate way to check this.
-  // (We could check if the updated value has a new storage than the original value,
-  // but this won't also let us uniquely determine if the tensor **also**
-  // experienced a data mutation).
-  was_storage_changed_ = true;
+  if (storage_ != other->storage_) {
+    // FREEZE the old storage, preventing mutations to it.
+    // this is a huge pain to handle properly in all cases, so we ban it.
+    functional_storage_impl()->freeze();
+    // Unsafely swap out the storage with other's storage,
+    // disconnecting `self` with its view chain
+    storage_ = other->storage_;
+    /// explicitly mark the tensor as having its storage changed from set_()
+    // Otherwise, we don't actually have a 100% accurate way to check this.
+    // (We could check if the updated value has a new storage than the original value,
+    // but this won't also let us uniquely determine if the tensor **also**
+    // experienced a data mutation).
+    was_storage_changed_ = true;
+  }
 
   auto sizes_ = value_.sym_sizes();
   auto strides_ = value_.sym_strides();

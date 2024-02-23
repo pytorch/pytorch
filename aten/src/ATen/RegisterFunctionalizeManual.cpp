@@ -1,11 +1,10 @@
 #include <ATen/RegisterFunctionalizeManual.h>
 
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/InferSize.h>
-#include <torch/library.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/util/irange.h>
 #include <c10/util/strides.h>
-#include <iostream>
+#include <torch/library.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/ATen.h>
@@ -13,15 +12,15 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_to_copy.h>
-#include <ATen/ops/to_native.h>
+#include <ATen/ops/_unsafe_view.h>
+#include <ATen/ops/as_strided.h>
+#include <ATen/ops/as_strided_copy.h>
+#include <ATen/ops/empty_strided_native.h>
 #include <ATen/ops/lift.h>
 #include <ATen/ops/lift_fresh.h>
 #include <ATen/ops/lift_fresh_copy.h>
 #include <ATen/ops/resize.h>
-#include <ATen/ops/as_strided.h>
-#include <ATen/ops/as_strided_copy.h>
-#include <ATen/ops/empty_strided_native.h>
-#include <ATen/ops/_unsafe_view.h>
+#include <ATen/ops/to_native.h>
 
 #include <utility>
 #endif
@@ -168,7 +167,6 @@ static at::Tensor _to_copy_functionalize(
   return at::functionalization::impl::to_functional_tensor(out);
 }
 
-
 // Why is _unsafe_view special-cased here?
 // Basically just to satisfy autograd's debug asserts.
 // The situation:
@@ -241,124 +239,181 @@ static at::Tensor& set__functionalize(at::Tensor& self, const at::Tensor& src) {
   return self;
 }
 
-at::Tensor as_strided_functionalize(c10::DispatchKeySet dispatchKeySet, const at::Tensor & self, c10::SymIntArrayRef size, c10::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
-    at::Tensor self_;
+static at::Tensor as_strided_functionalize(
+    c10::DispatchKeySet dispatchKeySet,
+    const at::Tensor& self,
+    c10::SymIntArrayRef size,
+    c10::SymIntArrayRef stride,
+    c10::optional<c10::SymInt> storage_offset) {
+  at::Tensor self_;
 
-    if (at::functionalization::impl::isFunctionalTensor(self)) {
-        self_ = at::functionalization::impl::from_functional_tensor(self);
+  if (at::functionalization::impl::isFunctionalTensor(self)) {
+    self_ = at::functionalization::impl::from_functional_tensor(self);
+  } else {
+    self_ = self;
+  }
+
+  if (!at::functionalization::impl::isFunctionalTensor(self)) {
+    // functionalization is re-entrant, but will no-op if it wasn't passed a
+    // FunctionalTensorWrapper.
+    at::AutoDispatchSkipFunctionalize guard;
+    return at::_ops::as_strided::call(self_, size, stride, storage_offset);
+  }
+
+  auto self_base = at::functionalization::impl::unsafeGetFunctionalWrapper(self)
+                       ->get_base_functional_tensor();
+  auto self_base_ =
+      at::functionalization::impl::from_functional_tensor(self_base);
+  auto storage_offset_ = storage_offset.value_or(self.storage_offset());
+
+  auto reapply_views =
+      at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
+  auto inverse_return_mode =
+      (reapply_views
+           ? at::functionalization::InverseReturnMode::ViewOrScatterInverse
+           : at::functionalization::InverseReturnMode::NeverView);
+  auto compute_reference_meta =
+      self.key_set().has_backend(c10::BackendComponent::XLABit) ||
+      self.key_set().has_backend(c10::BackendComponent::LazyBit);
+  at::Tensor reference_tensor_output;
+  if (compute_reference_meta) {
+    auto self_meta = to_meta(self_base);
+    at::AutoDispatchSkipFunctionalize func_guard;
+    c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
+    reference_tensor_output =
+        at::_ops::as_strided::call(self_meta, size, stride, storage_offset_);
+  }
+  at::Tensor tmp_output;
+  {
+    at::AutoDispatchSkipFunctionalize guard;
+    if (reapply_views) {
+      tmp_output =
+          at::_ops::as_strided::call(self_base_, size, stride, storage_offset_);
     } else {
-        self_ = self;
+      tmp_output = at::_ops::as_strided_copy::call(
+          self_base_, size, stride, storage_offset_);
     }
-
-    if (!at::functionalization::impl::isFunctionalTensor(self)) {
-        // functionalization is re-entrant, but will no-op if it wasn't passed a FunctionalTensorWrapper.
-        at::AutoDispatchSkipFunctionalize guard;
-        return at::_ops::as_strided::call(self_, size, stride, storage_offset);
-    }
-
-    auto self_base = at::functionalization::impl::unsafeGetFunctionalWrapper(self)->get_base_functional_tensor();
-    auto self_base_ = at::functionalization::impl::from_functional_tensor(self_base);
-
-    auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
-    auto inverse_return_mode = (
-        reapply_views ? at::functionalization::InverseReturnMode::ViewOrScatterInverse
-        : at::functionalization::InverseReturnMode::NeverView
-        );
-    auto compute_reference_meta =
-        self.key_set().has_backend(c10::BackendComponent::XLABit) ||
-        self.key_set().has_backend(c10::BackendComponent::LazyBit);
-    at::Tensor reference_tensor_output;
-    if (compute_reference_meta) {
-        auto self_meta = to_meta(self_base);
-        at::AutoDispatchSkipFunctionalize func_guard;
-        c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
-        reference_tensor_output = at::_ops::as_strided::call(self_meta, size, stride, storage_offset);
-    }
-    at::Tensor tmp_output;
-    {
-        at::AutoDispatchSkipFunctionalize guard;
+  }
+  at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
+      [reapply_views = reapply_views,
+       size = size.vec(),
+       stride = stride.vec(),
+       storage_offset = storage_offset_](
+          const at::Tensor& base, int64_t mutated_view_idx) -> at::Tensor {
         if (reapply_views) {
-            std::cout << "> Func: as_strided" << std::endl;
-            tmp_output = at::_ops::as_strided::call(self_base_, size, stride, storage_offset);
+          return at::_ops::as_strided::call(base, size, stride, storage_offset);
         } else {
-            std::cout << "> Func: as_strided_copy" << std::endl;
-            tmp_output = at::_ops::as_strided_copy::call(self_base_, size, stride, storage_offset);
+          return at::_ops::as_strided_copy::call(
+              base, size, stride, storage_offset);
         }
-    }
-    at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
-        [reapply_views = reapply_views, size = size.vec(), stride = stride.vec(), storage_offset = storage_offset](const at::Tensor & base, int64_t mutated_view_idx) -> at::Tensor {
-            if (reapply_views) {
-                return at::_ops::as_strided::call(base, size, stride, storage_offset);
-            } else {
-                return at::_ops::as_strided_copy::call(base, size, stride, storage_offset);
-            }
-        },
-        [inverse_return_mode = inverse_return_mode, size = size.vec(), stride = stride.vec(), storage_offset = storage_offset](const at::Tensor & base, const at::Tensor & mutated_view, int64_t mutated_view_idx) -> at::Tensor {
-            return at::functionalization::FunctionalInverses::as_strided_inverse(base, mutated_view, inverse_return_mode, size, stride, storage_offset);
-        },
-        /*is_multi_output=*/false
-        );
-    auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, self_base, view_meta);
-    // See  Note [Propagating strides in the functionalization pass]
-    if (compute_reference_meta) {
-        at::functionalization::impl::set_sizes_strides_offset(out, reference_tensor_output);
-    }
-    return out;
+      },
+      [inverse_return_mode = inverse_return_mode,
+       size = size.vec(),
+       stride = stride.vec(),
+       storage_offset = storage_offset_](
+          const at::Tensor& base,
+          const at::Tensor& mutated_view,
+          int64_t mutated_view_idx) -> at::Tensor {
+        return at::functionalization::FunctionalInverses::as_strided_inverse(
+            base,
+            mutated_view,
+            inverse_return_mode,
+            size,
+            stride,
+            storage_offset);
+      },
+      /*is_multi_output=*/false);
+  auto out =
+      at::functionalization::impl::create_functional_tensor_with_view_meta(
+          tmp_output, self_base, view_meta);
+  // See  Note [Propagating strides in the functionalization pass]
+  if (compute_reference_meta) {
+    at::functionalization::impl::set_sizes_strides_offset(
+        out, reference_tensor_output);
+  }
+  return out;
 }
 
-const at::Tensor & as_strided__functionalize(c10::DispatchKeySet dispatchKeySet, const at::Tensor & self, c10::SymIntArrayRef size, c10::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
-    if (!at::functionalization::impl::isFunctionalTensor(self)) {
-        std::cout << "> as_strided__functionalize: " << at::functionalization::impl::isFunctionalTensor(self) << std::endl;
-        // functionalization is re-entrant, but will no-op if it wasn't passed a FunctionalTensorWrapper.
-        at::AutoDispatchSkipFunctionalize guard;
-        return at::_ops::as_strided_::call(self, size, stride, storage_offset);
-    }
+static const at::Tensor& as_strided__functionalize(
+    c10::DispatchKeySet dispatchKeySet,
+    const at::Tensor& self,
+    c10::SymIntArrayRef size,
+    c10::SymIntArrayRef stride,
+    c10::optional<c10::SymInt> storage_offset) {
+  if (!at::functionalization::impl::isFunctionalTensor(self)) {
+    // functionalization is re-entrant, but will no-op if it wasn't passed a
+    // FunctionalTensorWrapper.
+    at::AutoDispatchSkipFunctionalize guard;
+    return at::_ops::as_strided_::call(self, size, stride, storage_offset);
+  }
 
-    auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
-    auto inverse_return_mode = (
-        reapply_views ? at::functionalization::InverseReturnMode::ViewOrScatterInverse
-        : at::functionalization::InverseReturnMode::NeverView
-        );
+  auto storage_offset_ = storage_offset.value_or(self.storage_offset());
 
-    at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
-        [reapply_views = reapply_views, size = size.vec(), stride = stride.vec(), storage_offset = storage_offset](const at::Tensor & base, int64_t mutated_view_idx) -> at::Tensor {
-            if (reapply_views) {
-                return at::_ops::as_strided::call(base, size, stride, storage_offset);
-            } else {
-                return at::_ops::as_strided_copy::call(base, size, stride, storage_offset);
-            }
-        },
-        [inverse_return_mode = inverse_return_mode, size = size.vec(), stride = stride.vec(), storage_offset = storage_offset](const at::Tensor & base, const at::Tensor & mutated_view, int64_t mutated_view_idx) -> at::Tensor {
-            return at::functionalization::FunctionalInverses::as_strided_inverse(base, mutated_view, inverse_return_mode, size, stride, storage_offset);
+  auto reapply_views =
+      at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
+  auto inverse_return_mode =
+      (reapply_views
+           ? at::functionalization::InverseReturnMode::ViewOrScatterInverse
+           : at::functionalization::InverseReturnMode::NeverView);
+
+  at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
+      [reapply_views = reapply_views,
+       size = size.vec(),
+       stride = stride.vec(),
+       storage_offset = storage_offset_](
+          const at::Tensor& base, int64_t mutated_view_idx) -> at::Tensor {
+        if (reapply_views) {
+          return at::_ops::as_strided::call(base, size, stride, storage_offset);
+        } else {
+          return at::_ops::as_strided_copy::call(
+              base, size, stride, storage_offset);
         }
-        );
+      },
+      [inverse_return_mode = inverse_return_mode,
+       size = size.vec(),
+       stride = stride.vec(),
+       storage_offset = storage_offset_](
+          const at::Tensor& base,
+          const at::Tensor& mutated_view,
+          int64_t mutated_view_idx) -> at::Tensor {
+        return at::functionalization::FunctionalInverses::as_strided_inverse(
+            base,
+            mutated_view,
+            inverse_return_mode,
+            size,
+            stride,
+            storage_offset);
+      });
 
-    auto self_base = at::functionalization::impl::unsafeGetFunctionalWrapper(self)->get_base_functional_tensor();
-    auto compute_reference_meta =
-        self.key_set().has_backend(c10::BackendComponent::XLABit) ||
-        self.key_set().has_backend(c10::BackendComponent::LazyBit);
-    at::Tensor reference_tensor_output;
-    if (compute_reference_meta) {
-        auto self_meta = to_meta(self_base);
-        at::AutoDispatchSkipFunctionalize func_guard;
-        c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
-        reference_tensor_output = at::_ops::as_strided_::call(self_meta, size, stride, storage_offset);
-    }
-    // This function adds the above view meta to the current tensor and replays them off the base,
-    // mutating the size/stride info of the current FunctionalTensorWrapper.
-    // Because of this, we need to make sure to run the reference shape function above,
-    // BEFORE doing this (otherwise we'll end up runnin the reference function using the wrong sizes/strides)
-    at::functionalization::impl::mutate_view_meta(self_base, view_meta);
-    // See  Note [Propagating strides in the functionalization pass]
-    // XLA/LTC don't implement the logic to propagate strides correctly, so we need to rely
-    // on a reference implementation here (instead of relying on the output from the forward lambda
-    // having the correct stride info)
-    if (compute_reference_meta) {
-        at::functionalization::impl::set_sizes_strides_offset(self_base, reference_tensor_output);
-    }
-    auto self_base_ = at::functionalization::impl::from_functional_tensor(self_base);
-    at::functionalization::impl::replace_(self, self_base_);
-    return self;
+  auto self_base = at::functionalization::impl::unsafeGetFunctionalWrapper(self)
+                       ->get_base_functional_tensor();
+  auto compute_reference_meta =
+      self.key_set().has_backend(c10::BackendComponent::XLABit) ||
+      self.key_set().has_backend(c10::BackendComponent::LazyBit);
+  at::Tensor reference_tensor_output;
+  if (compute_reference_meta) {
+    auto self_meta = to_meta(self_base);
+    at::AutoDispatchSkipFunctionalize func_guard;
+    c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
+    reference_tensor_output =
+        at::_ops::as_strided_::call(self_meta, size, stride, storage_offset_);
+  }
+  // This function adds the above view meta to the current tensor and replays
+  // them off the base, mutating the size/stride info of the current
+  // FunctionalTensorWrapper. Because of this, we need to make sure to run the
+  // reference shape function above, BEFORE doing this (otherwise we'll end up
+  // runnin the reference function using the wrong sizes/strides)
+  at::functionalization::impl::mutate_view_meta(self_base, view_meta);
+  // See  Note [Propagating strides in the functionalization pass]
+  // XLA/LTC don't implement the logic to propagate strides correctly, so we
+  // need to rely on a reference implementation here (instead of relying on the
+  // output from the forward lambda having the correct stride info)
+  if (compute_reference_meta) {
+    at::functionalization::impl::set_sizes_strides_offset(
+        self_base, reference_tensor_output);
+  }
+  self.set_(self_base);
+  return self;
 }
 
 TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
