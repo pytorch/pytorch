@@ -2275,7 +2275,6 @@ make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
-make_fallback(aten.fractional_max_pool2d)
 make_fallback(aten.fractional_max_pool3d)
 make_fallback(aten.frexp)
 make_fallback(aten.geqrf)
@@ -4352,6 +4351,106 @@ def adaptive_max_pool2d(x, output_size):
         device=x.get_device(),
         dtype=torch.int64,
         inner_fn=inner_func_max_idx,
+        ranges=new_size,
+    )
+    return rv, ri
+
+
+fallback_fractional_max_pool2d = fallback_handler(
+    aten.fractional_max_pool2d.default, add_to_fallback_set=False
+)
+
+
+def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim):
+    out_sz = out_sz[dim]
+    in_sz = in_sz[dim]
+    kernel_sz = kernel_sz[dim]
+    alpha = (in_sz - kernel_sz) / (out_sz - 1)
+    samples_loader = samples.make_loader()
+
+    def load(prefix, i):
+        sample = ops.indirect_indexing(
+            samples_loader([*prefix, dim]), size=3, check=False
+        )
+
+        seq_i = ops.index_expr(
+            sympy.floor((i + sample) * alpha) - sympy.floor(sample * alpha), torch.int64
+        )
+
+        mask = ops.lt(
+            ops.index_expr(i, torch.int64),
+            ops.sub(ops.index_expr(out_sz, torch.int64), ops.constant(1, torch.int64)),
+        )
+
+        return ops.where(mask, seq_i, in_sz - kernel_sz)
+
+    return load
+
+
+@register_lowering(aten.fractional_max_pool2d)
+def fractional_max_pool2d(x, kernel_size, output_size, random_samples):
+    x.realize_hint()
+    *batch, inp_h, inp_w = x.get_size()
+    inp_h = V.graph.sizevars.evaluate_static_shape(inp_h)
+    inp_w = V.graph.sizevars.evaluate_static_shape(inp_w)
+    kernel_h, kernel_w = kernel_size
+    h_out, w_out = output_size
+
+    # TODO: add logic for fallback to eager at some kernel size
+
+    gen_offsets_for_dim = functools.partial(
+        _fractional_pooling_offsets,
+        samples=random_samples,
+        in_sz=[inp_h, inp_w],
+        out_sz=output_size,
+        kernel_sz=kernel_size,
+    )
+
+    h_index_fn = gen_offsets_for_dim(dim=0)
+    w_index_fn = gen_offsets_for_dim(dim=1)
+    x_loader = x.make_loader()
+
+    def fn(idx, return_index):
+        *prefix, bh, bw = idx
+
+        h_start_index = ops.indirect_indexing(h_index_fn(prefix, bh), inp_h)
+        h_end_index = h_start_index + kernel_h
+        w_start_index = ops.indirect_indexing(w_index_fn(prefix, bw), inp_w)
+        w_end_index = w_start_index + kernel_w
+
+        maxval = None
+        maxindex = None
+        for ih, iw in itertools.product(range(kernel_size[0]), range(kernel_size[1])):
+            val = x_loader([*prefix, h_start_index + ih, w_start_index + iw])
+            if return_index:
+                index = ops.index_expr(
+                    (h_start_index + ih) * inp_w + w_start_index + iw, torch.int64
+                )
+                if maxindex is None:
+                    maxindex = index
+                else:
+                    maxindex = ops.where(ops.gt(val, maxval), index, maxindex)
+            if maxval is None:
+                maxval = val
+            else:
+                maxval = ops.maximum(val, maxval)
+        if return_index:
+            return maxindex
+        else:
+            return maxval
+
+    new_size = list(batch) + [h_out, w_out]
+    rv = Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=functools.partial(fn, return_index=False),
+        ranges=new_size,
+    )
+
+    ri = Pointwise.create(
+        device=x.get_device(),
+        dtype=torch.int64,
+        inner_fn=functools.partial(fn, return_index=True),
         ranges=new_size,
     )
     return rv, ri
