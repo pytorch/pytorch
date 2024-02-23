@@ -314,10 +314,7 @@ class FunctionalTensorMode(TorchDispatchMode):
                 return FunctionalTensor(x)
             return x
 
-        any_functional_inputs = False
-
         def unwrap(x):
-            any_functional_inputs = True
             return x.elem
 
         from torch._higher_order_ops.auto_functionalize import (
