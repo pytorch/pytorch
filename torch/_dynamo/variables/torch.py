@@ -409,6 +409,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 ),
                 example_value=None,
             )
+        elif self.value.__name__ == 'sparse_bsc_tensor':
+            unimplemented("sparse_bsc_tensor")
         elif can_dispatch_torch_function(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
         elif self.value is torch.jit.annotate:
