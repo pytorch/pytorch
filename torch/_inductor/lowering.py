@@ -203,7 +203,7 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
             promoting_args = [
                 a
                 for a in args
-                if isinstance(a, (Number, sympy.Expr)) or hasattr(a, "get_dtype")
+                if isinstance(a, (Number, sympy.Expr)) or hasattr(a, "dtype")
             ]
             dtype = get_promoted_dtype(
                 *promoting_args, type_promotion_kind=type_promotion_kind
@@ -5108,7 +5108,7 @@ def logcumsumexp(x, dim):
     return result
 
 
-@register_lowering(aten.cummax)
+@register_lowering(aten.cummax, type_promotion_kind=None)
 def cummax(x, axis=None):
     if len(x.get_size()) == 0:
         assert axis in [0, -1]
@@ -5120,7 +5120,13 @@ def cummax(x, axis=None):
 
     dtype = x.get_dtype()
     min_value = (
-        torch.finfo(dtype).min if dtype.is_floating_point else torch.iinfo(dtype).min
+        False
+        if dtype is torch.bool
+        else (
+            torch.finfo(dtype).min
+            if dtype.is_floating_point
+            else torch.iinfo(dtype).min
+        )
     )
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     values, indices = ir.ArgScan.create_argscan(
@@ -5131,7 +5137,7 @@ def cummax(x, axis=None):
     return values, indices
 
 
-@register_lowering(aten.cummin)
+@register_lowering(aten.cummin, type_promotion_kind=None)
 def cummin(x, axis=None):
     if len(x.get_size()) == 0:
         assert axis in [0, -1]
@@ -5143,7 +5149,13 @@ def cummin(x, axis=None):
 
     dtype = x.get_dtype()
     max_value = (
-        torch.finfo(dtype).max if dtype.is_floating_point else torch.iinfo(dtype).max
+        True
+        if dtype is torch.bool
+        else (
+            torch.finfo(dtype).max
+            if dtype.is_floating_point
+            else torch.iinfo(dtype).max
+        )
     )
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     values, indices = ir.ArgScan.create_argscan(

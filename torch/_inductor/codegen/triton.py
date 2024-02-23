@@ -2443,10 +2443,9 @@ class TritonKernel(Kernel):
         )
 
         if not self.persistent_reduction:
+
             def _combine_fn(values1, values2):
-                result = combine_fn(
-                   *itertools.chain(*zip(values1, values2))
-                )
+                result = combine_fn(*itertools.chain(*zip(values1, values2)))
                 if isinstance(result, (tuple, list)):
                     return result
                 else:
