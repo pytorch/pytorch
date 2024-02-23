@@ -119,6 +119,9 @@ select = [
 "__init__.py" = [
     "F401",
 ]
+"functorch/notebooks/**" = [
+    "F401",
+]
 "test/typing/reveal/**" = [
     "F821",
 ]

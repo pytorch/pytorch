@@ -106,7 +106,7 @@ ft_jac_weight, ft_jac_bias = jacrev(predict, argnums=(0, 1))(weight, bias, x)
 # In reverse-mode AD, we are computing the jacobian row-by-row, while in
 # forward-mode AD (which computes Jacobian-vector products), we are computing
 # it column-by-column. The Jacobian matrix has M rows and N columns.
-from functorch import jacrev
+from functorch import jacfwd, jacrev
 
 # Benchmark with more inputs than outputs
 Din = 32
