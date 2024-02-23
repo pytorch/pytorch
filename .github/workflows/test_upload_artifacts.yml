@@ -40,6 +40,11 @@ jobs:
           name: test-run
           s3-bucket: pytorch-ci-artifacts
 
+      - name: Test
+        run: |
+          ls -la
+          less text.txt
+
 
 
 
