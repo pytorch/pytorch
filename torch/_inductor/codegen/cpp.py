@@ -807,9 +807,9 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def frexp(x):
-        cache_key = f"frexp({x})"
-        if cache_key in V.kernel.cse.cache:
-            return V.kernel.cse.cache[cache_key]
+        cache_keys = f"frexp({x})[0]", f"frexp({x})[1]"
+        if all(cache_key in V.kernel.cse.cache for cache_key in cache_keys):
+            return tuple(V.kernel.cse.cache[cache_key] for cache_key in cache_keys)
 
         code = BracesBuffer()
         exponent = V.kernel.cse.newvar()
@@ -817,7 +817,9 @@ class CppOverrides(OpOverrides):
         code.writeline(f"int32_t {exponent};")
         code.writeline(f"auto {mantissa} = std::frexp({x}, &{exponent});")
         V.kernel.compute.splice(code)
-        V.kernel.cse.cache[cache_key] = (mantissa, exponent)
+        cse_vars = (mantissa, exponent)
+        for cache_key, cse_var in zip(cache_keys, cse_vars):
+            V.kernel.cse.cache[cache_key] = cse_var
         return mantissa, exponent
 
     @staticmethod
