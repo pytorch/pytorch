@@ -1901,7 +1901,7 @@ class DictGuardManager : public GuardManager {
     // Points to an element in the _indices vector.
     size_t index_pointer = 0;
     // Points to the key index in the dict
-    size_t dict_pointer = 0;
+    Py_ssize_t dict_pointer = 0;
 
     while (index_pointer < _indices.size() &&
            PyDict_Next(obj, &pos, &key, &value)) {
@@ -1933,7 +1933,7 @@ class DictGuardManager : public GuardManager {
 
     // Points to an element in the _indices vector.
     size_t index_pointer = 0;
-    size_t dict_pointer = 0;
+    Py_ssize_t dict_pointer = 0;
 
     int num_guards_executed = 0;
     while (index_pointer < _indices.size() &&
