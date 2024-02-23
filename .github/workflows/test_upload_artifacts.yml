@@ -43,7 +43,7 @@ jobs:
     runs-on: linux.2xlarge
     steps:
     - name: Download artifact
-      uses: DanilBaibak/download-artifact-s3@main
+      uses: DanilBaibak/download-artifact-s3@Test-Info
       with:
         name: test-run
         s3-bucket: pytorch-ci-artifacts
