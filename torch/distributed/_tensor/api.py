@@ -160,7 +160,9 @@ class _FromTorchTensor(torch.autograd.Function):
                     # is replicated on the mesh dimension, we only broadcast if
                     # run_check is True TODO: study if this UX is good or not
                     input = input.contiguous()
-                    input = funcol.broadcast(input, device_mesh, mesh_dim=idx).wait()
+                    input = funcol.broadcast(
+                        input, src=0, group=(device_mesh, idx)
+                    ).wait()
 
         # We want a fresh Tensor object that shares memory with the input tensor
         dist_tensor = DTensor(
