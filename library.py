@@ -31,9 +31,8 @@ def register(opdef):
 
     impl_method = getattr(opdef, "impl", None)
     if impl_method is not None:
-        properties = getattr(impl_method, "__properties__", {})
-        for device in properties["device_types"]:
-            register_backend(lib, name, impl_method, device)
+        # TODO: Don't allow the meta to be reused for FakeTensor.
+        register_backend(lib, name, impl_method, "CompositeExplicitAutograd")
 
     impl_cpu_method = getattr(opdef, "impl_cpu", None)
     if impl_cpu_method is not None:
@@ -103,6 +102,12 @@ def device_types(*devs):
     return inner
 
 
+def dispatch_keyset_before(dk):
+    result = torch._C._dispatch_keyset_full()
+    result = result - torch._C._dispatch_keyset_full_after(dk)
+    result = result.remove(dk)
+    return result
+
 
 def register_backend(lib, name, kernel, key):
     if kernel is None:
@@ -112,10 +117,9 @@ def register_backend(lib, name, kernel, key):
                 "{name}.{key.lowercase}_impl was not defined")
     else:
         def wrapped(*args, **kwargs):
-            # TODO: exclude all keys above key to avoid layering issues
-            # key_set = torch._C.fullafter(key)
-            # with torch._C._ExcludeDispatchKeyGuard(key_set):
-            return kernel(*args, **kwargs)
+            before_dense = dispatch_keyset_before(torch._C.DispatchKey.Dense)
+            with torch._C._ExcludeDispatchKeyGuard(before_dense):
+                return kernel(*args, **kwargs)
 
     lib.impl(name, wrapped, key)
 
@@ -152,8 +156,20 @@ def unique_underscoring(s: str):
         i += 1
 
 
-def check_supported_schema(op):
-    pass
+def check_supported_schema(opdef):
+    return
+    # TODO: figure out what to do with torchgen FunctionSchema vs C++ FunctionSchema
+
+    # We only support the following schemas, for now.
+    # - functional
+    # - auto_functionalizable.
+    # For all others, we ask the user to go use the raw torch.library API.
+    schema = opdef._schema
+    if torch._library.utils.is_functional_schema(schema):
+        return
+    if torch._higher_order_ops.auto_functionalized.auto_functionalizable_schema(schema):
+        return
+    raise NotImplementedError("")
 
 
 def register_autograd(lib, name, opdef, op):
@@ -172,3 +188,20 @@ def register_autograd(lib, name, opdef, op):
             return opdef.backward(ctx, *grads)
 
     lib.impl(name, MyFunction.apply, "Autograd")
+
+
+class RegistersSubclassOnDefinition(type):
+    def __new__(cls, name, bases, dct):
+        result = super().__new__(cls, name, bases, dct)
+        # This is the base class
+        if name == "Operator":
+            return result
+        opoverload = register(result)
+        result._opoverload = opoverload
+        return result
+
+
+class Operator(metaclass=RegistersSubclassOnDefinition):
+    @classmethod
+    def call(cls, *args, **kwargs):
+        return cls._opoverload(*args, **kwargs)

@@ -1,15 +1,15 @@
 import torch
 import numpy as np
 # aka torch.library
-from library import Operator, traceable, device_types
+from library import OpDef, traceable, device_types
 
 # =====================================================================
-# This is example user library code. It defines
-# my_sin and my_sin_cos operators.
+# This was the initial design. It has been superceded with custom_ops.py.
+# Leaving it here for comparison purposes.
 # =====================================================================
 
 # User provides their custom op schema and implementations
-class MySin(Operator):
+class MySin(OpDef):
     schema = "(Tensor x) -> Tensor"
 
     # the black-box cpu kernel
@@ -41,31 +41,33 @@ class MySin(Operator):
         return grad_output * x.cos()
 
 
-# The user may optionally wrap in a function that provides a docstring and type hints.
-def my_sin(x: torch.Tensor) -> torch.Tensor:
+# Builds the provided implementations into a "custom op" that behaves like a function.
+# We don't do something like MySin.apply (i.e. the autograd.Function way) because
+# dynamic changes to methods on the MySin object will not be included in the op.
+my_sin_op = MySin.build()
+
+
+# The user should provide a function that calls the custom op so they can add a docstring.
+def my_sin(x):
     """my_sin(x: Tensor) -> Tensor
 
     Returns the sin of x.
     """
-    return MySin.call(x)
+    return my_sin_op(x)
 
 
 # Example of an operator that is implemented with pytorch operations
 # We automatically generate an abstract impl for it.
-class MySinCos(Operator):
+class MySinCos(OpDef):
     schema = "(Tensor x) -> Tensor"
 
-    # Instead of specifying separate per-device impls, the user may give us a 
-    # single `impl` staticmethod that we will apply to all backends,
-    # CompositeExplicitAutograd-style.
     @staticmethod
-    # Specifies that the impl is make_fx traceable. We will autogenerate rules
-    # (e.g. abstract, autograd, vmap). The user may override these by declaring
-    # those methods.
-    # This decorator may only be applied to `impl`.
-    @traceable
+    @traceable  # specifies that we can auto-generate an abstract impl for this op
+    @device_types("CPU", "CUDA")  # specifies which devices this is valid for
     def impl(x):
         return x.sin().cos()
+
+my_sin_cos_op = MySinCos.build()
 
 
 def my_sin_cos(x):
@@ -73,4 +75,4 @@ def my_sin_cos(x):
 
     Returns x.sin().cos()
     """
-    return MySinCos.call(x)
+    return my_sin_cos_op(x)
