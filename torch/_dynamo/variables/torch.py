@@ -187,9 +187,9 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             GradModeVariable,
             InferenceModeVariable,
             JvpIncrementNestingCtxManagerVariable,
+            NoOpContextManager,
             SetFwdGradEnabledContextManager,
             StreamVariable,
-            NoOpContextManager,
             VmapIncrementNestingCtxManagerVariable,
         )
 
