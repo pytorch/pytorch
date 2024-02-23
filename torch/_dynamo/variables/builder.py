@@ -1500,6 +1500,7 @@ def wrap_fx_proxy_cls(
         torch.sym_int,
         getattr,
         operator.getitem,
+        operator.eq,
         torch._utils._element_size,
         torch.seed,
         operator.mod,
@@ -1508,6 +1509,8 @@ def wrap_fx_proxy_cls(
         torch._functorch.vmap._validate_and_get_batch_size,
         torch._C._functorch._grad_increment_nesting,
         torch._C._functorch._grad_decrement_nesting,
+        torch._C._functorch.maybe_current_level,
+        torch._C._is_fwd_grad_enabled,
         # some mac builds are missing torch.distributed.get_rank()
         getattr(torch.distributed, "get_rank", _missing),
         getattr(torch.distributed, "get_world_size", _missing),

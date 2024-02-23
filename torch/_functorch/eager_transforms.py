@@ -60,6 +60,17 @@ def enable_inplace_requires_grad(enabled):
         set_inplace_requires_grad_allowed(prev_state)
 
 
+def _vjp_treespec_compare(primals_out, cotangents):
+    _, primals_out_spec = tree_flatten(primals_out)
+    _, cotangents_spec = tree_flatten(cotangents)
+    if primals_out_spec != cotangents_spec:
+        raise RuntimeError(
+            f'Expected pytree structure of cotangents to be the same '
+            f'as pytree structure of outputs to the function. '
+            f'cotangents: {treespec_pprint(cotangents_spec)}, '
+            f'primal output: {treespec_pprint(primals_out_spec)}')
+
+
 def _tensor_requires_grad(x):
     # avoid graph-break on x.requires_grad_()
     # https://github.com/pytorch/pytorch/pull/110053
@@ -305,8 +316,7 @@ def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = N
     #
     # Returns the same two elements as :func:`vjp` but the function returned, vjp_fn, returns a tuple of VJPs
     # for only the primal elements given by argnums.
-    level = _grad_increment_nesting()
-    try:
+    with grad_increment_nesting() as level:
         # See NOTE [grad and vjp interaction with no_grad]
         with torch.enable_grad():
             primals = _wrap_all_tensors(primals, level)
@@ -343,18 +353,10 @@ def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = N
             if create_graph is None:
                 create_graph = torch.is_grad_enabled()
             flat_cotangents, cotangents_spec = tree_flatten(cotangents)
-            if primals_out_spec != cotangents_spec:
-                raise RuntimeError(
-                    f'Expected pytree structure of cotangents to be the same '
-                    f'as pytree structure of outputs to the function. '
-                    f'cotangents: {treespec_pprint(cotangents_spec)}, '
-                    f'primal output: {treespec_pprint(primals_out_spec)}')
+            _vjp_treespec_compare(primals_out, cotangents)
             result = _autograd_grad(flat_primals_out, flat_diff_primals, flat_cotangents,
                                     retain_graph=retain_graph, create_graph=create_graph)
             return tree_unflatten(result, primals_spec)
-
-    finally:
-        _grad_decrement_nesting()
 
     if has_aux:
         return results, wrapper, aux
