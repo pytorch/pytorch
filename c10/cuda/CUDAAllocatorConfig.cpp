@@ -1,12 +1,12 @@
 #include <c10/cuda/CUDAAllocatorConfig.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/util/llvmMathExtras.h>
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
 #endif
 
-namespace c10 {
-namespace cuda {
-namespace CUDACachingAllocator {
+namespace c10::cuda::CUDACachingAllocator {
 
 constexpr size_t kRoundUpPowerOfTwoIntervals = 16;
 
@@ -16,7 +16,8 @@ CUDAAllocatorConfig::CUDAAllocatorConfig()
       m_pinned_num_register_threads(1),
       m_expandable_segments(false),
       m_release_lock_on_cudamalloc(false),
-      m_pinned_use_cuda_host_register(false) {
+      m_pinned_use_cuda_host_register(false),
+      m_last_allocator_settings("") {
   m_roundup_power2_divisions.assign(kRoundUpPowerOfTwoIntervals, 0);
 }
 
@@ -243,6 +244,10 @@ void CUDAAllocatorConfig::parseArgs(const char* env) {
   if (env == nullptr) {
     return;
   }
+  {
+    std::lock_guard<std::mutex> lock(m_last_allocator_settings_mutex);
+    m_last_allocator_settings = env;
+  }
 
   std::vector<std::string> config;
   lexArgs(env, config);
@@ -352,6 +357,4 @@ void setAllocatorSettings(const std::string& env) {
   CUDACachingAllocator::CUDAAllocatorConfig::instance().parseArgs(env.c_str());
 }
 
-} // namespace CUDACachingAllocator
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda::CUDACachingAllocator

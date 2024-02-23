@@ -17,8 +17,6 @@ from torch.utils._python_dispatch import (
     transform_subclass,
 )
 
-from .schemas import MutationType
-
 
 def to_fun(t):
     if isinstance(t, Tensor):
@@ -336,6 +334,25 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
     return copy_count
 
 
+def propagate_input_mutation_stacktraces(fx_g: torch.fx.Graph) -> None:
+    placeholders = set()
+    for n in fx_g.nodes:
+        if n.op == "placeholder":
+            placeholders.add(n)
+        if isinstance(n.target, torch._ops.OpOverload):
+            if n.target is torch.ops.aten.copy_.default:
+                # Can only copy_ into an input, and can only do so once
+                assert n.args[0] in placeholders
+                placeholders.remove(n.args[0])
+                copy_from_node = n.args[1]
+                # Pre-condition: every node has a "stack_trace" field in its meta,
+                # but copy_() nodes do not (since we manually added them during functionalization).
+                # Instead, we manually propagate here.
+                if "stack_trace" in copy_from_node.meta:
+                    assert "stack_trace" not in n.meta, str(n)
+                    n.meta["stack_trace"] = copy_from_node.meta["stack_trace"]
+
+
 def _check_if_mutation_can_be_in_graph(
     keep_input_mutations: bool,
     mutates_data,
@@ -351,27 +368,3 @@ def _check_if_mutation_can_be_in_graph(
             or mutations_under_no_grad_or_inference_mode
         )
     return False
-
-
-def _get_mutation_type(
-    keep_input_mutations: bool,
-    mutates_data,
-    mutates_metadata,
-    mutations_hidden_from_autograd,
-    mutations_under_no_grad_or_inference_mode,
-    requires_grad,
-):
-    if (not mutates_data) and (not mutates_metadata):
-        return MutationType.NOT_MUTATED
-
-    if _check_if_mutation_can_be_in_graph(
-        keep_input_mutations,
-        mutates_data,
-        mutates_metadata,
-        mutations_hidden_from_autograd,
-        mutations_under_no_grad_or_inference_mode,
-        requires_grad,
-    ):
-        return MutationType.MUTATED_IN_GRAPH
-
-    return MutationType.MUTATED_OUT_GRAPH

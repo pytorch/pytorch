@@ -147,20 +147,17 @@ TORCH_META_FUNC(_convert_indices_from_csr_to_coo)
  const bool out_int32,
  const bool transpose) {
   TORCH_CHECK(
-    crow_indices.dim() == 1, "crow_indices is supposed to be a vector, but got ",
-    crow_indices.dim(), " dimensional tensor.");
-  TORCH_CHECK(col_indices.dim() == 1, "col_indices is supposed to be a vector, but got ",
-              col_indices.dim(), " dimensional tensor.");
+    crow_indices.dim() == col_indices.dim(), "crow_indices and col_indices are supposed to have"
+    " the same dimensionality, but got ", crow_indices.dim(), " and ",
+    crow_indices.dim(), " dimensional tensors, respectively.");
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = crow_indices.options().dtype(scalar_type);
-  set_output_raw_strided(0, {2, col_indices.numel()}, {}, options, {});
+  set_output_raw_strided(0, {col_indices.dim() + 1, col_indices.numel()}, {}, options, {});
 }
 
 } // namespace meta
 
 namespace {
-
-constexpr int64_t GRAIN_SIZE = at::internal::GRAIN_SIZE;
 
 template <typename F>
 Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result) {
@@ -194,40 +191,12 @@ Tensor& unary_op_inplace(Tensor& self, const F& op_inplace, Args&&... args) {
   return self;
 }
 
-template <typename input_t, typename output_t>
-void convert_indices_from_csr_to_coo_cpu(
-    const Tensor& indices,
-    const Tensor& crow_indices,
-    const Tensor& col_indices,
-    const bool transpose = false) {
-  int64_t nrows = crow_indices.numel() - 1;
-  if (nrows == 0) {
-    indices.zero_();
-    return;
-  }
-  auto crow_indices_ = crow_indices.expect_contiguous();
-  const input_t* crow_indices_data_in = crow_indices_->data_ptr<input_t>();
-  TORCH_INTERNAL_ASSERT(indices.is_contiguous());
-  auto row0 = indices.select(0, transpose ? 1 : 0);
-  auto row1 = indices.select(0, transpose ? 0 : 1);
-  output_t* data_out = row0.data_ptr<output_t>();
-  row1.copy_(*col_indices.expect_contiguous());
-  at::parallel_for(0, nrows, GRAIN_SIZE, [&](int64_t start, int64_t end) {
-    for (const auto i : c10::irange(start, end)) {
-      std::fill(
-          &data_out[crow_indices_data_in[i]],
-          &data_out[crow_indices_data_in[i + 1]],
-          static_cast<output_t>(i));
-    }
-  });
-}
-
 } // end anonymous namespace
 
 namespace native {
 
 using namespace at::sparse_csr;
-// certain utiliy functions are usable from sparse COO.
+// certain utility functions are usable from sparse COO.
 using namespace at::sparse;
 
 Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
@@ -253,8 +222,7 @@ Tensor intersection_binary_op_with_wrapped_scalar(const Tensor& sparse, const Te
   // NOTE: intersection_binary_op_with_wrapped_scalar assumes scalar.numel() == 1.
   const auto result_values = op(sparse.values(), scalar.squeeze()).to(at::result_type(sparse, scalar));
   const auto result_sizes = infer_size(sparse.sizes(), scalar.sizes());
-  Tensor compressed_indices, plain_indices;
-  std::tie(compressed_indices, plain_indices) = getCompressedPlainIndices(sparse);
+  auto [compressed_indices, plain_indices] = getCompressedPlainIndices(sparse);
   return at::_sparse_compressed_tensor_unsafe(
       compressed_indices.clone(),
       plain_indices.clone(),
@@ -387,8 +355,7 @@ Tensor sparse_mask_sparse_compressed(
   }
 
   if (self.layout() == kStrided) {
-    Tensor compressed_indices, plain_indices;
-    std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(mask);
+    auto [compressed_indices, plain_indices] = at::sparse_csr::getCompressedPlainIndices(mask);
     auto mask_values = mask.values();
     auto dense_mask = at::_sparse_compressed_tensor_unsafe(
         compressed_indices,
@@ -1097,8 +1064,6 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, ReductionOp rop
   Tensor col_indices = sparse.col_indices();
   Tensor values = sparse.values();
   auto numel = values.numel();
-  Tensor new_col_indices;
-  Tensor columns_map;
 
   /*
     Calling at::_unique constitutes the main bottleneck of this
@@ -1106,7 +1071,7 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, ReductionOp rop
     invariant:
       csr.sum(dim=0) == csr.transpose(0, 1).sum(dim=1)
   */
-  std::tie(new_col_indices, columns_map) = at::_unique(col_indices, true, true);
+  auto [new_col_indices, columns_map] = at::_unique(col_indices, true, true);
   auto nnz = new_col_indices.numel();
 
   Tensor new_crow_indices = at::empty({2}, col_indices.options());
@@ -1487,7 +1452,7 @@ std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_backward_sparse_csr_cpu(
         /*transpose*/false);
     row = coo_indices.select(0, 0);
 
-    // calculte the global index for CSC
+    // calculate the global index for CSC
     // and get the conversion permute pattern
     Tensor index = col.mul(self.size(0)).add_(row);
     permute = index.argsort();

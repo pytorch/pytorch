@@ -84,8 +84,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     def test_exported_program_with_specialized_input_during_tracing(self):
-        def f(x, y):
-            return x + y
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        f = Foo()
 
         tensor_input = torch.ones(7, 5)
         dim0_x = torch.export.Dim("dim0_x", min=6)
@@ -131,7 +134,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         # NOTE: If input is ExportedProgram, we need to specify dynamic_shapes
         # as a tuple.
         reexported_program = torch.export.export(
-            exported_program, (tensor_input,), dynamic_shapes=({0: dim0_x},)
+            exported_program.module(), (tensor_input,), dynamic_shapes=({0: dim0_x},)
         )
         reexported_onnx_program = torch.onnx.dynamo_export(
             reexported_program, tensor_input
@@ -145,8 +148,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     def test_onnx_program_supports_none_arg_name_in_dynamic(self):
-        def foo(a, b):
-            return a.sum() + b.sum()
+        class Foo(torch.nn.Module):
+            def forward(self, a, b):
+                return a.sum() + b.sum()
+
+        foo = Foo()
 
         dim = torch.export.Dim("dim")
         exported_program = torch.export.export(
@@ -165,8 +171,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     def test_onnx_program_suppors_non_arg_name_with_kwarg(self):
-        def foo(a, b, kw1, kw2):
-            return a.sum() + b.sum() + kw1.sum() - kw2.sum()
+        class Foo(torch.nn.Module):
+            def forward(self, a, b, kw1, kw2):
+                return a.sum() + b.sum() + kw1.sum() - kw2.sum()
+
+        foo = Foo()
 
         dim = torch.export.Dim("dim")
         dim_for_kw1 = torch.export.Dim("dim_for_kw1")
@@ -238,8 +247,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             )
 
     def test_onnx_program_supports_non_arg_name_with_container_type(self):
-        def foo(a, b):
-            return a[0].sum() + a[1].sum() + b.sum()
+        class Foo(torch.nn.Module):
+            def forward(self, a, b):
+                return a[0].sum() + a[1].sum() + b.sum()
+
+        foo = Foo()
 
         inp_a = (torch.randn(4, 4), torch.randn(4, 4))
         inp_b = torch.randn(4, 4)

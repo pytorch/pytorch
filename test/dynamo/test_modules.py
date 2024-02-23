@@ -7,7 +7,7 @@ import types
 import unittest
 from copy import deepcopy
 from functools import partial
-from typing import Tuple
+from typing import Dict, NamedTuple, Tuple
 from unittest.mock import patch
 
 import torch
@@ -581,6 +581,38 @@ class LazyMLP(torch.nn.Module):
         return y
 
 
+class MyInput(NamedTuple):
+    x: Dict[str, Dict[str, torch.Tensor]]
+    y: torch.Tensor
+
+
+class LazyLayerWithNamedTupleInput(LazyModuleMixin, torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def initialize_parameters(self, input):
+        with torch.no_grad():
+            self._param = torch.nn.Parameter(
+                torch.empty(input.x["a"][0].shape).fill_(0.5)
+            )
+
+    def forward(self, input):
+        input = input.x["a"]
+        x = 0
+        for i in range(len(input)):
+            x = x + input[i]
+        return x
+
+
+class LazyModuleWithNamedTupleInput(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer = LazyLayerWithNamedTupleInput()
+
+    def forward(self, input):
+        return self.layer(input)
+
+
 class LazyLayerWithListInput(LazyModuleMixin, torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -615,6 +647,37 @@ class LazyModuleWithLazySubmodule(LazyModuleMixin, torch.nn.Module):
 
     def forward(self, x):
         return self.layer(x)
+
+
+class LazyLayerWithInputs(LazyModuleMixin, torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def initialize_parameters(self, x, y):
+        with torch.no_grad():
+            self._param_x = torch.nn.Parameter(torch.empty(x[0].shape).fill_(0.5))
+            self._param_y = torch.nn.Parameter(torch.empty(y[0].shape).fill_(0.5))
+
+    def forward(self, x, y):
+        res_x = 0
+        for i in range(len(x)):
+            res_x = res_x + x[i]
+        res_y = 0
+        for i in range(len(y)):
+            res_y = res_y + y[i]
+        return res_x + res_y
+
+
+class LazyModuleKwArgs(LazyModuleMixin, torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def initialize_parameters(self, *args, **kwargs):
+        with torch.no_grad():
+            self.layer = LazyLayerWithInputs()
+
+    def forward(self, x, y):
+        return self.layer(x, y=y)
 
 
 class LazyParentModule(LazyModuleMixin, torch.nn.Module):
@@ -1424,6 +1487,20 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
 
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+    @expectedFailureDynamic
+    def test_lazy_module7(self):
+        # Test lazy module works well with namedtuple/dict input
+        m = LazyModuleWithNamedTupleInput()
+        x = MyInput(
+            x={"a": [torch.rand([5, 5])] * 3, "b": torch.rand([5, 5])},
+            y=torch.rand([5, 5]),
+        )
+        opt_m = torch.compile(backend="eager", fullgraph=True)(m)
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+
     def test_lazy_module_no_cls_to_become(self):
         # make sure super() works in the case where cls_to_become is None
         m = LazyChildModuleNoClsToBecome()
@@ -1432,6 +1509,14 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         res = opt_m(x)
         ref = m(x)
         self.assertTrue(torch.allclose(ref, res))
+
+    def test_lazy_module_kwargs(self):
+        m = LazyModuleKwArgs()
+        x = [torch.rand([5, 5])] * 3
+        y = [torch.rand([5, 5])] * 2
+        opt_m = torch.compile(backend="eager", fullgraph=True)(m)
+        exp_res = m(x, y)
+        self.assertTrue(torch.allclose(exp_res, opt_m(x, y)))
 
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
@@ -1843,7 +1928,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         handle.remove()
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 7)
-        self.assertTrue("forward_hooks.keys" in failure_reason)
+        self.assertTrue("forward_hooks" in failure_reason)
         self.assertEqual(cc.frame_count, 1 + 1)
         self.assertEqual(cc.op_count, 6 + 4)
 
@@ -1863,9 +1948,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m._forward_hooks[handle.id] = new_forward_hook
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 16)
-        self.assertRegex(
-            failure_reason, r"^___check_obj_id\(.*\(L\['m'\]\._forward_hooks"
-        )
+        self.assertRegex(failure_reason, r"^___check_obj_id\(L\['m'\]._forward_hooks")
 
     @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", True)
     def test_hooks_skip_guards(self):

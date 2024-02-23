@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 
 import torch
 import torch.fx as fx
@@ -52,7 +54,9 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
                      "kwargs": kwargs, "kwargs_spec": kwargs_spec}
 
             # hash substituted args to a number, do not hash specs because specs are not hashable
-            hash_arg = hash((args, kwargs))
+            # We need to add type into hash to avoid situations like:
+            # hash((primals_2, 1.0)) == hash((primals_2, 1))
+            hash_arg = hash((tuple((a, type(a)) for a in args), tuple((a, type(a)) for a in kwargs)))
             hash_val = (n.target, hash_arg)
 
             # check if a node has a substitute and can be eliminated

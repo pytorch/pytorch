@@ -11,6 +11,7 @@ from torch.distributed._tensor import (
     distribute_module,
     DTensor,
     init_device_mesh,
+    Replicate,
     Shard,
 )
 from torch.distributed._tensor.debug import CommDebugMode
@@ -329,9 +330,9 @@ class TestTPFSDPIntegration(FSDPTest):
         self.assertEqual(fsdp_out, tp_fsdp_out)
 
     @skip_if_lt_x_gpu(4)
-    def test_fsdp_tp_gradient_layout(self):
+    def test_fsdp_tp_extension_grad(self):
         """
-        Tests TP + FSDP extension with consistent gradient layout
+        Tests TP + FSDP extension with correct gradient (i.e. no ACT)
         """
         mesh_2d = init_device_mesh(
             "cuda", (self.world_size // 2, 2), mesh_dim_names=["dp", "tp"]
@@ -372,6 +373,72 @@ class TestTPFSDPIntegration(FSDPTest):
         self.assertEqual(comm_counts[funcol.reduce_scatter_tensor], 2)
         self.assertEqual(comm_counts[funcol.all_gather_into_tensor], 2)
         self.assertEqual(comm_counts[funcol.all_reduce], 1)
+
+        grads = [p.grad for p in fsdp_2d_model.parameters() if p.grad is not None]
+
+        for grad in grads:
+            self.assertFalse(grad.isnan().any().item())
+
+    @skip_if_lt_x_gpu(4)
+    def test_fsdp_tp_sync_module_state(self):
+        mesh_2d = init_device_mesh(
+            "cuda", (self.world_size // 2, 2), mesh_dim_names=["dp", "tp"]
+        )
+        tp_mesh = mesh_2d["tp"]
+        dp_mesh = mesh_2d["dp"]
+
+        # set random seed for each rank
+        torch.manual_seed(mesh_2d.get_rank())
+
+        class TestModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                replicated_dt = DTensor.from_local(
+                    torch.randn(8, 8), tp_mesh, [Replicate()], run_check=False
+                )
+                replicated_buffer_dt = DTensor.from_local(
+                    torch.randn(8, 8), tp_mesh, [Replicate()], run_check=False
+                )
+                self.param = torch.nn.Parameter(replicated_dt)
+                self.register_buffer("buf", replicated_buffer_dt)
+
+            def forward(self, x):
+                return self.param + self.buffer + 1
+
+        model = TestModel()
+
+        def assert_local_shard_across_ranks(local_tensor, group, check_equal=True):
+            gathered_tensors = [
+                torch.empty_like(local_tensor) for _ in range(group.size())
+            ]
+            dist.all_gather(gathered_tensors, local_tensor, group=group)
+            # on dp mesh dim local tensor does not equal
+            tensor_to_compare = gathered_tensors[0]
+            for tensor in gathered_tensors[1:]:
+                if check_equal:
+                    self.assertTrue(torch.equal(tensor, tensor_to_compare))
+                else:
+                    self.assertFalse(torch.equal(tensor, tensor_to_compare))
+
+        dp_group = dp_mesh.get_group()
+
+        # check on dp mesh dim param local tensor does not equal
+        local_param = model.param.to_local()
+        assert_local_shard_across_ranks(local_param, dp_group, check_equal=False)
+        # check on dp mesh dim buffer local tensor does not equal
+        local_buf = model.buf.to_local()
+        assert_local_shard_across_ranks(local_buf, dp_group, check_equal=False)
+
+        # wrap with fsdp sync param should sync dp mesh dim
+        fsdp_mod = FSDP(model, device_mesh=dp_mesh, sync_module_states=True)
+        with fsdp_mod.summon_full_params(fsdp_mod):
+            # on dp mesh dim local param does equal after sync_module_states
+            local_param = fsdp_mod.param.to_local()
+            assert_local_shard_across_ranks(local_param, dp_group, check_equal=True)
+
+            # on dp mesh dim local buf does equal after sync_module_states
+            local_buf = fsdp_mod.buf.to_local()
+            assert_local_shard_across_ranks(local_buf, dp_group, check_equal=True)
 
 
 instantiate_parametrized_tests(TestTPFSDPIntegration)
