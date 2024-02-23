@@ -274,6 +274,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
   repository(name: $name, owner: $owner) {
     pullRequest(number: $number) {
       files(first: 100, after: $cursor) {
+        totalCount
         nodes {
           path
         }
@@ -459,6 +460,8 @@ HAS_NO_CONNECTED_DIFF_TITLE = (
 # This could be set to -1 to ignore all flaky and broken trunk failures. On the
 # other hand, using a large value like 10 here might be useful in sev situation
 IGNORABLE_FAILED_CHECKS_THESHOLD = 10
+# Github cannot fetch more than 3000 files per PR
+CHANGED_FILES_THRESHOLD = 3000
 
 
 def gh_get_pr_info(org: str, proj: str, pr_no: int) -> Any:
@@ -754,6 +757,7 @@ class GitHubPR:
             info = self.info
             unique_changed_files = set()
             # Do not try to fetch more than 10K files
+            total_count_from_graphql = None
             for _ in range(100):
                 unique_changed_files.update([x["path"] for x in info["files"]["nodes"]])
                 if not info["files"]["pageInfo"]["hasNextPage"]:
@@ -766,10 +770,17 @@ class GitHubPR:
                     cursor=info["files"]["pageInfo"]["endCursor"],
                 )
                 info = rc["data"]["repository"]["pullRequest"]
+                total_count_from_graphql = info["files"]["totalCount"]
             self.changed_files = list(unique_changed_files)
 
-        if len(self.changed_files) != self.get_changed_files_count():
-            raise RuntimeError("Changed file count mismatch")
+            if (
+                total_count_from_graphql != CHANGED_FILES_THRESHOLD
+                and len(self.changed_files) != self.get_changed_files_count()
+            ):
+                raise RuntimeError(
+                    f"Changed file count mismatch, found {len(self.changed_files)} files, "
+                    + "expected {self.get_changed_files_count()} files."
+                )
         return self.changed_files
 
     def get_submodules(self) -> List[str]:
