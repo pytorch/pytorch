@@ -1405,6 +1405,9 @@ class Kernel(CodeGen):
     ) -> CSEVariable:
         raise NotImplementedError()
 
+    def vectorized_random(self, seed, offset, mode):
+        raise NotImplementedError()
+
     def bucketize(
         self,
         values: CSEVariable,
@@ -1568,6 +1571,10 @@ class Kernel(CodeGen):
                 init: int,
             ) -> CSEVariable:
                 return self.scan(dtype, combine_fn, value, init)
+
+            @staticmethod
+            def vectorized_random(seed, offset, mode):
+                return self.vectorized_random(seed, offset, mode)
 
             @staticmethod
             def bucketize(

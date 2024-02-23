@@ -7054,8 +7054,12 @@ class CommonTemplate:
         weight.grad.zero_()
         r2, (fw_code, bw_code) = run_fw_bw_and_get_code(lambda: run(ones))
         if self.device == GPU_TYPE:
-            self.assertEqual(fw_code.count("tl.rand"), 1)
-            self.assertEqual(bw_code.count("tl.rand"), 0)
+            if torch._dynamo.config.assume_static_by_default:
+                self.assertEqual(fw_code.count("triton_helpers.vectorized_rand"), 1)
+                self.assertEqual(bw_code.count("triton_helpers.vectorized_rand"), 0)
+            else:
+                self.assertEqual(fw_code.count("tl.rand"), 1)
+                self.assertEqual(bw_code.count("tl.rand"), 0)
         g2 = weight.grad.clone()
         check(r2, g2)
 
@@ -7090,8 +7094,8 @@ class CommonTemplate:
         )
 
         if self.device == GPU_TYPE:
-            self.assertEqual(fw_code.count("tl.rand"), 1)
-            self.assertEqual(bw_code.count("tl.rand"), 0)
+            self.assertEqual(fw_code.count("triton_helpers.vectorized_rand"), 1)
+            self.assertEqual(bw_code.count("triton_helpers.vectorized_rand"), 0)
         expected_kernel = 4
 
         self.assertEqual(

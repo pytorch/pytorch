@@ -9,6 +9,7 @@ import logging
 import math
 import operator
 import os
+import re
 import textwrap
 from functools import lru_cache
 from typing import (
@@ -2008,6 +2009,71 @@ class TritonKernel(Kernel):
 
         if not self.inside_reduction:
             self.outside_loop_vars.add(value)
+
+    def vectorized_random(self, seed, offset, mode):
+        assert mode in ("rand", "randn")
+        numel = math.prod(self.numels)
+        if numel % 4 == 0:
+            log.debug("Use tl.rand4x/randn4x for speedup")
+            prefix = []
+            for tree in self.range_trees:
+                if tree.prefix != "r" or self.inside_reduction:
+                    prefix.append(tree.prefix)
+            strides = ir.FlexibleLayout.contiguous_strides(
+                [
+                    sympy.Symbol(
+                        self.cse.generate(
+                            self.compute,
+                            f"(({self.numels[i]} + {p.upper()}BLOCK - 1) // {p.upper()}BLOCK) * {p.upper()}BLOCK",
+                        ).name
+                    )
+                    for i, p in enumerate(prefix)
+                ]
+            )
+            offsets_size = sympy_dot(
+                [
+                    sympy.Symbol(
+                        "("
+                        + (f"{p}offset + " if p != "r" else "")
+                        + f"tl.arange(0, {p.upper()}BLOCK"
+                        + (
+                            f" // 4 if {p.upper()}BLOCK // 4 > 1 else 1"
+                            if ("r" in prefix and p == "r")
+                            or ("r" not in prefix and i == 0)
+                            else ""
+                        )
+                        + ")"
+                        + self.indexing_size_str(i, p)
+                        + ")"
+                    )
+                    for i, p in enumerate(prefix)
+                ],
+                strides,
+            )
+            block_size = self.dense_size_str()
+            if (
+                self.loads._lines
+                and seed.name + " = tl.broadcast_to(" in self.loads._lines[-1]
+            ):
+                # If seed used tl.broadcast_to(, then we need special handling before using tl.rand4x/randn4x
+                matches = re.findall(r"\((.*?)\)", self.loads._lines[-1])
+                broadcast_to_args = matches[0].split(",")
+                broadcast_to_input = broadcast_to_args[0].strip()
+                broadcast_to_shape = broadcast_to_args[1].strip()
+                if "[" == broadcast_to_shape[0] and "]" == broadcast_to_shape[-1]:
+                    new_broadcast_to_shape = broadcast_to_shape[:-1] + " // 4]"
+                elif "(" == broadcast_to_shape[0] and ")" == broadcast_to_shape[-1]:
+                    new_broadcast_to_shape = broadcast_to_shape[:-1] + " // 4)"
+                else:
+                    new_broadcast_to_shape = broadcast_to_shape + " // 4"
+
+                seed = (
+                    f"tl.broadcast_to({broadcast_to_input}, {new_broadcast_to_shape})"
+                )
+            return f"triton_helpers.vectorized_{mode}({seed}, {offsets_size}, {block_size})"
+        else:
+            func = getattr(self.overrides, mode)  # type: ignore[has-type]
+            return func(seed, offset)
 
     def bucketize(
         self,

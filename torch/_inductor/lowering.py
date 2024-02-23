@@ -2045,10 +2045,15 @@ def inductor_random(size: List[int], seed: TensorBox, mode: str, *, offset: int 
     seed_loader = seed.make_loader()
 
     def inner_fn(index):
-        return getattr(ops, mode)(
-            seed_loader([]),
-            ops.index_expr(random_pos(index), torch.int32),
-        )
+        if device.type == torch.device("cuda").type:
+            return ops.vectorized_random(
+                seed_loader([]), ops.index_expr(random_pos(index), torch.int32), mode
+            )
+        else:
+            return getattr(ops, mode)(
+                seed_loader([]),
+                ops.index_expr(random_pos(index), torch.int32),
+            )
 
     result = Pointwise.create(
         device=device,
