@@ -9518,6 +9518,7 @@ fn
 
     def _test_compile_model_free(self, model_inp_ctr, weakref_watch):
         cleared = False
+
         def finalize():
             nonlocal cleared
             cleared = True
