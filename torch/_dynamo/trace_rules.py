@@ -189,6 +189,7 @@ manual_torch_name_rule_map = {
     "torch._C._functorch._remove_batch_dim": TorchInGraphFunctionVariable,
     "torch._C._functorch.is_batchedtensor": TorchInGraphFunctionVariable,
     "torch._dynamo.mark_static": UserFunctionVariable,
+    "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
 }
 
 
@@ -2309,8 +2310,8 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.backends.cuda.is_built",
         "torch.backends.cuda.math_sdp_enabled",
         "torch.backends.cuda.mem_efficient_sdp_enabled",
-        "torch.backends.cuda._get_cudnn_sdp_enabled",
-        "torch.backends.cuda._set_sdp_use_cudnn",
+        "torch.backends.cuda.cudnn_sdp_enabled",
+        "torch.backends.cuda.enable_cudnn_sdp",
         "torch.backends.cuda.preferred_linalg_library",
         "torch.backends.cuda.sdp_kernel",
         "torch.backends.cudnn._init",
