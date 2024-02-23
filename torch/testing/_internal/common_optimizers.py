@@ -109,6 +109,8 @@ class OptimizerInfo:
         supports_sparse_on: Tuple[str] = (),
         # the optim only supports one config: sparse grads w/ dense params, see SparseAdam
         only_supports_sparse_grads: bool = False,
+        # the optim supports complex parameters
+        supports_complex: bool = True,
         # whether the optimizer.step() function requires a closure to be passed
         step_requires_closure: bool = False,
         # whether the optimizer supports per-param options with parameter groups
@@ -126,6 +128,7 @@ class OptimizerInfo:
         self.supported_impls = supported_impls
         self.supports_sparse_on = supports_sparse_on
         self.only_supports_sparse_grads = only_supports_sparse_grads
+        self.supports_complex = supports_complex
         self.step_requires_closure = step_requires_closure
         self.supports_param_groups = supports_param_groups
         self.supports_multiple_devices = supports_multiple_devices
@@ -2050,6 +2053,7 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_sparseadam,
         supported_impls=(),
         only_supports_sparse_grads=True,
+        supports_complex=False,  # Missing complex support, see #118153
         skips=(
             DecorateInfo(
                 skipIfMps,  # SparseAdam does not support MPS
@@ -2099,11 +2103,37 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
             ),
-            DecorateInfo(
-                unittest.skip("Missing complex support, see #118153"),
-                "TestOptimRenewed",
-                "test_complex",
-            ),
         ),
     ),
 ]
+
+
+class TensorTracker:
+    def __init__(self):
+        self.tensors = []
+
+    def add(self, tensor):
+        self.tensors.append(tensor)
+
+    # pops from beginning, like a queue and not a stack!
+    def pop_and_set(self, tensor_to_set):
+        assert len(self.tensors) > 0, "no tensors to pop"
+        ref = self.tensors.pop(0)
+
+        assert isinstance(ref, Tensor), f"{ref=}"
+
+        if ref is None:
+            assert tensor_to_set is None
+            return
+
+        rtol, atol = torch.testing._comparison.get_tolerances(
+            ref.dtype, rtol=None, atol=None
+        )
+        assert torch.allclose(
+            ref, tensor_to_set, rtol=rtol, atol=atol
+        ), f"{ref=} but {tensor_to_set=}"
+        with torch.no_grad():
+            tensor_to_set.copy_(ref)
+
+    def all_popped(self):
+        return len(self.tensors) == 0
