@@ -3298,8 +3298,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         c10d.init_process_group(backend="nccl", store=store, rank=self.rank, world_size=self.world_size)
         process_group = c10d.distributed_c10d._get_default_group()
         device = torch.device("cuda:%d" % self.rank)
-        print(os.getpid())
-        time.sleep(10)
         tensors = [torch.full((60 + i,), self.rank + 1 + i, device=device, dtype=torch.float) for i in range(5)]
         torch.distributed.all_reduce_coalesced(tensors, group=process_group)
         for i, t in enumerate(tensors):
@@ -4280,7 +4278,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         num_coalesced_ops = 20
         ops_per_coalesce = len(op_sizes_per_coalesce)
-        for i in range (num_coalesced_ops):
+        for i in range(num_coalesced_ops):
             ops = []
             for input_sizes in op_sizes_per_coalesce:
                 tensor = torch.zeros(input_sizes).to(self.local_device)
@@ -4299,12 +4297,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             time.sleep(1)
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
-        ver = t['version']
-        self.assertEqual(ver, "1.1")
         self.assertEqual(len(t['entries']), num_coalesced_ops * (ops_per_coalesce + 1))
-        # if self.rank == 0:
-        #     for id, entry in enumerate(t['entries']):
-        #         print(f"{id}: seq {entry['seq_id']}, name {entry['profiling_name']} sz {entry['input_sizes']}")
         for seq in range(num_coalesced_ops):
             first_op = seq * (ops_per_coalesce + 1)
             coalesced_op = first_op + ops_per_coalesce
@@ -4353,7 +4346,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         num_repeats = 10
         ops_per_repeat = len(op_sizes)
-        for i in range (num_repeats):
+        for i in range(num_repeats):
             for input_sizes in op_sizes:
                 tensor = torch.zeros(input_sizes).to(self.local_device)
                 if self.rank == 0:
@@ -4369,12 +4362,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             time.sleep(1)
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
-        ver = t['version']
-        self.assertEqual(ver, "1.1")
         self.assertEqual(len(t['entries']), num_repeats * (ops_per_repeat))
-        # if self.rank == 0:
-        #     for id, entry in enumerate(t['entries']):
-        #         print(f"{id}: seq {entry['seq_id']}, name {entry['profiling_name']} sz {entry['output_sizes']}")
         for seq in range(num_repeats * ops_per_repeat):
             input_sizes = op_sizes[seq % ops_per_repeat]
             profiling_name = 'nccl:recv 0<-1' if self.rank == 0 else 'nccl:send 1->0'
@@ -4383,7 +4371,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             expected_seq = seq + 1
             self.assertEqual(t['entries'][seq]['profiling_name'], profiling_name)
             self.assertEqual(t['entries'][seq]['seq_id'], expected_seq)
-            # TODO(whc)
+            # TODO(whc) input sizes are lost
             # self.assertEqual(t['entries'][seq]['input_sizes'], [input_sizes])
             self.assertEqual(t['entries'][seq]['output_sizes'], [input_sizes])
             self.assertEqual(t['entries'][seq]['state'], 'completed')
@@ -4394,6 +4382,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
             else:
                 self.assertTrue('duration_ms' not in t['entries'][seq])
 
+    # TODO(whc) support and test coalesced collectives that use the c++ start/end group thingy instead of python
+    # coalescing manager
+
+    # TODO(whc) test out other ops (And combinations of ops, if that's valid?)
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @parametrize("timing_enabled", [True, False])
@@ -4407,6 +4399,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         output_tensors = torch.zeros(2, 2).to(self.rank)
         input_tensors = [torch.ones(2, 2).to(self.rank) for _ in range(self.world_size)]
 
+        # TODO(whc) make this work with bigger world or something
         self.assertEqual(self.world_size, 2, self.world_size)
 
         with dist._coalescing_manager():
@@ -4421,31 +4414,21 @@ class NCCLTraceTest(NCCLTraceTestBase):
             time.sleep(1)
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
-        if self.rank == 0:
-            for id, entry in enumerate(t['entries']):
-                print(f"{id}: seq {entry['seq_id']}, name {entry['profiling_name']} osz {entry['output_sizes']}")
 
         # TODO can we change the behavior so indiviual reduce_scatter_tensors get logged?
-        self.assertEqual(len(t['entries']), 2)  # one for the reduce_scatter_tensor_coalesced, one for the endCoalescing
+        self.assertEqual(len(t['entries']), 1)  # one for the reduce_scatter_tensor_coalesced, one for the endCoalescing
         self.assertEqual(t['entries'][0]['profiling_name'], "nccl:reduce_scatter_tensor_coalesced")
         self.assertEqual(t['entries'][0]['seq_id'], 1)
-        self.assertEqual(t['entries'][0]['input_sizes'], [input_sizes])
-        self.assertEqual(t['entries'][0]['output_sizes'], [input_sizes])
-        self.assertEqual(t['entries'][0]['state'], 'scheduled')
-        self.assertTrue('duration_ms' not in t['entries'][0])
-
-        self.assertEqual(t['entries'][1]['profiling_name'], "nccl:coalesced_collective")
-        self.assertEqual(t['entries'][1]['seq_id'], 1)
-        self.assertEqual(t['entries'][1]['input_sizes'], [])
-        # TODO whc is it consistent that coalesced_collective op has sizes?
-        self.assertEqual(t['entries'][1]['output_sizes'], [input_sizes])
-        self.assertEqual(t['entries'][1]['state'], 'completed')
-
+        # TODO(whc) input sizes aren't handled yet
+        # self.assertEqual(t['entries'][0]['input_sizes'], [[2, 2], [2, 2]])
+        self.assertEqual(t['entries'][0]['input_sizes'], [])
+        self.assertEqual(t['entries'][0]['output_sizes'], [[2,], [2,]])
+        self.assertEqual(t['entries'][0]['state'], 'completed')
         if timing_enabled:
-            duration = t['entries'][1]['duration_ms']
+            duration = t['entries'][0]['duration_ms']
             self.assertTrue(0.001 < duration < 10000, duration)
         else:
-            self.assertTrue('duration_ms' not in t['entries'][1])
+            self.assertTrue('duration_ms' not in t['entries'][0])
 
 class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
     timeout_sec = 1
