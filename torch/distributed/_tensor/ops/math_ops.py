@@ -99,8 +99,8 @@ class _NormPartial(_Partial):
     ) -> torch.Tensor:
         assert isinstance(shard_spec, Shard), f"{shard_spec}"
         tensor = self._pre_reduce_transform(tensor)
-        reduced_tensor = shard_spec._reduce_shard_tensor(
-            tensor, mesh, self.reduce_op, mesh_dim
+        reduced_tensor = super()._reduce_shard_value(
+            tensor, mesh, mesh_dim, shard_spec
         )
         return self._post_reduce_transform(reduced_tensor)
 
@@ -108,9 +108,7 @@ class _NormPartial(_Partial):
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
         tensor = self._pre_reduce_transform(tensor)
-        reduced_tensor = funcol.all_reduce(
-            tensor, reduceOp=self.reduce_op.name, group=(mesh, mesh_dim)
-        )
+        reduced_tensor = super()._reduce_value(tensor, mesh, mesh_dim)
         return self._post_reduce_transform(reduced_tensor)
 
     def _pre_reduce_transform(self, tensor: torch.Tensor) -> torch.Tensor:
