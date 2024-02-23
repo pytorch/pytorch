@@ -756,8 +756,6 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
                 raise NotImplementedError()
 
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
         class foo_autograd_fn(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
