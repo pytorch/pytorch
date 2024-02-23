@@ -202,8 +202,8 @@ class GraphArg:
             self._example = TensorWeakRef(self._example)
             assert is_fake(self.fake_tensor)
 
-    def load(self, tx):
-        return self.source.reconstruct(tx)
+    def reconstruct(self, codegen):
+        self.source.reconstruct(codegen)
 
     def erase(self):
         self._example = None
@@ -755,7 +755,9 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type):
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            # This is a userdefined class, so install an ID_MATCH even if its a
+            # global variable.
+            self.install_guards(GuardBuilder.ID_MATCH)
             return UserDefinedClassVariable(
                 value,
                 source=self.source,
@@ -1596,9 +1598,9 @@ def _automatic_dynamic(
 
     # We preserve the dynamism of inputs. For example, when users call
     # make_fx(torch.cond, tracing_mode="symbolic")(*args), inputs have SymInt sizes.
-    from torch.fx.experimental.symbolic_shapes import is_singleton
+    from torch.fx.experimental.symbolic_shapes import is_nested_int
 
-    if any(isinstance(s, SymInt) and not is_singleton(s) for s in e.size()):
+    if any(isinstance(s, SymInt) and not is_nested_int(s) for s in e.size()):
         return StatefulSymbolicContext(
             dynamic_sizes=[
                 DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
@@ -1727,7 +1729,7 @@ def _automatic_dynamic(
             constraint_dim is not None
             or marked_dynamic
             or marked_weak_dynamic
-            or is_singleton(e.shape[i])
+            or is_nested_int(e.shape[i])
         ):
             # NB: We could assert static_shapes is False here, but it
             # seems better to allow the user to override symbolic_context in this
@@ -1872,6 +1874,10 @@ class SourcelessBuilder:
             return cls([self(tx, x) for x in value], mutable_local=MutableLocal())
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)
+        elif PlacementVariable.is_placement(value):
+            return PlacementVariable(value)
+        elif DeviceMeshVariable.is_device_mesh(value):
+            return DeviceMeshVariable(value)
         unimplemented(f"Unexpected type in sourceless builder {type(value)}")
 
     @staticmethod

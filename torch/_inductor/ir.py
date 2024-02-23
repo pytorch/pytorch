@@ -21,6 +21,7 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
 from unittest.mock import patch
@@ -58,6 +59,7 @@ from .dependencies import (
     extract_read_writes,
     var_builder,
 )
+from .ops_handler import OpCounterCSE
 from .utils import (
     argsort,
     cache_on_self,
@@ -73,6 +75,9 @@ from .utils import (
     sympy_subs,
 )
 from .virtualized import ops, V
+
+if TYPE_CHECKING:
+    from .graph import GraphLowering
 
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
@@ -332,31 +337,7 @@ class IRNode:
     make_indexer: Callable[[], Callable[[Any], Any]]
     mark_reuse: Callable[[int], None]
     realize_hint: Callable[[], None]
-
-
-class _OpCounterCSE:
-    """Shim to count how many ops are used"""
-
-    def __init__(self, inner):
-        super().__init__()
-        self.parent_handler = inner
-        self.op_count = 0
-        self.var_names = {}
-
-    def __getattr__(self, name):
-        def inner(*args, **kwargs):
-            val = getattr(self.parent_handler, name)(*args, **kwargs)
-            if name == "indirect_indexing":
-                return val
-            if val not in self.var_names:
-                varname = f"tmp{self.op_count}"
-                self.op_count += 1
-                self.var_names[val] = varname
-                return varname
-            else:
-                return self.var_names[val]
-
-        return inner
+    get_unbacked_symbol_uses: Callable[[], Set[sympy.Symbol]]
 
 
 @dataclasses.dataclass
@@ -429,7 +410,7 @@ class Loops(IRNode):
     def inner_fn_opcount(self):
         from .ir import FlexibleLayout
 
-        opcounter = _OpCounterCSE(V.MockHandler())
+        opcounter = OpCounterCSE(V.MockHandler())
 
         with V.set_ops_handler(opcounter), patch.object(
             FlexibleLayout, "allow_indexing", True
@@ -1673,10 +1654,6 @@ class Scan(Loops):
             # TODO: CPU support
             return None
 
-        if torch.version.hip is not None:
-            # TODO: ROCm support
-            return None
-
         sizevars = V.graph.sizevars
         scan_numel = sizevars.simplify(sympy_product(scan_ranges))
 
@@ -1823,6 +1800,9 @@ def is_stride_order_storage_and_layout(x, stride_order):
 @dataclasses.dataclass
 class BaseView(IRNode):
     data: IRNode
+
+    def get_unbacked_symbol_uses(self):
+        return self.data.get_unbacked_symbol_uses()
 
     def make_reindexer(self):
         raise NotImplementedError(f"make_reindexer NYI on {self}")
@@ -2295,6 +2275,13 @@ class ReinterpretView(BaseView):
 
     def freeze_layout(self):
         pass
+
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+        return (
+            free_unbacked_symbols(self.layout.size)
+            | free_unbacked_symbols(self.layout.stride)
+            | free_unbacked_symbols(self.layout.offset)
+        )
 
     def codegen_reference(self, writer=None):
         # reinterpret_tensor is similar to as_strided except:
@@ -3057,6 +3044,9 @@ class ConstantBuffer(InputBuffer):
 
 
 class NoneAsConstantBuffer(IRNode):
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+        return set()
+
     def codegen_reference(self, writer=None):
         return V.graph.wrapper_code.none_str
 
@@ -3065,6 +3055,9 @@ class ShapeAsConstantBuffer(IRNode):
     def __init__(self, shape):
         super().__init__()
         self.shape = shape
+
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+        return free_unbacked_symbols(self.shape)
 
     def codegen_reference(self, writer=None):
         return V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.shape))
@@ -3451,14 +3444,20 @@ class InputsKernel(Buffer):
             op_counts=collections.Counter(),
         )
 
-    @staticmethod
-    def unwrap_storage_for_input(x):
+    @classmethod
+    def unwrap_storage_for_input(cls, x):
         if isinstance(x, TensorBox):
             x = x.data
         if isinstance(x, StorageBox):
             x = x.data
         if isinstance(x, BaseView) and not isinstance(x, ReinterpretView):
             x = ExternKernel.realize_input(x)
+        if isinstance(x, TensorBox):
+            # when converting to ReinterpretView fails in the
+            # realize_input call above, the result will be wrapped
+            # into TensorBox / StorageBox pair as a result of the
+            # cls.copy_input call; so we should unwrap recursively
+            return cls.unwrap_storage_for_input(x)
         assert isinstance(x, (Buffer, ReinterpretView)), x
         return x
 
@@ -4294,15 +4293,18 @@ class InplaceCopyFallback(ExternKernel):
         return result
 
 
-class AccumulateGrad(ExternKernel):
+class MutatingFirstArgExternKernel(ExternKernel):
     """
     This needs to be a custom class to handle mutation properly
     """
 
     def codegen(self, wrapper):
-        (variable, new_grad) = (t.codegen_reference() for t in self.inputs)
+        argrefs = [
+            *(t.codegen_reference() for t in self.inputs),
+            *map(repr, self.constant_args),
+        ]
         wrapper.writeline(
-            f"{self.get_kernel_name()}({variable}, {new_grad}){wrapper.ending}"
+            f"{self.get_kernel_name()}({', '.join(argrefs)}){wrapper.ending}"
         )
 
     def should_allocate(self):
@@ -4314,6 +4316,11 @@ class AccumulateGrad(ExternKernel):
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
 
+    def has_side_effects(self):
+        return True
+
+
+class AccumulateGrad(MutatingFirstArgExternKernel):
     def __init__(self, variable, new_grad):
         super().__init__(
             None,
@@ -4326,6 +4333,23 @@ class AccumulateGrad(ExternKernel):
         mark_node_as_mutating(self, variable)
         # never reuse gradient buffers since they might be stolen
         V.graph.never_reuse_buffers.add(new_grad.data.get_name())
+
+
+class ResizeStorageBytes(MutatingFirstArgExternKernel):
+    def __init__(self, variable, new_size):
+        assert isinstance(new_size, int), "TODO: dynamic shapes"
+        super().__init__(
+            None,
+            NoneLayout(variable.get_device()),  # type: ignore[arg-type]
+            self.unwrap_storage([variable]),
+            constant_args=(new_size,),
+        )
+        V.graph.mark_buffer_mutated(variable.get_name())
+        self.name = V.graph.register_buffer(self)
+        self.python_kernel_name = "inductor_ops.resize_storage_bytes_"
+        self.cpp_kernel_name = "torch::inductor::resize_storage_bytes_"
+        V.graph.never_reuse_buffers.add(variable.data.get_name())
+        mark_node_as_mutating(self, variable)
 
 
 class ScatterFallback(ExternKernel):
@@ -6521,6 +6545,9 @@ class MutableBox(IRNode):
     def realize(self):
         return self.data.realize()
 
+    def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
+        return self.data.get_unbacked_symbol_uses()
+
     def codegen_reference(self, writer=None):
         return self.data.codegen_reference(writer)
 
@@ -6670,6 +6697,127 @@ class StorageBox(MutableBox):
             )
             else True
         )
+
+
+@dataclasses.dataclass
+class Subgraph(IRNode):
+    name: str
+    graph_module: torch.fx.GraphModule
+    graph: Optional["GraphLowering"] = None
+
+
+@dataclasses.dataclass
+class Conditional(ExternKernel):
+    predicate: Optional[DynamicScalar] = None
+    operands: Optional[List[TensorBox]] = None
+    true_subgraph: Optional[Subgraph] = None
+    false_subgraph: Optional[Subgraph] = None
+    outputs: Optional[List[MultiOutput]] = None
+
+    def __init__(
+        self,
+        predicate: DynamicScalar,
+        operands: List[TensorBox],
+        true_subgraph: Subgraph,
+        false_subgraph: Subgraph,
+        layout: MultiOutputLayout,
+    ):
+        self.predicate = predicate
+        self.operands = operands
+        self.true_subgraph = true_subgraph
+        self.false_subgraph = false_subgraph
+
+        super().__init__(
+            name=None,
+            layout=layout,  # type: ignore[arg-type]
+            inputs=[predicate, *operands],  # type: ignore[list-item]
+        )
+
+        self.name = V.graph.register_buffer(self)
+
+    @classmethod
+    def create(
+        cls,
+        predicate: TensorBox,
+        true_fn: Subgraph,
+        false_fn: Subgraph,
+        operands: List[TensorBox],
+    ):
+        predicate = cls.realize_input(predicate)
+        operands = [cls.realize_input(x) for x in operands]
+
+        fx_operands = V.graph.current_node.args[-1]
+        fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
+
+        for subgraph in (true_fn, false_fn):
+            if subgraph.graph is None:
+                # create and lower subgraphs
+                subgraph.graph = V.graph.make_subgraph(
+                    gm=subgraph.graph_module,
+                    example_inputs=fake_operands,
+                    subgraph_name=subgraph.name,
+                )
+                with V.set_graph_handler(subgraph.graph):
+                    subgraph.graph.run(*fake_operands)
+
+        true_outputs = true_fn.graph.graph_outputs  # type: ignore[union-attr]
+        false_outputs = true_fn.graph.graph_outputs  # type: ignore[union-attr]
+
+        def _aliased_buffers(outputs):
+            buffers = [
+                output.unwrap_view() if isinstance(output, ReinterpretView) else output
+                for output in outputs
+            ]
+            # assuming the same buffer is represented by the same IRNode object
+            return len({id(buffer) for buffer in buffers}) < len(outputs)
+
+        for name, outputs in (("true_fn", true_outputs), ("false_fn", false_outputs)):
+            if _aliased_buffers(true_outputs):
+                raise AssertionError(
+                    "Output aliasing is currently not supported in compiled torch.cond. "
+                    f"The outputs of the {name} subgraph of torch.cond are aliased: {outputs}"
+                )
+
+        # make sure true and false outputs are structurally equivalent
+        assert len(true_outputs) == len(false_outputs), (true_outputs, false_outputs)
+        for i, (to, fo) in enumerate(zip(true_outputs, false_outputs)):
+            assert to.get_size() == fo.get_size(), (i, to, fo)
+            assert to.get_stride() == fo.get_stride(), (i, to, fo)
+            assert to.get_device() == fo.get_device(), (i, to, fo)
+            assert to.get_dtype() == fo.get_dtype(), (i, to, fo)
+            assert to.get_layout().offset == fo.get_layout().offset, (i, to, fo)
+
+        conditional = Conditional(
+            predicate=predicate,
+            operands=operands,
+            true_subgraph=true_fn,
+            false_subgraph=false_fn,
+            # use predicate device for consistent codegen-ing
+            layout=MultiOutputLayout(predicate.get_device()),
+        )
+
+        outputs = [
+            MultiOutput(
+                FixedLayout(
+                    device=output.get_device(),
+                    dtype=output.get_dtype(),
+                    size=output.get_size(),
+                    stride=output.get_stride(),
+                    offset=output.get_layout().offset,
+                ),
+                conditional,
+                [(list, i)],
+            )
+            # as the true and false outputs are equivalent,
+            # we can use either of them here as a "template"
+            for i, output in enumerate(true_outputs)
+        ]
+
+        conditional.outputs = outputs
+        return outputs
+
+    def codegen(self, wrapper):
+        wrapper.codegen_conditional(self)
 
 
 class InterpreterShim(torch.fx.Interpreter):

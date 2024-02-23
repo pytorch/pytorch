@@ -431,6 +431,7 @@ class TestExecutionTrace(TestCase):
         assert loop_count == expected_loop_events
 
     @unittest.skipIf(IS_WINDOWS, 'torch.compile does not support WINDOWS')
+    @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
     def test_execution_trace_with_pt2(self):
 
         class ConvAndRelu(nn.Module):
@@ -1660,6 +1661,7 @@ class TestProfiler(TestCase):
                 self.assertTrue(len(e.input_shapes[0]) > 0)
 
     @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
+    @patch.dict(os.environ, {"KINETO_DAEMON_INIT_DELAY_S": "1"})
     def test_kineto_profiler_with_environment_variable(self):
         script = """
 import torch
