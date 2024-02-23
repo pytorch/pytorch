@@ -828,6 +828,19 @@ dynamo_expected_failures = {
     "TestControlFlowTraced.test_map_functionalized",  # functorch/test_control_flow
     "TestControlFlowTraced.test_nested_map_cond_symbolic",  # functorch/test_control_flow
     "TestControlFlowTraced.test_nested_map_cond_real",  # functorch/test_control_flow
+    "TestJacCPU.test_vmap_on_jac_simple_jacfwd_cpu",  # functorch/test_eager_transforms.py
+    "TestGradTransformCPU.test_no_grad_outside_vjp_cpu",  # functorch/test_eager_transforms.py
+    "TestGradTransformCPU.test_no_grad_outside_vjp_fn_cpu",  # functorch/test_eager_transforms.py
+    "TestGradTransformCPU.test_no_grad_outside_vjp_only_cpu",  # functorch/test_eager_transforms.py
+    "TestGradTransformCPU.test_unrelated_vjp_cpu",  # functorch/test_eager_transforms.py
+    "TestGradTransformCPU.test_unrelated_vjp_multiple_inputs_outputs_cpu",  # functorch/test_eager_transforms.py
+    "TestGradTransformCPU.test_vjp_aux_pytree_cpu",  # functorch/test_eager_transforms.py
+    "TestGradTransformCPU.test_vjp_of_grad_composition_cpu",  # functorch/test_eager_transforms.py
+    "TestGradTransformCPU.test_vjp_pytree_input_cpu",  # functorch/test_eager_transforms.py
+    "TestComposabilityCPU.test_make_fx_vjp_cpu",  # functorch/test_eager_transforms.py
+    "TestComposabilityCPU.test_vjp_grad_cpu",  # functorch/test_eager_transforms.py
+    "TestComposabilityCPU.test_vjp_vmap_cpu",  # functorch/test_eager_transforms.py
+    "TestAutogradFunctionCPU.test_once_differentiable_autograd_vjp_cpu",  # functorch/test_eager_transforms.py
     "TestFunctionalizeCPU.test_multioutput_view_cpu",  # functorch/test_eager_transforms.py
     "TestFunctionalizeCPU.test_simple_view_cpu",  # functorch/test_eager_transforms.py
     "TestMetaKernel.test_addmm_invalid_dtype",  # lazy/test_meta_kernel
@@ -1408,6 +1421,7 @@ dynamo_expected_failures = {
     "TestAOTAutograd.test_input_output_view_metadata_mutate_multiple",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_input_data_and_metadata_mutation",  # functorch/test_aotdispatch
     "TestPartitioning.test_min_cut_partitioner_output_tensor_shape_tensor",  # functorch/test_aotdispatch
+    "TestPythonKeyCPU.test_make_fx_vjp_cpu",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_input_output_view_simple",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_output_aliases_intermediate_multi_output_view",  # functorch/test_aotdispatch
     "TestAOTAutograd.test_output_aliases_intermediate_returned_multiple_times",  # functorch/test_aotdispatch
@@ -2130,6 +2144,8 @@ dynamo_expected_failures = {
     "TestJacCPU.test_argnums_tuple_jacfwd_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_argnums_effect_on_return_jacrev_cpu",  # functorch/test_eager_transforms.py
     "TestGradTransformCPU.test_vjp_cpu",  # functorch/test_eager_transforms.py
+    "TestGradTransformCPU.test_vjp_pytree_output_cpu",  # functorch/test_eager_transforms.py
+    "TestGradTransformCPU.test_vjp_two_outputs_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_repeated_argnums_jacfwd_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_against_reference_unrelated_outputs_cpu",  # functorch/test_eager_transforms.py
     "TestComposabilityCPU.test_vjp_vjp_cpu",  # functorch/test_eager_transforms.py
@@ -2161,7 +2177,6 @@ dynamo_expected_failures = {
     "TestJacCPU.test_argnums_tuple_jacrev_cpu",  # functorch/test_eager_transforms.py
     "TestComposabilityCPU.test_vmap_vjp_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_multiple_args_jacfwd_cpu",  # functorch/test_eager_transforms.py
-    "TestAutogradFunctionCPU.test_needs_input_grads_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_against_reference_simple_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_multiple_args_jacrev_cpu",  # functorch/test_eager_transforms.py
     "TestJacCPU.test_empty_argnums_jacrev_cpu",  # functorch/test_eager_transforms.py

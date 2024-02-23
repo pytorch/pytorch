@@ -150,6 +150,85 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
         return x
 
 
+class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
+    """represents torch grad requries grad"""
+
+    @staticmethod
+    def create(tx, target_values, **kwargs):
+        return GradInplaceRequiresGradCtxManagerVariable(
+            target_values=target_values,
+            initial_values=None,
+            **kwargs,
+        )
+
+    def enter(self, tx):
+        [enabled] = self.target_values
+        self.prev_state = torch._C._functorch.get_inplace_requires_grad_allowed()
+        torch._C._functorch.set_inplace_requires_grad_allowed(enabled)
+        self.set_cleanup_hook(
+            tx,
+            lambda: torch._C._functorch.set_inplace_requires_grad_allowed(
+                self.prev_state
+            ),
+        )
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch._C._functorch.set_inplace_requires_grad_allowed,
+            (enabled,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+    def exit(self, tx, *args):
+        self.state.cleanup()
+        tx.output.create_node(
+            "call_function",
+            torch._C._functorch.set_inplace_requires_grad_allowed,
+            (self.prev_state,),
+            {},
+        )
+        return variables.ConstantVariable.create(None)
+
+
+class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
+    """represents torch.func.grad increment/decrement nesting"""
+
+    # A guard is needed as the grad level is baked into the torch FX graph
+    # This is fine if grad is only called from within the function
+    # being compiled. But the FX graph may be invalid in the case of a grad
+    # call from eager that calls the compiled function, as the grad levels
+    # may be different.
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)
+
+    @staticmethod
+    def create(tx, **kwargs):
+        var = GradIncrementNestingCtxManagerVariable(
+            target_values=None,
+            initial_values=None,
+            **kwargs,
+        )
+        return var
+
+    def enter(self, tx):
+        install_guard(self._guards_singleton)
+        grad_level = torch._C._functorch._grad_increment_nesting()
+        self.set_cleanup_hook(tx, lambda: torch._C._functorch._grad_decrement_nesting())
+        self.state.proxy = tx.output.create_node(
+            "call_function",
+            torch._C._functorch._grad_increment_nesting,
+            (),
+            {},
+        )
+        return variables.ConstantVariable.create(grad_level)
+
+    def exit(self, tx, *args):
+        self.state.cleanup()
+        tx.output.create_node(
+            "call_function", torch._C._functorch._grad_decrement_nesting, (), {}
+        )
+        return variables.ConstantVariable.create(None)
+
+
 class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     """represents torch VMap increment/decrement nesting"""
 

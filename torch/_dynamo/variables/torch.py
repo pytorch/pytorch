@@ -43,7 +43,6 @@ from .ctx_manager import (
     TorchFunctionDisableVariable,
 )
 from .distributed import is_constant_pg_functions, is_from_local, ProcessGroupVariable
-from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import ListVariable, TupleVariable
 from .torch_function import can_dispatch_torch_function, dispatch_torch_function
 
@@ -55,6 +54,8 @@ supported_ctx_manager_classes = {
     torch.autograd.profiler.record_function,
     torch._C.DisableTorchFunctionSubclass,
     torch._functorch.vmap.vmap_increment_nesting,
+    torch._functorch.eager_transforms.grad_increment_nesting,
+    torch._functorch.eager_transforms.enable_inplace_requires_grad,
     torch.amp.autocast_mode.autocast,
     torch.autograd.grad_mode.enable_grad,
     torch.autograd.grad_mode.inference_mode,
@@ -174,6 +175,8 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
     ) -> "VariableTracker":
         from . import (
             DisabledSavedTensorsHooksVariable,
+            GradIncrementNestingCtxManagerVariable,
+            GradInplaceRequiresGradCtxManagerVariable,
             GradModeVariable,
             InferenceModeVariable,
             StreamVariable,
@@ -239,6 +242,17 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 tx,
                 [guard_if_dyn(x) for x in args],
             )
+        elif self.value is torch._functorch.eager_transforms.grad_increment_nesting:
+            assert len(args) == 0
+            return GradIncrementNestingCtxManagerVariable.create(tx)
+        elif (
+            self.value is torch._functorch.eager_transforms.enable_inplace_requires_grad
+        ):
+            assert len(args) == 1
+            return GradInplaceRequiresGradCtxManagerVariable.create(
+                tx,
+                [guard_if_dyn(x) for x in args],
+            )
         elif self.value is torch.autograd.graph.disable_saved_tensors_hooks:
             assert len(args) == 1
             return DisabledSavedTensorsHooksVariable.create(
@@ -291,11 +305,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             ):
                 tx.mark_inconsistent_side_effects()
             return ConstantVariable.create(tracing_state_functions[self.value])
-        elif self.value in (torch._functorch.eager_transforms.grad_impl,):
-            return TorchHigherOrderOperatorVariable.make(
-                self.value,
-                source=self.source,
-            ).call_function(tx, args, kwargs)
         elif self.value is torch.overrides.get_default_nowrap_functions.__wrapped__:
             # [Note: __torch_function__] we return empty here because we restrict
             # the set of functions that we trace __torch_function__ on to

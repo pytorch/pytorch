@@ -1180,13 +1180,16 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 return TupleVariable([TupleVariable(items), aux])
 
 
-class FunctorchVmapHigherOrderVariable(UserFunctionVariable):
+class FunctorchHigherOrderVariable(UserFunctionVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         if not torch._dynamo.config.capture_func_transforms:
+            name = self.get_name()
+            assert name in ("grad_impl", "vmap_impl")
+            fn = name.split("_")[0]
             unimplemented(
-                "torch.func.vmap capture is disabled, "
+                f"torch.func.{fn} capture is disabled, "
                 "it can be turned on by setting "
                 "`torch._dynamo.config.capture_func_transforms=True`"
             )
