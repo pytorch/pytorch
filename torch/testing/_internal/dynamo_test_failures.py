@@ -62,6 +62,22 @@ else:
     dynamo_expected_failures = set(os.listdir(failures_directory))
     dynamo_skips = set(os.listdir(skips_directory))
 
+# TODO: due to case sensitivity problems, for now list these files by hand
+extra_dynamo_skips = {
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_T_cpu_float32",
+    "TestProxyTensorOpInfoCPU.test_make_fx_exhaustive_t_cpu_float32",
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_T_cpu_float32",
+    "TestProxyTensorOpInfoCPU.test_make_fx_fake_exhaustive_t_cpu_float32",
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_T_cpu_float32",
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_t_cpu_float32",
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_T_cpu_float32",
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_inplace_t_cpu_float32",
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_T_cpu_float32",
+    "TestProxyTensorOpInfoCPU.test_make_fx_symbolic_exhaustive_out_t_cpu_float32",
+}
+dynamo_skips = dynamo_skips.union(extra_dynamo_skips)
+
+
 # verify some invariants
 for test in dynamo_expected_failures.union(dynamo_skips):
     if len(test.split(".")) != 2:
