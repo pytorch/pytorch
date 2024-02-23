@@ -518,12 +518,6 @@ struct NCCLTraceBuffer {
   */
   void retire_id(c10::optional<size_t> id, bool compute_duration = true) {
     if (!enabled_ || !id) {
-      if (!enabled_) {
-        LOG(ERROR) << "retire_id disabled";
-      }
-      if (!id) {
-        LOG(ERROR) << "retire_id no id";
-      }
       return;
     }
 
@@ -543,8 +537,6 @@ struct NCCLTraceBuffer {
             entry->start_ && entry->end_;
         startEvent = entry->start_;
         endEvent = entry->end_;
-        LOG(ERROR) << "retire_id 'compute_duration' can_compute_duration="
-                   << can_compute_duration;
       }
     }
 
@@ -554,8 +546,6 @@ struct NCCLTraceBuffer {
       // can dump(), which we never want to block.
       guard.unlock();
       duration = getDurationFromEvent(*startEvent, *endEvent);
-      LOG(ERROR) << "retire_id duration="
-                 << (duration.has_value() ? duration.value() : -1);
       guard.lock();
 
       // Refresh the entry pointer, see if the entry has been overwritten

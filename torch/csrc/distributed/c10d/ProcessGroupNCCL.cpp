@@ -2231,7 +2231,6 @@ void ProcessGroupNCCL::workEnqueue(
       uid_,
       seq_,
       work->profilingTitle_,
-
       // TODO some new way to pass in/out tensor shapes to record()
       // we avoid keeping tensors alive by holding a work obj, so shouldn't
       // store the inputs/outputs directly
@@ -2239,7 +2238,6 @@ void ProcessGroupNCCL::workEnqueue(
       work->outputs_ ? *work->outputs_ : std::vector<at::Tensor>{},
       work->ncclStartEvent_.get(),
       work->ncclEndEvent_.get());
-  LOG(ERROR) << "workEnqueue just recorded " << work->trace_id_.value();
   if (!terminateProcessGroup_.load()) {
     {
       std::lock_guard<std::mutex> lock(workMetaListMutex_);
@@ -2689,7 +2687,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     p2pRank = rank_;
     p2pTargetRank = peer;
   } else {
-    // For single P2P, preserve the old two-rank behavior (to avoid perf diff)
+    // For single P2P, preserve theworkEnqueue old two-rank behavior (to avoid
+    // perf diff)
     key = getKeySendRecv(rank_, peer);
     p2pRank = rank_ <= peer ? 0 : 1;
     isSendRecvSelf = rank_ == peer;
@@ -2698,7 +2697,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     if (!coalescing_state_) {
       // Bump sequence number. Don't do so if it's a batch P2P, it will be
       // bumped in `endCoalescing`.
-      LOG(ERROR) << "Bumping seq_ inside pointToPoint" << seq_;
+      // TODO(whc) move this till the end of the op?
+      // and should
       seq_++;
     }
   }
@@ -2725,10 +2725,15 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         profilingTitle,
         {tensor},
         {tensor},
-        enableTiming_.load() ? coalescedStartEvent_.get() : nullptr,
-        coalescedEndEvent_.get());
+        // We'd like to include events here and have them updated, but it
+        // complicates event lifetime. currently, event lifetime is managed by
+        // the Work that owns the event, which may be destroyed before this
+        // particular flight record gets updated during dumping.
+        nullptr,
+        nullptr);
     // TODO accumulate the trace_ids into a list and later stuff those into the
     // work for recording
+    (void)trace_id;
   } else {
     work = initWork(device, rank_, opType, profilingTitle, {tensor}, {});
     // Store references to outputs to be used by WorkNCCL::result and

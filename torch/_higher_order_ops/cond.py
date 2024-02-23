@@ -157,11 +157,18 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
 
     with disable_proxy_modes_tracing():
+        # We'll use the current decomposition table to make sure operatos in subgraphs are
+        # decomposed properly.
+        decomp_table = torch.fx.experimental.proxy_tensor.CURRENT_DECOMPOSITION_TABLE
         true_graph = make_fx(
-            _maybe_run_with_interpreter(true_fn), pre_dispatch=pre_dispatch
+            _maybe_run_with_interpreter(true_fn),
+            decomposition_table=decomp_table,
+            pre_dispatch=pre_dispatch,
         )(*operands)
         false_graph = make_fx(
-            _maybe_run_with_interpreter(false_fn), pre_dispatch=pre_dispatch
+            _maybe_run_with_interpreter(false_fn),
+            decomposition_table=decomp_table,
+            pre_dispatch=pre_dispatch,
         )(*operands)
 
     true_outs = []
