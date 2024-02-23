@@ -1228,6 +1228,36 @@ class DYNAMIC_INDICES : public LeafGuard {
   py::set _dynamic_indices;
 };
 
+class DICT_VERSION : public LeafGuard {
+ public:
+  DICT_VERSION(py::object value, py::object verbose_code_parts)
+      : LeafGuard(verbose_code_parts) {
+    if (!PyDict_Check(value.ptr())) {
+      throw py::type_error("DICT_VERSION expects a dict");
+    }
+    _tag = get_dict_version(value.ptr());
+  }
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    return PyDict_Check(value) && get_dict_version(value) == _tag;
+  }
+
+ private:
+  int64_t get_dict_version(PyObject* dict) {
+#if IS_PYTHON_3_12_PLUS
+    throw std::runtime_error("Dynamo does not support CPython 3.12 yet.");
+#else
+    // ma_version_tag is deprecated since 3.12. We will need to transition
+    // to use the appropriate API for later versions.
+    // This warning is an error on some clang builds, so we have to ifdef it
+    // away for now.
+    return ((PyDictObject*)dict)->ma_version_tag;
+#endif
+  }
+
+  // Saved dict version.
+  int64_t _tag;
+};
+
 // GuardManager can be a pointer to DictGuardManager, but at this point the
 // compiler does not know that DictGuardManager is a derived class of
 // GuardManager (no way to define inheritance relationships in forward
@@ -2494,6 +2524,10 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DYNAMIC_INDICES")
       .def(py::init<bool, py::set, py::list>())
       .def("__call__", &DYNAMIC_INDICES::check);
+  py::class_<DICT_VERSION, LeafGuard, std::shared_ptr<DICT_VERSION>>(
+      py_m, "DICT_VERSION")
+      .def(py::init<py::object, py::list>())
+      .def("__call__", &DICT_VERSION::check);
   py::class_<TENSOR_MATCH, LeafGuard, std::shared_ptr<TENSOR_MATCH>>(
       py_m, "TENSOR_MATCH")
       .def(py::init<
@@ -2647,6 +2681,14 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(std::make_shared<DYNAMIC_INDICES>(
                 has_attr, value, verbose_code_parts));
+          })
+      .def(
+          "add_dict_version_guard",
+          [](GuardManager& self,
+             py::object value,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(
+                std::make_shared<DICT_VERSION>(value, verbose_code_parts));
           })
       .def(
           "add_tensor_match_guard",
