@@ -44,8 +44,7 @@ static void sigmoid_kernel(TensorIteratorBase& iter) {
             return static_cast<float>(1) / (static_cast<float>(1) + std::exp((-a0)));
           },
           [=](Vectorized<scalar_t> a) {
-            Vectorized<float> a0, a1;
-            std::tie(a0, a1) = convert_to_float<scalar_t>(a);
+            auto [a0, a1] = convert_to_float<scalar_t>(a);
             a0 = (Vectorized<float>(static_cast<float>(1)) + a0.neg().exp()).reciprocal();
             a1 = (Vectorized<float>(static_cast<float>(1)) + a1.neg().exp()).reciprocal();
             return convert_from_float<scalar_t>(a0, a1);
@@ -355,8 +354,9 @@ static void sinc_kernel(TensorIteratorBase& iter) {
           if (a == scalar_t(0)) {
             return scalar_t(1);
           } else {
-            scalar_t product = c10::pi<scalar_t> * a;
-            return std::sin(product) / product;
+            using opmath_t = at::opmath_type<scalar_t>;
+            opmath_t product = c10::pi<opmath_t> * opmath_t{a};
+            return static_cast<scalar_t>(std::sin(product) / product);
           }
         });
   });

@@ -46,6 +46,21 @@ def _find_all_reduce_mesh_dim(placements: Tuple[Placement, ...], dim: int) -> in
     return 0
 
 
+def _cast_to_dtensor(
+    tensor, placements: Tuple[Placement, ...], mesh: DeviceMesh
+) -> DTensor:
+    assert isinstance(tensor, DTensor | torch.Tensor)
+    if isinstance(tensor, DTensor):
+        if tensor.placements == placements:
+            return tensor
+        else:
+            raise RuntimeError(f"Expected {placements} but got {tensor.placements}.")
+    else:
+        return DTensor.from_local(
+            tensor, device_mesh=mesh, placements=placements, run_check=False
+        )
+
+
 def _propagate_tensor_meta(
     op_call: torch._ops.OpOverload,
     args: Tuple[object, ...],
@@ -103,9 +118,10 @@ def _log_softmax_handler(
 
     spec = x._spec
     mesh_dim = _find_all_reduce_mesh_dim(spec.placements, dim)
-    res = _log_softmax(x._local_tensor, dim, half_to_float, spec.mesh, mesh_dim)
 
     output_tensor_meta = _propagate_tensor_meta(op_call, args, kwargs)
+
+    res = _log_softmax(x._local_tensor, dim, half_to_float, spec.mesh, mesh_dim)
 
     return DTensor(
         res,
@@ -143,6 +159,7 @@ def _log_softmax_backward_handler(
     input_dtype = cast(torch.dtype, args[3])
 
     spec = grad_output._spec
+
     res = _log_softmax_backward_no_computation(
         grad_output._local_tensor, output._local_tensor, dim, input_dtype
     )
@@ -185,6 +202,7 @@ def _nll_loss_forward(
             w = weight.view(shape)
         else:
             w = weight
+        # TODO: need sharded weight
         x = x * w
     safe_target = torch.where(target != ignore_index, target, 0)
     safe_target_ = safe_target.unsqueeze(channel_dim)
@@ -205,6 +223,7 @@ def _nll_loss_forward(
         return result, total_weight
 
     if weight is not None:
+        # TODO: need replicated weight
         w = w.expand(x.shape)
         wsum = torch.gather(w, channel_dim, safe_target_).squeeze(channel_dim)
         wsum = torch.where(target != ignore_index, wsum, 0)
@@ -212,6 +231,8 @@ def _nll_loss_forward(
     else:
         total_weight = (target != ignore_index).sum().to(x)
 
+    # NOTE: this is correct only on 1D DeviceMesh; o/w additional
+    #       all-reduce on result and total_weight is needed
     if reduction == Reduction.SUM.value:
         result = result.sum()
     elif reduction == Reduction.MEAN.value:
@@ -220,15 +241,15 @@ def _nll_loss_forward(
     return result, total_weight
 
 
-# TODO: add input shapes checking like in torch._decomp.decomposition
+# TODO: add input shapes checking as in torch._decomp.decomposition
 def _nll_loss_forward_handler(
     op_call: torch._ops.OpOverload,
     args: Tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> object:
     x = cast(DTensor, args[0])
-    target = cast(torch.Tensor, args[1])
-    weight = cast(Optional[torch.Tensor], args[2])
+    target = args[1]
+    weight = args[2]
     reduction = cast(int, args[3])
     ignore_index = cast(int, args[4])
 
@@ -236,25 +257,37 @@ def _nll_loss_forward_handler(
     channel_dim_size = x.shape[channel_dim]
     spec = x._spec
     mesh_dim = _find_all_reduce_mesh_dim(spec.placements, channel_dim)
+
+    # Check user input: if target and weight are not DTensors, convert them to DTensors;
+    # if they are DTensors, check that they have the desired placements.
+    target_placements = _skip_dim(
+        replicate_reduction_dims(spec.placements, [channel_dim]), channel_dim
+    )
+    all_replicate_placements = (Replicate(),) * spec.mesh.ndim
+    target = _cast_to_dtensor(target, target_placements, spec.mesh)
+    if weight is not None:
+        weight = _cast_to_dtensor(weight, all_replicate_placements, spec.mesh)
+
+    if reduction == Reduction.NONE.value:
+        output_placements = target_placements
+    else:
+        output_placements = all_replicate_placements
+
+    # tensor inputs to _propagate_tensor_meta need to be DTensors
+    args = list(args)
+    args[1], args[2] = target, weight
+    output_tensor_meta = _propagate_tensor_meta(op_call, tuple(args), kwargs)
+
     result, total_weight = _nll_loss_forward(
         x._local_tensor,
-        target,
-        weight,
+        target._local_tensor,
+        weight._local_tensor if weight is not None else None,
         reduction,
         ignore_index,
         channel_dim_size,
         spec.mesh,
         mesh_dim,
     )
-
-    if reduction == Reduction.NONE.value:
-        output_placements = _skip_dim(
-            replicate_reduction_dims(spec.placements, [channel_dim]), channel_dim
-        )
-    else:
-        output_placements = (Replicate(),) * spec.mesh.ndim
-
-    output_tensor_meta = _propagate_tensor_meta(op_call, args, kwargs)
 
     return (
         DTensor(
@@ -324,6 +357,7 @@ def _nll_loss_and_log_softmax_backward(
         new_shape = [1 for _ in range(x.dim())]
         new_shape[channel_dim] = weight.shape[0]
         weight = weight.reshape(new_shape)
+        # TODO: need sharded weight
         grad_output = grad_output * weight
 
     grad_output = torch.where(target != ignore_index, grad_output, 0)
@@ -335,7 +369,7 @@ def _nll_loss_and_log_softmax_backward(
     return (grad_input + torch.exp(x)) * grad_output
 
 
-# TODO: add input shapes checking like in torch._decomp.decomposition
+# TODO: add input shapes checking as in torch._decomp.decomposition
 def _nll_loss_backward_handler(
     op_call: torch._ops.OpOverload,
     args: Tuple[object, ...],
@@ -343,8 +377,8 @@ def _nll_loss_backward_handler(
 ) -> object:
     grad_output = cast(DTensor, args[0])
     x = cast(DTensor, args[1])
-    target = cast(torch.Tensor, args[2])
-    weight = cast(Optional[torch.Tensor], args[3])
+    target = args[2]
+    weight = args[3]
     reduction = cast(int, args[4])
     ignore_index = cast(int, args[5])
     total_weight = cast(Tensor, args[6])
@@ -353,11 +387,27 @@ def _nll_loss_backward_handler(
     channel_dim_size = x.shape[channel_dim]
     spec = x._spec
     mesh_dim = _find_all_reduce_mesh_dim(spec.placements, channel_dim)
+
+    # if target and weight are not DTensors, convert them to DTensors
+    target_placements = _skip_dim(
+        replicate_reduction_dims(spec.placements, [channel_dim]), channel_dim
+    )
+    all_replicate_placements = (Replicate(),) * spec.mesh.ndim
+    target = _cast_to_dtensor(target, target_placements, spec.mesh)
+    if weight is not None:
+        weight = _cast_to_dtensor(weight, all_replicate_placements, spec.mesh)
+
+    # tensor inputs to _propagate_tensor_meta need to be DTensors
+    args = list(args)
+    args[2], args[3] = target, weight
+    args[6] = _cast_to_dtensor(total_weight, all_replicate_placements, spec.mesh)
+    output_tensor_meta = _propagate_tensor_meta(op_call, tuple(args), kwargs)
+
     result = _nll_loss_and_log_softmax_backward(
         grad_output._local_tensor,
         x._local_tensor,
-        target,
-        weight,
+        target._local_tensor,
+        weight._local_tensor if weight is not None else None,
         reduction,
         ignore_index,
         total_weight,
@@ -365,8 +415,6 @@ def _nll_loss_backward_handler(
         spec.mesh,
         mesh_dim,
     )
-
-    output_tensor_meta = _propagate_tensor_meta(op_call, args, kwargs)
 
     return DTensor(
         result,
@@ -392,10 +440,8 @@ customized_loss_ops = {
 
 def _enable_custom_loss_ops():
     DTensor._op_dispatcher._custom_op_handlers.update(customized_loss_ops)
-    DTensor._op_dispatcher._allow_implicit_replication = True
 
 
 def _disable_custom_loss_ops():
-    DTensor._op_dispatcher._allow_implicit_replication = False
     for custom_op in customized_loss_ops:
         DTensor._op_dispatcher._custom_op_handlers.pop(custom_op)
