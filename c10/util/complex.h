@@ -175,6 +175,31 @@ struct alignas(sizeof(T) * 2) complex {
       const std::enable_if_t<std::is_same_v<U, double>, complex<float>>& other)
       : real_(other.real_), imag_(other.imag_) {}
 
+#ifdef __C10_NATIVE_FP16__
+  template <typename U = T>
+  C10_HOST_DEVICE explicit constexpr complex(
+      const std::enable_if_t<std::is_same_v<U, float16_t>, complex<float>>& other)
+      : real_(static_cast<float>(other.real_)),
+        imag_(static_cast<float>(other.imag_)) {}
+  template <typename U = T>
+  C10_HOST_DEVICE explicit constexpr complex(
+      const std::enable_if_t<std::is_same_v<U, float16_t>, complex<double>>& other)
+      : real_(static_cast<double>(other.real_)),
+        imag_(static_cast<double>(other.imag_)) {}
+
+  template <typename U = T>
+  C10_HOST_DEVICE explicit constexpr complex(
+      const std::enable_if_t<std::is_same_v<U, float>, complex<float16_t>>& other)
+      : real_(other.real_), imag_(other.imag_) {}
+
+  template <typename U = T>
+  C10_HOST_DEVICE constexpr complex(
+      const std::enable_if_t<std::is_same_v<U, double>, complex<float16_t>>& other)
+      : real_(other.real_), imag_(other.imag_) {}
+
+#endif
+
+  // Use SFINAE to specialize casting constructor for c10::complex<at::BFloat16>
   constexpr complex<T>& operator=(T re) {
     real_ = re;
     imag_ = 0;

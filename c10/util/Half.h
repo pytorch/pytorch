@@ -49,6 +49,19 @@
 #include <arm_neon.h>
 #endif
 
+#ifndef __C10_NOT_CPU__
+#if defined(__GNUC__) || defined(__clang__)
+#if defined(__aarch64__)
+#if (!defined(__ARM_32BIT_STATE)) || (__ARM_32BIT_STATE != 1)
+#define __C10_NATIVE_FP16__ 1
+#endif // !__ARM_32BIT_STATE
+#endif // __aarch64__
+#endif // GNUC or clang
+#endif // __C10_NOT_CPU__
+
+
+#ifndef __C10_NATIVE_FP16__
+
 namespace c10 {
 
 namespace detail {
@@ -536,3 +549,97 @@ C10_API std::ostream& operator<<(std::ostream& out, const Half& value);
 } // namespace c10
 
 #include <c10/util/Half-inl.h> // IWYU pragma: keep
+
+#else
+
+namespace c10 {
+  #include <arm_neon.h>
+  using Half = float16_t;
+
+  inline uint32_t fp16_ieee_to_fp32_bits(uint16_t h) {
+    float32_t f = (float32_t)*(float16_t*)&h;
+    return *(uint32_t *)&f;
+  }
+  inline uint16_t fp16_ieee_from_fp32_value(float f) {
+    float16_t h = f;
+    return *(uint16_t *)&h;
+  }
+
+  inline float fp16_ieee_to_fp32_value(uint16_t h) {
+    return (float32_t)*(float16_t*)&h;
+  }
+
+} // namespace c10
+
+constexpr inline float16_t fp16_from_bits(uint16_t h) {
+  union {
+    uint16_t as_bits;
+    float16_t as_value;
+  } fp16 = {h};
+  return fp16.as_value;
+}
+
+namespace std {
+
+template <>
+class numeric_limits<c10::Half> {
+ public:
+  static constexpr bool is_specialized = true;
+  static constexpr bool is_signed = true;
+  static constexpr bool is_integer = false;
+  static constexpr bool is_exact = false;
+  static constexpr bool has_infinity = true;
+  static constexpr bool has_quiet_NaN = true;
+  static constexpr bool has_signaling_NaN = true;
+  static constexpr auto has_denorm = numeric_limits<float>::has_denorm;
+  static constexpr auto has_denorm_loss =
+      numeric_limits<float>::has_denorm_loss;
+  static constexpr auto round_style = numeric_limits<float>::round_style;
+  static constexpr bool is_iec559 = true;
+  static constexpr bool is_bounded = true;
+  static constexpr bool is_modulo = false;
+  static constexpr int digits = 11;
+  static constexpr int digits10 = 3;
+  static constexpr int max_digits10 = 5;
+  static constexpr int radix = 2;
+  static constexpr int min_exponent = -13;
+  static constexpr int min_exponent10 = -4;
+  static constexpr int max_exponent = 16;
+  static constexpr int max_exponent10 = 4;
+  static constexpr auto traps = numeric_limits<float>::traps;
+  static constexpr auto tinyness_before =
+      numeric_limits<float>::tinyness_before;
+
+  #define
+  static constexpr c10::Half min() {
+    return fp16_from_bits(0x0400);
+  }
+  static constexpr c10::Half lowest() {
+    return fp16_from_bits(0xFBFF);
+  }
+  static constexpr c10::Half max() {
+    return fp16_from_bits(0x7BFF);
+  }
+  static constexpr c10::Half epsilon() {
+    return fp16_from_bits(0x1400);
+  }
+  static constexpr c10::Half round_error() {
+    return fp16_from_bits(0x3800);
+  }
+  static constexpr c10::Half infinity() {
+    return fp16_from_bits(0x7C00);
+  }
+  static constexpr c10::Half quiet_NaN() {
+    return fp16_from_bits(0x7E00);
+  }
+  static constexpr c10::Half signaling_NaN() {
+    return fp16_from_bits(0x7D00);
+  }
+  static constexpr c10::Half denorm_min() {
+    return fp16_from_bits(0x0001);
+  }
+};
+
+} // namespace std
+
+#endif // __C10_NATIVE_FP16__
