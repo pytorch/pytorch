@@ -144,8 +144,6 @@ class SpeculationEntry:
         """
         Start tracing of the current frame over again, and don't take this branch.
         """
-        # import traceback
-        # traceback.print_stack()
         self.failed = True
         raise exc.SpeculationRestartAnalysis()
 
@@ -2393,7 +2391,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             assert isinstance(module, torch.nn.Module)
             # Detect inline module method calls in order to propagate node metadata,
             # by checking if the first argument (self) is a variable tracking a nn.Module.
-            # print(f"code: {code}")
             if code.co_name != "_private_patched_nn_method":
                 instance_bound_nn_method = getattr(module, code.co_name)
             # code_context.get_context(instance_bound_nn_method)[
