@@ -4381,7 +4381,6 @@ aot_autograd_failures = {
 
 symbolic_aot_autograd_failures = {
     xfail('combinations', ''),  # aten.masked_select.default
-    xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('index_fill', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kthvalue', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.eigvals', ''),  # aten.linalg_eig.default - couldn't find symbolic meta function/decomposition

@@ -773,8 +773,6 @@ aten::fractional_max_pool3d
 aten::fractional_max_pool3d.output
 aten::fractional_max_pool3d_backward
 aten::fractional_max_pool3d_backward.grad_input
-aten::frexp.Tensor
-aten::frexp.Tensor_out
 aten::from_file
 aten::from_file.out
 aten::full.names

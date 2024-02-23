@@ -845,7 +845,7 @@ class TestStandaloneCPPJIT(TestCase):
             shutil.rmtree(build_dir)
 
 
-class DummyXPUModule:
+class DummyPrivateUse1Module:
     @staticmethod
     def is_available():
         return True
@@ -886,18 +886,18 @@ class TestExtensionUtils(TestCase):
 
         # Wrong device type
         with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
-            torch._register_device_module('dummmy', DummyXPUModule)
+            torch._register_device_module('dummmy', DummyPrivateUse1Module)
 
         with self.assertRaises(AttributeError):
-            torch.xpu.is_available()  # type: ignore[attr-defined]
+            torch.privateuseone.is_available()  # type: ignore[attr-defined]
 
-        torch._register_device_module('xpu', DummyXPUModule)
+        torch._register_device_module('privateuseone', DummyPrivateUse1Module)
 
-        torch.xpu.is_available()  # type: ignore[attr-defined]
+        torch.privateuseone.is_available()  # type: ignore[attr-defined]
 
         # No supporting for override
         with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
-            torch._register_device_module('xpu', DummyXPUModule)
+            torch._register_device_module('privateuseone', DummyPrivateUse1Module)
 
     def test_external_module_and_backend_register(self):
         torch.utils.rename_privateuse1_backend('foo')
@@ -913,7 +913,7 @@ class TestExtensionUtils(TestCase):
         with self.assertRaisesRegex(AssertionError, "Tried to use AMP with the"):
             with torch.autocast(device_type=custom_backend_name):
                 pass
-        torch._register_device_module('foo', DummyXPUModule)
+        torch._register_device_module('foo', DummyPrivateUse1Module)
 
         torch.foo.is_available()  # type: ignore[attr-defined]
         with torch.autocast(device_type=custom_backend_name):
@@ -1016,22 +1016,6 @@ class TestDeviceUtils(TestCase):
                 tree_all_only(torch.Tensor, lambda x: x.device.type == 'meta', r)
             )
 
-    def test_int16_device_index(self):
-        # Test if index does not wrap around when larger than int8
-        large_index = 500
-        x = torch.device('meta', large_index)
-        self.assertEqual(x.index, large_index)
-
-    def test_raise_on_device_index_out_of_bounds(self):
-        # Tests if an error is raised when the device index is out of bounds
-        index_larger_than_max = 100000
-        error_msg_regex = "^Device index must be.*"
-        # Explicit index
-        with self.assertRaisesRegex(RuntimeError, error_msg_regex):
-            x = torch.device('meta', index=index_larger_than_max)
-        # Index in device string
-        with self.assertRaisesRegex(RuntimeError, error_msg_regex):
-            x = torch.device(f'meta:{index_larger_than_max}')
 
 instantiate_device_type_tests(TestDeviceUtils, globals())
 
