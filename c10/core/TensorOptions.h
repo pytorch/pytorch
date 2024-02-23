@@ -700,6 +700,8 @@ inline DispatchKey computeDispatchKey(
           return DispatchKey::SparseCsrCPU;
         case c10::DeviceType::CUDA:
           return DispatchKey::SparseCsrCUDA;
+        case c10::DeviceType::Meta:
+          return DispatchKey::SparseCsrMeta;
         default:
           AT_ERROR(
               "Unsupported device type for ",
@@ -720,6 +722,7 @@ inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
     return Layout::Sparse;
     case DispatchKey::SparseCsrCPU:
     case DispatchKey::SparseCsrCUDA:
+    case DispatchKey::SparseCsrMeta:
       TORCH_CHECK(
           false,
           "Cannot map DispatchKey ",

@@ -128,7 +128,7 @@ class _Formatter:
         with torch.no_grad():
             tensor_view = tensor.reshape(-1)
 
-        if not self.floating_dtype:
+        if not self.floating_dtype or tensor.is_meta:
             for value in tensor_view:
                 value_str = f"{value}"
                 self.max_width = max(self.max_width, len(value_str))
@@ -476,7 +476,8 @@ def _str_intern(inp, *, tensor_contents=None):
         torch.sparse_bsc,
     }:
         suffixes.append("size=" + str(tuple(self.shape)))
-        suffixes.append("nnz=" + str(self._nnz()))
+        if not self.is_meta:
+            suffixes.append("nnz=" + str(self._nnz()))
         if not has_default_dtype:
             suffixes.append("dtype=" + str(self.dtype))
         if not custom_contents_provided:
@@ -492,23 +493,34 @@ def _str_intern(inp, *, tensor_contents=None):
                 cdimname, pdimname = "column", "row"
             compressed_indices_prefix = f"c{cdimname[:3]}_indices=tensor("
             compressed_indices = compressed_indices_method(self).detach()
-            compressed_indices_str = _tensor_str(
-                compressed_indices, indent + len(compressed_indices_prefix)
-            )
+            if compressed_indices.is_meta:
+                compressed_indices_str = "..."
+            else:
+                compressed_indices_str = _tensor_str(
+                    compressed_indices, indent + len(compressed_indices_prefix)
+                )
             if compressed_indices.numel() == 0:
                 compressed_indices_str += ", size=" + str(
                     tuple(compressed_indices.shape)
                 )
+            if compressed_indices.is_meta:
+                compressed_indices_str += ", dtype=" + str(compressed_indices.dtype)
             plain_indices_prefix = f"{pdimname[:3]}_indices=tensor("
             plain_indices = plain_indices_method(self).detach()
-            plain_indices_str = _tensor_str(
-                plain_indices, indent + len(plain_indices_prefix)
-            )
+            if plain_indices.is_meta:
+                plain_indices_str = "..."
+            else:
+                plain_indices_str = _tensor_str(
+                    plain_indices, indent + len(plain_indices_prefix)
+                )
             if plain_indices.numel() == 0:
                 plain_indices_str += ", size=" + str(tuple(plain_indices.shape))
             values_prefix = "values=tensor("
             values = self.values().detach()
-            values_str = _tensor_str(values, indent + len(values_prefix))
+            if values.is_meta:
+                values_str = "..."
+            else:
+                values_str = _tensor_str(values, indent + len(values_prefix))
             if values.numel() == 0:
                 values_str += ", size=" + str(tuple(values.shape))
             tensor_str = (
