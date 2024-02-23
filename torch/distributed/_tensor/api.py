@@ -8,7 +8,6 @@ import torch.distributed._functional_collectives as funcol
 import torch.distributed._tensor.dispatch as op_dispatch
 import torch.distributed._tensor.random as random
 import torch.nn as nn
-from torch.distributed._tensor._collective_utils import mesh_broadcast
 from torch.distributed._tensor._utils import compute_global_tensor_info
 from torch.distributed._tensor.placement_types import (
     DTensorSpec,
@@ -157,10 +156,11 @@ class _FromTorchTensor(torch.autograd.Function):
             # have a corresponding backward.
             for idx, placement in enumerate(placements):
                 if placement.is_replicate():
-                    # broadcast rank 0 tensor to all ranks
-                    # only broadcast if run_check is True
+                    # broadcast tensor from rank0 to all ranks to ensure the tensor
+                    # is replicated on the mesh dimension, we only broadcast if
+                    # run_check is True TODO: study if this UX is good or not
                     input = input.contiguous()
-                    mesh_broadcast(input, device_mesh, mesh_dim=idx)
+                    input = funcol.broadcast(input, device_mesh, mesh_dim=idx).wait()
 
         # We want a fresh Tensor object that shares memory with the input tensor
         dist_tensor = DTensor(
