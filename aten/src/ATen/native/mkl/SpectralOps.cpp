@@ -200,7 +200,7 @@ Tensor& _fft_c2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalizat
 }
 
 }} // namespace at::native
-#endif /* AT_MKL_ENALED() || AT_POCKETFFT_ENABLED() */
+#endif /* AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED() */
 
 #if AT_POCKETFFT_ENABLED()
 #include <pocketfft_hdronly.h>

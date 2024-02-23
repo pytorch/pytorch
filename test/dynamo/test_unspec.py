@@ -273,7 +273,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             comptime.assert_static(x.size(0))
             return x + 1
 
-        opt_fn = torch.compile(fn, dynamic=True)
+        opt_fn = torch.compile(fn, dynamic=True, fullgraph=True)
         opt_fn(torch.randn(12, 23))
 
     def test_shape_graph_break(self):
@@ -494,6 +494,15 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
         self.assertExpectedInline(cnts.frame_count, """2""")
         self.assertExpectedInline(cnts.op_count, """3""")
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_split_aot_autograd(self):
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(x, i):
+            y, z = i.tolist()
+            return torch.split(x, [y, z])
+
+        print(f(torch.randn(10, requires_grad=True), torch.tensor([7, 3])))
 
 
 if __name__ == "__main__":
