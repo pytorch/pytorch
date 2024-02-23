@@ -365,10 +365,12 @@ class FSDPParam:
         )
 
     def alloc_all_gather_output(self) -> None:
-        unsafe_alloc_storage(self.all_gather_output)
+        # unsafe_alloc_storage(self.all_gather_output)
+        pass
 
     def free_all_gather_output(self) -> None:
-        unsafe_free_storage(self.all_gather_output)
+        # unsafe_free_storage(self.all_gather_output)
+        pass
 
     @property
     def all_gather_input(self) -> torch.Tensor:  # 1D
