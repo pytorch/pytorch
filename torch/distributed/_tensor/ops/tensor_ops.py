@@ -411,14 +411,14 @@ def stack_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     assert isinstance(child_strategy, OpStrategy), f"{child_strategy}"
     strategies: List[PlacementStrategy] = []
 
-    # For every arg strategy, we replicate the stack dim since we
-    # cannot stack on a sharded dim.
     # For each arg strategy of the child to follow, we check if every other
     # child has an equal strategy. If so, then that is a valid strategy. If
     # there are no such valid strategies, then we replicate.
     for arg_strategy in child_strategy.strategies:
         arg_spec = arg_strategy.output_spec
-        if is_tensor_dim_sharded(arg_spec, dim):  # cannot stack on this dim
+        # For each arg strategy, we replicate the stack dim since we cannot
+        # stack on a sharded dim
+        if is_tensor_dim_sharded(arg_spec, dim):
             arg_spec = DTensorSpec(
                 mesh, unshard_tensor_dim(arg_spec.placements, dim=dim)
             )
@@ -434,17 +434,28 @@ def stack_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
                     other_arg_spec = DTensorSpec(
                         mesh, unshard_tensor_dim(other_arg_spec.placements, dim=dim)
                     )
-                if other_arg_spec == arg_spec:
+                if other_arg_spec.placements == arg_spec.placements:
                     has_compatible_strategy = True
                     break
             if not has_compatible_strategy:
                 all_compatible = False
                 break
         if all_compatible:
+            input_specs = tuple(
+                arg_spec for _ in range(len(input_tuple_strategy.childs))
+            )
             strategies.append(
-                PlacementStrategy(output_specs=DTensorSpec(mesh, arg_spec.placements))
+                PlacementStrategy(
+                    output_specs=DTensorSpec(mesh, arg_spec.placements),
+                    input_specs=input_specs,
+                )
             )
     if not strategies:
+        # Arbitrarily use each child strategy's 0th strategy's output spec
+        input_specs = tuple(
+            cast(OpStrategy, child_strategy).strategies[0].output_spec
+            for child_strategy in input_tuple_strategy.childs
+        )
         replicate_spec = DTensorSpec(mesh, tuple(Replicate() for _ in range(mesh.ndim)))
         strategies.append(PlacementStrategy(output_specs=replicate_spec))
     return OpStrategy(strategies)

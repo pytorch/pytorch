@@ -7,6 +7,7 @@ from typing import Union
 import torch
 from torch.distributed._composable import replicate
 from torch.distributed._composable.fsdp import fully_shard
+from torch.distributed._tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests
@@ -73,10 +74,13 @@ class TestClipGradNormMultiThread(FSDPTest):
             ref_total_norm = torch.nn.utils.clip_grad_norm_(
                 ref_model.parameters(), max_norm=max_norm, norm_type=norm_type
             )
-            total_norm = torch.nn.utils.clip_grad_norm_(
-                model.parameters(), max_norm=max_norm, norm_type=norm_type
-            )
+            comm_mode = CommDebugMode()
+            with comm_mode:
+                total_norm = torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), max_norm=max_norm, norm_type=norm_type
+                )
             self.assertEqual(ref_total_norm, total_norm)
+            self.assertEqual(comm_mode.get_total_counts(), 1)  # one all-reduce
             # For zero gradients, clipping has no effect
             for param, grad in zip(ref_model.parameters(), ref_grads):
                 self.assertTrue(vector_norm_fn(param.grad).item() <= max_norm)
