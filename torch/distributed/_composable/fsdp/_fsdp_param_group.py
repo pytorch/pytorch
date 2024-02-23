@@ -224,8 +224,11 @@ class FSDPParamGroup:
         for fsdp_param in self.fsdp_params:
             fsdp_param.init_unsharded_param()  # no-op after 1st call
         self._to_unsharded()
-        all_gather_copy_out_event = torch.cuda.Event()
-        all_gather_copy_out_event.record()
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            all_gather_copy_out_event = torch.cuda.Event()
+            all_gather_copy_out_event.record()
+        else:
+            all_gather_copy_out_event = None
         if self._training_state == TrainingState.FORWARD:
             self.comm_ctx.all_gather_state = AllGatherState(
                 self._all_gather_result, all_gather_copy_out_event
