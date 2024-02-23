@@ -38,7 +38,7 @@ on:
         type: string
         default: ""
       s3-bucket:
-        description: S3 bucket to download builds
+        description: S3 bucket to download artifacts
         required: false
         type: string
         default: "gha-artifacts"
