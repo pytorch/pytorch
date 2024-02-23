@@ -5247,7 +5247,10 @@ else:
         run(10, 1, False, True)
         run(10, 1, True, False)
         run(10, 10, False, True)
+
+        # KURT: fails on parallelnative-linux-jammy-py3.8-gcc11
         run(10, 10, True, True)
+
         run(10, 2, False, True)
         run(10, 2, True, True)
 
