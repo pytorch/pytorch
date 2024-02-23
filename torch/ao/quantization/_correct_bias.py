@@ -118,7 +118,7 @@ def bias_correction(float_model, quantized_model, img_data, target_modules=_supp
             count = 0
             for data in img_data:
                 quantized_model(data[0])
-                count += 1
+                count += 1  # noqa: SIM113
                 if count == neval_batches:
                     break
             ob_dict = ns.get_logger_dict(quantized_model)
