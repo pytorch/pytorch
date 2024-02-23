@@ -58,7 +58,7 @@ jobs:
 
     - name: Download artifact
       run: |
-        aws s3 cp s3://pytorch-ci-artifacts/pytorch/pytorch/8019633822/linux-jammy-py3.8-gcc11/artifacts.zip .
+        aws s3 cp s3://gha-artifacts/pytorch/pytorch/1000029090/pytorch-win-vs2019-cpu-py3/pytorch-win-vs2019-cpu-py3-f724ef1d337380c4f3a45b7d65396828a8382da7.7z .
 
     - name: Test
       run: |
