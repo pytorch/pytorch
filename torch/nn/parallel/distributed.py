@@ -17,7 +17,6 @@ import torch
 import torch.distributed as dist
 from torch.autograd import Function, Variable
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
-from torch.distributed.device_mesh import _mesh_resources
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
 
@@ -665,7 +664,8 @@ class DistributedDataParallel(Module, Joinable):
                 )
             self.device_mesh = device_mesh
             self.process_group = device_mesh.get_group(mesh_dim=0)
-            if _mesh_resources.get_parent_mesh(device_mesh) != None:
+            from torch.distributed.device_mesh import _mesh_resources
+            if _mesh_resources.get_parent_mesh(device_mesh) is not None:
                 # TODO: This is a temporary work around to enable DDP + TP.
                 # We should do the logic in DDP so that the 2D implementation is
                 # sound and the state_dict works out of the box.

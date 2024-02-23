@@ -4,7 +4,6 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 import torch
 import torch.nn as nn
 from torch.distributed._composable_state import _State
-from torch.distributed.device_mesh import _mesh_resources
 from torch.nn.parallel import DistributedDataParallel
 
 from .contract import _get_registry, contract
@@ -72,11 +71,14 @@ class _ReplicateState(_State):
 
         device_mesh = kwargs.get("device_mesh", None)
         if device_mesh is not None:
+            from torch.distributed.device_mesh import _mesh_resources
             if _mesh_resources.get_parent_mesh(device_mesh) != None:
                 # TODO: This is a temporary work around to enable DDP + TP.
                 # We should do the logic in DDP so that the 2D implementation is
                 # sound and the state_dict works out of the box.
-                # This has to be done before check UninitializedParameter.
+                #
+                # This won't conflict with what is done in DDP class as the module
+                # replicate is going to pass is NOT the original module.
                 from torch.distributed.tensor.parallel.ddp import (
                     _pre_dp_module_transform,
                 )
