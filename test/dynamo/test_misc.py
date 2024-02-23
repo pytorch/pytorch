@@ -60,6 +60,7 @@ from torch.fx.experimental.symbolic_shapes import (
     constrain_unify,
     ConstraintViolationError,
     expect_true,
+    guard_size_oblivious,
     ShapeEnv,
 )
 from torch.nn import functional as F
@@ -9514,6 +9515,18 @@ fn
         torch._dynamo.reset()
         c2 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c2), 0)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_guard_size_oblivious(self):
+        # This code, in fact, does NOT work in eager
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            y = torch.zeros(x.item())
+            if guard_size_oblivious(y.size(0) == 0):
+                assert False
+            return y
+
+        self.assertEqual(fn(torch.tensor([0])), torch.zeros(0))
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_module_free(self):
