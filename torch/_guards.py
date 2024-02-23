@@ -608,7 +608,7 @@ class TracingContext:
         # careful not to accidentally induce guards on the SymInt if
         # you ever do change this in aot_autograd.py; you should check
         # on permutations preferentially.)
-        self.output_strides_listeners: Optional[List[Optional[List[int]]]] = []
+        self.output_strides_listeners: List[Callable[[List[int]], None]] = []
         # When this is True, whenever we encounter an int in Dynamo tracing,
         # we will (1) force unspec it and (2) force it as a size-like unbacked
         # integer.  This is currently used when processing certain lists of
