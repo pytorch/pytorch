@@ -131,6 +131,7 @@ class TestStateDictUtils(DTensorTestBase):
             "tensor2": torch.ones(10, device=device),
             "non_tensor_bytes_io": copy.deepcopy(buffer),
             "non_tensor_bytes": buffer.read(),
+            "step": torch.tensor(7, dtype=torch.float),
             "lr": 1.5,
             "nested": {"list": [1, 2, 3, 4]},
         }
@@ -159,6 +160,7 @@ class TestStateDictUtils(DTensorTestBase):
         buffer.seek(0)
         self.assertEqual(cpu_state_dict["non_tensor_bytes"], buffer.read())
         self.assertEqual(cpu_state_dict["lr"], 1.5)
+        self.assertEqual(cpu_state_dict["step"], 7)
         self.assertEqual(cpu_state_dict["nested"], {"list": [1, 2, 3, 4]})
 
 

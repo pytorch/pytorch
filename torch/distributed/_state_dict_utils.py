@@ -313,9 +313,12 @@ def _create_pin_state_dict(
         device: Optional[torch.device],
         companion_obj: Any,
     ) -> torch.Tensor:
-        return torch.empty(
-            *tuple(companion_obj.size()), dtype=companion_obj.dtype, pin_memory=True
-        )
+        if len(obj.size()) == 0:
+            return torch.tensor(0, dtype=obj.dtype)
+        else:
+            return torch.empty(
+                *tuple(companion_obj.size()), dtype=companion_obj.dtype, pin_memory=True
+            )
 
     ret = _iterate_state_dict(
         state_dict,
