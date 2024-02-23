@@ -3,6 +3,8 @@ import sys
 
 
 def find_test_dir():
+    if sys.platform == "win32":
+        return None
     main = sys.modules["__main__"]
     file = getattr(main, "__file__", None)
     if file is None:
