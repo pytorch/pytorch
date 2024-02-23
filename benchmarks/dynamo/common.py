@@ -738,7 +738,11 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         for k, v in kwargs["dynamo_stats"].items():
             headers.append(k)
             row.append(v)
-    if  torch.distributed.is_available() and torch.distributed.get_rank() == 0:
+    if (
+        torch.distributed.is_available()
+        and torch.distributed.is_initialized()
+        and torch.distributed.get_rank() == 0
+    ):
         output_csv(
             output_filename,
             headers,
