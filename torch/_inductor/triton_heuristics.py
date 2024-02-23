@@ -712,7 +712,11 @@ def end_graph():
                     percentage = f"{ms/overall_time*100:.2f}%"
                     suffix = f" \t {percentage} \t {kernel_name}"
                     bw_info_str = create_bandwidth_info_str(
-                        ms, num_gb, gb_per_s, suffix=suffix
+                        ms,
+                        num_gb,
+                        gb_per_s,
+                        suffix=suffix,
+                        color=False,
                     )
                     file.write(bw_info_str + "\n")
                 file.write(f"{summary_str}\n\n")

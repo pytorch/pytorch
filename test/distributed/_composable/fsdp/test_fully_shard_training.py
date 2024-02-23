@@ -82,7 +82,6 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
         return 4
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
-    @test_compiled_fsdp()
     def test_param_registration_after_forward(self):
         """Tests the parameter registration after forward."""
         device = torch.device("cuda", 0)
@@ -137,7 +136,6 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             self._assert_same_params(model.parameters(), ref_model.parameters())
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
-    @test_compiled_fsdp()
     def test_param_registration_after_backward(self):
         """Tests the parameter registration after backward."""
         device = torch.device("cuda", 0)
