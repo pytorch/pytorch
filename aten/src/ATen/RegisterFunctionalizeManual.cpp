@@ -239,6 +239,27 @@ static at::Tensor& set__functionalize(at::Tensor& self, const at::Tensor& src) {
   return self;
 }
 
+// [Note: as_strided Functionalization]
+//
+// 'as_strided' (and its inplace version 'as_strided_') is special-cased because
+// contrary to other operations, it cares mostly about the underlying storage,
+// instead of the actual tensor. We can see that in the following example:
+//
+// a = torch.arange(10)
+// b = a[::2]
+// c = b.as_strided((10,), (1,))
+//
+// 'c' is only possible because, as mentioned above, 'as_strided' operates on the
+// actual storage of 'b', which is the exact same as 'a'. Since the storage of 'a'
+// had the capacity for, at least, 10 elements, 'c' is able to also have, at most,
+// 10 elements.
+//
+// Therefore, instead of calling the actual 'as_strided' operation (c) with the given
+// arguments (b), we call it with the argument's base tensor (a).
+
+// The two functions below (as_strided_functionalize and as_strided__functionalize)
+// are slightly modified versions of their code-generated ones (RegisterFunctionalization_X.cpp).
+// Below, we call out each of those changes by a 'CHANGE' flag.
 static at::Tensor as_strided_functionalize(
     c10::DispatchKeySet dispatchKeySet,
     const at::Tensor& self,
@@ -260,10 +281,13 @@ static at::Tensor as_strided_functionalize(
     return at::_ops::as_strided::call(self_, size, stride, storage_offset);
   }
 
+  // CHANGE: create a FunctionalTensorWrapper for the base tensor of 'self'.
   auto self_base =
       at::functionalization::impl::create_functional_tensor_from_base(self);
   auto self_base_ =
       at::functionalization::impl::from_functional_tensor(self_base);
+  // CHANGE: pass-through the storage offset value from 'self', which is the
+  //         only aspect of 'self' that 'as_strided' cares about.
   auto storage_offset_ = storage_offset.value_or(self.sym_storage_offset());
 
   auto reapply_views =
@@ -277,6 +301,7 @@ static at::Tensor as_strided_functionalize(
       self.key_set().has_backend(c10::BackendComponent::LazyBit);
   at::Tensor reference_tensor_output;
   if (compute_reference_meta) {
+    // CHANGE: we should also use the base tensor for meta reference.
     auto self_meta = to_meta(self_base);
     at::AutoDispatchSkipFunctionalize func_guard;
     c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
@@ -285,6 +310,7 @@ static at::Tensor as_strided_functionalize(
   }
   at::Tensor tmp_output;
   {
+    // CHANGE: call the actual operation with the base tensor.
     at::AutoDispatchSkipFunctionalize guard;
     if (reapply_views) {
       tmp_output =
@@ -323,6 +349,8 @@ static at::Tensor as_strided_functionalize(
             storage_offset);
       },
       /*is_multi_output=*/false);
+  // CHANGE: the result FunctionalTensorWrapper should use, as its base the
+  //         actual base of the 'self' argument.
   auto out =
       at::functionalization::impl::create_functional_tensor_with_view_meta(
           tmp_output, self_base, view_meta);
@@ -347,6 +375,8 @@ static const at::Tensor& as_strided__functionalize(
     return at::_ops::as_strided_::call(self, size, stride, storage_offset);
   }
 
+  // CHANGE: pass-through the storage offset value from 'self', which is the
+  //         only aspect of 'self' that 'as_strided' cares about.
   auto storage_offset_ = storage_offset.value_or(self.sym_storage_offset());
 
   auto reapply_views =
@@ -403,7 +433,10 @@ static const at::Tensor& as_strided__functionalize(
   // FunctionalTensorWrapper. Because of this, we need to make sure to run the
   // reference shape function above, BEFORE doing this (otherwise we'll end up
   // runnin the reference function using the wrong sizes/strides)
+
+  // CHANGE: apply the new ViewMeta to the created base tensor.
   at::functionalization::impl::mutate_view_meta(self_base, view_meta);
+
   // See  Note [Propagating strides in the functionalization pass]
   // XLA/LTC don't implement the logic to propagate strides correctly, so we
   // need to rely on a reference implementation here (instead of relying on the
@@ -412,6 +445,8 @@ static const at::Tensor& as_strided__functionalize(
     at::functionalization::impl::set_sizes_strides_offset(
         self_base, reference_tensor_output);
   }
+
+  // CHANGE: replace the underlying TensorImpl to the one we just modified.
   self.set_(self_base);
   return self;
 }

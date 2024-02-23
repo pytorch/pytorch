@@ -256,6 +256,7 @@ void FunctionalTensorWrapper::set__impl(const FunctionalTensorWrapper* other) {
   value_ = other->value_;
   generation_ = other->generation_;
   view_metas_ = other->view_metas_;
+  // Only freeze the storage if we actually change it.
   if (storage_.unsafeGetStorageImpl() != other->storage_.unsafeGetStorageImpl()) {
     // FREEZE the old storage, preventing mutations to it.
     // this is a huge pain to handle properly in all cases, so we ban it.
