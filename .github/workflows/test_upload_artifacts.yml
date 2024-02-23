@@ -10,6 +10,9 @@ jobs:
   test:
     runs-on:
       group: arc-lf-linux.2xlarge.arc-rootless.canary
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Create artifact
         run: |
