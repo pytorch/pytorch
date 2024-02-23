@@ -1870,19 +1870,20 @@ class DictGuardManager : public GuardManager {
 
     // Points to an element in the _indices vector.
     size_t index_pointer = 0;
+    // Points to the key index in the dict
+    size_t dict_pointer = 0;
 
     while (index_pointer < _indices.size() &&
            PyDict_Next(obj, &pos, &key, &value)) {
-      // Pos moves with PyDict_Next
-      Py_ssize_t pos_minus_1 = pos - 1;
-      // Skip if pos_minus_1 is not a saved index.
-      if (pos_minus_1 == _indices[index_pointer]) {
+      // Skip if dict_pointer is not a saved index.
+      if (dict_pointer == _indices[index_pointer]) {
         index_pointer += 1;
-        if (!_key_value_managers[pos_minus_1]->check_nopybind_key_value(
+        if (!_key_value_managers[dict_pointer]->check_nopybind_key_value(
                 key, value)) {
           return false;
         }
       }
+      dict_pointer += 1;
     }
     return true;
   }
@@ -1902,17 +1903,16 @@ class DictGuardManager : public GuardManager {
 
     // Points to an element in the _indices vector.
     size_t index_pointer = 0;
+    size_t dict_pointer = 0;
 
     int num_guards_executed = 0;
     while (index_pointer < _indices.size() &&
            PyDict_Next(obj, &pos, &key, &value)) {
       // Skip if pos is not a saved index.
-      Py_ssize_t pos_minus_1 = pos - 1;
-      if (pos_minus_1 == _indices[index_pointer]) {
+      if (dict_pointer == _indices[index_pointer]) {
         index_pointer += 1;
-        // Pos moves with PyDict_Next
         GuardDebugInfo debug_info =
-            _key_value_managers[pos_minus_1]->check_verbose_nopybind_key_value(
+            _key_value_managers[dict_pointer]->check_verbose_nopybind_key_value(
                 key, value);
         num_guards_executed += debug_info.num_guards_executed;
         if (!debug_info.result) {
@@ -1920,6 +1920,7 @@ class DictGuardManager : public GuardManager {
               false, debug_info.verbose_code_parts, num_guards_executed);
         }
       }
+      dict_pointer += 1;
     }
     return GuardDebugInfo(true, num_guards_executed);
   }
