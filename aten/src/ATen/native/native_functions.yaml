@@ -3068,7 +3068,6 @@
     CompositeExplicitAutograd: _unsafe_masked_index
 
 - func: _unsafe_masked_index_put(Tensor self, Tensor mask, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor
-  device_check: NoCheck
   variants: function
   dispatch:
     CompositeExplicitAutograd: _unsafe_masked_index_put
