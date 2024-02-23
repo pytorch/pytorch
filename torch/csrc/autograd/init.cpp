@@ -890,6 +890,17 @@ static PyObject* python_enter_dual_level(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* python_get_current_dual_level(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  // It is unlikely that the depth of forward nesting will overflow int64_t so
+  // we just static cast here.
+  return utils::wrap(
+      static_cast<int64_t>(forward_ad::get_current_dual_level()));
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* python_exit_dual_level(
     PyObject* _unused,
     PyObject* args,
@@ -1175,6 +1186,10 @@ static PyMethodDef methods[] = { // NOLINT
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
+    {"_get_current_dual_level",
+     python_get_current_dual_level,
+     METH_NOARGS,
+     nullptr},
     {"_exit_dual_level",
      castPyCFunctionWithKeywords(python_exit_dual_level),
      METH_VARARGS | METH_KEYWORDS,
