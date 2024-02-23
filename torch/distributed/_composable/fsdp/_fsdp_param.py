@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from enum import auto, Enum
-from typing import Any, cast, List, Optional, Tuple
+from typing import cast, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -10,7 +10,7 @@ from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed._tensor import DTensor, Placement, Replicate, Shard
 from torch.distributed._tensor.device_mesh import _mesh_resources
 from torch.distributed._tensor.placement_types import DTensorSpec
-from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
+from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import (
     _chunk_with_empty,
     _from_local_no_grad,
@@ -28,25 +28,23 @@ FSDP considers the following tensors:
   on the module when applying FSDP
 - Sharded parameter: sharding the original parameter on dim-0 as a DTensor
   over the main mesh
-- All-gather inputs: the ``torch.Tensor`` or ``Tensor`` s passed to all-gather,
-  derived from the sharded parameter
-- All-gather output: the ``torch.Tensor`` or ``Tensor`` s resulting from
-  all-gathering the all-gather inputs
+- All-gather input: the ``torch.Tensor`` passed to all-gather, derived from the
+  sharded parameter
+- All-gather output: the ``torch.Tensor`` resulting from all-gathering the
+  all-gather input
 - Unsharded parameter: parameter used for forward/backward computation, derived
   from the all-gather output; autograd leaf
 
 We define these tensors to describe the general framework that can accomodate
 extensions, where:
-- all-gather-inputs = pre-all-gather-transform(sharded-parameter)
-- unsharded-parameter = post-all-gather-transform(all-gather-outputs)
+- all-gather-input = pre-all-gather-transform(sharded-parameter)
+- unsharded-parameter = post-all-gather-transform(all-gather-output)
 
-For the default ``torch.Tensor`` case, there is only one all-gather input, and
-it shares the same underlying tensor data as the sharded parameter, meaning
-that they can be thought of as the same tensors. The same applies for the
-all-gather output and unsharded parameter. For non-``torch.Tensor`` extensions,
-these equivalences may no longer hold due to the pre/post-all-gather
-transforms, and some may have multiple all-gather inputs/outputs (e.g.
-quantized data and scales).
+For the default ``torch.Tensor`` case, the sharded parameter and all-gather
+input share the same underlying tensor data, meaning that they can be thought
+of as the same tensors. The same applies for the all-gather output and
+unsharded parameter. For non-``torch.Tensor`` extensions, these equivalences
+may no longer hold due to the pre/post-all-gather transforms.
 
 [Note: FSDP and autograd]
 FSDP dynamically frees and allocates the unsharded parameter. Since autograd
@@ -113,16 +111,11 @@ class FSDPParam:
     _sharded_post_forward_param_data: Optional[torch.Tensor]  # 1D
     _sharded_post_forward_param: Optional[nn.Parameter]  # ND
     _unsharded_param: nn.Parameter  # ND
-    cpu_sharded_grad: torch.Tensor  # unpadded, ND, pinned memory
     _global_placements: Tuple[Placement, ...]
     _global_size: torch.Size
     _global_stride: Tuple[int, ...]
     # DTensor attributes (only defined for DTensor `param`):
     _tp_spec: DTensorSpec
-    # All-gather extension attributes
-    _use_all_gather_extensions: bool
-    _all_gather_metadata: Optional[Any]
-    _unsharded_inner_tensors: List[torch.Tensor]
 
     def __init__(
         self,
@@ -132,20 +125,16 @@ class FSDPParam:
         post_forward_mesh_info: Optional[FSDPMeshInfo],
         device: torch.device,
         mp_policy: MixedPrecisionPolicy,
-        offload_policy: OffloadPolicy,
     ):
         self._module_info: ParamModuleInfo = module_info
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
         self._init_dtype_attrs(param, mp_policy)
-        self.offload_to_cpu: bool = offload_policy.offload_type == "cpu"
-        self.grad_offload_event: Optional[torch.cuda.Event] = None
         self._init_sharded_param(param, device)
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
-        self._init_extensions()
-        self.all_gather_outputs: List[torch.Tensor] = []
+        self.all_gather_output = torch.empty(0)
         self._param_fqn: Optional[str] = None  # prefixed from root module
 
     def _init_dtype_attrs(self, param: nn.Parameter, mp_policy: MixedPrecisionPolicy):
@@ -225,11 +214,6 @@ class FSDPParam:
         padded_sharded_param = param_data.new_zeros(padded_sharded_size)
         if sharded_param.numel() > 0:
             padded_sharded_param[: sharded_param.size(0)].copy_(sharded_param)
-        if self.offload_to_cpu:
-            padded_sharded_param = padded_sharded_param.cpu().pin_memory()
-            self.cpu_sharded_grad = sharded_param.new_zeros(
-                sharded_param.size(), device="cpu", pin_memory=True
-            )
         self._sharded_param_data = padded_sharded_param.view(-1)
         self.sharded_param = nn.Parameter(
             self.to_sharded_dtensor(padded_sharded_param[: sharded_param.size(0)])
@@ -252,66 +236,27 @@ class FSDPParam:
             self.sharded_post_forward_size
         )
 
-    def _init_extensions(self) -> None:
-        inner_tensor = self._inner_tensor
-        has_pre_all_gather = hasattr(inner_tensor, "fsdp_pre_all_gather")
-        has_post_all_gather = hasattr(inner_tensor, "fsdp_post_all_gather")
-        if has_pre_all_gather != has_post_all_gather:
-            raise AssertionError(
-                f"Pre and post-all-gather should be defined together if defined: {inner_tensor}"
-            )
-        self._use_all_gather_extensions = has_pre_all_gather
-        if self._use_all_gather_extensions:
-            self._all_gather_metadata: Optional[Any] = None
-            self._unsharded_inner_tensors: List[torch.Tensor] = []
-
-    def init_all_gather_outputs(
+    def init_all_gather_output(
         self,
-        all_gather_input_numels: List[int],
-        all_gather_input_dtypes: List[torch.dtype],
+        all_gather_input_numel: int,
         world_size: int,
+        dtype: torch.dtype,
         device: torch.device,
     ):
-        if self.all_gather_outputs:
+        if self.all_gather_output.numel() > 0:
             return  # already initialized
-        self.all_gather_outputs = [
-            torch.empty(torch.Size([numel * world_size]), dtype=dtype, device=device)
-            for numel, dtype in zip(all_gather_input_numels, all_gather_input_dtypes)
-        ]
+        all_gather_output_size = torch.Size([all_gather_input_numel * world_size])
+        self.all_gather_output = torch.empty(
+            all_gather_output_size, dtype=dtype, device=device
+        )
 
     def init_unsharded_param(self):
         if hasattr(self, "_unsharded_param"):
-            if not self._use_all_gather_extensions:
-                return  # already initialized
-            for tensor in self._unsharded_inner_tensors:
-                if (storage := tensor.untyped_storage()).size() == 0:
-                    storage.resize_(tensor.numel() * tensor.itemsize)
-            self._inner_tensor.fsdp_post_all_gather(  # type: ignore[attr-defined]
-                tuple(self.all_gather_outputs),
-                self._all_gather_metadata,
-                self.param_dtype or self.orig_dtype,
-                out=self._unsharded_param,
-            )
-            self._all_gather_metadata = None
-            return
-        if self._use_all_gather_extensions:
-            param_dtype = self.param_dtype or self.orig_dtype
-            (
-                unsharded_tensor,
-                self._unsharded_inner_tensors,
-            ) = self._inner_tensor.fsdp_post_all_gather(  # type: ignore[attr-defined]
-                self.all_gather_outputs,
-                self._all_gather_metadata,
-                param_dtype,
-            )
-            self._all_gather_metadata = None
-        else:
-            # For the default path (no post-all-gather), the all-gather output
-            # gives the unsharded parameter data directly
-            assert len(self.all_gather_outputs) == 1
-            unsharded_tensor = self.all_gather_outputs[0]
+            return  # already initialized
+        # For the default path (no post-all-gather), the all-gather output
+        # gives the unsharded parameter data directly
         unsharded_param = torch.as_strided(
-            unsharded_tensor,
+            self.all_gather_output,
             self._orig_size,
             self._contiguous_orig_stride,
             storage_offset=0,
@@ -329,7 +274,7 @@ class FSDPParam:
 
     def to_sharded(self) -> None:
         self._setattr_on_modules(self.sharded_param)
-        self.free_unsharded_param()
+        self.free_all_gather_output()
         self.sharded_state = ShardedState.SHARDED
 
     def to_sharded_post_forward(self) -> None:
@@ -339,9 +284,8 @@ class FSDPParam:
             )
         self._assert_in_states(ShardedState.UNSHARDED)
         assert self.post_forward_mesh_info is not None  # mypy
-        assert len(self.all_gather_outputs) == 1
         shard_world_size = self.post_forward_mesh_info.shard_mesh_size
-        if (numel := self.all_gather_outputs[0].numel()) % shard_world_size != 0:
+        if (numel := self.all_gather_output.numel()) % shard_world_size != 0:
             _raise_assert_with_print(
                 f"All-gather output size ({numel}) must be divisible by the shard "
                 f"world size ({shard_world_size})"
@@ -349,9 +293,7 @@ class FSDPParam:
         shard_rank = self.post_forward_mesh_info.shard_mesh_rank
         sharded_numel = numel // shard_world_size
         self._sharded_post_forward_param_data = (
-            self.all_gather_outputs[0].narrow(
-                0, sharded_numel * shard_rank, sharded_numel
-            )
+            self.all_gather_output.narrow(0, sharded_numel * shard_rank, sharded_numel)
         ).clone()  # clone to be able to free all-gather output
         sharded_post_forward_tensor = torch.as_strided(
             self._sharded_post_forward_param_data,
@@ -363,7 +305,7 @@ class FSDPParam:
             self.to_sharded_post_forward_dtensor(sharded_post_forward_tensor)
         )
         self._setattr_on_modules(self._sharded_post_forward_param)
-        self.free_unsharded_param()
+        self.free_all_gather_output()
         self.sharded_state = ShardedState.SHARDED_POST_FORWARD
 
     def to_unsharded(self) -> None:
@@ -377,7 +319,6 @@ class FSDPParam:
             # is ensured without further synchronization.
             self._sharded_post_forward_param = None
             self._sharded_post_forward_param_data = None  # free
-        self.free_all_gather_outputs()
         self.sharded_state = ShardedState.UNSHARDED
 
     def _setattr_on_modules(self, param: nn.Parameter) -> None:
@@ -422,56 +363,23 @@ class FSDPParam:
             self._global_stride,
         )
 
-    def alloc_all_gather_outputs(self) -> None:
-        for tensor in self.all_gather_outputs:
-            unsafe_alloc_storage(tensor)
+    def alloc_all_gather_output(self) -> None:
+        unsafe_alloc_storage(self.all_gather_output)
 
-    def free_all_gather_outputs(self) -> None:
-        if not self._use_all_gather_extensions:
-            # Do not free since all-gather output and unsharded parameter alias
-            return
-        inner_tensor_ptrs = {
-            t.untyped_storage().data_ptr() for t in self._unsharded_inner_tensors
-        }
-        for all_gather_output in self.all_gather_outputs:
-            if (
-                storage := all_gather_output.untyped_storage()
-            ).data_ptr() in inner_tensor_ptrs:
-                # Do not free since all-gather output and inner tensor alias
-                continue
-            storage.resize_(0)
-
-    def free_unsharded_param(self) -> None:
-        if not self._use_all_gather_extensions:
-            for tensor in self.all_gather_outputs:
-                unsafe_free_storage(tensor)
-            return
-        for tensor in self._unsharded_inner_tensors:
-            unsafe_free_storage(tensor)
+    def free_all_gather_output(self) -> None:
+        unsafe_free_storage(self.all_gather_output)
 
     @property
-    def all_gather_inputs(self) -> List[torch.Tensor]:  # 1D
+    def all_gather_input(self) -> torch.Tensor:  # 1D
         self._assert_in_states(ShardedState.SHARDED, ShardedState.SHARDED_POST_FORWARD)
         if self.sharded_state == ShardedState.SHARDED:
-            sharded_param_data = self._sharded_param_data
-            if self.offload_to_cpu:
-                assert not self._use_all_gather_extensions
-                sharded_param_data = sharded_param_data.to(
-                    self.device, non_blocking=True
-                )
-            return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
-            if self._use_all_gather_extensions:
-                fsdp_pre_all_gather = self._inner_tensor.fsdp_pre_all_gather  # type: ignore[attr-defined]
-                all_gather_inputs, self._all_gather_metadata = fsdp_pre_all_gather()
-                return [t.view(-1) for t in all_gather_inputs]
+            return _to_dtype_if_needed(self._sharded_param_data, self.param_dtype)
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
-            # TODO: Add extensions path.
-            all_gather_input = _to_dtype_if_needed(
+            return _to_dtype_if_needed(
                 cast(torch.Tensor, self._sharded_post_forward_param_data),
                 self.param_dtype,
             )
-            return [all_gather_input]
-        return [torch.empty(0)]  # mypy
+        return torch.empty(0)  # mypy
 
     @property
     def unsharded_param(self) -> nn.Parameter:  # ND
@@ -496,10 +404,6 @@ class FSDPParam:
             _raise_assert_with_print(
                 f"Expects to be in one of {states}, not {self.sharded_state}"
             )
-
-    @property
-    def _inner_tensor(self) -> torch.Tensor:
-        return cast(DTensor, self.sharded_param)._local_tensor
 
 
 # NOTE: Unsafe here refers to not checking whether the storage is already
