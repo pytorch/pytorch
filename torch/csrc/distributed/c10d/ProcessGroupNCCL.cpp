@@ -309,8 +309,7 @@ void cacheAllocatorDeregisterHook(
   }
 }
 
-#ifdef IS_NCCL_EXP
-#ifdef NCCL_COMM_DUMP
+#if defined(IS_NCCL_EXP) && defined(NCCL_COMM_DUMP)
 std::string dump_nccl_trace() {
   std::unordered_map<
       std::string /* ncclUniqueID */,
@@ -333,7 +332,6 @@ std::string dump_nccl_trace() {
   }
   return NCCLTraceBuffer::get()->dump(ncclDumpMap);
 }
-#endif
 #else
 std::string dump_nccl_trace() {
   return NCCLTraceBuffer::get()->dump(c10::nullopt);
