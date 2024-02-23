@@ -1,4 +1,10 @@
 """
+Produced AOT graphs: https://gist.github.com/yf225/3a9ef062a750dd02d7e08b87aa4bc864
+
+Notice that there is no copy_ to copy the mutated values back to the input. Why?
+"""
+
+"""
 git pull && TORCH_COMPILE_DEBUG=1 python3 test_foreach_copy.py >output.txt 2>&1
 """
 import contextlib
@@ -25,10 +31,8 @@ device_type = "cuda"
 
 
 def func(x1, x2, x3, x4):
-    x5 = x1[:]
-    x6 = x2[:]
     with torch.no_grad():
-        torch._foreach_copy_([x5, x6], [x3, x4])
+        torch._foreach_copy_([x1, x2], [x3, x4])
     return torch.matmul(x1, x2)
 
 if __name__ == "__main__":
