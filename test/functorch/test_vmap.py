@@ -3672,6 +3672,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # `index_put` OpInfo in pytorch/pytorch has
         # masked index as input which is not supported
         xfail('index_put', ''),
+        xfail('_unsafe_masked_index', ''),
         xfail('isin'),
         xfail('lu_unpack'),
         xfail('masked_fill'),
