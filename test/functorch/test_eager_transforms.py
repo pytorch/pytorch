@@ -864,7 +864,7 @@ class TestGradTransform(TestCase):
                 expected = f"{repr(x)}"
                 level = 0
                 for op in op_list:
-                    level += 1  # noqa: SIM113
+                    level += 1
                     if op == grad:
                         expected = f"GradTrackingTensor(lvl={level}, value={expected})"
                     elif op == vmap:

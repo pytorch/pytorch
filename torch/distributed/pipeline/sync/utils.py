@@ -23,14 +23,16 @@ def partition_model(
             List indicating the device to use for each partition. Defaults to
             ``range(len(balance))``
     """
+    device_idx = 0
     pipe_idx = 0
     balanced_pipe = []
-    for device_idx, num_layers in enumerate(balance):
+    for num_layers in balance:
         layers = []
         for i in range(num_layers):
             layers.append(module[pipe_idx])
             pipe_idx += 1
         device = device_idx if devices is None else devices[device_idx]
         balanced_pipe.append(nn.Sequential(*layers).to(device))
+        device_idx += 1
 
     return nn.Sequential(*balanced_pipe)

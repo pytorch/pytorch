@@ -2588,7 +2588,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             self.assertEqual(
                 val, my_tensor_function(torch.ones(j, j), torch.ones(j, j))
             )
-            j += 1  # noqa: SIM113
+            j += 1
 
     @dist_init
     def test_py_tensors_in_container(self):

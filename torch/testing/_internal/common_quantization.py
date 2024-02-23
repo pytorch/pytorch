@@ -196,7 +196,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, ntrain_bat
     for image, target in data_loader:
         start_time = time.time()
         print('.', end='')
-        cnt += 1  # noqa: SIM113
+        cnt += 1
         image, target = image.to(device), target.to(device)
         output = model(image)
         loss = criterion(output, target)
