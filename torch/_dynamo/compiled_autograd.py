@@ -6,7 +6,7 @@ import torch
 from torch._dynamo.external_utils import call_backward, call_hook
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import counters, lazy_format_graph_code
-from torch._logging import getArtifactLogger
+from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses import FakeTensorMode
 from torch.fx import GraphModule
@@ -200,6 +200,10 @@ class AutogradCompilerInstance:
         )
         compiled_autograd_log.info(
             "%s", lazy_format_graph_code("Compiled autograd graph", graph)
+        )
+        trace_structured(
+            "compiled_autograd_graph",
+            payload_fn=lambda: graph.print_readable(print_output=False),
         )
         return self.compiler_fn(graph)
 

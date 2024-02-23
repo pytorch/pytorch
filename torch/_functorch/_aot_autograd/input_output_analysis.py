@@ -15,7 +15,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 from .schemas import (
@@ -29,8 +28,6 @@ from .schemas import (
 from .utils import strict_zip
 
 zip = strict_zip
-
-aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 
 def remove_dupe_metadata(

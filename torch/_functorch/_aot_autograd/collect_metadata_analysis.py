@@ -8,13 +8,13 @@ a functionalized version of the graph under compilation.
 """
 
 import collections
+import logging
 from functools import wraps
 from typing import Callable, DefaultDict, Dict, List
 
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
@@ -45,7 +45,7 @@ from .utils import _get_autocast_states, KNOWN_TYPES, strict_zip
 
 zip = strict_zip
 
-aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
+log = logging.getLogger(__name__)
 
 
 # This is a version of functionalization that is specifically designed
@@ -413,7 +413,7 @@ def run_functionalized_fw_and_collect_metadata(
                     # However, autograd does not allow users to mutate multi-output views
                     # in any way that can change the autograd metadata of other aliases.
                     # So we hide this aliasing from autograd here.
-                    aot_graphs_log.info(
+                    log.debug(
                         "Encountered AOTAutograd case: differentiable outputs that \
 alias each other from a multi-output view call"
                     )
@@ -455,7 +455,7 @@ alias each other from a multi-output view call"
                         out_tensor_alias_counts[curr_storage] != 1
                         and num_aliased_outs_that_are_not_multi_output_views <= 1
                     ):
-                        aot_graphs_log.info(
+                        log.debug(
                             "Encountered AOTAutograd case: differentiable outputs that alias each other \
 from a multi-output view call"
                         )
@@ -599,7 +599,7 @@ from a multi-output view call"
             torch.set_grad_enabled(
                 prior_grad_enabled
             )  # Restore the prior state after tracing it
-            aot_graphs_log.info(
+            log.debug(
                 (
                     "grad_mode mutation encountered in graph. "
                     "Will emit mutation epilogue, to set grad_mode=%s"
