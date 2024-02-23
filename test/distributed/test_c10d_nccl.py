@@ -4301,12 +4301,13 @@ class NCCLTraceTest(NCCLTraceTestBase):
         for seq in range(num_coalesced_ops):
             first_op = seq * (ops_per_coalesce + 1)
             coalesced_op = first_op + ops_per_coalesce
+            expected_seq = seq + 1
             for p2p_op_idx, input_sizes in zip(range(first_op, coalesced_op, 1), op_sizes_per_coalesce):
                 # the indivudal ops inside the coalescing group the individual op metadata,
                 # but not the timing info coming from the actual coalesced kernel
                 profiling_name = 'nccl:recv 0<-1' if self.rank == 0 else 'nccl:send 1->0'
                 self.assertEqual(t['entries'][p2p_op_idx]['profiling_name'], profiling_name)
-                self.assertEqual(t['entries'][p2p_op_idx]['seq_id'], seq)
+                self.assertEqual(t['entries'][p2p_op_idx]['seq_id'], expected_seq)
                 self.assertEqual(t['entries'][p2p_op_idx]['input_sizes'], [input_sizes])
                 self.assertEqual(t['entries'][p2p_op_idx]['output_sizes'], [input_sizes])
                 # duration doesn't get tagged onto individual ops yet, nor is their state updated
@@ -4316,7 +4317,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             # the coalesced op has no metadata but indicates that coalescing was used,
             # and accurately reflects the timing and state info for the whole group
             self.assertEqual(t['entries'][coalesced_op]['profiling_name'], 'nccl:coalesced')
-            self.assertEqual(t['entries'][coalesced_op]['seq_id'], seq)
+            self.assertEqual(t['entries'][coalesced_op]['seq_id'], expected_seq)
             self.assertEqual(t['entries'][coalesced_op]['state'], 'completed')
             self.assertEqual(t['entries'][coalesced_op]['input_sizes'], [])
             self.assertEqual(t['entries'][coalesced_op]['output_sizes'], [])
@@ -4343,7 +4344,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
         pg = self._create_process_group_nccl()
         if timing_enabled:
             pg._enable_collectives_timing()
-
         num_repeats = 10
         ops_per_repeat = len(op_sizes)
         for i in range(num_repeats):
@@ -4356,7 +4356,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
                     dist.send(tensor, 0)
 
         torch.cuda.synchronize()
-
         if timing_enabled:
             # wait for watchdog thread to process the queue of works
             time.sleep(1)
@@ -4366,13 +4365,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
         for seq in range(num_repeats * ops_per_repeat):
             input_sizes = op_sizes[seq % ops_per_repeat]
             profiling_name = 'nccl:recv 0<-1' if self.rank == 0 else 'nccl:send 1->0'
-            # TODO(whc) clarify if this off by one is expected or a bug. and if we can fix it or if that breaks BC.
-            # (observed that first p2p op gets seq 1 instead of seq 0, bc we bump seq before we initwork/flightrecord in p2p)
             expected_seq = seq + 1
             self.assertEqual(t['entries'][seq]['profiling_name'], profiling_name)
             self.assertEqual(t['entries'][seq]['seq_id'], expected_seq)
-            # TODO(whc) input sizes are lost
-            # self.assertEqual(t['entries'][seq]['input_sizes'], [input_sizes])
+            self.assertEqual(t['entries'][seq]['input_sizes'], [input_sizes])
             self.assertEqual(t['entries'][seq]['output_sizes'], [input_sizes])
             self.assertEqual(t['entries'][seq]['state'], 'completed')
 
@@ -4389,7 +4385,14 @@ class NCCLTraceTest(NCCLTraceTestBase):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @parametrize("timing_enabled", [True, False])
-    def test_coalesced_collective(self, timing_enabled):
+    def test_coalescing_manager_collective(self, timing_enabled):
+        """
+        The coalescing manager api works by accumulating operations in python via a contextmanager, and then making
+        one call into c++ to an <op>_coalesced API.  It has limited support for ops and has been added recently to
+        avoid overheads of making individual py-cpp calls.  This complicates flight recording..
+
+        For now, flight recording of coalescing_manager collectives is less detailed than cpp coalesced collectives.
+        """
         if self.rank == self.MAIN_PROCESS_RANK:
             return
         pg = self._create_process_group_nccl()
@@ -4415,13 +4418,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
 
-        # TODO can we change the behavior so indiviual reduce_scatter_tensors get logged?
         self.assertEqual(len(t['entries']), 1)  # one for the reduce_scatter_tensor_coalesced, one for the endCoalescing
         self.assertEqual(t['entries'][0]['profiling_name'], "nccl:reduce_scatter_tensor_coalesced")
         self.assertEqual(t['entries'][0]['seq_id'], 1)
-        # TODO(whc) input sizes aren't handled yet
-        # self.assertEqual(t['entries'][0]['input_sizes'], [[2, 2], [2, 2]])
-        self.assertEqual(t['entries'][0]['input_sizes'], [])
+        self.assertEqual(t['entries'][0]['input_sizes'], [[2, 2], [2, 2]])
         self.assertEqual(t['entries'][0]['output_sizes'], [[2,], [2,]])
         self.assertEqual(t['entries'][0]['state'], 'completed')
         if timing_enabled:
