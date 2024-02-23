@@ -442,9 +442,9 @@ def compile_fx_inner(
 
     # Return the output strides to the caller via TracingContext
     context = torch._guards.TracingContext.try_get()
-    if context is not None and context.output_strides is not None:
-        assert len(context.output_strides) == 0
-        context.output_strides.extend(compiled_graph.output_strides)
+    if context is not None and context.output_strides_listeners is not None:
+        for li in context.output_strides_listeners:
+            li(compiled_graph.output_strides)
 
     if aot_mode:
         return compiled_graph

@@ -685,7 +685,6 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     @torch._inductor.config.patch({"layout_optimization": True, "keep_output_stride": False})
     @patch.object(config, "optimize_ddp", True)
-    @patch.object(config, "optimize_ddp_lazy_compile", True)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor_layout_optimizations(self):
         assert config.optimize_ddp
