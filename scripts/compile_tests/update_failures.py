@@ -51,10 +51,11 @@ def patch_file(
     with open(filename, "r") as f:
         start = False
         for text in f.readlines():
+            text = text.strip()
             if start:
                 if text == "}":
                     break
-                extra_dynamo_skips.add(text.strip().strip('"'))
+                extra_dynamo_skips.add(text.strip(',"'))
             else:
                 if text == "extra_dynamo_skips = {":
                     start = True
