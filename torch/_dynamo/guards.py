@@ -1005,11 +1005,6 @@ class CheckFunctionManager:
             ):
                 continue
 
-            # # TODO: still need to understand what this guard is.
-            # # Currently, the next line `guard.create(builder)` throws `'function' object has no attribute '__self__'`.
-            # if guard.name == "L['___stack0'].__self__":
-            #     continue
-
             try:
                 guard.create(builder)
             except Exception as e:
@@ -1097,21 +1092,13 @@ class CheckFunctionManager:
                         converted.append(dim.node.maybe_as_int())
                 return converted
 
-            # TODO: is this the right thing to do?
-            def maybe_unpack(tensor):
-                # if isinstance(tensor, torch._subclasses.async_tensor.AsyncTensor):
-                #     return tensor._unused_real_tensor
-                # else:
-                #     return tensor
-                return tensor
-
             dynamic_dims_sizes = [
-                convert(self.output_graph.tensor_weakref_to_sizes_strides[maybe_unpack(t)]["size"])
+                convert(self.output_graph.tensor_weakref_to_sizes_strides[t]["size"])
                 for t in tensor_check_examples
             ]
 
             dynamic_dims_strides = [
-                convert(self.output_graph.tensor_weakref_to_sizes_strides[maybe_unpack(t)]["stride"])
+                convert(self.output_graph.tensor_weakref_to_sizes_strides[t]["stride"])
                 for t in tensor_check_examples
             ]
 

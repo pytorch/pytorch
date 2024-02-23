@@ -156,7 +156,6 @@ from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .torch_function import build_torch_function_fn, TensorWithTFOverrideVariable
 from .user_defined import (
     KeyedJaggedTensorVariable,
-    AsyncTensorVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
 )
@@ -618,9 +617,6 @@ class VariableBuilder:
             result = KeyedJaggedTensorVariable(value, source=self.source)
             # TODO: this doing it manually is bad
             return self.tx.output.side_effects.track_object_existing(value, result)
-        # elif AsyncTensorVariable.is_matching_object(value):
-        #     self.install_guards(GuardBuilder.TYPE_MATCH)
-        #     return AsyncTensorVariable(value, source=self.source)
         elif isinstance(value, torch.optim.Optimizer):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return OptimizerVariable(value, source=self.source)

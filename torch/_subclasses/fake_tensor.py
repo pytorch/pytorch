@@ -1265,7 +1265,6 @@ class FakeTensor(torch.Tensor):
     #
     def __init__(self, *args, **kwargs):
         super().__init__()
-        # print(f"FakeTensor init: id(self): {id(self)}")
 
     @staticmethod
     def from_tensor(t, fake_mode):
