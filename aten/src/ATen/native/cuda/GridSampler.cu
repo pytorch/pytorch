@@ -98,7 +98,7 @@ namespace {
           if (within_bounds_2d(iy_se, ix_se, inp_H, inp_W)) {
             out_acc += inp_ptr_NC[iy_se * inp_sH + ix_se * inp_sW] * se;
           }
-          *out_ptr_NCHW = out_acc;
+          *out_ptr_NCHW = static_cast<scalar_t>(out_acc);
         }
       } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
         index_t ix_nearest = static_cast<index_t>(std::nearbyint(ix));
@@ -133,19 +133,21 @@ namespace {
           #pragma unroll 4
           for (index_t i = 0; i < 4; ++i) {
             coefficients[i] = cubic_interp1d(
-              get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
-              get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 0, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
-              get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
-              get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 2, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
+              get_value_bounded<opmath_t>(inp_ptr_NC, ix_nw - 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
+              get_value_bounded<opmath_t>(inp_ptr_NC, ix_nw + 0, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
+              get_value_bounded<opmath_t>(inp_ptr_NC, ix_nw + 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
+              get_value_bounded<opmath_t>(inp_ptr_NC, ix_nw + 2, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
               tx);
           }
 
-          *out_ptr_NCHW = cubic_interp1d(
-            coefficients[0],
-            coefficients[1],
-            coefficients[2],
-            coefficients[3],
-            ty);
+          *out_ptr_NCHW = static_cast<scalar_t>(
+            cubic_interp1d(
+              coefficients[0],
+              coefficients[1],
+              coefficients[2],
+              coefficients[3],
+              ty)
+            );
         }
       }
     }
@@ -280,7 +282,7 @@ namespace {
           if (within_bounds_3d(iz_bse, iy_bse, ix_bse, inp_D, inp_H, inp_W)) {
             out_acc += inp_ptr_NC[iz_bse * inp_sD + iy_bse * inp_sH + ix_bse * inp_sW] * bse;
           }
-          *out_ptr_NCDHW = out_acc;
+          *out_ptr_NCDHW = static_cast<scalar_t>(out_acc);
         }
       } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
         index_t ix_nearest = static_cast<index_t>(std::nearbyint(ix));
@@ -322,6 +324,7 @@ namespace {
       const index_t grad_input_memory_span,
       const bool input_requires_grad) {
 
+    using opmath_t = at::opmath_type<scalar_t>;
     index_t C = input.sizes[1];
     index_t inp_H = input.sizes[2];
     index_t inp_W = input.sizes[3];
@@ -359,13 +362,13 @@ namespace {
       const auto grid_offset = n * grid_sN + h * grid_sH + w * grid_sW;
 
       // get the corresponding input x, y co-ordinates from grid
-      scalar_t x = grid.data[grid_offset];
-      scalar_t y = grid.data[grid_offset + grid_sCoor];
+      opmath_t x = grid.data[grid_offset];
+      opmath_t y = grid.data[grid_offset + grid_sCoor];
 
       // multipliers for gradients on ix and iy
       scalar_t gix_mult, giy_mult;
-      scalar_t ix = grid_sampler_compute_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
-      scalar_t iy = grid_sampler_compute_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
+      opmath_t ix = grid_sampler_compute_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
+      opmath_t iy = grid_sampler_compute_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
 
       if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
         // get NE, NW, SE, SW pixel values from (x, y)
@@ -379,10 +382,10 @@ namespace {
         index_t iy_se = iy_nw + 1;
 
         // get surfaces to each neighbor:
-        scalar_t nw = (ix_se - ix)    * (iy_se - iy);
-        scalar_t ne = (ix    - ix_sw) * (iy_sw - iy);
-        scalar_t sw = (ix_ne - ix)    * (iy    - iy_ne);
-        scalar_t se = (ix    - ix_nw) * (iy    - iy_nw);
+        opmath_t nw = (ix_se - ix)    * (iy_se - iy);
+        opmath_t ne = (ix    - ix_sw) * (iy_sw - iy);
+        opmath_t sw = (ix_ne - ix)    * (iy    - iy_ne);
+        opmath_t se = (ix    - ix_nw) * (iy    - iy_nw);
 
         scalar_t gix = static_cast<scalar_t>(0), giy = static_cast<scalar_t>(0);
         scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
@@ -455,21 +458,21 @@ namespace {
         ix = grid_sampler_unnormalize_set_grad(x, inp_W, align_corners, &gix_mult);
         iy = grid_sampler_unnormalize_set_grad(y, inp_H, align_corners, &giy_mult);
 
-        scalar_t ix_nw = std::floor(ix);
-        scalar_t iy_nw = std::floor(iy);
+        opmath_t ix_nw = std::floor(ix);
+        opmath_t iy_nw = std::floor(iy);
 
-        const scalar_t tx = ix - ix_nw;
-        const scalar_t ty = iy - iy_nw;
+        const opmath_t tx = ix - ix_nw;
+        const opmath_t ty = iy - iy_nw;
 
-        scalar_t x_coeffs[4];
-        scalar_t y_coeffs[4];
-        scalar_t x_coeffs_grad[4];
-        scalar_t y_coeffs_grad[4];
+        opmath_t x_coeffs[4];
+        opmath_t y_coeffs[4];
+        opmath_t x_coeffs_grad[4];
+        opmath_t y_coeffs_grad[4];
 
-        get_cubic_upsampling_coefficients<scalar_t>(x_coeffs, tx);
-        get_cubic_upsampling_coefficients<scalar_t>(y_coeffs, ty);
-        get_cubic_coefficients_grad<scalar_t>(x_coeffs_grad, tx);
-        get_cubic_coefficients_grad<scalar_t>(y_coeffs_grad, ty);
+        get_cubic_upsampling_coefficients<opmath_t>(x_coeffs, tx);
+        get_cubic_upsampling_coefficients<opmath_t>(y_coeffs, ty);
+        get_cubic_coefficients_grad<opmath_t>(x_coeffs_grad, tx);
+        get_cubic_coefficients_grad<opmath_t>(y_coeffs_grad, ty);
 
         scalar_t gix = static_cast<scalar_t>(0);
         scalar_t giy = static_cast<scalar_t>(0);
@@ -497,7 +500,7 @@ namespace {
               }
 
               // set grid gradient
-              scalar_t val = get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1 + i, iy_nw - 1 + j,
+              scalar_t val = get_value_bounded<scalar_t, opmath_t>(inp_ptr_NC, ix_nw - 1 + i, iy_nw - 1 + j,
                 inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners);
 
               gix -= val * x_coeffs_grad[i] * y_coeffs[j] * gOut;
@@ -528,6 +531,7 @@ namespace {
       const index_t grad_input_memory_span,
       const bool input_requires_grad) {
 
+    using opmath_t = at::opmath_type<scalar_t>;
     index_t C = input.sizes[1];
     index_t inp_D = input.sizes[2];
     index_t inp_H = input.sizes[3];
@@ -573,9 +577,9 @@ namespace {
       const auto grid_offset = n * grid_sN + d * grid_sD + h * grid_sH + w * grid_sW;
 
       // get the corresponding input x, y, z co-ordinates from grid
-      scalar_t ix = grid.data[grid_offset];
-      scalar_t iy = grid.data[grid_offset + grid_sCoor];
-      scalar_t iz = grid.data[grid_offset + 2 * grid_sCoor];
+      opmath_t ix = grid.data[grid_offset];
+      opmath_t iy = grid.data[grid_offset + grid_sCoor];
+      opmath_t iz = grid.data[grid_offset + 2 * grid_sCoor];
 
       // multipliers for gradients on ix, iy, and iz
       scalar_t gix_mult, giy_mult, giz_mult;
@@ -620,14 +624,14 @@ namespace {
         index_t iz_bse = iz_tnw + 1;
 
         // get surfaces to each neighbor:
-        scalar_t tnw = (ix_bse - ix)    * (iy_bse - iy)    * (iz_bse - iz);
-        scalar_t tne = (ix    - ix_bsw) * (iy_bsw - iy)    * (iz_bsw - iz);
-        scalar_t tsw = (ix_bne - ix)    * (iy    - iy_bne) * (iz_bne - iz);
-        scalar_t tse = (ix    - ix_bnw) * (iy    - iy_bnw) * (iz_bnw - iz);
-        scalar_t bnw = (ix_tse - ix)    * (iy_tse - iy)    * (iz - iz_tse);
-        scalar_t bne = (ix    - ix_tsw) * (iy_tsw - iy)    * (iz - iz_tsw);
-        scalar_t bsw = (ix_tne - ix)    * (iy    - iy_tne) * (iz - iz_tne);
-        scalar_t bse = (ix    - ix_tnw) * (iy    - iy_tnw) * (iz - iz_tnw);
+        opmath_t tnw = (ix_bse - ix)    * (iy_bse - iy)    * (iz_bse - iz);
+        opmath_t tne = (ix    - ix_bsw) * (iy_bsw - iy)    * (iz_bsw - iz);
+        opmath_t tsw = (ix_bne - ix)    * (iy    - iy_bne) * (iz_bne - iz);
+        opmath_t tse = (ix    - ix_bnw) * (iy    - iy_bnw) * (iz_bnw - iz);
+        opmath_t bnw = (ix_tse - ix)    * (iy_tse - iy)    * (iz - iz_tse);
+        opmath_t bne = (ix    - ix_tsw) * (iy_tsw - iy)    * (iz - iz_tsw);
+        opmath_t bsw = (ix_tne - ix)    * (iy    - iy_tne) * (iz - iz_tne);
+        opmath_t bse = (ix    - ix_tnw) * (iy    - iy_tnw) * (iz - iz_tnw);
 
         scalar_t gix = static_cast<scalar_t>(0), giy = static_cast<scalar_t>(0), giz = static_cast<scalar_t>(0);
         scalar_t *gOut_ptr_NCDHW = grad_output.data + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;

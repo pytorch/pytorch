@@ -33,17 +33,17 @@ scalar_t grid_sampler_unnormalize(scalar_t coord, int size, bool align_corners) 
 // except that it also returns the `d output / d input` via pointer argument
 // `grad_in`.
 // This is useful in the backward pass of grid_sampler.
-template <typename scalar_t>
+template <typename coord_scalar_t, typename grad_scalar_t>
 static __forceinline__ __device__
-scalar_t grid_sampler_unnormalize_set_grad(scalar_t coord, int size,
-                                           bool align_corners, scalar_t *grad_in) {
+coord_scalar_t grid_sampler_unnormalize_set_grad(coord_scalar_t coord, int size,
+                                           bool align_corners, grad_scalar_t *grad_in) {
   if (align_corners) {
     // unnormalize coord from [-1, 1] to [0, size - 1]
-    *grad_in = static_cast<scalar_t>(size - 1) / 2;
+    *grad_in = static_cast<grad_scalar_t>(size - 1) / 2;
     return ((coord + 1.f) / 2) * (size - 1);
   } else {
     // unnormalize coord from [-1, 1] to [-0.5, size - 0.5]
-    *grad_in = static_cast<scalar_t>(size) / 2;
+    *grad_in = static_cast<grad_scalar_t>(size) / 2;
     return ((coord + 1.f) * size - 1) / 2;
   }
 }
@@ -58,21 +58,21 @@ scalar_t clip_coordinates(scalar_t in, int clip_limit) {
 // clip_coordinates_set_grad works similarly to clip_coordinates except that
 // it also returns the `d output / d input` via pointer argument `grad_in`.
 // This is useful in the backward pass of grid_sampler.
-template <typename scalar_t>
+template <typename coord_scalar_t, typename grad_scalar_t>
 static __forceinline__ __device__
-scalar_t clip_coordinates_set_grad(scalar_t in, int clip_limit, scalar_t *grad_in) {
+coord_scalar_t clip_coordinates_set_grad(coord_scalar_t in, int clip_limit, grad_scalar_t *grad_in) {
   // Note that it is important for the gradient calculation that borders
   // are considered out of bounds.
-  if (in <= static_cast<scalar_t>(0)) {
-    *grad_in = static_cast<scalar_t>(0);
-    return static_cast<scalar_t>(0);
+  if (in <= static_cast<coord_scalar_t>(0)) {
+    *grad_in = static_cast<grad_scalar_t>(0);
+    return static_cast<coord_scalar_t>(0);
   } else {
-    scalar_t max = static_cast<scalar_t>(clip_limit - 1);
+    coord_scalar_t const max = static_cast<coord_scalar_t>(clip_limit - 1);
     if (in >= max) {
-      *grad_in = static_cast<scalar_t>(0);
+      *grad_in = static_cast<grad_scalar_t>(0);
       return max;
     } else {
-      *grad_in = static_cast<scalar_t>(1);
+      *grad_in = static_cast<grad_scalar_t>(1);
       return in;
     }
   }
@@ -104,32 +104,32 @@ scalar_t reflect_coordinates(scalar_t in, int twice_low, int twice_high) {
 // that it also returns the `d output / d input` via pointer argument
 // `grad_in`.
 // This is useful in the backward pass of grid_sampler.
-template <typename scalar_t>
+template <typename coord_scalar_t, typename grad_scalar_t>
 static __forceinline__ __device__
-scalar_t reflect_coordinates_set_grad(scalar_t in, int twice_low, int twice_high,
-                                      scalar_t *grad_in) {
+coord_scalar_t reflect_coordinates_set_grad(coord_scalar_t in, int twice_low, int twice_high,
+                                      grad_scalar_t *grad_in) {
   if (twice_low == twice_high) {
-    *grad_in = static_cast<scalar_t>(0);
-    return static_cast<scalar_t>(0);
+    *grad_in = static_cast<grad_scalar_t>(0);
+    return static_cast<coord_scalar_t>(0);
   }
   int grad_in_mult_;
-  scalar_t min = static_cast<scalar_t>(twice_low) / 2;
-  scalar_t span = static_cast<scalar_t>(twice_high - twice_low) / 2;
+  coord_scalar_t const min = static_cast<coord_scalar_t>(twice_low) / 2;
+  coord_scalar_t const span = static_cast<coord_scalar_t>(twice_high - twice_low) / 2;
   in = in - min;
-  if (in < static_cast<scalar_t>(0)) {
+  if (in < static_cast<coord_scalar_t>(0)) {
     grad_in_mult_ = -1;
     in = -in;
   } else {
     grad_in_mult_ = 1;
   }
   // `fmod` returns same sign as `in`, which is positive after the `if` above.
-  scalar_t extra = ::fmod(in, span);
+  coord_scalar_t extra = ::fmod(in, span);
   int flips = static_cast<int>(::floor(in / span));
   if (flips % 2 == 0) {
-    *grad_in = static_cast<scalar_t>(grad_in_mult_);
+    *grad_in = static_cast<grad_scalar_t>(grad_in_mult_);
     return extra + min;
   } else {
-    *grad_in = static_cast<scalar_t>(-grad_in_mult_);
+    *grad_in = static_cast<grad_scalar_t>(-grad_in_mult_);
     return span - extra + min;
   }
 }
@@ -185,15 +185,15 @@ scalar_t grid_sampler_compute_source_index(
 // grid_sampler_compute_source_index except that it also returns the
 // `d output / d input` via pointer argument `grad_in`.
 // This is useful in the backward pass of grid_sampler.
-template <typename scalar_t>
+template <typename coord_scalar_t, typename grad_scalar_t>
 static __forceinline__ __device__
-scalar_t grid_sampler_compute_source_index_set_grad(
-    scalar_t coord,
+coord_scalar_t grid_sampler_compute_source_index_set_grad(
+    coord_scalar_t coord,
     int size,
     GridSamplerPadding padding_mode,
     bool align_corners,
-    scalar_t *grad_in) {
-  scalar_t grad_clip, grad_refl;
+    grad_scalar_t *grad_in) {
+  grad_scalar_t grad_clip, grad_refl;
   coord = grid_sampler_unnormalize_set_grad(coord, size, align_corners, grad_in);
   if (padding_mode == GridSamplerPadding::Border) {
     // clip coordinates to image borders
@@ -225,10 +225,10 @@ bool within_bounds_3d(int d, int h, int w, int D, int H, int W) {
   return d >= 0 && d < D && h >= 0 && h < H && w >= 0 && w < W;
 }
 
-template<typename scalar_t>
+template<typename data_scalar_t, typename coord_scalar_t>
 static __forceinline__ __device__
-scalar_t get_value_bounded(
-    scalar_t *data, scalar_t x, scalar_t y, int W, int H, int sW, int sH,
+data_scalar_t get_value_bounded(
+    data_scalar_t *data, coord_scalar_t x, coord_scalar_t y, int W, int H, int sW, int sH,
     GridSamplerPadding padding_mode,
     bool align_corners) {
 
@@ -241,7 +241,7 @@ scalar_t get_value_bounded(
   if (within_bounds_2d(iy, ix, H, W)) {
     return data[iy * sH + ix * sW];
   }
-  return static_cast<scalar_t>(0);
+  return static_cast<data_scalar_t>(0);
 }
 
 template<typename scalar_t, typename index_t>
@@ -276,11 +276,11 @@ void safe_add_3d(scalar_t *data, int d, int h, int w,
   }
 }
 
-template<typename scalar_t, typename index_t>
+template<typename data_scalar_t, typename coord_scalar_t, typename index_t>
 static __forceinline__ __device__
 void add_value_bounded(
-    scalar_t* data, scalar_t x, scalar_t y, int W, int H, int sW, int sH,
-    scalar_t delta,
+    data_scalar_t* data, coord_scalar_t x, coord_scalar_t y, int W, int H, int sW, int sH,
+    data_scalar_t delta,
     GridSamplerPadding padding_mode,
     bool align_corners,
     const index_t NC_offset,
