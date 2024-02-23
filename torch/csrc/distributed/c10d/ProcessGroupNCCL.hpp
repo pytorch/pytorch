@@ -317,8 +317,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // to the store.
     c10::intrusive_ptr<Store> store_;
 
-    // Store a reference to NCCL collective's outputs, used by result and to
-    // give a more descriptive message when representing the Work as a string.
+    // Store a reference to NCCL collective's outputs and inputs, used by
+    // result, to give a more descriptive message when representing the Work as
+    // a string, and for Flight Recorder.
+    std::shared_ptr<std::vector<at::Tensor>> inputs_;
     std::shared_ptr<std::vector<at::Tensor>> outputs_;
 
     // TORCH_NCCL_AVOID_RECORD_STREAMS implementation helper.
@@ -341,7 +343,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // work has completed
     c10::optional<uint64_t> trace_id_;
     DebugLevel distDebugLevel_;
-    std::string profilingTitle_;
     friend class ProcessGroupNCCL;
   };
 
@@ -593,13 +594,16 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   virtual std::exception_ptr checkForNCCLErrors(
       std::shared_ptr<NCCLComm>& ncclComm);
 
+  // Ensure thaht if record is True, the work obj will be enqueued via
+  // workEnqueue
   virtual c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       at::Device& device,
       int rank,
       OpType opType,
       const char* profilingTitle = nullptr,
       const std::vector<at::Tensor>& inputs = {},
-      const std::vector<at::Tensor>& outputs = {});
+      const std::vector<at::Tensor>& outputs = {},
+      bool record = false);
 
  private:
   int globalRankStart;
@@ -918,12 +922,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Stores communicators for all collectives run inside a coalescing block
   std::vector<std::shared_ptr<NCCLComm>> coalescedComms_;
-
-  // Stores start/end events to be shared by all ops inside a coalesced region.
-  // Eventually, gets added to the 'Work' obj created during endCoalescing, but
-  // also ends up on the flight record for each op in the coalesced region.
-  std::shared_ptr<at::cuda::CUDAEvent> coalescedStartEvent_;
-  std::shared_ptr<at::cuda::CUDAEvent> coalescedEndEvent_;
 
   // map from the key: "group name + pg counter (ID)" to the
   // unique NCCL ID count. This needs to be group and pg specific
