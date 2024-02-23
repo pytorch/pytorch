@@ -36,6 +36,12 @@ class OpNode {
   friend class ComputeGraph;
 
  public:
+  OpNode(ValueRef input, ValueRef output) : inputs_{input}, outputs_{output} {}
+  OpNode(
+      const std::vector<ValueRef>& inputs,
+      const std::vector<ValueRef>& outputs)
+      : inputs_(inputs), outputs_(outputs) {}
+
   virtual ~OpNode() = default;
 
  protected:
