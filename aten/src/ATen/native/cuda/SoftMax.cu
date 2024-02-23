@@ -556,7 +556,7 @@ WriteBpropResultsVectorized(
 }
 
 /**
- * This will apply the Epilogue with non-vectrorized reads & writes for the general case
+ * This will apply the Epilogue with non-vectorized reads & writes for the general case
  */
 template <int ILP, typename scalar_t, typename accum_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
 __device__ __forceinline__ void

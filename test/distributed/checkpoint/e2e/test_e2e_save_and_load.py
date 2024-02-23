@@ -289,9 +289,6 @@ class TestNoCPU(DTensorTestBase):
 
     @with_comms
     def test_no_cpu(self):
-        import fbvscode
-
-        fbvscode.attach_debugger()
         with self.assertRaisesRegex(
             AssertionError, r"A CPU backend must be enabled for async save;.*?"
         ):

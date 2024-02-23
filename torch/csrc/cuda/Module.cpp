@@ -1284,7 +1284,7 @@ static void bindGetDeviceProperties(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   m.def(
       "_get_device_properties",
-      [](int device) -> cudaDeviceProp* {
+      [](c10::DeviceIndex device) -> cudaDeviceProp* {
         return at::cuda::getDeviceProperties(device);
       },
       py::return_value_policy::reference);
