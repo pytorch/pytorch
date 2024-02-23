@@ -425,8 +425,7 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
       workStartTime_(std::chrono::steady_clock::now()),
       seq_(seq),
       timingEnabled_(enableTiming),
-      distDebugLevel_(distDebugLevel),
-      profilingTitle_(profilingTitle) {
+      distDebugLevel_(distDebugLevel) {
   // Creates the CUDA event wrappers
   // Note: The actual events are lazily created when first recorded to with
   // DEFAULT_FLAGS = cudaEventDisableTiming.
@@ -2177,7 +2176,8 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     OpType opType,
     const char* profilingTitle,
     const std::vector<at::Tensor>& inputs,
-    const std::vector<at::Tensor>& outputs) { // TODO(kwen2501): necessary?
+    const std::vector<at::Tensor>& outputs, // TODO(kwen2501): necessary?
+    bool record) {
   auto r = c10::make_intrusive<ProcessGroupNCCL::WorkNCCL>(
       device,
       rank,
@@ -2189,6 +2189,30 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       desyncDebug_,
       enableTiming_.load(),
       dist_debug_level_);
+  if (record) {
+    // Ideally record every work that we enqueue, rather than every work we
+    // create.
+    // - at the time of this PR we do not currently enqueue every created work
+    // - but it is unsafe to steal refs to start/end cuda events from Works that
+    // may go
+    //   out of scope before flight recorder has retired them,
+    //   so we must ensure that any work that is initialized via initWork will
+    //   be enqueued
+    // - initially, moved record() into workEnqueue(), but found that makes it
+    // hard to get access to profilingTitle,
+    //   inputs, and outputs for metadata recording, and we don't want to attach
+    //   these objects to the Work becuase it has implications for keeping those
+    //   tensors alive longer and adds overhead when copying Work objects
+    //   between threads
+    r->trace_id_ = NCCLTraceBuffer::get()->record(
+        uid_,
+        seq_,
+        profilingTitle ? profilingTitle : "",
+        inputs,
+        outputs,
+        r->ncclStartEvent_.get(),
+        r->ncclEndEvent_.get());
+  }
   return r;
 }
 
@@ -2219,36 +2243,15 @@ uint64_t ProcessGroupNCCL::WorkNCCL::getSequencenumber() const {
 
 void ProcessGroupNCCL::workEnqueue(
     c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work) {
-  // Record every work that we enqueue, rather than every work we create.
-  // - we do not currently enqueue every created work, see coalescing in
-  // pointToPoint
-  // - but it is UNSAFE to steal start/end event refs from works that may go
-  // out of scope,
-  //   and enqueueing in workMetaList is the mechanism by which we ensure they
-  //   stay in scope long enough for flight recorder to finish using them
-
-  work->trace_id_ = NCCLTraceBuffer::get()->record(
-      uid_,
-      seq_,
-      work->profilingTitle_,
-      // TODO some new way to pass in/out tensor shapes to record()
-      // we avoid keeping tensors alive by holding a work obj, so shouldn't
-      // store the inputs/outputs directly
-      std::vector<at::Tensor>{},
-      work->outputs_ ? *work->outputs_ : std::vector<at::Tensor>{},
-      work->ncclStartEvent_.get(),
-      work->ncclEndEvent_.get());
   if (!terminateProcessGroup_.load()) {
-    {
-      std::lock_guard<std::mutex> lock(workMetaListMutex_);
-      // Avoid view tensors to be processed in cleanup thread.
-      // View tensors' destruction invokes autograd_meta, which
-      // needs to be destructed in user thread. Otherwise will
-      // get deadlock. Here we enqueue work without outputs_.
-      workMetaList_.emplace_back(*work);
-      lastEnqueuedSeq_ = work->seq_;
-      lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
-    }
+    std::lock_guard<std::mutex> lock(workMetaListMutex_);
+    // Avoid view tensors to be processed in cleanup thread.
+    // View tensors' destruction invokes autograd_meta, which
+    // needs to be destructed in user thread. Otherwise will
+    // get deadlock. Here we enqueue work without outputs_.
+    workMetaList_.emplace_back(*work);
+    lastEnqueuedSeq_ = work->seq_;
+    lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
   }
 }
 
@@ -2262,16 +2265,6 @@ void ProcessGroupNCCL::startCoalescing() {
   coalescedDevices_.clear();
   coalescedComms_.clear();
   coalescing_state_ |= CoalActive;
-
-  bool enableTiming = enableTiming_.load();
-
-  if (enableTiming) {
-    coalescedStartEvent_ =
-        std::make_shared<at::cuda::CUDAEvent>(cudaEventDefault);
-  }
-  coalescedEndEvent_ = std::make_shared<at::cuda::CUDAEvent>(
-      enableTiming ? cudaEventDefault : cudaEventDisableTiming);
-
   groupStart();
 }
 
@@ -2279,9 +2272,9 @@ void ProcessGroupNCCL::startCoalescing() {
 // REDUCE_SCATTER
 c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   if (coalescedComms_.size() == 0) {
-    LOG(ERROR) << "endcoalescing bailed bc comms size";
     // There is no actual work being coalesced, return here
     groupEnd();
+    coalescing_state_ = 0;
     return nullptr;
   }
 
@@ -2295,19 +2288,19 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   auto ncclStream = ncclStreams_.at(key);
 
   // Create Work object
-  auto work = initWork(device, rank_, optype, "nccl:coalesced");
+  c10::cuda::CaptureStatus capture_status =
+      c10::cuda::currentStreamCaptureStatusMayInitCtx();
+  bool enqueue =
+      (coalescing_state_) && capture_status == c10::cuda::CaptureStatus::None;
+  auto work =
+      initWork(device, rank_, optype, "nccl:coalesced", {}, {}, enqueue);
   work->ncclComm_ = comm;
   work->blockingWait_ = blockingWait_;
   work->avoidRecordStreams_ = avoidRecordStreams_;
   work->opTimeout_ = options_->timeout;
   work->store_ = store_;
+
   // Record start before ncclGroupEnd
-
-  // we waste the cuda events created inside initWork which is not a big deal
-  // but we could pass a flag
-  work->ncclStartEvent_ = coalescedStartEvent_;
-  work->ncclEndEvent_ = coalescedEndEvent_;
-
   if (work->timingEnabled_) {
     work->ncclStartEvent_->record(ncclStream);
   }
@@ -2327,13 +2320,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
     work->stashed_for_allocator_safety_ =
         std::make_shared<std::vector<at::Tensor>>();
   }
-  c10::cuda::CaptureStatus capture_status =
-      c10::cuda::currentStreamCaptureStatusMayInitCtx();
 
   // Notify graphs before we check the capture status preemptively
   at::cuda::CUDAGraph::inc_pending_event_queries();
 
-  if ((coalescing_state_) && capture_status == c10::cuda::CaptureStatus::None) {
+  if (enqueue) {
     workEnqueue(work);
   } else {
     at::cuda::CUDAGraph::dec_pending_event_queries();
@@ -2391,7 +2382,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   std::vector<at::Tensor> inputs{input};
   std::vector<at::Tensor> outputs{output};
 
-  auto work = initWork(device, rank_, opType, profilingTitle, inputs, outputs);
+  bool enqueue =
+      !coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None;
+  auto work =
+      initWork(device, rank_, opType, profilingTitle, inputs, outputs, enqueue);
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ =
@@ -2488,8 +2482,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 
   // Notify graphs before we check the capture status preemptively
   at::cuda::CUDAGraph::inc_pending_event_queries();
-
-  if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
+  if (enqueue) {
     workEnqueue(work);
   } else {
     at::cuda::CUDAGraph::dec_pending_event_queries();
@@ -2532,7 +2525,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   // First let NCCL streams wait for input tensors allocation streams
   syncStream(device, ncclEvents_[key], ncclStream);
 
-  auto work = initWork(device, rank_, opType, profilingTitle, inputs, outputs);
+  auto work = initWork(
+      device, rank_, opType, profilingTitle, inputs, outputs, /*record=*/true);
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
@@ -2684,8 +2678,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     p2pRank = rank_;
     p2pTargetRank = peer;
   } else {
-    // For single P2P, preserve theworkEnqueue old two-rank behavior (to avoid
-    // perf diff)
+    // For single P2P, preserve the old two-rank behavior (to avoid perf diff)
     key = getKeySendRecv(rank_, peer);
     p2pRank = rank_ <= peer ? 0 : 1;
     isSendRecvSelf = rank_ == peer;
@@ -2716,23 +2709,22 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // Work itself will create the CUDA events on all GPUs of tensors
   c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work;
   if (coalescing_state_) {
+    // When coalescing, we record events per op that lack timing/state
+    // information becuase there is no 'work' associated with them, and then
+    // later in endCoalescing we record a 'coalesced' Work which has
+    // timing/state updates via watchdog thread, but lacks op metadata such as
+    // input/output sizes and profilingTitle per-op in the group.
     auto trace_id = NCCLTraceBuffer::get()->record(
-        uid_,
-        seq_,
-        profilingTitle,
-        {tensor},
-        {tensor},
-        // We'd like to include events here and have them updated, but it
-        // complicates event lifetime. currently, event lifetime is managed by
-        // the Work that owns the event, which may be destroyed before this
-        // particular flight record gets updated during dumping.
-        nullptr,
-        nullptr);
-    // TODO accumulate the trace_ids into a list and later stuff those into the
-    // work for recording
+        uid_, seq_, profilingTitle, {tensor}, {tensor}, nullptr, nullptr);
+    // TODO(whc) if we want to make the per-p2p-op flightrecorder entries get
+    // their timings/states updated by proxy when the Work obj representing the
+    // coalesce group gets its update, we could accumulate these trace_ids
+    // together and ask FlightRecorder to take the update from one Work and
+    // apply it to multiple entries
     (void)trace_id;
   } else {
-    work = initWork(device, rank_, opType, profilingTitle, {tensor}, {});
+    work = initWork(
+        device, rank_, opType, profilingTitle, {tensor}, {}, /*record=*/true);
     // Store references to outputs to be used by WorkNCCL::result and
     // operator<<. Note that these outputs are only valid for recv(), as send()
     // does not modify the inputs but we still create these outputs for use
