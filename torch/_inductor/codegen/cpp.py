@@ -3497,15 +3497,13 @@ class CppScheduling(BaseScheduling):
                 def get_indexing_ranges_exprs(node):
                     if isinstance(node, FusedSchedulerNode):
                         assert len(node.snodes) > 0
-                        # use the last scheduler node from the list as it has the most
-                        # relevant indexing expressions
-                        return get_indexing_ranges_exprs(node.snodes[-1])
+                        return get_indexing_ranges_exprs(node.snodes[0])
                     else:
                         assert isinstance(node, SchedulerNode)
                         comp_buffer = node.node
                         assert isinstance(comp_buffer, ir.ComputedBuffer)
                         _, body, _ = comp_buffer.get_default_sizes_body()
-                        return body.var_ranges, [*body.indexing_exprs.values()]
+                        return body.var_ranges, list(body.indexing_exprs.values())
 
                 node_to_recomp = node1 if len(vars1) < len(vars2) else node2
                 assert isinstance(node_to_recomp, SchedulerNode)
@@ -3517,11 +3515,6 @@ class CppScheduling(BaseScheduling):
                 node_to_recomp.recompute_size_and_body(
                     extra_indexing_constraints=extra_indexing_constraints
                 )
-
-                if len(vars1) < len(vars2):
-                    node1 = node_to_recomp
-                else:
-                    node2 = node_to_recomp
 
                 _, (vars1, _) = node1.group
                 _, (vars2, _) = node2.group
@@ -3544,8 +3537,9 @@ class CppScheduling(BaseScheduling):
         node_to_recomp = node1 if len(vars1) < len(vars2) else node2
         ref_node = node2 if len(vars1) < len(vars2) else node1
 
-        # We can recompute sizes and body for nodes other than SchedulerNode
-        if not isinstance(node_to_recomp, SchedulerNode):
+        # We can not recompute sizes and body for nodes other than SchedulerNode
+        # TODO: we can extend fusion support with compatible ranges for FusedSchedulerNode
+        if isinstance(node_to_recomp, FusedSchedulerNode):
             return False
 
         def get_buffer(node):
@@ -3559,12 +3553,16 @@ class CppScheduling(BaseScheduling):
                 return node.node
 
         ref_node_buffer = get_buffer(ref_node)
-        if not isinstance(ref_node_buffer, ir.ComputedBuffer):
+        if isinstance(ref_node_buffer, ir.TemplateBuffer):
             return False
+
+        assert isinstance(ref_node_buffer, ir.ComputedBuffer)
 
         # It may happen that node1 and node2 compatible number of elements
         # but different original ranges, for example:
         # {d0: s0, d1: s1, d2: s2} vs {d0: s0*s1*s2}
+        # See https://github.com/pytorch/pytorch/pull/120077/files#r1500427848 for more details
+        # TODO: we can fix if it allows us to CSE at least one of the variables
         var_ranges1 = ref_node_buffer.get_read_writes().var_ranges
         var_ranges2 = node_to_recomp.node.get_read_writes().var_ranges
         if var_ranges1 != var_ranges2:
@@ -3573,6 +3571,8 @@ class CppScheduling(BaseScheduling):
         return True
 
     def _can_fuse_horizontal_impl(self, node1, node2):
+        assert isinstance(node1, (FusedSchedulerNode, SchedulerNode))
+        assert isinstance(node2, (FusedSchedulerNode, SchedulerNode))
         _, (vars1, reduce1) = node1.group
         _, (vars2, reduce2) = node2.group
         if vars1 == vars2 and reduce1 == reduce2:

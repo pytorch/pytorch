@@ -569,7 +569,7 @@ class SchedulerFusionTests(TestCase):
         # Fuse nodes with same number of elements and compatible orginal var ranges
         # [buf0: {d0: 60, d1: 11}, buf1: {d0: 660}] -> buf0_buf1
         def f(x, w):
-            o1 = x * w.view(1, 1, 1, -1)
+            o1 = x * w
             output = o1 + 1.0
             return output
 
@@ -578,8 +578,8 @@ class SchedulerFusionTests(TestCase):
 
         # [buf0_buf1: {d0: 60, d1: 11}, buf2: {d0: 660}] -> buf0_buf1_buf2
         def f(x, w1, w2):
-            o1 = x * w1.view(1, 1, 1, -1)
-            o2 = x * w2.view(1, 1, 1, -1)
+            o1 = x * w1
+            o2 = x * w2
             output = o1 + o2
             return output
 
