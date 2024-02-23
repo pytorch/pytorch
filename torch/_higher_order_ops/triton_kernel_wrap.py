@@ -162,26 +162,34 @@ def generate_ttir(kernel, kwargs):
 
 def ttir_to_functions(ttir_module):
     """
-    Walk the `ttir_module` to mine the `functions` from the
-    MLIR entities representing the Triton kernel (operations,
-    blocks, and regions).
+    Walk the `ttir_module` bottom up to mine the `functions` from
+    the structured MLIR entities representing the Triton kernel
+    (mlir::Operation, mlir::Block, mlir::Region).
     """
     functions = {}
-    op_stack = defaultdict(lambda: defaultdict(list))
-    region_id_to_block_ids = defaultdict(list)
-    block_id_to_block_arg_ids = {}
+
+    # block id --> op result (Intermediate) --> one or more ops
+    op_stack: Dict[int, Dict[Intermediate, List[Op]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    region_id_to_block_ids: Dict[int, List[int]] = defaultdict(list)
+    block_id_to_block_arg_ids: Dict[int, List[int]] = {}
     next_fake_intermediate = 0
 
     def mlir_to_functions(op):
-        name = op.get_name()
+        name: str = op.get_name()
         if name == "builtin.module":
             # this wraps all tt.func ops
             return
 
-        operand_ids = [op.get_operand(i).id() for i in range(op.get_num_operands())]
-        result_ids = [op.get_result(i).id() for i in range(op.get_num_results())]
+        operand_ids: List[int] = [
+            op.get_operand(i).id() for i in range(op.get_num_operands())
+        ]
+        result_ids: List[int] = [
+            op.get_result(i).id() for i in range(op.get_num_results())
+        ]
 
-        child_block_ids = []
+        child_block_ids: List[int] = []
         for i in [op.get_region(i).id() for i in range(op.get_num_regions())]:
             # as the walk is bottom-up, the region_id_to_block_ids[i]
             # must be populated by the time we process the enclosing op
@@ -204,15 +212,16 @@ def ttir_to_functions(ttir_module):
                     region_id_to_block_ids[parent_region.id()].append(parent_block_id)
 
         if name == "tt.func":
-            # for function ops: gather the ops from all child blocks
+            # for function ops: gather and inline
+            # the ops from all child blocks
             fn_ops = defaultdict(list)
             for child_block_id in child_block_ids:
                 for result, block_fn_ops in op_stack.pop(child_block_id).items():
                     for block_fn_op in block_fn_ops:
                         fn_ops[result].append(block_fn_op)
 
-            # replace the corresponding Intermediates in the child op
-            # args with the function arguments (Params)
+            # replace the corresponding Intermediates in the
+            # child op args with the function args (Params)
             params = {
                 idx: Param(i)
                 for i, idx in enumerate(block_id_to_block_arg_ids[child_block_ids[0]])
@@ -236,13 +245,13 @@ def ttir_to_functions(ttir_module):
                     if block_id in op_stack:
                         block_ops = op_stack.pop(block_id)
                         yield_ops.extend(block_ops.popitem()[1])
-                        for result, child_ops in block_ops.items():
-                            op_stack[parent_block_id][result].extend(child_ops)
+                        for op_result, child_ops in block_ops.items():
+                            op_stack[parent_block_id][op_result].extend(child_ops)
 
                 scf_results = [Intermediate(idx) for idx in result_ids]
-                for result in scf_results:
+                for scf_result in scf_results:
                     for yield_op in yield_ops:
-                        op_stack[parent_block_id][result].append(yield_op)
+                        op_stack[parent_block_id][scf_result].append(yield_op)
             else:
                 raise Exception(
                     f"Unknown blocked function: {name}. Can't capture the TTIR."
@@ -251,17 +260,19 @@ def ttir_to_functions(ttir_module):
             callee = None
             if name == "tt.call":
                 callee = op.get_flat_symbol_ref_attr("callee")
-            args = [Intermediate(operand) for operand in operand_ids]
+            args: List[Union[Param, Intermediate]] = [
+                Intermediate(operand) for operand in operand_ids
+            ]
             block_ops = op_stack[parent_block_id]
             if result_ids:
-                for result in result_ids:
-                    res = Intermediate(result)
+                for result_id in result_ids:
+                    res = Intermediate(result_id)
                     block_ops[res].append(Op(name, callee, args, res))
             else:
                 nonlocal next_fake_intermediate
                 next_fake_intermediate -= 1
                 fake_res = Intermediate(next_fake_intermediate)
-                block_ops[fake_res].append(Op(name, callee, args, None))
+                block_ops[fake_res].append(Op(name, callee, args, fake_res))
 
     ttir_module.walk(mlir_to_functions)
 
