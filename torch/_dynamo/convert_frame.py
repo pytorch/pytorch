@@ -7,6 +7,7 @@ import os
 import random
 import sys
 import threading
+import time
 import traceback
 import types
 import typing
@@ -671,6 +672,7 @@ def _compile(
             "compile_stack",
             lambda: structured.from_traceback(traceback.extract_stack()[: -4 - skip]),
         )
+        start_time = time.time()
         try:
             guarded_code = compile_inner(code, one_graph, hooks, transform)
             return guarded_code
@@ -757,6 +759,7 @@ def _compile(
                 graph_op_count,
                 graph_node_count,
                 graph_input_count,
+                start_time,
                 entire_frame_compile_time,
                 backend_compile_time,
                 inductor_compile_time,

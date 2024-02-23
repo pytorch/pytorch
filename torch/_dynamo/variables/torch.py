@@ -506,16 +506,27 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 param_vars=args,
             )
         elif is_constant_pg_functions(self.value):
-            # becuase the input is a "ProcessGroupVariable", we'll be guarding on its
+            # because the input is a "ProcessGroupVariable", we'll be guarding on its
             # ID_MATCH based on how it was constructed.
 
             # We desugar it at trace-time into ranks by directly calling util
             # bake the result into the trace
-            assert len(args) == 1, "Expected one arg (pg)"
-            # Some constant pg functions address a pg via its name
-            assert isinstance(args[0], (ProcessGroupVariable, ConstantVariable))
+            if len(args) == 1:
+                # group or group name
+                assert isinstance(args[0], (ProcessGroupVariable, ConstantVariable))
+            elif len(args) == 2:
+                # ranks + tag
+                assert isinstance(args[0], ListVariable) and isinstance(
+                    args[1], ConstantVariable
+                )
+            else:
+                raise AssertionError(
+                    f"Invalid group value ({args}) for constant pg "
+                    f"function {self.value}"
+                )
+            args_as_value = [arg.as_python_constant() for arg in args]
+            invocation_result = self.value(*args_as_value)
 
-            invocation_result = self.value(args[0].as_python_constant())
             # Note - while we *could* cook up sources around invocations, like a FunctionSource
             # the space of invoking functions in the middle of the guard chain is very iffy. As such,
             # guard propagation via options is the best we can do.

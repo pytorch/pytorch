@@ -624,6 +624,7 @@ class CompilationMetrics:
     graph_op_count: Optional[int]
     graph_node_count: Optional[int]
     graph_input_count: Optional[int]
+    start_time: float
     entire_frame_compile_time_s: Optional[float]
     backend_compile_time_s: Optional[float]
     inductor_compile_time_s: Optional[float]
@@ -2012,6 +2013,8 @@ def nnmodule_has_hooks(
 
 def to_numpy_helper(value):
     """Convert tensor and tnp.ndarray to numpy.ndarray."""
+    if is_fake(value):
+        return value
     if isinstance(value, tnp.ndarray):
         return to_numpy_helper(value.tensor)
     elif isinstance(value, torch.Tensor):
