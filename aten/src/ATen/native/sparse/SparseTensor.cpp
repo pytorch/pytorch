@@ -12,7 +12,6 @@
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/NonSymbolicBC.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/TensorSubclassLikeUtils.h>
 
 #include <ATen/native/Copy.h>
 #include <ATen/native/CPUBlas.h>
@@ -381,8 +380,10 @@ void _validate_sparse_coo_tensor_args(
 
   // Check to make sure all indices are within the boundaries of `size`
   if (!indices.getIntrusivePtr()->has_symbolic_sizes_strides() && indices.numel() > 0) {
-    // subclass-like tensors may not have data available...
-    if (!isTensorSubclassLike(indices)) {
+    // Some meta tensors (especially FakeTensor) may not have data available. We can't
+    // use `isTensorSubclassLike` because some tensor subclasses DO have data and we have
+    // tests that expect these checks to run (test_factory_size_check w/ crossref).
+    if (indices.has_storage() && indices.storage().data()) {
       Tensor min_indices =
         std::get</* values */ 0>(indices.min(/* dim */ 1, /* keepdim */ false));
       Tensor max_indices =
