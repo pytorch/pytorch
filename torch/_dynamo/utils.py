@@ -131,12 +131,17 @@ def cprofile_wrapper(func):
     @wraps(func)
     def profile_wrapper(*args, **kwargs):
         global timer_counter
-        profile_path = Path(func.__name__ + f"{next(timer_counter)}.profile")
+        profile_cnt = next(timer_counter)
+        profile_path = Path(func.__name__ + f"{profile_cnt}.profile")
         prof = cProfile.Profile()
         prof.enable()
+        start_ts = time.time()
         retval = prof.runcall(func, *args, **kwargs)
+        profile_latency = time.time() - start_ts
         prof.disable()
-        print(f"### Cprofile for {func.__name__} iter {next(timer_counter)} ###")
+        print(
+            f"### Cprofile for {func.__name__} iter {profile_cnt} took {profile_latency:.3f} seconds ###"
+        )
         ps = pstats.Stats(prof)
         prof.dump_stats(profile_path)
         svg_path = profile_path.with_suffix(".svg")
@@ -619,6 +624,7 @@ class CompilationMetrics:
     graph_op_count: Optional[int]
     graph_node_count: Optional[int]
     graph_input_count: Optional[int]
+    start_time: float
     entire_frame_compile_time_s: Optional[float]
     backend_compile_time_s: Optional[float]
     inductor_compile_time_s: Optional[float]
@@ -2007,6 +2013,8 @@ def nnmodule_has_hooks(
 
 def to_numpy_helper(value):
     """Convert tensor and tnp.ndarray to numpy.ndarray."""
+    if is_fake(value):
+        return value
     if isinstance(value, tnp.ndarray):
         return to_numpy_helper(value.tensor)
     elif isinstance(value, torch.Tensor):

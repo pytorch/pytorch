@@ -303,7 +303,7 @@ struct Dist {
 
     // The only way to parallelize and avoid locking requires parallelizing
     // over the columns of the input, i.e. we compute the gradient for the
-    // first section of each vector independentaly of the second section, etc.
+    // first section of each vector independently of the second section, etc.
     at::parallel_for(0, m / Vec::size(), internal::GRAIN_SIZE / (8 * n * n), [p, n, m, gs, grad_start, dist_start, self_start, res_start](int64_t l, int64_t end) {
       const Vec pvec(p);
 
