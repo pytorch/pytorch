@@ -7,7 +7,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  upload-step:
+    name: upload-step
     runs-on:
       group: arc-lf-linux.2xlarge.arc-rootless.canary
     permissions:
@@ -34,16 +35,19 @@ jobs:
           path: test.txt
           s3-bucket: pytorch-ci-artifacts
 
-      - name: Download artifact
-        uses: seemethere/download-artifact-s3@v4
-        with:
-          name: test-run
-          s3-bucket: pytorch-ci-artifacts
+  download-step:
+    needs: upload-step
+    runs-on: linux.2xlarge
+    steps:
+    - name: Download artifact
+      uses: seemethere/download-artifact-s3@v4
+      with:
+        name: test-run
+        s3-bucket: pytorch-ci-artifacts
 
-      - name: Test
-        run: |
-          ls -la
-          less text.txt
+    - name: Test
+      run: |
+        ls -la
 
 
 
