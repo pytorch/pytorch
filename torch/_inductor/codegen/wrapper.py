@@ -1003,42 +1003,49 @@ class WrapperCodeGen(CodeGen):
 
         signature: List[KernelArgType] = []
         constants = {}
-        for key, arg in kwargs.items():
-            idx = kernel.arg_names.index(key)
+        non_constant_indices = []
+        for idx, key in enumerate(kernel.arg_names):
+            if key not in kwargs:
+                continue
+            arg = kwargs[key]
             if idx in kernel.constexprs:
                 constants[key] = arg
-            elif isinstance(arg, ir.Buffer):
-                signature.append(
-                    TensorArg(
-                        name=key,
-                        buffer=arg.get_name(),
-                        dtype=arg.get_dtype(),
-                    )
-                )
-            elif isinstance(arg, ir.ReinterpretView):
-                # for ReinterpretView we use the underlying
-                # buffer name and note the (possibly non-zero)
-                # offset relative to the underlying buffer
-                signature.append(
-                    TensorArg(
-                        name=key,
-                        buffer=arg.data.get_name(),
-                        dtype=arg.get_dtype(),
-                        offset=arg.layout.offset,
-                    )
-                )
             else:
-                signature.append(SizeArg(key, arg))
+                non_constant_indices.append(idx)
+                if isinstance(arg, ir.Buffer):
+                    signature.append(
+                        TensorArg(
+                            name=key,
+                            buffer=arg.get_name(),
+                            dtype=arg.get_dtype(),
+                        )
+                    )
+                elif isinstance(arg, ir.ReinterpretView):
+                    # for ReinterpretView we use the underlying
+                    # buffer name and note the (possibly non-zero)
+                    # offset relative to the underlying buffer
+                    signature.append(
+                        TensorArg(
+                            name=key,
+                            buffer=arg.data.get_name(),
+                            dtype=arg.get_dtype(),
+                            offset=arg.layout.offset,
+                        )
+                    )
+                else:
+                    signature.append(SizeArg(key, arg))
         index_dtype = "tl.int32"
         inductor_meta = {
             "kernel_name": name,
         }
         triton_meta = {
-            "signature": signature_to_meta(signature, size_dtype=index_dtype),
+            "signature": signature_to_meta(
+                signature, size_dtype=index_dtype, indices=non_constant_indices
+            ),
             "device": V.graph.scheduler.current_device.index,
             "device_type": V.graph.scheduler.current_device.type,
             "constants": constants,
-            "configs": [config_of(signature)],
+            "configs": [config_of(signature, indices=non_constant_indices)],
         }
         configs = [
             {
