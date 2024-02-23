@@ -365,14 +365,12 @@ class FSDPParam:
         )
 
     def alloc_all_gather_output(self) -> None:
-        # unsafe_alloc_storage(self.all_gather_output)
         # TODO: can we change it to `self.all_gather_output = torch.empty(...)`, it's actually an intermediate, not visible to FSDP users
-        pass
+        unsafe_alloc_storage(self.all_gather_output)
 
     def free_all_gather_output(self) -> None:
-        # unsafe_free_storage(self.all_gather_output)
         # TODO: can we change it to `self.all_gather_output = torch.empty(0)`, it's actually an intermediate, not visible to FSDP users
-        pass
+        unsafe_free_storage(self.all_gather_output)
 
     @property
     def all_gather_input(self) -> torch.Tensor:  # 1D

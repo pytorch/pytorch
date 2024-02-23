@@ -29,10 +29,10 @@ def func(x1, x2, x3, x4):
     return torch.matmul(x1, x2)
 
 if __name__ == "__main__":
-    x1 = torch.randn(4, 4)
-    x2 = torch.randn(4, 4)
-    x3 = torch.randn(4, 4)
-    x4 = torch.randn(4, 4)
+    x1 = torch.randn(4, 4, requires_grad=True)
+    x2 = torch.randn(4, 4, requires_grad=True)
+    x3 = torch.randn(4, 4, requires_grad=True)
+    x4 = torch.randn(4, 4, requires_grad=True)
     def compiler_fn(gm):
         print("Compiling autograd?")
         return torch.compile(gm, backend="inductor", fullgraph=True)
