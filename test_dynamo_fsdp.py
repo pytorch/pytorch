@@ -3,9 +3,9 @@ Adapted from fsdp.py in https://github.com/pytorch/pytorch/pull/110609.
 """
 
 """
-git pull && CUDA_VISIBLE_DEVICES=6,7 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >output.txt 2>&1
+git pull && CUDA_VISIBLE_DEVICES=6,7 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >output.txt 2>&1
 
-CUDA_VISIBLE_DEVICES=6,7 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py
+CUDA_VISIBLE_DEVICES=6,7 TORCH_LOGS_RANKS=0 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py
 """
 import contextlib
 import logging
@@ -180,10 +180,10 @@ def main_compiled(n_iter):
 
     torch._dynamo.config.trace_distributed = True
 
-    if dist.get_rank() == 0:
-        # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
-        import time
-        time.sleep(600)
+    # if dist.get_rank() == 0:
+    #     # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
+    #     import time
+    #     time.sleep(600)
     model = torch.compile(model, backend="inductor", fullgraph=True, dynamic=dynamic)
     with compiled_autograd.enable(compiler_fn):
         for _ in range(n_iter):
