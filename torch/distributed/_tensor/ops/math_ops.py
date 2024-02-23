@@ -41,6 +41,14 @@ class Reduction(Enum):
     SUM = 2
 
 
+@dataclass(frozen=True)
+class NormReduction:
+    norm_type: Union[int, float, str]
+
+
+ReductionOpType = Union[NormReduction, c10d.ReduceOp.RedOpType]
+
+
 def _infer_reduction_dims(dims_arg: object, ndim: int) -> Optional[List[int]]:
     if dims_arg is None:
         return None
@@ -90,7 +98,7 @@ def map_placements_after_reduction(
     placements: Tuple[Placement, ...],
     reduction_dims: List[int],
     reduction_dims_map: List[int],
-    reduction_op: c10d.ReduceOp.RedOpType,
+    reduction_op: ReductionOpType,
 ) -> Tuple[Placement, ...]:
     """
     Map each placement based on the output shape after reduction.
@@ -106,13 +114,16 @@ def map_placements_after_reduction(
             if new_shard_dim == -1 or shard_dim in reduction_dims:
                 # if new_shard_dim collapsed or its in the reduction dims
                 # (i.e. for the case where keepdims=True), we generate partial
-                if isinstance(reduction_op, _Partial):  # HACK!
-                    new_placements.append(reduction_op)
-                else:
-                    new_placements.append(_Partial(reduction_op))
+                new_placements.append(get_placement_from_reduction_op(reduction_op))
             else:
                 new_placements.append(Shard(new_shard_dim))
     return tuple(new_placements)
+
+
+def get_placement_from_reduction_op(reduction_op: ReductionOpType) -> Placement:
+    if isinstance(reduction_op, NormReduction):
+        return _NormPartial(norm_type=reduction_op.norm_type)
+    return _Partial(reduction_op)
 
 
 def common_reduction_strategy(
@@ -121,7 +132,7 @@ def common_reduction_strategy(
     reduce_dims: List[int],
     keep_dim: bool = False,
     reduction_linear: bool = True,
-    reduction_op: c10d.ReduceOp.RedOpType = c10d.ReduceOp.SUM,
+    reduction_op: ReductionOpType = c10d.ReduceOp.SUM,
 ) -> OpStrategy:
     """
     reduction_linear means that the reduction `f` follows this rule:
@@ -270,6 +281,7 @@ def vector_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     input_strategy = args_schema[0]
     assert isinstance(input_strategy, OpStrategy)
     norm_type = args_schema[1] if len(args_schema) > 1 else 2
+    assert isinstance(norm_type, (int, float, str)), f"{norm_type}"
     dim = args_schema[2] if len(args_schema) > 2 else None
     keepdim = args_schema[3] if len(args_schema) > 3 else False
     dims = _infer_reduction_dims(dim, input_strategy.output_ndim)
@@ -279,7 +291,8 @@ def vector_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
         input_strategy,
         reduce_dims,
         keep_dim=cast(bool, keepdim),
-        reduction_op=_NormPartial(norm_type=norm_type),  # type: ignore[arg-type]
+        reduction_linear=True,
+        reduction_op=NormReduction(norm_type),
     )
 
 

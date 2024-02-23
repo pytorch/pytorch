@@ -5,8 +5,8 @@ import functools
 from typing import Union
 
 import torch
-from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable import replicate
+from torch.distributed._composable.fsdp import fully_shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests
