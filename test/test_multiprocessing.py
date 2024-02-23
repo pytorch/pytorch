@@ -429,7 +429,7 @@ class TestMultiprocessing(TestCase):
         ctx = mp.get_context('fork')
         simple_autograd_function()
         # Autograd only uses thread when GPUs are involved
-        if torch.cuda.is_available() or torch.backends.mps.is_available():
+        if torch.cuda.is_available() or torch.backends.mps.is_available() or torch.xpu.is_available():
             with self.assertRaisesRegex(RuntimeError, r'Unable to handle autograd'):
                 with ctx.Pool(3) as pool:
                     pool.map(simple_autograd_function, [1, 2, 3])

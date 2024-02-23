@@ -29,7 +29,10 @@ from torch.optim import (
     SGD,
     SparseAdam,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipCUDAIf,
+)
 
 from torch.testing._internal.common_optimizers import (
     _get_optim_inputs_including_global_cliquey_kwargs,
@@ -38,7 +41,7 @@ from torch.testing._internal.common_optimizers import (
 )
 
 from torch.testing._internal.common_utils import TestCase
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, has_triton
 from torch.testing._internal.triton_utils import requires_cuda
 
 
@@ -331,6 +334,7 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
 
 
 class CompiledOptimizerParityTests(TestCase):
+    @skipCUDAIf(not has_triton(), "torch.compile with cuda requires triton")
     @optims(optim_db, dtypes=[torch.float32])
     def test_correctness(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
@@ -477,6 +481,76 @@ class CompiledOptimizerTests(TestCase):
 
         self.assertTrue(p_ref() is None)
         gc.enable()
+
+    # Basic shampoo test to verify we support compiling the various ops without error
+    @requires_cuda
+    def test_basic_shampoo(self):
+        param_buf = torch.rand((1024, 128))
+        param_buf_c = param_buf.clone().detach()
+
+        params_c = [param_buf_c[0:512, :].t(), param_buf_c[512:, :].t()]
+        params = [param_buf[0:512, :].t(), param_buf[512:, :].t()]
+
+        for p, p_c in zip(params, params_c):
+            p.grad = torch.rand_like(p)
+            p_c.grad = p.grad.clone().detach()
+
+        # note this skips the root inverse because this has a lot of internal dependencies
+        # we also don't compile it regardless
+        @torch.no_grad()
+        def shampoo_functional_basic(params):
+            step = 1
+            weight_decay = 0.1
+            grads = [p.grad for p in params]
+            beta1 = 0.9
+            beta2 = 1.0
+            epsilon = 1e-10
+            preconditioners = [torch.zeros_like(p) for p in params]
+            lr = 0.01
+
+            # pt2 region 1
+            # weight decay
+            torch._foreach_add_(grads, params, alpha=weight_decay)
+
+            # update preconditioners
+            torch._foreach_addcmul_(preconditioners, grads, grads, value=1.0)
+
+            torch._foreach_mul_(grads, beta1)
+            torch._foreach_add_(
+                grads,
+                grads,
+                alpha=1 - beta1,
+            )
+            bias_correction1 = 1.0 - beta1**step
+            grad_list = torch._foreach_div(grads, bias_correction1)
+
+            # pt2 region 2
+            # precondition (with shampoo branch), with no grafting
+            bias_correction2 = 1.0 - beta2**step
+            bias_corrected_preconditioner_list = torch._foreach_div(
+                preconditioners, bias_correction2
+            )
+            torch._foreach_sqrt_(bias_corrected_preconditioner_list)
+            torch._foreach_add_(bias_corrected_preconditioner_list, epsilon)
+            search_directions = torch._foreach_div(
+                grad_list, bias_corrected_preconditioner_list
+            )
+
+            torch._foreach_add_(
+                search_directions,
+                params,
+                alpha=weight_decay,
+            )
+
+            torch._foreach_mul_(search_directions, -lr)
+            # pt2 region 3 update params
+            torch._foreach_add_(params, search_directions)
+
+            return params, preconditioners, grads
+
+        compiled_fn = torch.compile(shampoo_functional_basic)
+
+        self.assertEqual(compiled_fn(params_c), shampoo_functional_basic(params))
 
 
 for optim_cls, name, kwargs in COMPILED_OPT_KWARG_DB:

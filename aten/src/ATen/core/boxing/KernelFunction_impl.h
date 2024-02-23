@@ -3,6 +3,7 @@
 #include <ATen/core/boxing/impl/WrapFunctionIntoFunctor.h>
 #include <ATen/core/boxing/impl/WrapFunctionIntoRuntimeFunctor.h>
 
+#include <c10/util/C++17.h>
 #include <type_traits>
 
 namespace c10 {

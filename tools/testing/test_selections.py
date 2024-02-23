@@ -233,7 +233,7 @@ def calculate_shards(
     if total_time == 0:
         num_serial_shards = num_shards
     else:
-        num_serial_shards = math.ceil(serial_time / total_time * num_shards)
+        num_serial_shards = max(math.ceil(serial_time / total_time * num_shards), 1)
 
     sharded_jobs = [ShardJob() for _ in range(num_shards)]
     shard(
