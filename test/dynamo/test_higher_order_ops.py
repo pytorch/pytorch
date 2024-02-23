@@ -3547,6 +3547,8 @@ class GraphModule(torch.nn.Module):
 
         _enter_dual_level = torch._C._enter_dual_level()
 
+        _get_current_dual_level = torch._C._get_current_dual_level()
+
         make_dual = torch.autograd.forward_ad.make_dual(p, t, level = 0);  p = t = None
 
         sin = make_dual.sin();  make_dual = None
@@ -3606,6 +3608,8 @@ class GraphModule(torch.nn.Module):
         count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
 
         _enter_dual_level = torch._C._enter_dual_level()
+
+        _get_current_dual_level = torch._C._get_current_dual_level()
 
         aux = torch.autograd.forward_ad.make_dual(p, t, level = 0);  p = t = None
 
@@ -3670,6 +3674,8 @@ class GraphModule(torch.nn.Module):
         count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
 
         _enter_dual_level = torch._C._enter_dual_level()
+
+        _get_current_dual_level = torch._C._get_current_dual_level()
 
         aux = torch.autograd.forward_ad.make_dual(p, t, level = 0);  p = None
         make_dual_1 = torch.autograd.forward_ad.make_dual(p_1, t, level = 0);  p_1 = t = None
@@ -3737,6 +3743,8 @@ class GraphModule(torch.nn.Module):
         count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
 
         _enter_dual_level = torch._C._enter_dual_level()
+
+        _get_current_dual_level = torch._C._get_current_dual_level()
 
         make_dual = torch.autograd.forward_ad.make_dual(p, t, level = 0);  p = t = None
 
@@ -3813,6 +3821,8 @@ class GraphModule(torch.nn.Module):
         count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
 
         _enter_dual_level = torch._C._enter_dual_level()
+
+        _get_current_dual_level = torch._C._get_current_dual_level()
 
         make_dual = torch.autograd.forward_ad.make_dual(p, t, level = 0);  p = t = None
 
