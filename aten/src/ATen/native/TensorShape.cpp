@@ -509,7 +509,7 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
     }
   }
   // to_broadcast conserves is_coalesced property iff only the last
-  // sparse dimensions are expaned. Possible expansion of dense
+  // sparse dimensions are expanded. Possible expansion of dense
   // dimensions can be discarded as it does not affect the is_coalesce
   // property.
   bool is_coalesced = self.dim()==0 || (self.is_coalesced() && (max_unchanged_dim < min_broadcast_dim || min_broadcast_dim == -1));
@@ -1827,7 +1827,7 @@ Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index) {
   auto size = self.sym_sizes()[dim];
   // Note: `size < -index` is not equivalent to `size <= -1 - index` if index is INT64_MIN
   // For std::numeric_limits<int64_t>::min() result of unary minus is undefined by the standard
-  // but in practice is equal to self. On the other hand, indexing wraping is valid for all
+  // but in practice is equal to self. On the other hand, indexing wrapping is valid for all
   // negative int64_t values, as x[INT64_MIN] is the same as x[INT64_MAX]
   if (size <= -1 - index || size <= index) {
     if (self.has_names() && self.names()[dim] != Dimname::wildcard()) {
@@ -1878,7 +1878,7 @@ Tensor select_backward_symint(const Tensor& grad, c10::SymIntArrayRef input_size
 Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& index) {
   /*
     Algorithm:
-    index - a 1-D tensor of indicies with shape (n,)
+    index - a 1-D tensor of indices with shape (n,)
     self - sparse tensor, its shape is sizes = sparse_shape + dense_shape
       indices - 2-D tensor of indices, shape is (sparse_dims, nnz)
       values - (1+len(dense_shape))-D tensor of values, shape is (nnz,) + dense_shape
@@ -2072,7 +2072,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
             auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).data_ptr<int64_t>();
             auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).data_ptr<int64_t>();
             auto* ptr_tid_int_counts = int_counts.select(0, tid).data_ptr<int64_t>();
-            const auto* ptr_src = src.data_ptr<int64_t>() + start;
+            const auto* ptr_src = src.const_data_ptr<int64_t>() + start;
 
             for (const auto i : c10::irange(start, end)) {
               const auto src_val = *ptr_src++;
@@ -2130,9 +2130,9 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
             const auto start = tid * chunk_size_src;
             const auto end = std::min(start + chunk_size_src, src_len);
             const auto tid_offset = thread_offsets.const_data_ptr<int64_t>()[tid];
-            const auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).data_ptr<int64_t>();
-            const auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).data_ptr<int64_t>();
-            const auto* ptr_tid_int_counts = int_counts.select(0, tid).data_ptr<int64_t>();
+            const auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).const_data_ptr<int64_t>();
+            const auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).const_data_ptr<int64_t>();
+            const auto* ptr_tid_int_counts = int_counts.select(0, tid).const_data_ptr<int64_t>();
             auto* ptr_tid_selected_sorted = ptr_selected_sorted + tid_offset;
             auto* ptr_tid_selected_src = ptr_selected_src + tid_offset;
 
@@ -2330,9 +2330,9 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
             const auto end = std::min(start + chunk_size, src_len);
             auto* ptr_src_tid = ptr_src + start;
             const auto* ptr_src_counts_per_thread
-              = src_counts_per_thread.select(0, tid).data_ptr<int64_t>();
+              = src_counts_per_thread.select(0, tid).const_data_ptr<int64_t>();
             const auto* ptr_src_offset_counts_per_thread
-              = src_offset_counts_per_thread.select(0, tid).data_ptr<int64_t>();
+              = src_offset_counts_per_thread.select(0, tid).const_data_ptr<int64_t>();
             auto tid_counts = at::zeros({size}, src.options());
             auto* ptr_tid_counts = tid_counts.data_ptr<int64_t>();
 
@@ -2940,11 +2940,11 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   }
 
   // Sparse COO is an exceptional sparse format as it allows transpose
-  // to be a view operation which is a convinient property for
+  // to be a view operation which is a convenient property for
   // in-place operations. For other sparse formats, the in-place
   // transpose would not be possible without shuffling the specified
   // values. So we don't support this as it would defeat the purpose
-  // of in-place opeations of being memory-efficient.
+  // of in-place opreations of being memory-efficient.
   if (self.is_sparse()) {
     return sparse_transpose_(self, dim0, dim1);
   }

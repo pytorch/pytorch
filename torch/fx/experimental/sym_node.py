@@ -173,6 +173,14 @@ class SymNode:
     def is_bool(self):
         return self.pytype is bool
 
+    def is_nested_int(self):
+        # Unbacked SymInts cannot be nested int today
+        return (
+            self._hint is not None
+            and isinstance(self._hint, SymInt)
+            and self._hint.node.is_nested_int()
+        )
+
     def wrap_int(self, num):
         assert type(num) is int
         import sympy
@@ -371,7 +379,9 @@ class SymNode:
             raise
 
     def expect_true(self, file, line):
-        if self.has_hint():
+        from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+        if self.has_hint() and not free_unbacked_symbols(self.expr):
             # OK to generate guards
             return self.guard_bool(file, line)
         # Generate a deferred runtime assert (this might actually end up doing
@@ -424,7 +434,7 @@ class SymNode:
     def is_symbolic(self):
         return True
 
-    def singleton_int(self):
+    def nested_int(self):
         return None
 
     def is_constant(self):
