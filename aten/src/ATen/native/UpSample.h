@@ -475,7 +475,7 @@ template <typename scalar_in, typename scalar_out,
           typename std::enable_if_t<!is_reduced_floating_point_v<scalar_out> || !std::is_same<scalar_in, float>::value, int> = 0>
 void inline apply_grad_input(scalar_in* buffer_ptr, scalar_out* gin, int64_t size) {
   TORCH_CHECK((is_reduced_floating_point_v<scalar_out>),
-              "Upsample backward only support BFloat16 and Half in the lower percision data types on CPU.")
+              "Upsample backward only support BFloat16 and Half in the lower precision data types on CPU.")
   TORCH_CHECK((std::is_same<scalar_in, float>::value),
               "Upsample backward should use float as acc buffer for BFloat16 and Half grad input on CPU.")
   return;

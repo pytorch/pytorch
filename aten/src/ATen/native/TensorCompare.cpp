@@ -13,6 +13,7 @@
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+#include <iostream>
 #include <c10/util/Exception.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -22,6 +23,7 @@
 #include <ATen/ops/_aminmax_native.h>
 #include <ATen/ops/_assert_async_native.h>
 #include <ATen/ops/_functional_assert_async_native.h>
+#include <ATen/ops/_print_native.h>
 #include <ATen/ops/_assert_scalar_native.h>
 #include <ATen/ops/_functional_assert_scalar_native.h>
 #include <ATen/ops/_make_per_tensor_quantized_tensor.h>
@@ -71,6 +73,7 @@
 #include <ATen/ops/where_native.h>
 #include <ATen/ops/zeros_like.h>
 
+#include <iostream>
 #include <utility>
 #endif
 
@@ -440,6 +443,9 @@ Tensor _functional_assert_async_msg_cpu(
   return dep_token.clone();
 }
 
+void _print(c10::string_view s) {
+  std::cout << s << "\n";
+}
 
 // Sorting-based algorithm for isin(); used when the number of test elements is large.
 static void isin_sorting(
@@ -455,17 +461,16 @@ static void isin_sorting(
     elements_flat = elements.ravel();
     test_elements_flat = test_elements.ravel();
   } else {
-    std::tie (elements_flat, unique_order) = at::_unique(
+    std::tie(elements_flat, unique_order) = at::_unique(
         elements, /*sorted=*/ false, /*return_inverse=*/ true);
-    std::tie (test_elements_flat, std::ignore) = at::_unique(test_elements, /*sorted=*/ false);
+    std::tie(test_elements_flat, std::ignore) = at::_unique(test_elements, /*sorted=*/ false);
   }
 
   // 2. Stable sort all elements, maintaining order indices to reverse the
   //    operation. Stable sort is necessary to keep elements before test
   //    elements within the sorted list.
   Tensor all_elements = at::cat({std::move(elements_flat), std::move(test_elements_flat)});
-  Tensor sorted_elements, sorted_order;
-  std::tie (sorted_elements, sorted_order) = all_elements.sort(
+  auto [sorted_elements, sorted_order] = all_elements.sort(
       /*stable=*/ true, /*dim=*/ 0, /*descending=*/ false);
 
   // 3. Create a mask for locations of adjacent duplicate values within the
