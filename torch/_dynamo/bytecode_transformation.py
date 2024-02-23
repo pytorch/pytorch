@@ -702,12 +702,29 @@ def check_inst_exn_tab_entries_nested(
         entry_stack.append(key)
 
 
+def fix_broken_exn_tab_entry(instructions, indexof):
+    """
+    WORKAROUND SHOULD REMOVE/FIX
+
+    We are somehow creating invalid output instructions which have
+    exn_tab_entry pointing to instructions that don't exist.
+
+    Repro with:
+        PYTORCH_TEST_WITH_DYNAMO=1 python test/test_autograd.py -k test_parameter_resize_cpu
+    """
+    for inst in instructions:
+        if inst.exn_tab_entry and inst.target not in indexof:
+            inst.exn_tab_entry = None
+
+
 def propagate_inst_exn_table_entries(instructions: List[Instruction]) -> None:
     """
     Copies exception table entries to all instructions in an entry's range.
     Supports nested exception table entries.
     """
     indexof = get_indexof(instructions)
+    fix_broken_exn_tab_entry(instructions, indexof)
+
     entries: Dict[Tuple[int, int], InstructionExnTabEntry] = {}
     for inst in instructions:
         if inst.exn_tab_entry:
