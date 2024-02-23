@@ -65,7 +65,7 @@ def fakify(
     if _is_constant_argument(t) or isinstance(t, torch.ScriptObject):
         return t
     if not isinstance(t, torch.Tensor):
-        raise ValueError("Only tensors allowed as input")
+        return t
     n_dims = len(t.shape)
     symbolic_context = StatelessSymbolicContext(
         dynamic_sizes=[DimDynamic.STATIC] * n_dims,
@@ -190,6 +190,8 @@ def make_constraints(fake_mode, src_equalities, original_signature, gm):
         if _is_constant_argument(node.meta["val"]) or isinstance(
             node.meta["val"], CustomObjArgument
         ):
+            continue
+        if not isinstance(node.meta["val"], torch.Tensor):
             continue
         for i, d in enumerate(node.meta["val"].shape):
             if isinstance(d, torch.SymInt):

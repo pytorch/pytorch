@@ -1578,7 +1578,6 @@ def forward(self, arg_0):
         ):
             _ = exported.module()(torch.ones(7, 5), 6.0)
 
-    @testing.expectedFailureNonStrict
     def test_runtime_assert_for_prm_str(self):
         class Foo(torch.nn.Module):
             def forward(self, a, b, mode):
