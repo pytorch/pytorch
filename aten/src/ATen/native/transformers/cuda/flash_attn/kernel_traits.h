@@ -34,10 +34,8 @@ struct Flash_kernel_traits {
         MMA_Atom<SM80_16x8x16_F32F16F16F32_TN>,
         MMA_Atom<SM80_16x8x16_F32BF16BF16F32_TN>
     >;
-    using ValLayoutMNK = Layout<Shape<_1, _2, _1>>;
 #else
     using MMA_Atom_Arch = MMA_Atom<SM75_16x8x8_F32F16F16F32_TN>;
-    using ValLayoutMNK = Layout<Shape<_1, _2, _2>>;
 #endif
 
 #if defined(__CUDA_ARCH__) &&  __CUDA_ARCH__ >= 750
@@ -78,7 +76,7 @@ struct Flash_fwd_kernel_traits : public Base {
     using TiledMma = TiledMMA<
         typename Base::MMA_Atom_Arch,
         Layout<Shape<Int<kNWarps>,_1,_1>>,  // 4x1x1 or 8x1x1 thread group
-        typename Base::ValLayoutMNK>; // 1x2x1 or 1x2x2 value group for 16x16x16 MMA and LDSM
+        Tile<Int<16 * kNWarps>, _16, _16>>;
 
     using SmemLayoutAtomQ = decltype(
         composition(Swizzle<kSwizzle, 3, 3>{},
@@ -220,18 +218,15 @@ struct Flash_bwd_kernel_traits : public Base {
     using TiledMmaSdP = TiledMMA<
         typename Base::MMA_Atom_Arch,
         Layout<Shape<Int<AtomLayoutMSdP>, Int<kNWarps / AtomLayoutMSdP>, _1>>,
-        typename Base::ValLayoutMNK>; // 1x2x1 or 1x2x2 value group for 16x16x16 MMA and LDSM
-
+        Tile<Int<16 * AtomLayoutMSdP>, Int<16 * kNWarps / AtomLayoutMSdP>, _16>>;
     using TiledMmadKV = TiledMMA<
         typename Base::MMA_Atom_Arch,
         Layout<Shape<Int<AtomLayoutNdKV>, Int<kNWarps / AtomLayoutNdKV>, _1>>,
-        typename Base::ValLayoutMNK>; // 1x2x1 or 1x2x2 value group for 16x16x16 MMA and LDSM
-
+        Tile<Int<16 * AtomLayoutNdKV>, Int<16 * kNWarps / AtomLayoutNdKV>, _16>>;
     using TiledMmadQ = TiledMMA<
         typename Base::MMA_Atom_Arch,
         Layout<Shape<Int<AtomLayoutMdQ>, Int<kNWarps / AtomLayoutMdQ>, _1>>,  // 2x4x1 or 4x2x1 thread group
-        typename Base::ValLayoutMNK>; // 1x2x1 or 1x2x2 value group for 16x16x16 MMA and LDSM
-
+        Tile<Int<16 * AtomLayoutMdQ>, Int<16 * kNWarps / AtomLayoutMdQ>, _16>>;
     using SmemLayoutAtomQdO = decltype(
         composition(Swizzle<kSwizzle, 3, 3>{},
                     Layout<Shape<_8, Int<kBlockKSmem>>,
