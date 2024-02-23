@@ -347,7 +347,9 @@ def map_functionalize(ctx, f, xs, pos_args):
         ):
             raise UnsupportedAliasMutationException("torch.map is mutating the input!")
 
-        if _has_potential_branch_input_alias(f, example_inputs):
+        if _has_potential_branch_input_alias(
+            f, example_inputs, pre_dispatch=pre_dispatch
+        ):
             raise UnsupportedAliasMutationException("torch.map is aliasing the input!")
 
         map_return = map_impl(wrapped_fn, unwrapped_xs, unwrapped_args)

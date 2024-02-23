@@ -228,7 +228,9 @@ def while_loop_func(ctx, cond_fn, body_fn, operands):
                 )
 
         for fn in [functional_cond_fn, functional_body_fn]:
-            if _has_potential_branch_input_alias(fn, unwrapped_operands):
+            if _has_potential_branch_input_alias(
+                fn, unwrapped_operands, pre_dispatch=pre_dispatch
+            ):
                 raise UnsupportedAliasMutationException(
                     f"torch.while_loop's {fn_name} might be aliasing the input!"
                 )

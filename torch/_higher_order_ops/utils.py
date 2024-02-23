@@ -128,21 +128,14 @@ def _has_potential_branch_input_mutation(branch, inputs, pre_dispatch=False):
     return _detect_input_mutation(gm)
 
 
-def _has_potential_branch_input_alias(branch, inputs):
+def _has_potential_branch_input_alias(branch, inputs, pre_dispatch=False):
     """
     Dispatch-trace the branch with inputs and check if
     producing graph has output aliasing the branch input. This is
     bit restrictive as the branch must be traceable.
     """
     try:
-        # At this point, we could be invoking this when PreDispatch key is active. So we manually skip it
-        include_set = torch._C._dispatch_tls_local_include_set().remove(
-            torch._C.DispatchKey.PreDispatch
-        )
-        exclude_set = torch._C._dispatch_tls_local_exclude_set()
-        with torch._C._ForceDispatchKeyGuard(include_set, exclude_set):
-            gm = make_fx(branch)(*inputs)
-
+        gm = make_fx(branch, pre_dispatch=pre_dispatch)(*inputs)
     except UnsupportedAliasMutationException:
         # this can happen when nested cond_op is
         # functionalized
