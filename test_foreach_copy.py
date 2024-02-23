@@ -26,12 +26,16 @@ device_type = "cuda"
 
 def func(x1, x2, x3, x4):
     torch._foreach_copy_([x1, x2], [x3, x4])
-    return x1 + x2
+    return torch.matmul(x1, x2)
 
 if __name__ == "__main__":
-    x1 = torch.randn(3, 4)
-    x2 = torch.randn(3, 4)
-    x3 = torch.randn(3, 4)
-    x4 = torch.randn(3, 4)
-    out1 = torch.compile(func)(x1, x2, x3, x4)
-    out1.sum().backward()
+    x1 = torch.randn(4, 4)
+    x2 = torch.randn(4, 4)
+    x3 = torch.randn(4, 4)
+    x4 = torch.randn(4, 4)
+    def compiler_fn(gm):
+        print("Compiling autograd?")
+        return torch.compile(gm, backend="inductor", fullgraph=True)
+    with compiled_autograd.enable(compiler_fn):
+        out1 = torch.compile(func, backend="inductor", fullgraph=True)(x1, x2, x3, x4)
+        out1.sum().backward()
