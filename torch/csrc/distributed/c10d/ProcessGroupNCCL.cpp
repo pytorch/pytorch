@@ -309,9 +309,36 @@ void cacheAllocatorDeregisterHook(
   }
 }
 
+#ifdef IS_NCCL_EXP
+#ifdef NCCL_COMM_DUMP
 std::string dump_nccl_trace() {
-  return NCCLTraceBuffer::get()->dump();
+  std::unordered_map<
+      std::string /* ncclUniqueID */,
+      std::unordered_map<std::string, std::string> /* dump from this comm */>
+      ncclDumpMap;
+  // dump_nccl_trace is only called from the default PG (uid_=0), but we want to
+  // dump from all comms so we need to iterate over ncclCommDevIdxMap, which
+  // is static
+  std::vector<std::shared_ptr<NCCLComm>> allNCCLComms;
+  // within the critical section, we don't want to dump while holding the lock
+  // as dump might hang
+  ncclCommDevIdxMapMutex.lock();
+  for (auto& [ncclComm, _] : ncclCommDevIdxMap) {
+    allNCCLComms.push_back(ncclComm);
+  }
+  ncclCommDevIdxMapMutex.unlock();
+  for (auto& ncclComm : allNCCLComms) {
+    std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getNcclId());
+    ncclDumpMap[ncclUniqueIDStr] = ncclComm->ncclCommDump();
+  }
+  return NCCLTraceBuffer::get()->dump(ncclDumpMap);
 }
+#endif
+#else
+std::string dump_nccl_trace() {
+  return NCCLTraceBuffer::get()->dump(c10::nullopt);
+}
+#endif
 
 c10::optional<std::function<std::string()>>& get_cpp_trace_dumper() {
   static c10::optional<std::function<std::string()>> dumper(c10::nullopt);
@@ -616,7 +643,6 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
     // Python, thus blocking current stream would already block the next
     // compute kernel;
     // - achieve better barrier performance.
-    LOG(INFO) << logPrefix() << "Waiting in barrier; this is a CPU halt";
     auto currentStream = at::cuda::getCurrentCUDAStream(device_.index());
     AT_CUDA_CHECK(cudaStreamSynchronize(currentStream));
   }
@@ -1525,6 +1551,13 @@ void ProcessGroupNCCL::watchdogHandler() {
                   *optAsyncDebugDump,
                   std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
                   "Flight recorder dump in watchdog");
+              // This sleep is used to give additional time for other ranks to
+              // receive the dump signal and then dump flight records, the same
+              // sleep time used in the heartbeatmonitor thread
+              // TODO, we should probably dump from a single thread in the
+              // future
+              std::this_thread::sleep_for(
+                  std::chrono::seconds(heartbeatTimeoutInSec_));
             }
 
             if (desyncDebug_) {
