@@ -162,7 +162,7 @@ class ReplicateTest(MultiProcessTestCase):
 
         self.assertEqual(tuple(model.parameters()), tuple(compiled_model.parameters()))
 
-    def ____test_compile_cpu(self):
+    def test_compile_cpu(self):
         # Test the coalesced_op with CPU.
         torch._inductor.config.fuse_ddp_communication_passes = [
             "fuse_ddp_with_coalesced_op",
@@ -170,7 +170,7 @@ class ReplicateTest(MultiProcessTestCase):
         ]
         self._test_compile(use_gpu=False, no_sync=False)
 
-    def ____test_compile_cpu_no_sync(self):
+    def test_compile_cpu_no_sync(self):
         # Test the coalesced_op with CPU.
         torch._inductor.config.fuse_ddp_communication_passes = [
             "fuse_ddp_with_coalesced_op",
@@ -181,13 +181,13 @@ class ReplicateTest(MultiProcessTestCase):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm
     @skip_if_lt_x_gpu(2)
-    def ____test_compile_gpu(self):
+    def test_compile_gpu(self):
         self._test_compile(use_gpu=True, no_sync=False)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm
     @skip_if_lt_x_gpu(2)
-    def ____test_compile_bf16(self):
+    def test_compile_bf16(self):
         def setup(model, compiled_model) -> None:
             replicate.state(model)._ddp.register_comm_hook(
                 None, ddp_default_hooks.bf16_compress_hook
@@ -204,7 +204,7 @@ class ReplicateTest(MultiProcessTestCase):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm
     @skip_if_lt_x_gpu(2)
-    def ____test_compile_fp16(self):
+    def test_compile_fp16(self):
         def setup(model, compiled_model) -> None:
             replicate.state(model)._ddp.register_comm_hook(
                 None, ddp_default_hooks.fp16_compress_hook
@@ -222,7 +222,7 @@ class ReplicateTest(MultiProcessTestCase):
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm
     @skip_if_lt_x_gpu(2)
-    def ____test_compile_backward_only(self):
+    def test_compile_backward_only(self):
         self._test_compile(use_gpu=True, no_sync=False, no_compile_forward=True)
 
     def _test_bucketing(self):
@@ -252,7 +252,7 @@ class ReplicateTest(MultiProcessTestCase):
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         return code
 
-    def ____test_bucketing_coalesced_op(self):
+    def test_bucketing_coalesced_op(self):
         torch._inductor.config.fuse_ddp_communication_passes = [
             "fuse_ddp_with_coalesced_op",
             "schedule_comm_wait",
@@ -265,7 +265,7 @@ class ReplicateTest(MultiProcessTestCase):
         for i in range(3):
             fc.check("_wait_tensor(").check("cpp_fused_").run(code)
 
-    def ____test_bucketing_concat_op(self):
+    def test_bucketing_concat_op(self):
         torch._inductor.config.fuse_ddp_communication_passes = [
             "fuse_ddp_with_concat_op",
             "schedule_comm_wait",
