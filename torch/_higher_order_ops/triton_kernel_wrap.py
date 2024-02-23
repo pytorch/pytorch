@@ -160,13 +160,13 @@ def generate_ttir(kernel, kwargs):
     return ttir_module, ordered_tensor_names
 
 
-def ttir_to_functions(ttir_module):
+def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
     """
     Walk the `ttir_module` bottom up to mine the `functions` from
     the structured MLIR entities representing the Triton kernel
     (mlir::Operation, mlir::Block, mlir::Region).
     """
-    functions = {}
+    functions: Dict[str, Dict[Intermediate, List[Op]]] = {}
 
     # block id --> op result (Intermediate) --> one or more ops
     op_stack: Dict[int, Dict[Intermediate, List[Op]]] = defaultdict(
@@ -176,7 +176,7 @@ def ttir_to_functions(ttir_module):
     block_id_to_block_arg_ids: Dict[int, List[int]] = {}
     next_fake_intermediate = 0
 
-    def mlir_to_functions(op):
+    def mlir_to_functions(op) -> None:
         name: str = op.get_name()
         if name == "builtin.module":
             # this wraps all tt.func ops
@@ -253,6 +253,7 @@ def ttir_to_functions(ttir_module):
                     for yield_op in yield_ops:
                         op_stack[parent_block_id][scf_result].append(yield_op)
             else:
+                # TODO(oulgen): add support for tt.reduce
                 raise Exception(
                     f"Unknown blocked function: {name}. Can't capture the TTIR."
                 )
