@@ -181,6 +181,23 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(guard(foo))
         self.assertFalse(guard([]))
 
+    def test_no_hasattr_guard(self):
+        class Bar:
+            def __init__(self):
+                self.bar = 2
+
+        bar = Bar()
+
+        class Foo:
+            def __init__(self):
+                self.foo = 2
+
+        foo = Foo()
+
+        guard = guards.NO_HASATTR("foo", ["hasattr(x, 'foo') == False"])
+        self.assertTrue(guard(bar))
+        self.assertFalse(guard(foo))
+
     def test_tensor_aliasing_guard(self):
         guard_manager = RootGuardManager()
 
