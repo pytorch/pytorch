@@ -779,7 +779,7 @@ class GitHubPR:
             ):
                 raise RuntimeError(
                     f"Changed file count mismatch, found {len(self.changed_files)} files, "
-                    + "expected {self.get_changed_files_count()} files."
+                    + f"expected {self.get_changed_files_count()} files."
                 )
         return self.changed_files
 
