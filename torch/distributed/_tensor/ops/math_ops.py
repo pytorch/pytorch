@@ -90,29 +90,42 @@ class _NormPartial(_Partial):
             return tensor / mesh.size(mesh_dim=mesh_dim)
         raise NotImplementedError(self)
 
-    def _reduce_shard_value(self):
-        raise NotImplementedError(self)
+    def _reduce_shard_value(
+        self,
+        tensor: torch.Tensor,
+        mesh: DeviceMesh,
+        mesh_dim: int,
+        shard_spec: Placement,
+    ) -> torch.Tensor:
+        assert isinstance(shard_spec, Shard), f"{shard_spec}"
+        tensor = self._pre_reduce_transform(tensor)
+        reduced_tensor = shard_spec._reduce_shard_tensor(
+            tensor, mesh, self.reduce_op, mesh_dim
+        )
+        return self._post_reduce_transform(reduced_tensor)
 
     def _reduce_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
-        if self.reduce_op in (c10d.ReduceOp.MAX, c10d.ReduceOp.MIN):
-            return funcol.all_reduce(
-                tensor, reduceOp=self.reduce_op.name, group=(mesh, mesh_dim)
-            )
-        elif self.reduce_op == c10d.ReduceOp.SUM:
+        tensor = self._pre_reduce_transform(tensor)
+        reduced_tensor = funcol.all_reduce(
+            tensor, reduceOp=self.reduce_op.name, group=(mesh, mesh_dim)
+        )
+        return self._post_reduce_transform(reduced_tensor)
+
+    def _pre_reduce_transform(self, tensor: torch.Tensor) -> torch.Tensor:
+        if self.reduce_op == c10d.ReduceOp.SUM:
             assert isinstance(self.norm_type, (int, float)), f"{self.norm_type}"
-            tensor_to_reduce = tensor
             if self.norm_type != 0 and self.norm_type != 1:
-                tensor_to_reduce = tensor**self.norm_type
-            reduced_tensor = funcol.all_reduce(
-                tensor_to_reduce, reduceOp="sum", group=(mesh, mesh_dim)
-            )
+                return tensor**self.norm_type
+        return tensor
+
+    def _post_reduce_transform(self, tensor: torch.Tensor) -> torch.Tensor:
+        if self.reduce_op == c10d.ReduceOp.SUM:
+            assert isinstance(self.norm_type, (int, float)), f"{self.norm_type}"
             if self.norm_type != 0 and self.norm_type != 1:
-                reduced_tensor **= 1.0 / self.norm_type
-            return reduced_tensor
-        else:
-            raise NotImplementedError(self)
+                return tensor ** (1.0 / self.norm_type)
+        return tensor
 
 
 def _infer_reduction_dims(dims_arg: object, ndim: int) -> Optional[List[int]]:
