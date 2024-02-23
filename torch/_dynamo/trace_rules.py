@@ -189,6 +189,7 @@ manual_torch_name_rule_map = {
     "torch._C._functorch._remove_batch_dim": TorchInGraphFunctionVariable,
     "torch._C._functorch.is_batchedtensor": TorchInGraphFunctionVariable,
     "torch._dynamo.mark_static": UserFunctionVariable,
+    "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
 }
 
 
