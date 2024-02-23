@@ -81,6 +81,8 @@ def _get_allowed_globals():
         torch.complex128,
         torch.float8_e5m2,
         torch.float8_e4m3fn,
+        torch.float8_e5m2fnuz,
+        torch.float8_e4m3fnuz,
         torch.float16,
         torch.float32,
         torch.float64,

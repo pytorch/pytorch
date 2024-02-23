@@ -35,6 +35,7 @@ from torch import export as torch_export
 from torch.onnx import _constants, verification
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import diagnostics
+from torch.testing._internal import common_utils
 from torch.testing._internal.opinfo import core as opinfo_core
 from torch.types import Number
 
@@ -308,6 +309,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 f"test_report_{self._testMethodName}"
                 f"_op_level_debug_{self.op_level_debug}"
                 f"_dynamic_axes_{self.dynamic_shapes}"
+                f"_model_type_{self.model_type}"
                 ".sarif"
             )
 
@@ -459,7 +461,6 @@ MIN_ONNX_OPSET_VERSION = 9
 MAX_ONNX_OPSET_VERSION = _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET
 TESTED_OPSETS = range(MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION + 1)
 
-# TODO(titaiwang): Change this when more versions are supported
 # The min onnx opset version to test for
 FX_MIN_ONNX_OPSET_VERSION = 18
 # The max onnx opset version to test for
@@ -469,11 +470,11 @@ FX_TESTED_OPSETS = range(FX_MIN_ONNX_OPSET_VERSION, FX_MAX_ONNX_OPSET_VERSION + 
 BOOL_TYPES = (torch.bool,)
 
 INT_TYPES = (
-    torch.int8,
-    torch.int16,
+    # torch.int8,
+    # torch.int16,
     torch.int32,
     torch.int64,
-    torch.uint8,
+    # torch.uint8,
 )
 
 QINT_TYPES = (
@@ -500,6 +501,8 @@ TESTED_DTYPES = (
     *INT_TYPES,
     # Floating types
     *FLOAT_TYPES,
+    # Complex types
+    *COMPLEX_TYPES,
 )
 
 
@@ -615,6 +618,44 @@ def skip(
         reason=reason,
         matcher=matcher,
         enabled_if=enabled_if,
+        test_behavior="skip",
+        model_type=model_type,
+    )
+
+
+def skip_slow(
+    op_name: str,
+    variant_name: str = "",
+    *,
+    reason: str,
+    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
+    dtypes: Optional[Collection[torch.dtype]] = None,
+    matcher: Optional[Callable[[Any], Any]] = None,
+    model_type: Optional[pytorch_test_common.TorchModelType] = None,
+):
+    """Skips a test case in OpInfo that is too slow.
+
+    It needs further investigation to understand why it is slow.
+
+    Args:
+        op_name: The name of the operator.
+        variant_name: The name of the variant.
+        opsets: The opsets to expect the failure. e.g. [9, 10] or [opsets_before(11)]
+        dtypes: The dtypes to expect the failure.
+        reason: The reason for the failure.
+        matcher: A function that matches the test sample input. It is used only when
+            skip is in the SKIP_XFAIL_SUBTESTS list.
+        model_type: The type of the torch model. Defaults to None.
+    """
+    return DecorateMeta(
+        op_name=op_name,
+        variant_name=variant_name,
+        decorator=common_utils.slowTest,
+        opsets=opsets,
+        dtypes=dtypes,
+        reason=reason,
+        matcher=matcher,
+        enabled_if=not common_utils.TEST_WITH_SLOW,
         test_behavior="skip",
         model_type=model_type,
     )

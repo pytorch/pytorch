@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import collections
 import functools
 import inspect
@@ -212,7 +214,7 @@ class RangeVariable(BaseListVariable):
         assert "range" not in codegen.tx.f_globals
         codegen.append_output(codegen.create_load_python_module(range, True))
         codegen.foreach(self.items)
-        return create_call_function(3, False)
+        codegen.extend_output(create_call_function(3, False))
 
     def var_getattr(self, tx, name):
         fields = ["start", "stop", "step"]
@@ -297,7 +299,7 @@ class ListVariable(CommonListMethodsVariable):
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
-        return [create_instruction("BUILD_LIST", arg=len(self.items))]
+        codegen.append_output(create_instruction("BUILD_LIST", arg=len(self.items)))
 
     def call_method(
         self,
@@ -343,7 +345,7 @@ class DequeVariable(CommonListMethodsVariable):
             codegen.create_load_python_module(collections.deque, True)
         )
         codegen.foreach(self.items)
-        return create_call_function(len(self.items), False)
+        codegen.extend_output(create_call_function(len(self.items), False))
 
     def call_method(
         self,
@@ -397,7 +399,7 @@ class TupleVariable(BaseListVariable):
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
-        return [create_instruction("BUILD_TUPLE", arg=len(self.items))]
+        codegen.append_output(create_instruction("BUILD_TUPLE", arg=len(self.items)))
 
     def call_method(
         self,
@@ -407,6 +409,11 @@ class TupleVariable(BaseListVariable):
         kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         return super().call_method(tx, name, args, kwargs)
+
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        if self.python_type() is not tuple:
+            return super().call_hasattr(tx, name)
+        return variables.ConstantVariable.create(hasattr((), name))
 
 
 class SizeVariable(TupleVariable):
@@ -474,7 +481,7 @@ class SizeVariable(TupleVariable):
         build_torch_size = [
             create_instruction("BUILD_TUPLE", arg=len(self.items)),
         ] + create_call_function(1, True)
-        return build_torch_size
+        codegen.extend_output(build_torch_size)
 
     def unpack_var_sequence(self, tx):
         return list(self.items)
@@ -549,13 +556,20 @@ class NamedTupleVariable(TupleVariable):
     def as_python_constant(self):
         return self.python_type()(*[x.as_python_constant() for x in self.items])
 
+    def as_proxy(self):
+        assert self.python_type() is not SizeVariable
+        return self.python_type()(*self._as_proxy())
+
     def reconstruct(self, codegen):
         create_fn = getattr(self.tuple_cls, "_make", self.tuple_cls)
         codegen.append_output(codegen._create_load_const(create_fn))
         codegen.foreach(self.items)
-        return [
-            create_instruction("BUILD_TUPLE", arg=len(self.items)),
-        ] + create_call_function(1, True)
+        codegen.extend_output(
+            [
+                create_instruction("BUILD_TUPLE", arg=len(self.items)),
+            ]
+            + create_call_function(1, True)
+        )
 
     def var_getattr(self, tx, name):
         def check_and_create_method():
@@ -618,7 +632,7 @@ class SliceVariable(BaseListVariable):
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
-        return [create_instruction("BUILD_SLICE", arg=len(self.items))]
+        codegen.append_output(create_instruction("BUILD_SLICE", arg=len(self.items)))
 
     def var_getattr(self, tx, name):
         fields = ["start", "stop", "step"]
@@ -639,9 +653,7 @@ class ListIteratorVariable(VariableTracker):
         self.index = index
 
     def __repr__(self):
-        return (
-            f"{self.__class__.__name__}({repr(self.items)}, index={repr(self.index)})"
-        )
+        return f"{self.__class__.__name__}(length={len(self.items)}, index={repr(self.index)})"
 
     def next_variables(self, tx):
         assert self.mutable_local
@@ -677,10 +689,12 @@ class ListIteratorVariable(VariableTracker):
     def reconstruct(self, codegen):
         remaining_items = self.items[self.index :]
         codegen.foreach(remaining_items)
-        return [
-            create_instruction("BUILD_TUPLE", arg=len(remaining_items)),
-            create_instruction("GET_ITER"),
-        ]
+        codegen.extend_output(
+            [
+                create_instruction("BUILD_TUPLE", arg=len(remaining_items)),
+                create_instruction("GET_ITER"),
+            ]
+        )
 
 
 class TupleIteratorVariable(ListIteratorVariable):
@@ -768,7 +782,8 @@ class RestrictedListSubclassVariable(ListVariable):
 
     def reconstruct(self, codegen):
         codegen(self.user_cls_source)
-        return super().reconstruct(codegen) + create_call_function(1, True)
+        super().reconstruct(codegen)
+        codegen.extend_output(create_call_function(1, True))
 
     def call_method(
         self,

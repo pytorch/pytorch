@@ -71,6 +71,12 @@ bool use_miopen(const at::Tensor& input, const double dropout_state) {
                                 (detail::getCUDAHooks().compiledWithMIOpen()) &&
                                 (input.is_cuda()) &&
                                 (at::globalContext().userEnabledCuDNN());
+    // MIOpen functions returns miopenStatusBadParm on empty
+    // tensors. Maybe some functions actually support empty tensors, but
+    // native kernels shouldn't be much slower because the output is also
+    // likely empty.
+    if (input.sym_numel() == 0) return false;
+
     return is_miopen_acceptable;
 }
 
@@ -290,10 +296,7 @@ struct QuantizedCellParams : public CellParamsBase {
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
       CellParamsSerializationType state) {
-    std::vector<at::Tensor> tensors;
-    std::vector<double> doubles;
-    std::vector<int64_t> longs;
-    std::tie(std::ignore, tensors, doubles, longs, std::ignore) =
+    auto [_, tensors, doubles, longs, __] =
         std::move(state);
     TORCH_INTERNAL_ASSERT(tensors.size() == 6);
     TORCH_INTERNAL_ASSERT(doubles.size() == 2);
@@ -338,12 +341,9 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params(
         std::make_tuple(std::move(packed_weight)), std::move(params));
   };
 
-  at::Tensor qw_ih, qw_hh, packed_ih, packed_hh, col_offsets_ih, col_offsets_hh;
-  at::Scalar scale_ih, scale_hh, zero_point_ih, zero_point_hh;
-
-  std::tie(packed_ih, qw_ih, col_offsets_ih, scale_ih, zero_point_ih) =
+  auto [packed_ih, qw_ih, col_offsets_ih, scale_ih, zero_point_ih] =
       make_vals(w_ih);
-  std::tie(packed_hh, qw_hh, col_offsets_hh, scale_hh, zero_point_hh) =
+  auto [packed_hh, qw_hh, col_offsets_hh, scale_hh, zero_point_hh] =
       make_vals(w_hh);
 
   return c10::make_intrusive<QuantizedCellParams>(
@@ -438,10 +438,7 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
       CellParamsSerializationType state) {
-    std::vector<at::Tensor> tensors;
-    std::vector<c10::intrusive_ptr<LinearPackedParamsBase>> packed_params;
-    std::vector<int64_t> serialized_ints;
-    std::tie(std::ignore, tensors, std::ignore, serialized_ints, packed_params) =
+    auto [_, tensors, __, serialized_ints, packed_params] =
         std::move(state);
     TORCH_INTERNAL_ASSERT(tensors.size() == 2);
     TORCH_INTERNAL_ASSERT(packed_params.size() == 2);
@@ -514,10 +511,7 @@ struct QuantizedCellParamsFP16 : public CellParamsBase {
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
       CellParamsSerializationType state) {
-    std::vector<c10::intrusive_ptr<LinearPackedParamsBase>> packed_params;
-    std::tie(
-        std::ignore, std::ignore, std::ignore, std::ignore, packed_params) =
-        std::move(state);
+    auto packed_params = std::get<4>(std::move(state));
     TORCH_INTERNAL_ASSERT(packed_params.size() == 2);
     return make_quantized_cell_params_fp16(
         /*w_ih_packed=*/std::move(packed_params[0]),
@@ -730,7 +724,7 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
     const auto& hx = std::get<0>(hidden);
     const auto& cx = std::get<1>(hidden);
 
-    if (input.is_cuda()) {
+    if (input.is_cuda() || input.is_privateuseone()) {
       TORCH_CHECK(!pre_compute_input);
       auto igates = params.matmul_ih(input);
       auto hgates = params.matmul_hh(hx);
@@ -766,7 +760,7 @@ struct GRUCell : Cell<Tensor, cell_params> {
       const hidden_type& hidden,
       const cell_params& params,
       bool pre_compute_input = false) const override {
-    if (input.is_cuda() || input.is_xpu()) {
+    if (input.is_cuda() || input.is_xpu() || input.is_privateuseone()) {
       TORCH_CHECK(!pre_compute_input);
       auto igates = params.matmul_ih(input);
       auto hgates = params.matmul_hh(hidden);
@@ -1167,7 +1161,7 @@ bool _use_cudnn_rnn_flatten_weight() {
 }
 
 // NB: This a (composite) wrapper for _thnn_fused_lstm_cell_backward_impl.
-//     It duplicates the outputs of this function so the non-composite verison doesn't have to.
+//     It duplicates the outputs of this function so the non-composite version doesn't have to.
 //     The point is so that we avoid triggering TensorImpl use count asserts in debug mode
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backward( const c10::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt,
       const Tensor& cx, const Tensor& cy,
