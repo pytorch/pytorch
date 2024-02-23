@@ -442,7 +442,7 @@ void GroupNormKernelImplChannelsLastInternal(
     //
     // We could fuse step 3 and 4 into a single session but this way is better:
     //   a. D might be too small for vectorization;
-    //   b. Avoid duplicate caculation of scale/bias, each HxW plain share the same scale/bias
+    //   b. Avoid duplicate calculation of scale/bias, each HxW plain share the same scale/bias
     //
     for (const auto n : c10::irange(N)) {
       for (const auto g : c10::irange(G)) {
