@@ -354,8 +354,9 @@ static void sinc_kernel(TensorIteratorBase& iter) {
           if (a == scalar_t(0)) {
             return scalar_t(1);
           } else {
-            scalar_t product = c10::pi<scalar_t> * a;
-            return std::sin(product) / product;
+            using opmath_t = at::opmath_type<scalar_t>;
+            opmath_t product = c10::pi<opmath_t> * opmath_t{a};
+            return static_cast<scalar_t>(std::sin(product) / product);
           }
         });
   });

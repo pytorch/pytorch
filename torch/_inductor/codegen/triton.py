@@ -2443,12 +2443,17 @@ class TritonKernel(Kernel):
         )
 
         if not self.persistent_reduction:
-            accs_next = combine_fn(
-                *itertools.chain(*zip(accumulators, partials_reduce))
-            )
-            new_result_vars = combine_fn(
-                *itertools.chain(*zip(accumulators, result_vars))
-            )
+            def _combine_fn(values1, values2):
+                result = combine_fn(
+                   *itertools.chain(*zip(values1, values2))
+                )
+                if isinstance(result, (tuple, list)):
+                    return result
+                else:
+                    return (result,)
+
+            accs_next = _combine_fn(accumulators, partials_reduce)
+            new_result_vars = _combine_fn(accumulators, result_vars)
             result_vars = [
                 self.cse.generate(self.compute, var) for var in new_result_vars
             ]
