@@ -217,7 +217,7 @@ def parse_ttir(ttir, kwargs):
             | INTERMEDIATE_CONSTANT
             | CONSTANT
             | PARAM
-            | "[" arg "]"
+            | "[" args "]"
             | arg_with_index
 
         ?arg_with_index: arg "#" DIGIT+
@@ -251,7 +251,14 @@ def parse_ttir(ttir, kwargs):
     def convert(token):
         if isinstance(token, lark.tree.Tree):
             if token.data == "args":
-                return [convert(a) for a in token.children]
+                res = []
+                for a in token.children:
+                    c = convert(a)
+                    if isinstance(c, list):
+                        res.extend(c)
+                    else:
+                        res.append(c)
+                return res
             elif token.data in {"assign_lhs", "arg_with_index"}:
                 # Drop length/index qualifier
                 return convert(token.children[0])
