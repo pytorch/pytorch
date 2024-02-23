@@ -28,6 +28,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
+    skip_unless_torch_gpu,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -67,6 +68,13 @@ class DeviceMeshTest(DTensorTestBase):
         DeviceMesh(device_type, mesh_tensor)
         self.assertTrue(is_initialized())
         self.destroy_pg()
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_assert_invalid_mesh_tensor(self):
+        mesh = torch.arange(self.world_size).to(self.rank)
+        with self.assertRaises(ValueError):
+            device_mesh = DeviceMesh(self.device_type, mesh)
 
     @with_comms
     @run_with_both_funcol_impls
