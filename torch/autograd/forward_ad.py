@@ -15,9 +15,6 @@ __all__ = [
     "dual_level",
 ]
 
-# Global variable used to make the python API simpler to use
-_current_level = -1
-
 
 def enter_dual_level():
     r"""Enter a new forward grad level.
@@ -28,14 +25,13 @@ def enter_dual_level():
     This function also updates the current level that is used by default
     by the other functions in this API.
     """
-    global _current_level
+    _current_level = torch._C._get_current_dual_level()
     new_level = torch._C._enter_dual_level()
     if new_level != _current_level + 1:
         raise RuntimeError(
             "Entering a new forward AD level but the current level "
             "is not valid. Make sure you did not modified it directly."
         )
-    _current_level = new_level
     return new_level
 
 
@@ -48,7 +44,7 @@ def exit_dual_level(*, level=None):
     This function also updates the current level that is used by default
     by the other functions in this API.
     """
-    global _current_level
+    _current_level = torch._C._get_current_dual_level()
     if level is None:
         level = _current_level
     if level != _current_level:
@@ -57,7 +53,6 @@ def exit_dual_level(*, level=None):
             "that was created. This is not supported."
         )
     torch._C._exit_dual_level(level=level)
-    _current_level = level - 1
 
 
 def make_dual(tensor, tangent, *, level=None):
@@ -104,7 +99,7 @@ def make_dual(tensor, tangent, *, level=None):
         from torch._decomp import decompositions_for_jvp  # noqa: F401
 
     if level is None:
-        level = _current_level
+        level = torch._C._get_current_dual_level()
 
     if level < 0:
         raise RuntimeError(
@@ -158,7 +153,7 @@ def unpack_dual(tensor, *, level=None):
     for detailed steps on how to use this API.
     """
     if level is None:
-        level = _current_level
+        level = torch._C._get_current_dual_level()
 
     if level < 0:
         return UnpackedDualTensor(tensor, None)
