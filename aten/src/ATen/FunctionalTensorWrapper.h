@@ -58,8 +58,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
       const FunctionalTensorWrapper* base,
       functionalization::ViewMeta meta);
   // This constructor should be used for creating a FunctionalTensorWrapper for
-  // the base tensor. Specifically for use on operations that only care about the
-  // storage (e.g. as_strided).
+  // the base tensor. Specifically for use on operations that only care about
+  // the storage (e.g. as_strided).
   //
   // It assumes that 'storage' implementation is a FunctionalStorageImpl.
   explicit FunctionalTensorWrapper(const Storage& storage);
@@ -335,7 +335,8 @@ std::vector<Tensor> create_functional_tensor_with_view_meta(
 // Creates a new FunctionalTensorWrapper, by wrapping the argument's base tensor
 // retrieved from its storage (i.e. FunctionalStorageImpl).
 //
-// Assumes that 'tensor' is an FunctionalTensorWrapper. This will error otherwise.
+// Assumes that 'tensor' is an FunctionalTensorWrapper. This will error
+// otherwise.
 Tensor create_functional_tensor_from_base(const Tensor& tensor);
 
 void mutate_view_meta(const Tensor& self, functionalization::ViewMeta meta);
