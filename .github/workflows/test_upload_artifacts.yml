@@ -6,6 +6,9 @@ on:
       - .github/workflows/test_upload_artifacts.yml
   workflow_dispatch:
 
+env:
+  ACTIONS_STEP_DEBUG: true
+
 jobs:
   upload-step:
     name: upload-step
@@ -40,7 +43,7 @@ jobs:
     runs-on: linux.2xlarge
     steps:
     - name: Download artifact
-      uses: seemethere/download-artifact-s3@v4
+      uses: DanilBaibak/download-artifact-s3@main
       with:
         name: test-run
         s3-bucket: pytorch-ci-artifacts
