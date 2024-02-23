@@ -403,15 +403,50 @@ def gather_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
 def stack_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     args_schema = op_schema.args_schema
     input_tuple_strategy = args_schema[0]
-    assert isinstance(input_tuple_strategy, TupleStrategy)
+    assert isinstance(input_tuple_strategy, TupleStrategy), f"{input_tuple_strategy}"
+    dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
 
-    # TODO: If all inputs have the same partial spec, then can keep partial.
-    # Otherwise, redistribute to replicate.
+    # Follow the 1st child strategy's placement strategies
     child_strategy = input_tuple_strategy.childs[0]
-    assert isinstance(child_strategy, OpStrategy)
-    strategies = [
-        PlacementStrategy(output_specs=child_strategy.strategies[0].output_spec)
-    ]
+    assert isinstance(child_strategy, OpStrategy), f"{child_strategy}"
+    strategies: List[PlacementStrategy] = []
+
+    # For every placement (arg) strategy, we replicate the stack dim since we
+    # cannot stack on a sharded dim.
+    # For each placement (arg) strategy of the child to follow, we check if
+    # every other child has an equal strategy. If so, then that is a valid
+    # strategy. If there are no such valid strategies, then we replicate.
+    for arg_strategy in child_strategy.strategies:
+        arg_spec = arg_strategy.output_spec
+        if is_tensor_dim_sharded(arg_spec, dim):  # cannot stack on this dim
+            arg_spec = DTensorSpec(
+                mesh, unshard_tensor_dim(arg_spec.placements, dim=dim)
+            )
+        all_compatible = True
+        for other_child_strategy in input_tuple_strategy.childs[1:]:
+            has_compatible_strategy = False
+            assert isinstance(
+                other_child_strategy, OpStrategy
+            ), f"{other_child_strategy}"
+            for other_arg_strategy in other_child_strategy.strategies:
+                other_arg_spec = other_arg_strategy.output_spec
+                if is_tensor_dim_sharded(other_arg_spec, dim):
+                    other_arg_spec = DTensorSpec(
+                        mesh, unshard_tensor_dim(other_arg_spec.placements, dim=dim)
+                    )
+                if other_arg_spec == arg_spec:
+                    has_compatible_strategy = True
+                    break
+            if not has_compatible_strategy:
+                all_compatible = False
+                break
+        if all_compatible:
+            strategies.append(
+                PlacementStrategy(output_specs=DTensorSpec(mesh, arg_spec.placements))
+            )
+    if not strategies:
+        replicate_spec = DTensorSpec(mesh, tuple(Replicate() for _ in range(mesh.ndim)))
+        strategies.append(PlacementStrategy(output_specs=replicate_spec))
     return OpStrategy(strategies)
 
 
@@ -612,7 +647,7 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
         dim = cast(int, op_schema.args_schema[1])
     dim = normalize_dim(dim, ndim)
 
-    # Make sure all tensors are replciated on cat dimension
+    # Make sure all tensors are replicated on cat dimension
     need_reshard = False
     tensor_list_specs_after: List[DTensorSpec] = []
     for spec in tensor_list_specs:

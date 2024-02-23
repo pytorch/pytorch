@@ -49,6 +49,72 @@ class NormReduction:
 ReductionOpType = Union[NormReduction, c10d.ReduceOp.RedOpType]
 
 
+@dataclass(frozen=True)
+class _NormPartial(_Partial):
+    """
+    This placement is used for partial vector norm.
+
+    For p-norms (where p not inf or -inf), the p-norm over n elements computes
+        (sum_i x_i^p)^(1/p)
+    where the sum is from i=1 to n. The reduction op is the p-norm itself.
+    For example, consider 2 ranks, a (4,) tensor sharded on dim-0, and 2-norm:
+        Rank 0: [t1, t2] | Rank 1: [t3, t4]
+    After computing 2-norm per gradient (partial placement):
+        Rank 0: [sqrt(t1^2 + t2^2)] | Rank 1: [sqrt(t3^2 + t4^2)]
+    Converting from partial to replicate wants to ultimately get:
+        Rank 0/1: [sqrt(t1^2 + t2^2 + t3^2 + t4^2)]
+    This can be achieved by computing 2-norm on each rank's result. This holds
+    similarly for inf and -inf norm. For 0-norm, the reduction op is sum.
+    """
+
+    norm_type: Union[int, float, str] = 2
+
+    def __post_init__(self):
+        """Set the appropriate reduce op based on the norm type."""
+        # Use `object.__setattr__` to bypass frozen checks
+        if self.norm_type in (float("inf"), "inf"):
+            object.__setattr__(self, "reduce_op", c10d.ReduceOp.MAX)
+        elif self.norm_type in (float("-inf"), "-inf"):
+            object.__setattr__(self, "reduce_op", c10d.ReduceOp.MIN)
+        elif isinstance(self.norm_type, (int, float)):
+            object.__setattr__(self, "reduce_op", c10d.ReduceOp.SUM)
+        else:
+            raise NotImplementedError(f"Unsupported norm type: {self.norm_type}")
+
+    def _partition_value(
+        self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
+    ) -> torch.Tensor:
+        if self.reduce_op in (c10d.ReduceOp.MAX, c10d.ReduceOp.MIN):
+            return tensor
+        elif self.reduce_op == c10d.ReduceOp.SUM:
+            return tensor / mesh.size(mesh_dim=mesh_dim)
+        raise NotImplementedError(self)
+
+    def _reduce_shard_value(self):
+        raise NotImplementedError(self)
+
+    def _reduce_value(
+        self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
+    ) -> torch.Tensor:
+        if self.reduce_op in (c10d.ReduceOp.MAX, c10d.ReduceOp.MIN):
+            return funcol.all_reduce(
+                tensor, reduceOp=self.reduce_op.name, group=(mesh, mesh_dim)
+            )
+        elif self.reduce_op == c10d.ReduceOp.SUM:
+            assert isinstance(self.norm_type, (int, float)), f"{self.norm_type}"
+            tensor_to_reduce = tensor
+            if self.norm_type != 0 and self.norm_type != 1:
+                tensor_to_reduce = tensor**self.norm_type
+            reduced_tensor = funcol.all_reduce(
+                tensor_to_reduce, reduceOp="sum", group=(mesh, mesh_dim)
+            )
+            if self.norm_type != 0 and self.norm_type != 1:
+                reduced_tensor **= 1.0 / self.norm_type
+            return reduced_tensor
+        else:
+            raise NotImplementedError(self)
+
+
 def _infer_reduction_dims(dims_arg: object, ndim: int) -> Optional[List[int]]:
     if dims_arg is None:
         return None
@@ -241,72 +307,6 @@ def var_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     return common_reduction_strategy(
         mesh, input_strategy, reduce_dims, keep_dim=keep_dim, reduction_linear=False
     )
-
-
-@dataclass(frozen=True)
-class _NormPartial(_Partial):
-    """
-    For p-norms (where p not inf or -inf), the p-norm over n elements computes
-        (sum_i x_i^p)^(1/p)
-    where the sum is from i=1 to n. The reduction op is the p-norm itself.
-    Consider 2 ranks, a 1D gradient with 4 numel sharded on dim-0, and 2-norm:
-        Rank 0: [g1, g2] | Rank 1: [g3, g4]
-    After computing 2-norm per gradient (partial placement):
-        Rank 0: [sqrt(g1^2 + g2^2)] | Rank 1: [sqrt(g3^2 + g4^2)]
-    Converting from partial to replicate wants to ultimately get:
-        Rank 0/1: [sqrt(g1^2 + g2^2 + g3^2 + g4^2)]
-    This can be achieved by computing 2-norm on each rank's result.
-    """
-
-    norm_type: Union[int, float, str] = 2
-
-    def __post_init__(self):
-        """Set the appropriate reduce op based on the norm type."""
-        # Use `object.__setattr__` to bypass frozen checks
-        if self.norm_type in (float("inf"), "inf"):
-            object.__setattr__(self, "reduce_op", c10d.ReduceOp.MAX)
-        elif self.norm_type in (float("-inf"), "-inf"):
-            object.__setattr__(self, "reduce_op", c10d.ReduceOp.MIN)
-        elif self.norm_type == 0:
-            raise NotImplementedError("Norm type of 0 is not supported yet")
-        elif isinstance(self.norm_type, (int, float)):
-            object.__setattr__(self, "reduce_op", c10d.ReduceOp.SUM)
-        else:
-            raise NotImplementedError(f"Unsupported norm type: {self.norm_type}")
-
-    def _partition_value(
-        self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
-    ) -> torch.Tensor:
-        if self.reduce_op in (c10d.ReduceOp.MAX, c10d.ReduceOp.MIN):
-            return tensor
-        elif self.reduce_op == c10d.ReduceOp.SUM:
-            return tensor / mesh.size(mesh_dim=mesh_dim)
-        raise NotImplementedError()
-
-    def _reduce_shard_value(self):
-        raise NotImplementedError(
-            f"norm type: {self.norm_type} reduce op: {self.reduce_op}"
-        )
-
-    def _reduce_value(
-        self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
-    ) -> torch.Tensor:
-        if self.reduce_op in (c10d.ReduceOp.MAX, c10d.ReduceOp.MIN):
-            return funcol.all_reduce(
-                tensor, reduceOp=self.reduce_op.name, group=(mesh, mesh_dim)
-            )
-        elif self.reduce_op == c10d.ReduceOp.SUM:
-            assert isinstance(self.norm_type, (int, float)), f"{self.norm_type}"
-            reduced_tensor = funcol.all_reduce(
-                tensor**self.norm_type, reduceOp="sum", group=(mesh, mesh_dim)
-            )
-            if self.norm_type != 1:
-                reduced_tensor **= 1.0 / self.norm_type
-            return reduced_tensor
-        else:
-            raise NotImplementedError(
-                f"norm type: {self.norm_type} reduce op: {self.reduce_op}"
-            )
 
 
 @register_op_strategy(

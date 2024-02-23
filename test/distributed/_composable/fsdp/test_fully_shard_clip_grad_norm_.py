@@ -25,7 +25,7 @@ class TestClipGradNormMultiThread(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_clip_grad_norm_1d(self):
         self.run_subtests(
-            {"max_norm": [1], "norm_type": [2]},
+            {"max_norm": [1], "norm_type": [2, 1, float("inf")]},
             self._test_clip_grad_norm_1d,
         )
 
@@ -61,11 +61,11 @@ class TestClipGradNormMultiThread(FSDPTest):
             for ref_grad, param in zip(ref_grads, model.parameters()):
                 self.assertEqual(ref_grad, param.grad.full_tensor())
 
-            # Check that at least one gradient has norm greater than the max
-            # norm before clipping to ensure the clipping is not vacuous
-            self.assertTrue(any(vector_norm_fn(g).item() > max_norm for g in ref_grads))
+            # Check that all gradients have norm greater than the max norm
+            # before clipping to ensure the clipping is not vacuous
+            self.assertTrue(all(vector_norm_fn(g).item() > max_norm for g in ref_grads))
             self.assertTrue(
-                any(vector_norm_fn(g).item() > max_norm for g in local_grads)
+                all(vector_norm_fn(g).item() > max_norm for g in local_grads)
             )
 
             # Check gradient norm clipping via total norm and individual
