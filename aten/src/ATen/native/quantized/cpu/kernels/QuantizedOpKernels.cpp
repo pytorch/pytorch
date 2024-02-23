@@ -913,7 +913,7 @@ void qhardsigmoid_kernel(const Tensor& qx, Tensor& qy) {
     fVec kThreeVec(3.0f);
     fVec kSixVec(6.0f);
 
-    // Naive implemenentation: uses dequantize/execute/quantize routine
+    // Naive implementation: uses dequantize/execute/quantize routine
     cpu_kernel_vec(
         iter,
         [&](scalar_t qx) -> scalar_t {
@@ -1070,7 +1070,7 @@ void qthreshold_kernel(
     Vec threshold_vec = Vec(threshold_float);
     Vec value_vec = Vec(value_float);
 
-    // Naive implemenentation: uses dequantize/execute/quantize routine
+    // Naive implementation: uses dequantize/execute/quantize routine
     cpu_kernel_vec(
         iter,
         [&](scalar_t value_qx) -> scalar_t {
@@ -1152,7 +1152,7 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
   auto scale_neg_zp_premul_vec = scale_vec * zero_point_vec.neg();
 
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qtanh", [&]() {
-    // Naive implemenentation: uses dequantize/execute/quantize routine
+    // Naive implementation: uses dequantize/execute/quantize routine
     // - Output scale is set to 2.0 / 2^(BIT_NUM)
     // - For signed types output zero point is set to 0
     // - For unsigned types output zero point is set to (qmax + qmin) / 2.0
@@ -2734,7 +2734,7 @@ void fake_quantize_learnable_channel_grad_kernel_cpu(
     float grad_factor) {
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
     /*  To see how the input and outputs are referenced and assigned,
-        please see the implemenetation of
+        please see the implementation of
         fake_quantize_learnable_tensor_grad_kernel_cpu.
     */
     for (const auto i : c10::irange(n)) {
@@ -3265,7 +3265,7 @@ void quantized_groupnorm_nhwc_kernel(
       //
       // We could fuse step 3 and 4 into a single session but this way is better:
       //   a. D might be too small for vectorization;
-      //   b. Avoid duplicate caculation of scale/bias, each HxW plain share the same scale/bias
+      //   b. Avoid duplicate calculation of scale/bias, each HxW plain share the same scale/bias
       //
       for (const auto n : c10::irange(Bs)) {
         for (const auto g : c10::irange(G)) {
@@ -3743,7 +3743,7 @@ void quantize_tensor_per_channel_impl(
   // TODO: channels last kernel can be made faster.
   // For contiguous tensors, e.g. NCHW, arbitrary axis can be used.
   // For channels_last/3d however axis == 0 or 1.
-  // Since current implemntation on channels_last format does not
+  // Since current implementation on channels_last format does not
   // cover per channel quant with arbitrary axis value, it is better
   // to check and fail.
   int64_t batches = size_to_dim_(axis, rtensor.sizes());
@@ -4008,7 +4008,7 @@ void dequantize_per_channel_affine_kernel(
 
   // For contiguous tensors, e.g. NCHW, arbitrary axis can be used.
   // For channels_last/3d however axis == 0 or 1.
-  // Since current implemntation on channels_last format does not
+  // Since current implementation on channels_last format does not
   // cover per channel quant with arbitrary axis value, it is better
   // to check and fail.
   TORCH_CHECK(rtensor.is_contiguous() || (axis <=1),
@@ -4084,7 +4084,7 @@ void quantize_tensor_per_channel_float_qparams_cpu(
     int64_t axis) {
   // For contiguous tensors, e.g. NCHW, arbitrary axis can be used.
   // For channels_last/3d however axis == 0 or 1.
-  // Since current implemntation on channels_last format does not
+  // Since current implementation on channels_last format does not
   // cover per channel quant with arbitrary axis value, it is better
   // to check and fail.
   TORCH_CHECK(rtensor.is_contiguous() || (axis <=1),

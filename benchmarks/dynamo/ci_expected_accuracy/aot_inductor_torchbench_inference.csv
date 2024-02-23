@@ -130,6 +130,14 @@ hf_Bart,fail_to_run,0
 
 
 
+hf_Bert,fail_to_run,0
+
+
+
+hf_Bert_large,fail_to_run,0
+
+
+
 hf_BigBird,fail_to_run,0
 
 
@@ -179,6 +187,10 @@ llama,fail_to_run,0
 
 
 llama_v2_7b_16h,model_fail_to_load,0
+
+
+
+maml,pass_due_to_skip,0
 
 
 
