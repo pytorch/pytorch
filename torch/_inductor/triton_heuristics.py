@@ -359,13 +359,12 @@ class CachingAutotuner(KernelInterface):
 
             try:
                 binary = triton.compile(*compile_args, **compile_kwargs)
-            except:
-                log.error(
+            except Exception:
+                log.exception(
                     "Triton compilation failed: %s\n%s\nmetadata: %s",
                     self.inductor_meta.get("kernel_name", "triton_"),
                     self.fn.src,
                     compile_meta,
-                    exc_info=True,
                 )
                 raise
             binary._init_handles()
