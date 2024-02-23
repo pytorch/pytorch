@@ -912,7 +912,7 @@ def _init_logs(log_file_name=None):
         def filename_cb():
             ranksuffix = ""
             if dist.is_available() and dist.is_initialized():
-                ranksuffix = "rank_{dist.get_rank()}_"
+                ranksuffix = f"rank_{dist.get_rank()}_"
             _, filename = tempfile.mkstemp(
                 suffix=".log",
                 prefix=f"dedicated_log_torch_trace_{ranksuffix}",
