@@ -205,6 +205,10 @@ uint64_t enter_dual_level() {
   return ForwardADLevel::get_next_idx();
 }
 
+uint64_t get_current_dual_level() {
+  return ForwardADLevel::get_current_idx();
+}
+
 void exit_dual_level(uint64_t level) {
   ForwardADLevel::release_idx(level);
 }

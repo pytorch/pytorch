@@ -22,6 +22,15 @@ uint64_t ForwardADLevel::get_next_idx() {
   return next_idx;
 }
 
+uint64_t ForwardADLevel::get_current_idx() {
+  std::unique_lock<std::mutex> lock(all_forward_levels_mutex_);
+  if (all_forward_levels_.empty()) {
+    return -1;
+  }
+  auto level = all_forward_levels_.back()->idx_;
+  return level;
+}
+
 void ForwardADLevel::release_idx(uint64_t idx) {
   std::unique_lock<std::mutex> lock(all_forward_levels_mutex_);
   TORCH_CHECK(
