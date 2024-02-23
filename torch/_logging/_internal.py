@@ -6,6 +6,7 @@ import logging
 import os
 import os.path
 import re
+import tempfile
 from dataclasses import dataclass, field
 from importlib import __import__
 from typing import Callable, Dict, List, Optional, Set, Union
@@ -902,11 +903,72 @@ def _init_logs(log_file_name=None):
     # TODO: Automatically initialize this in Tupperware environment to point
     # to /logs/dedicated_logs_XXX
     trace_file_name = os.environ.get(TRACE_ENV_VAR, None)
+    handler: Optional[logging.Handler] = None
+    TRACE_LOG_DIR = "/logs"
     if trace_file_name is not None:
+        handler = logging.FileHandler(trace_file_name)
+    elif is_fbcode() and os.path.exists(TRACE_LOG_DIR):
+
+        def filename_cb():
+            ranksuffix = ""
+            if dist.is_available() and dist.is_initialized():
+                ranksuffix = "rank_{dist.get_rank()}_"
+            _, filename = tempfile.mkstemp(
+                suffix=".log",
+                prefix=f"dedicated_log_torch_trace_{ranksuffix}",
+                dir=TRACE_LOG_DIR,
+            )
+            log.info("Automatically enabled TORCH_TRACE=%s", filename)
+            return filename
+
+        handler = FreshFileHandler(filename_cb)
+    if handler is not None:
         trace_log.setLevel(logging.DEBUG)
-        trace_log_handler = _track_handler(logging.FileHandler(trace_file_name))
+        trace_log_handler = _track_handler(handler)
         trace_log_handler.setFormatter(TorchLogsFormatter(trace=True))
         trace_log.addHandler(trace_log_handler)
+
+
+class FreshFileHandler(logging.StreamHandler):
+    """Like FileHandler, but the file is allocated lazily only upon the first log message"""
+
+    def __init__(self, filename_cb):
+        self.filename_cb = filename_cb
+        self.filename = None
+        # This is implemented in the same way that delay is implemented on
+        # FileHandler
+        logging.Handler.__init__(self)
+        self.stream = None
+        self._builtin_open = open
+
+    # cloned from FileHandler in cpython
+    def close(self):
+        self.acquire()
+        try:
+            try:
+                if self.stream:
+                    try:
+                        self.flush()
+                    finally:
+                        stream = self.stream
+                        self.stream = None
+                        if hasattr(stream, "close"):
+                            stream.close()
+            finally:
+                # Issue #19523: call unconditionally to
+                # prevent a handler leak when delay is set
+                # Also see Issue #42378: we also rely on
+                # self._closed being set to True there
+                logging.StreamHandler.close(self)
+        finally:
+            self.release()
+
+    def emit(self, record):
+        if self.stream is None:
+            open_func = self._builtin_open
+            self.stream = open_func(self.filename_cb(), "w")
+        if self.stream:
+            super().emit(record)
 
 
 @functools.lru_cache(None)
@@ -928,6 +990,10 @@ class LazyString:
 
     def __str__(self):
         return self.func(*self.args, **self.kwargs)
+
+
+def is_fbcode():
+    return not hasattr(torch.version, "git_version")
 
 
 def trace_structured(
@@ -985,3 +1051,4 @@ def trace_structured(
 
 import torch._guards
 import torch.distributed as dist
+import torch.version
