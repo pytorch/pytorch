@@ -47,6 +47,7 @@ from torchgen.context import (
 from torchgen.gen_aoti_c_shim import (
     gen_aoti_c_shim,
     gen_static_dispatch_backend_call_signature,
+    get_backend_index_for_aoti,
 )
 from torchgen.gen_functionalization_type import (
     gen_functionalization_definition,
@@ -2207,7 +2208,7 @@ def gen_source_files(
 
         if per_operator_headers:
 
-            def operator_headers(include_composite_explicit: bool = False) -> List[str]:
+            def operator_headers() -> List[str]:
                 headers = []
                 for g in grouped_native_functions:
                     is_registered = False
@@ -2231,28 +2232,6 @@ def gen_source_files(
                         DispatchKey.CompositeExplicitAutogradNonFunctional,
                     ):
                         is_registered = True
-
-                    # AOTI C shim needs to generate fallback wrapper for CompositeExplicitAutograd
-                    # and CompositeExplicitAutogradNonFunctional ops
-                    if include_composite_explicit and (
-                        backend_indices[
-                            DispatchKey.CompositeExplicitAutograd
-                        ].has_kernel(g)
-                        or backend_indices[
-                            DispatchKey.CompositeExplicitAutogradNonFunctional
-                        ].has_kernel(g)
-                    ):
-                        ns = (
-                            "compositeexplicitautograd"
-                            if backend_indices[
-                                DispatchKey.CompositeExplicitAutograd
-                            ].has_kernel(g)
-                            else "compositeexplicitautogradnonfunctional"
-                        )
-                        headers.append(
-                            f"#include <ATen/ops/{g.root_name}_{ns}_dispatch.h>"
-                        )
-
                     if not is_registered:
                         continue
 
@@ -2271,7 +2250,7 @@ def gen_source_files(
 
         else:
 
-            def operator_headers(include_composite_explicit: bool = False) -> List[str]:
+            def operator_headers() -> List[str]:
                 headers = ["#include <ATen/NativeFunctions.h>"]
                 if dispatch_key == DispatchKey.CompositeExplicitAutogradNonFunctional:
                     headers.append("#include <ATen/Functions.h>")
@@ -2371,14 +2350,42 @@ def gen_source_files(
                 raise AssertionError(f"unrecognized {dispatch_key} for ufunc")
 
         if dispatch_key in (DispatchKey.CPU, DispatchKey.CUDA):
-            op_headers = "\n".join(operator_headers(include_composite_explicit=True))
+
+            def get_header(
+                f: NativeFunction,
+            ) -> Optional[str]:
+                backend_index = get_backend_index_for_aoti(
+                    f, dispatch_key, backend_indices
+                )
+                return (
+                    None
+                    if backend_index is None
+                    else f"#include <ATen/ops/{f.root_name}_{backend_index.dispatch_key.lower()}_dispatch.h>"
+                )
+
+            def headers_for_aoti() -> str:
+                headers = []
+                for g in grouped_native_functions:
+                    if isinstance(g, NativeFunctionsGroup):
+                        for f in g.functions():
+                            # some variants are registered in the backend, but some are registered as CompositeExplicitAutograd
+                            header = get_header(f)
+                            if header is not None:
+                                headers.append(header)
+                    else:
+                        header = get_header(g)
+                        if header is not None:
+                            headers.append(header)
+                return "\n".join(sorted(set(headers)))
+
             extra_headers = (
                 extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else ""
             )
+
             aoti_fm.write(
                 f"c_shim_{dispatch_key.lower()}.h",
                 lambda: gen_aoti_c_shim(
-                    grouped_native_functions,
+                    native_functions,
                     dispatch_key,
                     backend_indices,
                     header=True,
@@ -2388,11 +2395,11 @@ def gen_source_files(
             aoti_fm.write(
                 f"c_shim_{dispatch_key.lower()}.cpp",
                 lambda: gen_aoti_c_shim(
-                    grouped_native_functions,
+                    native_functions,
                     dispatch_key,
                     backend_indices,
                     header=False,
-                    includes=op_headers + "\n" + extra_headers,
+                    includes=headers_for_aoti() + "\n" + extra_headers,
                 ),
             )
 

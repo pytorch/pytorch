@@ -3,6 +3,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/core/List.h>
 #include <c10/core/DeviceType.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
@@ -37,6 +38,13 @@ inline c10::optional<T> pointer_to_optional(U* ptr) {
 
 template <>
 inline c10::optional<at::Tensor> pointer_to_optional(AtenTensorHandle* ptr) {
+  return ptr ? c10::make_optional(*tensor_handle_to_tensor_pointer(*ptr))
+             : c10::nullopt;
+}
+
+template <>
+inline c10::optional<at::Tensor> pointer_to_optional(
+    const AtenTensorHandle* ptr) {
   return ptr ? c10::make_optional(*tensor_handle_to_tensor_pointer(*ptr))
              : c10::nullopt;
 }
@@ -92,7 +100,7 @@ inline std::vector<T> pointer_to_list(U** ptr, int64_t len) {
 
 template <>
 inline std::vector<at::Tensor> pointer_to_list(
-    AtenTensorHandle* ptr,
+    const AtenTensorHandle* ptr,
     int64_t len) {
   std::vector<at::Tensor> result;
   result.reserve(len);
@@ -104,7 +112,7 @@ inline std::vector<at::Tensor> pointer_to_list(
 
 template <>
 inline std::vector<c10::optional<at::Tensor>> pointer_to_list(
-    AtenTensorHandle** ptr,
+    const AtenTensorHandle** ptr,
     int64_t len) {
   std::vector<c10::optional<at::Tensor>> result;
   result.reserve(len);
@@ -115,7 +123,7 @@ inline std::vector<c10::optional<at::Tensor>> pointer_to_list(
 }
 
 template <int N>
-inline std::array<bool, N> pointer_to_list(int32_t* ptr) {
+inline std::array<bool, N> pointer_to_list(const int32_t* ptr) {
   std::array<bool, N> result;
   std::copy(ptr, ptr + N, result.begin());
   return result;

@@ -20,7 +20,6 @@ from torchgen.model import (
     FunctionSchema,
     ListType,
     NativeFunction,
-    NativeFunctionsGroup,
     OptionalType,
     Return,
     Type,
@@ -39,6 +38,7 @@ base_type_to_c_type = {
     BaseTy.bool: "int32_t",  # Use int to pass bool
     BaseTy.int: "int64_t",
     BaseTy.SymInt: "int64_t",  # Inductor-generated code won't see a SymInt
+    BaseTy.Scalar: "double",  # Use double to pass both integer and floating point
     BaseTy.float: "double",  # TODO: how about other floating point types?
     BaseTy.str: "const char*",
     BaseTy.DeviceIndex: "int32_t",
@@ -52,6 +52,7 @@ base_type_to_aten_type = {
     BaseTy.bool: "bool",
     BaseTy.int: "int64_t",
     BaseTy.SymInt: "c10::SymInt",
+    BaseTy.Scalar: "c10::Scalar",
     BaseTy.float: "double",
     BaseTy.str: "c10::string_view",
     BaseTy.DeviceIndex: "c10::DeviceIndex",
@@ -65,6 +66,7 @@ base_type_to_callsite_expr = {
     BaseTy.bool: "",
     BaseTy.int: "",
     BaseTy.SymInt: "",
+    BaseTy.Scalar: "",
     BaseTy.float: "",
     BaseTy.str: "",
     BaseTy.DeviceIndex: "static_cast<c10::DeviceIndex>",
@@ -108,7 +110,8 @@ def convert_arg_type_and_name(typ: Type, name: str) -> Tuple[List[str], List[str
         new_aten_types = []
         new_callsite_exprs = []
         for i, aten_type in enumerate(aten_types):
-            c_types[j] = c_types[j] + "*"  # Use pointer to denote optional type
+            # Use pointer to denote optional type
+            c_types[j] = c_types[j] + "*"
             if aten_type.startswith("c10::ArrayRef<"):
                 # ArrayRef is passed as pointer + size, but no need to add "*" to the size argument
                 new_aten_types.append(f"c10::optional<{aten_type}>")
@@ -142,7 +145,8 @@ def convert_arg_type_and_name(typ: Type, name: str) -> Tuple[List[str], List[str
         c_types, names, aten_types, _ = convert_arg_type_and_name(typ.elem, name)
         assert len(c_types) == 1, "ListType with unsupported element type " + repr(typ)
 
-        c_types[0] = c_types[0] + "*"
+        # The list content should never be modified
+        c_types[0] = f"const {c_types[0]}*"
         c_types.append("int64_t")
         name = names[0]
         names.append(name + "_len_")
@@ -301,12 +305,12 @@ def gen_static_dispatch_backend_call(
     return f"at::{backend_index.dispatch_key.lower()}::{cpp_sig.name()}"
 
 
-def gen_c_shim(
-    f: Union[NativeFunction, NativeFunctionsGroup],
+def get_backend_index_for_aoti(
+    f: NativeFunction,
     dispatch_key: DispatchKey,
     backend_indices: Dict[DispatchKey, BackendIndex],
-    header: bool,
-) -> Optional[str]:
+) -> Optional[BackendIndex]:
+    backend_index = None
     if backend_indices[dispatch_key].has_kernel(f):
         backend_index = backend_indices[dispatch_key]
     elif backend_indices[DispatchKey.CompositeExplicitAutograd].has_kernel(f):
@@ -319,14 +323,20 @@ def gen_c_shim(
         backend_index = backend_indices[
             DispatchKey.CompositeExplicitAutogradNonFunctional
         ]
-    else:
+    return backend_index
+
+
+def gen_c_shim(
+    f: NativeFunction,
+    dispatch_key: DispatchKey,
+    backend_indices: Dict[DispatchKey, BackendIndex],
+    header: bool,
+) -> Optional[str]:
+    backend_index = get_backend_index_for_aoti(f, dispatch_key, backend_indices)
+    if backend_index is None:
         return None
 
-    # Only generate C shim for primary variant
-    if isinstance(f, NativeFunctionsGroup):
-        f = backend_index.primary(f)
     schema = f.func
-
     # Only support cases where all returns are Tensors or vector<Tensor>
     if not accepts_at_least_one_tensor_input(schema) or not returns_are_all_tensor(
         schema
@@ -360,13 +370,13 @@ class ShimGenerator:
     header: bool  # True to generate .h and False to generate .cpp
 
     @method_with_native_function
-    def __call__(self, f: Union[NativeFunction, NativeFunctionsGroup]) -> Optional[str]:
+    def __call__(self, f: NativeFunction) -> Optional[str]:
         result = gen_c_shim(f, self.dispatch_key, self.backend_indices, self.header)
         return result
 
 
 def gen_aoti_c_shim(
-    group_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
+    native_functions: Sequence[NativeFunction],
     dispatch_key: DispatchKey,
     backend_indices: Dict[DispatchKey, BackendIndex],
     header: bool,
@@ -376,7 +386,7 @@ def gen_aoti_c_shim(
         list(
             mapMaybe(
                 ShimGenerator(dispatch_key, backend_indices, header),
-                group_native_functions,
+                native_functions,
             )
         )
     )
@@ -400,12 +410,11 @@ extern "C" {{
 """
     else:
         return f"""
-
-{includes}
-
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_{dispatch_key.lower()}.h>
+
+{includes}
 
 using namespace torch::aot_inductor;
 
