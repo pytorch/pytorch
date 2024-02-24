@@ -467,10 +467,11 @@ def create_functionalized_fn(
 
             for i, outp in enumerate(flat_outs[:num_outs]):
                 info = meta.output_info[i]
-                if (
-                    info.output_type == OutputType.is_input and
-                    meta.input_info[info.base_idx].mutation_type == MutationType.MUTATED_IN_GRAPH
+                if info.output_type == OutputType.is_input and (
+                    meta.input_info[info.base_idx].mutation_type
+                    == MutationType.MUTATED_IN_GRAPH
                 ):
+                    assert info.base_idx is not None
                     flat_outs[i] = args[info.base_idx]
             return pytree.tree_unflatten(flat_outs, outs_spec)
 

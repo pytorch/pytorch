@@ -397,6 +397,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
     def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node):
         node_loc = node_order[node]
+        copy_node_loc = node_order[copy_node] if copy_node is not None else None
 
         def is_meta_only_user(node):
             if _is_view_op(node.target):
@@ -405,11 +406,13 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
         for view in shared_view_nodes:
             for user in view.users:
+                user_loc = node_order[user]
                 # Skip all users before node
-                if node_order[user] <= node_loc:
+                if user_loc <= node_loc:
                     continue
-                # Skip over the copy_ epilogue node that could get reinplaced
-                if copy_node == user:
+                # Ignore uses after the copy_ epilogue node, where the input
+                # has already been mutated anyway
+                if copy_node_loc is not None and copy_node_loc <= user_loc:
                     continue
                 # Reinplacing does not change shape metadata
                 if is_meta_only_user(user):
