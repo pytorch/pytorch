@@ -174,6 +174,7 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
     )
     region_id_to_block_ids: Dict[int, List[int]] = defaultdict(list)
     block_id_to_block_arg_ids: Dict[int, List[int]] = {}
+    replacements: Dict[int, Union[Intermediate, Param]] = {}
     next_fake_intermediate = 0
 
     def mlir_to_functions(op) -> None:
@@ -211,6 +212,8 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
                 if parent_region is not None:
                     region_id_to_block_ids[parent_region.id()].append(parent_block_id)
 
+        nonlocal next_fake_intermediate
+
         if name == "tt.func":
             # for function ops: gather and inline
             # the ops from all child blocks
@@ -222,16 +225,19 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
 
             # replace the corresponding Intermediates in the
             # child op args with the function args (Params)
-            params = {
-                idx: Param(i)
-                for i, idx in enumerate(block_id_to_block_arg_ids[child_block_ids[0]])
-            }
+            for i, idx in enumerate(block_id_to_block_arg_ids[child_block_ids[0]]):
+                replacements[idx] = Param(i)
+
             for fn_op_list in fn_ops.values():
                 for fn_op in fn_op_list:
                     for i in range(len(fn_op.args)):
                         arg_idx = fn_op.args[i].idx
-                        if arg_idx in params:
-                            fn_op.args[i] = params[arg_idx]
+                        if arg_idx in replacements:
+                            fn_op.args[i] = replacements[arg_idx]
+
+            # next function capture starts
+            # with empty replacements
+            replacements.clear()
 
             fn_name = op.get_str_attr("sym_name")
             functions[fn_name] = fn_ops
@@ -242,6 +248,15 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
                 # each child block (yield) to return the scf result
                 yield_ops = []
                 for block_id in child_block_ids:
+                    # the block args used as operands of the ops in the block
+                    # (and nested blocks inlined in the current block by now)
+                    # are replaced by new fake Intermediates to avoid "this
+                    # operand is not returned by anything other op in the fn"
+                    # error in the downstream analysis
+                    for idx in block_id_to_block_arg_ids[block_id]:
+                        next_fake_intermediate -= 1
+                        replacements[idx] = Intermediate(next_fake_intermediate)
+
                     if block_id in op_stack:
                         block_ops = op_stack.pop(block_id)
                         yield_ops.extend(block_ops.popitem()[1])
@@ -270,14 +285,50 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
                     res = Intermediate(result_id)
                     block_ops[res].append(Op(name, callee, args, res))
             else:
-                nonlocal next_fake_intermediate
                 next_fake_intermediate -= 1
                 fake_res = Intermediate(next_fake_intermediate)
                 block_ops[fake_res].append(Op(name, callee, args, fake_res))
 
+    def reindex_intermediates(
+        functions: Dict[str, Dict[Intermediate, List[Op]]]
+    ) -> Dict[str, Dict[Intermediate, List[Op]]]:
+        """Renumber Intermediate idx to imrove readability."""
+        new_functions: Dict[str, Dict[Intermediate, List[Op]]] = {}
+        idx_map: Dict[int, int] = {}
+
+        def replace_idx(x):
+            if isinstance(x, Intermediate) and x.idx > 0:
+                if x.idx not in idx_map:
+                    idx_map[x.idx] = len(idx_map)
+                return Intermediate(idx_map[x.idx])
+            return x
+
+        for name, parts in functions.items():
+            new_parts = {}
+            for ret, ops in parts.items():
+                new_ops = []
+                new_ret = replace_idx(ret)
+                for op in ops:
+                    new_args = []
+                    for arg in op.args:
+                        new_args.append(replace_idx(arg))
+                    new_ops.append(
+                        Op(
+                            op.name,
+                            op.fn_call_name,
+                            new_args,
+                            replace_idx(op.ret),
+                        )
+                    )
+                new_parts[new_ret] = new_ops
+            new_functions[name] = new_parts
+            idx_map.clear()
+
+        return new_functions
+
     ttir_module.walk(mlir_to_functions)
 
-    return functions
+    return reindex_intermediates(functions)
 
 
 def parse_ttir(ttir, kwargs):
