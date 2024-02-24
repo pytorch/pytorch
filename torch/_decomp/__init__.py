@@ -171,6 +171,7 @@ def register_decomposition(
     assert type in {"post_autograd", "pre_autograd", "meta"}
 
     def decomposition_decorator(fn: Callable) -> Callable:
+        orig_fn = fn
         if not unsafe:
             fn = _convert_out_params(fn)
 
@@ -183,7 +184,7 @@ def register_decomposition(
 
         # To handle allowing multiple aten_ops at once
         pytree.tree_map_(register, aten_op)
-        return fn
+        return orig_fn
 
     return decomposition_decorator
 

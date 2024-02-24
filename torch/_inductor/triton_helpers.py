@@ -322,3 +322,12 @@ def exclusive_scan_decoupled_lookback_64(
     tl.atomic_xchg(scratch_base + 3 * index + 0, flag_two, sem="release")
 
     return exclusive_prefix
+
+
+@triton.jit
+def frexp(x):
+    # TODO(isuruf): use inline_asm_elementwise here
+    y = tl.math.ilogb(x) + 1
+    exponent = tl.where(x == 0, 0, y)
+    mantissa = tl.where(x == 0, 0, tl.math.ldexp(x, -y))
+    return mantissa, exponent
