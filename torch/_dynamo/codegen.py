@@ -309,6 +309,15 @@ class PyCodegen:
             create_instruction("POP_TOP"),
         ]
 
+    def call_function(self, nargs: int, push_null: bool):
+        self.extend_output(create_call_function(nargs, push_null=push_null))
+
+    def dup_top(self):
+        self.append_output(create_dup_top())
+
+    def store(self, varname):
+        self.append_output(self.create_store(varname))
+
     def make_function_with_closure(
         self, fn_name: str, code: types.CodeType, push_null: bool, num_on_stack=0
     ):

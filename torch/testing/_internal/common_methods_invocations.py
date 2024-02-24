@@ -20147,6 +20147,10 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/85258
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.frexp",
+        torch_opinfo_name="frexp",
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.frac",
         torch_opinfo_name="frac",
         skips=(
