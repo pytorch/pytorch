@@ -4,7 +4,6 @@ from enum import Enum
 from typing import cast, List, Optional, Sequence, Tuple, Union
 
 import torch
-import torch.distributed._functional_collectives as funcol
 
 import torch.distributed.distributed_c10d as c10d
 from torch.distributed._tensor.op_schema import (
@@ -99,9 +98,7 @@ class _NormPartial(_Partial):
     ) -> torch.Tensor:
         assert isinstance(shard_spec, Shard), f"{shard_spec}"
         tensor = self._pre_reduce_transform(tensor)
-        reduced_tensor = super()._reduce_shard_value(
-            tensor, mesh, mesh_dim, shard_spec
-        )
+        reduced_tensor = super()._reduce_shard_value(tensor, mesh, mesh_dim, shard_spec)
         return self._post_reduce_transform(reduced_tensor)
 
     def _reduce_value(
