@@ -94,6 +94,7 @@ manual_torch_name_rule_map = {
     "torch.distributed.get_world_size": TorchInGraphFunctionVariable,
     "torch.distributed._tensor.api.DTensor#from_local": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d._get_group_size_by_name": TorchInGraphFunctionVariable,
+    "torch.distributed.distributed_c10d._resolve_group_name_by_ranks_and_tag": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d._get_group_tag": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d.get_process_group_ranks": TorchInGraphFunctionVariable,
     "torch._utils.is_compiling": TorchInGraphFunctionVariable,
@@ -187,6 +188,8 @@ manual_torch_name_rule_map = {
     "torch._C._functorch._add_batch_dim": TorchInGraphFunctionVariable,
     "torch._C._functorch._remove_batch_dim": TorchInGraphFunctionVariable,
     "torch._C._functorch.is_batchedtensor": TorchInGraphFunctionVariable,
+    "torch._dynamo.mark_static": UserFunctionVariable,
+    "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
 }
 
 
@@ -475,6 +478,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_max_operator_version",
         "torch._C._get_mem_efficient_sdp_enabled",
         "torch._C._get_mkldnn_enabled",
+        "torch._C._get_cudnn_sdp_enabled",
+        "torch._C._set_sdp_use_cudnn",
         "torch._C._get_mobile_model_contained_types_from_buffer",
         "torch._C._get_mobile_model_contained_types",
         "torch._C._get_model_bytecode_version_from_buffer",
@@ -1406,6 +1411,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._scaled_dot_product_efficient_attention",
         "torch._scaled_dot_product_flash_attention",
         "torch._scaled_dot_product_flash_attention_for_cpu",
+        "torch._scaled_dot_product_cudnn_attention",
         "torch._scaled_mm",
         "torch._shape_as_tensor",
         "torch._sobol_engine_draw",
@@ -2304,6 +2310,8 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.backends.cuda.is_built",
         "torch.backends.cuda.math_sdp_enabled",
         "torch.backends.cuda.mem_efficient_sdp_enabled",
+        "torch.backends.cuda.cudnn_sdp_enabled",
+        "torch.backends.cuda.enable_cudnn_sdp",
         "torch.backends.cuda.preferred_linalg_library",
         "torch.backends.cuda.sdp_kernel",
         "torch.backends.cudnn._init",
