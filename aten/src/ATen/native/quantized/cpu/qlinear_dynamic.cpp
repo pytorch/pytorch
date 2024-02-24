@@ -520,8 +520,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
       /*len=*/input.numel());
 #else
   if (input_contig.numel() > 0) {
-    Tensor t_min, t_max;
-    std::tie(t_min, t_max) = at::aminmax(input_contig);
+    auto [t_min, t_max] = at::aminmax(input_contig);
     x_max = t_max.item<float>();
     x_min = t_min.item<float>();
   }
