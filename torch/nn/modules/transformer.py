@@ -314,7 +314,7 @@ class TransformerEncoder(Module):
                 compatibility.
 
         Shape:
-            see the docs in Transformer class.
+            see the docs in `Transformer <https://pytorch.org/docs/stable/generated/torch.nn.Transformer.html>` class.
         """
         src_key_padding_mask = F._canonical_mask(
             mask=src_key_padding_mask,
@@ -464,7 +464,7 @@ class TransformerDecoder(Module):
                 forward and backward compatibility.
 
         Shape:
-            see the docs in Transformer class.
+            see the docs in `Transformer <https://pytorch.org/docs/stable/generated/torch.nn.Transformer.html>` class.
         """
         output = tgt
 
@@ -858,7 +858,7 @@ class TransformerDecoderLayer(Module):
                 forward and backward compatibility.
 
         Shape:
-            see the docs in Transformer class.
+            see the docs in `Transformer <https://pytorch.org/docs/stable/generated/torch.nn.Transformer.html>` class.
         """
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
 
