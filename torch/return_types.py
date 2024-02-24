@@ -3,7 +3,9 @@ import inspect
 
 from torch.utils._pytree import register_pytree_node, SequenceKey
 
-__all__ = ["pytree_register_structseq"]
+__all__ = ["pytree_register_structseq", "all_return_types"]
+
+all_return_types = []
 
 # error: Module has no attribute "_return_types"
 return_types = torch._C._return_types  # type: ignore[attr-defined]
@@ -35,6 +37,7 @@ for name in dir(return_types):
 
     if not name.startswith('_'):
         __all__.append(name)
+        all_return_types.append(_attr)
 
     # Today everything in torch.return_types is a structseq, aka a "namedtuple"-like
     # thing defined by the Python C-API. We're going to need to modify this when that

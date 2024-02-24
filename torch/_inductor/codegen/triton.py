@@ -905,6 +905,20 @@ class TritonKernelOverrides(TritonOverrides):
             f"tl.load({var} + {V.kernel.args.seed_offset('load_seed_offset', offset)})"
         )
 
+    @staticmethod
+    def frexp(x):
+        cache_key = f"frexp({x})"
+        if cache_key in V.kernel.cse.cache:
+            return V.kernel.cse.cache[cache_key]
+
+        mantissa = V.kernel.cse.newvar()
+        exponent = V.kernel.cse.newvar()
+        V.kernel.compute.writeline(
+            f"{mantissa}, {exponent} = triton_helpers.frexp({x})"
+        )
+        V.kernel.cse.cache[cache_key] = (mantissa, exponent)
+        return (mantissa, exponent)
+
 
 # Use mypy to check protocol implemented correctly
 def _typecheck_TritonKernelOverrides(h: TritonKernelOverrides) -> OpsHandler[str]:
@@ -2219,7 +2233,7 @@ class TritonKernel(Kernel):
                     self.compute.splice(
                         f"""\
                     {accumulator}_next, {accumulator_m2}_next, {accumulator_weight}_next = triton_helpers.welford_reduce(
-                        {value}, {accumulator}, {accumulator_m2}, {accumulator_weight}, roffset == 0
+                        {value}, {accumulator}, {accumulator_m2}, {accumulator_weight},
                     )
                     """
                     )
