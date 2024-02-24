@@ -4361,8 +4361,10 @@ class TestSparseMeta(TestCase):
                 [(), (2,)], [(4, 6), (3, 5, 7)], [(), (3,)]
         ):
             if layout is torch.sparse_coo and batch_shape:
+                # COO tensors don't have batch dimensions
                 continue
             if layout is not torch.sparse_coo and len(sparse_shape) != 2:
+                # CSR/CSC/BSR/BSC tensors must have 2 sparse dimensions
                 continue
             printed += self._test_print_meta_data(dtype, layout, batch_shape, sparse_shape, dense_shape)
 
