@@ -857,6 +857,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     )
                 else:
                     prefix_insts.append(copy.copy(inst))
+        assert not (
+            self.pregraph_bytecode and self.export
+        ), "export does not support pregraph_bytecode"
         prefix_insts.extend(self.pregraph_bytecode)
 
         def append_prefix_insts():
