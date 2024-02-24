@@ -2555,7 +2555,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         compile_fn = torch.compile(CustomModel(), fullgraph=True)
 
-        shapes = [(2,1), (6,1), (4,1)]
+        shapes = [(2, 1), (6, 1), (4, 1)]
         for shape in shapes:
             vec1, vec2 = shape
             input_tensor1 = torch.randn(vec1)
