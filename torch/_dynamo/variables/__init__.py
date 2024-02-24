@@ -74,7 +74,6 @@ from .sdpa import SDPAParamsVariable
 from .tensor import (
     FakeItemVariable,
     NumpyNdarrayVariable,
-    ParameterVariable,
     SymNodeVariable,
     TensorVariable,
     UnspecializedPythonVariable,
@@ -121,7 +120,6 @@ __all__ = [
     "NNModuleVariable",
     "NumpyNdarrayVariable",
     "NumpyVariable",
-    "ParameterVariable",
     "PythonModuleVariable",
     "RangeVariable",
     "RemovableHandleVariable",

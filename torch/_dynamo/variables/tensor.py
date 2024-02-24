@@ -9,7 +9,7 @@ from typing import Dict, List
 
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from ..bytecode_transformation import create_call_function, create_call_method
+from ..bytecode_transformation import create_call_method
 from ..external_utils import call_hook_from_backward_state
 
 try:
@@ -1162,46 +1162,3 @@ class UntypedStorageVariable(VariableTracker):
         codegen(self.from_tensor)
         codegen.append_output(codegen.create_load_method("untyped_storage"))
         codegen.extend_output(create_call_method(0))
-
-
-class ParameterVariable(VariableTracker):
-    """Represents a call to torch.nn.Parameter"""
-
-    @staticmethod
-    def create(data=None, requires_grad=True):
-        if isinstance(requires_grad, variables.VariableTracker):
-            try:
-                requires_grad = requires_grad.as_python_constant()
-            except NotImplementedError:
-                unimplemented("Parameter(requires_grad=...) not constant")
-        if data is None:
-            unimplemented("Parameter(data=None) not implemented")
-        return ParameterVariable(data, requires_grad)
-
-    def __init__(self, tensor, requires_grad, **kwargs):
-        super().__init__(**kwargs)
-        self.tensor = tensor
-        assert isinstance(requires_grad, bool)
-        self.requires_grad = requires_grad
-
-    def as_proxy(self):
-        # torch.nn.Parameter is not traceable, so doesn't belong in graph
-        return self.tensor.as_proxy()
-
-    def reconstruct(self, codegen):
-        codegen.load_import_from("torch.nn", "Parameter")
-        codegen(self.tensor)
-        if self.requires_grad:
-            codegen.extend_output(create_call_function(1, True))
-        else:
-            codegen(variables.ConstantVariable.create(False))
-            codegen.extend_output(create_call_function(2, True))
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
-    ) -> VariableTracker:
-        return self.tensor.call_method(tx, name, args, kwargs)

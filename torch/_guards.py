@@ -496,6 +496,10 @@ class GuardsSet:
             for g in o:
                 self.add(g, skip=1)
 
+    def remove_guards_with_source(self, source):
+        """Delete all guards with a given source"""
+        self.inner = {g for g in self.inner if g.originating_source != source}
+
 
 class GuardsContext(Checkpointable[GuardsCheckpointState]):
     def __init__(self):
