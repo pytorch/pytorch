@@ -4217,6 +4217,27 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         T = IncByTwo
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_dont_aggressively_write_assert(self):
+        record_graph = torch._dynamo.testing.EagerAndRecordGraphs()
+
+        @torch.compile(dynamic=True, backend=record_graph)
+        def f(x):
+            assert x.shape[0] > 3
+            assert x[0].sum() > 0
+            assert 1 % (x.shape[0] // 2) != 0
+            assert 32 * (x.shape[0] // 2) ** 2 - 16 * (x.shape[0] // 2) != 0
+            return x.cos()
+
+        f(torch.ones(6, 4))
+        graph = record_graph.graphs[0]
+        for node in graph.graph.nodes:
+            if "example_value" in node.meta and isinstance(
+                node.meta["example_value"], torch._subclasses.fake_tensor.FakeTensor
+            ):
+                shape_env = node.meta["example_value"].fake_mode.shape_env
+                lower_ranges = [val.lower for val in shape_env.var_to_range.values()]
+                self.assertTrue(lower_ranges == [4, 2])
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
