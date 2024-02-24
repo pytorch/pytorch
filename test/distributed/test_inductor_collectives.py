@@ -941,6 +941,23 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled(*inputs)
 
     @run_with_both_funcol_impls
+    def test_dynamo_get_default_group(self):
+
+        def func(tensor):
+            torch.distributed.all_reduce(
+                tensor,
+                # group=torch.distributed.distributed_c10d._get_default_group(),
+                group=torch.distributed.group.WORLD,
+            )
+
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter, fullgraph=True)
+
+        input = torch.ones(2, device=self.device)
+        compiled(input)
+
+
+    @run_with_both_funcol_impls
     def test_dynamo_support_collective_op_with_async_op_False(self):
 
         def func(inp, out, *, pg):

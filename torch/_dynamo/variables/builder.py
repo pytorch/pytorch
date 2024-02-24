@@ -100,6 +100,7 @@ from .dicts import (
 )
 from .distributed import (
     DeviceMeshVariable,
+    GroupMemberClassVariable,
     PlacementClassVariable,
     PlacementVariable,
     ProcessGroupVariable,
@@ -624,6 +625,8 @@ class VariableBuilder:
         elif isinstance(value, torch.optim.Optimizer):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return OptimizerVariable(value, source=self.source)
+        elif GroupMemberClassVariable.is_group_member_type(value):
+            return GroupMemberClassVariable(value, source=self.source)
         elif ProcessGroupVariable.is_process_group(value):
             self.install_guards(GuardBuilder.ID_MATCH)
             return ProcessGroupVariable(value, source=self.source)
