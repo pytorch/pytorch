@@ -175,7 +175,7 @@ static inline scalar_t grid_sampler_compute_source_index(
 // `d output / d input` via pointer argument `grad_in`.
 // This is useful in the backward pass of grid_sampler.
 template <typename coord_scalar_t, typename grad_scalar_t>
-static inline scalar_t grid_sampler_compute_source_index_set_grad(
+static inline coord_scalar_t grid_sampler_compute_source_index_set_grad(
     coord_scalar_t coord,
     int64_t size,
     GridSamplerPadding padding_mode,
@@ -210,7 +210,7 @@ static inline bool within_bounds_3d(int64_t d, int64_t h, int64_t w, int64_t D, 
 }
 
 template<typename data_scalar_t, typename coord_scalar_t>
-static inline scalar_t get_value_bounded(
+static inline data_scalar_t get_value_bounded(
     data_scalar_t* data,
     coord_scalar_t x,
     coord_scalar_t y,
