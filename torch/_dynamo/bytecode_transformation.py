@@ -702,7 +702,7 @@ def check_inst_exn_tab_entries_nested(
         entry_stack.append(key)
 
 
-def fix_broken_exn_tab_entry(instructions, indexof):
+def fix_broken_exn_tab_entry(inst, indexof):
     """
     WORKAROUND SHOULD REMOVE/FIX
 
@@ -712,8 +712,9 @@ def fix_broken_exn_tab_entry(instructions, indexof):
     Repro with:
         PYTORCH_TEST_WITH_DYNAMO=1 python test/test_autograd.py -k test_parameter_resize_cpu
     """
-    for inst in instructions:
-        if inst.exn_tab_entry and inst.target not in indexof:
+    if inst.exn_tab_entry:
+        entry = inst.exn_tab_entry
+        if entry.start not in indexof and entry.target not in indexof:
             inst.exn_tab_entry = None
 
 
@@ -723,10 +724,10 @@ def propagate_inst_exn_table_entries(instructions: List[Instruction]) -> None:
     Supports nested exception table entries.
     """
     indexof = get_indexof(instructions)
-    fix_broken_exn_tab_entry(instructions, indexof)
 
     entries: Dict[Tuple[int, int], InstructionExnTabEntry] = {}
     for inst in instructions:
+        fix_broken_exn_tab_entry(inst, indexof)
         if inst.exn_tab_entry:
             key = (
                 indexof[inst.exn_tab_entry.start],

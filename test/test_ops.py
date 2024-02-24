@@ -1978,7 +1978,12 @@ class TestRefsOpsInfo(TestCase):
         '_refs.imag',
         '_refs.reshape_as',
         '_refs.view_as',
-        '_refs.view_as_complex'  # TorchInductor does not support complex at the moment.
+        '_refs.view_as_complex',  # TorchInductor does not support complex at the moment.
+        # the decompositions for these ops are slightly different
+        # because of out handling
+        '_refs.var_mean',
+        '_refs.std_mean',
+        '_refs.native_layer_norm',
     }
 
     @parametrize("op", ref_ops_names)
