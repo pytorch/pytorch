@@ -6268,6 +6268,8 @@ def reference_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, 
         dict(dim1=1, dim2=0),
         # negative dims are allowed
         dict(dim1=-2, dim2=-1),
+        # one dim negative and the other nonnegative is allowed
+        dict(dim1=-1, dim2=0),
         # out of bounds offset should return an empty tensor in diagonal and
         # offset the diagonal in diag_embed
         dict(offset=100),
