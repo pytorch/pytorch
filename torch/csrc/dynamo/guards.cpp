@@ -7,6 +7,7 @@
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_symnode.h>
+#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/extension.h>
 
 #ifdef USE_CUDA
@@ -14,6 +15,29 @@
 #endif
 
 #include <sstream>
+
+// For TupleIteratorGetItemAccessor, we need a fast way to retrieve the
+// underlying tuple and access the item. Before Python 3.12 version, the
+// datastructure is in tupleobject.c file -
+// https://github.com/python/cpython/blob/9afc6d102d16080535325f645849cd84eb04d57d/Objects/tupleobject.c#L1058-L1062
+// To handle this, we manually copy the struct here and manually cast it to this
+// new struct. From 3.12, the struct is included in the header file.
+#if IS_PYTHON_3_12_PLUS
+
+#define Py_BUILD_CORE
+// Bring _PyTupleIterObject from the header file
+#include <internal/pycore_tuple.h>
+#undef Py_BUILD_CORE
+
+#else
+
+// Manually create _PyTupleIterObject struct
+typedef struct {
+  PyObject_HEAD Py_ssize_t it_index;
+  PyTupleObject* it_seq; /* Set to NULL when iterator is exhausted */
+} _PyTupleIterObject;
+
+#endif // IS_PYTHON_3_12_PLUS
 
 namespace {
 
@@ -726,13 +750,24 @@ class GuardDebugInfo {
   int num_guards_executed;
 };
 
+class GuardManager;
+class RootGuardManager;
+class DictGuardManager;
+
 /**
  * Base class for the leaf guard in the GuardManager hierarchy.
  */
 class LeafGuard {
  public:
+  // Most guards do not need root guard manager.
   LeafGuard(py::object verbose_code_parts)
       : _verbose_code_parts(verbose_code_parts) {}
+
+  // Guards like TENSOR_MATCH require root_guard_manager to access local_state
+  // shared across all leaf guards.
+  LeafGuard(RootGuardManager* root_guard_manager, py::object verbose_code_parts)
+      : _root_guard_manager(root_guard_manager),
+        _verbose_code_parts(verbose_code_parts) {}
 
   // check function could be called from python. This is useful for debugging
   // purpose.
@@ -761,6 +796,11 @@ class LeafGuard {
   // is not exposed to Python and can only be called from C++.
   virtual bool check_nopybind(PyObject* value) = 0;
   virtual ~LeafGuard() = default;
+
+ protected:
+  // RootGuardManager has state that is common across all guards like
+  // LocalState.
+  RootGuardManager* _root_guard_manager;
 
  private:
   // This is set while constructing the leaf guard. This is used for identifying
@@ -871,6 +911,50 @@ class EQUALS_MATCH : public LeafGuard {
 
   // Type of the value
   PyTypeObject* _value_type;
+};
+
+class TUPLE_ITERATOR_LEN : public LeafGuard {
+ public:
+  TUPLE_ITERATOR_LEN(
+      py::object length,
+      py::object type_id,
+      py::object verbose_code_parts)
+      : LeafGuard(verbose_code_parts),
+        _length(py::cast<Py_ssize_t>(length)),
+        _type_id(py::cast<intptr_t>(type_id)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    // Do a type match first.
+    if (Py_TYPE(value) != (void*)_type_id) {
+      return false;
+    }
+    _PyTupleIterObject* it = (_PyTupleIterObject*)value;
+    Py_ssize_t length = 0;
+    if (it->it_seq)
+      length = PyTuple_GET_SIZE(it->it_seq) - it->it_index;
+    return length == _length;
+  }
+
+ private:
+  // Length of the guarded list
+  Py_ssize_t _length;
+  intptr_t _type_id;
+};
+
+class LENGTH_CHECK : public LeafGuard {
+ public:
+  LENGTH_CHECK(py::object value, py::object verbose_code_parts)
+      : LeafGuard(verbose_code_parts), _length(py::cast<Py_ssize_t>(value)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    // PySequence_Length returns -1 if the object is not a sequence. So, we
+    // don't have to test for PySequence_Check.
+    return PySequence_Length(value) == _length;
+  }
+
+ private:
+  // Length of the guarded list
+  Py_ssize_t _length;
 };
 
 class DEFAULT_DEVICE : public LeafGuard {
@@ -1073,9 +1157,67 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
   long unsigned int _counter = 0;
 };
 
-class GuardManager;
-class RootGuardManager;
-class DictGuardManager;
+class DYNAMIC_INDICES : public LeafGuard {
+  // C++ equivalent of
+  // if hasattr(value, "_dynamo_dynamic_indices"):
+  //     code.append(
+  //         f"(({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices}))
+  //         if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  #
+  //         noqa: B950
+  //     )
+  // else:
+  //     code.append(
+  //         f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
+  //     )
+ public:
+  DYNAMIC_INDICES(
+      bool has_attr,
+      py::set dynamic_indices,
+      py::object verbose_code_parts)
+      : LeafGuard(verbose_code_parts),
+        _has_attr(has_attr),
+        _dynamic_indices(dynamic_indices) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    // Make an interned string
+    static PyObject* dynamic_indices_str =
+        PyUnicode_InternFromString("_dynamo_dynamic_indices");
+
+    PyObject* indices = PyObject_GetAttr(value, dynamic_indices_str); // new ref
+    bool has_attr = true;
+    if (indices == nullptr) {
+      // Attr absent. Clear exception.
+      PyErr_Clear();
+      has_attr = false;
+    }
+
+    // Common case - hasattr({tensor_name}, '_dynamo_dynamic_indices') == False
+    if (!_has_attr) {
+      return !has_attr;
+    }
+
+    // "((x._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices}))
+    //       if hasattr(x, '_dynamo_dynamic_indices') else True)
+    if (!has_attr) {
+      return true;
+    }
+
+    static PyObject* issubset_str = PyUnicode_InternFromString("issubset");
+    PyObject* call_result = PyObject_CallMethodOneArg(
+        indices, issubset_str, _dynamic_indices.ptr()); // new ref
+    bool result = PyObject_IsTrue(call_result);
+    Py_DECREF(call_result);
+    Py_DECREF(indices);
+    return result;
+  }
+
+ private:
+  // _has_attr is for the common case - hasattr(x, "_dynamo_dynamic_indices') ==
+  // False
+  bool _has_attr;
+  py::set _dynamic_indices;
+};
+
 // GuardManager can be a pointer to DictGuardManager, but at this point the
 // compiler does not know that DictGuardManager is a derived class of
 // GuardManager (no way to define inheritance relationships in forward
@@ -1407,6 +1549,10 @@ class RootGuardManager : public GuardManager {
     std::lock_guard<std::mutex> lock_guard(_lock);
     Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
 
+    // Get the local state. This will be used for TENSOR_MATCH guards.
+    LocalState state;
+    _local_state = state;
+
     if (!GuardManager::check_nopybind(value)) {
       _reset_relational_guard_state();
       return false;
@@ -1431,6 +1577,10 @@ class RootGuardManager : public GuardManager {
     Py_UNBLOCK_THREADS; // ; is added to avoid clang-formatting
     std::lock_guard<std::mutex> lock_guard(_lock);
     Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
+
+    // Get the local state. This will be used for TENSOR_MATCH guards.
+    LocalState state;
+    _local_state = state;
 
     GuardDebugInfo debug_info = GuardManager::check_verbose_nopybind(value);
     if (!debug_info.result) {
@@ -1475,6 +1625,10 @@ class RootGuardManager : public GuardManager {
       guard->reset_state();
     }
   }
+
+ public:
+  // Local state for TENSOR_MATCH guards.
+  LocalState _local_state;
 
  private:
   // All the relational guards under this guard mananger. We only use these
@@ -1522,6 +1676,84 @@ std::unique_ptr<GuardManager> make_guard_manager(
   // }
   return std::make_unique<GuardManager>(root);
 }
+
+class TENSOR_MATCH : public LeafGuard {
+ public:
+  TENSOR_MATCH(
+      RootGuardManager* root_guard_manager,
+      py::object value,
+      py::object dynamic_dims_sizes_py,
+      py::object dynamic_dims_strides_py,
+      py::object tensor_name,
+      py::object verbose_code_parts)
+      : LeafGuard(root_guard_manager, verbose_code_parts),
+        _tensor_name(py::cast<py::str>(tensor_name)) {
+    PyObject* item = value.ptr();
+    if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
+      PyErr_SetString(PyExc_TypeError, "expected Tensor()");
+      return;
+    }
+    auto tensor = THPVariable_Unpack(item);
+
+    std::vector<std::optional<c10::SymInt>> tensor_dims_size =
+        pyListToVecOptInt(dynamic_dims_sizes_py.ptr());
+    std::vector<std::optional<c10::SymInt>> tensor_dims_stride =
+        pyListToVecOptInt(dynamic_dims_strides_py.ptr());
+
+    tensor_dims_size = tensor_dims_size.empty()
+        ? wrapIntegersInOptional(tensor.sym_sizes())
+        : tensor_dims_size;
+    tensor_dims_stride = tensor_dims_stride.empty()
+        ? wrapIntegersInOptional(tensor.sym_strides())
+        : tensor_dims_stride;
+    LocalState state;
+    _tensor_check = std::make_unique<TensorCheck>(
+        state,
+        Py_TYPE(item),
+        std::move(tensor),
+        std::move(tensor_dims_size),
+        std::move(tensor_dims_stride));
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    if (Py_TYPE(value) != _tensor_check->pytype) {
+      return false;
+    }
+    return _tensor_check->check(
+        _root_guard_manager->_local_state, THPVariable_Unpack(value));
+  }
+
+  virtual GuardDebugInfo check_verbose_nopybind(
+      PyObject* value) override { // borrowed ref
+
+    if (Py_TYPE(value) != _tensor_check->pytype) {
+      std::stringstream fail_reason;
+      PyObject* type_str = PyObject_Str(PyObject_Type(value));
+      fail_reason << "expected type of '" << _tensor_name
+                  << "' to be a tensor type, ";
+      if (!type_str) {
+        fail_reason << "but found a different type";
+      } else {
+        fail_reason << "' but found " << PyUnicode_AsUTF8(type_str);
+      }
+      return GuardDebugInfo(false, fail_reason.str(), 0);
+    }
+
+    std::string fail_reason = _tensor_check->check_verbose(
+        _root_guard_manager->_local_state,
+        THPVariable_Unpack(value),
+        _tensor_name);
+
+    if (fail_reason != "") {
+      return GuardDebugInfo(false, fail_reason, 0);
+    }
+    return GuardDebugInfo(true, 1);
+  }
+
+ private:
+  std::string _tensor_name;
+  std::unique_ptr<TensorCheck> _tensor_check;
+};
 
 /**
  * Represents __getattr__ acccessor.
@@ -1692,6 +1924,118 @@ class TypeGuardAccessor : public GuardAccessor {
   }
 };
 
+/**
+ * Getitem tuple_iterator accessor.
+ */
+class TupleIteratorGetItemAccessor : public GuardAccessor {
+ public:
+  TupleIteratorGetItemAccessor(
+      RootGuardManager* root,
+      py::object index,
+      py::handle example_value)
+      : GuardAccessor(root, index, example_value),
+        _index(py::cast<Py_ssize_t>(index)) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    _PyTupleIterObject* it = (_PyTupleIterObject*)obj;
+    PyObject* x =
+        PyTuple_GET_ITEM(it->it_seq, it->it_index + _index); // borrowed ref
+    if (x == nullptr) {
+      // Out of range.
+      PyErr_Clear();
+      return false;
+    }
+    bool result = _guard_manager->check_nopybind(x);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    _PyTupleIterObject* it = (_PyTupleIterObject*)obj;
+    PyObject* x =
+        PyTuple_GET_ITEM(it->it_seq, it->it_index + _index); // borrowed ref
+    if (x == nullptr) {
+      // Out of range.
+      PyErr_Clear();
+      return GuardDebugInfo(false, std::string("IndexError ") + repr(), 0);
+    }
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    return result;
+  }
+
+  std::string repr() const override {
+    return "TupleIteratorGetItemAccessor(" + std::to_string(_index) + ")";
+  }
+
+ private:
+  Py_ssize_t _index;
+};
+
+/**
+ * GlobalWeakRef accessor. Dynamo can insert a weakref object into the frame
+ * globals. This accessor reads the globals and then calls the weakref object
+ * to get the underlying object. This is a child of GlobalsGuardAccessor.
+ * Therefore, we will get the globals dict while caling check_nopybind.
+ */
+class GlobalWeakRefGuardAccessor : public GuardAccessor {
+ public:
+  GlobalWeakRefGuardAccessor(
+      RootGuardManager* root,
+      py::object global_name,
+      py::handle example_value)
+      : GuardAccessor(root, global_name, example_value),
+        _global_name(global_name.ptr()) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    // obj is globals dict because GlobalWeakRefGuardAccessor has to be a
+    // child of GlobalsGuardAccessor.
+    PyObject* weakref = PyDict_GetItem(obj, _global_name); // borrowed ref
+    if (weakref == nullptr) {
+      // The weakref is not in the globals dict.
+      PyErr_Clear();
+      return false;
+    }
+
+    if (!PyWeakref_Check(weakref)) {
+      return false;
+    }
+
+    PyObject* x = PyWeakref_GetObject(weakref); // borrowed ref
+    return _guard_manager->check_nopybind(x);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    // obj is globals dict because GlobalWeakRefGuardAccessor has to be a
+    // child of GlobalsGuardAccessor.
+    PyObject* weakref = PyDict_GetItem(obj, _global_name); // borrowed ref
+    if (weakref == nullptr) {
+      // The weakref is not in the globals dict.
+      PyErr_Clear();
+      return GuardDebugInfo(false, std::string("KeyError ") + repr(), 0);
+    }
+
+    if (!PyWeakref_Check(weakref)) {
+      return GuardDebugInfo(false, std::string("Not a weakref ") + repr(), 0);
+    }
+
+    PyObject* x = PyWeakref_GetObject(weakref); // borrowed ref
+    return _guard_manager->check_verbose_nopybind(x);
+  }
+
+  std::string repr() const override {
+    return "GlobalWeakRefGuardAccessor(" +
+        py::str(_global_name).cast<std::string>() + ")";
+  }
+
+ private:
+  PyObject* _global_name;
+};
+
 void install_tensor_aliasing_guard(
     GuardManager* x,
     GuardManager* y,
@@ -1826,10 +2170,20 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "EQUALS_MATCH")
       .def(py::init<py::object, py::list>())
       .def("__call__", &EQUALS_MATCH::check);
+  py::class_<LENGTH_CHECK, LeafGuard, std::shared_ptr<LENGTH_CHECK>>(
+      py_m, "LENGTH_CHECK")
+      .def(py::init<py::object, py::list>())
+      .def("__call__", &LENGTH_CHECK::check);
   py::class_<DEFAULT_DEVICE, LeafGuard, std::shared_ptr<DEFAULT_DEVICE>>(
       py_m, "DEFAULT_DEVICE")
       .def(py::init<py::list>())
       .def("__call__", &DEFAULT_DEVICE::check);
+  py::class_<
+      TUPLE_ITERATOR_LEN,
+      LeafGuard,
+      std::shared_ptr<TUPLE_ITERATOR_LEN>>(py_m, "TUPLE_ITERATOR_LEN")
+      .def(py::init<py::object, py::object, py::list>())
+      .def("__call__", &TUPLE_ITERATOR_LEN::check);
   py::class_<GLOBAL_STATE, LeafGuard, std::shared_ptr<GLOBAL_STATE>>(
       py_m, "GLOBAL_STATE")
       .def(py::init<py::list>())
@@ -1838,6 +2192,20 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DATA_PTR_MATCH")
       .def(py::init<py::object, py::list>())
       .def("__call__", &DATA_PTR_MATCH::check);
+  py::class_<DYNAMIC_INDICES, LeafGuard, std::shared_ptr<DYNAMIC_INDICES>>(
+      py_m, "DYNAMIC_INDICES")
+      .def(py::init<bool, py::set, py::list>())
+      .def("__call__", &DYNAMIC_INDICES::check);
+  py::class_<TENSOR_MATCH, LeafGuard, std::shared_ptr<TENSOR_MATCH>>(
+      py_m, "TENSOR_MATCH")
+      .def(py::init<
+           RootGuardManager*,
+           py::object,
+           py::object,
+           py::object,
+           py::str,
+           py::list>())
+      .def("__call__", &TENSOR_MATCH::check);
   py::class_<TENSOR_ALIASING, LeafGuard, std::shared_ptr<TENSOR_ALIASING>>(
       py_m, "TENSOR_ALIASING");
   py::class_<
@@ -1867,6 +2235,16 @@ PyObject* torch_c_dynamo_guards_init() {
       TypeGuardAccessor,
       GuardAccessor,
       std::unique_ptr<TypeGuardAccessor>>(py_m, "TypeGuardAccessor");
+  py::class_<
+      TupleIteratorGetItemAccessor,
+      GuardAccessor,
+      std::unique_ptr<TupleIteratorGetItemAccessor>>(
+      py_m, "TupleIteratorGetItemAccessor");
+  py::class_<
+      GlobalWeakRefGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<GlobalWeakRefGuardAccessor>>(
+      py_m, "GlobalWeakRefGuardAccessor");
 
   // Guard Manager - No constructor in python, python should use
   // RootGuardManager.
@@ -1921,6 +2299,23 @@ PyObject* torch_c_dynamo_guards_init() {
                 std::make_shared<EQUALS_MATCH>(value, verbose_code_parts));
           })
       .def(
+          "add_length_check_guard",
+          [](GuardManager& self,
+             py::object value,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(
+                std::make_shared<LENGTH_CHECK>(value, verbose_code_parts));
+          })
+      .def(
+          "add_tuple_iterator_length_guard",
+          [](GuardManager& self,
+             py::object length,
+             py::object type_id,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<TUPLE_ITERATOR_LEN>(
+                length, type_id, verbose_code_parts));
+          })
+      .def(
           "add_default_device_guard",
           [](GuardManager& self, py::object verbose_code_parts) -> void {
             self.add_leaf_guard(
@@ -1939,6 +2334,31 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(
                 std::make_shared<DATA_PTR_MATCH>(data_ptr, verbose_code_parts));
+          })
+      .def(
+          "add_dynamic_indices_guard",
+          [](GuardManager& self,
+             bool has_attr,
+             py::set value,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<DYNAMIC_INDICES>(
+                has_attr, value, verbose_code_parts));
+          })
+      .def(
+          "add_tensor_match_guard",
+          [](GuardManager& self,
+             py::object value,
+             py::object sizes,
+             py::object strides,
+             py::object tensor_name,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<TENSOR_MATCH>(
+                self.get_root(),
+                value,
+                sizes,
+                strides,
+                tensor_name,
+                verbose_code_parts));
           })
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
@@ -1962,6 +2382,18 @@ PyObject* torch_c_dynamo_guards_init() {
             return self.get_child_manager<TypeGuardAccessor>(
                 unique_key, example_value);
           },
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "tuple_iterator_getitem_manager",
+          &GuardManager::get_child_manager<TupleIteratorGetItemAccessor>,
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "global_weakref_manager",
+          &GuardManager::get_child_manager<GlobalWeakRefGuardAccessor>,
           py::return_value_policy::reference)
       // return by reference because C++ GuardManager has the ownership of
       // accessors and guard managers
