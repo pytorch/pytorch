@@ -676,6 +676,17 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                     for idx, name in enumerate(output_tensor_names):
                         if name in tx.symbolic_locals:
                             tx.symbolic_locals[name] = tensor_variable.items[idx]
+                    for out_tensor, result_tensor in zip(
+                        kwargs["out"].items, tensor_variable.items
+                    ):
+                        if (
+                            out_tensor.source
+                            and out_tensor in tx.output.graphargs
+                            and out_tensor.size != result_tensor.size
+                        ):
+                            # It's hard to get out variants with resizing on graph inputs work
+                            # properly across dynamo/aot/inductor, just fall back.
+                            unimplemented("out variants with resizing on graph inputs")
                 elif isinstance(tensor_variable, TensorVariable):
                     assert isinstance(kwargs["out"], TensorVariable)
                     if (

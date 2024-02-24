@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import functools
+import weakref
 
 import torch
 import torch._dynamo
@@ -15,6 +16,10 @@ TENSOR_ALIASING = guards.TENSOR_ALIASING
 install_tensor_aliasing_guard = guards.install_tensor_aliasing_guard
 NO_TENSOR_ALIASING = guards.NO_TENSOR_ALIASING
 install_no_tensor_aliasing_guard = guards.install_no_tensor_aliasing_guard
+
+
+x = torch.tensor(4)
+weakref_x = weakref.ref(x)
 
 
 class Pair:
@@ -168,6 +173,12 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(guard(foo))
         self.assertFalse(guard(torch.tensor([1, 2, 3])))
 
+    def test_length_check_guard(self):
+        foo = [1, 2, 3]
+        guard = guards.LENGTH_CHECK(len(foo), ["len(x) == len(foo)"])
+        self.assertTrue(guard(foo))
+        self.assertFalse(guard([]))
+
     def test_tensor_aliasing_guard(self):
         guard_manager = RootGuardManager()
 
@@ -200,6 +211,42 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(guard_manager.check(f_locals))
 
         self.assertFalse(guard_manager.check(f_locals_unaliased))
+
+    def test_dynamic_indices_guard(self):
+        guard1 = guards.DYNAMIC_INDICES(False, set(), ["x.size(0) == y.size(0)"])
+        guard2 = guards.DYNAMIC_INDICES(True, set({0, 1}), ["x.size(0) == y.size(0)"])
+
+        x = torch.randn(4)
+        self.assertTrue(guard1(x))
+        self.assertTrue(guard2(x))
+
+        x._dynamo_dynamic_indices = set({0})
+        self.assertFalse(guard1(x))
+        self.assertTrue(guard2(x))
+
+        x._dynamo_dynamic_indices = set({2})
+        self.assertFalse(guard1(x))
+        self.assertFalse(guard2(x))
+
+    def test_tensor_match_guard(self):
+        guard_manager = RootGuardManager()
+        x = torch.randn(4, 4)
+        size = list(x.size())
+        stride = list(x.stride())
+        guard_manager.add_tensor_match_guard(x, size, stride, "x", ["check_tensor(x)"])
+        self.assertTrue(guard_manager.check(x))
+        self.assertTrue(guard_manager.check_verbose(x).result)
+        self.assertTrue(guard_manager.check(torch.randn(4, 4)))
+        self.assertTrue(guard_manager.check_verbose(torch.randn(4, 4)).result)
+        self.assertFalse(guard_manager.check(x.t_()))
+
+        x = torch.randn(4, 4)
+        x.t_()
+        debug_info = guard_manager.check_verbose(x)
+        print(debug_info.verbose_code_parts[0])
+        self.assertTrue(
+            "tensor 'x' stride mismatch" in debug_info.verbose_code_parts[0]
+        )
 
     def test_no_tensor_aliasing_guard(self):
         guard_manager = RootGuardManager()
@@ -383,6 +430,10 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(
             isinstance(type_manager.get_accessors()[0], GetAttrGuardAccessor)
         )
+        mro_manager.add_length_check_guard(
+            3,
+            "Expected len(type(foo).__mro__) == 3",
+        )
 
         # type(foo).__mro__[0].a = 4
         item_manager = mro_manager.getitem_manager(1, type(foo).__mro__[1])
@@ -399,6 +450,45 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         )
 
         self.assertTrue(guard_manager.check(f_locals))
+
+    def test_tuple_iterator_getitem(self):
+        a = (1, 2, 3, 4, 5, 6)
+        foo = iter(a)
+        next(foo)  # foo points at index=1
+
+        guard_manager = RootGuardManager()
+        # Check a[3] which is tuple_iterator_getitem(foo, 2)
+        guard_manager.add_tuple_iterator_length_guard(
+            5, id_type(iter(tuple())), ["len == 5"]
+        )
+        guard_manager.tuple_iterator_getitem_manager(2, foo).add_equals_match_guard(
+            a[3], ["x==4"]
+        )
+
+        # Check that type match works
+        self.assertFalse(guard_manager.check(False))
+
+        self.assertTrue(guard_manager.check(foo))
+
+        # Check that index error fails gracefully
+        b = (1, 2)
+        b_foo = iter(b)
+        self.assertFalse(guard_manager.check(b_foo))
+
+    def test_global_weakref(self):
+        guard_manager = RootGuardManager()
+        globals_manager = guard_manager.globals_dict_manager(globals(), None)
+        weakref_manager = globals_manager.global_weakref_manager("weakref_x", None)
+
+        weakref_manager.add_lambda_guard(
+            lambda x: isinstance(x, torch.Tensor),
+            "global weakref fail",
+        )
+
+        self.assertTrue(guard_manager.check(None))
+        global x
+        del x
+        self.assertFalse(guard_manager.check(None))
 
 
 if __name__ == "__main__":
