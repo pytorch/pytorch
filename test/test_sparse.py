@@ -4322,6 +4322,59 @@ class TestSparseMeta(TestCase):
             for batch_shape, dense_shape in itertools.product([(), (2,)], [(), (3,)]):
                 self._test_basic_sparse_compressed(dtype, layout, batch_shape, dense_shape)
 
+    def _test_print_meta_data(self, dtype, layout, batch_shape, sparse_shape, dense_shape):
+        index_dtype = torch.int64
+        nnz = 0
+        blocksize = (2, 3) if layout in {torch.sparse_bsr, torch.sparse_bsc} else ()
+        shape = (*batch_shape, *sparse_shape, *dense_shape)
+        values = torch.empty((*batch_shape, nnz, *blocksize, *dense_shape), device='meta', dtype=dtype)
+        if layout is torch.sparse_coo:
+            indices = torch.empty((len(sparse_shape), nnz), device='meta', dtype=index_dtype)
+            x = torch.sparse_coo_tensor(indices, values, shape)
+        else:
+            compressed_dim = 0 if layout in {torch.sparse_csr, torch.sparse_bsr} else 1
+            nof_compressed_indices = (sparse_shape[compressed_dim] // blocksize[compressed_dim] + 1 if blocksize
+                                      else sparse_shape[compressed_dim] + 1)
+            compressed_indices = torch.empty((*batch_shape, nof_compressed_indices), device='meta', dtype=index_dtype)
+            plain_indices = torch.empty((*batch_shape, nnz), device='meta', dtype=index_dtype)
+            x = torch.sparse_compressed_tensor(
+                compressed_indices,
+                plain_indices,
+                values,
+                shape,
+                layout=layout
+            )
+
+        printed = []
+        printed.append("########## {}/{}/size={}+{}+{}+{} ##########".format(
+            dtype, index_dtype, batch_shape, sparse_shape, blocksize, dense_shape))
+        printed.append("# sparse meta tensor")
+        printed.append(str(x))
+
+        return printed
+
+    @all_sparse_layouts('layout', include_strided=False)
+    @parametrize("dtype", [torch.float64])
+    def test_print_meta(self, dtype, layout):
+        printed = []
+        for batch_shape, sparse_shape, dense_shape in itertools.product(
+                [(), (2,)], [(4, 6), (3, 5, 7)], [(), (3,)]
+        ):
+            if layout is torch.sparse_coo and batch_shape:
+                continue
+            if layout is not torch.sparse_coo and len(sparse_shape) != 2:
+                continue
+            printed += self._test_print_meta_data(dtype, layout, batch_shape, sparse_shape, dense_shape)
+
+        orig_maxDiff = self.maxDiff
+        self.maxDiff = None
+        try:
+            self.assertExpected('\n'.join(printed))
+            self.maxDiff = orig_maxDiff
+        except Exception:
+            self.maxDiff = orig_maxDiff
+            raise
+
 
 class _SparseDataset(torch.utils.data.Dataset):
     # An utility class used in TestSparseAny.test_dataloader method.
