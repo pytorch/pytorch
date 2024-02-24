@@ -497,7 +497,6 @@ class Function(_SingleLevelFunction):
             "Instantiating an autograd function will raise an "
             "error in a future version of PyTorch.",
             DeprecationWarning,
-            stacklevel=2,
         )
 
     def __call__(self, *args, **kwargs):
