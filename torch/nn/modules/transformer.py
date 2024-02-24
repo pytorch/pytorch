@@ -622,7 +622,7 @@ class TransformerEncoderLayer(Module):
                 compatibility.
 
         Shape:
-            see the docs in Transformer class.
+            see the docs in `Transformer <https://pytorch.org/docs/stable/generated/torch.nn.Transformer.html>` class.
         """
         src_key_padding_mask = F._canonical_mask(
             mask=src_key_padding_mask,
