@@ -13,6 +13,11 @@
 
 namespace pytorch_flash {
 
+
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+#define ARCH_SUPPORTS_FLASH
+#endif
+
 template<bool Clear_dQaccum=true, typename Kernel_traits>
 __global__ void flash_bwd_dot_do_o_kernel(const Flash_bwd_params params) {
     pytorch_flash::compute_dot_do_o<Clear_dQaccum, Kernel_traits>(params);
@@ -29,8 +34,12 @@ __global__ void flash_bwd_dq_dk_dv_loop_kernel(__grid_constant__ const Flash_bwd
 }
 
 template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Is_local, bool Has_alibi, bool Is_even_MN, bool Is_even_K>
+#if defined(ARCH_SUPPORTS_FLASH)
 __global__ void flash_bwd_dq_dk_dv_loop_seqk_parallel_kernel(__grid_constant__ const Flash_bwd_params params) {
-    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+#else
+__global__ void flash_bwd_dq_dk_dv_loop_seqk_parallel_kernel(const Flash_bwd_params params) {
+#endif
+    #if defined(ARCH_SUPPORTS_FLASH)
         static_assert(!(Is_causal && Is_local));  // If Is_local is true, Is_causal should be false
         pytorch_flash::compute_dq_dk_dv_seqk_parallel<Kernel_traits, Is_dropout, Is_causal, Is_local, Has_alibi, Is_even_MN, Is_even_K>(params);
     #else

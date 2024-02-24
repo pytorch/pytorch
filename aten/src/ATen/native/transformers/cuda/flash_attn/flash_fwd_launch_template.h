@@ -12,9 +12,18 @@
 
 namespace pytorch_flash {
 
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+#define ARCH_SUPPORTS_FLASH
+#endif
+
+
 template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Is_local, bool Has_alibi, bool Is_even_MN, bool Is_even_K, bool Return_softmax>
+#if defined(ARCH_SUPPORTS_FLASH)
 __global__ void flash_fwd_kernel(__grid_constant__ const Flash_fwd_params params) {
-    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+#else
+__global__ void flash_fwd_kernel(const Flash_fwd_params params) {
+#endif
+    #if defined(ARCH_SUPPORTS_FLASH)
         static_assert(!(Is_causal && Is_local));  // If Is_local is true, Is_causal should be false
         pytorch_flash::compute_attn<Kernel_traits, Is_dropout, Is_causal, Is_local, Has_alibi, Is_even_MN, Is_even_K, Return_softmax>(params);
     #else
@@ -23,8 +32,12 @@ __global__ void flash_fwd_kernel(__grid_constant__ const Flash_fwd_params params
 }
 
 template<typename Kernel_traits, bool Is_causal, bool Is_local, bool Has_alibi, bool Is_even_MN, bool Is_even_K, bool Split, bool Append_KV>
+#if defined(ARCH_SUPPORTS_FLASH)
 __global__ void flash_fwd_splitkv_kernel(__grid_constant__ const Flash_fwd_params params) {
-    #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+#else
+__global__ void flash_fwd_splitkv_kernel(const Flash_fwd_params params) {
+#endif
+    #if defined(ARCH_SUPPORTS_FLASH)
         pytorch_flash::compute_attn_splitkv<Kernel_traits, Is_causal, Is_local, Has_alibi, Is_even_MN, Is_even_K, Split, Append_KV>(params);
     #else
         printf("FATAL: FlashAttention requires to be build with sm80-sm90, but was built for < 8.0!");
