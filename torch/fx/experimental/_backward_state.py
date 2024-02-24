@@ -4,7 +4,7 @@ import torch.fx
 class BackwardState:
     """
     BackwardState is used to pass Python hooks from the forwards pass
-    into the backwards pass.
+    into the backwards pass in Dynamo+Compiled Autograd.
 
     It is created by TorchDynamo and has special handling there.
     Dynamo will pass an empty BackwardState to the forwards, then populate
@@ -12,7 +12,7 @@ class BackwardState:
     Later on, in CompileAutograd we will inline and add the needed guards
     on the BackwardState.
 
-    It is identified and has special handling in AOTAutograd.
+    BackwardState is identified and has special handling in AOTAutograd.
     During AOTAutograd:
         1) BackwardState is an input to the forwards graph
         2) It must only be used in the backwards
@@ -21,7 +21,7 @@ class BackwardState:
         5) In the backwards it becomes an input
         6) There can only be one per graph
 
-    Note BackwardState requires CompiledAutograd
+    BackwardState requires CompiledAutograd.
     """
 
     proxy: torch.fx.Proxy

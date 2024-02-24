@@ -4,7 +4,7 @@ from torch._higher_order_ops.utils import autograd_not_implemented
 
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
-from torch.fx.experimental.backward_state import BackwardState
+from torch.fx.experimental._backward_state import BackwardState
 
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils._python_dispatch import _get_current_dispatch_mode
@@ -60,23 +60,26 @@ def _assert_meta(grad, size, stride, dtype):
 
 
 @_trace_wrapped_op.py_impl(ProxyTorchDispatchMode)
-def inner_trace(mode, *args, bw_state, **kwargs):
+def inner_trace(mode, *args, bw_state=None, **kwargs):
     import torch
 
     assert len(args) == 1
     grad = args[0]
     assert isinstance(grad, torch.Tensor), grad
-    assert isinstance(bw_state, BackwardState) and bw_state.proxy is not None, bw_state
+    proxy_kwargs = {}
+    if bw_state is not None:
+        assert isinstance(bw_state, BackwardState) and bw_state.proxy is not None
+        proxy_kwargs["bw_state"] = bw_state.proxy
 
-    def self_invoke(*args, bw_state):
+    def self_invoke(*args, **dyn_kwargs):
         with torch.no_grad():
-            return _trace_wrapped_op(*args, **{"bw_state": bw_state, **kwargs})
+            return _trace_wrapped_op(*args, **dyn_kwargs, **kwargs)
 
     out_proxy = mode.tracer.create_proxy(
         "call_function",
         self_invoke,
         (mode.tracer.unwrap_proxy(grad),),
-        {"bw_state": bw_state.proxy},
+        proxy_kwargs,
         name="trace_wrapped",
     )
     grad = torch.zeros_like(grad)

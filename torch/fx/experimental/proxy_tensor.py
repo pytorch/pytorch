@@ -32,8 +32,8 @@ from torch.overrides import TorchFunctionMode
 from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
-from .backward_state import BackwardState
 
+from ._backward_state import BackwardState
 from .sym_node import SymNode
 from ._sym_dispatch_mode import SymDispatchMode
 from torch.fx import Proxy

@@ -5,6 +5,7 @@ from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     hint_int, free_symbols, is_symbol_binding_fx_node, find_symbol_binding_fx_nodes
 )
+from torch.fx.experimental._backward_state import BackwardState
 import torch
 import torch.fx as fx
 import operator
@@ -21,7 +22,6 @@ from .compile_utils import fx_graph_cse, get_aten_target
 from . import config
 import functools
 
-from ..fx.experimental.backward_state import BackwardState
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
 

@@ -20,9 +20,9 @@ from torch._guards import detect_fake_mode, tracing, TracingContext
 from torch._logging import getArtifactLogger
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
+from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
-from ...fx.experimental.backward_state import BackwardState
 from .. import config
 from .dispatch_and_compile_graph import (
     aot_dispatch_autograd_graph,
@@ -424,8 +424,9 @@ def aot_dispatch_autograd(
         def forward(ctx, *deduped_flat_tensor_args):
             args = deduped_flat_tensor_args
             if backward_state_indices:
-                assert isinstance(args[backward_state_indices[0]], BackwardState)
-                ctx._compiled_autograd_backward_state = args[backward_state_indices[0]]
+                bw_state = args[backward_state_indices[0]]
+                assert isinstance(bw_state, BackwardState)
+                ctx._compiled_autograd_backward_state = bw_state
 
             marked_dirty_inps = []
             for i in fw_metadata.mutated_graph_handled_indices_seen_by_autograd:
@@ -733,9 +734,6 @@ Got grad_output types: {str(grad_output_types)}"""
                     assert len(symints) == len(ctx.symints)
                     all_args[: len(symints)] = symints
                     if backward_state_indices:
-                        assert isinstance(
-                            ctx._compiled_autograd_backward_state, BackwardState
-                        )
                         assert ctx._compiled_autograd_backward_state.proxy is not None
                         all_args.append(ctx._compiled_autograd_backward_state)
                     context = torch._C._DisableAutocast if disable_amp else nullcontext

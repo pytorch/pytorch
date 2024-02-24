@@ -27,7 +27,7 @@ from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
 from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
-from torch.fx.experimental.backward_state import BackwardState
+from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
     DimDynamic,

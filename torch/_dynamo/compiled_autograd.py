@@ -10,7 +10,7 @@ from torch._logging import getArtifactLogger
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses import FakeTensorMode
 from torch.fx import GraphModule
-from torch.fx.experimental.backward_state import BackwardState
+from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import (
     decompose,
     disable_autocast_cache,

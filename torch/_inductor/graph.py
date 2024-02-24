@@ -18,10 +18,10 @@ from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._logging import LazyString
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import has_free_symbols, ShapeEnv, SymTypes
 from torch.utils._mode_utils import no_dispatch
-from ..fx.experimental.backward_state import BackwardState
 
 from . import config, ir
 from .codegen.common import (
