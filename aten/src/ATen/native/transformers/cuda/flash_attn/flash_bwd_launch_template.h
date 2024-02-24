@@ -29,7 +29,11 @@ __global__ void flash_bwd_clear_dkvaccum_kernel(const Flash_bwd_params params) {
 }
 
 template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Has_alibi, bool Is_even_M, bool Is_even_K>
+#if defined(ARCH_SUPPORTS_FLASH)
 __global__ void flash_bwd_dq_dk_dv_loop_kernel(__grid_constant__ const Flash_bwd_params params) {
+#else
+__global__ void flash_bwd_dq_dk_dv_loop_kernel(const Flash_bwd_params params) {
+#endif
     pytorch_flash::compute_dq_dk_dv<Kernel_traits, Is_dropout, Is_causal, Has_alibi, Is_even_M, Is_even_K>(params);
 }
 

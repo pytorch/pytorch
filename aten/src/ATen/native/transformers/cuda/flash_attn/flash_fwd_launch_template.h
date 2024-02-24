@@ -45,7 +45,11 @@ __global__ void flash_fwd_splitkv_kernel(const Flash_fwd_params params) {
 }
 
 template<typename Kernel_traits, int kBlockM, int Log_max_splits, bool Is_even_K>
+#if defined(ARCH_SUPPORTS_FLASH)
 __global__ void flash_fwd_splitkv_combine_kernel(__grid_constant__ const Flash_fwd_params params) {
+#else
+__global__ void flash_fwd_splitkv_combine_kernel(const Flash_fwd_params params) {
+#endif
     static_assert(Log_max_splits >= 1);
     pytorch_flash::combine_attn_seqk_parallel<Kernel_traits, kBlockM, Log_max_splits, Is_even_K>(params);
 }
