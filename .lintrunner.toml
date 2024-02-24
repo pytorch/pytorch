@@ -223,7 +223,6 @@ exclude_patterns = [
     'third_party/**/*',
     'torch/csrc/api/**',
     'torch/csrc/autograd/generated/**',
-    'torch/csrc/autograd/profiler_legacy.cpp',
     'torch/csrc/dynamo/*',
     'torch/csrc/distributed/**/*',
     'torch/csrc/inductor/**/*',
