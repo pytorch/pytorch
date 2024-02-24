@@ -6,6 +6,7 @@ import dataclasses
 import dis
 import enum
 import functools
+import gc
 import itertools
 import logging
 import math
@@ -9528,43 +9529,46 @@ fn
 
         self.assertEqual(fn(torch.tensor([0])), torch.zeros(0))
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
-    def test_module_free(self):
-        """Test that CUDA memory is freed when a model goes out of scope"""
+    def _test_compile_model_free(self, model_inp_ctr, weakref_watch):
+        """
+        Args:
+        model_inp_ctr
+            - constructor that returns a new model and inputs to that model
+        weakref_watch
+            - function that returns a layer of the model for weakref to
+              finalize on, so we can check that the layer is freed after
+              the model goes out of scope
+        """
+        cleared = False
+
+        def finalize():
+            nonlocal cleared
+            cleared = True
+
+        def run():
+            mod, inp = model_inp_ctr()
+            weakref.finalize(weakref_watch(mod), finalize)
+            torch.compile(mod, backend="eager")(inp)
+
+        run()
+        gc.collect()
+        self.assertTrue(cleared)
+
+    def test_custom_module_free(self):
+        """Test that a model is freed when it goes out of scope"""
 
         class Mod(torch.nn.Module):
             def __init__(self):
                 super(Mod, self).__init__()
-                self.fc = torch.nn.Linear(10000, 10000)
+                self.fc = torch.nn.Linear(100, 100)
 
             def forward(self, out):
                 return self.fc(out)
 
-        def run(compile):
-            mod = Mod().cuda()
-            if compile:
-                mod = torch.compile(mod, backend="eager")
-            inp = torch.rand(10000, 10000).cuda()
-            mod(inp)
-
-        def clean_and_report_memory():
-            import gc
-
-            gc.collect()
-            return torch.cuda.memory_allocated()
-
-        run(False)
-        # mem1 = clean_and_report_memory()
-        run(True)
-        mem2 = clean_and_report_memory()
-        torch._dynamo.reset_code_caches()
-        mem3 = clean_and_report_memory()
-
-        # it's possible for dynamo to hold on to more memory
-        # even after a _dynamo.reset[_code_caches], so we omit the following check.
-        # self.assertEqual(mem1, mem2)
-
-        self.assertEqual(mem2, mem3)
+        self._test_compile_model_free(
+            lambda: (Mod(), torch.randn(100, 100)),
+            lambda mod: mod.fc,
+        )
 
     def test_dynamo_cache_move_to_front(self):
         class Mod(torch.nn.Module):
