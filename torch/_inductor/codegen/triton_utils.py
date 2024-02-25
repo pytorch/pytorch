@@ -67,7 +67,6 @@ def config_of(
     args: List[KernelArgType],
     *,
     indices: Optional[List[int]] = None,
-    add_equal_to_1: bool = False,
 ) -> Any:
     if indices is None:
         indices = list(range(len(args)))
@@ -115,20 +114,16 @@ def config_of(
         if is_aligned(arg, alignment=8, include_tensor=False)
     )
 
-    if add_equal_to_1:
-        equal_to_1 = tuple(
-            i
-            for i, arg in zip(indices, args)
-            if isinstance(arg, SizeArg)
-            and arg.expr is not None
-            and V.graph.sizevars.statically_known_equals(arg.expr, 1)  # type: ignore[arg-type]
-        )
-        # ids_of_folded_args is set from equal_to_1
-        # and None args by the Triton compiler
-        ids_of_folded_args = tuple(equal_to_1)
-    else:
-        equal_to_1 = ()
-        ids_of_folded_args = ()
+    equal_to_1 = tuple(
+        i
+        for i, arg in zip(indices, args)
+        if isinstance(arg, SizeArg)
+        and arg.expr is not None
+        and V.graph.sizevars.statically_known_equals(arg.expr, 1)  # type: ignore[arg-type]
+    )
+    # ids_of_folded_args is set from equal_to_1
+    # and None args by the Triton compiler
+    ids_of_folded_args = tuple(equal_to_1)
 
     return instance_descriptor(
         divisible_by_16, equal_to_1, ids_of_folded_args, divisible_by_8

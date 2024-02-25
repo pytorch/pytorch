@@ -1049,8 +1049,8 @@ class WrapperCodeGen(CodeGen):
             ),
             "device": V.graph.scheduler.current_device.index,
             "device_type": V.graph.scheduler.current_device.type,
-            # Triton compiler includes equal_to_1 and None args into constants
-            # even when they are not constexpr. otherwise there may be a segfault
+            # Triton compiler includes equal_to_1 args into constants even
+            # when they are not constexpr. otherwise there may be a segfault
             # during launching the Inductor-compiled Triton kernel.
             # TODO(aakhundov): add None args to constnats, too. currently, this
             # causes CUDA errors in test_aot_inductor.test_triton_kernel_with_none_input.
@@ -1064,7 +1064,6 @@ class WrapperCodeGen(CodeGen):
                 config_of(
                     signature,
                     indices=non_constant_indices,
-                    add_equal_to_1=True,
                 )
             ],
         }
