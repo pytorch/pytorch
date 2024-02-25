@@ -7039,6 +7039,11 @@ class LoopBodyBlock:
                     "call_module", name, (dtype_proxy, value_proxy, init_proxy), {}
                 )
 
+            def frexp(self, value_proxy):
+                result = self._inner.frexp(value_proxy)
+                # Proxies are iterable, but some methods expect tuples/lists
+                return (result[0], result[1])
+
             @staticmethod
             def indirect_indexing(index_proxy, size, check=True):
                 """
