@@ -120,6 +120,7 @@ def config_of(
             i
             for i, arg in zip(indices, args)
             if isinstance(arg, SizeArg)
+            and arg.expr is not None
             and V.graph.sizevars.statically_known_equals(arg.expr, 1)  # type: ignore[arg-type]
         )
         # ids_of_folded_args is set from equal_to_1

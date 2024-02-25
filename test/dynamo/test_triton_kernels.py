@@ -961,19 +961,49 @@ def forward(self, x_1, output_1):
 
     @requires_cuda
     @skipIfRocm
-    def test_triton_kernel_equal_to_1_arg(self):
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_triton_kernel_equal_to_1_arg(self, dynamic):
+        @triton.jit
+        def add_kernel_half_n_elements(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            half_n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < half_n_elements * 2
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
         def f(x, y):
-            out = torch.zeros_like(x)
-            n_elements = x.numel()
-            add_kernel[(n_elements,)](x, y, out, n_elements, BLOCK_SIZE=16)
+            out = torch.empty_like(x)
+            half_n_elements = x.numel() // 2
+            add_kernel_half_n_elements[(half_n_elements,)](
+                x, y, out, half_n_elements, BLOCK_SIZE=16
+            )
             return out
 
-        x = torch.randn(1, device="cuda")
-        y = torch.randn(1, device="cuda")
+        x = torch.randn(2, device="cuda")
+        y = torch.randn(2, device="cuda")
         eager_out = f(x, y)
-        compiled_out, sources = run_and_get_code(torch.compile(f), x, y)
-        self.assertTrue("equal_to_1=(3,)" in sources[0])
-        self.assertTrue("ids_of_folded_args=(3,)" in sources[0])
+        compiled_out, sources = run_and_get_code(
+            torch.compile(f, dynamic=dynamic), x, y
+        )
+
+        if dynamic:
+            # when half_n_elements passed to the Triton kernel is
+            # dynamic, equal_to_1 specializaiton can't be enforced
+            self.assertTrue("equal_to_1=()" in sources[0])
+            self.assertTrue("ids_of_folded_args=()" in sources[0])
+        else:
+            self.assertTrue("equal_to_1=(3,)" in sources[0])
+            self.assertTrue("ids_of_folded_args=(3,)" in sources[0])
+
         self.assertEqual(compiled_out, eager_out)
 
 
