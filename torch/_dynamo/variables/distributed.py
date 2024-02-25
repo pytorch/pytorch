@@ -70,7 +70,12 @@ def is_constant_pg_functions(value):
     return inspect.isfunction(value) and value in constant_processgroup_functions
 
 
-class GroupMemberClassVariable(DistributedVariable):
+class WorldMetaClassVariable(DistributedVariable):
+    """
+    Tracks torch.distributed.GroupMember and torch.distributed.group, which are
+    instances of the metaclass _WorldMeta.
+    """
+
     @classmethod
     def is_group_member_type(cls, value):
         if not cls.is_available():
