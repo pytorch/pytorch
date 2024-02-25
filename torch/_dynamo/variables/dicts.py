@@ -174,13 +174,15 @@ class ConstDictVariable(VariableTracker):
             codegen(value)
         # BUILD_MAP and calling collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
-            return [
-                create_instruction("BUILD_MAP", arg=len(self.items)),
-                *create_call_function(1, False),
-            ]
+            codegen.extend_output(
+                [
+                    create_instruction("BUILD_MAP", arg=len(self.items)),
+                    *create_call_function(1, False),
+                ]
+            )
         # BUILD_MAP only if user_cls is dict
         else:
-            return [create_instruction("BUILD_MAP", arg=len(self.items))]
+            codegen.append_output(create_instruction("BUILD_MAP", arg=len(self.items)))
 
     def getitem_const(self, arg: VariableTracker):
         key = ConstDictVariable._HashableTracker(arg)
@@ -358,7 +360,7 @@ class SetVariable(ConstDictVariable):
 
     def reconstruct(self, codegen):
         codegen.foreach([x.vt for x in self.set_items])
-        return [create_instruction("BUILD_SET", arg=len(self.set_items))]
+        codegen.append_output(create_instruction("BUILD_SET", arg=len(self.set_items)))
 
     def call_method(
         self,
@@ -419,10 +421,12 @@ class DictView(VariableTracker):
 
     def reconstruct(self, codegen):
         codegen(self.dv_dict)
-        return [
-            create_instruction("LOAD_METHOD", argval=self.kv),
-            *create_call_method(0),
-        ]
+        codegen.extend_output(
+            [
+                create_instruction("LOAD_METHOD", argval=self.kv),
+                *create_call_method(0),
+            ]
+        )
 
     def call_method(
         self,
@@ -610,7 +614,7 @@ class DataClassVariable(ConstDictVariable):
         d = self.keys_as_python_constant()
         codegen.foreach(d.values())
         keys = tuple(d.keys())
-        return codegen.create_call_function_kw(len(keys), keys, True)
+        codegen.extend_output(codegen.create_call_function_kw(len(keys), keys, True))
 
     def call_method(
         self,
@@ -730,7 +734,7 @@ class CustomizedDictVariable(ConstDictVariable):
         d = self.keys_as_python_constant()
         codegen.foreach(d.values())
         keys = tuple(d.keys())
-        return codegen.create_call_function_kw(len(keys), keys, True)
+        codegen.extend_output(codegen.create_call_function_kw(len(keys), keys, True))
 
     def call_method(
         self,
@@ -827,7 +831,6 @@ class PythonSysModulesVariable(VariableTracker):
     def python_type(self):
         return dict
 
-    @staticmethod
     def reconstruct(self, codegen):
         codegen.extend_output(
             [
