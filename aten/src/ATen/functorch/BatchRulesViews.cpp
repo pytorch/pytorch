@@ -163,9 +163,7 @@ const Tensor& resize__plumbing(
     return self.resize_(size, optional_memory_format);
   }
 
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  auto [self_value, self_bdim] = unwrapTensorAtLevel(self, cur_level);
   TORCH_INTERNAL_ASSERT(self_bdim.has_value());
 
   // TODO: The following algorithm only works for batch dim == 0.

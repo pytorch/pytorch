@@ -61,7 +61,7 @@ struct TORCH_API LegacyEvent {
       int64_t cpu_ns,
       bool cuda_recorded,
       int64_t cuda_memory_usage = 0,
-      int device = -1,
+      c10::DeviceIndex device = -1,
       double cuda_us = -1)
       : cpu_ns_(cpu_ns),
         name_(std::move(name)),
@@ -141,7 +141,7 @@ struct TORCH_API LegacyEvent {
     return cuda_event != nullptr || (isRemote() && device_ != -1);
   }
 
-  int device() const {
+  c10::DeviceIndex device() const {
     return device_;
   }
 
