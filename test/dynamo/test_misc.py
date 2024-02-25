@@ -2546,6 +2546,29 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(same(fn(x, y), opt_fn(x.clone(), y.clone())))
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_out_variants_with_resizing_on_graph_inputs_with_dynamic(self):
+        # https://github.com/pytorch/pytorch/issues/120482
+        class CustomModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, inputs):
+                return torch.outer(**inputs)
+
+        compile_fn = torch.compile(CustomModel(), fullgraph=True)
+
+        shapes = [(2, 1), (6, 1), (4, 1)]
+        for shape in shapes:
+            vec1, vec2 = shape
+            input_tensor1 = torch.randn(vec1)
+            input_tensor2 = torch.randn(vec2)
+            out_tensor = torch.empty(shape)
+            args = {"input": input_tensor1, "vec2": input_tensor2, "out": out_tensor}
+            res = compile_fn(args)
+            opt_res = res.clone()  # cuz this is out and we mutate it
+            res = CustomModel()(args)
+            self.assertEqual(res, opt_res)
+
     def test_dict_mutation_side_effect(self):
         def fn(d):
             d["c"] = d["a"] + d.pop("b")
