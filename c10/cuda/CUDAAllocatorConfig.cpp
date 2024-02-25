@@ -281,7 +281,6 @@ void CUDAAllocatorConfig::parseArgs(const char* env) {
         // ROCm build's hipify step will change "cuda" to "hip", but for ease of
         // use, accept both. We must break up the string to prevent hipify here.
         config_item_view == "release_lock_on_hipmalloc" ||
-        config_item_view ==
             "release_lock_on_c"
             "udamalloc") {
       used_native_specific_option = true;
@@ -298,7 +297,6 @@ void CUDAAllocatorConfig::parseArgs(const char* env) {
         // ROCm build's hipify step will change "cuda" to "hip", but for ease of
         // use, accept both. We must break up the string to prevent hipify here.
         config_item_view == "pinned_use_hip_host_register" ||
-        config_item_view ==
             "pinned_use_c"
             "uda_host_register") {
       i = parsePinnedUseCudaHostRegister(config, i);
