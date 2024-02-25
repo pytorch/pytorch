@@ -148,7 +148,7 @@ static Device getATenDevice(const DLDevice& ctx, void* data) {
 }
 
 ScalarType toScalarType(const DLDataType& dtype) {
-  ScalarType stype;
+  ScalarType stype = ScalarType::Undefined;
   TORCH_CHECK(dtype.lanes == 1, "ATen does not support lanes != 1");
   switch (dtype.code) {
     case DLDataTypeCode::kDLUInt:
@@ -306,7 +306,7 @@ Tensor fromDLPack(const DLManagedTensor* src) {
 
 Tensor fromDLPack(
     const DLManagedTensor* src,
-    std::function<void(void*)> deleter) {
+    const std::function<void(void*)>& deleter) {
   Device device = getATenDevice(src->dl_tensor.device, src->dl_tensor.data);
   ScalarType stype = toScalarType(src->dl_tensor.dtype);
   if (!src->dl_tensor.strides) {
