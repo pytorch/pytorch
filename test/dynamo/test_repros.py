@@ -4238,6 +4238,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 lower_ranges = [val.lower for val in shape_env.var_to_range.values()]
                 self.assertTrue(lower_ranges == [4, 2])
 
+        @torch.compile(dynamic=True, backend=record_graph)
+        def f_fail(x):
+            assert x.shape[0] < 3
+
+        with self.assertRaisesRegex(RuntimeError, "Symbolic expression for assertion"):
+            f_fail(torch.ones(6, 4))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

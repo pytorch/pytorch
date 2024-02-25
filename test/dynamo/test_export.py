@@ -2922,11 +2922,11 @@ def forward(self, x):
     @config.patch(assume_static_by_default=False)
     def test_export_persist_assert(self):
         def f(x):
-            assert x.shape[0] > 4, "Shape must be more than 4"
+            assert x[0].sum() > 4, "Shape must be more than 4"
             return x.cos() + x.sin()
 
         gm, guard = torch._dynamo.export(f, aten_graph=True, tracing_mode="symbolic")(
-            torch.randn(5, 4, 6)
+            torch.ones(5, 4, 6)
         )
 
         def has_aten_op(gm, op):
@@ -2942,7 +2942,7 @@ def forward(self, x):
         self.assertTrue(has_aten_op(gm, torch.ops.aten._assert_async.msg))
 
         with self.assertRaisesRegex(RuntimeError, "Shape must be more than 4"):
-            gm(torch.randn(3, 4, 5))
+            gm(torch.zeros(3, 4, 5))
 
     @common_utils.parametrize(
         "type_fn",
