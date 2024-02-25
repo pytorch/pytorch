@@ -354,6 +354,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             (2, (8, channel_size), (8,)),  # calling aten.nll_loss_forward
             (3, (8, channel_size, 12), (8, 12)),  # calling aten.nll_loss2d_forward
         ]
+        weight = torch.rand(channel_size, device=self.device_type)
         for input_ndim, input_size, target_size in test_setup:
             x = torch.rand(*input_size, device=self.device_type, requires_grad=True)
             target = torch.randint(channel_size, target_size, device=self.device_type)
@@ -362,10 +363,10 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             reductions = ["none", "mean", "sum"]
             for shard_dim, reduction in itertools.product(shard_dims, reductions):
                 dist_x = distribute_tensor(x, device_mesh, [Shard(shard_dim)])
-                y = F.cross_entropy(x, target, reduction=reduction)
+                y = F.cross_entropy(x, target, weight, reduction=reduction)
                 with loss_parallel():
                     if shard_dim == channel_dim:
-                        dist_y = F.cross_entropy(dist_x, target, reduction=reduction)
+                        dist_y = F.cross_entropy(dist_x, target, weight, reduction=reduction)
                         self.assertTrue(dist_y.placements[0].is_replicate())
                         self.assertEqual(dist_y.to_local(), y)
 

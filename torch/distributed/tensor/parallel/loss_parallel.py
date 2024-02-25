@@ -7,7 +7,7 @@ import torch._prims_common as utils
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 from torch import Tensor
-from torch.distributed._tensor import DTensor, Replicate
+from torch.distributed._tensor import DTensor, Replicate, Shard
 from torch.distributed._tensor.ops.embedding_ops import _MaskPartial
 from torch.distributed._tensor.ops.math_ops import (
     _skip_dim,
@@ -23,7 +23,7 @@ aten = torch.ops.aten
 @contextlib.contextmanager
 def loss_parallel():
     """
-    Context manager to enable loss parallelism.
+    A Context Manager to enable loss parallelism.
     """
     _enable_custom_loss_ops()
 
@@ -49,16 +49,17 @@ def _find_all_reduce_mesh_dim(placements: Tuple[Placement, ...], dim: int) -> in
 def _cast_to_dtensor(
     tensor, placements: Tuple[Placement, ...], mesh: DeviceMesh
 ) -> DTensor:
-    assert isinstance(tensor, DTensor | torch.Tensor)
     if isinstance(tensor, DTensor):
         if tensor.placements == placements:
             return tensor
         else:
             raise RuntimeError(f"Expected {placements} but got {tensor.placements}.")
-    else:
+    elif isinstance(tensor, torch.Tensor):
         return DTensor.from_local(
             tensor, device_mesh=mesh, placements=placements, run_check=False
         )
+    else:
+        raise TypeError(f"Unsupported type {type(tensor)}")
 
 
 def _propagate_tensor_meta(
@@ -182,6 +183,7 @@ def _nll_loss_forward(
     x: Tensor,
     target: Tensor,
     weight: Optional[Tensor],
+    local_weight: Optional[Tensor],
     reduction: int,
     ignore_index: int,
     channel_dim_size: int,
@@ -193,7 +195,7 @@ def _nll_loss_forward(
     if n_dims < 2:
         channel_dim = 0
 
-    if weight is not None:
+    def _weight_view(weight: Tensor) -> Tensor:
         if n_dims > 1:
             shape = [
                 1,
@@ -202,16 +204,20 @@ def _nll_loss_forward(
             w = weight.view(shape)
         else:
             w = weight
-        # TODO: need sharded weight
-        x = x * w
+        return w
+
+    if weight is not None:
+        w = _weight_view(weight)
+        local_w = _weight_view(local_weight)
+        x = x * local_w
     safe_target = torch.where(target != ignore_index, target, 0)
     safe_target_ = safe_target.unsqueeze(channel_dim)
 
     # The following code block is a distributed version of
     # result = -torch.gather(self, channel_dim, safe_target_).squeeze(channel_dim)
     partial_placement = _MaskPartial(logical_dim_size=channel_dim_size)
-    safe_target_ = partial_placement._partition_value(safe_target_, mesh, mesh_dim)
-    result_partial = torch.gather(x, channel_dim, safe_target_)
+    safe_target_partial_ = partial_placement._partition_value(safe_target_, mesh, mesh_dim)
+    result_partial = torch.gather(x, channel_dim, safe_target_partial_)
     # an all_reduce happens here
     result_reduced = partial_placement._reduce_value(result_partial, mesh, mesh_dim)
     result = -result_reduced.squeeze(channel_dim)
@@ -223,8 +229,9 @@ def _nll_loss_forward(
         return result, total_weight
 
     if weight is not None:
-        # TODO: need replicated weight
-        w = w.expand(x.shape)
+        new_shape = list(x.shape)
+        new_shape[channel_dim] = -1
+        w = w.expand(new_shape)
         wsum = torch.gather(w, channel_dim, safe_target_).squeeze(channel_dim)
         wsum = torch.where(target != ignore_index, wsum, 0)
         total_weight = wsum.sum()
@@ -241,7 +248,6 @@ def _nll_loss_forward(
     return result, total_weight
 
 
-# TODO: add input shapes checking as in torch._decomp.decomposition
 def _nll_loss_forward_handler(
     op_call: torch._ops.OpOverload,
     args: Tuple[object, ...],
@@ -265,8 +271,16 @@ def _nll_loss_forward_handler(
     )
     all_replicate_placements = (Replicate(),) * spec.mesh.ndim
     target = _cast_to_dtensor(target, target_placements, spec.mesh)
+    local_weight = None
     if weight is not None:
         weight = _cast_to_dtensor(weight, all_replicate_placements, spec.mesh)
+        # For local computation, both (replicated) weight and (sharded) local_weight
+        # are needed in _nll_loss_forward(). local_weight is generated here using
+        # DTensor API, without incurring any communication.
+        sharded_placements = list(all_replicate_placements)
+        sharded_placements[mesh_dim] = Shard(0)
+        local_weight = weight.redistribute(spec.mesh, sharded_placements)._local_tensor
+        assert local_weight.shape[0] == x._local_tensor.shape[channel_dim]
 
     if reduction == Reduction.NONE.value:
         output_placements = target_placements
@@ -282,6 +296,7 @@ def _nll_loss_forward_handler(
         x._local_tensor,
         target._local_tensor,
         weight._local_tensor if weight is not None else None,
+        local_weight,
         reduction,
         ignore_index,
         channel_dim_size,
@@ -357,8 +372,13 @@ def _nll_loss_and_log_softmax_backward(
         new_shape = [1 for _ in range(x.dim())]
         new_shape[channel_dim] = weight.shape[0]
         weight = weight.reshape(new_shape)
-        # TODO: need sharded weight
-        grad_output = grad_output * weight
+        # In order for fused computation to work, the following line is rewritten.
+        # grad_output = grad_output * weight
+        new_shape = list(x.shape)
+        new_shape[channel_dim] = -1
+        w = weight.expand(new_shape)
+        w_target = torch.gather(w, channel_dim, target)
+        grad_output = grad_output * w_target
 
     grad_output = torch.where(target != ignore_index, grad_output, 0)
 
@@ -369,7 +389,6 @@ def _nll_loss_and_log_softmax_backward(
     return (grad_input + torch.exp(x)) * grad_output
 
 
-# TODO: add input shapes checking as in torch._decomp.decomposition
 def _nll_loss_backward_handler(
     op_call: torch._ops.OpOverload,
     args: Tuple[object, ...],
