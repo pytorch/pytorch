@@ -1663,6 +1663,7 @@ class CPUReproTests(TestCase):
             "index_expr",
             "signbit",
             "isinf",
+            "frexp",
             "mod",
             "masked",
             "randn",
