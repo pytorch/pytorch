@@ -305,7 +305,7 @@ Tensor fromDLPack(const DLManagedTensor* src) {
 
 Tensor fromDLPack(
     const DLManagedTensor* src,
-    std::function<void(void*)> deleter) {
+    const std::function<void(void*)>& deleter) {
   Device device = getATenDevice(src->dl_tensor.device, src->dl_tensor.data);
   ScalarType stype = toScalarType(src->dl_tensor.dtype);
   if (!src->dl_tensor.strides) {
