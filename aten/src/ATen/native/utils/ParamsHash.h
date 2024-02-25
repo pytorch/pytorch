@@ -10,6 +10,8 @@ namespace at::native {
 // Fowler–Noll–Vo hash function
 // see
 // https://en.wikipedia.org/wiki/Fowler%E2%80%93Noll%E2%80%93Vo_hash_function
+// WARNING: This hash function will produce unexpected results for `Params` with uninitialized padding values, as the
+// padding is also part of the hash. Use with caution.
 template <typename Params>
 struct ParamsHash {
   // Params must be a POD because we read out its memory

@@ -2230,6 +2230,23 @@ Call this whenever a new thread is created in order to propagate values from
         return torch::should_allow_numbers_as_tensors(name);
       });
 
+  // FIXME(crcrpar): Better to have `at::ScalarType` get mapped to `torch.dtype`
+  // Currently I see the second item of the key is displayed as
+  // e.g. `torch._C._te.ScalarType at 0x7fcf318adab0`
+  // I thought adding an appropriate type_caster of `at::ScalarType` to
+  // torch/csrc/pybind.h` would solve this but it caused segmentation fault in
+  // my environment.
+  using _DeviceDtypeKey = std::pair<at::Device, std::string>;
+  struct _DeviceDtypeHasher {
+    std::size_t operator()(const _DeviceDtypeKey& k) const noexcept {
+      return std::hash<at::Device>{}(k.first) ^
+          std::hash<std::string>{}(k.second);
+    }
+  };
+  using _FlatMap = std::unordered_map<
+      _DeviceDtypeKey,
+      at::native::TensorsAndIndicesT,
+      _DeviceDtypeHasher>;
   py_module.def(
       "_group_tensors_by_device_and_dtype",
       [](const std::vector<std::vector<std::optional<at::Tensor>>>&
