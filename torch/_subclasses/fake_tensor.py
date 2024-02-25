@@ -151,6 +151,19 @@ def maybe_get_fake_mode(t):
     return None
 
 
+def _is_sparse_compressed(t):
+    return t.layout in {
+        torch.sparse_csr,
+        torch.sparse_csc,
+        torch.sparse_bsr,
+        torch.sparse_bsc,
+    }
+
+
+def _is_sparse_any(t):
+    return t.layout is torch.sparse_coo or _is_sparse_compressed(t)
+
+
 @functools.lru_cache(None)
 def get_schema_info(func):
     return torch._C._SchemaInfo(func._schema)  # type: ignore[attr-defined]
@@ -677,7 +690,7 @@ class TensorMetadata:
     is_conj: bool
     is_neg: bool
     is_inference: bool
-    is_sparse: bool
+    is_sparse: bool  # TODO: eliminate is_sparse and use _is_sparse_any(...) instead
     is_coalesced: Optional[bool]
     dense_dim: Optional[int]
     sparse_dim: Optional[int]
@@ -706,8 +719,8 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
         is_inference=t.is_inference(),
         is_sparse=t.is_sparse,
         is_coalesced=t.is_coalesced() if t.is_sparse else None,
-        dense_dim=t.dense_dim() if t.is_sparse else None,
-        sparse_dim=t.sparse_dim() if t.is_sparse else None,
+        dense_dim=t.dense_dim() if _is_sparse_any(t) else None,
+        sparse_dim=t.sparse_dim() if _is_sparse_any(t) else None,
     )
 
 
@@ -1042,7 +1055,7 @@ class FakeTensorMode(TorchDispatchMode):
                     raise _BypassDispatchCache("symbolic shape")
                 if arg.constant is not None:
                     raise _BypassDispatchCache("constant attribute")
-                if arg.is_sparse:
+                if _is_sparse_any(arg):
                     raise _BypassDispatchCache("sparse tensor")
                 result.append(extract_tensor_metadata(arg))
             elif isinstance(arg, torch.Tensor):
@@ -1083,7 +1096,7 @@ class FakeTensorMode(TorchDispatchMode):
             raise _BypassDispatchCache("constant attribute")
 
         # TODO: support caching sparse outputs?
-        if output.is_sparse:
+        if _is_sparse_any(output):
             raise _BypassDispatchCache("sparse output")
 
         # Can an in-place op really reference a kwarg? If so, then we need
@@ -1368,7 +1381,7 @@ class FakeTensorMode(TorchDispatchMode):
                     # TODO: Remove these exclusions, so that we can remove
                     # this leg entirely
                     torch_decomp_decompositions(func)
-                    and all(not e.is_sparse for e in flat_arg_fake_tensors)
+                    and all(not _is_sparse_any(e) for e in flat_arg_fake_tensors)
                 )
             ):
                 with self:

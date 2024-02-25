@@ -5329,6 +5329,7 @@
   dispatch:
     CompositeExplicitAutograd: detach
     NestedTensorCPU, NestedTensorCUDA: detach
+    SparseCsrMeta: detach  # TODO: remove when SparseCsr becomes a functionality key
 
 # Like `detach()`, but modifies this `Variable` in-place. This method may
 # only be called on non-view `Variable`s. You can use `is_view()` to check

@@ -70,6 +70,9 @@ def assert_metadata_eq(assert_eq, m1, m2, *, skip_symbolic=False):
             assert_eq(m1.dense_dim(), m2.dense_dim())
             assert_eq(m1.sparse_dim(), m2.sparse_dim())
             assert_eq(m1.is_coalesced(), m2.is_coalesced())
+        elif _is_sparse_compressed(m1):
+            assert_eq(m1.dense_dim(), m2.dense_dim())
+            assert_eq(m1.sparse_dim(), m2.sparse_dim())
         else:
             if not skip_symbolic:
                 assert_eq(m1.stride(), m2.stride())
@@ -82,6 +85,19 @@ def assert_metadata_eq(assert_eq, m1, m2, *, skip_symbolic=False):
         # TODO: test forward AD
 
     return go(m1, m2)
+
+
+def _is_sparse_compressed(t):
+    return t.layout in {
+        torch.sparse_csr,
+        torch.sparse_csc,
+        torch.sparse_bsr,
+        torch.sparse_bsc,
+    }
+
+
+def _is_sparse_any(t):
+    return t.layout is torch.sparse_coo or _is_sparse_compressed(t)
 
 
 # This is a class for converting multiple tensors into meta tensors which
@@ -133,7 +149,7 @@ class MetaConverter:
         # hold a weak ref to self, otherwise it will be kept alive
         # by the del_ten closure
         self_weak_ref = weakref.ref(self)
-        if t.is_sparse or t.is_mkldnn or is_batchedtensor(t):
+        if _is_sparse_any(t) or t.is_mkldnn or is_batchedtensor(t):
             weak_st = None
         else:
             weak_st = StorageWeakRef(t._typed_storage())
@@ -280,13 +296,16 @@ class MetaConverter:
                 if t.is_sparse:
                     is_leaf = safe_is_leaf(t)
                     r = callback(
-                        lambda: torch.ops.aten._sparse_coo_tensor_with_dims(
+                        lambda: torch.ops.aten._sparse_coo_tensor_with_dims_and_tensors(
                             t.sparse_dim(),
                             t.dense_dim(),
                             t.shape,
+                            t._indices().to(device="meta"),
+                            t._values().to(device="meta"),
                             dtype=t.dtype,
                             layout=torch.sparse_coo,
                             device="meta",
+                            is_coalesced=t.is_coalesced(),
                         )
                     )
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
@@ -295,13 +314,48 @@ class MetaConverter:
                     # which means that it will get caught by fake tensor mode.
                     # Ordinarily this would error, but there's some logic in
                     # fake tensor ensure this doesn't happen.
-                    r._coalesced_(t.is_coalesced())
+                    # Update: with the introduction of is_coalesced kw
+                    # argument to sparse coo tensor factory function,
+                    # there is no need to call r._coalesced_(t.is_coalesced()).
+                    # Is this note still relevant?
                     if t.requires_grad:
                         r.requires_grad = True
                     if t.requires_grad and not is_leaf:
                         with torch.enable_grad():
                             r = r.clone()
                             r._coalesced_(t.is_coalesced())
+                elif _is_sparse_compressed(t):
+                    is_leaf = safe_is_leaf(t)
+                    if t.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                        r = callback(
+                            lambda: torch.ops.aten.sparse_compressed_tensor(
+                                t.crow_indices().to(device="meta"),
+                                t.col_indices().to(device="meta"),
+                                t.values().to(device="meta"),
+                                t.shape,
+                                dtype=t.dtype,
+                                layout=t.layout,
+                                device="meta",
+                            )
+                        )
+                    else:
+                        r = callback(
+                            lambda: torch.sparse_compressed_tensor(
+                                t.ccol_indices().to(device="meta"),
+                                t.row_indices().to(device="meta"),
+                                t.values().to(device="meta"),
+                                t.shape,
+                                dtype=t.dtype,
+                                layout=t.layout,
+                                device="meta",
+                            )
+                        )
+                    assert safe_is_leaf(r), "the callback you passed in doesn't detach"
+                    if t.requires_grad:
+                        r.requires_grad = True
+                    if t.requires_grad and not is_leaf:
+                        with torch.enable_grad():
+                            r = r.clone()
                 elif t.is_nested and not is_traceable_wrapper_subclass(t):
                     # TODO: Handle this better in Dynamo?
                     # There are checks there now, but this can still be triggered by a dense
@@ -639,8 +693,6 @@ class MetaConverter:
         if isinstance(t, torch.Tensor) or is_traceable_wrapper_subclass(t):
             if t.device.type != "xla" and any(
                 [
-                    t.is_sparse_csr,
-                    t.layout in [torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc],
                     t.is_quantized,
                     t._is_view() and t._base is not None and t._base.is_sparse,
                     torch._is_functional_tensor(t),
