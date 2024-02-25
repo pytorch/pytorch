@@ -71,12 +71,18 @@ static const std::unordered_set<NodeKind> comparisonOps = {
     onnx::LessOrEqual,
 };
 
+static const std::unordered_set<NodeKind> selectorOps = {onnx::Where};
+
 static bool IsStandardOp(const NodeKind& nkind) {
   return standardOps.find(nkind) != standardOps.end();
 }
 
 static bool IsComparisonOp(const NodeKind& nkind) {
   return comparisonOps.find(nkind) != comparisonOps.end();
+}
+
+static bool IsSelectorOp(const NodeKind& nkind) {
+  return selectorOps.find(nkind) != selectorOps.end();
 }
 
 static TensorTypePtr CreateProfiledTensorTypeWithScalarType(
@@ -87,7 +93,8 @@ static TensorTypePtr CreateProfiledTensorTypeWithScalarType(
 }
 
 static bool IsImplicitCastSupported(const NodeKind& nodeKind) {
-  return IsStandardOp(nodeKind) || IsComparisonOp(nodeKind);
+  return IsStandardOp(nodeKind) || IsComparisonOp(nodeKind) ||
+      IsSelectorOp(nodeKind);
 }
 
 static c10::optional<c10::ScalarType> PromoteScalarTypes(
@@ -298,7 +305,8 @@ static void UpdateScalarTypeForInputs(
         input_tensor_type ? input_tensor_type->scalarType() : c10::nullopt;
 
     if ((input->node()->kind() == onnx::Constant) ||
-        (input_scalar_type && (*input_scalar_type != scalar_type))) {
+        (input_scalar_type && (*input_scalar_type != scalar_type) &&
+         !(IsSelectorOp(n->kind())))) {
       if (input->node()->kind() == onnx::Constant) {
         // Fix up the scalar directly instead of inserting a cast operator.
         // TODO: Keep only the else branch once constant_folding is enabled by
