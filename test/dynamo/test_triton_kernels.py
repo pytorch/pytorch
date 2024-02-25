@@ -15,6 +15,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_mutation,
 )
 from torch._inductor import metrics
+from torch._inductor.utils import run_and_get_code
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfRocm
 
@@ -956,6 +957,21 @@ def forward(self, x_1, output_1):
         x = torch.randn(4, device="cuda")
         eager_out = f(x)
         compiled_out = torch.compile(f, fullgraph=True, backend=backend)(x)
+        self.assertEqual(compiled_out, eager_out)
+
+    def test_triton_kernel_equal_to_1_arg(self):
+        def f(x, y):
+            out = torch.zeros_like(x)
+            n_elements = x.numel()
+            add_kernel[(n_elements,)](x, y, out, n_elements, BLOCK_SIZE=16)
+            return out
+
+        x = torch.randn(1, device="cuda")
+        y = torch.randn(1, device="cuda")
+        eager_out = f(x, y)
+        compiled_out, sources = run_and_get_code(torch.compile(f), x, y)
+        self.assertTrue("equal_to_1=(3,)" in sources[0])
+        self.assertTrue("ids_of_folded_args=(3,)" in sources[0])
         self.assertEqual(compiled_out, eager_out)
 
 

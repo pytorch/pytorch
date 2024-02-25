@@ -1004,6 +1004,8 @@ class WrapperCodeGen(CodeGen):
         signature: List[KernelArgType] = []
         constants = {}
         non_constant_indices = []
+        equal_to_1_args: List[str] = []
+        none_args: List[str] = []
         for idx, key in enumerate(kernel.arg_names):
             if key not in kwargs:
                 continue
@@ -1034,18 +1036,38 @@ class WrapperCodeGen(CodeGen):
                     )
                 else:
                     signature.append(SizeArg(key, arg))
+                    if V.graph.sizevars.statically_known_equals(arg, 1):  # type: ignore[arg-type]
+                        equal_to_1_args.append(key)
+                    elif arg is None:
+                        none_args.append(key)
         index_dtype = "tl.int32"
         inductor_meta = {
             "kernel_name": name,
         }
         triton_meta = {
             "signature": signature_to_meta(
-                signature, size_dtype=index_dtype, indices=non_constant_indices
+                signature,
+                size_dtype=index_dtype,
+                indices=non_constant_indices,
             ),
             "device": V.graph.scheduler.current_device.index,
             "device_type": V.graph.scheduler.current_device.type,
-            "constants": constants,
-            "configs": [config_of(signature, indices=non_constant_indices)],
+            # Triton compiler includes equal_to_1 and None args into constants
+            # even when they are not constexpr. otherwise there may be a segfault
+            # during launching the Inductor-compiled Triton kernel.
+            # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
+            "constants": {
+                **constants,
+                **{arg: 1 for arg in equal_to_1_args},
+                **{arg: None for arg in none_args},
+            },
+            "configs": [
+                config_of(
+                    signature,
+                    indices=non_constant_indices,
+                    add_equal_to_1=True,
+                )
+            ],
         }
         configs = [
             {
