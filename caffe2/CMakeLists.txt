@@ -603,7 +603,6 @@ if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
     ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
     ${TORCH_SRC_DIR}/csrc/jit/mobile/compatibility/backport.cpp
     ${TORCH_SRC_DIR}/csrc/jit/mobile/compatibility/backport_manager.cpp
-    ${TORCH_SRC_DIR}/csrc/jit/serialization/onnx.cpp
     ${TORCH_SRC_DIR}/csrc/jit/serialization/export.cpp
     ${TORCH_SRC_DIR}/csrc/jit/serialization/export_bytecode.cpp
     ${TORCH_SRC_DIR}/csrc/jit/serialization/export_module.cpp
@@ -613,6 +612,12 @@ if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
     ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
   )
 
+  if(NOT INTERN_DISABLE_ONNX)
+    list(APPEND TORCH_SRCS
+      ${TORCH_SRC_DIR}/csrc/jit/serialization/onnx.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/serialization/export_onnx.cpp
+    )
+  endif()
   # Disable legacy import of building without Caffe2 support
   if(BUILD_CAFFE2)
     list(APPEND TORCH_SRCS
@@ -1344,6 +1349,12 @@ if(BUILD_LITE_INTERPRETER)
   endif()
 endif()
 
+
+# Pass INTERN_DISABLE_ONNX to torch_cpu, as export.h needs to skip
+# defining some symbols that won't exist if ONNX isn't built
+if(INTERN_DISABLE_ONNX)
+  target_compile_definitions(torch_cpu PUBLIC INTERN_DISABLE_ONNX)
+endif()
 
 # Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and
 # jit/unpickler.cpp need to be compiled only when USE_DISTRIBUTED is set
