@@ -13,10 +13,38 @@
 
 namespace pytorch_flash {
 
-
+// Determine if the architecture supports FLASH and define a macro to handle parameter modifiers
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
 #define ARCH_SUPPORTS_FLASH
+#define KERNEL_PARAM_MODIFIER __grid_constant__
+#else
+#define KERNEL_PARAM_MODIFIER
 #endif
+
+// Define a macro for unsupported architecture handling to centralize the error message
+#define FLASH_UNSUPPORTED_ARCH printf("FATAL: FlashAttention requires building with sm version sm80-sm90, but was built for < 8.0!");
+
+// Use a macro to clean up kernel definitions
+#define DEFINE_FLASH_BACKWARD_KERNEL(kernelName, ...) \
+template<typename Kernel_traits, __VA_ARGS__> \
+__global__ void kernelName(KERNEL_PARAM_MODIFIER const Flash_bwd_params params)
+
+DEFINE_FLASH_BACKWARD_KERNEL(flash_bwd_dq_dk_dv_loop_kernel, bool Is_dropout, bool Is_causal, bool Has_alibi, bool Is_even_M, bool Is_even_K) {
+    #if defined(ARCH_SUPPORTS_FLASH)
+       pytorch_flash::compute_dq_dk_dv<Kernel_traits, Is_dropout, Is_causal, Has_alibi, Is_even_M, Is_even_K>(params);
+    #else
+        FLASH_UNSUPPORTED_ARCH
+    #endif
+}
+
+DEFINE_FLASH_BACKWARD_KERNEL(flash_bwd_dq_dk_dv_loop_seqk_parallel_kernel, bool Is_dropout, bool Is_causal, bool Is_local, bool Has_alibi, bool Is_even_MN, bool Is_even_K) {
+    #if defined(ARCH_SUPPORTS_FLASH)
+        static_assert(!(Is_causal && Is_local));  // If Is_local is true, Is_causal should be false
+        pytorch_flash::compute_dq_dk_dv_seqk_parallel<Kernel_traits, Is_dropout, Is_causal, Is_local, Has_alibi, Is_even_MN, Is_even_K>(params);
+    #else
+        FLASH_UNSUPPORTED_ARCH
+    #endif
+}
 
 template<bool Clear_dQaccum=true, typename Kernel_traits>
 __global__ void flash_bwd_dot_do_o_kernel(const Flash_bwd_params params) {
@@ -26,29 +54,6 @@ __global__ void flash_bwd_dot_do_o_kernel(const Flash_bwd_params params) {
 template<typename Kernel_traits>
 __global__ void flash_bwd_clear_dkvaccum_kernel(const Flash_bwd_params params) {
     pytorch_flash::clear_dKVaccum<Kernel_traits>(params);
-}
-
-template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Has_alibi, bool Is_even_M, bool Is_even_K>
-#if defined(ARCH_SUPPORTS_FLASH)
-__global__ void flash_bwd_dq_dk_dv_loop_kernel(__grid_constant__ const Flash_bwd_params params) {
-#else
-__global__ void flash_bwd_dq_dk_dv_loop_kernel(const Flash_bwd_params params) {
-#endif
-    pytorch_flash::compute_dq_dk_dv<Kernel_traits, Is_dropout, Is_causal, Has_alibi, Is_even_M, Is_even_K>(params);
-}
-
-template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Is_local, bool Has_alibi, bool Is_even_MN, bool Is_even_K>
-#if defined(ARCH_SUPPORTS_FLASH)
-__global__ void flash_bwd_dq_dk_dv_loop_seqk_parallel_kernel(__grid_constant__ const Flash_bwd_params params) {
-#else
-__global__ void flash_bwd_dq_dk_dv_loop_seqk_parallel_kernel(const Flash_bwd_params params) {
-#endif
-    #if defined(ARCH_SUPPORTS_FLASH)
-        static_assert(!(Is_causal && Is_local));  // If Is_local is true, Is_causal should be false
-        pytorch_flash::compute_dq_dk_dv_seqk_parallel<Kernel_traits, Is_dropout, Is_causal, Is_local, Has_alibi, Is_even_MN, Is_even_K>(params);
-    #else
-        printf("FATAL: FlashAttention requires to be build with sm80-sm90, but was built for < 8.0!");
-    #endif
 }
 
 template<typename Kernel_traits>
