@@ -9676,6 +9676,53 @@ fn
         c5 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c5), 0)
 
+    def test_grad_none(self):
+        def fn(x, y):
+            x.grad = torch.abs(y)
+            x.grad.t_()
+            x.grad *= 2
+            return y
+
+        y = torch.arange(4).reshape(2, 2).to(torch.float)
+        x = torch.randn(2, 2)
+        x.grad = None
+
+        z = fn(x, y)
+        ref_y = torch.clone(z).detach()
+        ref_x_grad = torch.clone(x.grad).detach()
+
+        y = torch.arange(4).reshape(2, 2).to(torch.float)
+        x = torch.randn(2, 2)
+        x.grad = None
+
+        opt_fn = torch.compile(fn, backend="eager")
+        z = opt_fn(x, y)
+        self.assertEqual(z, ref_y)
+        self.assertEqual(x.grad, ref_x_grad)
+
+    def test_grad_non_none(self):
+        def fn(x, y):
+            x.grad.t_()
+            x.grad *= 2
+            return y
+
+        y = torch.ones(2, 2)
+        x = torch.randn(2, 2)
+        x.grad = torch.arange(4).reshape(2, 2).to(torch.float)
+
+        z = fn(x, y)
+        ref_y = torch.clone(z).detach()
+        ref_x_grad = torch.clone(x.grad).detach()
+
+        y = torch.ones(2, 2)
+        x = torch.randn(2, 2)
+        x.grad = torch.arange(4).reshape(2, 2).to(torch.float)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        z = opt_fn(x, y)
+        self.assertEqual(z, ref_y)
+        self.assertEqual(x.grad, ref_x_grad)
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
