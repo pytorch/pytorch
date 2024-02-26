@@ -57,6 +57,7 @@ inductor_decompositions = get_decompositions(
         aten._batch_norm_with_update,
         aten._batch_norm_with_update_functional,
         aten._batch_norm_no_update,
+        aten.batch_norm_backward,
         aten.native_batch_norm,
         aten.native_group_norm,
         aten.native_layer_norm,
