@@ -1,10 +1,14 @@
 # Owner(s): ["module: dynamo"]
+import copy
 import functools
 import io
 import json
 import logging
 import os
 import unittest.mock
+import tempfile
+import shutil
+import subprocess
 
 import torch
 import torch._dynamo.test_case
@@ -12,6 +16,7 @@ import torch._dynamo.testing
 import torch._logging.structured
 import torch.distributed as dist
 
+from torch._logging._internal import TorchLogsFormatter
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from torch.testing._internal.common_utils import find_free_port, TestCase
@@ -57,7 +62,7 @@ class StructuredTraceTestingFilter(logging.Filter):
 
 class StructuredTraceTestingFormatter(logging.Formatter):
     def format(self, record):
-        metadata = dict(record.metadata)
+        metadata = copy.deepcopy(record.metadata)
 
         # Stub out values that are not stable across runs
         # TODO: Check that these match schema
@@ -82,14 +87,29 @@ class StructuredTraceTest(TestCase):
         self.buffer = io.StringIO()
         self.old_level = trace_log.level
         trace_log.setLevel(logging.DEBUG)
+
         self.handler = logging.StreamHandler(self.buffer)
         self.handler.setFormatter(StructuredTraceTestingFormatter())
         self.handler.addFilter(StructuredTraceTestingFilter())
         trace_log.addHandler(self.handler)
 
+        self.raw_file = tempfile.NamedTemporaryFile(mode='w', delete=True)  # set this to False to keep temporary files
+        self.raw_handler = logging.StreamHandler(self.raw_file)
+        self.raw_handler.setFormatter(TorchLogsFormatter(trace=True))
+        trace_log.addHandler(self.raw_handler)
+
     def tearDown(self):
         trace_log.removeHandler(self.handler)
+        trace_log.removeHandler(self.raw_handler)
+        self.raw_file.close()
         trace_log.setLevel(self.old_level)
+
+    def assertParses(self):
+        out = tempfile.mkdtemp()
+        try:
+            subprocess.check_call(["tlparse", "-o", out, "--overwrite", "--strict", self.raw_file.name])
+        finally:
+            shutil.rmtree(out, ignore_errors=True)
 
     @requires_cuda
     def test_schedule(self):
@@ -106,6 +126,8 @@ class StructuredTraceTest(TestCase):
 {"dynamo_guards": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 """,  # noqa: B950
         )
+
+        self.assertParses()
 
     @requires_cuda
     def test_cudagraphs(self):
