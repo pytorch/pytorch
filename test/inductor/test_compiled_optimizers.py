@@ -191,7 +191,6 @@ def make_test(
     rtol=None,
     **kwargs,
 ):
-    @config.patch({"fx_graph_cache": False})
     def test_fn(self):
         stack = ExitStack()
         try:

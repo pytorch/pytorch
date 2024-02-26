@@ -46,7 +46,7 @@ from torch._dynamo.device_interface import (
     get_registered_device_interfaces,
 )
 from torch._dynamo.utils import counters, dynamo_timed
-from torch._inductor import config, exc
+from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.utils import cache_dir, developer_warning, is_linux
 from torch._subclasses.fake_tensor import (
@@ -703,14 +703,17 @@ class FxGraphCache:
 
         # Iterate over any entries in the subdir for this key and evaluate
         # their guards to determine whether there's a hit.
+        graph = None
+
         for path in sorted(os.listdir(subdir)):
             with open(os.path.join(subdir, path), "rb") as f:
-                graph: CompiledFxGraph = pickle.load(f)
+                candidate: CompiledFxGraph = pickle.load(f)
 
-            guards_expr = graph.guards_expr
+            guards_expr = candidate.guards_expr
             if not guards_expr:
-                # No guards to evaluate
-                return graph
+                # No guards to evaluate, so this is a hit.
+                graph = candidate
+                break
 
             # Evaluate the guard expression in the current context.
             symints = FxGraphCache._filter_symints(example_inputs)
@@ -733,13 +736,18 @@ class FxGraphCache:
                 check = bool(shape_env.evaluate_guards_expression(guards_expr, symints))
                 assert check is True
                 log.debug(
-                    "fx graph cache key %s post-load guards: %s",
-                    key,
-                    shape_env.guards,
+                    "fx graph cache key %s post-load guards: %s", key, shape_env.guards
                 )
-                return graph
+                graph = candidate
+                break
 
-        return None
+        # Increment the generated kernel count by the amount recorded when the
+        # FX graph was compiled for this cache entry. Pretending this counter
+        # was incremented normally is useful for testing with the cache enabled.
+        if graph is not None:
+            metrics.generated_kernel_count += graph.generated_kernel_count_delta
+
+        return graph
 
     @staticmethod
     def _save_graph(
@@ -861,6 +869,8 @@ class CompiledFxGraph:
     mutated_input_idxs: Set[int] = field(default_factory=set)
     constants: Dict[str, torch.Tensor] = field(default_factory=dict)
     output_strides: Optional[List[Optional[Tuple[int, ...]]]] = None
+    disabled_cudagraphs_reason: Optional[str] = None
+    generated_kernel_count_delta: int = 0
     # This is a string representation of an expression we serialize
     # with the object so the guards can be evaluated in a different
     # context in order to verify the validity of serving a cached
@@ -870,14 +880,13 @@ class CompiledFxGraph:
 
     _boxed_call: Optional[bool] = None
 
-    disabled_cudagraphs_reason: Optional[str] = None
-
     def __init__(
         self,
         compiled_artifact: Optional[Callable[..., Any]],
         graph: GraphLowering,
         output_strides: List[Optional[Tuple[int, ...]]],
         disabled_cudagraphs_reason: Optional[str],
+        generated_kernel_count_delta: int,
     ):
         self.compiled_artifact = compiled_artifact
         self.cache_key = graph.cache_key
@@ -889,8 +898,9 @@ class CompiledFxGraph:
         self.mutated_input_idxs = set(graph.mutated_input_idxs)
         self.constants = graph.constants
         self.output_strides = output_strides
-        self.guards_expr = None
         self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
+        self.generated_kernel_count_delta = generated_kernel_count_delta
+        self.guards_expr = None
 
     def __call__(self, inputs: List[Any]) -> Any:
         return self.get_current_callable()(inputs)

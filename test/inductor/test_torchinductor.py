@@ -304,7 +304,7 @@ def run_and_get_cpp_code(fn, *args, **kwargs):
     # We use the patch context manager instead of using it as a decorator.
     # In this way, we can ensure that the attribute is patched and unpatched correctly
     # even if this run_and_get_cpp_code function is called multiple times.
-    with config.patch({"debug": True, "fx_graph_cache": False}):
+    with patch.object(config, "debug", True):
         torch._dynamo.reset()
         import io
         import logging
@@ -876,7 +876,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 16, 8), torch.randn(8, 16), torch.randn(16, 8)))
 
-    @config.patch(fx_graph_cache=False)
     def test_vertical_fusion1(self):
         def fn(sa, ct, p):
             # From torchbench.pyhpc_equation_of_state
@@ -900,7 +899,6 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 1)
 
-    @config.patch(fx_graph_cache=False)
     def test_forced_buffer_realize(self):
         # Test torch._test_inductor_realize forces a buffer to be realized
         def fn(a):
@@ -910,7 +908,6 @@ class CommonTemplate:
         self.common(fn, (torch.randn(10),))
         self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 2)
 
-    @config.patch(fx_graph_cache=False)
     def test_scheduler_vertical_fusion1(self):
         realize = test_operators.realize
 
@@ -3120,7 +3117,6 @@ class CommonTemplate:
             (torch.randn(2, 4, 6, 6),),
         )
 
-    @config.patch(fx_graph_cache=False)
     def test_adaptive_avg_pool2d2(self):
         # Big kernel size, use fallback
         def fn(x):
@@ -3379,7 +3375,6 @@ class CommonTemplate:
             (torch.randn([16, 64, 55, 55]),),
         )
 
-    @config.patch(fx_graph_cache=False)
     def test_max_pool2d6(self):
         # Too big kernel size, use fallback
         def fn(x):
@@ -3406,7 +3401,6 @@ class CommonTemplate:
         )
 
     # From https://github.com/pytorch/pytorch/issues/93384
-    @config.patch(fx_graph_cache=False)
     def test_max_pool2d8(self):
         # dialtion is not 1, use fallback
         def fn(x):
@@ -3487,7 +3481,6 @@ class CommonTemplate:
             (-torch.arange(1 * 8 * 8, dtype=torch.float32).view(1, 1, 8, 8),),
         )
 
-    @config.patch(fx_graph_cache=False)
     def test_avg_pool2d7(self):
         # Large kernel size, use fallback
         def fn(x):
@@ -3792,7 +3785,6 @@ class CommonTemplate:
         o2 = torch.compile(mod)(inp)
         self.assertEqual(o1, o2)
 
-    @config.patch(fx_graph_cache=False)
     @patch.object(config.trace, "enabled", True)
     def test_layer_norm(self):
         m = torch.nn.Sequential(
@@ -3805,7 +3797,6 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
-    @config.patch(fx_graph_cache=False)
     def test_transpose_add(self):
         def fn(a, b):
             return a.t() + b
@@ -3816,7 +3807,6 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
-    @config.patch(fx_graph_cache=False)
     @patch.object(config.triton, "persistent_reductions", True)
     def test_softmax_one_kernel_persist(self):
         def fn(x):
@@ -3830,7 +3820,6 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
-    @config.patch(fx_graph_cache=False)
     @patch.object(config.triton, "persistent_reductions", False)
     def test_softmax_one_kernel_loop(self):
         def fn(x):
@@ -3843,7 +3832,6 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
-    @config.patch(fx_graph_cache=False)
     def test_complex_fallback(self):
         def fn(x):
             return x * x + 10
@@ -3896,7 +3884,6 @@ class CommonTemplate:
 
         self.common(fn, (x,))
 
-    @config.patch(fx_graph_cache=False)
     def test_cauchy(self):
         def fn(x, y):
             return torch.sum(1 / (torch.unsqueeze(x, -1) - y))
@@ -3916,7 +3903,6 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
-    @config.patch(fx_graph_cache=False)
     def test_fusing_write_into_disjoint_read(self):
         def test_flip(a):
             return a.copy_(torch.flip(a, (0,)))
@@ -3935,7 +3921,6 @@ class CommonTemplate:
             a = torch.rand((1, 1000000), device="cuda")
             self.common(f, (a,))
 
-    @config.patch(fx_graph_cache=False)
     def test_gather_scatter(self):
         def fn(node_feat, edge_index):
             src_node_feat = node_feat[edge_index[0]]
@@ -3962,7 +3947,7 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 2)
 
-    @config.patch(max_fusion_size=1, fx_graph_cache=False)
+    @config.patch(max_fusion_size=1)
     def test_no_mega_fusion_during_lowering(self):
         n = 50
 
@@ -3981,7 +3966,6 @@ class CommonTemplate:
         if self.device != "cpu":
             self.assertTrue(torch._inductor.metrics.generated_kernel_count > 1)
 
-    @config.patch(fx_graph_cache=False)
     def test_move_arange(self):
         def fn(x):
             return torch.arange(len(x), device="cpu").to(x.device) + x
@@ -5716,7 +5700,6 @@ class CommonTemplate:
         args = [torch.tensor([1], dtype=torch.int64), torch.randn(8, 4), torch.randn(4)]
         self.common(fn, args)
 
-    @config.patch(fx_graph_cache=False)
     def test_index_put_reinplace(self):
         def fn(x, idx):
             src = torch.ones(idx.size(0), device=x.device)
@@ -5729,7 +5712,6 @@ class CommonTemplate:
         self.common(fn, (a, idx))
         assertGeneratedKernelCountEqual(self, 1)
 
-    @config.patch(fx_graph_cache=False)
     def test_index_put_failed_reinplace(self):
         def fn(x, idx):
             src = torch.ones(idx.size(0), device=x.device)
@@ -5933,7 +5915,6 @@ class CommonTemplate:
         b = torch.empty(0)
         self.common(fn, [a, b])
 
-    @config.patch(fx_graph_cache=False)
     def test_slice_scatter_reinplace(self):
         class M(nn.Module):
             def __init__(self, device):
@@ -6683,7 +6664,6 @@ class CommonTemplate:
         )
 
     # From https://github.com/pytorch/torchdynamo/issues/1352
-    @config.patch(fx_graph_cache=False)
     def test_max_pool2d_with_indices_backward4(self):
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
@@ -6710,7 +6690,6 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 1)
 
-    @config.patch(fx_graph_cache=False)
     def test_max_pool2d_with_indices_backward5(self):
         # Window size is too big. Should fallback
         def fn(a, b, c):
@@ -6739,7 +6718,6 @@ class CommonTemplate:
         assertGeneratedKernelCountEqual(self, 0)
 
     # From https://github.com/pytorch/pytorch/issues/93384
-    @config.patch(fx_graph_cache=False)
     def test_max_pool2d_with_indices_backward6(self):
         # dilation is not 1. Should fallback
         def fn(a, b, c):
@@ -6815,7 +6793,6 @@ class CommonTemplate:
             ],
         )
 
-    @config.patch(fx_graph_cache=False)
     def test_avg_pool2d_backward3(self):
         def fn(a, b):
             return aten.avg_pool2d_backward(
@@ -6839,7 +6816,6 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 1)
 
-    @config.patch(fx_graph_cache=False)
     def test_avg_pool2d_backward4(self):
         def fn(a, b):
             return aten.avg_pool2d_backward(
@@ -7882,7 +7858,6 @@ class CommonTemplate:
         self.assertEqual(inductor_out, eager_out)
 
     @skipIfRocm
-    @config.patch(fx_graph_cache=False)
     def test_require_stride_expanded(self):
         def forward(arg6, arg7, arg16):
             convolution = torch.ops.aten.convolution(
@@ -8491,7 +8466,6 @@ class CommonTemplate:
             for right in [True, False]:
                 self.common(fn, (input, offsets, out_int32, right), check_lowp=False)
 
-    @config.patch(fx_graph_cache=False)
     @patch.object(config.triton, "autotune_pointwise", True)
     def test_bucketize_add_autotune(self):
         # Causes a @pointwise(size_hints) where size_hints is 2D
@@ -8698,7 +8672,6 @@ class CommonTemplate:
         self.assertEqual(rot.grad, rot_e.grad)
         self.assertEqual(trans.grad, trans_e.grad)
 
-    @config.patch(fx_graph_cache=False)
     def test_inner_fn_str_and_stride(self):
         def f(x):
             x = x + 1
