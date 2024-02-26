@@ -6,6 +6,8 @@ from typing import Dict, List
 import torch
 from .. import variables
 from ..exc import unimplemented
+from ..guards import GuardBuilder, install_guard
+from ..source import AttrSource, GlobalSource
 from ..utils import istype
 from .base import VariableTracker
 from .constant import ConstantVariable
@@ -66,6 +68,29 @@ def is_constant_pg_functions(value):
     ]
 
     return inspect.isfunction(value) and value in constant_processgroup_functions
+
+
+class WorldMetaClassVariable(DistributedVariable):
+    """
+    Tracks torch.distributed.GroupMember and torch.distributed.group, which are
+    instances of the metaclass _WorldMeta.
+    """
+
+    @classmethod
+    def is_group_member_type(cls, value):
+        if not cls.is_available():
+            return False
+
+        from torch.distributed.distributed_c10d import _WorldMeta
+
+        return type(value) is _WorldMeta
+
+    def var_getattr(self, tx, name: str) -> VariableTracker:
+        if name == "WORLD":
+            source = AttrSource(base=self.source, member="WORLD")
+            install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+            return ProcessGroupVariable(self.value.WORLD)
+        return super().var_getattr(tx, name)
 
 
 class PlacementClassVariable(DistributedVariable):
@@ -255,3 +280,30 @@ class ProcessGroupVariable(DistributedVariable):
         from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
 
         return istype(value, (ProcessGroup, FakeProcessGroup))
+
+    @staticmethod
+    def get_global_pg_variable():
+        """
+        Make a ProcessGroupVariable from torch.distributed.group.WORLD and
+        intall guards.
+        """
+        import torch.distributed as dist
+
+        source = AttrSource(
+            AttrSource(
+                base=AttrSource(
+                    base=GlobalSource(global_name="torch"),
+                    member="distributed",
+                    get_static=False,
+                ),
+                member="group",
+                get_static=False,
+            ),
+            member="WORLD",
+            get_static=False,
+        )
+        install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+        return ProcessGroupVariable(
+            dist.group.WORLD,
+            source=source,
+        )
