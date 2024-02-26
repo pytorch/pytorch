@@ -176,7 +176,7 @@ class TestPrioritizations:
             for test, score in self._test_scores.items()
             if test.test_file in tests
         }
-        self._test_priorities = valid_scores
+        self._test_scores = valid_scores
 
         for test in tests:
             if test not in self._original_tests:
