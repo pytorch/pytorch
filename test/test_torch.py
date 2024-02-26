@@ -535,6 +535,21 @@ class TestTorchDeviceType(TestCase):
             y = torch.tensor([[0]], dtype=torch.int64)
             _ = torch.fmod(x, y)
 
+        # Same problem with 32-bit ints
+        with self.assertRaisesRegex(RuntimeError, "^Invalid input to modulo operation."):
+            x = torch.tensor([-2**31], dtype=torch.int32)
+            y = torch.tensor([[-1]], dtype=torch.int32)
+            _ = torch.fmod(x, y)
+
+        # For whatever reason, int16 and int8 are not affected
+        x = torch.tensor([-2**15], dtype=torch.int16)
+        y = torch.tensor([[-1]], dtype=torch.int16)
+        self.assertEqual(torch.fmod(x, y).item(), 0.)
+        x = torch.tensor([-2**7], dtype=torch.int8)
+        y = torch.tensor([[-1]], dtype=torch.int8)
+        self.assertEqual(torch.fmod(x, y).item(), 0.)
+
+
     # collected tests of ops that used scalar_check in Declarations.cwrap for
     # correctness
     def test_scalar_check(self, device):
