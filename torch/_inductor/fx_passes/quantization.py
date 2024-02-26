@@ -167,6 +167,24 @@ qlinear_pt2e_pattern = CallFunction(
     KeywordArg("postop_algorithm"),
 )
 
+qlinear_tensor_pt2e_pattern = CallFunction(
+    torch.ops.onednn.qlinear_pointwise.tensor,
+    KeywordArg("x"),
+    KeywordArg("x_scale"),
+    KeywordArg("x_zp"),
+    KeywordArg("packed_weight"),
+    KeywordArg("w_scale"),
+    KeywordArg("w_zp"),
+    KeywordArg("b"),
+    KeywordArg("output_scale"),
+    KeywordArg("output_zero_point"),
+    KeywordArg("output_dtype"),
+    KeywordArg("postop_name"),
+    KeywordArg("postop_args"),
+    KeywordArg("postop_algorithm"),
+)
+
+
 dequantize_accum_pattern = CallFunction(
     aten.mul.Tensor,
     CallFunction(
@@ -670,44 +688,45 @@ def _register_quantization_unary_fusion():
             )
 
         # QLinear
-        # Priority 1 to match: QLinear Unary pattern with int8 output
-        linear_unary_replace_patterns = {
-            UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
-                qlinear_pt2e_pattern,
-                dtype=original_pattern_output_dtype,
-            ),
-            UnaryAttr("relu", [], ""): generate_pattern_with_output_quant(
-                generate_pattern_with_unary(qlinear_pt2e_pattern, aten.relu.default),
-                dtype=original_pattern_output_dtype,
-            ),
-        }
+        for qlinear_pattern in (qlinear_pt2e_pattern, qlinear_tensor_pt2e_pattern):
+            # Priority 1 to match: QLinear Unary pattern with int8 output
+            linear_unary_replace_patterns = {
+                UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
+                    qlinear_pattern,
+                    dtype=original_pattern_output_dtype,
+                ),
+                UnaryAttr("relu", [], ""): generate_pattern_with_output_quant(
+                    generate_pattern_with_unary(qlinear_pattern, aten.relu.default),
+                    dtype=original_pattern_output_dtype,
+                ),
+            }
 
-        for unary_attr, patterns in linear_unary_replace_patterns.items():
-            _register_quantized_linear_lowering(
-                patterns,
-                1,  # pass_number
-                torch.ops.onednn.qlinear_pointwise,  # computation_op
-                None,  # output_dtype
-                unary_attr,  # unary_attr
-                original_pattern_output_dtype=original_pattern_output_dtype,
-            )
+            for unary_attr, patterns in linear_unary_replace_patterns.items():
+                _register_quantized_linear_lowering(
+                    patterns,
+                    1,  # pass_number
+                    torch.ops.onednn.qlinear_pointwise,  # computation_op
+                    None,  # output_dtype
+                    unary_attr,  # unary_attr
+                    original_pattern_output_dtype=original_pattern_output_dtype,
+                )
 
-        # Priority 2 to match: QLinear Unary pattern with FP32/BF16 output
-        linear_unary_replace_float_out_patterns = {
-            UnaryAttr("relu", [], ""): generate_pattern_with_unary(
-                qlinear_pt2e_pattern, aten.relu.default
-            ),
-        }
+            # Priority 2 to match: QLinear Unary pattern with FP32/BF16 output
+            linear_unary_replace_float_out_patterns = {
+                UnaryAttr("relu", [], ""): generate_pattern_with_unary(
+                    qlinear_pattern, aten.relu.default
+                ),
+            }
 
-        for unary_attr, patterns in linear_unary_replace_float_out_patterns.items():
-            _register_quantized_linear_lowering(
-                patterns,
-                2,  # pass_number
-                torch.ops.onednn.qlinear_pointwise,  # computation_op
-                original_pattern_output_dtype,  # output_dtype
-                unary_attr,  # unary_attr
-                original_pattern_output_dtype=original_pattern_output_dtype,
-            )
+            for unary_attr, patterns in linear_unary_replace_float_out_patterns.items():
+                _register_quantized_linear_lowering(
+                    patterns,
+                    2,  # pass_number
+                    torch.ops.onednn.qlinear_pointwise,  # computation_op
+                    original_pattern_output_dtype,  # output_dtype
+                    unary_attr,  # unary_attr
+                    original_pattern_output_dtype=original_pattern_output_dtype,
+                )
 
 
 def _register_quantization_binary_fusion():
@@ -1672,9 +1691,20 @@ def _register_qlinear_weight_prepack_pass(
                 [],  # post op args
                 "",  # post op algorithm
             )
-            new_linear_node = graph.call_function(
-                torch.ops.onednn.qlinear_pointwise.default, args=new_args
-            )
+            Node = torch.fx.node.Node
+            if (
+                isinstance(x_scale, Node)
+                and x_scale.target == operator.getitem
+                and isinstance(x_zp, Node)
+                and x_zp.target == operator.getitem
+            ):
+                new_linear_node = graph.call_function(
+                    torch.ops.onednn.qlinear_pointwise.tensor, args=new_args
+                )
+            else:
+                new_linear_node = graph.call_function(
+                    torch.ops.onednn.qlinear_pointwise.default, args=new_args
+                )
             if input_dim_exceeds_two:
                 if input_contiguous:
                     output_reshape_node.replace_all_uses_with(new_linear_node)
