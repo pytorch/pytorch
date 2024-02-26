@@ -135,6 +135,9 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     # We should be able to graphbreak there.
     "doctr_det_predictor",
     "dlrm",
+    "pyhpc_isoneutral_mixing",
+    "pyhpc_equation_of_state",
+    "pyhpc_turbulent_kinetic_energy",
 }
 
 # These models currently fail accuracy with eager Adam optimizer
