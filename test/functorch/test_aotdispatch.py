@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
 import copy
 import torch
+import torch._dynamo as torchdynamo
 import torch.nn as nn
 import torch.utils._pytree as pytree
 import unittest
@@ -2987,6 +2988,7 @@ def forward(self, arg0_1, arg1_1):
     _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
     return (add_3,)""")
 
+    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "TorchDynamo is not supported")
     def test_aot_export_predispatch_with_cond_nested(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -3049,6 +3051,7 @@ def forward(self, arg0_1):
     sin_1 = torch.ops.aten.sin.default(add);  add = None
     return (sin_1,)""")
 
+    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "TorchDynamo is not supported")
     def test_aot_export_predispatch_with_cond(self):
         class M(torch.nn.Module):
             def __init__(self):
