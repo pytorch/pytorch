@@ -1626,9 +1626,7 @@ def main():
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])
 
-    aggregated_heuristics: AggregatedHeuristics = AggregatedHeuristics(
-        unranked_tests=selected_tests
-    )
+    aggregated_heuristics: AggregatedHeuristics = AggregatedHeuristics(selected_tests)
 
     with open(
         REPO_ROOT / "test" / "test-reports" / "td_heuristic_rankings.log", "a"
@@ -1667,47 +1665,17 @@ def main():
 
         def __str__(self):
             s = f"Name: {self.name}\n"
-            s += "  Serial tests:\n"
-            s += "".join(
-                f"    {test}\n" for test in self.sharded_tests if must_serial(test)
-            )
-            s += "  Parallel tests:\n"
-            s += "".join(
-                f"    {test}\n" for test in self.sharded_tests if not must_serial(test)
-            )
+            serial = [test for test in self.sharded_tests if must_serial(test)]
+            parallel = [test for test in self.sharded_tests if not must_serial(test)]
+            s += f"  Serial tests ({len(serial)}):\n"
+            s += "".join(f"    {test}\n" for test in serial)
+            s += f"  Parallel tests ({len(parallel)}):\n"
+            s += "".join(f"    {test}\n" for test in parallel)
             return s.strip()
 
-    test_batches: List[TestBatch] = []
+    test_batch = TestBatch("all_tests", test_prioritizations.get_all_tests(), False)
 
-    # Each batch will be run sequentially
-    test_batches = [
-        TestBatch(
-            "high_relevance", test_prioritizations.get_high_relevance_tests(), False
-        ),
-        TestBatch(
-            "probable_relevance",
-            test_prioritizations.get_probable_relevance_tests(),
-            False,
-        ),
-        TestBatch(
-            "unranked_relevance",
-            test_prioritizations.get_unranked_relevance_tests(),
-            True,
-        ),
-        TestBatch(
-            "unlikely_relevance",
-            test_prioritizations.get_unlikely_relevance_tests(),
-            True,
-        ),
-        TestBatch(
-            "none_relevance",
-            test_prioritizations.get_none_relevance_tests(),
-            True,
-        ),
-    ]
-
-    for test_batch in test_batches:
-        print_to_stderr(test_batch)
+    print_to_stderr(test_batch)
 
     if options.dry_run:
         return
@@ -1724,17 +1692,13 @@ def main():
     try:
         # Actually run the tests
         start_time = time.time()
-        for test_batch in test_batches:
-            elapsed_time = time.time() - start_time
-            print_to_stderr(
-                f"Starting test batch '{test_batch.name}' {elapsed_time} seconds after initiating testing"
-            )
-            print_to_stderr(
-                f"With sharding, this batch will run {len(test_batch.sharded_tests)} tests"
-            )
-            run_tests(
-                test_batch.sharded_tests, test_directory, options, test_batch.failures
-            )
+        elapsed_time = time.time() - start_time
+        print_to_stderr(
+            f"Starting test batch '{test_batch.name}' {round(elapsed_time, 2)} seconds after initiating testing"
+        )
+        run_tests(
+            test_batch.sharded_tests, test_directory, options, test_batch.failures
+        )
 
     finally:
         if options.coverage:
@@ -1749,7 +1713,7 @@ def main():
                 if not PYTORCH_COLLECT_COVERAGE:
                     cov.html_report()
 
-        all_failures = [failure for batch in test_batches for failure in batch.failures]
+        all_failures = test_batch.failures
 
         if IS_CI:
             num_tests = len(selected_tests)
