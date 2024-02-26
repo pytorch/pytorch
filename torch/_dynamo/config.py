@@ -409,8 +409,7 @@ max_loop_unroll_nodes = int(os.environ.get("TORCHDYNAMO_MAX_LOOP_UNROLL_NODES", 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
-    def _make_closure_patcher(**changes):
-        ...
+    def _make_closure_patcher(**changes): ...
 
 
 from torch.utils._config_module import install_config_module

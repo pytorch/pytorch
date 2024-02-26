@@ -610,7 +610,10 @@ class BackedgeTracker:
         # loops earlier (so we don't have to wait for `max` nodes before
         # skipping).
         added_nodes = count - self.n_nodes_on_first_loop
-        if config.max_loop_unroll_nodes > 0 and added_nodes > config.max_loop_unroll_nodes:
+        if (
+            config.max_loop_unroll_nodes > 0
+            and added_nodes > config.max_loop_unroll_nodes
+        ):
             raise exc.SkipFrame("unrolled loop getting too big")
 
 
@@ -2004,9 +2007,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         # Properties of the input/output code
         self.instructions: List[Instruction] = instructions
         self.indexof: Dict[Instruction, int] = get_indexof(self.instructions)
-        self.f_locals: Dict[
-            str, Any
-        ] = f_locals  # needed for recording accessed locals for replay
+        self.f_locals: Dict[str, Any] = (
+            f_locals  # needed for recording accessed locals for replay
+        )
         self.f_globals: Dict[str, Any] = f_globals
         self.f_builtins: Dict[str, Any] = f_builtins
         self.code_options: Dict[str, Any] = code_options
