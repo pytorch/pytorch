@@ -2,11 +2,15 @@
 #include <ATen/xpu/XPUDevice.h>
 #include <ATen/xpu/detail/XPUHooks.h>
 #include <c10/util/CallOnce.h>
+#include <c10/util/Logging.h>
+#include <c10/xpu/XPUCachingAllocator.h>
 
 namespace at::xpu::detail {
 
 void XPUHooks::initXPU() const {
-  // TODO: the initialization of device allocator should be placed here.
+  C10_LOG_API_USAGE_ONCE("aten.init.xpu");
+  const auto device_count = c10::xpu::device_count_ensure_non_zero();
+  c10::xpu::XPUCachingAllocator::init(device_count);
 }
 
 bool XPUHooks::hasXPU() const {

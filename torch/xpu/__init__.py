@@ -13,7 +13,7 @@ import torch
 import torch._C
 from .. import device as _device
 from ._utils import _dummy_type, _get_device_index
-from .streams import Stream
+from .streams import Event, Stream
 
 _initialized = False
 _initialization_lock = threading.Lock()
@@ -344,7 +344,21 @@ def synchronize(device: _device_t = None) -> None:
     return torch._C._xpu_synchronize(device)
 
 
+def empty_cache() -> None:
+    r"""Release all unoccupied cached memory currently held by the caching
+    allocator so that those can be used in other XPU application.
+
+    .. note::
+        :func:`~torch.xpu.empty_cache` doesn't increase the amount of XPU
+        memory available for PyTorch. However, it may help reduce fragmentation
+        of XPU memory in certain cases.
+    """
+    if is_initialized():
+        torch._C._xpu_emptyCache()
+
+
 __all__ = [
+    "Event",
     "Stream",
     "StreamContext",
     "current_device",
@@ -352,6 +366,7 @@ __all__ = [
     "device",
     "device_of",
     "device_count",
+    "empty_cache",
     "get_device_capability",
     "get_device_name",
     "get_device_properties",

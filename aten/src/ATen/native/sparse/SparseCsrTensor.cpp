@@ -878,9 +878,7 @@ Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) 
   new_sizes.erase(new_sizes.begin() + dim);
   auto options = self.options();
 
-  Tensor plain_indices;
-  Tensor compressed_indices;
-  std::tie(compressed_indices, plain_indices) =
+  auto [compressed_indices, plain_indices] =
       AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
           self.layout(),
           "select",

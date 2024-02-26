@@ -177,7 +177,7 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
 # be a TypedStorage
 def _rebuild_tensor(storage, storage_offset, size, stride):
     # first construct a tensor with the correct dtype/device
-    t = torch.tensor([], dtype=storage.dtype, device=storage._untyped_storage.device)
+    t = torch.empty((0,), dtype=storage.dtype, device=storage._untyped_storage.device)
     return t.set_(storage._untyped_storage, storage_offset, size, stride)
 
 
@@ -221,8 +221,8 @@ def _rebuild_tensor_v3(
     dtype,
     metadata=None,
 ):
-    t = torch.tensor(
-        [],
+    t = torch.empty(
+        (0,),
         dtype=dtype,
         device=storage._untyped_storage.device,
         requires_grad=requires_grad,

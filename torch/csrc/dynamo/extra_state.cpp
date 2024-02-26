@@ -1,7 +1,14 @@
 #include <torch/csrc/dynamo/extra_state.h>
 
 #include <torch/csrc/dynamo/cache_entry.h>
+#include <torch/csrc/dynamo/cpython_defs.h>
 #include <torch/csrc/dynamo/debug_macros.h>
+#include <torch/csrc/utils/python_compat.h>
+
+#if IS_PYTHON_3_12_PLUS
+#define _PyCode_GetExtra PyUnstable_Code_GetExtra
+#define _PyCode_SetExtra PyUnstable_Code_SetExtra
+#endif
 
 Py_ssize_t extra_index = -1;
 
