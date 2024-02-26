@@ -56,7 +56,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
         received_cuda_(false),
         allocator_(allocator) {
     if (data_ptr_ == nullptr) {
-        data_ptr_ = size_bytes.is_heap_allocated()
+        data_ptr_ = size_bytes_.is_heap_allocated()
                         ? allocator->allocate(0)
                         : allocator->allocate(size_bytes.as_int_unchecked());
     }
