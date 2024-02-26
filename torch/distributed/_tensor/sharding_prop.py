@@ -275,9 +275,11 @@ class ShardingPropagator:
             elif isinstance(op_strategy, TupleStrategy):
                 # tuple strategy output sharding
                 out_spec_list: List[DTensorSpec] = []
+                output_strategy_list: List[PlacementStrategy] = []
                 for strategy in op_strategy.childs:
                     assert isinstance(strategy, OpStrategy)
                     output_strategy = self._select_strategy(strategy)
+                    output_strategy_list.append(output_strategy)
                     out_spec_list.append(output_strategy.output_spec)
 
                 needs_redistribute = False
@@ -288,16 +290,26 @@ class ShardingPropagator:
                     ):
                         expected_input_spec_list = []
                         for idx, arg_spec in enumerate(arg):
-                            if arg_spec.placements != out_spec_list[idx].placements:
+                            expected_input_specs = output_strategy_list[
+                                idx
+                            ].input_specs or [output_strategy_list[idx].output_spec]
+                            if all(
+                                arg_spec.placements != input_spec.placements
+                                for input_spec in expected_input_specs
+                            ):
+                                if torch.distributed.get_rank() == 0:
+                                    print(
+                                        f"needs_redistribute because arg_spec {arg_spec.placements} != expected_input_specs: {expected_input_specs}"
+                                    )
                                 needs_redistribute = True
-                            expected_input_spec_list.append(out_spec_list[idx])
+                            expected_input_spec_list.append(expected_input_specs[0])
                         suggestion_args.append(
                             tuple(expected_input_spec_list)
                             if isinstance(arg, tuple)
                             else expected_input_spec_list
                         )
                     elif isinstance(arg, DTensorSpec):
-                        expected_input_spec = out_spec_list[0]
+                        expected_input_spec = output_strategy_list[0].output_spec
                         if arg.placements != expected_input_spec.placements:
                             needs_redistribute = True
                         suggestion_args.append(expected_input_spec)

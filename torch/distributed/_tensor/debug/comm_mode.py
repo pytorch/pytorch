@@ -60,6 +60,8 @@ class CommDebugMode(TorchDispatchMode):
         super().__exit__(*args)
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        if torch.distributed.get_rank() == 0:
+            print(f"Running {func}")
         if any(t == DTensor for t in types):
             return NotImplemented
         kwargs = kwargs if kwargs else {}

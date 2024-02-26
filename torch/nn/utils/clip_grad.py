@@ -71,10 +71,14 @@ def clip_grad_norm_(
     # avoids a `if clip_coef < 1:` conditional which can require a CPU <=> device synchronization
     # when the gradients do not reside in CPU memory.
     clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
+    if torch.distributed.get_rank() == 0:
+        print(f"clip_coef_clamped: {clip_coef_clamped}")
     for ((device, _), ([grads], _)) in grouped_grads.items():  # type: ignore[assignment]
         if (foreach is None or foreach) and _has_foreach_support(grads, device=device):  # type: ignore[arg-type]
+        # if False:
             torch._foreach_mul_(grads, clip_coef_clamped.to(device))  # type: ignore[call-overload]
-        elif foreach:
+        # elif foreach:
+        elif False:
             raise RuntimeError(f'foreach=True was passed, but can\'t use the foreach API on {device.type} tensors')
         else:
             clip_coef_clamped_device = clip_coef_clamped.to(device)

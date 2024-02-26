@@ -173,8 +173,8 @@ class RuntimeSchemaInfo:
     """
 
     # This static_argnum records static arg "starting index" for ops that have non-tensor
-    # args/kwargs which would affect sharding propagation results. All args after this
-    # index would be hashed to our sharding cache.
+    # args/kwargs which would affect sharding propagation results. All args starting from
+    # this index would be hashed to our sharding cache.
     # Note that only a few ops need this information, e.g. view, transpose, var.dim, etc.
     static_argnum: int = 100
     # This static_kwargkey records static kwarg names which would affect sharding prop

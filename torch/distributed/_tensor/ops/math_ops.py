@@ -11,6 +11,7 @@ from torch.distributed._tensor.op_schema import (
     OpStrategy,
     PlacementStrategy,
     RuntimeSchemaInfo,
+    TupleStrategy,
 )
 from torch.distributed._tensor.ops.utils import (
     as_list,
@@ -330,7 +331,10 @@ def vector_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     keepdim = args_schema[3] if len(args_schema) > 3 else False
     dims = _infer_reduction_dims(dim, input_strategy.output_ndim)
     reduce_dims = list(range(input_strategy.output_ndim)) if dims is None else dims
-    return common_reduction_strategy(
+    if torch.distributed.get_rank() == 0:
+        print("vector_norm_strategy")
+        print(f"input_strategy: {input_strategy}")
+    out = common_reduction_strategy(
         mesh,
         input_strategy,
         reduce_dims,
@@ -338,6 +342,43 @@ def vector_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
         reduction_linear=True,
         reduction_op=NormReduction(norm_type),
     )
+    if torch.distributed.get_rank() == 0:
+        print("output strategy:", out)
+    return out
+
+
+@register_op_strategy(
+    [aten._foreach_norm.Scalar], schema_info=RuntimeSchemaInfo(1, needs_pytree=True)
+)
+def foreach_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> TupleStrategy:
+    args_schema = op_schema.args_schema
+    input_tuple_strategy = args_schema[0]
+    assert isinstance(input_tuple_strategy, TupleStrategy)
+    norm_type = args_schema[1]
+    if torch.distributed.get_rank() == 0:
+        print("_foreach_norm")
+        print("input_tuple_strategy:")
+        for child_strategy in input_tuple_strategy.childs:
+            print(child_strategy)
+
+    output_tuple_strategy = TupleStrategy([])
+    for op_strategy in input_tuple_strategy.childs:
+        assert isinstance(op_strategy, OpStrategy), f"{op_strategy}"
+        reduce_dims = list(range(op_strategy.output_ndim))
+        # for placement_strategy in op_strategy.strategies:
+        output_strategy = common_reduction_strategy(
+            mesh,
+            op_strategy,
+            reduce_dims,
+            reduction_linear=True,
+            reduction_op=NormReduction(norm_type),
+        )
+        output_tuple_strategy.childs.append(output_strategy)
+    if torch.distributed.get_rank() == 0:
+        print("output tuple strategy:")
+        for child_strategy in output_tuple_strategy.childs:
+            print(child_strategy)
+    return output_tuple_strategy
 
 
 @register_op_strategy(

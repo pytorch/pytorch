@@ -540,6 +540,7 @@ for_each_ops = [
     aten._foreach_mul.List,
     aten._foreach_mul_.Scalar,
     aten._foreach_mul_.ScalarList,
+    aten._foreach_mul_.Tensor,
     aten._foreach_mul_.List,
     aten._foreach_neg.default,
     aten._foreach_neg_.default,
@@ -563,23 +564,32 @@ def foreach_list_strategy(
     mesh: DeviceMesh, op_schema: OpSchema, linearity: bool = False
 ) -> StrategyType:
     """
-    for each list op stratgy mostly follow the same logic as pointwise strategy
+    for each list op strategy mostly follow the same logic as pointwise strategy
     except that it handles list of tensors instead, and normally we don't need to
     handle implicit broadcasting
     """
+    if torch.distributed.get_rank() == 0:
+        print(f"foreach list strategy: {op_schema}")
 
     def args_tuple_strategies(args_schema: Tuple[object, ...]) -> List[TupleStrategy]:
         first_arg = args_schema[0]
         assert isinstance(first_arg, TupleStrategy)
         strategy_len = len(first_arg.childs)
         tuple_strategies: List[TupleStrategy] = []
-        for arg in args_schema:
+        for arg_idx, arg in enumerate(args_schema):
             if isinstance(arg, TupleStrategy):
                 # every tuple strategy should have the same length
                 assert len(arg.childs) == strategy_len
                 tuple_strategies.append(arg)
             elif isinstance(arg, OpStrategy):
-                raise RuntimeError("foreach list op only supports tuple strategy!")
+                if arg_idx > 0:  # implicitly broadcast
+                    tuple_strategies.append(
+                        TupleStrategy([arg for _ in tuple_strategies[0].childs])
+                    )
+                else:
+                    raise RuntimeError(
+                        f"foreach list op only supports tuple strategy! {op_schema}"
+                    )
         return tuple_strategies
 
     args_strategies = args_tuple_strategies(op_schema.args_schema)
@@ -616,6 +626,10 @@ def foreach_list_strategy(
         foreach_strategy_list.append(OpStrategy(strategies))
 
     tup_strategy = TupleStrategy(foreach_strategy_list)
+    if torch.distributed.get_rank() == 0:
+        print("foreach list strategy:")
+        for child in tup_strategy.childs:
+            print(child)
     return tup_strategy
 
 
