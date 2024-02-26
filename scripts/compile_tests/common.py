@@ -1,4 +1,5 @@
 import os
+import warnings
 
 try:
     from lxml.etree import parse, XMLParser
@@ -10,7 +11,9 @@ except ImportError:
 
     parse = ET.parse
     use_lxml = False
-    print("lxml was not found. `pip install lxml` to make this script run much faster")
+    warnings.warn(
+        "lxml was not found. `pip install lxml` to make this script run much faster"
+    )
 from download_reports import download_reports
 
 
