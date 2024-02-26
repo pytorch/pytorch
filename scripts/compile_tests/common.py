@@ -1,16 +1,16 @@
+import functools
 import os
 import warnings
 
 try:
-    from lxml.etree import parse, XMLParser
+    import lxml.etree
 
-    p = XMLParser(huge_tree=True)
-    use_lxml = True
+    p = lxml.etree.XMLParser(huge_tree=True)
+    parse = functools.partial(lxml.etree.parse, parser=p)
 except ImportError:
     import xml.etree.ElementTree as ET
 
     parse = ET.parse
-    use_lxml = False
     warnings.warn(
         "lxml was not found. `pip install lxml` to make this script run much faster"
     )
@@ -22,10 +22,7 @@ def open_test_results(directory):
     for root, _, files in os.walk(directory):
         for file in files:
             if file.endswith(".xml"):
-                if use_lxml:
-                    tree = parse(f"{root}/{file}", parser=p)
-                else:
-                    tree = parse(f"{root}/{file}")
+                tree = parse(f"{root}/{file}")
                 xmls.append(tree)
     return xmls
 
