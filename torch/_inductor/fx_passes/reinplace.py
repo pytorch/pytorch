@@ -473,7 +473,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 if can_inplace(node, mutated_arg):
                     copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
                     if copy_node is not None:
-                        graph.erase_node(copy_node)
+                        replace_dict[copy_node] = copy_node.args[0]
                     for user in node.users:
                         if user.target == operator.getitem and user.args[1] == arg:
                             replace_dict[user] = mutated_arg
@@ -493,7 +493,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             if can_inplace(node, mutated_args):
                 for arg in mutated_args:
                     copy_node = copy_args_to_copy_nodes[(arg, node)]
-                    graph.erase_node(copy_node)
+                    replace_dict[copy_node] = copy_node.args[0]
 
                 node.target = inplaceable_op.inplace_op
     for node, replacement in replace_dict.items():
