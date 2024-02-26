@@ -1005,7 +1005,7 @@ def trace_structured(
     name: str,
     # NB: metadata expected to be dict so adding more info is forward compatible
     # Tuple[str, int] is a special case for string interning
-    metadata_fn: Callable[[], Union[Dict[str, Any], Tuple[str, int]]] = lambda: {},
+    metadata_fn: Callable[[], Union[Dict[str, Any], Tuple[str, int]]] = dict,
     *,
     payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
     suppress_context: bool = False,
