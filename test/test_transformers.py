@@ -2493,7 +2493,7 @@ class TestSDPACudaOnly(NNTestCase):
     def test_fused_backwards_throws_determinism_warning(self, device, warn_only, fused_kernel):
         batch_size, seq_len, num_heads, head_dim = 1, 64, 8, 64
         shape = SdpaShape(batch_size, num_heads, seq_len, head_dim)
-        make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=torch.bfloat16, packed=False, requires_grad=True)
+        make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=torch.float16, packed=False, requires_grad=True)
         query, key, value = make_tensor(shape), make_tensor(shape), make_tensor(shape)
 
         kernel_name = "Memory Efficient attention" if fused_kernel == SDPBackend.EFFICIENT_ATTENTION else "Flash Attention"
