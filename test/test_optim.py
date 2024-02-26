@@ -262,25 +262,25 @@ class TestOptimRenewed(TestCase):
                 loss.backward()
 
                 # Track clones to best test accuracy
-                a1_reals.add(a1.real.clone().detach())
-                a1_imags.add(a1.imag.clone().detach())
-                a1_grad_reals.add(a1.grad.real.clone().detach())
-                a1_grad_imags.add(a1.grad.imag.clone().detach())
+                a1_reals.add(a1.real)
+                a1_imags.add(a1.imag)
+                a1_grad_reals.add(a1.grad.real)
+                a1_grad_imags.add(a1.grad.imag)
 
-                losses.add(loss.clone().detach())
+                losses.add(loss)
 
                 return loss
 
             def closure2():
                 optim2.zero_grad()
-                a1_reals.pop_and_set(a1_real)
-                a1_imags.pop_and_set(a1_imag)
+                a1_reals.pop_check_set(a1_real, self)
+                a1_imags.pop_check_set(a1_imag, self)
                 a2 = torch.complex(a1_real, a1_imag)
                 loss = rosenbrock(a2).abs()
-                losses.pop_and_set(loss)
+                losses.pop_check_set(loss, self)
                 loss.backward()
-                a1_grad_reals.pop_and_set(a1_real.grad)
-                a1_grad_imags.pop_and_set(a1_imag.grad)
+                a1_grad_reals.pop_check_set(a1_real.grad, self)
+                a1_grad_imags.pop_check_set(a1_imag.grad, self)
                 return loss
 
 

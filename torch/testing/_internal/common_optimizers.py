@@ -2200,26 +2200,24 @@ class TensorTracker:
         self.tensors = []
 
     def add(self, tensor):
-        self.tensors.append(tensor)
+        """
+        Add a clone().detach()'d version of the tensor
+        """
+        self.tensors.append(tensor.clone().detach())
 
     # pops from beginning, like a queue and not a stack!
-    def pop_and_set(self, tensor_to_set):
-        assert len(self.tensors) > 0, "no tensors to pop"
+    def pop_check_set(self, tensor_to_set, testcase):
+        """
+        Pop the first element in the tensor tracker, assert equality between the popped tensor and
+        the input tensor, and then set the input tensor to have the same values as the popped tensor
+        (with copy_).
+        """
+        testcase.assertGreater(len(self.tensors), 0, "no tensors to pop")
         ref = self.tensors.pop(0)
 
-        assert isinstance(ref, Tensor), f"{ref=}"
+        testcase.assertTrue(isinstance(ref, Tensor), f"{type(ref)=}")
+        testcase.assertEqual(tensor_to_set, ref)
 
-        if ref is None:
-            assert tensor_to_set is None
-            return
-
-        # torch.allclose does not variably compare based on dtype, look up tolerances beforehand
-        rtol, atol = torch.testing._comparison.get_tolerances(
-            ref.dtype, rtol=None, atol=None
-        )
-        assert torch.allclose(
-            ref, tensor_to_set, rtol=rtol, atol=atol
-        ), f"{ref=} but {tensor_to_set=}"
         with torch.no_grad():
             tensor_to_set.copy_(ref)
 
