@@ -1077,6 +1077,7 @@ class CheckFunctionManager:
         # Don't report this guard, it's always the same, useless!
         code_parts = ["___check_global_state()"]
         verbose_code_parts = code_parts[:]
+        structured_guard_fns = []
 
         def add_code_part(code_part, guard, log_only=False):
             verbose_code_part = get_verbose_code_part(code_part, guard)
