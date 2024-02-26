@@ -32,8 +32,8 @@ from torch.testing._internal.common_utils import (
     set_cwd,
     shell,
     TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
     TEST_WITH_CROSSREF,
+    TEST_WITH_ROCM,
     TEST_WITH_SLOW_GRADCHECK,
 )
 
@@ -1668,7 +1668,9 @@ def main():
 
     percent_to_run = 50 if options.enable_td else 100
     print_to_stderr(
-        f"Running {percent_to_run}% of tests based on TD" if options.enable_td else "Running all tests"
+        f"Running {percent_to_run}% of tests based on TD"
+        if options.enable_td
+        else "Running all tests"
     )
     include, exclude = test_prioritizations.get_top_per_tests(percent_to_run)
 
