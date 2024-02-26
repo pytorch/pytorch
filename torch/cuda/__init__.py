@@ -756,12 +756,12 @@ def _get_nvml_device_index(device: Optional[Union[int, Device]]) -> int:
         visible_devices = _transform_uuid_to_ordinals(
             cast(List[str], visible_devices), uuids
         )
-    idx_map = dict(enumerate(cast(List[int], visible_devices)))
-    if idx not in idx_map:
+    visible_devices = cast(List[int], visible_devices)
+    if idx < 0 or idx >= len(visible_devices):
         raise RuntimeError(
             f"device {idx} is not visible (CUDA_VISIBLE_DEVICES={visible_devices})"
         )
-    return idx_map[idx]
+    return visible_devices[idx]
 
 
 @lru_cache(maxsize=1)

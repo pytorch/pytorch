@@ -3,6 +3,7 @@
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <c10/xpu/XPUStream.h>
+#include <c10/xpu/test/impl/XPUTest.h>
 
 #include <thread>
 #include <unordered_set>
@@ -140,18 +141,6 @@ void asyncMemCopy(sycl::queue& queue, int* dst, int* src, size_t numBytes) {
   queue.memcpy(dst, src, numBytes);
 }
 
-void clearHostData(int* hostData, int numel) {
-  for (const auto i : c10::irange(numel)) {
-    hostData[i] = 0;
-  }
-}
-
-void validateHostData(int* hostData, int numel) {
-  for (const auto i : c10::irange(numel)) {
-    EXPECT_EQ(hostData[i], i);
-  }
-}
-
 TEST(XPUStreamTest, StreamFunction) {
   if (!has_xpu()) {
     return;
@@ -159,9 +148,7 @@ TEST(XPUStreamTest, StreamFunction) {
 
   constexpr int numel = 1024;
   int hostData[numel];
-  for (const auto i : c10::irange(numel)) {
-    hostData[i] = i;
-  }
+  initHostData(hostData, numel);
 
   auto stream = c10::xpu::getStreamFromPool();
   EXPECT_TRUE(stream.query());

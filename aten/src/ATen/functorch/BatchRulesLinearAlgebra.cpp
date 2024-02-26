@@ -417,8 +417,7 @@ fourOutputs linalg_lstsq_batch_rule(
   const auto self_ = ensure_has_bdim(std::get<0>(tensor_other), self_bdim.has_value(), batch_size);
   const auto b_ = ensure_has_bdim(std::get<1>(tensor_other), b_bdim.has_value(), batch_size);
 
-  Tensor res, res_1, res_2, res_3;
-  std::tie(res, res_1, res_2, res_3) = at::linalg_lstsq(self_, b_, rcond, driver);
+  auto [res, res_1, res_2, res_3] = at::linalg_lstsq(self_, b_, rcond, driver);
 
   // everything but the 0th output are only sometimes computed. When they aren't, they're empty tensors without a bdim
   const auto res_1_bdim = batch_dim_if_not_empty(res_1);
