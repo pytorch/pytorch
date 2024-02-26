@@ -10,6 +10,7 @@ from torch._dynamo.source import (
     TensorProperty,
     TensorPropertySource,
 )
+from torch._dynamo.utils import common_constant_types
 from torch._dynamo.variables.builder import TrackedFake
 from torch._export.passes.add_runtime_assertions_for_constraints_pass import InputDim
 from torch._guards import Source
@@ -51,7 +52,7 @@ def key_path_to_source(kp: KeyPath) -> Source:
 
 
 def _is_constant_argument(t):
-    return t is None or isinstance(t, (int, float, bool))
+    return t is None or isinstance(t, (int, float, bool, str))
 
 
 def fakify(
@@ -65,7 +66,7 @@ def fakify(
     if _is_constant_argument(t) or isinstance(t, torch.ScriptObject):
         return t
     if not isinstance(t, torch.Tensor):
-        return t
+        raise ValueError(f"Unsupported input type {type(t)}")
     n_dims = len(t.shape)
     symbolic_context = StatelessSymbolicContext(
         dynamic_sizes=[DimDynamic.STATIC] * n_dims,
@@ -190,8 +191,6 @@ def make_constraints(fake_mode, src_equalities, original_signature, gm):
         if _is_constant_argument(node.meta["val"]) or isinstance(
             node.meta["val"], CustomObjArgument
         ):
-            continue
-        if not isinstance(node.meta["val"], torch.Tensor):
             continue
         for i, d in enumerate(node.meta["val"].shape):
             if isinstance(d, torch.SymInt):
