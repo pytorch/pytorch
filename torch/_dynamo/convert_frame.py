@@ -79,7 +79,6 @@ from .utils import (
     CleanupManager,
     CompilationMetrics,
     counters,
-    cprofile_wrapper,
     dynamo_timed,
     format_bytecode,
     frame_phase_timing,
@@ -88,6 +87,7 @@ from .utils import (
     is_namedtuple,
     istype,
     LazyString,
+    maybe_cprofile,
     orig_code_map,
     record_compilation_metrics,
     reset_graph_break_dup_checker,
@@ -423,12 +423,6 @@ def convert_frame_assert(
     return _convert_frame_assert
 
 
-def maybe_cprofile(func):
-    if config.cprofile:
-        return cprofile_wrapper(func)
-    return func
-
-
 from collections import OrderedDict
 
 from torch.utils.hooks import RemovableHandle
@@ -669,8 +663,12 @@ def _compile(
         )
         # -4: -2 as above, plus trace_structured frames
         torch._logging.trace_structured(
-            "compile_stack",
-            lambda: structured.from_traceback(traceback.extract_stack()[: -4 - skip]),
+            "dynamo_start",
+            lambda: {
+                "stack": structured.from_traceback(
+                    traceback.extract_stack()[: -4 - skip]
+                )
+            },
         )
         start_time = time.time()
         try:

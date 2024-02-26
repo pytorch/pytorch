@@ -9,7 +9,7 @@ import re
 import tempfile
 from dataclasses import dataclass, field
 from importlib import __import__
-from typing import Callable, Dict, List, Optional, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Union
 from weakref import WeakSet
 
 log = logging.getLogger(__name__)
@@ -907,7 +907,12 @@ def _init_logs(log_file_name=None):
     TRACE_LOG_DIR = "/logs"
     if trace_file_name is not None:
         handler = logging.FileHandler(trace_file_name)
-    elif is_fbcode() and os.path.exists(TRACE_LOG_DIR):
+    elif (
+        is_fbcode()
+        and os.path.exists(TRACE_LOG_DIR)
+        and os.access(TRACE_LOG_DIR, os.W_OK)
+        and torch._utils_internal.justknobs_check("pytorch/trace:enable")
+    ):
 
         def filename_cb():
             ranksuffix = ""
@@ -998,7 +1003,8 @@ def is_fbcode():
 
 def trace_structured(
     name: str,
-    metadata_fn: Callable[[], object] = lambda: True,
+    # NB: metadata expected to be dict so adding more info is forward compatible
+    metadata_fn: Callable[[], Dict[str, Any]] = lambda: {},
     *,
     payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
     suppress_context: bool = False,
@@ -1050,5 +1056,6 @@ def trace_structured(
 
 
 import torch._guards
+import torch._utils_internal
 import torch.distributed as dist
 import torch.version
