@@ -532,12 +532,10 @@ def break_graph_if_unsupported(*, push):
             # Reconstruct the context variables in the block stack
             for b in self.block_stack:
                 assert b.with_context is not None
-                self.output.add_output_instructions(
-                    [
-                        *b.with_context.reconstruct(cg),
-                        *b.resume_fn().try_except(cg.code_options, cleanup),
-                    ]
-                )
+                cg(b.with_context)
+                cg.extend_output(b.resume_fn().try_except(cg.code_options, cleanup))
+            self.output.add_output_instructions(cg.get_instructions())
+            del cg
 
             if sys.version_info >= (3, 11) and inst.opname == "CALL":
                 kw_names = (
@@ -590,11 +588,16 @@ class BackedgeTracker:
     """
 
     def __init__(self):
+        # How many loops have we performed?
         self.n_seen = 0
+        # How many nodes were in the graph on our first loop?
+        self.n_nodes_on_first_loop = None
 
     # Raises SkipFrame if the loop is getting too big.
     def append(self, count):
         self.n_seen += 1
+        if self.n_seen == 1:
+            self.n_nodes_on_first_loop = count
 
         # Don't skip if we haven't seen this particular backedge at least a few
         # times.
@@ -602,10 +605,12 @@ class BackedgeTracker:
             return
 
         # For now use the trivial hueristic of checking the raw number of nodes
-        # in the graph. In the future we could do something more interesting
-        # like watching the rate of growth to trim loops earlier (so we don't
-        # have to wait for `max` nodes before skipping).
-        if config.max_loop_unroll_nodes > 0 and count > config.max_loop_unroll_nodes:
+        # since the first time we saw this backedge. In the future we could do
+        # something more interesting like watching the rate of growth to trim
+        # loops earlier (so we don't have to wait for `max` nodes before
+        # skipping).
+        added_nodes = count - self.n_nodes_on_first_loop
+        if config.max_loop_unroll_nodes > 0 and added_nodes > config.max_loop_unroll_nodes:
             raise exc.SkipFrame("unrolled loop getting too big")
 
 

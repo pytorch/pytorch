@@ -7,6 +7,7 @@ import os
 import random
 import sys
 import threading
+import time
 import traceback
 import types
 import typing
@@ -77,7 +78,6 @@ from .utils import (
     CleanupManager,
     CompilationMetrics,
     counters,
-    cprofile_wrapper,
     dynamo_timed,
     format_bytecode,
     frame_phase_timing,
@@ -86,6 +86,7 @@ from .utils import (
     is_namedtuple,
     istype,
     LazyString,
+    maybe_cprofile,
     orig_code_map,
     record_compilation_metrics,
     reset_graph_break_dup_checker,
@@ -421,12 +422,6 @@ def convert_frame_assert(
     return _convert_frame_assert
 
 
-def maybe_cprofile(func):
-    if config.cprofile:
-        return cprofile_wrapper(func)
-    return func
-
-
 from collections import OrderedDict
 
 from torch.utils.hooks import RemovableHandle
@@ -665,6 +660,7 @@ def _compile(
             # -2: omit current frame, omit contextlib decorator
             "".join(traceback.format_list(traceback.extract_stack()[: -2 - skip])),
         )
+        start_time = time.time()
         try:
             guarded_code = compile_inner(code, one_graph, hooks, transform)
             return guarded_code
@@ -751,6 +747,7 @@ def _compile(
                 graph_op_count,
                 graph_node_count,
                 graph_input_count,
+                start_time,
                 entire_frame_compile_time,
                 backend_compile_time,
                 inductor_compile_time,

@@ -187,9 +187,21 @@ struct TraceEntry {
   trace_time_ time_{};
 };
 
+struct AllocatorConfigInfo {
+  double garbage_collection_threshold;
+  size_t max_split_size;
+  size_t pinned_num_register_threads;
+  bool expandable_segments;
+  bool release_lock_on_malloc;
+  bool pinned_use_host_register;
+  std::string last_allocator_settings;
+  std::vector<size_t> roundup_power2_divisions;
+};
+
 struct SnapshotInfo {
   std::vector<SegmentInfo> segments;
   std::vector<std::vector<TraceEntry>> device_traces;
+  AllocatorConfigInfo config_metadata;
 };
 
 // returns the pointers freed in the pool

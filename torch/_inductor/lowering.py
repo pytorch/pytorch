@@ -4,12 +4,12 @@ import logging
 import os
 import warnings
 from collections import defaultdict
-from collections.abc import Iterable
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
 import torch
+import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._higher_order_ops.triton_kernel_wrap import (
@@ -70,6 +70,7 @@ needs_realized_inputs: Set[torch._ops.OpOverload] = set()
 foreach_ops: Set[torch._ops.OpOverload] = set()
 inplace_foreach_ops: Set[torch._ops.OpOverload] = set()
 inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = dict()
+quantized_decomposed = torch.ops.quantized_decomposed
 
 
 def assert_nyi(cond, msg):
@@ -202,7 +203,7 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
             promoting_args = [
                 a
                 for a in args
-                if isinstance(a, (Number, sympy.Expr)) or hasattr(a, "get_dtype")
+                if isinstance(a, (Number, sympy.Expr)) or hasattr(a, "dtype")
             ]
             dtype = get_promoted_dtype(
                 *promoting_args, type_promotion_kind=type_promotion_kind
@@ -644,6 +645,40 @@ def register_pointwise(
     return fn
 
 
+def register_frexp():
+    """A pointwise function that maps ops.frexp to inputs"""
+    name = "frexp"
+    frexp = ops_wrapper("frexp")
+
+    def frexp0(*args, **kwargs):
+        return frexp(*args, **kwargs)[0]
+
+    def frexp1(*args, **kwargs):
+        return frexp(*args, **kwargs)[1]
+
+    pw_fns = [
+        make_pointwise(frexp0),
+        make_pointwise(frexp1, override_return_dtype=torch.int32),
+    ]
+
+    def fn(*args, **kwargs):
+        return pw_fns[0](*args, **kwargs), pw_fns[1](*args, **kwargs)
+
+    fn = register_lowering(
+        aten.frexp,
+    )(fn)
+
+    if hasattr(prims, name):
+        register_lowering(
+            getattr(prims, name),
+            type_promotion_kind=None,
+        )(fn)
+    return fn
+
+
+register_frexp()
+
+
 def register_foreach_pointwise(
     aten_fn,
     pointwise_lowering_fn,
@@ -906,65 +941,6 @@ def slice_(x, dim=0, start=0, end=2**63, step=1):
     return TensorBox(ir.SliceView.create(x.data, dim, start, end, step))
 
 
-@register_lowering(aten.roll, type_promotion_kind=None)
-def roll(a, shifts, dims=tuple()):
-    """
-    This is based on torch._refs.roll(), but uses ModularIndexing().
-
-    We can't use the ref here because it is based on multiple calls to
-    torch.cat() that this will result in terrible code.
-    """
-    # ATen specifies int[1] type for shifts and dims which expands integers to tuples of length 1
-    if not isinstance(shifts, Iterable):
-        shifts = (shifts,)
-    if not isinstance(dims, Iterable):
-        dims = (dims,)
-    dims = [_validate_dim(a, d) for d in dims]
-
-    if sympy_product(a.get_size()) == 0:
-        return clone(a)
-
-    len_shifts = len(shifts)
-    len_dims = len(dims)
-    if len_shifts != 1 or len_dims != 1:
-        if len_shifts == 0:
-            raise RuntimeError("`shifts` required")
-        # Takes care of the case when dims is not specified (default)
-        # By default, the tensor is flattened before shifting, after which the original shape is restored
-        if len_dims == 0 and len_shifts == 1:
-            flat = view(a, [sympy_product(a.get_size())])
-            rolled = roll(flat, shifts, 0)
-            return view(rolled, list(a.get_size()))
-        if len_shifts != len_dims:
-            raise RuntimeError(
-                f"shifts and dimensions must align. shifts: {len_shifts}, dims: {len_dims}"
-            )
-        tail_shifts = shifts[1:]
-        tail_dims = dims[1:]
-        first_dim_rolled = roll(a, shifts[0], dims[0])
-        return roll(first_dim_rolled, tail_shifts, tail_dims)
-
-    (dim,) = dims
-    # TODO: Avoid guarding on shape here
-    size = V.graph.sizevars.evaluate_static_shape(a.get_size()[dim])
-    start = (size - shifts[0]) % size
-    a_loader = a.make_loader()
-
-    def fn(index):
-        index = list(index)
-        index[dim] = ModularIndexing(
-            index[dim] + start, sympy.Integer(1), sympy.expand(size)
-        )
-        return a_loader(index)
-
-    return Pointwise.create(
-        device=a.get_device(),
-        dtype=a.get_dtype(),
-        inner_fn=fn,
-        ranges=a.get_size(),
-    )
-
-
 @register_lowering(aten.as_strided, type_promotion_kind=None)
 def as_strided(x, size, stride, storage_offset=None):
     if isinstance(x, TensorBox) and isinstance(x.data, ir.BaseView):
@@ -1061,6 +1037,96 @@ def pointwise_cat(inputs, dim=0):
         dtype=inputs[0].get_dtype(),
         inner_fn=inner_fn,
         ranges=new_size,
+    )
+
+
+@register_lowering(quantized_decomposed.quantize_per_channel, type_promotion_kind=None)
+def quantized_decomposed_quantize_per_channel(
+    input: TensorBox,
+    scales: TensorBox,
+    zero_points: TensorBox,
+    axis: int,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> TensorBox:
+    assert len(scales.get_size()) == 1, "expect scales 1 dim"
+    assert len(zero_points.get_size()) == 1, "expect zero_points 1 dim"
+
+    if input.get_dtype() == torch.bfloat16:
+        input = to_dtype(input, torch.float32)
+    assert (
+        input.get_dtype() == torch.float32
+    ), f"Expecting input to have dtype torch.float32, but got dtype: {input.get_dtype()}"
+    assert axis < len(
+        input.get_size()
+    ), f"Expecting axis to be < {len(input.get_size())}"
+
+    input_loader = input.make_loader()
+    scales_loader = scales.make_loader()
+    zero_points_loader = zero_points.make_loader()
+
+    def inner_fn(idx):
+        channel_idx = (idx[axis],)
+
+        input = input_loader(idx)
+        scale = scales_loader(channel_idx)
+        zero_point = zero_points_loader(channel_idx)
+        qmin, qmax = _create_constants(quant_min, quant_max, dtype=torch.float32)
+
+        inv_scale = ops.reciprocal(scale)
+        val = ops.round(input * inv_scale) + zero_point
+        clamped = ops.maximum(qmin, ops.minimum(qmax, val))
+        return ops.to_dtype(clamped, dtype)
+
+    return Pointwise.create(
+        device=input.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=input.get_size(),
+    )
+
+
+@register_lowering(
+    quantized_decomposed.dequantize_per_channel, type_promotion_kind=None
+)
+def quantized_decomposed_dequantize_per_channel(
+    input: TensorBox,
+    scales: TensorBox,
+    zero_points: TensorBox,
+    axis: int,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> TensorBox:
+    assert len(scales.get_size()) == 1, "expect scales 1 dim"
+    assert len(zero_points.get_size()) == 1, "expect zero_points 1 dim"
+    assert (
+        input.get_dtype() == dtype
+    ), f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
+    assert axis < len(
+        input.get_size()
+    ), f"Expecting axis to be < {len(input.get_size())}"
+
+    input_loader = input.make_loader()
+    scales_loader = scales.make_loader()
+    zero_points_loader = zero_points.make_loader()
+
+    def inner_fn(idx):
+        channel_idx = (idx[axis],)
+
+        input = input_loader(idx)
+        scale = scales_loader(channel_idx)
+        zero_point = zero_points_loader(channel_idx)
+
+        val = ops.sub(ops.to_dtype(input, torch.float32), zero_point) * scale
+        return val
+
+    return Pointwise.create(
+        device=input.get_device(),
+        dtype=torch.float32,
+        inner_fn=inner_fn,
+        ranges=input.get_size(),
     )
 
 
@@ -2246,7 +2312,6 @@ make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
 make_fallback(aten.fractional_max_pool2d)
 make_fallback(aten.fractional_max_pool3d)
-make_fallback(aten.frexp)
 make_fallback(aten.geqrf)
 make_fallback(aten.histc)
 make_fallback(aten.kthvalue)
@@ -2265,7 +2330,6 @@ make_fallback(aten._linalg_slogdet)
 make_fallback(aten._linalg_solve_ex)
 make_fallback(aten.linalg_solve_triangular)
 make_fallback(aten._linalg_svd)
-make_fallback(aten.logcumsumexp)
 make_fallback(aten.lu_unpack)
 make_fallback(aten.max_pool3d_with_indices)
 make_fallback(aten.max_unpool2d)
@@ -4983,6 +5047,7 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
 
 fallback_cumsum = fallback_handler(aten.cumsum.default)
 fallback_cumprod = fallback_handler(aten.cumprod.default)
+fallback_logcumsumexp = fallback_handler(aten.logcumsumexp.default)
 
 
 @register_lowering(aten.cumsum)
@@ -5020,6 +5085,26 @@ def cumprod(x, axis=None, dtype=None):
     result = ir.Scan.create(**kwargs, combine_fn=ops.mul, init=1)
     if result is None:
         return fallback_cumprod(x, dim=axis, dtype=dtype)
+    return result
+
+
+@register_lowering(aten.logcumsumexp)
+def logcumsumexp(x, dim):
+    def log_add_exp_helper(a, b):
+        min_v = ops.minimum(a, b)
+        max_v = ops.maximum(a, b)
+        mask = (min_v != max_v) | (~ops.isinf(min_v))
+        return ops.where(mask, ops.log1p(ops.exp(min_v - max_v)) + max_v, a)
+
+    dtype = x.get_dtype()
+    if len(x.get_size()) == 0:
+        assert dim in [0, -1]
+        return clone(x)
+
+    kwargs = _make_scan_inner(x, axis=dim, dtype=dtype)
+    result = ir.Scan.create(**kwargs, combine_fn=log_add_exp_helper, init=float("-inf"))
+    if result is None:
+        return fallback_logcumsumexp(x, dim=dim)
     return result
 
 
@@ -5445,6 +5530,18 @@ def triton_kernel_wrap(*, kernel_idx, grid, kwargs, tensors_to_clone):
     return triton_kernel_wrap_(kernel_idx=kernel_idx, grid=grid, kwargs=new_kwargs)
 
 
+@register_lowering(torch.ops.higher_order.cond)
+def cond(pred, true_fn, false_fn, operands):
+    if is_triton(pred) or any(map(is_triton, operands)):
+        msg = "control flow operator: torch.cond."
+        if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
+            msg = f"{msg} Found from : \n {stack_trace}"
+        V.graph.disable_cudagraphs_reason = msg
+
+    result = ir.Conditional.create(pred, true_fn, false_fn, operands)
+    return list(map(TensorBox.create, result))
+
+
 try:
     import torch.distributed._functional_collectives
 
@@ -5599,6 +5696,21 @@ try:
                 group_name,
             )
         )
+
+    @register_lowering(_c10d_functional.broadcast)
+    def _broadcast(inp, src, group_name):
+        inp = clone(inp)
+        ir._CollectiveKernel.create_inplace(
+            _c10d_functional.broadcast_.default, inp, src, group_name
+        )
+        return inp
+
+    @register_lowering(_c10d_functional.broadcast_)
+    def _broadcast_(inp, src, group_name):
+        ir._CollectiveKernel.create_inplace(
+            _c10d_functional.broadcast_.default, inp, src, group_name
+        )
+        return inp
 
     @register_lowering(_c10d_functional.wait_tensor)
     def _wait_tensor(inp):
