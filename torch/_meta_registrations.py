@@ -597,6 +597,11 @@ def assert_async_meta(val, assert_msg):
     return
 
 
+@register_meta(aten._print.default)
+def print_meta(s):
+    return
+
+
 @register_meta(aten._make_dep_token.default)
 def make_dep_token(
     *,
@@ -3073,6 +3078,7 @@ def register_meta_foreach(ops):
         aten._foreach_log1p,
         aten._foreach_log2,
         aten._foreach_neg,
+        aten._foreach_norm,
         aten._foreach_reciprocal,
         aten._foreach_round,
         aten._foreach_sigmoid,

@@ -338,7 +338,6 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                     load_object(f),
                     (
                         types.FunctionType,
-                        types.MethodType,
                         types.BuiltinFunctionType,
                         types.MethodDescriptorType,
                         types.WrapperDescriptorType,

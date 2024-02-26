@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
     TEST_WITH_ROCM,
 )
+from torch.testing._internal.two_tensor import TwoTensor
 
 
 _orig_module_call = torch.nn.Module.__call__
@@ -3915,6 +3916,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
         self.assertLess(total_shape_env_guards, AMT * 8)
 
+    # https://github.com/pytorch/pytorch/issues/118799
+    def test_subclass_graph_output_repro(self):
+        @torch._dynamo.allow_in_graph
+        def to_subclass(x):
+            return TwoTensor(x.clone(), x.clone())
+
+        def f(x):
+            tmp_subclass = to_subclass(x)
+            return tmp_subclass.view(-1)
+
+        x = torch.ones(2)
+        out_ref = f(x)
+        out_test = torch.compile(f, backend="aot_eager")(x)
+        self.assertEqual(out_ref, out_test)
+
     def test_numpy_tobytes_no_error(self):
         def fn(x):
             x += 1
@@ -4127,6 +4143,50 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             opt_fn(x, counter)
         self.assertEqual(counter[0], 12)
         self.assertEqual(cnt.frame_count, torch._dynamo.utils.ifdynstaticdefault(3, 2))
+
+    @unittest.expectedFailure
+    def test_many_overlapping_inputs_does_not_explode_guards(self):
+        from torch._dynamo.backends.common import aot_autograd
+
+        # Before, this was (9702, 0)
+        num_shape_guards = None
+        num_aot_guards = None
+        num_compiles = 0
+
+        def guard_count_backend(gm, *args):
+            nonlocal num_shape_guards
+            nonlocal num_aot_guards
+            nonlocal num_compiles
+            num_shape_guards = len(
+                torch._guards.TracingContext.try_get().fake_mode.shape_env.guards
+            )
+            num_aot_guards = len(
+                torch._guards.TracingContext.try_get().guards_context.aotautograd_guards
+            )
+            num_compiles += 1
+            return gm
+
+        aot_guard_counter = aot_autograd(fw_compiler=guard_count_backend)
+
+        @torch.compile(backend=aot_guard_counter, dynamic=True)
+        def f(*args):
+            for a in args:
+                a.add_(1)
+
+        x = torch.ones(1000, requires_grad=True)
+        args = x.split(10)
+
+        with torch.no_grad():
+            f(*args)
+        # In this example, there were 4950 guards (roughly (# tensors) ^ 2 // 2),
+        # because every pair of aliased inputs needs a guard.
+        self.assertTrue(num_aot_guards < 5000)
+        # But there are no dynamic shape guards.
+        self.assertEqual(num_shape_guards, 0)
+        # don't recompile
+        with torch.no_grad():
+            f(*args)
+        self.assertEqual(num_compiles, 1)
 
     def test_invalid_seq_unpack(self):
         def myfn(arg):
