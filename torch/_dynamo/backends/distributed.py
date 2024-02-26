@@ -256,16 +256,11 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
                 traceback.FrameSummary(__file__, 0, DDPOptimizer),
             ],
         )
-        context = torch._guards.TracingContext.try_get()
-        assert context is not None
 
-        with torch._guards.TracingContext.report_output_strides() as output_strides:
-            wrapper = WrapperModule(
-                self.compiler(input_mod, args),
-                unwrap_singleton_tuple,
-            )
-
-        return wrapper, output_strides
+        return WrapperModule(
+            self.compiler(input_mod, args),
+            unwrap_singleton_tuple,
+        )
 
     # Note:
     #
@@ -316,9 +311,18 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             # be FakeTensors already since Dynamo would have made them FakeTensors in the
             # non-DDP flow.  However, the parameters are _not_ expected to be FakeTensors,
             # since this wrapping happens during compilation
-            compiled_submod_real, output_strides = self.compile_submod(
-                real_mod, new_args, kwargs
-            )
+
+            class FakifyGuard:
+                def __init__(self):
+                    assert torch._guards.TracingContext.try_get()
+                    torch._guards.TracingContext.try_get().fakify_first_call = True
+
+                def __del__(self):
+                    torch._guards.TracingContext.try_get().fakify_first_call = False
+
+            g = FakifyGuard()
+
+            compiled_submod_real = self.compile_submod(real_mod, new_args, kwargs)
 
             # We update the original (outer) graph with a call into the compiled module
             # instead of the uncompiled one.
@@ -329,16 +333,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             # Finally, we have to produce inputs for use compiling the next submodule,
             # and these need to be FakeTensors, so we execute the module under fake_mode
             with self.fake_mode:
-                # TODO - make sure the first outputs of inductor match with user visible outputs
-                # (I think thats the case)
-                out = curr_submod(*new_args, **kwargs)
-                wrap_tuple = not isinstance(out,  (list, tuple))
-                out = [out] if wrap_tuple else out
-                out = [
-                    o.as_strided(o.shape, output_strides[i])
-                    for i, o in enumerate(out)
-                ]
-                return out if not wrap_tuple else out[0]
+                return compiled_submod_real(*new_args, **kwargs)
         else:
             # placeholder or output nodes don't need to get compiled, just executed
             return getattr(self, n.op)(n.target, new_args, kwargs)

@@ -618,6 +618,8 @@ class TracingContext:
         # See note [Tensor Fakification and Symbol Caching]
         self.tensor_to_context = WeakTensorKeyDictionary()
 
+        self.fakify_first_call = False
+
     def clear(self):
         # Look at the note in output_graph.py in function `save_global_state`
         # for the context on clearing global context.
