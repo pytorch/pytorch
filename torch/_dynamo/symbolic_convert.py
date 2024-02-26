@@ -17,14 +17,14 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Type
+from typing import Any, Dict, List, NamedTuple, Optional, Set, Tuple, Type
 from unittest.mock import patch
 
 import torch
 import torch._logging
 from torch._guards import Checkpointable, tracing, TracingContext
 
-from . import config, exc, logging as torchdynamo_logging, skipfiles, variables
+from . import config, exc, logging as torchdynamo_logging, trace_rules, variables
 from .bytecode_analysis import (
     get_indexof,
     JUMP_OPNAMES,
@@ -86,6 +86,7 @@ from .variables.dicts import ConstDictVariable, SetVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
     NestedUserFunctionVariable,
+    SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
@@ -487,8 +488,6 @@ def break_graph_if_unsupported(*, push):
                 if not self.should_compile_partial_graph():
                     raise
 
-                log.debug("break_graph_if_unsupported triggered compile", exc_info=True)
-
                 user_stack = excp.real_stack
                 # TODO: Also report the traceback from the parent frame
                 user_stack_formatted = "".join(traceback.format_list(user_stack))
@@ -500,10 +499,20 @@ def break_graph_if_unsupported(*, push):
                     and not explain
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
+                    # This log line is exercised from
+                    #   python test/dynamo/test_exc.py -k test_graph_break_log
                     graph_break_log.debug(
-                        "Graph break: %s from user code at:\n%s",
-                        excp,
+                        "Graph break: from user code at:\n%s",
                         user_stack_formatted,
+                        exc_info=True,
+                    )
+                else:
+                    # This log line MUST NOT contain the string "Graph break",
+                    # exercised by
+                    #   python test/dynamo/test_misc.py -k test_duplicate_graph_break_log
+                    log.debug(
+                        "Unsupported break in user code at %s:%s (details suppressed)",
+                        *frame_loc,
                     )
 
                 if self.has_backedge():
@@ -530,12 +539,10 @@ def break_graph_if_unsupported(*, push):
             # Reconstruct the context variables in the block stack
             for b in self.block_stack:
                 assert b.with_context is not None
-                self.output.add_output_instructions(
-                    [
-                        *b.with_context.reconstruct(cg),
-                        *b.resume_fn().try_except(cg.code_options, cleanup),
-                    ]
-                )
+                cg(b.with_context)
+                cg.extend_output(b.resume_fn().try_except(cg.code_options, cleanup))
+            self.output.add_output_instructions(cg.get_instructions())
+            del cg
 
             if sys.version_info >= (3, 11) and inst.opname == "CALL":
                 kw_names = (
@@ -595,9 +602,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     inline_depth: int
     inconsistent_side_effects: bool
     current_speculation: Optional[SpeculationEntry]
-    random_calls: List[
-        Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
-    ]
 
     def mark_inconsistent_side_effects(self):
         """
@@ -1122,7 +1126,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             tos = self.pop()
         _ = self.pop()
         if preserve_tos:
-            self.push(tos)
+            self.push(tos)  # type: ignore[possibly-undefined]
 
     def FOR_ITER(self, inst):
         it = self.pop().realize()
@@ -1500,7 +1504,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             val = seq.unpack_var_sequence(self)
         else:
             unimplemented(f"UNPACK_SEQUENCE {seq}")
-        assert len(val) == inst.argval
+        if len(val) != inst.argval:
+            unimplemented("UNPACK_SEQUENCE length mismatch")
         for i in reversed(val):
             self.push(i)
 
@@ -1981,7 +1986,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.export = export
 
         self.current_speculation = None
-        self.random_calls = []
 
         self.strict_checks_enabled = False
 
@@ -2039,7 +2043,6 @@ class InstructionTranslator(InstructionTranslatorBase):
         _step_logger()(
             logging.INFO,
             f"torchdynamo start tracing {f_code.co_name} {code_options['co_filename']}:{code_options['co_firstlineno']}",
-            stack_info=True,
         )
         super().__init__(
             output=OutputGraph(
@@ -2205,12 +2208,12 @@ class InstructionTranslator(InstructionTranslatorBase):
         # Add original GraphModule context to the resume function to handle
         # the case of a graph break while tracing a GraphModule
         orig_graphmodule_maybe = code_context.get_context(self.f_code).get(
-            "orig_graphmodule", None
-        )
+            "orig_graphmodule", lambda: None
+        )()
         if orig_graphmodule_maybe is not None:
-            code_context.get_context(new_code)[
-                "orig_graphmodule"
-            ] = orig_graphmodule_maybe
+            code_context.get_context(new_code)["orig_graphmodule"] = weakref.ref(
+                orig_graphmodule_maybe
+            )
 
         if new_code.co_freevars:
             cg.make_function_with_closure(name, new_code, True, stack_len)
@@ -2278,19 +2281,22 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if func.has_self():
             unimplemented("inline with __self__")
 
-        result = skipfiles.check_verbose(func, is_inlined_call=True)
+        result = trace_rules.check_verbose(func, is_inlined_call=True)
         if result.skipped:
             from torch._dynamo.variables.misc import produce_trampoline_autograd_apply
 
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
-            if hasattr(func.fn, "_origin") and func.fn._origin in [
+            if hasattr(getattr(func, "fn", None), "_origin") and func.fn._origin in [
                 produce_trampoline_autograd_apply,
             ]:
                 # Known sound
-                return skipfiles.SkipResult(False, "allowlist in dynamo known function")
+                return trace_rules.SkipResult(
+                    False, "allowlist in dynamo known function"
+                )
+            fn_qualname = func.fn.__qualname__ if hasattr(func, "fn") else ""
             unimplemented(
-                f"'inline in skipfiles: {func.fn.__qualname__} | {func.get_name()} {func.get_filename()}, {result.reason}'"
+                f"'inline in skipfiles: {fn_qualname} | {func.get_name()} {func.get_filename()}, {result.reason}'"
             )
 
         if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
@@ -2306,6 +2312,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def inline_call_(
         parent, func: VariableTracker, args: List[VariableTracker], kwargs
     ):
+        if isinstance(func, SkipFunctionVariable):
+            unimplemented("inline with functions in skip files")
         assert isinstance(
             func,
             (UserFunctionVariable, NestedUserFunctionVariable),
@@ -2365,7 +2373,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 # but it is enough to add a context for `forward` in case it is called.
                 code_context.get_context(module.forward.__code__)[
                     "orig_graphmodule"
-                ] = module
+                ] = weakref.ref(module)
             else:
                 # Detect inline module method calls in order to propagate node metadata,
                 # by checking if the first argument (self) is a variable tracking a nn.Module

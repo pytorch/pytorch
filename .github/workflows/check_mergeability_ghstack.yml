@@ -20,6 +20,34 @@ jobs:
           git config --global user.name "PyTorch MergeBot"
           git fetch origin main:main
 
+      - name: Wait for orig branch
+        shell: bash
+        run: |
+          BRANCH="${{ github.base_ref }}"
+          echo "$BRANCH"
+          BRANCH="${BRANCH%/base}/orig"
+          echo "$BRANCH"
+
+          WAIT_SECONDS=300
+          END_WAIT=$((SECONDS+WAIT_SECONDS))
+          BRANCH_EXISTS=0
+
+          while [ $SECONDS -lt $END_WAIT ]; do
+            git fetch --prune origin "${BRANCH}" || true
+            if git rev-parse --verify "origin/${BRANCH}"; then
+              BRANCH_EXISTS=1
+              break
+            fi
+            echo "Waiting for branch ${BRANCH} to exist..."
+            sleep 30  # Wait for 30 seconds before retrying
+          done
+
+          if [ $BRANCH_EXISTS -eq 0 ]; then
+            echo "Branch ${BRANCH} not found after ${WAIT_SECONDS} seconds."
+            echo "Mergeability check failed for infrastructure reasons."
+            exit 1
+          fi
+
       - name: Setup Python
         uses: actions/setup-python@v4
         with:

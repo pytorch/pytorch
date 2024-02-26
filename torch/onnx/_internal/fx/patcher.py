@@ -95,7 +95,7 @@ class ONNXTorchPatcher:
 
             def safetensors_load_file_wrapper(filename, device="cpu"):
                 result = {}
-                with safetensors.torch.safe_open(
+                with safetensors.torch.safe_open(  # type: ignore[attr-defined]
                     filename, framework="pt", device=device
                 ) as f:
                     for k in f.keys():

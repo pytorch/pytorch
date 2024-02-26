@@ -134,11 +134,11 @@ def sparse_semi_structured_from_dense_cutlass(dense):
     idxs1 = bit2 | (bit3.to(torch.int64) << 1)
 
     if dense.dtype != torch.float:
-        sparse0 = dense_4.gather(-1, idxs0.unsqueeze(-1))
+        sparse0 = dense_4.gather(-1, idxs0.unsqueeze(-1))  # type: ignore[possibly-undefined]
         sparse1 = dense_4.gather(-1, idxs1.unsqueeze(-1))
         sparse = torch.stack((sparse0, sparse1), dim=-1).view(m, k // 2)
     else:
-        sparse = dense_2.gather(-1, idxs0.unsqueeze(-1) // 2).view(m, k // 2)
+        sparse = dense_2.gather(-1, idxs0.unsqueeze(-1) // 2).view(m, k // 2)  # type: ignore[possibly-undefined]
 
     meta_4 = idxs0 | (idxs1 << 2)
     meta_n = meta_4.view((-1, meta_ncols, quadbits_per_meta_elem)).to(meta_dtype)
@@ -163,7 +163,7 @@ def sparse_semi_structured_from_dense_cutlass(dense):
         )
 
     # Reorder meta tensor elements.
-    meta_reordered = meta.new_empty((m * meta_ncols,))
+    meta_reordered = meta.new_empty((m * meta_ncols,))  # type: ignore[possibly-undefined]
     meta_offsets = _calculate_meta_reordering_scatter_offsets(
         m, meta_ncols, meta_dtype, device
     )

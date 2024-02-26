@@ -516,7 +516,7 @@ def register_multi_grad_hook(
             if tensor.requires_grad
         )
 
-    return Handle(handles)
+    return Handle(handles)  # type: ignore[possibly-undefined]
 
 
 # NOTE [Allow mutation on tensors saved for backward]
@@ -746,4 +746,4 @@ def _engine_run_backward(t_outputs, *args, **kwargs):
         )  # Calls into the C++ engine to run the backward pass
     finally:
         if attach_logging_hooks:
-            unregister_hooks()
+            unregister_hooks()  # type: ignore[possibly-undefined]

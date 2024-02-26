@@ -40,7 +40,7 @@ template <typename scalar_t, typename IndexType, bool upper, int elements_per_th
 C10_LAUNCH_BOUNDS_1(block_size)
 __global__ void triu_tril_kernel(
     cuda::detail::TensorInfo<scalar_t, IndexType> result_info,
-    const cuda::detail::TensorInfo<scalar_t, IndexType> self_info,
+    const cuda::detail::TensorInfo<const scalar_t, IndexType> self_info,
     const int64_t k,
     const int64_t N_padded,
     const IndexType last_dim_padded) {
@@ -124,7 +124,7 @@ void triu_tril_cuda_template(const Tensor& result, const Tensor& self, int64_t k
     dim3 dim_grid((N_padded / elements_per_thread + dim_block.x - 1) / dim_block.x);
     if (cuda::detail::canUse32BitIndexMath(result) && cuda::detail::canUse32BitIndexMath(self)) {
       auto result_info = cuda::detail::getTensorInfo<scalar_t, int32_t>(result);
-      auto self_info = cuda::detail::getTensorInfo<scalar_t, int32_t>(self);
+      auto self_info = cuda::detail::getTensorInfo<const scalar_t, int32_t>(self);
       BOOL_SWITCH(self.is_same(result), inplace, [&] {
         triu_tril_kernel<scalar_t, int32_t, upper, elements_per_thread, inplace>
           <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -133,7 +133,7 @@ void triu_tril_cuda_template(const Tensor& result, const Tensor& self, int64_t k
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       auto result_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(result);
-      auto self_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(self);
+      auto self_info = cuda::detail::getTensorInfo<const scalar_t, int64_t>(self);
       BOOL_SWITCH(self.is_same(result), inplace, [&] {
         triu_tril_kernel<scalar_t, int64_t, upper, elements_per_thread, inplace>
           <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(

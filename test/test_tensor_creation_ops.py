@@ -1056,8 +1056,6 @@ class TestTensorCreation(TestCase):
 
         self._float_to_int_conversion_helper(vals, device, dtype)
 
-    # TODO: re-enable this test
-    @unittest.skipIf(True, "real and imag not implemented for complex")
     @onlyNativeDeviceTypes
     def test_complex_type_conversions(self, device):
         dtypes = [torch.float, torch.complex64, torch.complex128]

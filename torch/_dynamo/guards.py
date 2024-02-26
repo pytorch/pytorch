@@ -54,11 +54,10 @@ from torch.utils.weak import TensorWeakRef
 
 from . import config, convert_frame, exc, mutation_guard
 from .eval_frame import set_guard_error_hook
-from .source import DefaultsSource, LocalSource, TypeSource
-from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
+from .source import AttrSource, DefaultsSource, LocalSource, TypeSource
+from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     common_constant_types,
-    dict_keys_getitem,
     dict_keys_repr,
     guard_failures,
     istype,
@@ -102,7 +101,6 @@ CLOSURE_VARS = {
     "___key_to_id": key_to_id,
     "___dict_version": dict_version,
     "___dict_contains": lambda a, b: a in b,
-    "___dict_keys_getitem": dict_keys_getitem,
     "___tuple_iterator_len": tuple_iterator_len,
     "___tuple_iterator_getitem": tuple_iterator_getitem,
     "__math_isnan": math.isnan,
@@ -115,6 +113,7 @@ CLOSURE_VARS = {
     # If not numpy array, piggy back on e.g. tensor guards to check type
     (lambda a: torch.as_tensor(a) if isinstance(a, (np.generic, np.ndarray)) else a),
     "torch": torch,
+    "inspect": inspect,
 }
 
 if sys.version_info[:2] <= (3, 8):
@@ -264,6 +263,14 @@ class GuardBuilder(GuardBuilderBase):
 
         return name
 
+    def _guard_on_attribute(self, guard: Guard, attr_name: str, guard_fn):
+        attr_source = AttrSource(guard.originating_source, attr_name)
+        # Copy the stack info
+        new_guard = Guard(
+            attr_source, guard_fn, stack=guard.stack, user_stack=guard.user_stack
+        )
+        new_guard.create(self)
+
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         t = type(self.get(guard.name))
@@ -328,8 +335,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def NAME_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
-        code = f"{self.arg_ref(guard)}.__name__ == '{obj.__name__}'"
-        self._produce_guard_code(guard, [code])
+        self._guard_on_attribute(guard, "__name__", GuardBuilder.EQUALS_MATCH)
 
     def DATA_PTR_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
@@ -350,13 +356,13 @@ class GuardBuilder(GuardBuilderBase):
 
         self._produce_guard_code(guard, [code], provided_guarded_object=self.get(base))
 
-    def FUNCTORCH_CURRENT_LEVEL_MATCH(self, guard: Guard):
-        # Invalidate the graph if a call to vmap has been made prior to this
-        # This is super conservative as the interpreter stack may not contain
-        # vmap
-        code = [
-            "torch._C._functorch.maybe_current_level() is None",
-        ]
+    def FUNCTORCH_STACK_MATCH(self, guard: Guard):
+        # Invalidate functorch code if current level is different than
+        # the one when FX graph was generated
+        # if torch._C._functorch.peek_interpreter_stack() is not None:
+        cis = torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters()
+        states = [ci.get_state() for ci in cis]
+        code = [f"torch._functorch.pyfunctorch.compare_functorch_state({states})"]
         self._produce_guard_code(guard, code)
 
     def EQUALS_MATCH(self, guard: Guard):
@@ -405,15 +411,15 @@ class GuardBuilder(GuardBuilderBase):
 
         # Special case for nan because float("nan") == float("nan") evaluates to False
         if istype(val, float) and math.isnan(val):
+            self.TYPE_MATCH(guard)
             code = list()
-            code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
             code.append(f"__math_isnan({ref})")
             self._produce_guard_code(guard, code)
             return
         # Python math library doesn't support complex nan, so we need to use numpy
         elif istype(val, complex) and np.isnan(val):
+            self.TYPE_MATCH(guard)
             code = list()
-            code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
             code.append(f"__numpy_isnan({ref})")
             self._produce_guard_code(guard, code)
             return
@@ -432,7 +438,7 @@ class GuardBuilder(GuardBuilderBase):
                 )
         else:
             # Add type check to prevent equality check between tensor and non-tensor.
-            code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
+            self.TYPE_MATCH(guard)
 
         if istype(val, torch.Size):
             val = tuple(val)
@@ -479,11 +485,8 @@ class GuardBuilder(GuardBuilderBase):
             val = self.get(guard.name)
             # Strictly only want user-defined functions
             if type(val) == types.FunctionType and hasattr(val, "__code__"):
-                ref = self.arg_ref(guard)
-                code = [
-                    f"___check_obj_id(getattr({ref}, '__code__', None), {self.id_ref(val.__code__)})",
-                ]
-                self._produce_guard_code(guard, code)
+                self._guard_on_attribute(guard, "__code__", GuardBuilder.HASATTR)
+                self._guard_on_attribute(guard, "__code__", GuardBuilder.FUNCTION_MATCH)
             else:
                 self.FUNCTION_MATCH(guard)
 
@@ -498,9 +501,12 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard.name)
         t = type(value)
 
+        self.TYPE_MATCH(guard)
         code = list()
-        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
-        code.append(f"len({ref}) == {len(value)}")
+        if len(value) == 0:
+            code.append(f"not {ref}")
+        else:
+            code.append(f"len({ref}) == {len(value)}")
 
         self._produce_guard_code(guard, code)
 
@@ -509,8 +515,8 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard.name)
         t = type(value)
 
+        self.TYPE_MATCH(guard)
         code = list()
-        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
 
         self._produce_guard_code(guard, code)
@@ -529,8 +535,8 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard.name)
         t = type(value)
 
+        self.TYPE_MATCH(guard)
         code = list()
-        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         any_key_is_id = any(key_is_id(k) for k in value.keys())
         const_keys_repr = dict_keys_repr(
             key_to_id(value),
@@ -552,21 +558,21 @@ class GuardBuilder(GuardBuilderBase):
         t = type(value)
         keys = {k for k, v in value.named_parameters()}
 
+        self.TYPE_MATCH(guard)
         code = list()
-        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
         code.append(f"{{k for k, v in {ref}.named_parameters()}} == {keys!r}")
 
         self._produce_guard_code(guard, code)
 
-    def ODICT_KEYS(self, guard):
-        """OrderedDict keys match"""
+    def DICT_CONST_KEYS(self, guard):
+        """Constant keys match"""
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
 
+        self.TYPE_MATCH(guard)
         code = list()
-        code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
-        code.append(f"str({ref}.keys()) == {str(value.keys())!r}")
+        code.append(f"list({ref}.keys()) == {list(value.keys())!r}")
 
         self._produce_guard_code(guard, code)
 
@@ -665,7 +671,7 @@ class GuardBuilder(GuardBuilderBase):
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
-        if guard.is_nn_module():
+        if guard.is_nn_module() or guard.originating_source.is_dict_key():
             self.ID_MATCH(guard)
         else:
             if isinstance(value, TensorWeakRef):
@@ -932,16 +938,15 @@ def must_add_nn_module_guards(guard):
     )
 
 
+class DeletedGuardFn:
+    pass
+
+
 # NB: Naively, you'd expect this to only be a function that produces
 # the callable that constitutes the guard.  However, there is some
 # delicate handling for invalidating this check function when the
 # locals/globals get invalidated, so there's some extra state
 # we have to hold in this manager class.
-#
-# TODO: this object has reference cycle with itself, via check_fn which
-# references back to CheckFunction via ___guarded_code in closure_vars.
-# Ideally, there shouldn't be any ref cycle so that guards are
-# promptly disposed of.
 class CheckFunctionManager:
     def __init__(
         self,
@@ -949,7 +954,6 @@ class CheckFunctionManager:
         guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
     ):
         guards = output_graph.guards if output_graph else None
-        self.valid = True
         self._weakrefs: Dict[int, ReferenceType[object]] = {}
         self.output_graph = output_graph
 
@@ -1030,7 +1034,7 @@ class CheckFunctionManager:
         guards_log.debug("GUARDS:")
 
         # Don't report this guard, it's always the same, useless!
-        code_parts = ["___guarded_code.valid", "___check_global_state()"]
+        code_parts = ["___check_global_state()"]
         verbose_code_parts = code_parts[:]
 
         def add_code_part(code, guard, log_only=False):
@@ -1162,7 +1166,6 @@ class CheckFunctionManager:
             # we should only hit this case in NopTests()
             global_state = convert_frame.GlobalStateGuard()
         closure_vars = {
-            "___guarded_code": self,
             "___check_tensors": check_tensors_fn,
             "___check_tensors_verbose": check_tensors_verbose_fn,
             "___check_global_state": global_state.check,
@@ -1180,8 +1183,13 @@ class CheckFunctionManager:
             print("GUARDS\n", guard_body)
 
         out: Dict[str, Any] = dict()
+
+        # We don't put builder.scope as the globals in exec call because
+        # guard_fn.__globals__ becomes equal to builder.scope. This causes
+        # guard_fn to hold a referece to f_locals sitting in builder.scope["L"]
+        globals_for_guard_fn = {"G": builder.scope["G"]}
         try:
-            exec(pycode, builder.scope, out)
+            exec(pycode, globals_for_guard_fn, out)
         except SyntaxError as ex:
             log.exception("Failed to exec guard at line %s.\n%s", ex.lineno, pycode)
             raise
@@ -1192,18 +1200,30 @@ class CheckFunctionManager:
         guard_fn.code_parts = code_parts
         guard_fn.verbose_code_parts = verbose_code_parts
         # Grab only G, but preserve "G" because guards access it as "G"
-        guard_fn.global_scope = {
-            "G": builder.scope["G"],
-        }
+        guard_fn.global_scope = globals_for_guard_fn
         guard_fn.guard_fail_fn = guard_fail_fn
+        # will be populated by a non-owning reference to CacheEntry/ExtraState
+        # when the CacheEntry is constructed
+        guard_fn.cache_entry = None
+        guard_fn.extra_state = None
         return guard_fn
 
     def invalidate(self):
-        # A weakref is no longer valid, self.check_fn should return false
-        # TODO(janimesh) - Free up cache entry after the cache entry formation
-        # is in python, and the underlying data structure is a doubly linked
-        # list.
-        self.valid = False
+        # Some tests reveal that CheckFunctionManager has no attribute
+        # check_fn, but this case should not be of any concern.
+        # This case doesn't seem easy to repro.
+        if (
+            hasattr(self, "check_fn")
+            and self.check_fn is not DeletedGuardFn
+            and (cache_entry := self.check_fn.cache_entry) is not None
+            and (extra_state := self.check_fn.extra_state) is not None
+        ):
+            assert isinstance(cache_entry, CacheEntry)
+            assert isinstance(extra_state, ExtraState)
+            extra_state.invalidate(cache_entry)
+            self.check_fn.cache_entry = None
+            self.check_fn.extra_state = None
+            self.check_fn = DeletedGuardFn
 
     def id_ref(self, obj):
         """add a weakref, return the id"""
@@ -1385,12 +1405,14 @@ def guard_error_hook(
     print(
         f"ERROR RUNNING GUARDS {code.co_name} {code.co_filename}:{code.co_firstlineno}"
     )
-    # TODO: If we passed in the exception here, we could get a precise
-    # column number of which subexpression failed.  But that would also
-    # require us to have the TRUE code that was eval'ed, not a shoddy
-    # reconstruction (like is done here)
     print("lambda " + ", ".join(guard_fn.args) + ":")
     print(" ", " and\n  ".join(guard_fn.code_parts))
+    local_scope = {"L": f_locals, **guard_fn.closure_vars}
+    for guard in guard_fn.code_parts:
+        try:
+            eval(guard, guard_fn.global_scope, local_scope)
+        except:  # noqa: B001,E722
+            print(f"Malformed guard:\n{guard}")
 
 
 set_guard_error_hook(guard_error_hook)

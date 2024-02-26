@@ -1,4 +1,5 @@
 import logging
+import os
 import warnings
 import weakref
 from typing import cast, Dict, List, Optional
@@ -22,6 +23,13 @@ _outstanding_wait_count
 _wait_all
 
 """
+
+_use_native_funcol = "_USE_NATIVE_C10D_FUNCTIONAL" in os.environ
+
+
+def native_funcol_enabled():
+    return _use_native_funcol
+
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +100,9 @@ def _wait_reg_dec(ptr, wait_reg):
 
 
 def _register_tensor_wrapper(tensor) -> None:
+    if native_funcol_enabled():
+        # Tensor storage -> work mapping is maintained in C++
+        return
     global data_ptr_to_work
     data_ptr = tensor.elem.data_ptr()
     # Note: we should NEVER try to trace this, bc it registers runtime stuff during trace.

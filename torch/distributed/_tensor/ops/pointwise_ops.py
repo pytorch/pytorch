@@ -283,6 +283,7 @@ pointwise_ops = [
     aten.logit.out,
     aten.logit_.default,
     aten.masked_fill.Scalar,
+    aten.maximum.out,
     aten.mul.Scalar,
     aten.mul.Tensor,
     aten.mul.out,
@@ -351,6 +352,8 @@ pointwise_ops = [
     aten.sign_.default,
     aten.signbit.default,
     aten.signbit.out,
+    aten.silu.default,
+    aten.silu.out,
     aten.sin.default,
     aten.sin.out,
     aten.sin_.default,
@@ -395,6 +398,7 @@ pointwise_ops = [
     # please keep the entries below alphabetically sorted
     aten.gelu_backward.default,
     aten.sigmoid_backward.default,
+    aten.silu_backward.default,
     aten.tanh_backward.default,
     aten.threshold_backward.default,
 ]
@@ -520,6 +524,7 @@ for op in pointwise_ops:
 
 # TODO: add all for_each ops
 for_each_ops = [
+    aten._foreach_abs_.default,
     aten._foreach_addcdiv_.Scalar,
     aten._foreach_addcdiv_.ScalarList,
     aten._foreach_addcdiv_.Tensor,

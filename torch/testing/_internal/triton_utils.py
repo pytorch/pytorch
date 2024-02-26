@@ -14,7 +14,9 @@ def has_lark():
         return False
 
 
-requires_lark = unittest.skipUnless(has_lark(), "requires lark")
+HAS_LARK = has_lark()
+
+requires_lark = unittest.skipUnless(HAS_LARK, "requires lark")
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 if HAS_CUDA:
@@ -28,23 +30,6 @@ if HAS_CUDA:
         in_ptr1,
         out_ptr,
         n_elements,
-        BLOCK_SIZE: "tl.constexpr",
-    ):
-        pid = tl.program_id(axis=0)
-        block_start = pid * BLOCK_SIZE
-        offsets = block_start + tl.arange(0, BLOCK_SIZE)
-        mask = offsets < n_elements
-        x = tl.load(in_ptr0 + offsets, mask=mask)
-        y = tl.load(in_ptr1 + offsets, mask=mask)
-        output = x + y
-        tl.store(out_ptr + offsets, output, mask=mask)
-
-    @triton.jit
-    def add_kernel_out_of_order(
-        in_ptr0,
-        n_elements,
-        in_ptr1,
-        out_ptr,
         BLOCK_SIZE: "tl.constexpr",
     ):
         pid = tl.program_id(axis=0)
@@ -276,6 +261,40 @@ if HAS_CUDA:
             boundary_check=[0],
         )
 
+    @triton.jit
+    def kernel_with_block_ptr_2d(
+        x_ptr,
+        output_ptr,
+        n_elements,
+        BLOCK_SIZE: tl.constexpr,
+    ):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        x = tl.load(
+            tl.make_block_ptr(
+                base=x_ptr,
+                shape=[n_elements, 1],
+                strides=[1, 1],
+                offsets=[block_start, 0],
+                block_shape=[BLOCK_SIZE, 1],
+                order=[1, 0],
+            ),
+            boundary_check=[0],
+        )
+        output = x
+        tl.store(
+            tl.make_block_ptr(
+                base=output_ptr,
+                shape=[n_elements, 1],
+                strides=[1, 1],
+                offsets=[block_start, 0],
+                block_shape=[BLOCK_SIZE, 1],
+                order=[1, 0],
+            ),
+            output,
+            boundary_check=[0],
+        )
+
     from triton.language import load, store
 
     @triton.jit
@@ -354,3 +373,20 @@ if HAS_CUDA:
             i -= 1
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
+
+    @triton.jit
+    def add_kernel_out_of_order_fn2(
+        in_ptr0,
+        in_ptr1,
+        n_elements,
+        out_ptr,
+        BLOCK_SIZE: "tl.constexpr",
+    ):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(in_ptr0 + offsets, mask=mask)
+        y = tl.load(in_ptr1 + offsets, mask=mask)
+        output = x + y
+        tl.store(out_ptr + offsets, output, mask=mask)

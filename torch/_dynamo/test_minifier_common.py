@@ -118,7 +118,7 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
                 finally:
                     log.removeHandler(log_handler)
                     if cwd is not None:
-                        os.chdir(prev_cwd)
+                        os.chdir(prev_cwd)  # type: ignore[possibly-undefined]
                     # Make sure we don't leave buggy compiled frames lying
                     # around
                     torch._dynamo.reset()

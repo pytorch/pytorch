@@ -26,14 +26,12 @@ from ..guards import GuardBuilder, install_guard
 from ..replay_record import DummyModule
 from ..source import AttrSource, GetItemSource, is_constant_source, TypeSource
 from ..utils import (
-    build_checkpoint_variable,
     check_constant_args,
     check_numpy_ndarray_args,
     check_unspec_python_args,
     extract_fake_example_value,
     get_fake_value,
     guard_if_dyn,
-    is_utils_checkpoint,
     istype,
     numpy_operator_wrapper,
     proxy_args_kwargs,
@@ -57,7 +55,12 @@ from .lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
-from .tensor import FakeItemVariable, SymNodeVariable, UnspecializedPythonVariable
+from .tensor import (
+    FakeItemVariable,
+    SymNodeVariable,
+    TensorVariable,
+    UnspecializedPythonVariable,
+)
 from .user_defined import UserDefinedVariable
 
 log = logging.getLogger(__name__)
@@ -95,6 +98,11 @@ def _polyfill_call_impl(name):
 
 class BuiltinVariable(VariableTracker):
     _SENTINEL = object()
+
+    @classmethod
+    def create_with_source(cls, value, source):
+        install_guard(source.make_guard(GuardBuilder.BUILTIN_MATCH))
+        return BuiltinVariable(value, source=source)
 
     @staticmethod
     @functools.lru_cache(None)
@@ -473,7 +481,7 @@ class BuiltinVariable(VariableTracker):
         name = self.fn.__name__
         assert self.fn.__module__ == "builtins"
         assert name not in codegen.tx.f_globals, "shadowed global"
-        return [codegen.create_load_global(name, False, add=True)]
+        codegen.append_output(codegen.create_load_global(name, False, add=True))
 
     def constant_args(self, *args, **kwargs):
         return check_constant_args(args, kwargs)
@@ -702,8 +710,11 @@ class BuiltinVariable(VariableTracker):
         # unnecessarily putting guards on objects which might not actually be used.
         has_constant_handler = self.has_constant_handler(args, kwargs)
         if has_constant_handler:
+            from .builder import SourcelessBuilder
+
             # constant fold
-            return variables.ConstantVariable.create(
+            return SourcelessBuilder()(
+                tx,
                 self.as_python_constant()(
                     *[x.as_python_constant() for x in args],
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
@@ -831,8 +842,9 @@ class BuiltinVariable(VariableTracker):
             else:
                 return result
         elif isinstance(a, SymNodeVariable) or isinstance(b, SymNodeVariable):
+            fn = torch.sym_max if self.fn is max else torch.sym_min
             proxy = tx.output.create_proxy(
-                "call_function", self.fn, *proxy_args_kwargs([a, b], {})
+                "call_function", fn, *proxy_args_kwargs([a, b], {})
             )
             return SymNodeVariable.create(tx, proxy, None)
 
@@ -918,7 +930,17 @@ class BuiltinVariable(VariableTracker):
                 mutable_local=MutableLocal(),
             )
 
-    call_iter = _call_iter_tuple_list
+    def call_iter(self, tx, obj, *args, **kwargs):
+        # Handle the case where we are iterating over a tuple, list or iterator
+        ret = self._call_iter_tuple_list(tx, obj, *args, **kwargs)
+
+        if ret is None:
+            # If the object doesn't implement a __iter__ method, it will be an error in eager mode when calling iter on it anyway.
+            # If the object implements a __iter__ method, inlining effectively forwards the call to another iter call
+            # (e.g. when __iter__ just returns iter(self.list)) or return a user-defined iterator.
+            return obj.call_method(tx, "__iter__", args, kwargs)
+        return ret
+
     call_tuple = _call_iter_tuple_list
     call_list = _call_iter_tuple_list
 
@@ -929,6 +951,10 @@ class BuiltinVariable(VariableTracker):
             arg, (variables.UserDefinedClassVariable, BaseUserFunctionVariable)
         ):
             return variables.ConstantVariable.create(True)
+        elif isinstance(arg, UserDefinedVariable):
+            return variables.ConstantVariable.create(callable(arg.value))
+        elif isinstance(arg, (ConstantVariable, SymNodeVariable, TensorVariable)):
+            return variables.ConstantVariable.create(False)
 
     def call_cast(self, _, *args, **kwargs):
         if len(args) == 2:
@@ -1053,7 +1079,12 @@ class BuiltinVariable(VariableTracker):
         return args[0].call_method(tx, "__getitem__", args[1:], kwargs)
 
     def call_isinstance(self, tx, arg, isinstance_type):
-        arg_type = arg.python_type()
+        try:
+            arg_type = arg.python_type()
+        except NotImplementedError:
+            unimplemented(
+                f"isinstance({arg}, {isinstance_type}): can't determine type of {arg}"
+            )
 
         isinstance_type = isinstance_type.as_python_constant()
 
@@ -1292,7 +1323,9 @@ class BuiltinVariable(VariableTracker):
         elif isinstance(obj, TorchInGraphFunctionVariable):
             # Get OpOverload from an OpOverloadPacket, e.g., torch.ops.aten.add.default.
             member = getattr(obj.value, name)
-            if trace_rules.is_aten_op_or_tensor_method(member):
+            if isinstance(
+                member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
+            ) and trace_rules.is_aten_op_or_tensor_method(member):
                 return TorchInGraphFunctionVariable(member, **options)
         elif isinstance(obj, (PythonModuleVariable, DummyModule)):
             if obj.is_torch:
@@ -1303,10 +1336,7 @@ class BuiltinVariable(VariableTracker):
             if config.replay_record_enabled:
                 tx.exec_recorder.record_module_access(obj.value, name, member)
 
-            if is_utils_checkpoint(member):
-                options["source"] = source
-                return build_checkpoint_variable(**options)
-            elif source is not None:
+            if source is not None:
                 return VariableBuilder(tx, source)(member)
             else:
                 return SourcelessBuilder()(tx, member)
@@ -1606,13 +1636,17 @@ class BuiltinVariable(VariableTracker):
         if isinstance(left, TensorVariable) or isinstance(right, TensorVariable):
             from .builder import wrap_fx_proxy_cls
 
-            if op is operator.is_:
-                return ConstantVariable.create(
+            if op in [operator.is_, operator.is_not]:
+                is_result = (
                     isinstance(left, TensorVariable)
                     and isinstance(right, TensorVariable)
                     and id(extract_fake_example_value(left.as_proxy().node))
                     == id(extract_fake_example_value(right.as_proxy().node))
                 )
+                if op is operator.is_:
+                    return ConstantVariable.create(is_result)
+                else:
+                    return ConstantVariable.create(not is_result)
 
             if op not in supported_tensor_comparison_ops.values():
                 _unimplemented()
@@ -1655,11 +1689,16 @@ class BuiltinVariable(VariableTracker):
         ):
             return ConstantVariable.create(op(left.value, right.value))
 
-        if (
-            (isinstance(left, StreamVariable) and isinstance(right, StreamVariable))
-            or (isinstance(left, EventVariable) and isinstance(right, EventVariable))
-        ) and op is operator.eq:
-            return ConstantVariable(op(left.value, right.value))
+        if isinstance(left, (StreamVariable, EventVariable)) or isinstance(
+            right, (StreamVariable, EventVariable)
+        ):
+            if type(left) == type(right) and op is operator.eq:
+                return ConstantVariable(op(left.value, right.value))
+
+            if isinstance(right, ConstantVariable) or isinstance(
+                left, ConstantVariable
+            ):
+                return ConstantVariable(op(left.value, right.value))
 
         if op.__name__ == "is_":
             # If the two objects are of different type, we can safely return False

@@ -33,13 +33,19 @@ from torch._dynamo import (
     logging as dynamo_logging,
     utils as dynamo_utils,
 )
-from torch._dynamo.utils import counters, detect_fake_mode, lazy_format_graph_code
+from torch._dynamo.utils import (
+    counters,
+    detect_fake_mode,
+    lazy_format_graph_code,
+    optimus_scuba_log,
+)
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
+from torch._utils_internal import signpost_event
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 from .._dynamo.backends.common import aot_autograd
@@ -60,7 +66,7 @@ if config.is_fbcode():
     from torch._inductor.fb.utils import time_and_log
 else:
     # no-op decorator
-    def time_and_log(attr: str):
+    def time_and_log(attr: str, extra_loggings: Optional[Dict[str, str]] = None):
         return dynamo_utils.identity
 
 
@@ -146,13 +152,25 @@ def _warn_tf32_disabled():
 
 
 def _unlift_graph(mod, gm, graph_signature):
+    from torch.export.unflatten import _assign_attr, _AttrKind
+
     state_dict = {}
     for name, param in mod.named_parameters(remove_duplicate=False):
-        gm.register_parameter(name.replace(".", "_"), param)
         state_dict[name] = param
+        _assign_attr(
+            param,
+            gm,
+            name,
+            attr_kind=_AttrKind.PARAMETER,
+        )
     for name, buffer in mod.named_buffers(remove_duplicate=False):
-        gm.register_buffer(name.replace(".", "_"), buffer)
         state_dict[name] = buffer
+        _assign_attr(
+            buffer,
+            gm,
+            name,
+            attr_kind=_AttrKind.BUFFER,
+        )
 
     placeholder_nodes = [node for node in gm.graph.nodes if node.op == "placeholder"]
     lifted_inputs = []
@@ -186,6 +204,63 @@ def _unlift_graph(mod, gm, graph_signature):
         {},
     )
     return unlifted_gm
+
+
+def split_const_gm(
+    gm: torch.fx.GraphModule,
+) -> Tuple[torch.fx.GraphModule, Dict[str, int]]:
+    """
+    This function takes an GraphModule input "gm".
+    The gm will be split into 2 components,
+      1) const_gm, which consists the subgraph of gm that can be constant folded.
+      2) gm (being inplace modified,) which returns the graph after constant folding.
+
+    const_output_index is a mapping of corresponding node name from gm to the
+    output index of const_gm.
+    Returns (const_gm, const_output_index)
+    """
+    from torch._inductor.constant_folding import (
+        CONST_MODULE_TAG,
+        META_TAG,
+        MODULE_TAG,
+        replace_node_with_constant,
+        run_and_get_constant_graph,
+    )
+
+    const_gm = run_and_get_constant_graph(gm)
+    const_result = const_gm()
+
+    const_outputs = {
+        x.name: idx for idx, x in enumerate(tuple(const_gm.graph.nodes)[-1].args[0])
+    }
+
+    to_erase_node = []
+    to_replace_node = []
+    const_output_index = {}
+    for node in gm.graph.nodes:
+        if node.name in const_outputs:
+            to_replace_node.append(node)
+        elif node.meta[META_TAG] == CONST_MODULE_TAG:
+            to_erase_node.append(node)
+
+    for node in to_replace_node:
+        new_const_name = "_FOLDED_CONST_" + node.name
+        replace_node_with_constant(
+            gm,
+            node,
+            const_result[const_outputs[node.name]],
+            new_const_name,
+        )
+        const_output_index[new_const_name] = const_outputs[node.name]
+    for node in to_erase_node[::-1]:
+        if node.users:
+            for n in node.users:
+                assert n.meta[META_TAG] == MODULE_TAG, f"node: {node} user not empty."
+        else:
+            gm.graph.erase_node(node)
+    gm.recompile()
+
+    return const_gm, const_output_index
 
 
 def is_tf32_warning_applicable(gm: torch.fx.GraphModule):
@@ -259,14 +334,24 @@ def fake_tensor_prop(
     return fake_mode
 
 
+# pass config dict back to user
+def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
+    with config.patch(config_patches):
+        return config.get_config_copy()
+
+
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
-@time_and_log(attr="compilation time (in seconds)")
+@time_and_log(
+    attr="compilation time (in seconds)",
+    extra_loggings={"config_dict": str(get_patched_config_dict())},
+)
 # Need this decorator for compile_fx_inner even if we already have one for
 # compile_fx. The reason is the compilation for backward graph may happen after
 # compile_fx return and we may want to use the _LazyGraphModule for compiling
 # the backward graph as well.
 @_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
+@dynamo_utils.dynamo_timed(phase_name="inductor_compile")
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -542,12 +627,40 @@ def fx_codegen_and_compile(
         post_grad_passes(gm, is_inference=is_inference)
         V.debug.fx_graph_transformed(gm, example_inputs)
         post_grad_graphs_log.debug("%s", lazy_format_graph_code("AFTER POST GRAD", gm))
-        log.debug(
-            "counters of inductor dict after apply passes on the input FX graph in the post grad pass: %s",
-            counters["inductor"],
+        optimus_scuba_log["inductor_post_grad"] = counters["inductor"]
+        signpost_event(
+            "optimus",
+            "compile_fx.post_grad_passes",
+            optimus_scuba_log,
         )
 
     with V.set_fake_mode(fake_mode):
+        const_output_index = None
+        const_graph = None
+        const_code = None
+
+        if aot_mode and config.aot_inductor.use_runtime_constant_folding:
+            const_gm, const_output_index = split_const_gm(gm)
+
+            const_graph = GraphLowering(
+                const_gm,
+                example_inputs=[],
+                shape_env=shape_env,
+                num_static_inputs=num_fixed,
+                graph_id=graph_id,
+                cpp_wrapper=cpp_wrapper,
+                aot_mode=aot_mode,
+                user_visible_outputs=user_visible_outputs,
+                extern_node_serializer=extern_node_serializer,
+                is_inference=is_inference,
+                is_const_graph=True,
+            )
+            with V.set_graph_handler(const_graph):
+                assert cpp_wrapper, "AOT mode only supports C++ wrapper"
+                const_graph.run()
+
+                const_code, _ = const_graph.codegen_with_cpp_wrapper()
+
         graph = GraphLowering(
             gm,
             # example_inputs will be used by AOTInductor to dry-run the generated code for Triton kernel tuning.
@@ -562,6 +675,9 @@ def fx_codegen_and_compile(
             user_visible_outputs=user_visible_outputs,
             extern_node_serializer=extern_node_serializer,
             is_inference=is_inference,
+            const_output_index=const_output_index,
+            const_code=const_code,
+            const_module=const_graph,
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
@@ -1051,9 +1167,11 @@ def compile_fx(
             )
 
         model_ = pre_grad_passes(model_, example_inputs_)
-        log.debug(
-            "counters of inductor dict after apply passes on the input FX graph in the pre grad pass: %s",
-            counters["inductor"],
+        optimus_scuba_log["inductor_pre_grad"] = counters["inductor"]
+        signpost_event(
+            "optimus",
+            "compile_fx.pre_grad_passes",
+            optimus_scuba_log,
         )
 
     if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
@@ -1219,12 +1337,6 @@ def compile_fx(
             partition_fn=partition_fn,
             keep_inference_input_mutations=True,
         )(model_, example_inputs_)
-
-
-# pass config dict back to user
-def get_patched_config_dict(config_patches=None):
-    with config.patch(config_patches):
-        return config.get_config_copy()
 
 
 def _shape_env_from_inputs(inputs: List[torch.Tensor]):

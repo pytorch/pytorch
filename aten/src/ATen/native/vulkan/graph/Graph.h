@@ -16,6 +16,12 @@ namespace native {
 namespace vulkan {
 
 using ValueRef = int32_t;
+
+struct IOValueRef {
+  ValueRef value;
+  ValueRef staging;
+};
+
 class ComputeGraph;
 
 /*
@@ -30,6 +36,12 @@ class OpNode {
   friend class ComputeGraph;
 
  public:
+  OpNode(ValueRef input, ValueRef output) : inputs_{input}, outputs_{output} {}
+  OpNode(
+      const std::vector<ValueRef>& inputs,
+      const std::vector<ValueRef>& outputs)
+      : inputs_(inputs), outputs_(outputs) {}
+
   virtual ~OpNode() = default;
 
  protected:
@@ -39,6 +51,21 @@ class OpNode {
  public:
   virtual void encode_prepack(ComputeGraph* graph) const {}
   virtual void encode_execute(ComputeGraph* graph) const {}
+};
+
+struct SharedObject {
+  friend class ComputeGraph;
+
+  explicit SharedObject() = default;
+
+  VkMemoryRequirements aggregate_memory_requirements;
+  VmaAllocationCreateInfo aggregate_create_info;
+  std::vector<ValueRef> users;
+  api::MemoryAllocation allocation;
+
+  void add_user(ComputeGraph* const graph, const ValueRef idx);
+  void allocate(ComputeGraph* const graph);
+  void bind_users(ComputeGraph* const graph);
 };
 
 /*
@@ -61,6 +88,7 @@ class ComputeGraph final {
  private:
   GraphConfig config_;
   std::unique_ptr<api::Context> context_;
+  std::vector<SharedObject> shared_objects_;
   std::vector<Value> values_;
 
   std::vector<std::unique_ptr<OpNode>> prepack_nodes_;
@@ -127,7 +155,8 @@ class ComputeGraph final {
 
   ValueRef add_tensor(
       const std::vector<int64_t>& sizes,
-      const api::ScalarType dtype);
+      const api::ScalarType dtype = api::ScalarType::Float,
+      const int64_t shared_object_idx = -1);
   ValueRef add_tensorref(
       const std::vector<int64_t>& sizes,
       const api::ScalarType dtype,
@@ -136,6 +165,20 @@ class ComputeGraph final {
 
   ValueRef set_input_tensor(const ValueRef idx, const bool use_staging = true);
   ValueRef set_output_tensor(const ValueRef idx, const bool use_staging = true);
+
+  /*
+   * Convenience function to add an input tensor along with its staging buffer
+   */
+  inline IOValueRef add_input_tensor(
+      const std::vector<int64_t>& sizes,
+      const api::ScalarType dtype,
+      const int64_t shared_object_idx = -1) {
+    ValueRef t = add_tensor(sizes, dtype, shared_object_idx);
+    ValueRef staging = set_input_tensor(t);
+    return {t, staging};
+  }
+
+  SharedObject& get_shared_object(const int64_t idx);
 
   //
   // Input/Output

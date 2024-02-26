@@ -133,7 +133,9 @@ class BaseTorchVariable(VariableTracker):
         except Exception:
             name = f"torch_obj_{id(self.value)}"
         unique_var_name = "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
-        return codegen.setup_globally_cached(unique_var_name, self.value, False)
+        codegen.extend_output(
+            codegen.setup_globally_cached(unique_var_name, self.value, False)
+        )
 
     def as_proxy(self):
         return self.value
@@ -252,6 +254,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     def __repr__(self):
         return f"TorchInGraphFunctionVariable({self.value})"
 
+    def get_function(self):
+        return self.value
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -293,7 +298,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 self.value,
                 source=self.source,
             ).call_function(tx, args, kwargs)
-        elif self.value is torch.overrides.get_default_nowrap_functions:
+        elif self.value is torch.overrides.get_default_nowrap_functions.__wrapped__:
             # [Note: __torch_function__] we return empty here because we restrict
             # the set of functions that we trace __torch_function__ on to
             # functions outside of the actual set. Implementing this properly will require implementing
@@ -501,15 +506,27 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 param_vars=args,
             )
         elif is_constant_pg_functions(self.value):
-            # becuase the input is a "ProcessGroupVariable", we'll be guarding on its
+            # because the input is a "ProcessGroupVariable", we'll be guarding on its
             # ID_MATCH based on how it was constructed.
 
             # We desugar it at trace-time into ranks by directly calling util
             # bake the result into the trace
-            assert len(args) == 1, "Expected one arg (pg)"
-            assert isinstance(args[0], ProcessGroupVariable)
+            if len(args) == 1:
+                # group or group name
+                assert isinstance(args[0], (ProcessGroupVariable, ConstantVariable))
+            elif len(args) == 2:
+                # ranks + tag
+                assert isinstance(args[0], ListVariable) and isinstance(
+                    args[1], ConstantVariable
+                )
+            else:
+                raise AssertionError(
+                    f"Invalid group value ({args}) for constant pg "
+                    f"function {self.value}"
+                )
+            args_as_value = [arg.as_python_constant() for arg in args]
+            invocation_result = self.value(*args_as_value)
 
-            invocation_result = self.value(args[0].as_python_constant())
             # Note - while we *could* cook up sources around invocations, like a FunctionSource
             # the space of invoking functions in the middle of the guard chain is very iffy. As such,
             # guard propagation via options is the best we can do.
@@ -552,6 +569,20 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             raise unimplemented(
                 "torch.nn.functional.one_hot with data-dependent output shape"
             )
+        elif (
+            self.value is torch.fx.experimental.symbolic_shapes.guard_size_oblivious
+            and len(args) == 1
+            and isinstance(args[0], SymNodeVariable)
+        ):
+            # TODO: this probably should be folded somewhere else but I'm not
+            # sure where
+            # TODO: some of the other symbolic_shapes special tools can also
+            # get this treatment too
+            (cond,) = args
+            return variables.ConstantVariable.create(
+                torch.fx.experimental.symbolic_shapes.guard_size_oblivious(cond.sym_num)
+            )
+
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(

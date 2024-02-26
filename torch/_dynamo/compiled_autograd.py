@@ -222,18 +222,35 @@ class AutogradCompilerInstance:
 
 compiled_autograd_enabled = False
 
+# We may have code like:
+# with enable(compiler_fn):
+#   ...
+#   with disable():
+#     ...
+#   ...
+# The disable() call just want to disable compiled autograd temporarily.
+# But overall the feature is enabled.
+#
+# The code covered by the disable context manager has no way to know if
+# compiled autograd is overall eanbled. Use another variable
+# compiled_autograd_enabled_count to indicate how many times compiled
+# autograd has been enabled in the call stack for this purpose.
+compiled_autograd_enabled_count = 0
+
 
 @contextlib.contextmanager
 def enable(compiler_fn):
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
         functools.partial(AutogradCompilerInstance, compiler_fn)
     )
-    global compiled_autograd_enabled
+    global compiled_autograd_enabled, compiled_autograd_enabled_count
     compiled_autograd_enabled = True
+    compiled_autograd_enabled_count += 1
     try:
         with torch.autograd.set_multithreading_enabled(False):
             yield
     finally:
+        compiled_autograd_enabled_count -= 1
         if not prior:
             compiled_autograd_enabled = False
         torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
