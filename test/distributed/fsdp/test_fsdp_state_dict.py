@@ -34,6 +34,7 @@ from torch.distributed.fsdp import (
     ShardedStateDictConfig,
     StateDictType,
 )
+from torch.distributed.fsdp._common_utils import FSDP_PREFIX
 from torch.distributed.fsdp._unshard_param_utils import FLAT_PARAM
 from torch.distributed.fsdp.wrap import enable_wrap, ModuleWrapPolicy, wrap
 from torch.nn import Linear, Module, TransformerDecoderLayer, TransformerEncoderLayer
@@ -1188,7 +1189,6 @@ class TestFSDPStateDict(FSDPTest):
         # Create an unexpected key
         sd['unexpected'] = torch.ones(1)
         missing, unexpected = model.load_state_dict(sd, strict=False)
-        from torch.distributed.fsdp._common_utils import FSDP_PREFIX
         assert len(missing) == 1
         assert len(unexpected) == 1
         self.assertTrue(FSDP_PREFIX not in missing[0])
