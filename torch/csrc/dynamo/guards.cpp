@@ -1043,6 +1043,22 @@ class DATA_PTR_MATCH : public LeafGuard {
   void* _data_ptr;
 };
 
+// Checks that an attr is absent in the object. We don't need the opposite
+// HASATTR guard because we can just rely on GetAttrGuardAccessor to act as
+// HASATTR guard.
+class NO_HASATTR : public LeafGuard {
+ public:
+  NO_HASATTR(py::object attr_name, py::object verbose_code_parts)
+      : LeafGuard(verbose_code_parts), _attr_name(attr_name.ptr()) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    return PyObject_HasAttr(value, _attr_name) == 0;
+  }
+
+ private:
+  PyObject* _attr_name;
+};
+
 /**
  * Relational guards compare more than one value. We implement Relational
  * guards by capturing some state in the guard object. For example for tensor
@@ -2520,6 +2536,10 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DATA_PTR_MATCH")
       .def(py::init<py::object, py::list>())
       .def("__call__", &DATA_PTR_MATCH::check);
+  py::class_<NO_HASATTR, LeafGuard, std::shared_ptr<NO_HASATTR>>(
+      py_m, "NO_HASATTR")
+      .def(py::init<py::object, py::list>())
+      .def("__call__", &NO_HASATTR::check);
   py::class_<DYNAMIC_INDICES, LeafGuard, std::shared_ptr<DYNAMIC_INDICES>>(
       py_m, "DYNAMIC_INDICES")
       .def(py::init<bool, py::set, py::list>())
@@ -2672,6 +2692,14 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(
                 std::make_shared<DATA_PTR_MATCH>(data_ptr, verbose_code_parts));
+          })
+      .def(
+          "add_no_hasattr_guard",
+          [](GuardManager& self,
+             py::object attr_name,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(
+                std::make_shared<NO_HASATTR>(attr_name, verbose_code_parts));
           })
       .def(
           "add_dynamic_indices_guard",
