@@ -213,6 +213,35 @@ def get_buffer(
     return None
 
 
+def is_lifted_tensor_constant(
+    program: ExportedProgram,
+    node: torch.fx.Node,
+) -> bool:
+    """
+    Checks if the given node is a lifted tensor constant within the exported program
+    """
+
+    return node.name in program.graph_signature.inputs_to_lifted_tensor_constants
+
+
+def get_lifted_tensor_constant(
+    program: ExportedProgram,
+    node: torch.fx.Node,
+) -> Optional[torch.Tensor]:
+    """
+    Returns the lifted tensor constant associated with the given node in the exported program.
+    Returns None if the node is not a lifted tensor constant within the exported program
+    """
+
+    if is_lifted_tensor_constant(program, node):
+        lifted_tensor_name = program.graph_signature.inputs_to_lifted_tensor_constants[
+            node.name
+        ]
+        return program.constants[lifted_tensor_name]
+
+    return None
+
+
 def sequential_split(gm: torch.fx.GraphModule, node_call_back) -> torch.fx.GraphModule:
     """
     Splits the graph module into multiple submodules based on the node_call_back.
