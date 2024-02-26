@@ -654,9 +654,9 @@ def identify_mutated_tensors(kernel, kwargs):
             )
         )
         if ttir_module is not None:
-            warnings.warn(f"TTIR:\n{str(ttir_module)}\n")
+            log.debug("TTIR: %s", str(ttir_module))
         if functions is not None:
-            warnings.warn(f"functions:\n{str(functions)}\n")
+            log.debug("functions: %s", str(functions))
         return [key for key, value in kwargs.items() if isinstance(value, Tensor)]
 
 
