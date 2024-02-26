@@ -21,7 +21,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
     load_tests,
     gradcheck,
-    skipIfRocm,
     skipIfTorchDynamo
 )
 
@@ -267,30 +266,6 @@ class TestOptim(TestCase):
         )
 
 
-    def _test_complex_2d(self, optimizer_constructor):
-        a1 = torch.randn(2, dtype=torch.complex64, requires_grad=True)
-        a1_real = a1.real.clone().detach()
-        a1_imag = a1.imag.clone().detach()
-        a1_real.requires_grad_()
-        a1_imag.requires_grad_()
-        optim1 = optimizer_constructor([a1])
-        optim2 = optimizer_constructor([a1_real, a1_imag])
-
-        for _ in range(10):
-            optim1.zero_grad()
-            optim2.zero_grad()
-            a2 = torch.complex(a1_real, a1_imag)
-            rosenbrock(a1).abs().backward()
-            rosenbrock(a2).abs().backward()
-
-            self.assertEqual(a1.grad.real, a1_real.grad)
-            self.assertEqual(a1.grad.imag, a1_imag.grad)
-
-            optim1.step()
-            optim2.step()
-            self.assertEqual(a1.real, a1_real)
-            self.assertEqual(a1.imag, a1_imag)
-
     def _build_params_dict(self, weight, bias, **kwargs):
         return [{"params": [weight]}, dict(params=[bias], **kwargs)]
 
@@ -485,16 +460,6 @@ class TestOptim(TestCase):
             constructor_accepts_foreach=True,
         )
 
-    def test_adam_complex(self):
-        for foreach in (False, True):
-            self._test_complex_2d(functools.partial(Adam, foreach=foreach))
-            self._test_complex_2d(functools.partial(Adam, foreach=foreach, amsgrad=True))
-            self._test_complex_2d(functools.partial(Adam, foreach=foreach, weight_decay=0.2))
-            self._test_complex_2d(functools.partial(Adam, foreach=foreach, weight_decay=0.2, amsgrad=True))
-        self._test_complex_2d(Adam)
-        self._test_complex_2d(functools.partial(
-            Adam, lr=torch.tensor(.001), weight_decay=0.2, amsgrad=True,
-        ))
 
     def test_adamw(self):
         self._test_basic_cases(
@@ -510,17 +475,6 @@ class TestOptim(TestCase):
             constructor_accepts_foreach=True,
         )
 
-
-    def test_adamw_complex(self):
-        self._test_complex_2d(AdamW)
-        self._test_complex_2d(functools.partial(
-            AdamW, lr=torch.tensor(.001), weight_decay=0.2, amsgrad=True,
-        ))
-        for foreach in (False, True):
-            self._test_complex_2d(functools.partial(AdamW, foreach=foreach))
-            self._test_complex_2d(functools.partial(AdamW, foreach=foreach, amsgrad=True))
-            self._test_complex_2d(functools.partial(AdamW, foreach=foreach, weight_decay=0.2))
-            self._test_complex_2d(functools.partial(AdamW, foreach=foreach, weight_decay=0.2, amsgrad=True))
 
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
@@ -624,11 +578,6 @@ class TestOptim(TestCase):
             )
 
 
-    def test_adamax(self):
-        self._test_complex_2d(Adamax)
-        self._test_complex_2d(functools.partial(Adamax, foreach=True))
-
-
     def test_radam(self):
         self._test_basic_cases(
             lambda weight, bias, foreach: RAdam(
@@ -651,27 +600,6 @@ class TestOptim(TestCase):
             ],
             constructor_accepts_foreach=True,
         )
-
-
-    def test_rmsprop(self):
-        for foreach in (False, True):
-            self._test_complex_2d(lambda param: RMSprop(param, foreach=foreach))
-            self._test_complex_2d(
-                lambda param: RMSprop(param, centered=True, foreach=foreach)
-            )
-            self._test_complex_2d(
-                lambda param: RMSprop(param, momentum=0.1, foreach=foreach)
-            )
-            self._test_complex_2d(
-                lambda param: RMSprop(param, maximize=True, foreach=foreach)
-            )
-
-
-    @skipIfRocm
-    @skipIfTorchDynamo()
-    def test_rprop(self):
-        for foreach in (False, True):
-            self._test_complex_2d(lambda param: Rprop(param, foreach=foreach))
 
 
     def test_fused_optimizer_does_not_step_if_foundinf(self):

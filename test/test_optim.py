@@ -14,7 +14,7 @@ from optim.test_swa_utils import TestSWAUtils  # noqa: F401
 from torch.nn import Parameter
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_optimizers import (
-    optim_db, optims, OptimizerErrorEnum, _get_optim_inputs_including_global_cliquey_kwargs)
+    optim_db, optims, OptimizerErrorEnum, _get_optim_inputs_including_global_cliquey_kwargs, TensorTracker)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA, skipMPS)
 from torch.testing._internal.common_utils import markDynamoStrictTest, parametrize, run_tests, TestCase
@@ -26,6 +26,13 @@ FP16_REDUCED_PRECISION = {'atol': 1e-5, 'rtol': 1e-4}
 def _force_capturable_False_for_unsupported_single_tensor(optim_info, kwargs):
     if optim_info.only_supports_capturable_on_foreach and not kwargs.get("foreach", False) and kwargs.get("capturable", False):
         kwargs["capturable"] = False
+
+
+def rosenbrock(tensor):
+    assert tensor.size() == torch.Size([2]), f"Requires tensor with 2 scalars but got {tensor.size()}"
+    x, y = tensor
+    return (1 - x) ** 2 + 100 * (y - x**2) ** 2
+
 
 @markDynamoStrictTest
 class TestOptimRenewed(TestCase):
@@ -148,7 +155,7 @@ class TestOptimRenewed(TestCase):
 
 
     @skipMPS
-    @optims(optim_db, dtypes=[torch.complex64])
+    @optims([o for o in optim_db if o.supports_complex], dtypes=[torch.complex64])
     def test_complex(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
@@ -223,6 +230,79 @@ class TestOptimRenewed(TestCase):
             self.assertEqual(complex_steps, real_steps)
 
 
+    @optims([o for o in optim_db if o.supports_complex], dtypes=[torch.complex64])
+    def test_complex_2d(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
+        # Also skip fused, since our fused kernels do not support complex
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device, dtype, optim_info, skip=("differentiable", "fused"))
+        for optim_input in all_optim_inputs:
+            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
+                    and not optim_input.kwargs.get("foreach", False)):
+                continue
+
+            a1 = torch.randn(2, device=device, dtype=dtype, requires_grad=True)
+            a1_real = a1.real.clone().detach()
+            a1_imag = a1.imag.clone().detach()
+            a1_real.requires_grad_()
+            a1_imag.requires_grad_()
+            optim1 = optim_cls([a1], **optim_input.kwargs)
+            optim2 = optim_cls([a1_real, a1_imag], **optim_input.kwargs)
+
+            a1_reals = TensorTracker()
+            a1_imags = TensorTracker()
+            a1_grad_reals = TensorTracker()
+            a1_grad_imags = TensorTracker()
+            losses = TensorTracker()
+
+            def closure1():
+                optim1.zero_grad()
+                loss = rosenbrock(a1).abs()
+                loss.backward()
+
+                # Track clones to best test accuracy
+                a1_reals.add(a1.real.clone().detach())
+                a1_imags.add(a1.imag.clone().detach())
+                a1_grad_reals.add(a1.grad.real.clone().detach())
+                a1_grad_imags.add(a1.grad.imag.clone().detach())
+
+                losses.add(loss.clone().detach())
+
+                return loss
+
+            def closure2():
+                optim2.zero_grad()
+                a1_reals.pop_and_set(a1_real)
+                a1_imags.pop_and_set(a1_imag)
+                a2 = torch.complex(a1_real, a1_imag)
+                loss = rosenbrock(a2).abs()
+                losses.pop_and_set(loss)
+                loss.backward()
+                a1_grad_reals.pop_and_set(a1_real.grad)
+                a1_grad_imags.pop_and_set(a1_imag.grad)
+                return loss
+
+
+            for _ in range(3):
+                if optim_info.step_requires_closure:
+                    # LBFGS, for example, requires closure and calls it internally
+                    optim1.step(closure1)
+                    optim2.step(closure2)
+                else:
+                    closure1()
+                    closure2()
+                    optim1.step()
+                    optim2.step()
+
+                self.assertEqual(a1.real, a1_real)
+                self.assertEqual(a1.imag, a1_imag)
+
+            self.assertTrue(a1_reals.all_popped())
+            self.assertTrue(a1_imags.all_popped())
+            self.assertTrue(a1_grad_reals.all_popped())
+            self.assertTrue(a1_grad_imags.all_popped())
+            self.assertTrue(losses.all_popped())
 
 
     def _test_derived_optimizers(self, device, dtype, optim_info, flag, reduced_precision=False, assert_step_dtype=None):
