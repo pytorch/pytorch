@@ -17,7 +17,7 @@ def intern_string(s: str) -> int:
         r = len(INTERN_TABLE)
         INTERN_TABLE[s] = r
         torch._logging._internal.trace_structured(
-            "str", lambda: [s, r], suppress_context=True
+            "str", lambda: (s, r), suppress_context=True
         )
     return r
 

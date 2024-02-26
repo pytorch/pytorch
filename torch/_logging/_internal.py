@@ -9,7 +9,7 @@ import re
 import tempfile
 from dataclasses import dataclass, field
 from importlib import __import__
-from typing import Any, Callable, Dict, List, Optional, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from weakref import WeakSet
 
 log = logging.getLogger(__name__)
@@ -1004,7 +1004,8 @@ def is_fbcode():
 def trace_structured(
     name: str,
     # NB: metadata expected to be dict so adding more info is forward compatible
-    metadata_fn: Callable[[], Dict[str, Any]] = lambda: {},
+    # Tuple[str, int] is a special case for string interning
+    metadata_fn: Callable[[], Union[Dict[str, Any], Tuple[str, int]]] = lambda: {},
     *,
     payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
     suppress_context: bool = False,
@@ -1024,7 +1025,7 @@ def trace_structured(
         payload_fn
     ), f"payload_fn should be callable, but got {type(payload_fn)}"
     if trace_log.isEnabledFor(logging.DEBUG):
-        record = {}
+        record: Dict[str, object] = {}
         record[name] = metadata_fn()
         if not suppress_context:
             # TODO: Actually, the rank probably should just be emitted once at
