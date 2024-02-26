@@ -366,18 +366,22 @@ def kaiser(
     if M == 1:
         return torch.ones((1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
 
+    # Avoid NaNs by casting `beta` to the appropriate dtype.
+    beta = torch.tensor(beta, dtype=dtype, device=device)
+
     start = -beta
     constant = 2.0 * beta / (M if not sym else M - 1)
+    end = torch.minimum(beta, start + (M - 1) * constant)
 
     k = torch.linspace(start=start,
-                       end=start + (M - 1) * constant,
+                       end=end,
                        steps=M,
                        dtype=dtype,
                        layout=layout,
                        device=device,
                        requires_grad=requires_grad)
 
-    return torch.i0(torch.sqrt(beta * beta - torch.pow(k, 2))) / torch.i0(torch.tensor(beta, device=device))
+    return torch.i0(torch.sqrt(beta * beta - torch.pow(k, 2))) / torch.i0(beta)
 
 
 @_add_docstr(

@@ -15,14 +15,16 @@ Tensor _empty_affine_quantized(
     const double scale,
     const int64_t zero_point,
     const optional<MemoryFormat> memory_format) {
+  api::StorageType storage_type = api::StorageType::TEXTURE_3D;
   return convert_quantized(vTensor{
       api::context(),
-      sizes,
+      sizes.vec(),
       scale,
       zero_point,
-      dtype ? *dtype : c10::kFloat,
-      api::StorageType::TEXTURE_3D,
-      memory_format ? *memory_format : c10::MemoryFormat::Contiguous,
+      convert_dtype(dtype ? *dtype : c10::kFloat),
+      storage_type,
+      memory_format ? get_gpu_memory_layout(storage_type, *memory_format)
+                    : api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED,
   });
 }
 
@@ -33,12 +35,14 @@ Tensor empty_memory_format(
     const c10::optional<Device> device,
     const c10::optional<bool> pin_memory,
     const optional<MemoryFormat> memory_format) {
+  api::StorageType storage_type = api::StorageType::TEXTURE_3D;
   return convert(vTensor{
       api::context(),
-      sizes,
-      dtype ? *dtype : c10::kFloat,
-      api::StorageType::TEXTURE_3D,
-      memory_format ? *memory_format : c10::MemoryFormat::Contiguous,
+      sizes.vec(),
+      convert_dtype(dtype ? *dtype : c10::kFloat),
+      storage_type,
+      memory_format ? get_gpu_memory_layout(storage_type, *memory_format)
+                    : api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED,
   });
 }
 

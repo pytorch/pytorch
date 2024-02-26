@@ -151,6 +151,7 @@
 #include <ATen/ops/slice.h>
 #include <ATen/ops/slice_backward_native.h>
 #include <ATen/ops/slice_copy_native.h>
+#include <ATen/ops/slice_inverse_native.h>
 #include <ATen/ops/slice_native.h>
 #include <ATen/ops/slice_scatter_native.h>
 #include <ATen/ops/sparse_coo_tensor.h>
@@ -525,10 +526,7 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   Tensor new_values = values.expand(broadcast_dense_sizes).repeat_interleave(nnz_factor, 0);
   Tensor new_indices = indices.new_empty(new_indices_size);
   if (!broadcast_sizes.empty()) {
-    // ones(broadcast_sizes).nonzero() is equivalent to
-    // product(map(arange, broadcast_sizes)) but avoids creating
-    // auxilary arange tensors
-    Tensor broadcast_indices = at::native::new_ones(indices, broadcast_sizes).nonzero().transpose(0, 1).tile(nnz);
+    Tensor broadcast_indices = at::sparse::full_coo_indices(broadcast_sizes, indices.options()).tile(nnz);
     new_indices.narrow(0, 0, sparse_extra_ndim).copy_(broadcast_indices.narrow(0, 0, sparse_extra_ndim));
     for (size_t i=0; i<broadcast_dims.size(); i++) {
       int64_t j=broadcast_dims[i];
@@ -2560,6 +2558,17 @@ Tensor slice(
   }
   namedinference::propagate_names(result, self);
   return result;
+}
+
+Tensor slice_inverse_symint(
+    const Tensor& self,
+    const Tensor& base,
+    int64_t /* dim */,
+    c10::optional<SymInt> /* start */,
+    c10::optional<SymInt> /* end */,
+    SymInt /* step */) {
+  // assume self has enough to storage to be viewed with base's metadata
+  return self.as_strided_symint(base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
 }
 
 Tensor slice_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) {

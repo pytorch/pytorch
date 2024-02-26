@@ -317,9 +317,7 @@ template<typename T>
 static T dispatch_to(const Tensor & self) {
   pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
-  if (self.sym_numel() != 1) {
-    throw ValueError("only one element tensors can be converted to Python scalars");
-  }
+  TORCH_CHECK_VALUE(self.sym_numel() == 1, "only one element tensors can be converted to Python scalars");
   return self.template item<T>();
 }
 
@@ -978,6 +976,9 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
   if (device && device->is_cuda()) {
     torch::utils::cuda_lazy_init();
   }
+  if (device && device->is_privateuseone()) {
+    at::globalContext().lazyInitPrivateUse1();
+  }
   if (!device && !scalarType && !copy && !opt_memory_format.has_value()) {
     Py_INCREF(self);
     return self;
@@ -1058,6 +1059,9 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   }
   if (device.is_cuda()) {
     torch::utils::cuda_lazy_init();
+  }
+  if (device.is_privateuseone()) {
+    at::globalContext().lazyInitPrivateUse1();
   }
   return THPVariable_Wrap(dispatch_to(self_, device, scalar_type, /*non_blocking=*/ r.toBool(1), /*copy=*/ false, opt_memory_format));
   END_HANDLE_TH_ERRORS

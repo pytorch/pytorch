@@ -147,10 +147,10 @@ static PyObject* THPGenerator_manualSeed(PyObject* _self, PyObject* seed) {
   HANDLE_TH_ERRORS
   auto self = (THPGenerator*)_self;
   auto generator = self->cdata;
-  THPUtils_assert(
+  TORCH_CHECK(
       THPUtils_checkLong(seed),
       "manual_seed expected a long, "
-      "but got %s",
+      "but got ",
       THPUtils_typename(seed));
   uint64_t unsigned_seed = unpack_uint64(seed);
   // See Note [Acquire lock when using random generators]
@@ -165,10 +165,10 @@ static PyObject* THPGenerator_setOffset(PyObject* _self, PyObject* offset) {
   HANDLE_TH_ERRORS
   auto self = (THPGenerator*)_self;
   auto generator = self->cdata;
-  THPUtils_assert(
+  TORCH_CHECK(
       THPUtils_checkLong(offset),
       "manual_offset expected a long, "
-      "but got %s",
+      "but got ",
       THPUtils_typename(offset));
   uint64_t unsigned_offset = unpack_uint64(offset);
   // See Note [Acquire lock when using random generators]

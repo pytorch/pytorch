@@ -22,7 +22,7 @@ void add_arithmetic_node(
     graph.prepack_nodes().emplace_back(new ArithmeticPrepack(t1, t1_vten));
     arg1 = t1_vten;
   }
-  VKGRAPH_CHECK(graph.get_val(arg1).isTensor());
+  VK_CHECK_COND(graph.get_val(arg1).isTensor());
   // Prepacking second arg (if needed)
   ValueRef arg2 = t2;
   if (graph.get_val(t2).isTensorRef()) {
@@ -31,7 +31,7 @@ void add_arithmetic_node(
     graph.prepack_nodes().emplace_back(new ArithmeticPrepack(t2, t2_vten));
     arg2 = t2_vten;
   }
-  VKGRAPH_CHECK(graph.get_val(arg2).isTensor());
+  VK_CHECK_COND(graph.get_val(arg2).isTensor());
 
   graph.execute_nodes().emplace_back(
       new ArithmeticNode(arg1, arg2, out, alpha, optype));
@@ -43,8 +43,8 @@ ValueRef add_arithmetic_node(
     const ValueRef t2,
     const float alpha,
     const arithmetic::OpType optype) {
-  IntArrayRef t1_sizes = graph.get_val_sizes(t1);
-  c10::ScalarType t1_dtype = graph.get_val_dtype(t1);
+  std::vector<int64_t> t1_sizes = graph.get_val_sizes(t1);
+  api::ScalarType t1_dtype = graph.get_val_dtype(t1);
 
   ValueRef out = graph.add_tensor(t1_sizes, t1_dtype);
   add_arithmetic_node(graph, t1, t2, out, alpha, optype);
@@ -65,8 +65,8 @@ void ArithmeticPrepack::encode_prepack(ComputeGraph* graph) const {
   api::StorageBuffer staging(
       graph->context(), packed.dtype(), packed.gpu_nbytes());
 
-  size_t numel = c10::multiply_integers(tref.sizes);
-  size_t nbytes = numel * c10::elementSize(tref.dtype);
+  size_t numel = api::utils::multiply_integers(tref.sizes);
+  size_t nbytes = numel * api::element_size(tref.dtype);
   copy_ptr_to_staging(tref.data, staging, nbytes);
 
   encode_copy_to_vtensor(graph->context(), staging, packed);

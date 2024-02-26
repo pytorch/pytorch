@@ -16,12 +16,12 @@ class TestConsumeOp(unittest.TestCase):
         r = torch.jit.trace(foo, (torch.rand(2, 2)))
 
         graph = str(r.graph)
-        occurance = graph.count("aten::sum")
+        occurrence = graph.count("aten::sum")
 
         x = torch.rand(2, 2)
         value = r(x)
         self.assertEqual(value, torch.sum(x))
-        self.assertEqual(occurance, iters)
+        self.assertEqual(occurrence, iters)
 
     def test_jit_consume_op_for_list_input(self):
         iters = 6
@@ -34,7 +34,7 @@ class TestConsumeOp(unittest.TestCase):
         r = torch.jit.trace(foo, torch.rand(2, 2))
 
         graph = str(r.graph)
-        occurance = graph.count("aten::chunk")
+        occurrence = graph.count("aten::chunk")
 
         x = torch.rand(2, 2)
         value = r(x)
@@ -42,4 +42,4 @@ class TestConsumeOp(unittest.TestCase):
         self.assertTrue(
             all(torch.allclose(t1, t2) for t1, t2 in zip(value, torch.chunk(x, 2)))
         )
-        self.assertEqual(occurance, iters)
+        self.assertEqual(occurrence, iters)

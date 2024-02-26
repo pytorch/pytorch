@@ -34,9 +34,27 @@ from torch.distributed.device_mesh import DeviceMesh
 aten = torch.ops.aten
 
 
-@register_op_strategy(
+def default_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+    # Default strategy by default just propagate the first input strategy
+    select_strategy = op_schema.args_schema[0]
+    assert isinstance(select_strategy, OpStrategy)
+    default_strategy = []
+    for strategy in select_strategy.strategies:
+        # we create new DTensorSpecs even for default strategy to assure that
+        # the tensor metas are distinct between the arguments and outputs
+        default_strategy.append(
+            PlacementStrategy(
+                output_spec=DTensorSpec(
+                    mesh=strategy.out_spec.mesh,
+                    placements=strategy.out_spec.placements,
+                )
+            )
+        )
+    return OpStrategy(default_strategy)
+
+
+register_op_strategy(
     [
-        aten._to_copy.default,
         aten.clone.default,
         aten.contiguous.default,
         aten.copy_.default,
@@ -44,17 +62,11 @@ aten = torch.ops.aten
         aten.fill_.Scalar,
         aten.zero_.default,
     ]
-)
-def default_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
-    # Default strategy by default just propagate the first input strategy
-    select_strategy = op_schema.args_schema[0]
-    assert isinstance(select_strategy, OpStrategy)
-    return OpStrategy(
-        [
-            PlacementStrategy(arg_strategy.output_spec)
-            for arg_strategy in select_strategy.strategies
-        ]
-    )
+)(default_strategy)
+
+register_op_strategy(
+    aten._to_copy.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["dtype"])
+)(default_strategy)
 
 
 @register_op_strategy(

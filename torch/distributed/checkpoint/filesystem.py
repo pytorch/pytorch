@@ -8,7 +8,18 @@ import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast, Dict, List, Optional, Union
+from typing import (
+    Callable,
+    cast,
+    Dict,
+    IO,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Tuple,
+    Union,
+)
 
 import torch
 import torch.distributed as dist
@@ -52,40 +63,32 @@ class _StoragePrefix:
 DEFAULT_SUFFIX = ".distcp"
 
 
-def _result_from_write_item(
-    item: WriteItem, size_in_bytes, storage_data
-) -> WriteResult:
-    return WriteResult(
-        index=item.index, size_in_bytes=size_in_bytes, storage_data=storage_data
-    )
-
-
 class _TensorLoader(ABC):
     @abstractmethod
-    def add(self, size, obj):
+    def add(self, size: int, obj: object) -> None:
         pass
 
     @abstractmethod
-    def start_loading(self):
+    def start_loading(self) -> None:
         pass
 
     @abstractmethod
-    def values(self):
+    def values(self) -> Iterator[Tuple[torch.Tensor, object]]:
         pass
 
 
 class _SerialCpuLoader(_TensorLoader):
-    def __init__(self, resolve_fun):
+    def __init__(self, resolve_fun: Callable) -> None:
         self.resolve_fun = resolve_fun
-        self.items = []
+        self.items: List[Tuple[int, object]] = []
 
-    def add(self, size, obj):
+    def add(self, size: int, obj: object) -> None:
         self.items.append((size, obj))
 
-    def start_loading(self):
+    def start_loading(self) -> None:
         pass
 
-    def values(self):
+    def values(self) -> Iterator[Tuple[torch.Tensor, object]]:
         for _, obj in self.items:
             tensor = self.resolve_fun(obj).detach()
             tensor = tensor.cpu()
@@ -98,9 +101,14 @@ class _SerialCpuLoader(_TensorLoader):
 
 
 class _OverlappingCpuLoader(_TensorLoader):
-    def __init__(self, resolve_fun, stream=None, inflight_threshhold=1_000_000):
+    def __init__(
+        self,
+        resolve_fun: Callable,
+        stream: Optional[torch.Stream] = None,
+        inflight_threshhold: int = 1_000_000,
+    ) -> None:
         self.resolve_fun = resolve_fun
-        self.items = []
+        self.items: List[Tuple[int, object]] = []
         self.inflight_threshhold = inflight_threshhold
         self.in_flight_data = 0
         self.current_items: collections.deque = collections.deque()
@@ -108,15 +116,17 @@ class _OverlappingCpuLoader(_TensorLoader):
         self.started = False
         self.device_type = stream.device_type if stream else torch.device("cuda").type
         self.device_module = _get_device_module(self.device_type)
-        self.stream = stream or self.device_module.current_stream()
+        self.stream = cast(
+            torch.cuda.Stream, stream or self.device_module.current_stream()
+        )
         if self.stream != self.device_module.current_stream():
             self.stream.wait_stream(self.device_module.current_stream())
 
     @property
-    def _done(self):
+    def _done(self) -> bool:
         return self.idx >= len(self.items)
 
-    def _drain(self):
+    def _drain(self) -> List[Tuple[torch.Tensor, object]]:
         drained = []
         if self.in_flight_data >= self.inflight_threshhold:
             self.stream.synchronize()
@@ -126,7 +136,7 @@ class _OverlappingCpuLoader(_TensorLoader):
             drained.append(val)
         return drained
 
-    def _refill(self):
+    def _refill(self) -> None:
         with self.device_module.stream(self.stream):
             while not self._done and self.in_flight_data < self.inflight_threshhold:
                 _, obj = self.items[self.idx]
@@ -147,25 +157,25 @@ class _OverlappingCpuLoader(_TensorLoader):
                 )
                 self.in_flight_data += tensor.numel() * tensor.element_size()
 
-    def _finish(self):
+    def _finish(self) -> Iterable[Tuple[torch.Tensor, object]]:
         assert self._done
         if len(self.current_items) > 0:
             self.stream.synchronize()
         return self.current_items
 
-    def add(self, size, obj):
+    def add(self, size: int, obj: object) -> None:
         if self.started:
             raise RuntimeError("cannot add items after loading started")
         self.items.append((size, obj))
 
-    def start_loading(self):
+    def start_loading(self) -> None:
         if self.started:
             return
         self.started = True
         self.items.sort(key=lambda x: x[0])
         self._refill()
 
-    def values(self):
+    def values(self) -> Iterator[Tuple[torch.Tensor, object]]:
         self.start_loading()
         while not self._done:
             drained = self._drain()
@@ -186,7 +196,7 @@ def _item_size(item: WriteItem) -> int:
     return size * torch._utils._element_size(dtype)
 
 
-def _split_by_size_and_type(bins, items: List[WriteItem]) -> List[List[WriteItem]]:
+def _split_by_size_and_type(bins: int, items: List[WriteItem]) -> List[List[WriteItem]]:
     if bins == 1:
         return [items]
 
@@ -210,7 +220,12 @@ def _split_by_size_and_type(bins, items: List[WriteItem]) -> List[List[WriteItem
     return buckets
 
 
-def _write_item(stream, data, write_item, storage_key):
+def _write_item(
+    stream: io.IOBase,
+    data: Union[io.BytesIO, torch.Tensor],
+    write_item: WriteItem,
+    storage_key: str,
+) -> WriteResult:
     offset = stream.tell()
 
     if write_item.type == WriteItemType.BYTE_IO:
@@ -219,11 +234,13 @@ def _write_item(stream, data, write_item, storage_key):
     else:
         assert isinstance(data, torch.Tensor)
         assert data.device == torch.device("cpu")
-        torch.save(data, stream)
+        torch.save(data, cast(IO[bytes], stream))
     length = stream.tell() - offset
 
-    return _result_from_write_item(
-        write_item, length, _StorageInfo(storage_key, offset, length)
+    return WriteResult(
+        index=write_item.index,
+        size_in_bytes=length,
+        storage_data=_StorageInfo(storage_key, offset, length),
     )
 
 
@@ -233,7 +250,7 @@ def _write_files_from_queue(
     planner: SavePlanner,
     inflight_threshhold: int,
     use_fsync: bool,
-):
+) -> None:
     try:
         while True:
             file_name, storage_key, write_items = file_queue.get_nowait()
@@ -418,7 +435,7 @@ class FileSystemReader(StorageReader):
         self.path = path
         self.storage_data: Dict[MetadataIndex, _StorageInfo] = dict()
 
-    def _slice_file(self, file, sinfo: _StorageInfo):
+    def _slice_file(self, file, sinfo: _StorageInfo) -> io.IOBase:
         return _create_file_view(file, sinfo.offset, sinfo.length)
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
@@ -436,12 +453,13 @@ class FileSystemReader(StorageReader):
                     item_md = self.storage_data[req.storage_index]
                     file_slice = self._slice_file(file, item_md)
                     if req.type == LoadItemType.BYTE_IO:
-                        bytes = io.BytesIO(file_slice.read(item_md.length))
-                        bytes.seek(0)
-                        planner.load_bytes(req, bytes)
+                        read_bytes = io.BytesIO(file_slice.read(item_md.length))
+                        read_bytes.seek(0)
+                        planner.load_bytes(req, read_bytes)
                     else:
                         tensor = cast(
-                            Tensor, torch.load(file_slice, map_location="cpu")
+                            Tensor,
+                            torch.load(cast(IO[bytes], file_slice), map_location="cpu"),
                         )
                         tensor = narrow_tensor_by_index(
                             tensor, req.storage_offsets, req.lengths
@@ -496,7 +514,7 @@ class _FileSystemCheckpointer(_Checkpointer):
         no_dist: bool = False,
         load_planner: Optional[LoadPlanner] = None,
         save_planner: Optional[SavePlanner] = None,
-    ):
+    ) -> None:
         """Initializes Checkpointing defualts, including ``FileSystemWriter`` and ``FileSystemReader``
 
         Args:

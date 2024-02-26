@@ -1,11 +1,16 @@
-from typing import Any, List
+from typing import Any, cast, List
 
 import torch
+import torch.distributed as dist
+from torch._utils import _get_device_module
+
 from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 from torch.distributed._tensor import DTensor
 from torch.distributed._tensor._utils import compute_local_shape_and_global_offset
+
+from torch.utils._pytree import tree_map_only
 
 from .metadata import (
     BytesStorageMetadata,
@@ -253,3 +258,46 @@ def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
                 length=0,
             )
         ]
+
+
+def _init_state_dict(state_dict: STATE_DICT_TYPE) -> None:
+    state_dict_assigned_storage = tree_map_only(
+        torch.Tensor, lambda v: _init_meta_tensor(v), state_dict
+    )
+    # The inplace version of tree_map_only, tree_map_only_ doesn't seem to work.
+    # So we need to temporariy update the each element in the state dict with meta tensor.
+    for k in state_dict.keys():
+        state_dict[k] = state_dict_assigned_storage[k]
+
+
+def _init_meta_tensor(value: Any) -> Any:
+    """
+    Initializes tensor, moves it to device for torch.Tensor/DTensor on meta device.
+    """
+
+    device = getattr(value, "device", None)
+    # DCP does the initialization if it's meta tensor/DTensor.
+    if device == torch.device("meta"):
+        device_type = dist.distributed_c10d._get_pg_default_device().type
+        device = cast(torch.device, _get_device_module(device_type).current_device())
+        if isinstance(value, DTensor):
+            new_local_tensor = torch.empty_like(value.to_local(), device=device)
+            # We need to pass shape and stride explicitly, since DTensor might be
+            # sharded unevenly.
+            dtensor = DTensor.from_local(
+                new_local_tensor,
+                device_mesh=value.device_mesh,
+                placements=value.placements,
+                shape=value.size(),
+                stride=value.stride(),
+            )
+            return dtensor
+        elif isinstance(value, torch.Tensor):
+            tensor = torch.empty_like(value, device=device)
+            return tensor
+        else:
+            raise RuntimeError(
+                f"Found unsupported type {type(value)} for meta device loading."
+            )
+    else:
+        return value

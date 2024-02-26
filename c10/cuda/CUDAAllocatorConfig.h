@@ -1,14 +1,13 @@
 #pragma once
 
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/util/Exception.h>
-#include <c10/util/llvmMathExtras.h>
 #include <cuda_runtime_api.h>
 
 #include <atomic>
-#include <vector>
+#include <cstddef>
+#include <cstdlib>
+#include <string>
 
 namespace c10::cuda::CUDACachingAllocator {
 
@@ -74,8 +73,8 @@ class C10_CUDA_API CUDAAllocatorConfig {
  private:
   CUDAAllocatorConfig();
 
-  void lexArgs(const char* env, std::vector<std::string>& config);
-  void consumeToken(
+  static void lexArgs(const char* env, std::vector<std::string>& config);
+  static void consumeToken(
       const std::vector<std::string>& config,
       size_t i,
       const char c);

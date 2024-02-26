@@ -698,7 +698,7 @@ class _MinimizerBase:
         if self.settings.traverse_method == "accumulate":
             return self._accumulate_traverse(nodes)
 
-        if(self.settings.traverse_method == "skip"):
+        if self.settings.traverse_method == "skip":
             if (skip_nodes is None):
                 raise RuntimeError("'skip_nodes' can't be None when 'traverse_method' is 'skip'.")
             return self._skip_traverse(nodes, skip_nodes)

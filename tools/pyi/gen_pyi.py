@@ -1,7 +1,12 @@
 import argparse
 import collections
+import importlib
+import sys
+
 from pprint import pformat
 from typing import Dict, List, Sequence
+from unittest.mock import Mock, patch
+from warnings import warn
 
 from torchgen.api.python import (
     PythonSignatureGroup,
@@ -580,6 +585,49 @@ def gen_nn_functional(fm: FileManager) -> None:
     )
 
 
+"""
+We gather the docstrings for torch with the following steps:
+1. Mock torch and torch._C, which are the only dependencies of the docs files
+2. Mock the _add_docstr function to save the docstrings
+3. Import the docs files to trigger mocked _add_docstr and collect docstrings
+"""
+
+
+def gather_docstrs() -> Dict[str, str]:
+    docstrs = {}
+
+    def mock_add_docstr(func: Mock, docstr: str) -> None:
+        docstrs[func._extract_mock_name()] = docstr.strip()
+
+    # sys.modules and sys.path are restored after the context manager exits
+    with patch.dict(sys.modules), patch.object(sys, "path", sys.path + ["torch"]):
+        # mock the torch module and torch._C._add_docstr
+        sys.modules["torch"] = Mock(name="torch")
+        sys.modules["torch._C"] = Mock(_add_docstr=mock_add_docstr)
+
+        try:
+            # manually import torch._torch_docs and torch._tensor_docs to trigger
+            # the mocked _add_docstr and collect docstrings
+            sys.modules["torch._torch_docs"] = importlib.import_module("_torch_docs")
+            sys.modules["torch._tensor_docs"] = importlib.import_module("_tensor_docs")
+        except ModuleNotFoundError:
+            # Gracefully fail if these modules are not importable
+            warn(
+                "Failed to import _torch_docs/_tensor_docs, skipping docstring in pyi files."
+            )
+
+    return docstrs
+
+
+def add_docstr_to_hint(docstr: str, hint: str) -> str:
+    if "..." in hint:  # function or method
+        assert hint.endswith("..."), f"Hint `{hint}` does not end with '...'"
+        hint = hint[:-3]  # remove "..."
+        return "\n    ".join([hint, 'r"""'] + docstr.split("\n") + ['"""', "..."])
+    else:  # attribute or property
+        return f'{hint}\nr"""{docstr}"""\n'
+
+
 def gen_pyi(
     native_yaml_path: str,
     tags_yaml_path: str,
@@ -972,11 +1020,15 @@ def gen_pyi(
         )
         return hint
 
+    docstrs = gather_docstrs()
     function_hints = []
     for name, hints in sorted(unsorted_function_hints.items()):
         hints = [replace_special_case(h) for h in hints]
         if len(hints) > 1:
             hints = ["@overload\n" + h for h in hints]
+        docstr = docstrs.get(f"torch.{name}")
+        if docstr is not None:
+            hints = [add_docstr_to_hint(docstr, h) for h in hints]
         function_hints += hints
 
     # Generate type signatures for Tensor methods
@@ -1199,6 +1251,9 @@ def gen_pyi(
     for name, hints in sorted(unsorted_tensor_method_hints.items()):
         if len(hints) > 1:
             hints = ["@overload\n" + h for h in hints]
+        docstr = docstrs.get(f"torch._C.TensorBase.{name}")
+        if docstr is not None:
+            hints = [add_docstr_to_hint(docstr, h) for h in hints]
         tensor_method_hints += hints
 
     # TODO: Missing type hints for nn
@@ -1248,6 +1303,9 @@ def gen_pyi(
             "float8_e5m2fnuz",
             "half",
             "uint8",
+            "uint16",
+            "uint32",
+            "uint64",
             "int8",
             "int16",
             "short",

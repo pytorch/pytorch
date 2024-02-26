@@ -7,7 +7,7 @@ from torch.fx.experimental.migrate_gradual_types.constraint import BinConstraint
 from torch.fx.experimental.migrate_gradual_types.constraint_generator import ConstraintGenerator
 from torch.fx.experimental.migrate_gradual_types.constraint_transformation import transform_constraint
 from torch.fx.experimental.migrate_gradual_types.operation import op_precision, op_matching, op_consistency
-from torch.fx.experimental.migrate_gradual_types.transform_to_z3 import transform_all_constraints,\
+from torch.fx.experimental.migrate_gradual_types.transform_to_z3 import transform_all_constraints, \
     evaluate_conditional_with_constraints
 from torch.fx.experimental.migrate_gradual_types.z3_types import tensor_type, D, z3_dyn
 from torch.fx.experimental.rewriter import RewritingTracer

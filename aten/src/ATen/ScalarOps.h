@@ -33,27 +33,9 @@ inline at::Tensor scalar_to_tensor(
     const Device device = at::kCPU) {
   // This is the fast track we have for CPU scalar tensors.
   if (device == at::kCPU) {
-    if (s.isFloatingPoint()) {
-      return at::detail::scalar_tensor_static(s, at::kDouble, at::kCPU);
-    } else if (s.isComplex()) {
-      return at::detail::scalar_tensor_static(s, at::kComplexDouble, at::kCPU);
-    } else if (s.isBoolean()) {
-      return at::detail::scalar_tensor_static(s, at::kBool, at::kCPU);
-    } else {
-      AT_ASSERT(s.isIntegral(false));
-      return at::detail::scalar_tensor_static(s, at::kLong, at::kCPU);
-    }
+    return at::detail::scalar_tensor_static(s, s.type(), at::kCPU);
   }
-  if (s.isFloatingPoint()) {
-    return at::scalar_tensor(s, at::device(device).dtype(at::kDouble));
-  } else if (s.isBoolean()) {
-    return at::scalar_tensor(s, at::device(device).dtype(at::kBool));
-  } else if (s.isComplex()) {
-    return at::scalar_tensor(s, at::device(device).dtype(at::kComplexDouble));
-  } else {
-    AT_ASSERT(s.isIntegral(false));
-    return at::scalar_tensor(s, at::device(device).dtype(at::kLong));
-  }
+  return at::scalar_tensor(s, at::device(device).dtype(s.type()));
 }
 
 } // namespace c10

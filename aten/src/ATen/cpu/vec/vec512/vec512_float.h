@@ -101,24 +101,16 @@ public:
   static Vectorized<float> loadu(const void* ptr, int64_t count = size()) {
     if (count == size())
       return _mm512_loadu_ps(reinterpret_cast<const float*>(ptr));
-    __at_align__ float tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
-    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
-    // instructions while a loop would be compiled to one instruction.
-    for (const auto i : c10::irange(size())) {
-      tmp_values[i] = 0.0;
-    }
-    std::memcpy(
-        tmp_values, reinterpret_cast<const float*>(ptr), count * sizeof(float));
-    return _mm512_loadu_ps(tmp_values);
+
+    __mmask16 mask = (1ULL << count) - 1;
+    return _mm512_maskz_loadu_ps(mask, ptr);
   }
   void store(void* ptr, int64_t count = size()) const {
     if (count == size()) {
       _mm512_storeu_ps(reinterpret_cast<float*>(ptr), values);
     } else if (count > 0) {
-      float tmp_values[size()];
-      _mm512_storeu_ps(reinterpret_cast<float*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(float));
+      __mmask16 mask = (1ULL << count) - 1;
+      _mm512_mask_storeu_ps(reinterpret_cast<float*>(ptr), mask, values);
     }
   }
   const float& operator[](int idx) const  = delete;
@@ -132,6 +124,10 @@ public:
     auto mask =  _mm512_cmp_ps_mask(values, _mm512_set1_ps(0.0), _CMP_UNORD_Q);
     return _mm512_castsi512_ps(_mm512_mask_set1_epi32(zero_vec, mask,
                                                       0xFFFFFFFF));
+  }
+  bool has_inf_nan() const {
+    __m512 self_sub  = _mm512_sub_ps(values, values);
+    return (_mm512_movepi8_mask(_mm512_castps_si512(self_sub)) & 0x7777777777777777) != 0;
   }
   Vectorized<float> map(float (*const f)(float)) const {
     __at_align__ float tmp[size()];

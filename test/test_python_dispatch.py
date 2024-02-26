@@ -97,7 +97,7 @@ class TestPythonRegistration(TestCase):
                         reg_name = schema.name
                         if schema.overload_name:
                             reg_name = f"{reg_name}.{schema.overload_name}"
-                        torch_compile_op_lib_impl.impl(
+                        torch_compile_op_lib_impl.impl(  # noqa: F821
                             reg_name, make_elementwise(_op_name), dispatch_key, compile_mode=True
                         )
                     except Exception as e:
@@ -534,7 +534,7 @@ class TestPythonRegistration(TestCase):
 
         # check rest of functional_result is the mutated args
         mutated_args = [maybe_mutated_arg for maybe_mutated_arg, arg in zip(cloned_args, args)
-                        if not(maybe_mutated_arg is not None and arg is not None and torch.allclose(maybe_mutated_arg, arg))]
+                        if not (maybe_mutated_arg is not None and arg is not None and torch.allclose(maybe_mutated_arg, arg))]
         self.assertEqual(flat_functional_result[len(flat_mutable_result):], mutated_args)
 
         # check that functionalization kernel was indeed registered

@@ -92,7 +92,7 @@ def run_functionalized_fw_and_collect_metadata(
     @wraps(f)
     def inner(*flat_args):
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
-        assert all(isinstance(a, KNOWN_TYPES) for a in flat_args)
+        assert all(isinstance(a, tuple(KNOWN_TYPES)) for a in flat_args)
 
         input_info: List[InputAliasInfo] = []
         output_info: List[OutputAliasInfo] = []
@@ -352,20 +352,31 @@ def run_functionalized_fw_and_collect_metadata(
                     and o is not curr
                 ]
             )
-            is_result_of_custom_autograd_fn = False
+
+            # See Note [Accessing .grad_fn on FunctionalTensor]
+            # In-place operations on views will trigger a lazy rebase of the autograd graph;
+            # this runs during access to the .grad_fn. The rebase logic will invoke view ops
+            # on FunctionalTensors, so we must enable a FunctionalTensorMode here to ensure
+            # these op calls succeed.
+            grad_fn = None
             if isinstance(o, Tensor):
-                # Need to check for both custom cpp (CppFunction) and python (BackwardCFunction) autograd fns
-                if type(o.grad_fn).__name__ == "CppFunction":
-                    is_result_of_custom_autograd_fn = True
-                if isinstance(o.grad_fn, torch.autograd.function.BackwardCFunction):
-                    is_result_of_custom_autograd_fn = True
+                with FunctionalTensorMode():
+                    grad_fn = o.grad_fn
+
+            is_result_of_custom_autograd_fn = False
+            # Need to check for both custom cpp (CppFunction) and python (BackwardCFunction)
+            # autograd fns
+            if type(grad_fn).__name__ == "CppFunction":
+                is_result_of_custom_autograd_fn = True
+            if isinstance(grad_fn, torch.autograd.function.BackwardCFunction):
+                is_result_of_custom_autograd_fn = True
 
             if not isinstance(o, Tensor):
                 output_type = OutputType.non_alias
                 base_idx = None
             elif (
                 curr_storage in inp_storage_refs
-                and o.grad_fn is not None
+                and grad_fn is not None
                 and is_result_of_custom_autograd_fn
             ):
                 output_type = OutputType.custom_function_view
@@ -384,7 +395,7 @@ def run_functionalized_fw_and_collect_metadata(
                     num_aliased_outs - num_multi_output_view_outs
                 )
                 if (
-                    o.grad_fn is not None
+                    grad_fn is not None
                     and num_aliased_outs_that_are_not_multi_output_views == 0
                 ):
                     # See Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]

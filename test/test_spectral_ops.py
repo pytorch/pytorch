@@ -11,7 +11,7 @@ import inspect
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, TEST_MKL, first_sample, TEST_WITH_ROCM,
-     make_tensor)
+     make_tensor, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyNativeDeviceTypes,
      skipCPUIfNoFFT, deviceCountAtLeast, onlyCUDA, OpDTypes, skipIf, toleranceOverride, tol)
@@ -464,6 +464,31 @@ class TestFFT(TestCase):
 
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
+    @dtypes(torch.half, torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_fftn_noop_transform(self, device, dtype):
+        skip_helper_for_fft(device, dtype)
+        RESULT_TYPE = {
+            torch.half: torch.chalf,
+            torch.float: torch.cfloat,
+            torch.double: torch.cdouble,
+        }
+
+        for op in [
+            torch.fft.fftn,
+            torch.fft.ifftn,
+            torch.fft.fft2,
+            torch.fft.ifft2,
+        ]:
+            inp = make_tensor((10, 10), device=device, dtype=dtype)
+            out = torch.fft.fftn(inp, dim=[])
+
+            expect_dtype = RESULT_TYPE.get(inp.dtype, inp.dtype)
+            expect = inp.to(expect_dtype)
+            self.assertEqual(expect, out)
+
+
+    @skipCPUIfNoFFT
+    @onlyNativeDeviceTypes
     @toleranceOverride({
         torch.half : tol(1e-2, 1e-2),
     })
@@ -891,6 +916,7 @@ class TestFFT(TestCase):
         self.assertFalse((x.grad - x).abs().max() == 0)
 
     # passes on ROCm w/ python 2.7, fails w/ python 3.6
+    @skipIfTorchDynamo("cannot set WRITEABLE flag to True of this array")
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
     @dtypes(torch.double)
@@ -964,6 +990,7 @@ class TestFFT(TestCase):
         _test((10,), 5, 4, win_sizes=(11,), expected_error=RuntimeError)
         _test((10,), 5, 4, win_sizes=(1, 1), expected_error=RuntimeError)
 
+    @skipIfTorchDynamo("double")
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
     @dtypes(torch.double)
@@ -1418,6 +1445,7 @@ class TestFFT(TestCase):
         self.assertRaises(RuntimeError, torch.istft, torch.zeros((3, 0, 2)), 2)
         self.assertRaises(RuntimeError, torch.istft, torch.zeros((0, 3, 2)), 2)
 
+    @skipIfTorchDynamo("Failed running call_function")
     @onlyNativeDeviceTypes
     @skipCPUIfNoFFT
     @dtypes(torch.double)

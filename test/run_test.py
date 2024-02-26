@@ -70,6 +70,7 @@ RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1
 CPP_TEST_PREFIX = "cpp"
 CPP_TEST_PATH = "build/bin"
 DISTRIBUTED_TEST_PREFIX = "distributed"
+INDUCTOR_TEST_PREFIX = "inductor"
 
 
 # Note [ROCm parallel CI testing]
@@ -300,7 +301,6 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
-    "dynamo/test_activation_checkpointing",
 ]
 
 # The tests inside these files should never be run in parallel with each other
@@ -361,6 +361,9 @@ CI_SERIAL_LIST = [
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
     "inductor/test_max_autotune",  # Testing, probably revert later
+    "inductor/test_torchinductor",  # OOM on test_large_block_sizes
+    "inductor/test_torchinductor_dynamic_shapes",  # OOM on test_large_block_sizes
+    "inductor/test_torchinductor_codegen_dynamic_shapes",  # OOM on test_large_block_sizes
 ]
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
 ONNX_SERIAL_LIST = [
@@ -438,6 +441,7 @@ JIT_EXECUTOR_TESTS = [
     "test_jit_fuser_legacy",
 ]
 
+INDUCTOR_TESTS = [test for test in TESTS if test.startswith(INDUCTOR_TEST_PREFIX)]
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith(DISTRIBUTED_TEST_PREFIX)]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
@@ -1244,6 +1248,11 @@ def parse_args():
         help="exclude distributed tests",
     )
     parser.add_argument(
+        "--exclude-inductor-tests",
+        action="store_true",
+        help="exclude inductor tests",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Only list the test that will run.",
@@ -1364,6 +1373,9 @@ def get_selected_tests(options) -> List[str]:
 
     if options.exclude_distributed_tests:
         options.exclude.extend(DISTRIBUTED_TESTS)
+
+    if options.exclude_inductor_tests:
+        options.exclude.extend(INDUCTOR_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
     if torch.version.cuda is not None:
@@ -1655,6 +1667,8 @@ def main():
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
 
+    os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
+
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])
 
@@ -1662,13 +1676,17 @@ def main():
         unranked_tests=selected_tests
     )
 
-    if IS_CI:
-        # downloading test cases configuration to local environment
-        get_test_case_configs(dirpath=test_directory)
-        aggregated_heuristics = get_test_prioritizations(selected_tests)
+    with open(
+        REPO_ROOT / "test" / "test-reports" / "td_heuristic_rankings.log", "w"
+    ) as f:
+        if IS_CI:
+            # downloading test cases configuration to local environment
+            get_test_case_configs(dirpath=test_directory)
+            aggregated_heuristics = get_test_prioritizations(selected_tests, file=f)
 
-    test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
-    test_prioritizations.print_info()
+        test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
+
+        f.write(test_prioritizations.get_info_str())
 
     test_file_times_dict = load_test_file_times()
     test_class_times_dict = load_test_class_times()
@@ -1742,13 +1760,12 @@ def main():
 
     if options.dynamo:
         os.environ["PYTORCH_TEST_WITH_DYNAMO"] = "1"
+
     elif options.inductor:
         os.environ["PYTORCH_TEST_WITH_INDUCTOR"] = "1"
 
     if not options.no_translation_validation:
         os.environ["PYTORCH_TEST_WITH_TV"] = "1"
-
-    os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 
     try:
         # Actually run the tests

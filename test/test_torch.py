@@ -55,6 +55,7 @@ import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import (
     tf32_on_and_off, tf32_is_not_fp32, TEST_CUDNN)
+from torch.testing._internal.common_mkldnn import bf32_on_and_off
 from torch.testing._internal.common_dtype import (
     floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
     all_types_and, floating_types, floating_and_complex_types, integral_types_and,
@@ -149,7 +150,7 @@ class TestTorchDeviceType(TestCase):
     @onlyNativeDeviceTypes
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64,
             torch.bool, torch.float32, torch.complex64, torch.float64,
-            torch.complex128)
+            torch.complex128, torch.uint16, torch.uint32, torch.uint64)
     def test_bytes_to_scalar(self, device, dtype):
         def rand_byte():
             if dtype == torch.bool:
@@ -166,7 +167,7 @@ class TestTorchDeviceType(TestCase):
 
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64,
             torch.bool, torch.float32, torch.complex64, torch.float64,
-            torch.complex128)
+            torch.complex128, torch.uint16, torch.uint32, torch.uint64)
     def test_storage(self, device, dtype):
         v = make_tensor((3, 5), dtype=dtype, device=device, low=-9, high=9)
         self.assertEqual(v.storage()[0], v[0][0])
@@ -238,7 +239,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(a.storage_type(), expected_storage_type)
 
     @onlyNativeDeviceTypes
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64))
     def test_tensor_from_storage(self, device, dtype):
         a = make_tensor((4, 5, 3), dtype=dtype, device=device, low=-9, high=9)
         a_s = a.storage()
@@ -1268,7 +1269,7 @@ else:
 
     @skipXLA
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64))
     def test_deterministic_resize(self, device, dtype):
         test_cases = [
             # size, stride, resize_size
@@ -1326,7 +1327,7 @@ else:
     # point tensors with NaN and integer tensors with MAX_INT
     @skipXLA
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64))
     def test_deterministic_empty(self, device, dtype):
         gen_fns = [
             lambda: torch.empty(10, 9, device=device, dtype=dtype),
@@ -2457,6 +2458,7 @@ else:
                         self.assertEqual(y1.grad, y2.grad, rtol=0, atol=0.001)
 
     @tf32_on_and_off(0.005)
+    @bf32_on_and_off(0.005)
     def test_cdist_large(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(1000, 10, device=device)
@@ -2467,6 +2469,7 @@ else:
 
     @slowTest
     @tf32_on_and_off(0.01)
+    @bf32_on_and_off(0.01)
     def test_cdist_large_batch(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 1000, 10, device=device)
@@ -2476,6 +2479,7 @@ else:
             self.assertEqual(expected, actual)
 
     @tf32_on_and_off(0.005)
+    @bf32_on_and_off(0.005)
     def test_cdist_non_contiguous(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(5, 7, device=device).mT
@@ -2503,6 +2507,7 @@ else:
             self.assertEqual(expected, actual)
 
     @tf32_on_and_off(0.005)
+    @bf32_on_and_off(0.005)
     def test_cdist_non_contiguous_batch(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 2, 5, 7, device=device).mT
@@ -5072,6 +5077,130 @@ else:
             t = torch.tensor((), device=device)
             self.assertEqual(t.dtype, t.storage().dtype)
 
+    # Note [lazy_clone_ tests with inductor enabled]
+    # These `lazy_clone_` tests are written in a way that makes them pass in
+    # both eager mode and compiled mode (`PYTORCH_TEST_WITH_INDUCTOR=1`). There
+    # are cases where COW tensors can materialize at different times and in
+    # different ways in compiled mode versus eager mode, and those cases need to
+    # be avoided. There are two main wrinkles the be aware of.
+    #
+    # The first wrinkle is that these tests have to check the internal
+    # properties of tensors to make sure they materialize in the expected way,
+    # and those checks cause dynamo graph breaks. Depending on the situation, a
+    # graph break in-between two compiled graphs that operate on the same COW
+    # tensor can make the tensor materialize when it would not materialize in
+    # eager mode, causing the checks to fail. The strategy for avoiding this is
+    # to make all the operations on COW tensors get compiled into the same
+    # graph, by not doing any checks between the operations, and just do all the
+    # checks at the end of the test. If we really do want to perform checks
+    # between two operations, `op1` and `op2`, the solution is to create two
+    # different tests. One test performs just `op1` and then checks. The other
+    # test performs `op1` followed immediately by `op2` and then checks.
+    #
+    # The second wrinkle is that in eager mode, if we perform writes on two COW
+    # tensors where one is a lazy clone of the other, the first tensor to be
+    # written will be materialized with a new data pointer, and the second
+    # tensor will just reuse the original data pointer when it is materialized.
+    # But in compiled mode, if these writes happen in the same graph, the order
+    # in which the tensors materialize can be different than in eager mode. So
+    # in this case the strategy is to purposefully cause a graph break to happen
+    # in-between the two write operations, by adding checks between them, so
+    # that they have to materialize in the expected order.
+    @skipXLA
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_lazy_clone(self, device, dtype):
+        t = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
+        t_orig_storage_addr = torch._C._storage_address(t)
+        orig_data_ptr = torch._C._data_address(t)
+        clone = t._lazy_clone()
+
+        # Lazy cloning a tensor should cause both it and its clone to become COW
+        # tensors. They should have different storages, but the same data
+        # pointer.
+
+        self.assertTrue(torch._C._is_cow_tensor(clone))
+        self.assertTrue(torch._C._is_cow_tensor(t))
+
+        self.assertTrue(torch._C._storage_address(t) == t_orig_storage_addr)
+        self.assertTrue(torch._C._storage_address(clone) != t_orig_storage_addr)
+
+        self.assertTrue(torch._C._data_address(t) == orig_data_ptr)
+        self.assertTrue(torch._C._data_address(clone) == orig_data_ptr)
+
+    # See Note [lazy_clone_ tests with inductor enabled]
+    @skipXLA
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_lazy_clone_view(self, device, dtype):
+        t = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
+        t_orig_storage_addr = torch._C._storage_address(t)
+        orig_data_ptr = torch._C._data_address(t)
+        clone = t._lazy_clone()
+        view = t.view([4])
+
+        # Viewing `t` should not cause a copy (materialize) to happen. All the
+        # tensors should still be COW and have the same data pointer. `view` and
+        # `t` should have the same storage, and `clone` should have a different
+        # storage.
+
+        self.assertTrue(torch._C._is_cow_tensor(t))
+        self.assertTrue(torch._C._is_cow_tensor(view))
+        self.assertTrue(torch._C._is_cow_tensor(clone))
+
+        self.assertTrue(torch._C._storage_address(t) == t_orig_storage_addr)
+        self.assertTrue(torch._C._storage_address(view) == t_orig_storage_addr)
+        self.assertTrue(torch._C._storage_address(clone) != t_orig_storage_addr)
+
+        self.assertTrue(torch._C._data_address(t) == orig_data_ptr)
+        self.assertTrue(torch._C._data_address(clone) == orig_data_ptr)
+        self.assertTrue(torch._C._data_address(view) == orig_data_ptr)
+
+    # See Note [lazy_clone_ tests with inductor enabled]
+    @skipXLA
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_lazy_clone_view_materialize(self, device, dtype):
+        t = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
+        t_orig_storage_addr = torch._C._storage_address(t)
+        orig_data_ptr = torch._C._data_address(t)
+        clone = t._lazy_clone()
+        view = t.view([4])
+        view += torch.ones(1, device=device, dtype=dtype)
+
+        # Writing to `t` should cause the storage under `t` and `view` to be
+        # copied (materialized), but should not affect `clone`.
+
+        self.assertFalse(torch._C._is_cow_tensor(t))
+        self.assertFalse(torch._C._is_cow_tensor(view))
+        self.assertTrue(torch._C._is_cow_tensor(clone))
+
+        self.assertTrue(torch._C._storage_address(t) == t_orig_storage_addr)
+        self.assertTrue(torch._C._storage_address(view) == t_orig_storage_addr)
+        self.assertTrue(torch._C._storage_address(clone) != t_orig_storage_addr)
+
+        t_new_data_addr = torch._C._data_address(t)
+        self.assertTrue(t_new_data_addr != orig_data_ptr)
+        self.assertTrue(torch._C._data_address(view) == t_new_data_addr)
+        self.assertTrue(torch._C._data_address(clone) == orig_data_ptr)
+
+        clone += torch.ones(1, device=device, dtype=dtype)
+
+        # Writing to `clone` should materialize it, so it should no longer
+        # be COW. However, since `clone`'s storage is the only COW storage
+        # left that holds a reference to the original data pointer, this
+        # materialization should not actually cause a copy--it should
+        # just reuse the original data pointer.
+
+        self.assertFalse(torch._C._is_cow_tensor(t))
+        self.assertFalse(torch._C._is_cow_tensor(view))
+        self.assertFalse(torch._C._is_cow_tensor(clone))
+
+        self.assertTrue(torch._C._storage_address(t) == t_orig_storage_addr)
+        self.assertTrue(torch._C._storage_address(view) == t_orig_storage_addr)
+        self.assertTrue(torch._C._storage_address(clone) != t_orig_storage_addr)
+
+        self.assertTrue(torch._C._data_address(t) == t_new_data_addr)
+        self.assertTrue(torch._C._data_address(view) == t_new_data_addr)
+        self.assertTrue(torch._C._data_address(clone) == orig_data_ptr)
+
     # FIXME: move to test distributions
     @skipIfMps
     @dtypesIfCUDA(torch.float, torch.double, torch.half)
@@ -5210,7 +5339,7 @@ else:
     def _test_memory_format_transformations(self, device, input_generator_fn, transformation_fn,
                                             memory_format, compare_data=True, default_is_preserve=False):
 
-        assert(memory_format == torch.channels_last or memory_format == torch.channels_last_3d)
+        assert memory_format == torch.channels_last or memory_format == torch.channels_last_3d
 
         # xc is a channels last tensor
         xc = input_generator_fn(device)
@@ -5444,6 +5573,81 @@ else:
         self._test_multinomial_empty(device, False, 1)
         self._test_multinomial_empty(device, False, 2)
 
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test_grad_scaling_unscale(self, device, dtype):
+        inv_scale = torch.full((1,), 0.25, dtype=torch.float, device=device)
+        found_inf = torch.full((1,), 0.0, dtype=torch.float, device=device)
+
+        size = 20
+        g = torch.full((size, size), 4.0, dtype=dtype, device=device)
+        ginf = g.clone()
+        ginf[2, 2] = float('inf')
+        gnan = g.clone()
+        gnan[2, 2] = float('nan')
+
+        # Tries selected combinations of
+        #  - contiguous grads
+        #  - g.clone().t() which is not contiguous but still non overlapping and dense
+        #  - variants of g.clone()[:, :5] which are not non overlapping and dense
+        # Non overlapping and dense grads route into a multi tensor apply kernel,
+        # others use a fallback per-tensor kernel, so we should try both.
+        cases = (
+            ([g.clone(), g.clone()], False),
+            ([g.clone(), g.clone().t()], False),
+            ([g.clone(), g.clone()[:, :5]], False),
+            ([g.clone()[:, :5], g.clone()[:, :5]], False),
+            ([g.clone(), ginf.clone()], True),
+            ([g.clone(), gnan.clone()], True),
+            ([g.clone(), ginf.clone()[:, :5]], True),
+            ([g.clone(), gnan.clone()[:, :5]], True),
+            ([ginf.clone(), g.clone()[:, :5]], True),
+            ([ginf.clone()[:, :5], g.clone()[:, :5]], True),
+        )
+
+        for grads, has_inf in cases:
+            found_inf.zero_()
+            torch._amp_foreach_non_finite_check_and_unscale_(grads, found_inf, inv_scale)
+            if has_inf:
+                self.assertEqual(found_inf, 1.0)
+            else:
+                self.assertEqual(found_inf, 0.0)
+                for grad in grads:
+                    self.assertEqual(grad, torch.ones_like(grad), rtol=1e-5, atol=1e-7)
+
+        # When passing lists with mismatched dtypes to a raw
+        # _amp_foreach_non_finite_check_and_unscale_ call,
+        # it's expected to fall back to single-tensor TensorIterator kernel.
+        grads = [g.clone(), g.to(dtype=torch.float16)]
+        torch._amp_foreach_non_finite_check_and_unscale_(grads, found_inf, inv_scale)
+        for grad in grads:
+            self.assertEqual(grad, torch.ones_like(grad), rtol=1e-5, atol=1e-7)
+
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float)
+    def test_grad_scaling_update_scale(self, device, dtype):
+        growth = 2.0
+        backoff = 0.25
+        growth_interval = 2
+        scale = torch.full((1,), 4.0, dtype=dtype, device=device)
+        growth_tracker = torch.full((1,), 0.0, dtype=torch.int32, device=device)
+        found_inf = torch.full((1,), 0.0, dtype=torch.float, device=device)
+
+        # Simulates 2 consecutive unskipped iterations
+        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
+        self.assertEqual(growth_tracker, 1)
+        self.assertEqual(scale, 4.0)
+        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
+        self.assertEqual(growth_tracker, 0)
+        self.assertEqual(scale, 8.0)
+
+        # Simulates a skipped iteration
+        found_inf.fill_(1.0)
+        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
+        self.assertEqual(growth_tracker, 0)
+        self.assertEqual(scale, 2.0)
+
     @dtypesIfCUDA(torch.float, torch.double, torch.half)
     @dtypesIfCPU(torch.float, torch.double, torch.bfloat16, torch.half)
     @dtypes(torch.float, torch.double)
@@ -5619,8 +5823,12 @@ else:
                     atol = 1e-2
                 self.assertEqual(src, dst.copy_(t), rtol=rtol, atol=atol)
 
-    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.complex32))
+    @dtypes(*all_types_and_complex_and(
+        torch.bool, torch.half, torch.bfloat16, torch.complex32,
+        torch.uint16, torch.uint32, torch.uint64))
     def test_item(self, device, dtype):
+        if torch.device(device).type == 'xla' and dtype in [torch.uint16, torch.uint32, torch.uint64]:
+            self.skipTest('uint16,32,64 not implemented on XLA')
         t = torch.ones((), device=device, dtype=dtype)
         self.assertEqual(1, t.item())
 
@@ -8924,7 +9132,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             # FIXME: All of the following should be marked as expected failures
             # so that it is easier to tell when missing has been added.
             # FIXME: fix all the skipped ones below!
-            test_namespace(torch.randn(1),
+            test_namespace(torch.randn(1),  # noqa: F821
                            'as_strided_',
                            re.compile('^clamp_(min|max)_?$'),
                            'is_distributed',
@@ -8946,8 +9154,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                            '_autocast_to_fp32',
                            )
 
-            test_namespace(torch.nn)
-            test_namespace(torch.nn.functional, 'assert_int_or_pair')
+            test_namespace(torch.nn)  # noqa: F821
+            test_namespace(torch.nn.functional, 'assert_int_or_pair')  # noqa: F821
             # TODO: add torch.* tests when we have proper namespacing on ATen functions
             # test_namespace(torch)
 

@@ -16,13 +16,11 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 /// `Variable` is exactly the same as `Tensor` (i.e. we have `using Variable =
 /// at::Tensor`). This means you can perform all the usual mathematical and
@@ -33,8 +31,7 @@ namespace autograd {
 /// is to eliminate the `Variable` class in the near future.
 using Variable = at::Tensor;
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
 
 // The following are all internal APIs and should not be shown in libtorch docs.
 // Therefore, we wrap the following code with `#ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -42,8 +39,7 @@ using Variable = at::Tensor;
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 /// Check if this type is supported by the autograd engine.
 /// If you change this, update the doc at the top of the
@@ -336,9 +332,13 @@ struct TORCH_API ViewInfo {
   /// view_fn is only saved when as_strided is not supported.
   /// If view_fn has value, we use it to recover views in backward.
   std::function<Variable(const Variable&)> view_fn_;
+  /// Analogue of view_fn but in reverse: given a view -> produce the base by
+  /// applying the inverse view.
+  std::function<Variable(const Variable&)> rev_view_fn_;
 
   /// Accessors for the view function
   bool has_view_fn() const {
+    // assume either BOTH or NEITHER of view_fn_ and rev_view_fn_ exist
     return view_fn_ != nullptr;
   }
 
@@ -346,6 +346,13 @@ struct TORCH_API ViewInfo {
     TORCH_CHECK(
         has_view_fn(), "Can only access the view function if it exists.");
     return view_fn_;
+  }
+
+  std::function<Variable(const Variable&)> rev_view_fn() const {
+    TORCH_CHECK(
+        has_view_fn(),
+        "Can only access the reverse view function if it exists.");
+    return rev_view_fn_;
   }
 
   /// The chain function can be used to build a new ViewInfo for a
@@ -359,10 +366,16 @@ struct TORCH_API ViewInfo {
   ViewInfo chain(
       const Variable& base,
       const Variable& tensor,
-      std::function<Variable(const Variable&)> view_func = nullptr) const;
+      std::function<Variable(const Variable&)> view_func = nullptr,
+      std::function<Variable(const Variable&)> rev_view_func = nullptr) const;
 
-  ViewInfo(Variable base, std::function<Variable(const Variable&)> view_fn)
-      : base_(std::move(base)), view_fn_(std::move(view_fn)) {
+  ViewInfo(
+      Variable base,
+      std::function<Variable(const Variable&)> view_fn,
+      std::function<Variable(const Variable&)> rev_view_fn)
+      : base_(std::move(base)),
+        view_fn_(std::move(view_fn)),
+        rev_view_fn_(std::move(rev_view_fn)) {
     TORCH_CHECK(base_.defined(), "base is undefined");
   }
 };
@@ -844,7 +857,6 @@ namespace utils {
 TORCH_API bool has_same_meta(const Variable& base, const Variable& other);
 
 } // namespace utils
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
 
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */

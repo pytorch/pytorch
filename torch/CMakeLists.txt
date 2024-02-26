@@ -65,6 +65,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${TORCH_ROOT}/third_party/valgrind-headers
 
     ${TORCH_ROOT}/third_party/gloo
+    ${TORCH_ROOT}/third_party/nlohmann/include
     ${TORCH_ROOT}/third_party/onnx
     ${TORCH_ROOT}/third_party/flatbuffers/include
     ${TORCH_ROOT}/third_party/kineto/libkineto/include
@@ -143,10 +144,6 @@ if(USE_ROCM)
       __HIP_PLATFORM_AMD__
       )
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ROCM_ROCTX_LIB})
-endif()
-
-if(USE_EXPERIMENTAL_CUDNN_V8_API)
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_EXPERIMENTAL_CUDNN_V8_API)
 endif()
 
 if(USE_CUDNN OR USE_ROCM)

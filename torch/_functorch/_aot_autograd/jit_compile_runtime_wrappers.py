@@ -148,6 +148,7 @@ def aot_dispatch_autograd(
     *,
     fw_metadata: ViewAndMutationMeta,
 ):
+    fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
     fx_g, joint_inputs, maybe_subclass_meta = aot_dispatch_autograd_graph(  # type: ignore[misc]
         flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
     )
@@ -382,10 +383,11 @@ def aot_dispatch_autograd(
         metadata: ViewAndMutationMeta = fw_metadata  # type: ignore[assignment]
         maybe_subclass_metadata: Optional[SubclassMeta] = maybe_subclass_meta
         num_symints_saved_for_bw = _num_symints_saved_for_bw
+        _compiled_autograd_should_lift = False
 
         @staticmethod
         def _compiled_autograd_key(ctx):
-            return (aot_config.aot_id, *ctx.symints)
+            return (ctx._autograd_function_id, *ctx.symints)
 
         @staticmethod
         def forward(ctx, *deduped_flat_tensor_args):
@@ -527,7 +529,7 @@ def aot_dispatch_autograd(
             # and we filter them out here before passing the remaining grad_outputs into the compiled backward.
             num_intermediate_bases = CompiledFunction.metadata.num_intermediate_bases
             num_graph_handled_inputs = (
-                CompiledFunction.metadata.num_mutated_graph_handled_indices
+                CompiledFunction.metadata.num_mutated_graph_handled_indices_seen_by_autograd
             )
             num_mutated_runtime_inps = (
                 CompiledFunction.metadata.num_mutated_inp_runtime_indices
@@ -537,6 +539,18 @@ def aot_dispatch_autograd(
                 + num_mutated_runtime_inps
                 + num_intermediate_bases
             )
+            deterministic = CompiledFunction.metadata.deterministic
+            global_deterministic = torch.are_deterministic_algorithms_enabled()
+            if deterministic is not None:
+                torch._check(
+                    not (not deterministic and global_deterministic),
+                    lambda: (
+                        "This compiled backward function is being run with "
+                        "torch.use_deterministic_algorithms(True), "
+                        "but it was previously generated during the forward function while "
+                        "torch.use_deterministic_algorithms(False) was set."
+                    ),
+                )
 
             if num_graph_handled_inputs > 0:
                 flat_args = flat_args[:-num_graph_handled_inputs]
@@ -722,6 +736,9 @@ Got grad_output types: {str(grad_output_types)}"""
                 # See comment for why once_differentiable is not sufficient:
                 # https://github.com/pytorch/pytorch/pull/92348/files#r1072962107
                 class CompiledFunctionBackward(torch.autograd.Function):
+                    # CompiledFunctionBackward is not yet supported in dynamo skipfiles
+                    _compiled_autograd_should_lift = False
+
                     @staticmethod
                     def forward(ctx, *unused_args):
                         outs = call_compiled_backward()
@@ -744,7 +761,7 @@ Got grad_output types: {str(grad_output_types)}"""
                             "torch.compile with aot_autograd does not currently support double backward"
                         )
 
-                CompiledFunctionBackward._compiled_autograd_key = (  # type: ignore[attr-defined]
+                CompiledFunctionBackward._compiled_autograd_key = (  # type: ignore[method-assign]
                     CompiledFunction._compiled_autograd_key
                 )
 

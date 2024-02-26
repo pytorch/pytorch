@@ -148,15 +148,29 @@ def is_bf16_supported():
     if torch.version.hip:
         return True
 
-    cu_vers = torch.version.cuda
-    if cu_vers is not None:
-        cuda_maj_decide = int(cu_vers.split(".")[0]) >= 11
-    else:
-        cuda_maj_decide = False
-    return (
-        torch.cuda.get_device_properties(torch.cuda.current_device()).major >= 8
-        and cuda_maj_decide
-    )
+    device = torch.cuda.current_device()
+
+    # Check for CUDA version and device compute capability.
+    # This is a fast way to check for it.
+    cuda_version = torch.version.cuda
+    if (
+        cuda_version is not None
+        and int(cuda_version.split(".")[0]) >= 11
+        and torch.cuda.get_device_properties(device).major >= 8
+    ):
+        return True
+
+    # Finally try to create a bfloat16 device.
+    return _check_bf16_tensor_supported(device)
+
+
+@lru_cache(maxsize=16)
+def _check_bf16_tensor_supported(device: _device_t):
+    try:
+        torch.tensor([1.0], dtype=torch.bfloat16, device=device)
+        return True
+    except Exception:
+        return False
 
 
 def _sleep(cycles):

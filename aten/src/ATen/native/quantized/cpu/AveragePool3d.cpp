@@ -14,8 +14,6 @@
 #include <ATen/ops/avg_pool3d_native.h>
 #endif
 
-#include <c10/util/math_compat.h>
-
 #include <vector>
 
 namespace at {

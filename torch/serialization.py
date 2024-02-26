@@ -15,10 +15,9 @@ from torch._sources import get_source_lines_and_file
 from torch.types import Storage
 from torch.storage import _get_dtype_from_pickle_storage_type
 from typing import Any, BinaryIO, Callable, cast, Dict, Optional, Type, Tuple, Union, IO
-from typing_extensions import TypeAlias  # Python 3.10+
+from typing_extensions import TypeAlias, TypeGuard  # Python 3.10+
 import copyreg
 import pickle
-import pathlib
 import torch._weights_only_unpickler as _weights_only_unpickler
 
 DEFAULT_PROTOCOL = 2
@@ -406,8 +405,8 @@ def storage_to_tensor_type(storage):
     return getattr(module, storage_type.__name__.replace('Storage', 'Tensor'))
 
 
-def _is_path(name_or_buffer):
-    return isinstance(name_or_buffer, (str, pathlib.Path))
+def _is_path(name_or_buffer) -> TypeGuard[Union[str, os.PathLike]]:
+    return isinstance(name_or_buffer, (str, os.PathLike))
 
 
 class _opener:
@@ -566,7 +565,7 @@ def _check_dill_version(pickle_module) -> None:
 
 
 def _check_save_filelike(f):
-    if not isinstance(f, (str, os.PathLike)) and not hasattr(f, 'write'):
+    if not _is_path(f) and not hasattr(f, 'write'):
         raise AttributeError(
             "expected 'f' to be string, path, or a file-like object with "
             "a 'write' attribute")
@@ -1010,10 +1009,10 @@ def load(
                     opened_file.seek(orig_position)
                     return torch.jit.load(opened_file, map_location=map_location)
                 if mmap:
-                    if not isinstance(f, str):
-                        raise ValueError("f must be a string filename in order to use mmap argument")
+                    if not _is_path(f):
+                        raise ValueError("f must be a file path in order to use the mmap argument")
                     size = os.path.getsize(f)
-                    overall_storage = torch.UntypedStorage.from_file(f, False, size)
+                    overall_storage = torch.UntypedStorage.from_file(os.fspath(f), False, size)
                 if weights_only:
                     try:
                         return _load(opened_zipfile,

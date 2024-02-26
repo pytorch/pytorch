@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/cuda/CachingHostAllocator.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
@@ -98,6 +99,8 @@ void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
   }
 }
 
+// TODO: We probably can use the opaque type trick to avoid creating duplicate
+// kernels for equivalent bit lengths
 void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
   ScalarType dtype = iter.dtype(0);
   if (isQIntType(dtype)) {
@@ -115,10 +118,10 @@ void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
     });
 #endif /* !defined(USE_ROCM) */
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
-        kHalf, kBool, kBFloat16, kComplexHalf,dtype, "copy_", [&] {
+    AT_DISPATCH_V2(
+        dtype, "copy_", AT_WRAP([&] {
           gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
-    });
+    }), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), kHalf, kBool, kBFloat16, kComplexHalf, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
   }
 }
 

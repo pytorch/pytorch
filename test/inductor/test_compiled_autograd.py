@@ -42,7 +42,7 @@ def hook3(gI, gO):
 
 
 class TestCompiledAutograd(TestCase):
-    def check_output_and_recompiles(self, fn, count=1):
+    def check_output_and_recompiles(self, fn, count=1, compiler_fn=compiler_fn):
         with torch.autograd.set_multithreading_enabled(False):
             torch._dynamo.reset()
             counters["compiled_autograd"].clear()
@@ -376,6 +376,263 @@ class TestCompiledAutograd(TestCase):
 
             eager_check()
 
+    def test_custom_fn_saved_tensors(self):
+        def fn():
+            class MySin(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return torch.sin(x)
+
+                @staticmethod
+                def backward(ctx, gO):
+                    (x,) = ctx.saved_tensors
+                    return gO * torch.cos(x)
+
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                out = MySin.apply(x)
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(fn, 2)
+
+    def test_custom_fn_saved_multiple_tensors(self):
+        def fn():
+            class MyFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x, y):
+                    ctx.save_for_backward(x, y)
+                    return torch.sin(x), torch.sin(y)
+
+                @staticmethod
+                def backward(ctx, gO_x, gO_y):
+                    (x, y) = ctx.saved_tensors
+                    return gO_x * torch.cos(x), gO_y * torch.cos(y)
+
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                y = torch.arange(0.0, i, requires_grad=True)
+                out1, out2 = MyFn.apply(x, y)
+                loss = (out1 * out2).sum()
+                loss.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(fn, 2)
+
+    def test_custom_fn_saved_multiple_tensors_dedup(self):
+        def fn():
+            class MyFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x, x)
+                    return torch.sin(x)
+
+                @staticmethod
+                def backward(ctx, gO):
+                    (x1, x2) = ctx.saved_tensors
+                    return gO * torch.cos(x1) * torch.cos(x2)
+
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                out = MyFn.apply(x)
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(fn, 2)
+
+    def test_custom_fn_saved_shape_tensor(self):
+        def fn():
+            class MyFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return x
+
+                @staticmethod
+                def backward(ctx, gO):
+                    (x,) = ctx.saved_tensors
+                    return gO * x.shape[0]
+
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                out = MyFn.apply(x)
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(fn, 2)
+
+    def test_custom_fn_saved_attr(self):
+        def fn():
+            class MyFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.shape = x.shape
+                    return x
+
+                @staticmethod
+                def backward(ctx, gO):
+                    x_shape = ctx.shape[0]
+                    return gO * x_shape
+
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                out = MyFn.apply(x)
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "is not subscriptable",
+        ):
+            self.check_output_and_recompiles(fn, 2)
+
+    def test_custom_fn_multiple_grads(self):
+        def fn():
+            class MyFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x, y):
+                    return x + y, y
+
+                @staticmethod
+                def backward(ctx, gO_1, gO_2):
+                    return gO_1, gO_2
+
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                y = torch.arange(0.0, i, requires_grad=True)
+                out1, out2 = MyFn.apply(x, y)
+                loss = (out1 + out2).sum()
+                loss.backward()
+                yield x.grad
+                yield y.grad
+
+        self.check_output_and_recompiles(fn, 2)
+
+    def test_custom_fn_non_variable_input(self):
+        def fn():
+            class MyFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x, y, z):
+                    return x * 2, y * 3, z * 4
+
+                @staticmethod
+                def backward(ctx, gO_1, gO_2, gO_3):
+                    return gO_1, gO_2, gO_3
+
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                y = 1
+                z = torch.arange(0.0, i, requires_grad=True)
+                out1, out2, out3 = MyFn.apply(x, y, z)
+                loss = (out1 + out2 + out3).sum()
+                loss.backward()
+                yield x
+                yield y
+                yield z
+
+        self.check_output_and_recompiles(fn, 2)
+
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_custom_fn_output_metadata(self):
+        def my_compiler_fn(gm):
+            for node in gm.graph.nodes:
+                if isinstance(node.target, torch._ops.OpOverload):
+                    assert (
+                        node.target._name != "aten::_to_copy"
+                    ), "there should be no implicit copies (e.g. dtype casting)"
+
+            def inner_compiler(gm_, example_inputs_):
+                counters["compiled_autograd"]["compiles"] += 1
+                return inductor.compile(gm_, example_inputs_)
+
+            return torch.compile(
+                gm, backend=inner_compiler, fullgraph=True, dynamic=True
+            )
+
+        def fn():
+            class MyFn(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x
+
+                @staticmethod
+                def backward(ctx, gO):
+                    return gO
+
+            x = torch.arange(
+                1, 10, requires_grad=True, dtype=torch.float16, device="cuda"
+            )
+            x_view = x.view(3, 3)
+            out = MyFn.apply(x_view)
+            loss = out.sum()
+            loss.backward()
+            yield x.dtype
+            yield x.device
+            yield x.grad
+
+        self.check_output_and_recompiles(fn, 1, my_compiler_fn)
+
+    def test_custom_fns_with_same_graph(self):
+        def fn():
+            class MyFn1(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x
+
+                @staticmethod
+                def backward(ctx, gO):
+                    return gO
+
+            # same as MyFn1, but different autograd function id
+            # should not be using same graph as MyFn1
+            class MyFn2(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x
+
+                @staticmethod
+                def backward(ctx, gO):
+                    return gO
+
+            for myfn in [MyFn1, MyFn2, MyFn1, MyFn2]:
+                x = torch.arange(0.0, 10, requires_grad=True)
+                out = myfn.apply(x)
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(
+            fn, 2
+        )  # should compile once for MyFn1 and once for MyFn2
+
+    def test_dynamically_defined_class(self):
+        def fn():
+            def create_class(multiplier: int):
+                class DynamicFn(torch.autograd.Function):
+                    @staticmethod
+                    def forward(ctx, x):
+                        return x * multiplier
+
+                    @staticmethod
+                    def backward(ctx, gO):
+                        return gO * multiplier
+
+                return DynamicFn
+
+            for multiplier in [10, 20, 30]:
+                x = torch.arange(0.0, 10, requires_grad=True)
+                out = create_class(multiplier).apply(x)
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(fn, 3)
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
@@ -428,42 +685,14 @@ known_failing_tests = {
     "test_wrapped_number_saved_variable_hooks",  # RuntimeError: this hook should not be called
     "test_accumulate_grad_posthooks_can_observe_tensor_prehook",  # data dependent operator: aten.allclose.default
     "test_accumulate_grad_tensor_reference",  # backend='inner_compiler' raised:
-    "test_anomaly_detect_nan",  # type object 'MyFunc' has no attribute '_compiled_autograd_key'
     "test_anomaly_grad_warnings",  # "one of the variables needed for gradient computation has been modified by an...
     "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
-    "test_autograd_multiple_views_python",  # type object 'ComplexView' has no attribute '_compiled_autograd_key'
-    "test_autograd_node_isinstance",  # type object 'Func' has no attribute '_compiled_autograd_key'
-    "test_autograd_python_custom_function_inplace",  # type object 'MyAdder' has no attribute '_compiled_autograd_key'
     "test_backward_with_inputs",  # specifying inputs= with .backward() not yet implemented for compiled autograd
-    "test_callback_adds_callback",  # type object 'MyFunc' has no attribute '_compiled_autograd_key'
     "test_current_node",  # TorchDispatchMode not yet implemented for compiled autograd
-    "test_custom_function_cycle",  # type object 'MyFn' has no attribute '_compiled_autograd_key'
-    "test_custom_function_error",  # type object 'BadBw' has no attribute '_compiled_autograd_key'
     "test_custom_function_exception",  # "Simulate error on backward pass" does not match "type object 'SimulateBackwa...
-    "test_custom_function_non_tensor_inputs_outputs",  # type object 'MyFunction' has no attribute '_compiled_autograd_key'
-    "test_custom_function_save_for_forward",  # type object 'Func' has no attribute '_compiled_autograd_key'
-    "test_custom_function_saved_tensors",  # type object 'MyFn' has no attribute '_compiled_autograd_key'
-    "test_custom_function_setup_context_multi_input",  # type object 'MyReshape' has no attribute '_compiled_autograd_key'
-    "test_custom_function_setup_context_multi_output",  # type object 'MySquare' has no attribute '_compiled_autograd_key'
-    "test_custom_function_setup_context_simple",  # type object 'MySquare' has no attribute '_compiled_autograd_key'
-    "test_deep_reentrant",  # type object 'DeepReentrant' has no attribute '_compiled_autograd_key'
-    "test_dep_nograd",  # type object 'F2' has no attribute '_compiled_autograd_key'
-    "test_dont_materialize_grads",  # type object 'MyFunction' has no attribute '_compiled_autograd_key'
-    "test_function_returns_input",  # type object 'MyFunction' has no attribute '_compiled_autograd_key'
-    "test_function_returns_undefined_tensor",  # type object 'MyFunction' has no attribute '_compiled_autograd_key'
     "test_grad_batched_grad",  # Cannot access storage of BatchedTensorImpl
-    "test_grad_fn_prehooks",  # type object 'Mul2' has no attribute '_compiled_autograd_key'
-    "test_grad_fn_prehooks_multiple_outputs",  # type object 'DoubleMul2' has no attribute '_compiled_autograd_key'
-    "test_grad_fn_prehooks_remove_hooks",  # type object 'Mul2' has no attribute '_compiled_autograd_key'
-    "test_grad_mode_restored_reentrant",  # type object 'MyFunction' has no attribute '_compiled_autograd_key'
     "test_grad_unreachable_discovery",  # specifying inputs= with .backward() not yet implemented for compiled autograd
-    "test_hook_none",  # type object 'NoneGradientFunction' has no attribute '_compiled_autograd_key'
     "test_index_backward_does_not_save_tensor",  # dynamic shape operator: aten.nonzero.default
-    "test_invalid_gradients",  # type object 'MyFunction' has no attribute '_compiled_autograd_key'
-    "test_mark_non_differentiable_mixed",  # type object 'MyFunction' has no attribute '_compiled_autograd_key'
-    "test_materialize_grads",  # type object 'MyFunction' has no attribute '_compiled_autograd_key'
-    "test_naughty_anomaly_access",  # type object 'MyFunction' has no attribute '_compiled_autograd_key'
-    "test_no_grad_copy",  # type object 'NonContGradFunc' has no attribute '_compiled_autograd_key'
     "test_post_accumulate_grad_hook_e2e",  # tensor_post_acc_grad_hooks not implemented for compiled autograd
     "test_post_accumulate_grad_hook_gets_cleaned_up",  # tensor_post_acc_grad_hooks not implemented for compiled autograd
     "test_post_accumulate_grad_hook_multiple_hooks",  # tensor_post_acc_grad_hooks not implemented for compiled autograd
@@ -471,36 +700,19 @@ known_failing_tests = {
     "test_post_accumulate_grad_hook_ordering",  # tensor_post_acc_grad_hooks not implemented for compiled autograd
     "test_post_accumulate_grad_hook_returns_not_None",  # "hooks should return None." does not match
     "test_reentrant_child_error",  # "Simulate error" does not match "type object 'ReentrantFunc' has no attribute...
-    "test_reentrant_priority",  # type object 'Reentrant' has no attribute '_compiled_autograd_key'
-    "test_reentrant_with_callbacks_both_depths",  # type object 'MyReentrantFunc' has no attribute '_compiled_autograd_key'
-    "test_reentrant_with_callbacks_depth_0",  # type object 'MyReentrantFunc' has no attribute '_compiled_autograd_key'
-    "test_reentrant_with_callbacks_depth_1",  # type object 'MyReentrantFunc' has no attribute '_compiled_autograd_key'
     "test_retain_grad_cycle",  # retains_grad_hooks not implemented for compiled autograd
     "test_retain_grad_inplace",  # retains_grad_hooks not implemented for compiled autograd
     "test_retain_grad_inplace_over_view",  # retains_grad_hooks not implemented for compiled autograd
     "test_retains_grad_can_always_observe_tensor_prehook",  # retains_grad_hooks not implemented for compiled autograd
     "test_retains_grad_inplace_multiple_outputs",  # retains_grad_hooks not implemented for compiled autograd
-    "test_return_leaf",  # type object 'Identity' has no attribute '_compiled_autograd_key'
-    "test_return_leaf_inplace",  # type object 'Inplace' has no attribute '_compiled_autograd_key'
-    "test_save_none_for_backward",  # type object 'MyFn' has no attribute '_compiled_autograd_key'
-    "test_save_output_nr",  # type object 'TestFn' has no attribute '_compiled_autograd_key'
-    "test_saved_tensor_hooks_custom_function_intermediates",  # type object 'Func' has no attribute '_compiled_autograd_key'
-    "test_saved_variables_deprecated",  # type object 'MyFunction' has no attribute '_compiled_autograd_key'
-    "test_set_materialize_non_diff_grads",  # type object 'Func' has no attribute '_compiled_autograd_key'
-    "test_setup_context_when_forward_has_default_args",  # type object 'PowFunction' has no attribute '_compiled_autograd_key'
-    "test_simple_reentrant",  # type object 'Reenter' has no attribute '_compiled_autograd_key'
-    "test_tensor_hooks_inplace_multiple_outputs",  # type object 'DoubleMul' has no attribute '_compiled_autograd_key'
     "test_to_sparse_backward",  # backend='inner_compiler' raised:
-    "test_too_many_grads",  # type object 'MyFn' has no attribute '_compiled_autograd_key'
     "test_accumulate_grad",  # RuntimeError: compiled_autograd does not support create_graph
     "test_anomaly_assign_parent_cleanup",  # RuntimeError: compiled_autograd does not support create_graph
     "test_anomaly_mode_no_check_nan",  # RuntimeError: compiled_autograd does not support AnomalyMode
-    "test_autograd_simple_views_python",  # AttributeError: type object 'IdOneOutput' has no attribute '_compiled_autograd_key'
     "test_backward_create_graph_warns",  # RuntimeError: compiled_autograd does not support create_graph
     "test_backward_with_nonleaf_inputs",  # RuntimeError: compiled_autograd does not support create_graph
     "test_create_graph_and_full_backward_hook_cycle",  # RuntimeError: compiled_autograd does not support create_graph
     "test_current_graph_task_id",  # torch._dynamo.exc.Unsupported: torch.* op returned non-Tensor int
-    "test_custom_autograd_no_early_free",  # AttributeError: type object 'Double' has no attribute '_compiled_autograd_key'
     "test_custom_autograd_repeated_grad_grad",  # RuntimeError: compiled_autograd does not support create_graph
     "test_custom_function_forward_mode_forward_is_no_op",  # AttributeError: type object 'MyFn'
     "test_custom_function_forward_mode_inplace_checks",  # AttributeError: type object 'InplaceFn'
@@ -519,23 +731,59 @@ known_failing_tests = {
     "test_hook_edge_case_when_called_with_grad",  # RuntimeError: specifying inputs= with .backward() not yet
     "test_hooks",  # torch._dynamo.exc.Unsupported: inline in skipfiles
     "test_inplace_on_view_backward",  # RuntimeError: compiled_autograd does not support create_graph
-    "test_lobpcg",  # AttributeError: type object 'LOBPCGAutogradFunction' has no attribute '_compiled_autograd_key'
     "test_multi_grad_hooks",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
-    "test_naughty_autograd_function_stashing_ctx",  # AttributeError: type object 'Id' has no attribute '_compiled_autograd_key'
     "test_nested_anomaly_detect_nan",  # RuntimeError: compiled_autograd does not support create_graph
     "test_nested_anomaly_printstack_cleanup",  # RuntimeError: compiled_autograd does not support create_graph
-    "test_no_grad_copy_sparse",  # AttributeError: type object 'MyFunc' has no attribute '_compiled_autograd_key'
     "test_once_differentiable",  # RuntimeError: compiled_autograd does not support create_graph
     "test_prehook_ordering",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
     "test_retain_grad",  # RuntimeError: retains_grad_hooks not implemented for compiled autograd
-    "test_return_duplicate",  # AttributeError: type object 'DoubleDuplicate' has no attribute '_compiled_autograd_key'
-    "test_return_duplicate_inplace",  # AttributeError: type object 'DoubleInplace' has no attribute '_compiled_autograd_key'
     "test_saved_variable_packing_unpacking_saved_original_with_hooks",  # RuntimeError: compiled_autograd
     "test_select_sum",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
     "test_unrelated_inputs",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
     "test_will_engine_execute_node",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
     "test_backward_to_node",  # RuntimeError: specifying inputs= with .backward() not yet implemented for compiled autograd
-    "test_callback_propagates_errors_from_device_thread",  # AssertionError: "blah" does not match "call_method UserDefinedObj..."
+    "test_anomaly_detect_nan",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function aten.add.Tensor(
+    "test_autograd_multiple_views_python",  # torch._dynamo.exc.Unsupported: call_function args: TensorVariable(
+    "test_autograd_node_isinstance",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsInstance
+    "test_autograd_simple_views_python",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function
+    "test_callback_adds_callback",  # torch._dynamo.exc.Unsupported: call_method UserDefinedObjectVariable
+    "test_callback_propagates_errors_from_device_thread",  # AssertionError: "blah" does not match "call_method
+    "test_custom_autograd_no_early_free",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
+    "test_custom_function_cycle",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
+    "test_custom_function_error",  # AssertionError: "must implement either the backward" does not match "call_function
+    "test_custom_function_non_tensor_inputs_outputs",  # torch._dynamo.exc.Unsupported: call_function
+    "test_custom_function_save_for_forward",  # torch._dynamo.exc.Unsupported: call_function
+    "test_custom_function_setup_context_multi_input",  # torch._dynamo.exc.Unsupported: call_function args
+    "test_custom_function_setup_context_multi_output",  # torch._dynamo.exc.Unsupported: call_function args
+    "test_deep_reentrant",  # torch._dynamo.exc.InternalTorchDynamoError: '<' not supported between instances of
+    "test_dont_materialize_grads",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsNone
+    "test_function_returns_undefined_tensor",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function
+    "test_grad_fn_prehooks",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
+    "test_grad_fn_prehooks_multiple_outputs",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles:
+    "test_grad_fn_prehooks_remove_hooks",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: RemovableHandle.remove
+    "test_grad_mode_restored_reentrant",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertTrue
+    "test_hook_none",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsNotNone
+    "test_invalid_gradients",  # AssertionError: "expected shape" does not match "The size of tensor a (5) must match
+    "test_mark_non_differentiable_mixed",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertTrue
+    "test_materialize_grads",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
+    "test_naughty_autograd_function_stashing_ctx",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function
+    "test_no_grad_copy",  # torch._dynamo.exc.Unsupported: call_function args: TensorVariable() SkipFilesVariable()
+    "test_no_grad_copy_sparse",  # torch._dynamo.exc.Unsupported: Tensor.data_ptr
+    "test_reentrant_priority",  # torch._dynamo.exc.InternalTorchDynamoError: '<' not supported between instances of
+    "test_reentrant_with_callbacks_both_depths",  # torch._dynamo.exc.Unsupported: call_method UserDefinedObjectVariable
+    "test_reentrant_with_callbacks_depth_0",  # torch._dynamo.exc.Unsupported: call_method UserDefinedObjectVariable
+    "test_reentrant_with_callbacks_depth_1",  # torch._dynamo.exc.Unsupported: Tensor.requires_grad_
+    "test_return_duplicate",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
+    "test_return_duplicate_inplace",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
+    "test_return_leaf",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
+    "test_save_none_for_backward",  # AssertionError:
+    "test_save_output_nr",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
+    "test_saved_variables_deprecated",  # torch._dynamo.exc.Unsupported: UNPACK_SEQUENCE SkipFilesVariable()
+    "test_set_materialize_non_diff_grads",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsNone
+    "test_setup_context_when_forward_has_default_args",  # torch._dynamo.exc.Unsupported: call_function args
+    "test_simple_reentrant",  # torch._dynamo.exc.Unsupported: call_method SkipFilesVariable() sum [] {}
+    "test_tensor_hooks_inplace_multiple_outputs",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
+    "test_lobpcg",  # torch._dynamo.exc.Unsupported: 'call_function LOBPCGAutogradFunction.backward in skip_files
 }
 
 if not HAS_CUDA:
