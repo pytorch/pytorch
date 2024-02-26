@@ -1553,9 +1553,6 @@ class AotCodeCompiler:
             specified_so_name,
         ) = split_aot_inductor_output_path(config.aot_inductor.output_path)
 
-        if config.aot_inductor.eager_mode:
-            specified_output_path = config.aot_inductor.eager_op_name
-
         key, input_path = write(
             source_code,
             "cpp",
@@ -1773,6 +1770,7 @@ class CppCodeCache:
     cache: Dict[str, Union[CDLL, ModuleType, str]] = {}
     clear = staticmethod(cache.clear)
     cpp_compile_command_flags: Dict[str, Any] = {}
+    vec_isa: VecISA = invalid_vec_isa
 
     @staticmethod
     def _load_library_inner(path: str, key: str) -> Union[CDLL, ModuleType]:
@@ -1798,72 +1796,51 @@ class CppCodeCache:
             raise
 
     @classmethod
-    def compile(
-        cls, source_code: str, cuda: bool = False
-    ) -> Union[CDLL, ModuleType, str]:
+    def compile(cls, source_code: str, cuda: bool = False) -> Tuple[str, str]:
+        cls.vec_isa = pick_vec_isa() if cls.vec_isa == invalid_vec_isa else cls.vec_isa
         cls.cpp_compile_command_flags.update({"cuda": cuda})
-        picked_vec_isa = pick_vec_isa()
         cpp_command = repr(
             cpp_compile_command(
-                "i", "o", vec_isa=picked_vec_isa, **cls.cpp_compile_command_flags
+                "i", "o", vec_isa=cls.vec_isa, **cls.cpp_compile_command_flags
             )
         )
         key, input_path = write(source_code, "cpp", extra=cpp_command)
+        output_path: str = input_path[:-3] + "so"
+
         if key not in cls.cache:
             from filelock import FileLock
 
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
-                output_path = input_path[:-3] + "so"
                 if not os.path.exists(output_path):
                     cmd = shlex.split(
                         cpp_compile_command(
                             input=input_path,
                             output=output_path,
-                            vec_isa=picked_vec_isa,
+                            vec_isa=cls.vec_isa,
                             **cls.cpp_compile_command_flags,
                         )
                     )
                     compile_file(input_path, output_path, cmd)
-
-                cls.cache[key] = output_path
+                    assert os.path.exists(
+                        output_path
+                    ), f"Failed to compile {input_path}"
         else:
-            assert isinstance(cls.cache[key], str)
-            output_path = str(cls.cache[key])
-        return output_path
+            assert output_path == cls.cache[key], f"Cache mismatch for {key}"
+            assert os.path.exists(output_path), f"Failed to find {output_path}"
+
+        return key, output_path
 
     @classmethod
     def load(cls, source_code: str, cuda: bool = False) -> Union[CDLL, ModuleType, str]:
-        cls.cpp_compile_command_flags.update({"cuda": cuda})
-        picked_vec_isa = pick_vec_isa()
-        cpp_command = repr(
-            cpp_compile_command(
-                "i", "o", vec_isa=picked_vec_isa, **cls.cpp_compile_command_flags
+        source_code_key, output_so_path = cls.compile(source_code, cuda)
+        if source_code_key not in cls.cache:
+            cls.cache[source_code_key] = cls._load_library(
+                output_so_path, source_code_key
             )
-        )
-        key, input_path = write(source_code, "cpp", extra=cpp_command)
-        if key not in cls.cache:
-            from filelock import FileLock
-
-            lock_dir = get_lock_dir()
-            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
-            with lock:
-                output_path = input_path[:-3] + "so"
-                if not os.path.exists(output_path):
-                    cmd = shlex.split(
-                        cpp_compile_command(
-                            input=input_path,
-                            output=output_path,
-                            vec_isa=picked_vec_isa,
-                            **cls.cpp_compile_command_flags,
-                        )
-                    )
-                    compile_file(input_path, output_path, cmd)
-                cls.cache[key] = cls._load_library(output_path, key)
-                cls.cache[key].key = key  # type: ignore[union-attr]
-
-        return cls.cache[key]
+            cls.cache[source_code_key].key = source_code_key  # type: ignore[union-attr]
+        return cls.cache[source_code_key]
 
 
 class CppPythonBindingsCodeCache(CppCodeCache):
@@ -1983,7 +1960,11 @@ class CppPythonBindingsCodeCache(CppCodeCache):
                 """
             )
 
-            output_so_path = cls.compile(source_code + c_func_name_decl, cuda)
+            source_code_key, output_so_path = cls.compile(
+                source_code + c_func_name_decl, cuda
+            )
+            if source_code_key not in cls.cache:
+                cls.cache[source_code_key] = output_so_path
 
             if kernel_meta_info:
                 assert isinstance(kernel_meta_info, dict)
