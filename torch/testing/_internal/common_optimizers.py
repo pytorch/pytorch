@@ -2185,17 +2185,17 @@ optim_db: List[OptimizerInfo] = [
 ]
 
 
-
 class TensorTracker:
     """
     A utility to track tensor clones in a list, with the expectation of popping them later (in
-    order) to make fair comparisons between two multi-step computation. The intended use case is 
+    order) to make fair comparisons between two multi-step computation. The intended use case is
     usually when comparing two supposed equal computations, such as an optimizer step that each
     individually consists of multiple steps, where numerical deviation could multiply.
 
     The goal is to be able to compare and align numbers at every milestone so as to minimize
     numerical discrepancies, and so when the test fails, it is likely a real problem.
     """
+
     def __init__(self):
         self.tensors = []
 
