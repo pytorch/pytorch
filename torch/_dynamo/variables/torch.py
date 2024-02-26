@@ -569,6 +569,20 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             raise unimplemented(
                 "torch.nn.functional.one_hot with data-dependent output shape"
             )
+        elif (
+            self.value is torch.fx.experimental.symbolic_shapes.guard_size_oblivious
+            and len(args) == 1
+            and isinstance(args[0], SymNodeVariable)
+        ):
+            # TODO: this probably should be folded somewhere else but I'm not
+            # sure where
+            # TODO: some of the other symbolic_shapes special tools can also
+            # get this treatment too
+            (cond,) = args
+            return variables.ConstantVariable.create(
+                torch.fx.experimental.symbolic_shapes.guard_size_oblivious(cond.sym_num)
+            )
+
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(
@@ -662,6 +676,17 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                     for idx, name in enumerate(output_tensor_names):
                         if name in tx.symbolic_locals:
                             tx.symbolic_locals[name] = tensor_variable.items[idx]
+                    for out_tensor, result_tensor in zip(
+                        kwargs["out"].items, tensor_variable.items
+                    ):
+                        if (
+                            out_tensor.source
+                            and out_tensor in tx.output.graphargs
+                            and out_tensor.size != result_tensor.size
+                        ):
+                            # It's hard to get out variants with resizing on graph inputs work
+                            # properly across dynamo/aot/inductor, just fall back.
+                            unimplemented("out variants with resizing on graph inputs")
                 elif isinstance(tensor_variable, TensorVariable):
                     assert isinstance(kwargs["out"], TensorVariable)
                     if (
