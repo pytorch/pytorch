@@ -1832,6 +1832,17 @@ def _run_test_output_match(
                 ):
                     rtol = test_suite.fp16_low_precision_dict[op.name][0]
                     atol = test_suite.fp16_low_precision_dict[op.name][1]
+                elif (
+                    dtype == torch.float16
+                    and (op.name, op.variant_test_name)
+                    in test_suite.fp16_low_precision_variant_dict
+                ):
+                    rtol = test_suite.fp16_low_precision_variant_dict[
+                        (op.name, op.variant_test_name)
+                    ][0]
+                    atol = test_suite.fp16_low_precision_variant_dict[
+                        (op.name, op.variant_test_name)
+                    ][1]
                 else:
                     rtol = None
                     atol = None
@@ -1976,6 +1987,11 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "sub": [3e-2, 1e-3],
         "trapezoid": [1e-3, 7e-3],
         "trapz": [1e-3, 7e-3],
+    }
+
+    fp16_low_precision_variant_dict = {
+        ("nn.functional.interpolate", "trilinear"): [3e-2, 3e-3],
+        ("nn.functional.interpolate", "linear"): [3e-2, 3e-3],
     }
 
     @common_device_type.ops(
