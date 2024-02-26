@@ -22,10 +22,7 @@ from torch._logging import getArtifactLogger
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
 from torch.fx.experimental.proxy_tensor import is_sym_node
-from torch.fx.experimental.symbolic_shapes import (
-    fx_placeholder_vals,
-    guard_size_oblivious,
-)
+from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
 from .. import config
 from .dispatch_and_compile_graph import (
     aot_dispatch_autograd_graph,
@@ -319,15 +316,20 @@ def aot_dispatch_autograd(
                 out = [n.meta["val"] for n in (list(fw_module.graph.nodes)[-1].args[0])]
                 # will only be set for inductor
                 if fwd_output_strides:
-                    for i in range(len(out)):
-                        if not isinstance(out[i], Tensor):
-                            continue
-                        if all(
-                            guard_size_oblivious(s1 == s2)
-                            for s1, s2 in zip(out[i].stride(), fwd_output_strides[i])
-                        ):
-                            continue
-                        out[i] = out[i].as_strided(out[i].shape, fwd_output_strides[i])
+                    with tracing_context.fake_mode.shape_env.suppress_guards():
+                        for i in range(len(out)):
+                            if not isinstance(out[i], Tensor):
+                                continue
+                            if all(
+                                s1 == s2
+                                for s1, s2 in zip(
+                                    out[i].stride(), fwd_output_strides[i]
+                                )
+                            ):
+                                continue
+                            out[i] = out[i].as_strided(
+                                out[i].shape, fwd_output_strides[i]
+                            )
 
                 fakified_out = out
                 fakify_first_call = True

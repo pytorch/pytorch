@@ -320,7 +320,10 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
                 def __del__(self):
                     torch._guards.TracingContext.try_get().fakify_first_call = False
 
-            g = FakifyGuard()
+            # For aot_eager and other backends, tracing context is not set
+            has_tracing_context = torch._guards.TracingContext.try_get() is not None
+            if has_tracing_context:
+                g = FakifyGuard()
 
             compiled_submod_real = self.compile_submod(real_mod, new_args, kwargs)
 
@@ -333,13 +336,17 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             # Finally, we have to produce inputs for use compiling the next submodule,
             # and these need to be FakeTensors, so we execute the module under fake_mode
             with self.fake_mode:
-                return compiled_submod_real(*new_args, **kwargs)
+                if has_tracing_context:
+                    return compiled_submod_real(*new_args, **kwargs)
+                else:
+                    return curr_submod(*new_args, **kwargs)
         else:
             # placeholder or output nodes don't need to get compiled, just executed
             return getattr(self, n.op)(n.target, new_args, kwargs)
 
 
 class DDPOptimizer:
+
     """Note [DDPOptimizer]
     DDPOptimizer applies when dynamo compiles models wrapped in DistributedDataParallel (DDP),
     breaking the dynamo graph into chunks to compile separately, with the breaks aligning to
