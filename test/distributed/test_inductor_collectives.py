@@ -964,7 +964,17 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                 group=group,
             )
 
-        compiled = torch.compile(func, fullgraph=True)
+        def verify(gm, _):
+            ar_nodes = []
+            for node in gm.graph.nodes:
+                if node.target in [
+                        torch.ops.c10d_functional.all_reduce,
+                        torch.ops._c10d_functional.all_reduce]:
+                    ar_nodes.append(node)
+            self.assertEqual(len(ar_nodes), 1)
+            return gm
+
+        compiled = torch.compile(func, backend=verify, fullgraph=True)
         input = torch.ones(2, device=self.device)
         compiled(input)
 
