@@ -258,7 +258,7 @@ class TransformerEncoder(Module):
 
     def __init__(
         self,
-        encoder_layer: TransformerEncoderLayer,
+        encoder_layer: "TransformerEncoderLayer",
         num_layers: int,
         norm: Optional[Module] = None,
         enable_nested_tensor: bool = True,
@@ -436,7 +436,7 @@ class TransformerDecoder(Module):
 
     def __init__(
         self,
-        decoder_layer: TransformerDecoderLayer,
+        decoder_layer: "TransformerDecoderLayer",
         num_layers: int,
         norm: Optional[Module] = None
     ) -> None:
