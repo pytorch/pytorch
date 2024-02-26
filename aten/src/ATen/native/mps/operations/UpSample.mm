@@ -16,14 +16,14 @@
 #include <ATen/ops/_upsample_nearest_exact2d_backward.h>
 #include <ATen/ops/_upsample_nearest_exact2d_backward_native.h>
 #include <ATen/ops/_upsample_nearest_exact2d_native.h>
-#include <ATen/ops/upsample_linear1d.h>
-#include <ATen/ops/upsample_linear1d_backward.h>
-#include <ATen/ops/upsample_linear1d_backward_native.h>
-#include <ATen/ops/upsample_linear1d_native.h>
 #include <ATen/ops/upsample_bilinear2d.h>
 #include <ATen/ops/upsample_bilinear2d_backward.h>
 #include <ATen/ops/upsample_bilinear2d_backward_native.h>
 #include <ATen/ops/upsample_bilinear2d_native.h>
+#include <ATen/ops/upsample_linear1d.h>
+#include <ATen/ops/upsample_linear1d_backward.h>
+#include <ATen/ops/upsample_linear1d_backward_native.h>
+#include <ATen/ops/upsample_linear1d_native.h>
 #include <ATen/ops/upsample_nearest1d.h>
 #include <ATen/ops/upsample_nearest1d_backward.h>
 #include <ATen/ops/upsample_nearest1d_backward_native.h>
@@ -364,13 +364,10 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact2d_backward_out_mps)
 }
 
 TORCH_IMPL_FUNC(upsample_linear1d_out_mps)
-(const Tensor& input,
- IntArrayRef output_size,
- bool align_corners,
- std::optional<double> scale,
- const Tensor& output) {
+(const Tensor& input, IntArrayRef output_size, bool align_corners, std::optional<double> scale, const Tensor& output) {
   if (check_mps_compatibility("bilinear", scale)) {
-    mps::upsample_out_template(input, output_size, c10::nullopt, c10::nullopt, scale, output, align_corners, "bilinear");
+    mps::upsample_out_template(
+        input, output_size, c10::nullopt, c10::nullopt, scale, output, align_corners, "bilinear");
   } else {
     output.copy_(at::upsample_linear1d(input.to("cpu"), output_size, align_corners, scale));
   }
@@ -384,9 +381,11 @@ TORCH_IMPL_FUNC(upsample_linear1d_backward_out_mps)
  std::optional<double> scale,
  const Tensor& grad_input) {
   if (check_mps_compatibility("bilinear", scale)) {
-    mps::upsample_out_template(grad_output, output_size, input_size, c10::nullopt, scale, grad_input, align_corners, "bilinear");
+    mps::upsample_out_template(
+        grad_output, output_size, input_size, c10::nullopt, scale, grad_input, align_corners, "bilinear");
   } else {
-    grad_input.copy_(at::upsample_linear1d_backward(grad_output.to("cpu"), output_size, input_size, align_corners, scale));
+    grad_input.copy_(
+        at::upsample_linear1d_backward(grad_output.to("cpu"), output_size, input_size, align_corners, scale));
   }
 }
 
