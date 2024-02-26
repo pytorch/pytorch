@@ -259,7 +259,15 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
 
                     if block_id in op_stack:
                         block_ops = op_stack.pop(block_id)
-                        yield_ops.extend(block_ops.popitem()[1])
+                        if not block_ops:
+                            continue
+                        last_ret, last_ops = block_ops.popitem()
+                        if all(op.name == "scf.yield" for op in last_ops):
+                            # if last_ops are scf.yield, treat them separately
+                            yield_ops.extend(last_ops)
+                        else:
+                            # otherwise, return last_ops to the block
+                            block_ops[last_ret] = last_ops
                         for op_result, child_ops in block_ops.items():
                             op_stack[parent_block_id][op_result].extend(child_ops)
 
@@ -602,6 +610,8 @@ def identify_mutated_tensors(kernel, kwargs):
     3) Analyzes the graph to detect all input tensor mutations
     """
 
+    ttir_module = None
+    functions = None
     try:
         from torch._dynamo import config
 
@@ -642,6 +652,10 @@ def identify_mutated_tensors(kernel, kwargs):
                 traceback.TracebackException.from_exception(e).format()  # noqa: G001
             )
         )
+        if ttir_module is not None:
+            warnings.warn(f"TTIR:\n{str(ttir_module)}\n")
+        if functions is not None:
+            warnings.warn(f"functions:\n{str(functions)}\n")
         return [key for key, value in kwargs.items() if isinstance(value, Tensor)]
 
 
