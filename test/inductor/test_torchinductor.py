@@ -7090,7 +7090,7 @@ class CommonTemplate:
         )
 
         if self.device == GPU_TYPE:
-            self.assertEqual(fw_code.count("tl.rand"), 1)
+            self.assertEqual(fw_code.count("tl.rand"), 2)
             self.assertEqual(bw_code.count("tl.rand"), 0)
         expected_kernel = 4
 
@@ -7109,7 +7109,7 @@ class CommonTemplate:
         _, source_codes = run_and_get_code(fn1)
         if self.device == GPU_TYPE:
             self.assertEqual(len(source_codes), 1)
-            self.assertEqual(source_codes[0].count("async_compile.triton"), 1)
+            self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
 
     def test_roll(self):
         def fn(a):
