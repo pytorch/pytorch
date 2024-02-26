@@ -191,10 +191,9 @@ include_patterns = [
     'c10/**/*.h',
     # Enable coverage of headers in torch/csrc and excluding sub-directories for now.
     'torch/csrc/*.h',
-    'torch/csrc/autograd/**/*.h',
+    'torch/csrc/*.cpp',
+    'torch/csrc/**/*.h',
     'torch/csrc/**/*.cpp',
-    'torch/csrc/cuda/**/*.h',
-    'torch/csrc/cuda/**/*.cpp',
 ]
 exclude_patterns = [
     # The negative filters below are to exclude files that include onnx_pb.h or
@@ -223,7 +222,6 @@ exclude_patterns = [
     'third_party/**/*',
     'torch/csrc/api/**',
     'torch/csrc/autograd/generated/**',
-    'torch/csrc/autograd/profiler_legacy.cpp',
     'torch/csrc/dynamo/*',
     'torch/csrc/distributed/**/*',
     'torch/csrc/inductor/**/*',
@@ -2654,7 +2652,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.1.14',
+    'ruff==0.2.2',
 ]
 is_formatter = true
 
