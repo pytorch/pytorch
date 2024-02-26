@@ -170,6 +170,45 @@ def strip_getattr_getitem(name):
     return re.split(r"[.\[]", name)[0]
 
 
+def get_verbose_code_part(code_part, guard):
+    extra = ""
+    if guard.user_stack:
+        for fs in reversed(guard.user_stack):
+            if fs.filename not in uninteresting_files():
+                extra = f"  # {format_frame(fs, line=True)}"
+                break
+    elif guard.stack:
+        extra = f"  # {format_frame(guard.stack.summary()[-1])}"
+
+    return f"{code_part:<60}{extra}"
+
+
+def convert_to_concrete_values(size_or_stride):
+    converted: List[Optional[int]] = []
+    for dim in size_or_stride:
+        if not is_symbolic(dim):
+            converted.append(dim)
+        else:
+            assert isinstance(dim, torch.SymInt)
+            converted.append(dim.node.maybe_as_int())
+    return converted
+
+
+def get_tensor_guard_code_part(value, name, sizes, strides):
+    pytype = type(value)
+    dispatch_key = (
+        torch._C._dispatch_keys(value) | torch._C._dispatch_tls_local_include_set()
+    ) - torch._C._dispatch_tls_local_exclude_set()
+    dtype = value.dtype
+    device_index = value.device.index
+    requires_grad = value.requires_grad
+    guard_str = (
+        f"check_tensor({name}, {pytype.__qualname__}, {dispatch_key}, {dtype}, "
+        f"device={device_index}, requires_grad={requires_grad}, size={sizes}, stride={strides})"
+    )
+    return guard_str
+
+
 # The ready to eval generated code (possibly multiple parts) for a guard, plus
 # the original guard object that created it for provenance
 @dataclasses.dataclass
@@ -464,10 +503,7 @@ class GuardBuilder(GuardBuilderBase):
 
         def setup_guard():
             assert istype(val.training, bool)
-            # TODO: Why doesn't this use produce_guard_code?
-            self.code.append(
-                GuardCodeList([f"{ref}.training == {val.training}"], guard)
-            )
+            self._guard_on_attribute(guard, "training", GuardBuilder.CONSTANT_MATCH)
 
         if hasattr(val, "training"):
             # There are cases where a monkeypatched object has a guard made between __new__ and __init__
@@ -1010,7 +1046,6 @@ class CheckFunctionManager:
 
             guard.create(builder)
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
-        self._weakrefs.clear()
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and check_fn and is used to
         # limit the number of cache entries with same ID_MATCH'd object.
@@ -1020,6 +1055,17 @@ class CheckFunctionManager:
         # queryable data structure such that this information is already present
         # in some form.
         self.check_fn.id_matched_objs = builder.id_matched_objs
+
+        # NB - We have to very careful of cleaning up here. Because of the
+        # invalidate function, we can create a weakref finalizer that keeps
+        # `self` alive for very long. Sometimes by mistake, we can run
+        # invalidate for a type/object (check id_ref method) that Python can
+        # leak by design, preventing us from calling the finalizer. In that
+        # case, the `self` will be alive even though the cache entry will be
+        # deleted (check invalidate method), which can cause a memory leak,
+        # e.g., not setting output_graph = None can keep hold of nn_modules.
+        self._weakrefs.clear()
+        self.output_graph = None
 
     def compile_check_fn(self, builder, guards_out, guard_fail_fn):
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
@@ -1032,19 +1078,10 @@ class CheckFunctionManager:
         code_parts = ["___check_global_state()"]
         verbose_code_parts = code_parts[:]
 
-        structured_guard_fns = []
+        def add_code_part(code_part, guard, log_only=False):
+            verbose_code_part = get_verbose_code_part(code_part, guard)
+            guards_log.debug("%s", verbose_code_part)
 
-        def add_code_part(code, guard, log_only=False):
-            extra = ""
-            if guard.user_stack:
-                for fs in reversed(guard.user_stack):
-                    if fs.filename not in uninteresting_files():
-                        extra = f"  # {format_frame(fs, line=True)}"
-                        break
-            elif guard.stack:
-                extra = f"  # {format_frame(guard.stack.summary()[-1])}"
-
-            guards_log.debug("%s", f"{code:<60}{extra}")
             structured_guard_fns.append(
                 lambda: {
                     "code": code,
@@ -1069,14 +1106,14 @@ class CheckFunctionManager:
                         )
                 verbose_guards_log.debug(
                     "Guard: %s%s%s",
-                    code,
+                    code_part,
                     maybe_stack,
                     maybe_user_stack,
                 )
 
             if not log_only:
-                code_parts.append(code)
-                verbose_code_parts.append(f"{code:<60}{extra}")
+                code_parts.append(code_part)
+                verbose_code_parts.append(verbose_code_part)
 
         seen = set()
         for gcl in builder.code:
@@ -1094,23 +1131,17 @@ class CheckFunctionManager:
             ), "Illegal to set tensor_check_names in export."
             tensor_check_examples = builder.tensor_check_examples
 
-            def convert(size_or_stride):
-                converted: List[Optional[int]] = []
-                for dim in size_or_stride:
-                    if not is_symbolic(dim):
-                        converted.append(dim)
-                    else:
-                        assert isinstance(dim, torch.SymInt)
-                        converted.append(dim.node.maybe_as_int())
-                return converted
-
             dynamic_dims_sizes = [
-                convert(self.output_graph.tensor_weakref_to_sizes_strides[t]["size"])
+                convert_to_concrete_values(
+                    self.output_graph.tensor_weakref_to_sizes_strides[t]["size"]
+                )
                 for t in tensor_check_examples
             ]
 
             dynamic_dims_strides = [
-                convert(self.output_graph.tensor_weakref_to_sizes_strides[t]["stride"])
+                convert_to_concrete_values(
+                    self.output_graph.tensor_weakref_to_sizes_strides[t]["stride"]
+                )
                 for t in tensor_check_examples
             ]
 
@@ -1133,22 +1164,10 @@ class CheckFunctionManager:
                 # This is a copy of what guards.cpp checks against
                 # Keep this in sync with TensorCheck constructor
                 t = tensor_check_examples[i]
-                pytype = type(t)
-                dispatch_key = (
-                    torch._C._dispatch_keys(t)
-                    | torch._C._dispatch_tls_local_include_set()
-                ) - torch._C._dispatch_tls_local_exclude_set()
-                dtype = t.dtype
-                device_index = t.device.index
-                requires_grad = t.requires_grad
                 sizes = dynamic_dims_sizes[i]
                 strides = dynamic_dims_strides[i]
-                add_code_part(
-                    f"check_tensor({name}, {pytype.__qualname__}, {dispatch_key}, {dtype}, "
-                    f"device={device_index}, requires_grad={requires_grad}, size={sizes}, stride={strides})",
-                    tensor_check_guards[i],
-                    log_only=True,
-                )
+                code_part = get_tensor_guard_code_part(t, name, sizes, strides)
+                add_code_part(code_part, tensor_check_guards[i], log_only=True)
 
         aotautograd_guards: List[GuardEnvExpr] = (
             self.output_graph.tracing_context.guards_context.aotautograd_guards
