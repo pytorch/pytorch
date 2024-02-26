@@ -6,6 +6,7 @@ import dataclasses
 import dis
 import enum
 import functools
+import gc
 import itertools
 import logging
 import math
@@ -60,6 +61,7 @@ from torch.fx.experimental.symbolic_shapes import (
     constrain_unify,
     ConstraintViolationError,
     expect_true,
+    guard_size_oblivious,
     ShapeEnv,
 )
 from torch.nn import functional as F
@@ -2543,6 +2545,29 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_fn = torch.compile(fn, backend=cnts)
         self.assertTrue(same(fn(x, y), opt_fn(x.clone(), y.clone())))
         self.assertEqual(cnts.frame_count, 1)
+
+    def test_out_variants_with_resizing_on_graph_inputs_with_dynamic(self):
+        # https://github.com/pytorch/pytorch/issues/120482
+        class CustomModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, inputs):
+                return torch.outer(**inputs)
+
+        compile_fn = torch.compile(CustomModel(), fullgraph=True)
+
+        shapes = [(2, 1), (6, 1), (4, 1)]
+        for shape in shapes:
+            vec1, vec2 = shape
+            input_tensor1 = torch.randn(vec1)
+            input_tensor2 = torch.randn(vec2)
+            out_tensor = torch.empty(shape)
+            args = {"input": input_tensor1, "vec2": input_tensor2, "out": out_tensor}
+            res = compile_fn(args)
+            opt_res = res.clone()  # cuz this is out and we mutate it
+            res = CustomModel()(args)
+            self.assertEqual(res, opt_res)
 
     def test_dict_mutation_side_effect(self):
         def fn(d):
@@ -8063,6 +8088,31 @@ def ___make_guard_fn():
 
         f(torch.tensor([2, 3, 4]), torch.randn(9))
 
+    # See https://github.com/pytorch/pytorch/issues/119689
+    @unittest.expectedFailure
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_runtime_assert_replacement(self):
+        @torch.compile(backend="aot_eager")
+        def fn(x, y):
+            z = y.item()
+            torch._check(z == 3)
+            return x + z
+
+        fn(torch.randn(4), torch.tensor([3]))
+        self.assertRaises(RuntimeError, lambda: fn(torch.randn(4), torch.tensor([4])))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_cat_unbacked(self):
+        @torch.compile(backend="eager")
+        def fn(x, y):
+            z = y.item()
+            return torch.cat([x, torch.ones(z)])
+
+        fn(torch.randn(2, 3), torch.tensor([0]))
+        self.assertRaises(
+            RuntimeError, lambda: fn(torch.randn(2, 3), torch.tensor([1]))
+        )
+
     def test_simple_set_usage(self):
         def foo(x, y):
             setty = {x, y}
@@ -8231,6 +8281,29 @@ def ___make_guard_fn():
         res, msg = fn(img1)
         self.assertEqual(msg, "shape torch.Size([8, 8]) batch size 1.00")
         self.assertEqual(res, img1 + torch.sin(img1))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_validate_outputs_unbacked(self):
+        class SillyCat(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x0, x1, i):
+                ctx.save_for_backward(i)
+                return torch.cat([x0, x1])
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                (i,) = ctx.saved_tensors
+                i0, i1 = i.tolist()
+                g_x0, g_x1 = grad_out.split([i0, i1])
+                return g_x0, g_x1, None
+
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(x, i):
+            i0, i1 = i.tolist()
+            x0, x1 = x.split([i0, i1])
+            return SillyCat.apply(x0, x1, i)
+
+        f(torch.randn(9, requires_grad=True), torch.tensor([3, 6]))
 
     def test_str_format_assert1(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -8888,6 +8961,22 @@ def ___make_guard_fn():
 
         self.assertEqual(fn(x), compiled_fn(x))
 
+    def test_storage_return(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            y = torch.sin(x + 1)
+            storage = x.untyped_storage()
+            storage.resize_(0)
+            y = torch.cos(y)
+            return y, storage
+
+        x = torch.randn(10)
+        expected = torch.cos(torch.sin(x + 1))
+        y, s = fn(x)
+        self.assertEqual(y, expected)
+        self.assertEqual(x.untyped_storage().size(), 0)
+        self.assertIs(s, x.untyped_storage())
+
     def test_flat_name_to_original_fqn(self):
         class FooBarModule(torch.nn.Module):
             def __init__(self):
@@ -9451,43 +9540,58 @@ fn
         c2 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c2), 0)
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
-    def test_module_free(self):
-        """Test that CUDA memory is freed when a model goes out of scope"""
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_guard_size_oblivious(self):
+        # This code, in fact, does NOT work in eager
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            y = torch.zeros(x.item())
+            if guard_size_oblivious(y.size(0) == 0):
+                assert False
+            return y
+
+        self.assertEqual(fn(torch.tensor([0])), torch.zeros(0))
+
+    def _test_compile_model_free(self, model_inp_ctr, weakref_watch):
+        """
+        Args:
+        model_inp_ctr
+            - constructor that returns a new model and inputs to that model
+        weakref_watch
+            - function that returns a layer of the model for weakref to
+              finalize on, so we can check that the layer is freed after
+              the model goes out of scope
+        """
+        cleared = False
+
+        def finalize():
+            nonlocal cleared
+            cleared = True
+
+        def run():
+            mod, inp = model_inp_ctr()
+            weakref.finalize(weakref_watch(mod), finalize)
+            torch.compile(mod, backend="eager")(inp)
+
+        run()
+        gc.collect()
+        self.assertTrue(cleared)
+
+    def test_custom_module_free(self):
+        """Test that a model is freed when it goes out of scope"""
 
         class Mod(torch.nn.Module):
             def __init__(self):
                 super(Mod, self).__init__()
-                self.fc = torch.nn.Linear(10000, 10000)
+                self.fc = torch.nn.Linear(100, 100)
 
             def forward(self, out):
                 return self.fc(out)
 
-        def run(compile):
-            mod = Mod().cuda()
-            if compile:
-                mod = torch.compile(mod, backend="eager")
-            inp = torch.rand(10000, 10000).cuda()
-            mod(inp)
-
-        def clean_and_report_memory():
-            import gc
-
-            gc.collect()
-            return torch.cuda.memory_allocated()
-
-        run(False)
-        # mem1 = clean_and_report_memory()
-        run(True)
-        mem2 = clean_and_report_memory()
-        torch._dynamo.reset_code_caches()
-        mem3 = clean_and_report_memory()
-
-        # it's possible for dynamo to hold on to more memory
-        # even after a _dynamo.reset[_code_caches], so we omit the following check.
-        # self.assertEqual(mem1, mem2)
-
-        self.assertEqual(mem2, mem3)
+        self._test_compile_model_free(
+            lambda: (Mod(), torch.randn(100, 100)),
+            lambda mod: mod.fc,
+        )
 
     def test_dynamo_cache_move_to_front(self):
         class Mod(torch.nn.Module):
