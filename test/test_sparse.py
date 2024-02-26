@@ -64,7 +64,9 @@ gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 
 CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
     IS_WINDOWS and torch.version.cuda and version.parse(torch.version.cuda) > version.parse("11.2")
-) or (not IS_WINDOWS)
+) or (not IS_WINDOWS and not TEST_WITH_ROCM)
+
+HIPSPARSE_SPMM_COMPLEX128_SUPPORTED = torch.version.hip and version.parse(torch.version.hip.split("-")[0]) >= version.parse("6.0")
 
 def all_sparse_layouts(test_name='layout', include_strided=False):
     return parametrize(test_name, [
