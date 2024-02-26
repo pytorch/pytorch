@@ -1,9 +1,10 @@
 import dataclasses
 import functools
+import inspect
 import logging
 import re
+import time
 import warnings
-from collections import OrderedDict
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -30,6 +31,7 @@ from torch._export.wrappers import _wrap_submodules
 from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._utils_internal import log_export_usage
 from torch.export.exported_program import OutputKind
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -145,14 +147,16 @@ def _replace_param_buffer_names(param_buffer_table, sig, constants):
             spec.target = param_buffer_table[spec.target]
 
 
-def _reorder_kwargs_by_names(
-    arg_names: List[str], args: Tuple[Any], kwargs: Dict[str, Any]
-):
-    assert len(arg_names) == len(args) + len(kwargs), (
-        f"Total number of arg names is expected to be {len(arg_names)} "
+def _convert_to_positional_args(orig_arg_names, args, kwargs):
+    assert len(orig_arg_names) == len(args) + len(kwargs), (
+        f"Total number of arg names is expected to be {len(orig_arg_names)} "
         f"but got {len(args)} positional args, {len(kwargs)} kwargs."
     )
-    return OrderedDict({kw_name: kwargs[kw_name] for kw_name in arg_names[len(args) :]})
+    reordered_kwargs = [kwargs[kw_name] for kw_name in orig_arg_names[len(args) :]]
+    return (
+        *args,
+        *reordered_kwargs,
+    )
 
 
 def _normalize_nn_module_stack(gm_torch_level, root_cls):
@@ -168,10 +172,14 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
             add_root = True
             if nn_module_stack := node.meta.get("nn_module_stack", {}):
                 path, ty = next(iter(nn_module_stack.values()))
-                assert issubclass(ty, torch.nn.Module)
-                # TODO Figure out why sometimes we have root sometimes we don't.
-                if path == root and ty is root_cls:
-                    add_root = False
+                # After deserializing the class `ty` might not exist anymore so
+                # it could be a string
+                if inspect.isclass(ty) and issubclass(ty, torch.nn.Module):
+                    # TODO Figure out why sometimes we have root sometimes we don't.
+                    if path == root and ty is root_cls:
+                        add_root = False
+                else:
+                    assert isinstance(ty, str)
             if add_root:
 
                 def normalize_path(path):
@@ -279,11 +287,15 @@ def _export_to_torch_ir(
     preserve_module_call_signature: Tuple[str, ...] = (),
     disable_constraint_solver: bool = False,
     restore_fqn: bool = True,
+    _log_export_usage: bool = True,
 ) -> torch.fx.GraphModule:
     """
     Traces either an nn.Module's forward function or just a callable with PyTorch
     operations inside and produce a torch.fx.GraphModule in torch IR.
     """
+
+    if _log_export_usage:
+        log_export_usage(event="export.private_api", flags={"_export_to_torch_ir"})
 
     constraints = constraints or []
     kwargs = kwargs or {}
@@ -311,6 +323,7 @@ def _export_to_torch_ir(
                     assume_static_by_default=True,
                     tracing_mode="symbolic",
                     disable_constraint_solver=disable_constraint_solver,
+                    _log_export_usage=_log_export_usage,
                 )(
                     *args,
                     **kwargs,
@@ -356,15 +369,23 @@ def _export_non_strict(
     ), grad_safe_guard, _ignore_backend_decomps():  # type: ignore[attr-defined]
         gm, graph_signature = transform(aot_export_module)(
             mod,
-            (*fake_args, *fake_kwargs.values()),
+            fake_args,
             trace_joint=False,
             pre_dispatch=pre_dispatch,
+            kwargs=fake_kwargs,
         )
     # TODO unfortunately preserving graph-level metadata is not
     # working well with aot_export. So we manually copy it.
     # (The node-level meta is addressed above.)
     if isinstance(mod, torch.fx.GraphModule) and hasattr(mod, "meta"):
         gm.meta.update(mod.meta)
+
+    if pre_dispatch:
+        from torch._export.passes.replace_set_grad_with_hop_pass import (
+            replace_set_grad_with_hop_pass,
+        )
+
+        gm = replace_set_grad_with_hop_pass(gm)
 
     # NOTE: aot_export adds symint metadata for placeholders with int values;
     # since these become specialized, we replace such metadata with the original values
@@ -494,6 +515,39 @@ def rewrite_non_persistent_buffers(
                 constants[spec.target] = orig_mod.get_buffer(spec.target)
 
 
+_EXPORT_FLAGS: Optional[Set[str]] = None
+
+
+def _log_export_wrapper(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        global _EXPORT_FLAGS
+        try:
+            start = time.time()
+            ep = fn(*args, **kwargs)
+            end = time.time()
+            log_export_usage(
+                event="export.time", metrics=end - start, flags=_EXPORT_FLAGS
+            )
+        except Exception as e:
+            t = type(e)
+            error_type = t.__module__ + "." + t.__qualname__
+            log_export_usage(
+                event="export.error",
+                type=error_type,
+                message=str(e),
+                flags=_EXPORT_FLAGS,
+            )
+            raise e
+        finally:
+            _EXPORT_FLAGS = None
+
+        return ep
+
+    return wrapper
+
+
+@_log_export_wrapper
 @_disable_prexisiting_fake_mode
 def _export(
     f: torch.nn.Module,
@@ -549,7 +603,15 @@ def _export(
     """
     from .dynamic_shapes import _process_dynamic_shapes
 
+    global _EXPORT_FLAGS
+    flags = set()
+    flags.add("strict" if strict else "non_strict")
+    flags.add("pre_dispatch" if pre_dispatch else "aot_dispatch")
+    log_export_usage(event="export.enter", flags=flags)
+    _EXPORT_FLAGS = flags
+
     if constraints is not None:
+        log_export_usage(event="export.private_api", flags={"constraints"})
         warnings.warn(
             "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
             "and will not be supported in the future. "
@@ -566,7 +628,6 @@ def _export(
 
     if not strict:
         assert isinstance(f, torch.nn.Module)
-        assert len(kwargs) == 0, "keyword arguments NYI"
         out_spec = None
 
         module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
@@ -581,7 +642,9 @@ def _export(
             return "L__self__" + strip_root(x)
 
         def _tuplify_outputs(aot_export):
-            def _aot_export_non_strict(mod, args, **kwargs):
+            def _aot_export_non_strict(mod, args, kwargs=None, **flags):
+                kwargs = kwargs or {}
+
                 class Wrapper(torch.nn.Module):
                     def __init__(self, mod):
                         super().__init__()
@@ -608,7 +671,7 @@ def _export(
                 with _wrap_submodules(
                     wrapped_mod, new_preserved_call_signatures, module_call_specs
                 ):
-                    gm, sig = aot_export(wrapped_mod, args, **kwargs)
+                    gm, sig = aot_export(wrapped_mod, args, kwargs=kwargs, **flags)
 
                 sig.parameters = pytree.tree_map(strip_root, sig.parameters)
                 sig.buffers = pytree.tree_map(strip_root, sig.buffers)
@@ -635,15 +698,24 @@ def _export(
 
             return _aot_export_non_strict
 
-        fake_mode, fake_args, src_equalities, original_signature = make_fake_inputs(
-            f, args, constraints
-        )
+        (
+            fake_mode,
+            fake_args,
+            fake_kwargs,
+            src_equalities,
+            original_signature,
+        ) = make_fake_inputs(f, args, kwargs, constraints)
 
         fake_params_buffers = make_fake_params_buffers(
             fake_mode, _get_params_buffers(f)
         )
         ep_non_strict = _export_non_strict(
-            f, fake_args, {}, fake_params_buffers, transform=_tuplify_outputs
+            f,
+            fake_args,
+            fake_kwargs,
+            fake_params_buffers,
+            pre_dispatch=pre_dispatch,
+            transform=_tuplify_outputs,
         )
         range_constraints, equality_constraints = make_constraints(
             fake_mode, src_equalities, original_signature, ep_non_strict.gm
@@ -709,6 +781,7 @@ def _export(
         constraints,
         preserve_module_call_signature=preserve_module_call_signature,
         restore_fqn=False,  # don't need to restore because we will do it later
+        _log_export_usage=False,
     )
 
     # We detect the fake_mode by looking at gm_torch_level's placeholders, this is the fake_mode created in dynamo.
@@ -779,11 +852,11 @@ def _export(
     if out_spec.type not in (list, tuple):
         out_spec = pytree.TreeSpec(tuple, None, [out_spec])
 
-    orig_args = gm_torch_level.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
+    orig_arg_names = gm_torch_level.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
 
     gm_torch_level.graph._codegen = _PyTreeCodeGen(
         _PyTreeInfo(
-            orig_args,
+            orig_arg_names,
             gm_torch_level._in_spec,
             out_spec,
         )
@@ -793,12 +866,11 @@ def _export(
     if isinstance(f, torch.nn.Module):
         _normalize_nn_module_stack(gm_torch_level, type(f))
 
-    # Note: aot_export_module doesn't accept kwargs, we'd like to reorder the kwargs as an OrderedDict
-    # to follow the order in orig_args and correctly call module
+    # NOTE: graph module expects only positional args
     ep_non_strict = _export_non_strict(
         gm_torch_level,
-        fake_args,
-        _reorder_kwargs_by_names(orig_args, fake_args, fake_kwargs),
+        _convert_to_positional_args(orig_arg_names, fake_args, fake_kwargs),
+        {},
         fake_params_buffers,
         pre_dispatch=pre_dispatch,
     )

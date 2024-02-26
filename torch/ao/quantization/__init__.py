@@ -12,9 +12,9 @@ from .quantization_mappings import *  # type: ignore[no-redef]
 from .quantize import *  # noqa: F403
 from .quantize_jit import *  # noqa: F403
 from .stubs import *  # noqa: F403
-from .pt2e.eval_utils import _move_exported_model_to_eval as move_exported_model_to_eval
-from .pt2e.eval_utils import _move_exported_model_to_train as move_exported_model_to_train
-from .pt2e.eval_utils import _allow_exported_model_train_eval as allow_exported_model_train_eval
+from .pt2e.export_utils import _move_exported_model_to_eval as move_exported_model_to_eval
+from .pt2e.export_utils import _move_exported_model_to_train as move_exported_model_to_train
+from .pt2e.export_utils import _allow_exported_model_train_eval as allow_exported_model_train_eval
 from .pt2e.generate_numeric_debug_handle import generate_numeric_debug_handle  # noqa: F401
 from typing import Union, List, Callable, Tuple, Optional
 from torch import Tensor
