@@ -158,8 +158,7 @@ inline void map_acc(
   constexpr int64_t kaVecSize = aVec::size();
   for (d = 0; d < size - (size % kVecSize); d += kVecSize) {
     Vec data2_vec = Vec::loadu(input_data2 + d);
-    aVec data2_avec0, data2_avec1;
-    std::tie(data2_avec0, data2_avec1) = convert_to_float<scalar_t>(data2_vec);
+    auto [data2_avec0, data2_avec1] = convert_to_float<scalar_t>(data2_vec);
     aVec input_vec0 = aVec::loadu(input_data + d);
     aVec input_vec1 = aVec::loadu(input_data + d + kaVecSize);
     vec_fun(input_vec0, data2_avec0).store(output_data + d);
@@ -168,8 +167,7 @@ inline void map_acc(
   if (size - d > 0) {
     int64_t tail_size = size - d;
     Vec data2_vec = Vec::loadu(input_data2 + d, tail_size);
-    aVec data2_avec0, data2_avec1;
-    std::tie(data2_avec0, data2_avec1) = convert_to_float<scalar_t>(data2_vec);
+    auto [data2_avec0, data2_avec1] = convert_to_float<scalar_t>(data2_vec);
     if (tail_size > kaVecSize) {
       aVec input_vec0 = aVec::loadu(input_data + d);
       aVec input_vec1 = aVec::loadu(input_data + d + kaVecSize, tail_size - kaVecSize);

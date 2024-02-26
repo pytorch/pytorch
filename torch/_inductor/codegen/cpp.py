@@ -16,6 +16,7 @@ import torch.fx
 from torch._inductor import dependencies
 from torch._inductor.ir import StorageBox, TensorBox
 from torch._prims_common import is_float_dtype
+from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 
@@ -805,6 +806,23 @@ class CppOverrides(OpOverrides):
         return f"std::copysign({x}, {y})"
 
     @staticmethod
+    def frexp(x):
+        cache_keys = f"frexp({x})[0]", f"frexp({x})[1]"
+        if all(cache_key in V.kernel.cse.cache for cache_key in cache_keys):
+            return tuple(V.kernel.cse.cache[cache_key] for cache_key in cache_keys)
+
+        code = BracesBuffer()
+        exponent = V.kernel.cse.newvar()
+        mantissa = V.kernel.cse.newvar()
+        code.writeline(f"int32_t {exponent};")
+        code.writeline(f"auto {mantissa} = std::frexp({x}, &{exponent});")
+        V.kernel.compute.splice(code)
+        cse_vars = (mantissa, exponent)
+        for cache_key, cse_var in zip(cache_keys, cse_vars):
+            V.kernel.cse.cache[cache_key] = cse_var
+        return mantissa, exponent
+
+    @staticmethod
     def hypot(x, y):
         return f"std::hypot({x}, {y})"
 
@@ -1405,6 +1423,10 @@ class CppVecOverrides(CppOverrides):
         other_code_vec = f"{V.kernel._get_vec_type(torch.float)}({other_code})"
         assert isinstance(new_mask, CppCSEVariable), new_mask
         if new_mask.is_vec or result.is_vec:
+            if result.dtype != torch.float:
+                raise CppVecUnsupportedError(
+                    "masked with non-float tensor is not supported in vectorized codegen"
+                )
             type = f"decltype({body_code_vec})"
             float_mask = f"to_float_mask({new_mask})"
             code = BracesBuffer()
@@ -2760,6 +2782,8 @@ class CppVecKernelChecker(CppVecKernel):
         self._orig_wrapper_code = V.graph.wrapper_code
         V.graph.wrapper_code = WrapperCodeGen()
 
+        parent_handler = V.MockHandler()
+
         class VecCheckerProxy:
             bin_cmp_ops = ["eq", "ne", "le", "ge", "lt", "gt"]
 
@@ -2778,7 +2802,9 @@ class CppVecKernelChecker(CppVecKernel):
 
                     if name not in self.fast_vec_list:
                         self.disable_vec(f"op: {name}")
-                    return self.simd_vec
+
+                    parent_val = getattr(parent_handler, name)(*args, **kwargs)
+                    return pytree.tree_map(lambda _: self.simd_vec, parent_val)
 
                 return inner
 
@@ -3440,10 +3466,10 @@ class CppScheduling(BaseScheduling):
         return tuple(tuple(map(V.graph.sizevars.simplify, s)) for s in sizes)
 
     def get_kernel_group(self):
-        from .cpp_wrapper_cpu import CppWrapperCodeGen
+        from .cpp_wrapper_cpu import CppWrapperCpu
 
         self.kernel_group: Union[CppWrapperKernelGroup, KernelGroup]
-        if isinstance(V.graph.wrapper_code, CppWrapperCodeGen):
+        if isinstance(V.graph.wrapper_code, CppWrapperCpu):
             self.kernel_group = CppWrapperKernelGroup()
         else:
             self.kernel_group = KernelGroup()
