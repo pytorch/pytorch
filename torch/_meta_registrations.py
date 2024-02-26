@@ -2155,6 +2155,17 @@ if torch._C._has_mkldnn:
         "mkldnn", "IMPL", "Meta"
     )
 
+    @register_meta([torch.ops.mkldnn._graph_sdpa_pattern])
+    def meta_sdpa_pattern_5(
+        uniqueID: int,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        scale: Optional[torch.Tensor],
+        attn_mask: Optional[torch.Tensor],
+    ):
+        return torch.empty_like(query)
+
     @register_meta(torch.ops.mkldnn._convolution_pointwise.default)
     def meta_mkldnn_convolution_default(
         input_tensor,

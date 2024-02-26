@@ -9,10 +9,12 @@
 #include <cpuinfo.h>
 #endif
 #include <vector>
-
 #if AT_MKLDNN_ENABLED()
 #include <ideep/tensor.hpp>
 #endif // AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_GRAPH_ENABLED()
+#include <oneapi/dnnl/dnnl_graph.hpp>
+#endif // AT_ONEDNN_GRAPH_ENABLED()
 
 namespace at { namespace native {
 
@@ -81,6 +83,28 @@ const std::map<c10::string_view, AttrFunction>& fusion_unary_attr_map();
 const std::map<c10::string_view, ideep::algorithm>& fusion_unary_alg_map();
 
 const std::map<c10::string_view, ideep::algorithm>& fusion_binary_alg_map();
+
+#if AT_ONEDNN_GRAPH_ENABLED()
+
+namespace onednn_graph {
+
+struct Engine {
+  // CPU engine singleton
+  static dnnl::engine& getEngine();
+  Engine(const Engine&) = delete;
+  void operator=(const Engine&) = delete;
+};
+
+struct Stream {
+  // CPU stream singleton
+  static dnnl::stream& getStream();
+  Stream(const Stream&) = delete;
+  void operator=(const Stream&) = delete;
+};
+
+}
+
+#endif // AT_ONEDNN_GRAPH_ENABLED()
 
 #endif // AT_MKLDNN_ENABLED()
 };

@@ -111,7 +111,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
 
 @init_once_fakemode
-def lazy_init():
+def lazy_init(inference_with_onednn_graph=False):
     if torch._C._has_mkldnn:
         from .mkldnn_fusion import _mkldnn_fusion_init
 

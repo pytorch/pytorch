@@ -73,7 +73,9 @@ pattern_matcher_passes_aten: List[PatternMatcherPass] = [
 
 
 @init_once_fakemode
-def lazy_init():
+def lazy_init(inference_with_onednn_graph=False):
+    # Although inference_with_onednn_graph would not be used here, it's essential
+    # for using the init_once_fakemode wrapper
     from . import efficient_conv_bn_eval, split_cat  # noqa: F401  # noqa: F401
 
     if config.is_fbcode():

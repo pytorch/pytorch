@@ -264,6 +264,7 @@ header_template_rule(
     out = "aten/src/ATen/Config.h",
     include = "aten/src",
     substitutions = {
+        "@BUILD_ONEDNN_GRAPH@": "0",
         "@AT_MKLDNN_ENABLED@": "1",
         "@AT_MKLDNN_ACL_ENABLED@": "0",
         "@AT_MKL_ENABLED@": "1",

@@ -5,6 +5,7 @@ import math
 
 import torch
 from ..._dynamo.utils import counters
+from ..compile_fx import IS_AVX512_BF16_SUPPORTED
 from ..pattern_matcher import (
     filter_nodes,
     fwd_only,
@@ -120,6 +121,29 @@ def _sfdp_replacement_5(query, key, value, attn_mask):
         dropout_p=0.0,
         is_causal=False,
     )
+
+
+# This function is only called when oneDNN Graph is enabled for inference,
+# and is supported by the machine. But in case of a dtype-mismatch,
+# the default replacement function would be called.
+def _sfdp_cpu_inference_replacement_5(query, key, value, attn_mask):
+    data_type = query.dtype
+    if data_type == torch.float or (
+        data_type == torch.bfloat16 and IS_AVX512_BF16_SUPPORTED
+    ):
+        counters["inductor"]["fuse_attention"] += 1
+        scale_tensor = torch.full((), math.sqrt(query.size(-1)), dtype=data_type)
+        return torch.ops.mkldnn._graph_sdpa_pattern(
+            0 if data_type == torch.float32 else 1,
+            query,
+            key.transpose(2, -1),
+            value,
+            scale_tensor,
+            attn_mask.to(dtype=query.dtype),
+        )
+    else:
+        # fall back to the default replacement
+        _sfdp_replacement_5(query, key, value, attn_mask)
 
 
 def _sfdp_pattern_6(query, key, value, attn_mask, dropout_p):
@@ -518,7 +542,39 @@ def partialize_and_update_signature(func, **kwargs):
     return wrapper
 
 
-def _get_sfdp_patterns():
+# Add replacement functions for oneDNN Graph.
+# This happens only when we're sure that the machine supports some
+# advanced ISAs oneDNN Graph requires for its custom fusions.
+# However, since check_fn failure would lead to the default replacement
+# not being used, any replacement function added by this function would
+# call the default replacement function in case dtype won't match.
+def _replacements_with_onednn_graph(replacement_info):
+    pattern_idx = 0
+    replacement_idx = 1
+    replacement_map = dict()
+    # Add a pattern as a key, and its replacement as a value here
+    replacement_map[_sfdp_pattern_5] = _sfdp_cpu_inference_replacement_5
+
+    for each_replacement_pattern in replacement_map.keys():
+        replaced_pattern_flag = False
+        for idx in range(len(replacement_info)):
+            if each_replacement_pattern == replacement_info[idx][pattern_idx]:
+                # pattern should be replaced with oneDNN Graph
+                list_of_tuple = list(replacement_info[idx])
+                # Convert the tuple into a list, since tuples are immutable
+                list_of_tuple[replacement_idx] = replacement_map[
+                    each_replacement_pattern
+                ]
+                replacement_info[idx] = tuple(list_of_tuple)
+                # This particular pattern was replaced.
+                replaced_pattern_flag = True
+                break
+        if replaced_pattern_flag:
+            # search for next pattern we can replace
+            continue
+
+
+def _get_sfdp_patterns(enable_onednn_fusions=False):
     from .joint_graph import patterns
 
     if torch.cuda.is_available():
@@ -548,6 +604,7 @@ def _get_sfdp_patterns():
 
     # softmax will generate a dtype conversion on inputs if they are in half,
     # but will not in float, so we generate a pattern for both
+
     for dtype in [torch.float, torch.half]:
         g = functools.partial(g_inp, dtype=dtype)
         b = functools.partial(b_inp, dtype=dtype)
@@ -555,7 +612,7 @@ def _get_sfdp_patterns():
         c = functools.partial(c_inp, dtype=dtype)
         g_3d = functools.partial(g_3d_inp, dtype=dtype)
 
-        for pattern, replacement, args, workaround, extra_check in [
+        replacement_info = [
             (
                 _sfdp_pattern_1,
                 _sfdp_replacement_1,
@@ -676,33 +733,43 @@ def _get_sfdp_patterns():
                 d,
                 _sfdp_extra_check(aten.div.Tensor),
             ),
-        ]:
+        ]
+
+        for pattern, replacement, args, workaround, extra_check in replacement_info:
+            if enable_onednn_fusions:
+                # The device is CPU if enable_onednn_fusions is True
+                _replacements_with_onednn_graph(replacement_info)
+
             # XXX: when adding a new pattern, re-run `gen_attention_patterns` so the pattern
             # gets serialized to a python file and does not require tracing at runtime.
             assert isinstance(workaround, dict)
             name = pattern.__name__
 
-            training_name = (
-                f"{name}_training" if dtype == torch.float else f"{name}_training_half"
-            )
-            yield training_name, {
-                "search_fn": pattern,
-                "replace_fn": replacement,
-                "example_inputs": args,
-                "trace_fn": joint_fwd_bwd,
-                "pass_dicts": patterns,
-                "extra_check": extra_check,
-                "scalar_workaround": workaround,
-            }
-
-            if workaround:
-                assert len(workaround) == 1 and "dropout_p" in workaround
-                # functools.partial insufficient because we look at signature downstream
-                pattern = partialize_and_update_signature(pattern, dropout_p=0.0)
-                replacement = partialize_and_update_signature(
-                    replacement, dropout_p=0.0
+            # currently, only training patterns are supported with oneDNN Graph
+            if not enable_onednn_fusions:
+                training_name = (
+                    f"{name}_training"
+                    if dtype == torch.float
+                    else f"{name}_training_half"
                 )
-                workaround = {}
+                yield training_name, {
+                    "search_fn": pattern,
+                    "replace_fn": replacement,
+                    "example_inputs": args,
+                    "trace_fn": joint_fwd_bwd,
+                    "pass_dicts": patterns,
+                    "extra_check": extra_check,
+                    "scalar_workaround": workaround,
+                }
+
+                if workaround:
+                    assert len(workaround) == 1 and "dropout_p" in workaround
+                    # functools.partial insufficient because we look at signature downstream
+                    pattern = partialize_and_update_signature(pattern, dropout_p=0.0)
+                    replacement = partialize_and_update_signature(
+                        replacement, dropout_p=0.0
+                    )
+                    workaround = {}
 
             inference_name = (
                 f"{name}_inference"
@@ -721,10 +788,12 @@ def _get_sfdp_patterns():
 
 
 @functools.lru_cache(None)
-def _sfdp_init():
+def _sfdp_init(enable_onednn_fusions=False):
     from .serialized_patterns.central_index import get_serialized_pattern
 
-    for key, register_replacement_kwargs in _get_sfdp_patterns():
+    for key, register_replacement_kwargs in _get_sfdp_patterns(
+        enable_onednn_fusions=enable_onednn_fusions
+    ):
         search_fn_pattern = get_serialized_pattern(key)
         register_replacement(
             **register_replacement_kwargs, search_fn_pattern=search_fn_pattern

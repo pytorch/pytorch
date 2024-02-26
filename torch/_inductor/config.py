@@ -318,6 +318,10 @@ developer_warnings = is_fbcode() or is_nightly_or_source
 # the default to spawn.
 worker_start_method = "fork"
 
+# Use oneDNN Graph fusions for inference on machines with processors that
+# support AVX512 ISAs
+onednn_graph = os.environ.get("TORCHINDUCTOR_ONEDNN_GRAPH", "0") == "1"
+
 
 def decide_compile_threads():
     """
