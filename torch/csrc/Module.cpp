@@ -1467,6 +1467,7 @@ void initModule(PyObject* module);
 #ifdef USE_XPU
 PyMethodDef* THXPModule_methods();
 void THXPStream_init(PyObject* module);
+void THXPEvent_init(PyObject* module);
 namespace torch::xpu {
 void initModule(PyObject* module);
 } // namespace torch::xpu
@@ -1612,6 +1613,7 @@ PyObject* initModule() {
 
 #ifdef USE_XPU
   THXPStream_init(module);
+  THXPEvent_init(module);
 #endif
 
   auto set_module_attr =

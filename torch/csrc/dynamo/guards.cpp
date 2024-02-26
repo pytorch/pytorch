@@ -1049,7 +1049,7 @@ class DATA_PTR_MATCH : public LeafGuard {
 class NO_HASATTR : public LeafGuard {
  public:
   NO_HASATTR(py::object attr_name, py::object verbose_code_parts)
-      : _attr_name(attr_name.ptr()), LeafGuard(verbose_code_parts) {}
+      : LeafGuard(verbose_code_parts), _attr_name(attr_name.ptr()) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     return PyObject_HasAttr(value, _attr_name) == 0;
