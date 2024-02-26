@@ -285,7 +285,7 @@ enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", ""
 max_fusion_size = 64
 
 # max number of inputs to generate cat as a pointwise op with masked laods
-max_pointwise_cat_inputs = 128
+max_pointwise_cat_inputs = 8
 
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
@@ -427,6 +427,9 @@ allow_stack_allocation: bool = True
 # When the DSO is generated in this mode, the usual interface will also be supported,
 # but performance for that interface may be degraded.
 use_minimal_arrayref_interface: bool = False
+
+# decompose some memory bound matmul/bmm to mul
+decompose_mem_bound_mm: bool = False
 
 
 # config specific to codegen/cpp.py
