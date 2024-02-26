@@ -628,6 +628,7 @@ def identify_mutated_tensors(kernel, kwargs):
             # parse string representation of Triton IR
             functions = parse_ttir(str(ttir_module), kwargs)
 
+        assert functions is not None
         kernel_name = next(iter(functions.keys()))
         # Triton codegen modifies the name
         assert kernel.fn.__name__ in kernel_name
