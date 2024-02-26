@@ -84,7 +84,6 @@ class DispatchKey(Enum):
     Sparse = auto()
     SparseCsrCPU = auto()
     SparseCsrCUDA = auto()
-    SparseCsrMeta = auto()
     NestedTensor = auto()
     Dense = auto()
 
@@ -261,7 +260,6 @@ dispatch_keys = [
     # kernels
     DispatchKey.Meta,
     DispatchKey.SparseMeta,
-    DispatchKey.SparseCsrMeta,
     DispatchKey.QuantizedMeta,
     DispatchKey.NestedTensorMeta,
     DispatchKey.ZeroTensor,
