@@ -114,7 +114,8 @@ FatalSignalHandler::FatalSignalHandler()
       fatalSignalReceived(false),
       fatalSignalName("<UNKNOWN>"),
       writingCond(),
-      writingMutex() {}
+      writingMutex(),
+      signalReceived(false) {}
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 FatalSignalHandler::signal_handler FatalSignalHandler::kSignalHandlers[] = {
@@ -164,6 +165,7 @@ void FatalSignalHandler::stacktraceSignalHandler(bool needsLock) {
   std::unique_lock<std::mutex> ul(writingMutex, std::defer_lock);
   if (needsLock) {
     ul.lock();
+    signalReceived = true;
   }
   pid_t tid = static_cast<pid_t>(syscall(SYS_gettid));
   std::string backtrace = fmt::format(
@@ -218,13 +220,17 @@ void FatalSignalHandler::fatalSignalHandler(int signum) {
       // If we've found the current thread then we'll jump into the SIGUSR2
       // handler instead of signaling to avoid deadlocking.
       if (tid != currentTid) {
+        signalReceived = false;
         syscall(SYS_tgkill, pid, tid, SIGUSR2);
         auto now = std::chrono::system_clock::now();
         using namespace std::chrono_literals;
         // we use wait_until instead of wait because on ROCm there was
         // a single thread that wouldn't receive the SIGUSR2
         if (std::cv_status::timeout == writingCond.wait_until(ul, now + 2s)) {
-          std::cerr << "timed out waiting for SIGUSR2 " << pid << ":" << tid << std::endl;
+          if (!signalReceived) {
+            std::cerr << "signal lost waiting for stacktrace " << pid << ":" << tid << std::endl;
+            break;
+          }
         }
       } else {
         stacktraceSignalHandler(false);

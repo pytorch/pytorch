@@ -92,6 +92,8 @@ class C10_API FatalSignalHandler {
   // because there's no way to convert from a tid to a pthread_t).
   std::condition_variable writingCond;
   std::mutex writingMutex;
+  // used to indicate if the other thread responded to the signal
+  bool signalReceived;
 
   struct signal_handler {
     const char* name;
