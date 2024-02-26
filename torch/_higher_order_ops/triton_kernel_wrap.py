@@ -175,7 +175,13 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
     region_id_to_block_ids: Dict[int, List[int]] = defaultdict(list)
     block_id_to_block_arg_ids: Dict[int, List[int]] = {}
     replacements: Dict[int, Union[Intermediate, Param]] = {}
+    reindex_map: Dict[int, int] = {}
     next_fake_intermediate = 0
+
+    def reindex(idx):
+        if idx not in reindex_map:
+            reindex_map[idx] = len(reindex_map)
+        return reindex_map[idx]
 
     def mlir_to_functions(op) -> None:
         name: str = op.get_name()
@@ -184,10 +190,10 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
             return
 
         operand_ids: List[int] = [
-            op.get_operand(i).id() for i in range(op.get_num_operands())
+            reindex(op.get_operand(i).id()) for i in range(op.get_num_operands())
         ]
         result_ids: List[int] = [
-            op.get_result(i).id() for i in range(op.get_num_results())
+            reindex(op.get_result(i).id()) for i in range(op.get_num_results())
         ]
 
         child_block_ids: List[int] = []
@@ -204,7 +210,7 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
                 block_id_to_block_arg_ids[parent_block_id] = []
                 for i in range(parent_block.get_num_arguments()):
                     block_id_to_block_arg_ids[parent_block_id].append(
-                        parent_block.get_argument(i).id(),
+                        reindex(parent_block.get_argument(i).id()),
                     )
                 # the region info is collected via ops' parent blocks to be
                 # used later when the region's encloding op is traversed
@@ -231,9 +237,9 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
             for fn_op_list in fn_ops.values():
                 for fn_op in fn_op_list:
                     for i in range(len(fn_op.args)):
-                        arg_idx = fn_op.args[i].idx
-                        if arg_idx in replacements:
-                            fn_op.args[i] = replacements[arg_idx]
+                        arg = fn_op.args[i]
+                        if isinstance(arg, Intermediate) and arg.idx in replacements:
+                            fn_op.args[i] = replacements[arg.idx]
 
             # next function capture starts
             # with empty replacements
@@ -297,46 +303,9 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
                 fake_res = Intermediate(next_fake_intermediate)
                 block_ops[fake_res].append(Op(name, callee, args, fake_res))
 
-    def reindex_intermediates(
-        functions: Dict[str, Dict[Intermediate, List[Op]]]
-    ) -> Dict[str, Dict[Intermediate, List[Op]]]:
-        """Renumber Intermediate idx to imrove readability."""
-        new_functions: Dict[str, Dict[Intermediate, List[Op]]] = {}
-        idx_map: Dict[int, int] = {}
-
-        def replace_idx(x):
-            if isinstance(x, Intermediate) and x.idx > 0:
-                if x.idx not in idx_map:
-                    idx_map[x.idx] = len(idx_map)
-                return Intermediate(idx_map[x.idx])
-            return x
-
-        for name, parts in functions.items():
-            new_parts = {}
-            for ret, ops in parts.items():
-                new_ops = []
-                new_ret = replace_idx(ret)
-                for op in ops:
-                    new_args = []
-                    for arg in op.args:
-                        new_args.append(replace_idx(arg))
-                    new_ops.append(
-                        Op(
-                            op.name,
-                            op.fn_call_name,
-                            new_args,
-                            replace_idx(op.ret),
-                        )
-                    )
-                new_parts[new_ret] = new_ops
-            new_functions[name] = new_parts
-            idx_map.clear()
-
-        return new_functions
-
     ttir_module.walk(mlir_to_functions)
 
-    return reindex_intermediates(functions)
+    return functions
 
 
 def parse_ttir(ttir, kwargs):
@@ -550,7 +519,7 @@ def analyze_kernel_mutations(functions, fn_name, num_args):
     Analyzes the graph to detect all sinks from a predefined list of sinks
     by using triton's MemWrite trait list. NOTE: What if triton exposed this?
     From each sink, it traverses the CFG backwards to identify all the input
-    pointers that are mutated
+    pointers that are mutated.
     """
     # Name of mutation op to mutated parameter indices
     # List from Triton Github include/triton/Dialect/Triton/IR/TritonOps.td
