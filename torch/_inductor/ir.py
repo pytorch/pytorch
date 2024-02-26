@@ -3233,6 +3233,12 @@ class ComputedBuffer(Buffer):
             1) Remove any 1 dimensions
             2) Fuse contiguous dimensions together
             3) Reorder dimensions based on stride orders
+
+        Optional argument extra_indexing_constraints can be used to append additional
+        indexing expressions to existing ones derived from buffer's body. This can be useful
+        to fuse scheduler nodes with compatible ranges, e.g. (s0*s1*...,) and (s0, s1, s2, ...)
+        on CPU by preventing indexing simplifications and obtaining index/reduce ranges for
+        the scheduler node compatible with other nodes.
         """
         (
             (index_size, reduce_size),
