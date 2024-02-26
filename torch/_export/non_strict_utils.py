@@ -10,7 +10,6 @@ from torch._dynamo.source import (
     TensorProperty,
     TensorPropertySource,
 )
-from torch._dynamo.utils import common_constant_types
 from torch._dynamo.variables.builder import TrackedFake
 from torch._export.passes.add_runtime_assertions_for_constraints_pass import InputDim
 from torch._guards import Source
