@@ -555,14 +555,27 @@ def is_function(value):
 
 
 def unwrap_if_wrapper(fn):
+    return unwrap_with_attr_name_if_wrapper(fn)[0]
+
+
+def unwrap_with_attr_name_if_wrapper(fn):
+    # unpack @functools.lru_cache wrapped function
     if isinstance(fn, functools._lru_cache_wrapper):
         fn = inspect.getattr_static(fn, "__wrapped__")
+        attr_name = "__wrapped__"
     # unpack @torch._dynamo.optimize()(fn) wrapped function
-    fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
+    elif is_function(fn) and inspect.getattr_static(fn, "_torchdynamo_inline", False):
+        fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
+        attr_name = "_torchdynamo_inline"
     # unpack torch.jit.script_if_tracing
-    if inspect.getattr_static(fn, "__script_if_tracing_wrapper", False):
+    elif is_function(fn) and inspect.getattr_static(
+        fn, "__script_if_tracing_wrapper", False
+    ):
         fn = inspect.getattr_static(fn, "__original_fn", fn)
-    return fn
+        attr_name = "__original_fn"
+    else:
+        attr_name = None
+    return fn, attr_name
 
 
 def is_numpy_ndarray(value):
