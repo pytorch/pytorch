@@ -451,6 +451,14 @@ def _export_non_strict(
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature))
 
+    # Remove nn_module_stack metadata from all placeholders/inputs nodes
+    # These may have multiple paths of references, so nn_module_stack may not be well-defined.
+    for mod in gm.modules():
+        for node in mod.graph.nodes:
+            if node.op in ["placeholder", "output"]:
+                if "nn_module_stack" in node.meta:
+                    del node.meta["nn_module_stack"]
+
     @dataclasses.dataclass
     class _ExportedProgramNonStrict:
         gm: torch.fx.GraphModule
@@ -808,8 +816,8 @@ def _export(
                     attr, static_shapes=True
                 )
 
-    # When aot_export lifts the params, we lose the nn_module_stack
-    # and source_fn from the param nodes as they are treated as fresh inputs
+    # When aot_export lifts the params, we lose various metadata (e.g. source_fn_stack, stack_trace)
+    # from the param nodes as they are treated as fresh inputs
     # Therefore, we manually extract them before calling into aot_export
     params_buffers_to_node_meta = {}
     for node in gm_torch_level.graph.nodes:
@@ -878,6 +886,11 @@ def _export(
     gm = ep_non_strict.gm
     export_graph_signature = ep_non_strict.sig
     constants = ep_non_strict.constants
+
+    # Withhold nn_module_stack metadata from params/buffers, since these are not well-defined
+    for fqn, metadata in params_buffers_to_node_meta.items():
+        if "nn_module_stack" in metadata:
+            del metadata["nn_module_stack"]
 
     # After aot_export, set the param/buffer metadata back into placeholders
     # Technically, users can still construct this data from param names

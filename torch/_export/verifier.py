@@ -190,6 +190,41 @@ class Verifier(metaclass=_VerifierMeta):
                     )
             self.check_valid_op(op)
 
+        def _check_nn_module_stack(graph_module: torch.fx.GraphModule) -> None:
+            '''
+            Perform nn_module_stack checks on the graph.
+            Current constraints:
+                For the top level graph:
+                - populated for 'call_module', 'call_method', 'call_function', 'get_attr'
+                - None for 'placeholder', 'output'
+                For submodule graphs:
+                - None for 'placeholder', output'
+
+            TODO(pianpwk): make this a consistent node-level check once nn_module_stack is populated for cond submodules.
+            '''
+            # Check top-level graph
+            for node in graph_module.graph.nodes:
+                if node.op in ['call_module', 'call_method', 'call_function', 'get_attr']:
+                    if node.meta.get('nn_module_stack', None) is None:
+                        raise SpecViolationError(
+                            f"Node {node} of type {node.op} is missing nn_module_stack metadata"
+                        )
+                else: # placeholder, output
+                    if node.meta.get('nn_module_stack', None):
+                        raise SpecViolationError(
+                            f"Node {node} of type {node.op} contains nn_module_stack metadata, this should be None"
+                        )
+
+            # Check submodule graphs
+            for i, mod in enumerate(graph_module.modules()):
+                if i == 0:
+                    continue
+                for node in mod.graph.nodes:
+                    if node.op in ['placeholder', 'output'] and node.meta.get('nn_module_stack', None):
+                        raise SpecViolationError(
+                            f"Node {node} of type {node.op} contains nn_module_stack metadata, this should be None"
+                        )
+
         for mod in gm.modules():
             if not isinstance(mod, torch.fx.GraphModule):
                 continue
@@ -247,6 +282,12 @@ class Verifier(metaclass=_VerifierMeta):
                 # TODO(zhxchen17)
                 # elif node.op == "output":
                 #     _check_flattened_outputs()
+
+        # Ideally we would perform this check at the node level, only looking at the node op type,
+        # but currently cond submodules have an issue where nn_module_stack metadata is not populated.
+        # For now, we perform strict checks for the top level graph, and looser checks for submodules.
+        # TODO(pianpwk): remove this check once we fix the nn_module_stack metadata issue
+        _check_nn_module_stack(gm)
 
         self.check_additional(gm)
 
