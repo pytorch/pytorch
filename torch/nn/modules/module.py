@@ -281,22 +281,12 @@ def register_module_full_backward_pre_hook(
         This adds global state to the `nn.module` module
         and it is only intended for debugging/profiling purposes.
 
-    The hook will be called every time the gradients for the module are computed.
-    The hook should have the following signature::
+    Hooks registered using this function behave in the same way as those
+    registered by :meth:`torch.nn.Module.register_full_backward_pre_hook`.
+    Refer to its documentation for more details.
 
-        hook(module, grad_output) -> Tensor or None
-
-    The :attr:`grad_output` is a tuple. The hook should
-    not modify its arguments, but it can optionally return a new gradient with
-    respect to the output that will be used in place of :attr:`grad_output` in
-    subsequent computations. Entries in :attr:`grad_output` will be ``None`` for
-    all non-Tensor arguments.
-
-    For technical reasons, when this hook is applied to a Module, its forward function will
-    receive a view of each Tensor passed to the Module. Similarly the caller will receive a view
-    of each Tensor returned by the Module's forward function.
-
-    Global hooks are called before hooks registered with `register_backward_pre_hook`
+    Hooks registered using this function will be called before hooks registered
+    using :meth:`torch.nn.Module.register_full_backward_pre_hook`.
 
     Returns:
         :class:`torch.utils.hooks.RemovableHandle`:
@@ -318,26 +308,12 @@ def register_module_full_backward_hook(
         This adds global state to the `nn.module` module
         and it is only intended for debugging/profiling purposes.
 
-    The hook will be called every time the gradients with respect to a module
-    are computed, i.e. the hook will execute if and only if the gradients with
-    respect to module outputs are computed. The hook should have the following
-    signature::
+    Hooks registered using this function behave in the same way as those
+    registered by :meth:`torch.nn.Module.register_full_backward_hook`.
+    Refer to its documentation for more details.
 
-        hook(module, grad_input, grad_output) -> Tensor or None
-
-    The :attr:`grad_input` and :attr:`grad_output` are tuples. The hook should
-    not modify its arguments, but it can optionally return a new gradient with
-    respect to the input that will be used in place of :attr:`grad_input` in
-    subsequent computations. :attr:`grad_input` will only correspond to the inputs given
-    as positional arguments and all kwarg arguments will not appear in the hook. Entries
-    in :attr:`grad_input` and :attr:`grad_output` will be ``None`` for all non-Tensor
-    arguments.
-
-    For technical reasons, when this hook is applied to a Module, its forward function will
-    receive a view of each Tensor passed to the Module. Similarly the caller will receive a view
-    of each Tensor returned by the Module's forward function.
-
-    Global hooks are called before hooks registered with `register_backward_hook`
+    Hooks registered using this function will be called before hooks registered
+    using :meth:`torch.nn.Module.register_full_backward_hook`.
 
     Returns:
         :class:`torch.utils.hooks.RemovableHandle`:
@@ -780,7 +756,7 @@ class Module:
             "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml "
             "to report this bug.")
 
-    def set_extra_state(self, state: Any):
+    def set_extra_state(self, state: Any) -> None:
         """Set extra state contained in the loaded `state_dict`.
 
         This function is called from :func:`load_state_dict` to handle any extra state
@@ -2036,6 +2012,7 @@ class Module:
         local_name_params = itertools.chain(self._parameters.items(), persistent_buffers.items())
         local_state = {k: v for k, v in local_name_params if v is not None}
         assign_to_params_buffers = local_metadata.get("assign_to_params_buffers", False)
+        use_swap_tensors = torch.__future__.get_swap_module_params_on_conversion()
 
         for name, param in local_state.items():
             key = prefix + name
@@ -2078,10 +2055,22 @@ class Module:
                                 setattr(self, name, torch.nn.Parameter(input_param))
                             else:
                                 setattr(self, name, input_param)
+                        elif use_swap_tensors:
+                            param_requires_grad = param.requires_grad
+                            new_input_param = param.module_load(input_param)
+                            if id(new_input_param) == id(input_param) or id(new_input_param) == id(param):
+                                raise RuntimeError("module_load returned one of self or other, please .detach() "
+                                                   "the result if returning one of the inputs in module_load")
+                            if (isinstance(param, torch.nn.Parameter) and
+                                    not isinstance(new_input_param, torch.nn.Parameter)):
+                                new_input_param = torch.nn.Parameter(new_input_param, requires_grad=param_requires_grad)
+                            torch.utils.swap_tensors(param, new_input_param)
+                            del new_input_param
                         else:
                             param.copy_(input_param)
                 except Exception as ex:
-                    error_msgs.append(f'While copying the parameter named "{key}", '
+                    action = "swapping" if use_swap_tensors else "copying"
+                    error_msgs.append(f'While {action} the parameter named "{key}", '
                                       f'whose dimensions in the model are {param.size()} and '
                                       f'whose dimensions in the checkpoint are {input_param.size()}, '
                                       f'an exception occurred : {ex.args}.'
