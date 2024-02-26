@@ -294,6 +294,18 @@ def convert_frame_assert(
         cache_size = compute_cache_size(frame, cache_entry)
         recompile_reasons = None
         if is_recompilation(cache_size):
+            if config.optimize_ddp and config.optimize_ddp_lazy_compile:
+                from torch._dynamo.exc import UserError, UserErrorType
+
+                raise UserError(
+                    UserErrorType.DYNAMIC_DIM,
+                    "When turning on both config.ddp_optimizer and config.optimize_ddp_lazy_compile, "
+                    "we expect input tensor shapes remain static but found dynamic shapes instead. "
+                    "Please try to a) pad the input tensor to a static shape, or "
+                    "b) set config.optimize_ddp_lazy_compile = False. If there is still a stride mismatch "
+                    "error, please set config.ddp_optimizer=False. Note that config.ddp_optimizer=False "
+                    "may slowdown the performance",
+                )
             recompile_reasons = get_and_maybe_log_recompilation_reason(
                 cache_entry, frame
             )

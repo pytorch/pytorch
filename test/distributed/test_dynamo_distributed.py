@@ -724,6 +724,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
 
     @patch.object(config, "optimize_ddp", True)
+    @patch.object(config, "optimize_ddp_lazy_compile", True)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor_transpose(self):
         assert config.optimize_ddp
@@ -749,14 +750,21 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         compiled_mod = torch.compile(mod, backend="inductor")
         ddp_compiled_mod = DDP(compiled_mod, device_ids=self.device_ids)
 
-        x = torch.randn((B, N, D), dtype=torch.float32, device=self.device)
-        self.assertTrue(same(mod(x), ddp_compiled_mod(x)))
+        with self.assertLogs('torch._dynamo.convert_frame', level='INFO') as cm:
+            x = torch.randn((B, N, D), dtype=torch.float32, device=self.device)
+            self.assertTrue(same(mod(x), ddp_compiled_mod(x)))
 
-        x_1 = torch.randn((B * 2, N, D), dtype=torch.float32, device=self.device)
-        self.assertTrue(same(mod(x_1), ddp_compiled_mod(x_1)))
+            x_1 = torch.randn((B * 2, N, D), dtype=torch.float32, device=self.device)
+            self.assertTrue(same(mod(x_1), ddp_compiled_mod(x_1)))
 
-        x_2 = torch.randn((B * 3, N, D), dtype=torch.float32, device=self.device)
-        self.assertTrue(same(mod(x_2), ddp_compiled_mod(x_2)))
+            x_2 = torch.randn((B * 3, N, D), dtype=torch.float32, device=self.device)
+            self.assertTrue(same(mod(x_2), ddp_compiled_mod(x_2)))
+        self.assertTrue(any("When turning on both config.ddp_optimizer and config.optimize_ddp_lazy_compile, "
+                            "we expect input tensor shapes remain static but found dynamic shapes instead. "
+                            "Please try to a) pad the input tensor to a static shape, or "
+                            "b) set config.optimize_ddp_lazy_compile = False. If there is still a stride mismatch "
+                            "error, please set config.ddp_optimizer=False. Note that config.ddp_optimizer=False "
+                            "may slowdown the performance" in msg for msg in cm.output))
 
     @patch.object(config, "optimize_ddp", True)
     def test_no_split(self):
