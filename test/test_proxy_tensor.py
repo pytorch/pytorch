@@ -955,7 +955,7 @@ class TestSymbolicTracing(TestCase):
         import torch.library
         from torch.library import Library
 
-        foo = Library("foo", "DEF")
+        foo = Library("foo", "DEF")  # noqa: TOR901
         foo.define("foo(Tensor self) -> Tensor")
 
         # Operator where meta and cpu disagree on strides
@@ -1876,12 +1876,10 @@ symbolic_tensor_failures = {
     xfail('linalg.eig'),
     xfail('linalg.eigvals'),
     xfail('combinations', ''),
-    xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('histc', ''),  # Could not run 'aten::histc' with arguments from the 'Meta' backend. This could be because...
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
-    xfail('isin', ''),  # aten.isin.Tensor_Tensor - couldn't find symbolic meta function/decomposition
     xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -1931,8 +1929,6 @@ symbolic_tensor_segfaults = {
 symbolic_tensor_failures.update(symbolic_tensor_segfaults)
 
 outplace_symbolic_tensor_failures = {
-    xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
-
     xfail('linalg.norm', ''),
 }
 
@@ -1945,50 +1941,31 @@ inplace_symbolic_tensor_failures = {
 
 out_symbolic_tensor_failures = {
     xfail('_native_batch_norm_legit', ''),
-    xfail('aminmax', ''),
     xfail('angle', ''),
     xfail('argmax', ''),
     xfail('argmin', ''),
     xfail('bmm', ''),
-    xfail('cummax', ''),
-    xfail('cummin', ''),
     xfail('fft.fft2', ''),
     xfail('fft.fftn', ''),
     xfail('fft.ifft2', ''),
     xfail('fft.ifftn', ''),
     xfail('gather', ''),
-    xfail('i0', ''),
     xfail('linalg.cholesky', ''),
     xfail('linalg.cholesky_ex', ''),
     xfail('linalg.det', ''),
     xfail('linalg.det', 'singular'),
-    xfail('linalg.eigh', ''),
     xfail('linalg.inv', ''),
     xfail('linalg.inv_ex', ''),
-    xfail('linalg.ldl_factor', ''),
-    xfail('linalg.ldl_factor_ex', ''),
-    xfail('linalg.lu', ''),
-    xfail('linalg.lu_factor', ''),
-    xfail('linalg.lu_factor_ex', ''),
     xfail('linalg.pinv', ''),
     xfail('linalg.pinv', 'hermitian'),
-    xfail('linalg.qr', ''),
-    xfail('linalg.slogdet', ''),
-    xfail('linalg.solve_ex', ''),
-    xfail('linalg.svd', ''),
     xfail('linalg.svdvals', ''),
     xfail('lu', ''),
-    xfail('lu_unpack', ''),
     xfail('max', 'reduction_with_dim'),
     xfail('min', 'reduction_with_dim'),
-    xfail('mode', ''),
     xfail('nn.functional.avg_pool2d', ''),
     xfail('nn.functional.linear', ''),
-    xfail('qr', ''),
     xfail('scatter_add', ''),
     xfail('scatter', ''),
-    xfail('sort', ''),
-    xfail('svd', ''),
     xfail('take_along_dim', ''),
     xfail('topk', ''),
     xfail('triangular_solve', ''),
