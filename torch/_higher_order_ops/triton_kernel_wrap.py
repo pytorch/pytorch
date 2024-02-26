@@ -623,9 +623,13 @@ def identify_mutated_tensors(kernel, kwargs):
             )
         )
         if ttir_module is not None:
-            log.debug("TTIR: %s", str(ttir_module))
+            log.debug("TTIR:\n%s", str(ttir_module))
         if functions is not None:
-            log.debug("functions: %s", str(functions))
+            log.debug("functions:")
+            for name, fn in functions.items():
+                log.debug("===\t%s\t===", name)
+                for ret, ops in fn.items():
+                    log.debug("%s\t=>\t%s", ret, ops)
         return [key for key, value in kwargs.items() if isinstance(value, Tensor)]
 
 
