@@ -77,7 +77,7 @@ DeviceProp* getDeviceProperties(DeviceIndex device) {
 
 // Return the global index enumerated by sycl::device::get_devices based on the
 // index of a XPU device in the framework.
-c10::DeviceIndex getGlobalIdxFromDevice(DeviceIndex device) {
+int32_t getGlobalIdxFromDevice(DeviceIndex device) {
   c10::call_once(init_flag, initXPUContextVectors);
   check_device(device);
   c10::call_once(device_global_idx_flags[device], initDeviceGlobalIdx, device);
