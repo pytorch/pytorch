@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (
     shell,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
+    TEST_WITH_CROSSREF,
     TEST_WITH_SLOW_GRADCHECK,
 )
 
@@ -1164,6 +1165,7 @@ def parse_args():
         action="store_true",
         help="Enables removing tests based on TD",
         default=IS_CI
+        and (TEST_WITH_ROCM or TEST_WITH_CROSSREF)
         and os.getenv("BRANCH", "") != "main"
         and not strtobool(os.environ.get("NO_TD", "False")),
     )
@@ -1456,30 +1458,6 @@ def get_sharding_opts(options) -> Tuple[int, int]:
     return (which_shard, num_shards)
 
 
-def do_sharding(
-    options,
-    selected_tests: Sequence[TestRun],
-    test_file_times: Dict[str, float],
-    test_class_times: Dict[str, Dict[str, float]],
-    sort_by_time: bool = True,
-) -> List[ShardedTest]:
-    which_shard, num_shards = get_sharding_opts(options)
-
-    # Do sharding
-    shards = calculate_shards(
-        num_shards,
-        selected_tests,
-        test_file_times,
-        test_class_times=test_class_times,
-        must_serial=must_serial,
-        sort_by_time=sort_by_time,
-    )
-    _, tests_from_shard = shards[which_shard - 1]
-    selected_tests = tests_from_shard
-
-    return selected_tests
-
-
 class TestFailure(NamedTuple):
     test: TestRun
     message: str
@@ -1666,16 +1644,20 @@ def main():
         ):
             self.name = name
             self.failures = []
-            self.sharded_tests = do_sharding(
-                options,
-                raw_tests,
+            which_shard, num_shards = get_sharding_opts(options)
+            shards = calculate_shards(
+                num_shards,
+                selected_tests,
                 test_file_times_dict,
-                test_class_times_dict,
+                test_class_times=test_class_times_dict,
+                must_serial=must_serial,
                 sort_by_time=should_sort_shard,
             )
+            self.sharded_tests = shards[which_shard - 1][1]
+            self.time = shards[which_shard - 1][0]
 
         def __str__(self):
-            s = f"Name: {self.name}\n"
+            s = f"Name: {self.name} (est. time: {round(self.time, 2)}s)\n"
             serial = [test for test in self.sharded_tests if must_serial(test)]
             parallel = [test for test in self.sharded_tests if not must_serial(test)]
             s += f"  Serial tests ({len(serial)}):\n"
@@ -1684,9 +1666,17 @@ def main():
             s += "".join(f"    {test}\n" for test in parallel)
             return s.strip()
 
-    test_batch = TestBatch("all_tests", test_prioritizations.get_all_tests(), False)
+    percent_to_run = 50 if options.enable_td else 100
+    print_to_stderr(
+        f"Running {percent_to_run}% of tests based on TD" if options.enable_td else "Running all tests"
+    )
+    include, exclude = test_prioritizations.get_top_per_tests(percent_to_run)
+
+    test_batch = TestBatch("tests to run", include, False)
+    test_batch_exclude = TestBatch("excluded", exclude, True)
 
     print_to_stderr(test_batch)
+    print_to_stderr(test_batch_exclude)
 
     if options.dry_run:
         return
