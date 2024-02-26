@@ -1,6 +1,16 @@
 import os
-import xml.etree.ElementTree as ET
 
+try:
+    from lxml.etree import parse, XMLParser
+
+    p = XMLParser(huge_tree=True)
+    use_lxml = True
+except ImportError:
+    import xml.etree.ElementTree as ET
+
+    parse = ET.parse
+    use_lxml = False
+    print("lxml was not found. `pip install lxml` to make this script run much faster")
 from download_reports import download_reports
 
 
@@ -9,7 +19,10 @@ def open_test_results(directory):
     for root, _, files in os.walk(directory):
         for file in files:
             if file.endswith(".xml"):
-                tree = ET.parse(f"{root}/{file}")
+                if use_lxml:
+                    tree = parse(f"{root}/{file}", parser=p)
+                else:
+                    tree = parse(f"{root}/{file}")
                 xmls.append(tree)
     return xmls
 
