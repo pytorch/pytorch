@@ -25,7 +25,6 @@ def foreach_all_gather(
     all_gather_copy_in_stream: torch.cuda.Stream,
     all_gather_stream: torch.cuda.Stream,
     device: torch.device,
-    dtype: torch.dtype,
 ) -> Optional[AllGatherResult]:
     world_size, rank = group.size(), group.rank()
     # - Copy in
@@ -33,6 +32,11 @@ def foreach_all_gather(
         param_all_gather_inputs = [
             fsdp_param.all_gather_input for fsdp_param in fsdp_params
         ]
+        dtype = param_all_gather_inputs[0].dtype
+        if not all(t.dtype == dtype for t in param_all_gather_inputs):
+            raise NotImplementedError(
+                f"Mixed dtype not supported yet: {[t.dtype for t in param_all_gather_inputs]}"
+            )
         inp_split_sizes = [inp.numel() for inp in param_all_gather_inputs]
         all_gather_input_numel = sum(inp_split_sizes)
         all_gather_output = torch.empty(
@@ -44,9 +48,7 @@ def foreach_all_gather(
         foreach_copy_dsts = torch.split(all_gather_input, inp_split_sizes)
         torch._foreach_copy_(foreach_copy_dsts, param_all_gather_inputs)
         del param_all_gather_inputs
-        all_gather_copy_in_event = torch.cuda.Event()
-        all_gather_copy_in_event.record()
-    all_gather_stream.wait_event(all_gather_copy_in_event)
+    all_gather_stream.wait_stream(all_gather_copy_in_stream)
     with torch.cuda.stream(all_gather_stream):
         # - All-gather
         all_gather_work = dist.all_gather_into_tensor(
@@ -55,8 +57,7 @@ def foreach_all_gather(
             group=group,
             async_op=async_op,
         )
-        all_gather_event = torch.cuda.Event()
-        all_gather_event.record()
+        all_gather_event = all_gather_stream.record_event()
         return AllGatherResult(
             all_gather_output, all_gather_event, all_gather_work, inp_split_sizes
         )
@@ -135,12 +136,9 @@ def foreach_reduce_scatter(
             unsharded_grads, reduce_scatter_input, world_size
         )
         _div_if_needed(reduce_scatter_input, predivide_factor)
-        # Record to mark the end of the reduce-scatter copy-in in the RS stream
-        copy_in_event = torch.cuda.Event()
-        copy_in_event.record()
         # Only after the copy-in finishes can we free the gradients, which were
         # computed in the default stream
-        current_stream.wait_event(copy_in_event)
+        current_stream.wait_stream(reduce_scatter_stream)
         unsharded_grads.clear()
         reduce_scatter_output = reduce_scatter_input.new_empty(
             (reduce_scatter_output_numel,)
@@ -169,8 +167,7 @@ def foreach_reduce_scatter(
                 fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
             padded_sharded_numel = padded_unsharded_size.numel() // world_size
             flat_grad_offset += padded_sharded_numel
-        reduce_scatter_view_out_event = torch.cuda.Event()
-        reduce_scatter_view_out_event.record()
+        reduce_scatter_view_out_event = reduce_scatter_stream.record_event()
     # The RS output is allocated in the RS stream and used in the default
     # stream (for optimizer). To ensure its memory is not reused for later
     # RSs, we do not need extra synchronization since the sharded parameters

@@ -39,7 +39,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         import torch.library
         from torch.library import Library
 
-        foo = Library("foo", "DEF")
+        foo = Library("foo", "DEF")  # noqa: TOR901
         foo.define("custom(Tensor self) -> Tensor")
 
         # Dynamic shape data dependent operator. For static shape compilation, Dynamo

@@ -69,7 +69,7 @@ Tensor math_channel_shuffle(const Tensor& self, int64_t groups) {
   // It is not clear, however from initial looking around it feels that
   // this may not be correct.
   // In this case channels last will likely require custom implementation
-  // if we want to preseve the memory order.
+  // if we want to preserve the memory order.
   // XNNPACK has channel shuffle op for NHWC. For mobile usecase this is good.
   // For server we will have to do a custom implementation.
   // For ChannelsFirst, a.k.a Contiguous, memory format we will also need

@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import sys
 from unittest.mock import patch
 
 import functorch
@@ -27,7 +28,9 @@ def count_bytes_inductor(gm, example_inputs):
     return compile_fx(gm, example_inputs, inner_compile=count_bytes_inner)
 
 
-if not IS_WINDOWS:
+# We don't support torch.compile() on
+# Windows and Python 3.12+
+if not IS_WINDOWS and sys.version_info < (3, 12):
 
     @torch._dynamo.optimize(count_bytes_inductor)
     def f(x):
@@ -230,6 +233,29 @@ class NumBytesMetricTests(TestCase):
         inp = (T(10, 10), T(10, 10))
         self.assertExpectedInline(count_numel(f, *inp), """800""")
 
+        # Should turn into pointwise even if only some of inputs are pointwise.
+        def f(a, b):
+            out = torch.cat([a.cos(), torch.mm(b, b)])
+            return out.cos()
+
+        inp = (T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """600""")
+
+        # Should not turn into pointwise if all inputs are not pointwise
+        def f(a, b):
+            out = torch.cat([torch.mm(a, a), torch.mm(b, b)])
+            return out.cos()
+
+        inp = (T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """800""")
+
+        def f(a, b):
+            out = torch.cat([a, b])
+            return out.cos()
+
+        inp = (T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """400""")
+
     @patch.object(config, "split_cat_fx_passes", False)
     def test_cat_pointwise_many_complex_inputs(self):
         def f(*inputs):
@@ -246,7 +272,7 @@ class NumBytesMetricTests(TestCase):
             return torch.cat(input) + 10
 
         inp = (T(10, 10) for _ in range(16))
-        self.assertExpectedInline(count_numel(f, *inp), """3200""")
+        self.assertExpectedInline(count_numel(f, *inp), """9600""")
 
     @patch.object(config, "max_pointwise_cat_inputs", 0)
     def test_cat_pointwise_config_option(self):
@@ -785,8 +811,6 @@ class InplacingTests(TestCase):
             return output
 
         inp = (T(10), T(10))
-        # TODO: Renable after triton version upgrade
-        return
         self.assertExpectedInline(count_numel(f, *inp), """80""")
 
     @requires_cuda
@@ -817,8 +841,6 @@ class InplacingTests(TestCase):
             return output
 
         inp = (T(10), T(10))
-        # TODO: Renable after triton version upgrade
-        return
         self.assertExpectedInline(count_numel(f, *inp), """80""")
 
     @requires_cuda
@@ -833,8 +855,6 @@ class InplacingTests(TestCase):
 
         t = T(10)
         inp = (t, t.view(-1))
-        # TODO: Renable after triton version upgrade
-        return
         self.assertExpectedInline(count_numel(f, *inp), """40""")
 
     def test_inplace_randperm_scatter(self):
