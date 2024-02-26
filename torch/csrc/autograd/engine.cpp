@@ -80,7 +80,7 @@ std::atomic<Engine::compiled_autograd_fn> the_compiled_autograd = nullptr;
   reinterpret_cast<Engine::compiled_autograd_fn>(1)
 std::atomic<int32_t> num_threads_in_backwards;
 struct CompiledAutogradThreadingDebugCheck {
-  CompiledAutogradThreadingDebugCheck() : incremented(true) {
+  CompiledAutogradThreadingDebugCheck() {
     num_threads_in_backwards++;
   }
   ~CompiledAutogradThreadingDebugCheck() {
@@ -93,7 +93,7 @@ struct CompiledAutogradThreadingDebugCheck {
   }
 
  private:
-  bool incremented;
+  bool incremented{true};
 };
 
 } // namespace

@@ -1,6 +1,5 @@
 #include <ATen/native/vulkan/impl/Packing.h>
 
-#include <ATen/native/vulkan/graph/Exception.h>
 #include <ATen/native/vulkan/graph/Staging.h>
 
 namespace at {
@@ -11,40 +10,36 @@ void memcpy_to_mapping(
     const void* src,
     api::MemoryMap& dst_mapping,
     const size_t nbytes,
-    const c10::ScalarType dtype) {
-  if (dtype == at::kFloat) {
-    memcpy_to_mapping_impl<float>(src, dst_mapping, nbytes);
-  } else if (dtype == at::kHalf) {
-    memcpy_to_mapping_impl<c10::Half>(src, dst_mapping, nbytes);
-  } else if (dtype == c10::kQUInt8) {
-    memcpy_to_mapping_impl<c10::quint8>(src, dst_mapping, nbytes);
-  } else if (dtype == c10::kQInt8) {
-    memcpy_to_mapping_impl<c10::qint8>(src, dst_mapping, nbytes);
-  } else if (dtype == c10::kQInt32) {
-    memcpy_to_mapping_impl<c10::qint32>(src, dst_mapping, nbytes);
-  } else {
-    VKGRAPH_THROW("Unrecognized dtype!");
+    const api::ScalarType dtype) {
+#define DTYPE_CASE(ctype, vkformat, name)                    \
+  case api::ScalarType::name:                                \
+    memcpy_to_mapping_impl<ctype>(src, dst_mapping, nbytes); \
+    break;
+
+  switch (dtype) {
+    VK_FORALL_SCALAR_TYPES(DTYPE_CASE)
+    default:
+      VK_THROW("Unrecognized dtype!");
   }
+#undef DTYPE_CASE
 }
 
 void memcpy_from_mapping(
     api::MemoryMap& src_mapping,
     void* dst,
     const size_t nbytes,
-    const c10::ScalarType dtype) {
-  if (dtype == at::kFloat) {
-    memcpy_from_mapping_impl<float>(src_mapping, dst, nbytes);
-  } else if (dtype == at::kHalf) {
-    memcpy_from_mapping_impl<c10::Half>(src_mapping, dst, nbytes);
-  } else if (dtype == c10::kQUInt8) {
-    memcpy_from_mapping_impl<c10::quint8>(src_mapping, dst, nbytes);
-  } else if (dtype == c10::kQInt8) {
-    memcpy_from_mapping_impl<c10::qint8>(src_mapping, dst, nbytes);
-  } else if (dtype == c10::kQInt32) {
-    memcpy_from_mapping_impl<c10::qint32>(src_mapping, dst, nbytes);
-  } else {
-    VKGRAPH_THROW("Unrecognized dtype!");
+    const api::ScalarType dtype) {
+#define DTYPE_CASE(ctype, vkformat, name)                      \
+  case api::ScalarType::name:                                  \
+    memcpy_from_mapping_impl<ctype>(src_mapping, dst, nbytes); \
+    break;
+
+  switch (dtype) {
+    VK_FORALL_SCALAR_TYPES(DTYPE_CASE)
+    default:
+      VK_THROW("Unrecognized dtype!");
   }
+#undef DTYPE_CASE
 }
 
 void copy_ptr_to_staging(
@@ -113,7 +108,7 @@ void StagingNode::encode_execute(ComputeGraph* graph) const {
     api::StorageBuffer& to_staging = graph->get_val(outputs_[0]).toStaging();
     encode_copy_from_vtensor(graph->context(), from_tensor, to_staging);
   } else {
-    VKGRAPH_THROW(
+    VK_THROW(
         "Unexpected input value type ",
         in_val.type(),
         " and output value type ",

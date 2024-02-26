@@ -75,10 +75,13 @@ def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
 class NNModuleVariable(VariableTracker):
     _nonvar_fields = {"module_type", "module_key", *VariableTracker._nonvar_fields}
 
-    def __init__(self, module_type: type, module_key: str, **kwargs):
+    def __init__(
+        self, module_type: type, module_key: str, module: torch.nn.Module, **kwargs
+    ):
         super().__init__(**kwargs)
         self.module_type = module_type
         self.module_key = module_key
+        self.module = module
         assert self.source
 
     def python_type(self):
@@ -578,7 +581,13 @@ class NNModuleVariable(VariableTracker):
                 )
                 return new_module_variable
 
-            key = args[0].as_python_constant()
+            from .tensor import SymNodeVariable
+
+            if isinstance(args[0], SymNodeVariable):
+                key = args[0].evaluate_expr(tx.output)
+            else:
+                key = args[0].as_python_constant()
+
             submod = module[key]
             return tx.output.register_attr_or_module(
                 submod,

@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/cpu/zmath.h>
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
 
@@ -121,6 +122,7 @@ gemm_notrans_(
 
 template <typename scalar_t, typename opmath_t>
 void gemm_transa_(
+    TransposeType transa,
     int64_t m, int64_t n, int64_t k,
     opmath_t alpha,
     const scalar_t *a, int64_t lda,
@@ -133,7 +135,7 @@ void gemm_transa_(
     const scalar_t *b_ = b;
     for (const auto j : c10::irange(n)) {
       const auto dot = sum(k, [&](int64_t l) -> opmath_t {
-        return static_cast<opmath_t>(a_[l]) * static_cast<opmath_t>(b_[l]);
+        return static_cast<opmath_t>(transa == TransposeType::ConjTranspose ? conj_impl(a_[l]) : a_[l]) * static_cast<opmath_t>(b_[l]);
       });
       b_ += ldb;
       if (beta == opmath_t(0)) {
@@ -149,6 +151,7 @@ void gemm_transa_(
 template <typename scalar_t, typename opmath_t>
 typename std::enable_if<std::is_same<scalar_t, opmath_t>::value, void>::type
 gemm_transb_(
+    TransposeType transb,
     int64_t m,
     int64_t n,
     int64_t k,
@@ -166,7 +169,7 @@ gemm_transb_(
   // c += alpha * (a @ b.T)
   for (const auto l : c10::irange(k)) {
     for (const auto j : c10::irange(n)) {
-      opmath_t val = b[j + l * ldb] * alpha;
+      opmath_t val = (transb == TransposeType::ConjTranspose ? conj_impl(b[j + l * ldb]) : b[j + l * ldb]) * alpha;
       int64_t i_m = m / 4;
       for (const auto i_i : c10::irange(i_m)) {
         c[j * ldc + i_i * 4 + 0] += a[i_i * 4 + 0 + l * lda] * val;
@@ -185,6 +188,7 @@ gemm_transb_(
 template <typename scalar_t, typename opmath_t>
 typename std::enable_if<!std::is_same<scalar_t, opmath_t>::value, void>::type
 gemm_transb_(
+    TransposeType transb,
     int64_t m,
     int64_t n,
     int64_t k,
@@ -201,7 +205,7 @@ gemm_transb_(
     for (const auto j : c10::irange(n)) {
       const auto dot = sum(k, [&](int64_t l) -> opmath_t {
         return static_cast<opmath_t>(a[l * lda + i]) *
-            static_cast<opmath_t>(b[l * ldb + j]);
+            static_cast<opmath_t>(transb == TransposeType::ConjTranspose ? conj_impl(b[l * ldb + j]) : b[l * ldb + j]);
       });
       if (beta == opmath_t(0)) {
         c[j * ldc + i] = alpha * dot;
@@ -214,6 +218,7 @@ gemm_transb_(
 
 template <typename scalar_t, typename opmath_t>
 void gemm_transab_(
+    TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     opmath_t alpha,
     const scalar_t *a, int64_t lda,
@@ -224,8 +229,8 @@ void gemm_transab_(
   for (const auto i : c10::irange(m)) {
     for (const auto j : c10::irange(n)) {
       const auto dot = sum(k, [&](int64_t l) -> opmath_t {
-        return static_cast<opmath_t>(a[i * lda + l]) *
-            static_cast<opmath_t>(b[l * ldb + j]);
+        return static_cast<opmath_t>(transa == TransposeType::ConjTranspose ? conj_impl(a[i * lda + l]) : a[i * lda + l]) *
+            static_cast<opmath_t>(transb == TransposeType::ConjTranspose ? conj_impl(b[l * ldb + j]) : b[l * ldb + j]);
       });
 
       if (beta == opmath_t(0)) {
@@ -250,16 +255,15 @@ void gemm_core_(
       transb == TransposeType::NoTranspose) {
     return gemm_notrans_(m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
   } else if (
-      transa == TransposeType::Transpose &&
-      transb != TransposeType::Transpose) {
-    gemm_transa_(m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+      transa != TransposeType::NoTranspose &&
+      transb == TransposeType::NoTranspose) {
+    gemm_transa_(transa, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
   } else if (
       transa == TransposeType::NoTranspose &&
-      transb == TransposeType::Transpose) {
-    gemm_transb_(m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
-  } else { // transa == TransposeType::Transpose && transb ==
-           // TransposeType::Transpose
-    gemm_transab_(m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+      transb != TransposeType::NoTranspose) {
+    gemm_transb_(transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+  } else {
+    gemm_transab_(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
   }
 }
 

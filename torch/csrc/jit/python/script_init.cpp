@@ -30,6 +30,7 @@
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
+#include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/parser.h>
@@ -972,7 +973,7 @@ void initJitScriptBindings(PyObject* module) {
           [mm_name](const Object& self, py::args args, py::kwargs kwargs) {
             auto method = self.find_method(mm_name);
             if (!method) {
-              throw NotImplementedError(
+              throw c10::NotImplementedError(
                   "'%s' is not implemented for %s",
                   mm_name,
                   self.type()->str().c_str());

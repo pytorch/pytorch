@@ -1321,6 +1321,8 @@ class OpInfo:
         return result
 
     def supported_dtypes(self, device_type):
+        if device_type == "privateuse1":
+            device_type = torch._C._get_privateuse1_backend_name()
         device_type = torch.device(device_type).type
         if device_type == "cuda":
             return self.dtypesIfROCM if TEST_WITH_ROCM else self.dtypesIfCUDA
@@ -1330,6 +1332,8 @@ class OpInfo:
         if not self.supports_autograd:
             return set()
 
+        if device_type == "privateuse1":
+            device_type = torch._C._get_privateuse1_backend_name()
         device_type = torch.device(device_type).type
         backward_dtypes = None
         if device_type == "cuda":

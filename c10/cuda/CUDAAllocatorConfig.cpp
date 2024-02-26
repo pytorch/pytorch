@@ -1,4 +1,6 @@
 #include <c10/cuda/CUDAAllocatorConfig.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/util/llvmMathExtras.h>
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>

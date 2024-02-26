@@ -26,7 +26,6 @@ from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 from torch.utils._traceback import format_traceback_short
 
 from . import config, exc
-from .allowed_functions import is_numpy
 from .backends.registry import CompilerFn
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
@@ -62,6 +61,7 @@ from .hooks import Hooks
 from .output_graph import OutputGraph
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator, SpeculationLog
+from .trace_rules import is_numpy
 from .types import BytecodeHook
 from .utils import (
     CleanupManager,
@@ -330,7 +330,8 @@ def convert_frame_assert(
 
         if is_generator(code):
             unimplemented("generator")
-        if exceeds_cache_size_limit(cache_size):
+        exceeded, limit_type = exceeds_cache_size_limit(cache_size)
+        if exceeded:
 
             def format_func_info(code):
                 return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
@@ -340,17 +341,18 @@ def convert_frame_assert(
                 return recompile_reasons[-1]
 
             log.warning(
-                "torch._dynamo hit config.cache_size_limit (%s)\n"
+                "torch._dynamo hit config.%s (%s)\n"
                 "   function: %s\n"
                 "   last reason: %s\n"
                 'To log all recompilation reasons, use TORCH_LOGS="recompiles".\n'
                 "To diagnose recompilation issues, see %s.",
-                config.cache_size_limit,
+                limit_type,
+                getattr(config, limit_type),
                 format_func_info(code),
                 format_guard_failures(),
                 troubleshooting_url,
             )
-            unimplemented("cache_size_limit reached")
+            unimplemented(f"{limit_type} reached")
 
         if not has_tensor_in_frame(frame):
             return None
@@ -454,6 +456,7 @@ def _compile(
     )
 
     output: Optional[OutputGraph] = None
+    tracer: Optional[InstructionTranslator] = None
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
     fail_type: Optional[str] = None
@@ -465,6 +468,7 @@ def _compile(
     @preserve_global_state
     def transform(instructions, code_options):
         nonlocal output
+        nonlocal tracer
         speculation_log.restart()
         tracer = InstructionTranslator(
             instructions,
@@ -669,6 +673,9 @@ def _compile(
                 e.__traceback__
             ) from None
         finally:
+            if tracer:
+                tracer.output.local_scope = {}
+
             from .utils import curr_frame
 
             frame_key = str(curr_frame)

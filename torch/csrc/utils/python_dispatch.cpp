@@ -23,6 +23,8 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_raii.h>
 
+#include <torch/csrc/inductor/aoti_eager/aoti_kernel_holder.h>
+
 #include <iostream>
 #include <memory>
 #include <utility>
@@ -106,96 +108,86 @@ struct EnableHermeticPyObject {
   bool old_python_snapshot_;
 };
 
-class PythonKernelHolder : public c10::OperatorKernel {
-  c10::SafePyObject func_;
-  c10::DispatchKey dispatch_key_;
-  bool is_torch_compile_python_kernel_;
+PythonKernelHolder::PythonKernelHolder(
+    py::object func,
+    c10::DispatchKey dispatch_key)
+    : func_(func.release().ptr(), getPyInterpreter()),
+      dispatch_key_(dispatch_key) {}
 
- public:
-  PythonKernelHolder(
-      py::object func,
-      c10::DispatchKey dispatch_key,
-      bool is_torch_compile_python_kernel = false)
-      : func_(func.release().ptr(), getPyInterpreter()),
-        dispatch_key_(dispatch_key),
-        is_torch_compile_python_kernel_(is_torch_compile_python_kernel) {}
+void PythonKernelHolder::operator()(
+    const c10::OperatorHandle& op,
+    c10::DispatchKeySet keyset,
+    torch::jit::Stack* stack) {
+  // Figure out if we can handle it hermetically, or if we have
+  // to double dispatch
 
-  void operator()(
-      const c10::OperatorHandle& op,
-      c10::DispatchKeySet keyset,
-      torch::jit::Stack* stack) {
-    // Figure out if we can handle it hermetically, or if we have
-    // to double dispatch
+  // If Torch Dispatch Mode is active, use its PyInterpreter for dispatch
+  const auto mode_stack_len = c10::impl::TorchDispatchModeTLS::stack_len();
+  if (mode_stack_len > 0) {
+    const auto& cur_torch_dispatch_mode_state =
+        c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
+    cur_torch_dispatch_mode_state->pyinterpreter()
+        ->python_op_registration_trampoline(op, dispatch_key_, stack);
+    return;
+  }
 
-    // If Torch Dispatch Mode is active, use its PyInterpreter for dispatch
-    const auto mode_stack_len = c10::impl::TorchDispatchModeTLS::stack_len();
-    if (mode_stack_len > 0) {
-      const auto& cur_torch_dispatch_mode_state =
-          c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
-      cur_torch_dispatch_mode_state->pyinterpreter()
-          ->python_op_registration_trampoline(op, dispatch_key_, stack);
-      return;
-    }
+  const auto& schema = op.schema();
+  const auto num_arguments = schema.arguments().size();
 
-    const auto& schema = op.schema();
-    const auto num_arguments = schema.arguments().size();
-
-    // Otherwise, find a PyInterpreter on a Tensor IF if has Python key (which
-    // means it's a nontrivial tensor subclass)
-    for (const auto& ivalue : torch::jit::last(*stack, num_arguments)) {
-      if (ivalue.isTensor()) {
+  // Otherwise, find a PyInterpreter on a Tensor IF if has Python key (which
+  // means it's a nontrivial tensor subclass)
+  for (const auto& ivalue : torch::jit::last(*stack, num_arguments)) {
+    if (ivalue.isTensor()) {
+      auto* interpreter =
+          ivalue.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
+      if (interpreter &&
+          ivalue.unsafeToTensorImpl()->key_set().has(at::DispatchKey::Python)) {
+        (*interpreter)
+            ->python_op_registration_trampoline(op, dispatch_key_, stack);
+        return;
+      }
+    } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
+      // NB: use toListRef as it doesn't induce refcount bumps
+      // (toTensorListRef is not a thing)
+      for (const auto& nv : ivalue.toListRef()) {
+        if (nv.isNone()) {
+          continue;
+        }
         auto* interpreter =
-            ivalue.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
+            nv.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
         if (interpreter &&
-            ivalue.unsafeToTensorImpl()->key_set().has(
-                at::DispatchKey::Python)) {
+            nv.unsafeToTensorImpl()->key_set().has(at::DispatchKey::Python)) {
           (*interpreter)
               ->python_op_registration_trampoline(op, dispatch_key_, stack);
           return;
         }
-      } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
-        // NB: use toListRef as it doesn't induce refcount bumps
-        // (toTensorListRef is not a thing)
-        for (const auto& nv : ivalue.toListRef()) {
-          if (nv.isNone()) {
-            continue;
-          }
-          auto* interpreter =
-              nv.unsafeToTensorImpl()->pyobj_slot()->pyobj_interpreter();
-          if (interpreter &&
-              nv.unsafeToTensorImpl()->key_set().has(at::DispatchKey::Python)) {
-            (*interpreter)
-                ->python_op_registration_trampoline(op, dispatch_key_, stack);
-            return;
-          }
-        }
       }
     }
-
-    // Nothing requires the operator to be homed to a specific interpreter, so
-    // run it on the current interpreter
-
-    auto arguments = torch::jit::pop(*stack, op.schema().arguments().size());
-    py::gil_scoped_acquire g;
-    std::unique_ptr<EnableHermeticPyObject> g2;
-    if (is_torch_compile_python_kernel_) {
-      // In terms of the aten operation kernel is implemented by torch.compile,
-      // we cannot assume the python object is hermetic. So we need to disable
-      // the logic.
-    } else {
-      g2 = std::make_unique<EnableHermeticPyObject>();
-    }
-    auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
-    auto obj = py::reinterpret_steal<py::object>(PyObject_Call(
-        func_.ptr(getPyInterpreter()),
-        args_kwargs.first.ptr(),
-        args_kwargs.second.ptr()));
-    if (!obj) {
-      throw python_error();
-    }
-    pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
   }
-};
+
+  // Nothing requires the operator to be homed to a specific interpreter, so
+  // run it on the current interpreter
+
+  auto arguments = torch::jit::pop(*stack, op.schema().arguments().size());
+  py::gil_scoped_acquire g;
+  // Jan 2024: We're slated to get rid of multipy, so stop forcing hermetic
+  // mode unconditionally in all situations when you're using multipy.
+  // Eventually just delete this entirely.  (Note that you may break multipy
+  // anyway this way with dispatcher registered functions that require
+  // hermetic to be off.)
+#if defined(USE_DEPLOY)
+  EnableHermeticPyObject g2;
+#endif
+  auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
+  auto obj = py::reinterpret_steal<py::object>(PyObject_Call(
+      func_.ptr(getPyInterpreter()),
+      args_kwargs.first.ptr(),
+      args_kwargs.second.ptr()));
+  if (!obj) {
+    throw python_error();
+  }
+  pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
+}
 
 static torch::_RegisterOrVerify register_or_verify() {
   if (isMainPyInterpreter()) {
@@ -350,14 +342,14 @@ void initDispatchBindings(PyObject* module) {
              py::object func) {
             HANDLE_TH_ERRORS
             auto& lib = self.cast<torch::Library&>();
-            bool is_compiling_aten_op = true;
             lib.impl(
                 name,
                 torch::dispatch(
                     dispatch,
                     CppFunction::makeFromBoxedFunctor(
-                        std::make_unique<PythonKernelHolder>(
-                            func, dispatch, is_compiling_aten_op))),
+                        std::make_unique<
+                            torch::inductor::AOTIPythonKernelHolder>(
+                            func, dispatch, name))),
                 register_or_verify());
             python_registrations_[lib._resolve(name)].insert_or_assign(
                 dispatch,

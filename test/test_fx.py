@@ -50,13 +50,14 @@ from fx.test_source_matcher_utils import TestSourceMatcher  # noqa: F401
 
 from fx.test_gradual_type import AnnotationsTest  # noqa: F401
 from fx.test_gradual_type import TypeCheckerTest  # noqa: F401
-from typing import Any, Callable, Dict, NamedTuple, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, NamedTuple, List, Optional, Set, Tuple, Union
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_MACOS,
     IS_WINDOWS,
     find_library_location,
     run_tests,
+    skipIfTorchDynamo,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -1676,8 +1677,8 @@ class TestFX(JitTestCase):
         x = torch.randn(5, 5, 224, 224)
         shape_prop.ShapeProp(traced).propagate(x)
 
-        assert(all(node.meta['tensor_meta'].memory_format is torch.contiguous_format
-                   for node in traced.graph.nodes))
+        assert all(node.meta['tensor_meta'].memory_format is torch.contiguous_format
+                   for node in traced.graph.nodes)
 
         x_channels_last = x.contiguous(memory_format=torch.channels_last)
         traced.to(memory_format=torch.channels_last)
@@ -1733,8 +1734,8 @@ class TestFX(JitTestCase):
         traced_3d = symbolic_trace(test_mod_3d)
         x_3d = torch.randn(5, 5, 224, 224, 15)
         shape_prop.ShapeProp(traced_3d).propagate(x_3d)
-        assert(all(node.meta['tensor_meta'].memory_format is torch.contiguous_format
-                   for node in traced_3d.graph.nodes))
+        assert all(node.meta['tensor_meta'].memory_format is torch.contiguous_format
+                   for node in traced_3d.graph.nodes)
 
         x_channels_last_3d = x_3d.contiguous(memory_format=torch.channels_last_3d)
         traced_3d.to(memory_format=torch.channels_last_3d)
@@ -1875,13 +1876,13 @@ class TestFX(JitTestCase):
             def call_function(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
                 if target == torch.sigmoid:
                     return torch.neg(*args, **kwargs)
-                return super().call_function(n)
+                return super().call_function(n)  # noqa: F821
 
             def call_method(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
                 if target == 'neg':
                     call_self, *args_tail = args
                     return call_self.sigmoid(*args_tail, **kwargs)
-                return super().call_method(n)
+                return super().call_method(n)  # noqa: F821
 
         input = torch.randn(3, 4)
         result = NegSigmSwapInterpreter(gm).run(input)
@@ -1990,13 +1991,13 @@ class TestFX(JitTestCase):
             def call_function(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
                 if target == torch.sigmoid:
                     return torch.neg(*args, **kwargs)
-                return super().call_function(n)
+                return super().call_function(n)  # noqa: F821
 
             def call_method(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
                 if target == 'neg':
                     call_self, *args_tail = args
                     return call_self.sigmoid(*args_tail, **kwargs)
-                return super().call_method(n)
+                return super().call_method(n)  # noqa: F821
 
         transformed = NegSigmSwapXformer(gm).transform()
         input = torch.randn(3, 4)
@@ -2548,7 +2549,7 @@ class TestFX(JitTestCase):
                 return self.a.b, self.a.b.t(), self.a.b.view(12)
 
         traced = torch.fx.symbolic_trace(Foo())
-        assert(all('constant' not in node.target for node in traced.graph.nodes))
+        assert all('constant' not in node.target for node in traced.graph.nodes)
 
     def test_single_default_arg(self):
         class M(torch.nn.Module):
@@ -2824,7 +2825,7 @@ class TestFX(JitTestCase):
         mod_false = symbolic_trace(mod, concrete_args={'y': False})
         self.assertEqual(mod_true(3, True), 6)
         print(mod_true.code)
-        assert(any(i.target == torch._assert for i in mod_true.graph.nodes))
+        assert any(i.target == torch._assert for i in mod_true.graph.nodes)
         with self.assertRaises(AssertionError):
             mod_true(3, False)
         self.assertEqual(mod_false(3, False), 3)
@@ -3607,17 +3608,17 @@ class TestFX(JitTestCase):
             self.assertEqual(nf.graph.process_outputs(bare_fx(*nf.graph.process_inputs(val))), orig_out)
 
             assert num_flat_args == 0 or "tree_flatten_spec" in nf.code
-            assert(sum([i.op == 'placeholder' for i in nf.graph.nodes]) == num_flat_args)
+            assert sum([i.op == 'placeholder' for i in nf.graph.nodes]) == num_flat_args
 
             nf = symbolic_trace(nf)
             self.assertEqual(nf(val), orig_out)
             assert "tree_flatten_spec" not in nf.code
-            assert(sum([i.op == 'placeholder' for i in nf.graph.nodes]) == 1)
+            assert sum([i.op == 'placeholder' for i in nf.graph.nodes]) == 1
 
             nf = symbolic_trace(nf, concrete_args={'x': inp})
             self.assertEqual(nf(val), orig_out)
             assert num_flat_args == 0 or "tree_flatten_spec" in nf.code
-            assert(sum([i.op == 'placeholder' for i in nf.graph.nodes]) == num_flat_args)
+            assert sum([i.op == 'placeholder' for i in nf.graph.nodes]) == num_flat_args
 
             pickled = pickle.dumps(nf)
             nf = pickle.loads(pickled)
@@ -3708,7 +3709,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
                 return [('List', typing.List)]
 
             def process_inputs(self, *inputs):
-                assert(len(inputs) == 1)
+                assert len(inputs) == 1
                 return inputs[0]
 
         def f(a, b):
@@ -3743,7 +3744,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
                 return [('List', typing.List)]
 
             def process_inputs(self, *inputs):
-                assert(len(inputs) == 1)
+                assert len(inputs) == 1
                 return inputs[0]
 
         def f(a, b):
@@ -3772,7 +3773,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
                 return [('List', typing.List)]
 
             def process_inputs(self, *inputs):
-                assert(len(inputs) == 1)
+                assert len(inputs) == 1
                 return inputs[0]
 
             def generate_output(self, output_args):
@@ -4454,6 +4455,7 @@ TestFunctionalTracing.generate_tests()
 
 instantiate_device_type_tests(TestOperatorSignatures, globals())
 
+@skipIfTorchDynamo("too slow")
 @skipIfNoTorchVision
 class TestVisionTracing(JitTestCase):
     def setUp(self):

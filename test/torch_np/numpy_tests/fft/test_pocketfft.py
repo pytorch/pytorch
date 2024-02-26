@@ -47,6 +47,7 @@ class TestFFTShift(TestCase):
 @instantiate_parametrized_tests
 class TestFFT1D(TestCase):
     def setUp(self):
+        super().setUp()
         np.random.seed(123456)
 
     def test_identity(self):

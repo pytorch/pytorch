@@ -12,7 +12,7 @@ from torch.jit._recursive import wrap_cpp_module
 from torch.testing import FileCheck
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import set_default_dtype, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import set_default_dtype, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM, skipIfTorchDynamo
 from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_CUDA
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.utils import mkldnn as mkldnn_utils
@@ -35,6 +35,8 @@ def removeExceptions(graph):
     for n in graph.findAllNodes('prim::RaiseException'):
         n.destroy()
 
+
+@skipIfTorchDynamo("somehow causing hanging during python shutdown")
 class TestFreezing(JitTestCase):
     def test_freeze_module(self):
         class M(nn.Module):
@@ -646,7 +648,7 @@ class TestFreezing(JitTestCase):
         self.assertFalse(mf.hasattr('a'))
         self.assertTrue(mf.hasattr('b'))
         with self.assertRaisesRegex(AttributeError, "TestModule (.*) does not have a field with name '_forward'"):
-            mf._forward(x)
+            mf._forward(x)  # noqa: F821
 
     def test_freeze_module_with_inplace_mutable(self):
         class FreezeMe(torch.jit.ScriptModule):
@@ -1988,6 +1990,7 @@ class TestFreezing(JitTestCase):
             mod.forward(x), unscripted_mod.forward(x), atol=1e-5, rtol=1e-5
         )
 
+@skipIfTorchDynamo("somehow causing hanging during python shutdown")
 class TestFrozenOptimizations(JitTestCase):
     def setUp(self):
         super().setUp()
@@ -2979,6 +2982,7 @@ class TestFrozenOptimizations(JitTestCase):
         FileCheck().check("aten::detach").run(frozen_mod.graph)
         self.assertEqual(frozen_mod(inp), mod(inp))
 
+@skipIfTorchDynamo("somehow causing hanging during python shutdown")
 @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
 class TestMKLDNNReinplacing(JitTestCase):
     def setUp(self):

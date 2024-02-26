@@ -17,13 +17,15 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
 )
 from torch.testing._internal.common_utils import (
+    IS_ARM64,
     IS_CI,
     IS_WINDOWS,
+    parametrize,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -38,7 +40,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from inductor.test_torchinductor import (
     check_model,
-    check_model_cuda,
+    check_model_gpu,
     CommonTemplate,
     copy_tests,
     TestFailure,
@@ -89,14 +91,14 @@ if HAS_CPU:
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
 
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HAS_GPU and not TEST_WITH_ASAN:
 
-    class DynamicShapesCudaTests(TestCase):
-        common = check_model_cuda
-        device = "cuda"
+    class DynamicShapesGPUTests(TestCase):
+        common = check_model_gpu
+        device = GPU_TYPE
 
     copy_tests(
-        DynamicShapesCommonTemplate, DynamicShapesCudaTests, "cuda", test_failures
+        DynamicShapesCommonTemplate, DynamicShapesGPUTests, GPU_TYPE, test_failures
     )
 
 
@@ -106,7 +108,7 @@ class TestInductorDynamic(TestCase):
     def setUp(self):
         # HAS_CUDA also checks compute capability to skip tests
         # on older devices
-        if self.device_type == "cuda" and not HAS_CUDA:
+        if not HAS_GPU:
             self.skipTest("Triton not available")
         torch._dynamo.reset()
         super(TestCase, self).setUp()
@@ -295,6 +297,35 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([3.0], device=device))
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_matmul(self, device):
+        def f(x):
+            y = x.item()
+            return torch.ones(1, y, device=device) @ torch.ones(y, 1, device=device)
+
+        cf = torch.compile(fullgraph=True)(f)
+        arg = torch.tensor(5, device=device)
+        self.assertEqual(f(arg), cf(arg))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_reduction(self, device):
+        expect_fail = device == "cpu" and not IS_ARM64
+        try:
+
+            def f(x):
+                y = x.item()
+                return torch.ones(y, device=device).sum()
+
+            cf = torch.compile(fullgraph=True)(f)
+            arg = torch.tensor(5, device=device)
+            self.assertEqual(f(arg), cf(arg))
+        except Exception:
+            if not expect_fail:
+                raise
+        else:
+            if expect_fail:
+                self.fail("expected to fail, but actually passed")
+
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
@@ -351,6 +382,7 @@ class TestInductorDynamic(TestCase):
         res1 = opt(x1)
         self.assertEqual(ref1, res1)
 
+    # Need to comment: is xpu need this? if yes we may need to add onlyGPU
     @onlyCUDA
     def test_pad_dynamic(self, device):
         def get_same_padding(x: int, k: int, s: int, d: int):
@@ -416,6 +448,16 @@ class TestInductorDynamic(TestCase):
         a = torch.randn(32, 32, device=device)
         cfn = self.compile_fn(fn)
         self.assertEqual(fn(a), cfn(a))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_item_materialize(self, device):
+        def fn(x):
+            return x.sum(dim=0).view(4).tolist()
+
+        cfn = torch.compile(fullgraph=True)(fn)
+
+        a = torch.ones(3, 4, dtype=torch.int64, device=device)
+        self.assertEqual(cfn(a), fn(a))
 
     def test_abs(self, device):
         def fn(x, y):
@@ -496,6 +538,33 @@ class TestInductorDynamic(TestCase):
         actual = cfn(5)
         self.assertEqual(expect, actual)
 
+    @parametrize(
+        "op",
+        [
+            math.sqrt,
+            math.sin,
+            math.cos,
+            math.cosh,
+            math.sin,
+            math.sinh,
+            math.tan,
+            math.tanh,
+            math.asin,
+            math.acos,
+            math.atan,
+        ],
+    )
+    def test_math_ops(self, device, op):
+        def func(x, fn, a):
+            return x + fn(a)
+
+        cfunc = self.compile_fn(func, fullgraph=True)
+        x = torch.rand(10, device=device)
+        a = -1 if op in (math.asin, math.acos) else 12
+        expected = func(x, op, a)
+        output = cfunc(x, op, a)
+        self.assertEqual(output, expected)
+
 
 instantiate_device_type_tests(TestInductorDynamic, globals())
 
@@ -503,5 +572,5 @@ if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ASAN:
+    if (HAS_CPU or HAS_GPU) and not TEST_WITH_ASAN:
         run_tests(needs="filelock")

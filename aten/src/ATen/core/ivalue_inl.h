@@ -2185,6 +2185,23 @@ template <class T, IValue::enable_if_symint<T>>
 inline IValue::IValue(const std::vector<T>& v) : IValue() {
   *this = IValue(at::ArrayRef<T>(v));
 }
+template <class T, IValue::enable_if_symint<T>>
+inline IValue::IValue(std::vector<T>&& v) : IValue() {
+  auto vi = c10::asIntArrayRefSlowOpt(v);
+  if (vi.has_value()) {
+    // This list is entirely integers; ensure it is typed as
+    // an IntList so toIntList works
+    *this = IValue(*vi);
+  } else {
+    // This list has SymInts; type it as a SymInt
+    *this = IValue(impl::toList<c10::SymInt>(c10::List<c10::SymInt>()));
+    auto list = to<c10::List<c10::SymInt>>();
+    list.reserve(v.size());
+    for (auto& e : v) {
+      list.push_back(std::move(e));
+    }
+  }
+}
 template <class T, IValue::enable_if_list_is_ivalue_constructible<T>>
 inline IValue::IValue(const std::vector<T>& v) : IValue(c10::List<T>()) {
   auto list = to<c10::List<T>>();
@@ -2193,6 +2210,22 @@ inline IValue::IValue(const std::vector<T>& v) : IValue(c10::List<T>()) {
     list.push_back(e);
   }
 }
+
+template <class T, IValue::enable_if_list_is_ivalue_constructible<T>>
+inline IValue::IValue(std::vector<T>&& v) : IValue(c10::List<T>()) {
+  auto list = to<c10::List<T>>();
+  list.reserve(v.size());
+  if constexpr (std::is_same_v<T, bool>) {
+    for (auto e : v) {
+      list.push_back(e);
+    }
+  } else {
+    for (auto& e : v) {
+      list.push_back(std::move(e));
+    }
+  }
+}
+
 template <class T, IValue::enable_if_list_is_ivalue_constructible<T>>
 inline IValue::IValue(c10::OptionalArrayRef<T> v) : IValue() {
   if (v.has_value()) {

@@ -1,42 +1,15 @@
 # NOTE: This is a placeholder for iterating on export serialization schema design.
 #       Anything is subject to change and no guarantee is provided at this point.
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Dict, List, Optional, Tuple
 
+from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = (3, 1)
 TREESPEC_VERSION = 1
-
-# TODO (zhxchen17) Move to a separate file.
-class _Union:
-    @classmethod
-    def create(cls, **kwargs):
-        assert len(kwargs) == 1
-        return cls(**{**{f.name: None for f in fields(cls)}, **kwargs})  # type: ignore[arg-type]
-
-    def __post_init__(self):
-        assert sum(1 for f in fields(self) if getattr(self, f.name) is not None) == 1  # type: ignore[arg-type, misc]
-
-    @property
-    def value(self):
-        val = next((getattr(self, f.name) for f in fields(self) if getattr(self, f.name) is not None), None)  # type: ignore[arg-type]
-        assert val is not None
-        return val
-
-    @property
-    def type(self):
-        val_type = next((f.name for f in fields(self) if getattr(self, f.name) is not None), None)  # type: ignore[arg-type]
-        assert val_type is not None
-        return val_type
-
-    def __str__(self):
-        return self.__repr__()
-
-    def __repr__(self):
-        return f"{type(self).__name__}({self.type}={self.value})"
 
 
 class ScalarType(IntEnum):
@@ -119,6 +92,11 @@ class TensorMeta:
     strides: List[SymInt]
     storage_offset: int
     layout: Layout
+
+
+@dataclass
+class ScriptObjectMeta:
+    constant_name: Optional[str]
 
 
 # In most cases we will use the "as_name" field to store arguments which are
@@ -226,6 +204,7 @@ class Graph:
     # tensor, rather than following export schema and returning a singleton
     # list.
     is_single_tensor_return: bool = False
+    script_object_metas: Dict[str, ScriptObjectMeta] = field(default_factory=dict)
 
 
 @dataclass
@@ -253,11 +232,18 @@ class InputToTensorConstantSpec:
 
 
 @dataclass
+class InputToCustomObjSpec:
+    arg: CustomObjArgument
+    custom_obj_name: str
+
+
+@dataclass(repr=False)
 class InputSpec(_Union):
     user_input: UserInputSpec
     parameter: InputToParameterSpec
     buffer: InputToBufferSpec
     tensor_constant: InputToTensorConstantSpec
+    custom_obj: InputToCustomObjSpec
 
 
 @dataclass
@@ -288,7 +274,7 @@ class GradientToUserInputSpec:
     user_input_name: str
 
 
-@dataclass
+@dataclass(repr=False)
 class OutputSpec(_Union):
     user_output: UserOutputSpec
     loss_output: LossOutputSpec
@@ -336,11 +322,19 @@ class GraphModule:
     module_call_graph: List[ModuleCallEntry]
 
 
+# Invariant: Every time a change is made to the schema, one of the versions
+#            should be upadted.
+@dataclass
+class SchemaVersion:
+    major: int  # Major version number is bumped every time a breaking change is made.
+    minor: int  # Minor version number is bumped when a compatible change is made.
+
+
 @dataclass
 class ExportedProgram:
     graph_module: GraphModule
     # Key is the opset namespace (ex. aten), and value is the version number
     opset_version: Dict[str, int]
     range_constraints: Dict[str, RangeConstraint]
-    schema_version: int
+    schema_version: SchemaVersion
     dialect: str

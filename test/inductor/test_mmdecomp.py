@@ -5,6 +5,7 @@ import unittest
 from typing import List, Tuple, Union
 
 import torch
+from torch._inductor import config
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
@@ -139,6 +140,18 @@ class TestDecomp(NNTestCase):
                     run_comp_nocomp(
                         torch_baddbmm, tadd, t1, t2, alpha, beta, rtol=rtol, atol=atol
                     )
+
+    @unittest.skipIf(TEST_CUDA and not has_triton(), "CUDA tests require triton")
+    @config.patch(coordinate_descent_tuning=True)
+    def test_bmm_batch2_last_dim_size_is_one(self, device):
+        fudge = 3
+        rtol = default_rtol[torch.float32] * fudge
+        atol = default_atol[torch.float32] * fudge
+
+        t1 = torch.randn(1, 32, 2, device=device)
+        t2 = torch.randn(1, 2, 1, device=device)
+
+        run_comp_nocomp(torch_bmm, t1, t2, rtol=rtol, atol=atol)
 
     @unittest.skipIf(TEST_CUDA and not has_triton(), "CUDA tests require triton")
     @parametrize("dtype", [torch.float, torch.bfloat16, torch.int])

@@ -5,6 +5,7 @@ from typing import Collection, Dict, List, Mapping, Optional, Set, Tuple, Union
 
 __all__ = [
     "ConstantArgument",
+    "CustomObjArgument",
     "ExportBackwardSignature",
     "ExportGraphSignature",
     "InputKind",
@@ -13,6 +14,7 @@ __all__ = [
     "OutputSpec",
     "SymIntArgument",
     "TensorArgument",
+    "CustomObjArgument",
 ]
 
 
@@ -27,11 +29,18 @@ class SymIntArgument:
 
 
 @dataclasses.dataclass
+class CustomObjArgument:
+    name: str
+
+
+@dataclasses.dataclass
 class ConstantArgument:
     value: Union[int, float, bool, None]
 
 
-ArgumentSpec = Union[TensorArgument, SymIntArgument, ConstantArgument]
+ArgumentSpec = Union[
+    TensorArgument, SymIntArgument, ConstantArgument, CustomObjArgument
+]
 
 
 class InputKind(Enum):
@@ -39,6 +48,7 @@ class InputKind(Enum):
     PARAMETER = auto()
     BUFFER = auto()
     CONSTANT_TENSOR = auto()
+    CUSTOM_OBJ = auto()
 
 
 @dataclasses.dataclass
@@ -48,7 +58,10 @@ class InputSpec:
     target: Optional[str]
 
     def __post_init__(self):
-        assert isinstance(self.arg, (TensorArgument, SymIntArgument, ConstantArgument))
+        assert isinstance(
+            self.arg,
+            (TensorArgument, SymIntArgument, ConstantArgument, CustomObjArgument),
+        )
 
 
 class OutputKind(Enum):

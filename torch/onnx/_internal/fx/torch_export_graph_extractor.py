@@ -5,13 +5,16 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Mapping, Optional, Sequence, Union
+from typing import Any, Callable, Mapping, Optional, Sequence, TYPE_CHECKING, Union
 
 import torch._dynamo
 import torch.fx
 import torch.onnx
 from torch.onnx._internal import _beartype, exporter, io_adapter
 from torch.onnx._internal.diagnostics import infra
+
+if TYPE_CHECKING:
+    from torch.export.exported_program import ExportedProgram
 
 
 class TorchExport(exporter.FXGraphExtractor):
@@ -31,7 +34,7 @@ class TorchExport(exporter.FXGraphExtractor):
     def generate_fx(
         self,
         options: exporter.ResolvedExportOptions,
-        model: "ExportedProgram",  # type: ignore[name-defined]
+        model: "ExportedProgram",  # type: ignore[override]
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ) -> torch.fx.GraphModule:

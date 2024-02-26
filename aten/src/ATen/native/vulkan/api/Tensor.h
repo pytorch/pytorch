@@ -5,8 +5,7 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Context.h>
-#include <c10/core/MemoryFormat.h>
-#include <c10/util/accumulate.h>
+#include <ATen/native/vulkan/api/Types.h>
 
 namespace at {
 namespace native {
@@ -35,8 +34,8 @@ class vTensorStorage final {
       api::Context* context,
       const api::StorageType storage_type,
       const api::GPUMemoryLayout gpu_memory_layout,
-      const IntArrayRef sizes,
-      const at::ScalarType dtype);
+      const std::vector<int64_t>& sizes,
+      const api::ScalarType dtype);
 
   vTensorStorage(const vTensorStorage&) = delete;
   vTensorStorage& operator=(const vTensorStorage&) = delete;
@@ -89,38 +88,22 @@ class vTensor final {
   // Default constructor
   vTensor(
       api::Context* context,
-      IntArrayRef sizes,
-      const c10::ScalarType dtype,
-      const api::StorageType storage_type,
-      const api::GPUMemoryLayout memory_layout);
+      const std::vector<int64_t>& sizes,
+      const api::ScalarType dtype,
+      const api::StorageType storage_type = api::StorageType::TEXTURE_3D,
+      const api::GPUMemoryLayout memory_layout =
+          api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED);
 
   // Default constructor for quantized vTensor
   vTensor(
       api::Context* const context,
-      const IntArrayRef sizes,
+      const std::vector<int64_t>& sizes,
       double q_scale,
       int64_t q_zero_point,
-      const c10::ScalarType dtype,
-      const api::StorageType storage_type,
-      const api::GPUMemoryLayout memory_layout);
-
-  // Allows construction of vTensor from aten Tensor params
-  vTensor(
-      api::Context* context,
-      IntArrayRef sizes,
-      const c10::ScalarType dtype = c10::kFloat,
+      const api::ScalarType dtype,
       const api::StorageType storage_type = api::StorageType::TEXTURE_3D,
-      const c10::MemoryFormat memory_format = c10::MemoryFormat::Contiguous);
-
-  // Allows construction of quantized vTensor from aten Tensor params
-  vTensor(
-      api::Context* const context,
-      const IntArrayRef sizes,
-      double q_scale,
-      int64_t q_zero_point,
-      const c10::ScalarType dtype = c10::kQUInt8,
-      const api::StorageType storage_type = api::StorageType::TEXTURE_3D,
-      const c10::MemoryFormat memory_format = c10::MemoryFormat::Contiguous);
+      const api::GPUMemoryLayout memory_layout =
+          api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED);
 
   // Copy Constructor and Assignment; Ideally copying  would be disabled
   // (see the reasoning for move assignment below) but it is required for
@@ -142,19 +125,19 @@ class vTensor final {
 
  private:
   // Tensor Options
-  c10::ScalarType dtype_;
+  api::ScalarType dtype_;
 
   // GPU specific memory layout qualifier
   api::GPUMemoryLayout memory_layout_;
 
   // Sizes and Strides
-  c10::SmallVector<int64_t, 6u> sizes_;
-  c10::SmallVector<int64_t, 6u> strides_;
+  std::vector<int64_t> sizes_;
+  std::vector<int64_t> strides_;
 
   // Storage Dimensions. When stored on the GPU, one dimension will be aligned
   // to the next multiple of 4 in order to take advantage of vec4 data types.
-  c10::SmallVector<int64_t, 6u> gpu_sizes_;
-  c10::SmallVector<int64_t, 6u> gpu_strides_;
+  std::vector<int64_t> gpu_sizes_;
+  std::vector<int64_t> gpu_strides_;
 
   // A Vulkan uniform buffer containing sizes and strides of the GPU buffer that
   // can be passed into a shader.
@@ -219,17 +202,18 @@ class vTensor final {
   }
 
   /*
-   * Extract a ScalarType from the TensorOptions member
+   * Extract an `api::ScalarType` from the TensorOptions member
    */
-  inline c10::ScalarType dtype() const {
+  inline api::ScalarType dtype() const {
     return dtype_;
   }
 
   /*
-   * Get a c10::ScalarType that corresponds to the image format of the texture
+   * Get an `api::ScalarType` that corresponds to the image format of the
+   * texture
    */
-  inline c10::ScalarType texture_dtype() const {
-    return api::c10_scalartype(view_->texture_format());
+  inline api::ScalarType texture_dtype() const {
+    return api::element_scalartype(view_->texture_format());
   }
 
   inline api::GPUMemoryLayout gpu_memory_layout() const {
@@ -240,19 +224,19 @@ class vTensor final {
     return static_cast<uint32_t>(memory_layout_);
   }
 
-  inline IntArrayRef sizes() const {
+  inline const std::vector<int64_t>& sizes() const {
     return sizes_;
   }
 
-  inline IntArrayRef strides() const {
+  inline const std::vector<int64_t>& strides() const {
     return strides_;
   }
 
-  inline IntArrayRef gpu_sizes() const {
+  inline const std::vector<int64_t>& gpu_sizes() const {
     return gpu_sizes_;
   }
 
-  inline IntArrayRef gpu_strides() const {
+  inline const std::vector<int64_t>& gpu_strides() const {
     return gpu_strides_;
   }
 
@@ -303,11 +287,11 @@ class vTensor final {
   }
 
   inline size_t numel() const {
-    return c10::multiply_integers(sizes());
+    return api::utils::multiply_integers(sizes());
   }
 
   inline size_t nbytes() const {
-    return c10::elementSize(dtype()) * numel();
+    return api::element_size(dtype()) * numel();
   }
 
   /*
@@ -321,7 +305,7 @@ class vTensor final {
    * Return nbytes but bnased on gpu_sizes_ instead of sizes_
    */
   inline VkDeviceSize gpu_nbytes() const {
-    return c10::elementSize(dtype()) * gpu_numel();
+    return api::element_size(dtype()) * gpu_numel();
   }
 };
 

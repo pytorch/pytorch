@@ -403,7 +403,7 @@ def generate_calc_product(constraint, counter):
     for p in all_possibilities:
         p = list(p)
         # this tells us there is a dynamic variable
-        contains_dyn = not(all(constraint.op == op_neq for constraint in p))
+        contains_dyn = not all(constraint.op == op_neq for constraint in p)
         if contains_dyn:
             mid_var = [Dyn]
             total_constraints = lhs + mid_var + rhs

@@ -46,8 +46,9 @@ def quantization_pertensor_hook(
     process_group: dist.ProcessGroup, bucket: dist.GradBucket
 ) -> torch.futures.Future[torch.Tensor]:
     """
-    Applies the ``torch.quantize_per_tensor`` logic to DDP using ``allgather``
-    protocol. Workers first allgather the scale and zero point of their own
+    Apply ``torch.quantize_per_tensor`` logic to DDP using ``allgather`` protocol.
+
+    Workers first allgather the scale and zero point of their own
     ``GradBucket`` prior to the quantization. After all workers have that information,
     the first ``then`` callback called ``quantize_and_allgather`` quantizes worker's
     own gradient tensor, and uses ``allgather`` to communicate these across all workers.
@@ -120,8 +121,9 @@ def quantization_perchannel_hook(
     process_group: dist.ProcessGroup, bucket: dist.GradBucket, bucket_size=512
 ) -> torch.futures.Future[torch.Tensor]:
     """
-    Applies the ``torch.quantize_per_channel`` logic to DDP using ``allgather``
-    protocol. Compared to pertensor, the main motivation of perchannel is
+    Apply``torch.quantize_per_channel`` logic to DDP using ``allgather`` protocol.
+
+    Compared to per-tensor, the main motivation of per-channel is
     for considerably large tensors such as a tensor that contains 6 million
     elements quantizing per a bucket size of 512 (or 128) elements may significantly
     increase the resolution.

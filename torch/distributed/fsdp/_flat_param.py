@@ -1423,9 +1423,7 @@ class FlatParamHandle:
         """
         unsharded_size = self.flat_param._unpadded_unsharded_size
         flat_param_part = padded_unsharded_flat_param[: unsharded_size.numel()]
-        flat_param_part_view = flat_param_part.view(
-            unsharded_size
-        )  # this `.view()` is not autograd visible
+        # slicing [:] is not visible to autograd because of .data
         self.flat_param.data = flat_param_part
         in_forward = self._training_state == HandleTrainingState.FORWARD
         in_pre_backward = self._training_state == HandleTrainingState.BACKWARD_PRE
@@ -1864,6 +1862,7 @@ class FlatParamHandle:
         return views
 
     @no_type_check
+    @torch.enable_grad()
     def _use_unsharded_views(self, as_params: bool) -> None:
         """
         Unflatten the unsharded flat parameter by setting the original parameter variables to be views into it.
@@ -1874,6 +1873,12 @@ class FlatParamHandle:
                 the original parameters only as ``Tensor`` s. ``False`` should
                 be used during forward/backward computation and when hiding the
                 original parameters from :meth:`nn.Module.named_parameters`.
+
+        Note:
+            when prefetching for next forward, current forward may be
+            annotated with `@torch.no_grad()`
+            `@torch.enable_grad()` ensures non-empty `view.grad_fn`
+            otherwise `_post_backward_hook` will not get called
         """
         flat_param = self.flat_param
         self._check_unsharded(flat_param)
@@ -2706,13 +2711,13 @@ def _warn_use_fake_reduce(log: logging.Logger, warning: str):
 
 
 def _same_storage(a, b):
-    return a._typed_storage()._data_ptr() == b._typed_storage().data_ptr()
+    return a.untyped_storage().data_ptr() == b.untyped_storage().data_ptr()
 
 
 def _same_storage_size(a: torch.Tensor, b: int):
-    return a._typed_storage()._size() == b
+    return a.untyped_storage().size() // a.element_size() == b
 
 
 def _storage_size_allocated(tensor: Tensor):
-    storage_size: int = tensor._typed_storage()._size()
+    storage_size: int = tensor.untyped_storage().size()
     return storage_size > 0

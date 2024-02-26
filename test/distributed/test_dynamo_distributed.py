@@ -269,6 +269,27 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
         opt_model()
 
 
+    @patch.object(config, "optimize_ddp", True)
+    def test_symbol_splitting(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight1 = nn.Parameter(torch.randn(512, 512))
+                self.weight2 = nn.Parameter(torch.randn(512, 512))
+
+            def forward(self, x):
+                x = torch.cat([x, x])
+                y = x @ self.weight1
+                z = x + y @ self.weight2
+                return z
+
+        model = Model()
+        model = FakeDDP(model)
+
+        opt_model = torch.compile(dynamic=True)(model)
+        opt_model(torch.randn(20, 512))
+
+
 # Are these tests failing?  Check and see if TestFakeDistributedSingleProc has a
 # single process version; if it's just a problem in the Dynamo distributed
 # optimizer, you should be able to repro it single process!
