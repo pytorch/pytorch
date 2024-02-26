@@ -438,6 +438,7 @@ def meta__cslt_sparse_mm(
     transpose_result: bool = False,
 ):
     assert dense_B.dtype in {
+        torch.float32,
         torch.float16,
         torch.bfloat16,
         torch.int8,
@@ -454,9 +455,11 @@ def meta__cslt_sparse_mm(
         assert m == bias.size(0)
 
     if out_dtype is not None:
-        assert (
-            is_int8_input_type and out_dtype == torch.float16
-        ), "out_dtype is only supported for i8i8->fp16 matmul"
+        assert is_int8_input_type and out_dtype in {
+            torch.float16,
+            torch.bfloat16,
+            torch.int32,
+        }, "out_dtype is only supported for i8i8->fp16, bf16, or i32 matmul"
     output_shape = (n, m) if transpose_result else (m, n)
     result = dense_B.new_empty(output_shape, dtype=out_dtype)
     return result
@@ -591,6 +594,11 @@ def assert_async(val):
 
 @register_meta(aten._assert_async.msg)
 def assert_async_meta(val, assert_msg):
+    return
+
+
+@register_meta(aten._print.default)
+def print_meta(s):
     return
 
 
@@ -3070,6 +3078,7 @@ def register_meta_foreach(ops):
         aten._foreach_log1p,
         aten._foreach_log2,
         aten._foreach_neg,
+        aten._foreach_norm,
         aten._foreach_reciprocal,
         aten._foreach_round,
         aten._foreach_sigmoid,
@@ -5351,12 +5360,15 @@ def meta__flash_attention_forward(
     return_debug_mask: bool,
     scale: Optional[float] = None,
 ):
-    batch_size = query.size(0)
-    max_seqlen_batch_q = query.size(1)
-    num_heads = query.size(2)
-    head_dim = query.size(3)
-
-    max_seqlen_batch_k = key.size(1)
+    # NB: there are two underlying paths:
+    # 1. normal dense path; expect 4D inputs of shape (batch_size, seqlen, num_heads, head_dim)
+    # 2. varseqlen path; expect 3D inputs of shape (total, num_heads, head_dim) where total
+    #    includes all batch item sequences. cum_seq_q / cum_seq_k contain offsets into total
+    batch_size = query.size(0) if cum_seq_q is None else cum_seq_q.numel() - 1
+    max_seqlen_batch_q = query.size(1) if cum_seq_q is None else max_q
+    max_seqlen_batch_k = key.size(1) if cum_seq_k is None else max_k
+    num_heads = query.size(-2)
+    head_dim = query.size(-1)
 
     # Cuda Path
     attention = torch.empty_like(query)
@@ -6206,9 +6218,16 @@ _create_unary_float_meta_func(aten.special_scaled_modified_bessel_k1)
 
 _create_binary_float_meta_func(aten.special_chebyshev_polynomial_t)
 _create_binary_float_meta_func(aten.special_chebyshev_polynomial_u)
+_create_binary_float_meta_func(aten.special_chebyshev_polynomial_v)
+_create_binary_float_meta_func(aten.special_chebyshev_polynomial_w)
+_create_binary_float_meta_func(aten.special_shifted_chebyshev_polynomial_t)
+_create_binary_float_meta_func(aten.special_shifted_chebyshev_polynomial_u)
+_create_binary_float_meta_func(aten.special_shifted_chebyshev_polynomial_v)
+_create_binary_float_meta_func(aten.special_shifted_chebyshev_polynomial_w)
 _create_binary_float_meta_func(aten.special_hermite_polynomial_h)
 _create_binary_float_meta_func(aten.special_hermite_polynomial_he)
 _create_binary_float_meta_func(aten.special_laguerre_polynomial_l)
+_create_binary_float_meta_func(aten.special_legendre_polynomial_p)
 
 
 # We must also trigger meta registrations from PrimTorch ref

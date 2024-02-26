@@ -10205,7 +10205,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         from torch.library import Library, impl
         global _my_storage
 
-        my_lib = Library("my_lib", "DEF")
+        my_lib = Library("my_lib", "DEF")  # noqa: TOR901
         my_lib.define('my_func() -> None')
 
         a = torch.tensor([1.])
