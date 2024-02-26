@@ -2073,6 +2073,7 @@ class GraphModule(torch.nn.Module):
             t3 = t1 + t2
 
         func()
+
     def test_to(self):
         @torch.compile(backend="eager")
         def fn():
