@@ -1647,7 +1647,7 @@ def main():
             which_shard, num_shards = get_sharding_opts(options)
             shards = calculate_shards(
                 num_shards,
-                selected_tests,
+                raw_tests,
                 test_file_times_dict,
                 test_class_times=test_class_times_dict,
                 must_serial=must_serial,
