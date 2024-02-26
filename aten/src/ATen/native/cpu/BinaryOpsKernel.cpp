@@ -2,6 +2,7 @@
 #include <ATen/native/BinaryOps.h>
 
 #include <cmath>
+#include <limits>
 
 #include <ATen/Dispatch.h>
 #include <ATen/Dispatch_v2.h>
@@ -972,7 +973,9 @@ void fmod_kernel(TensorIteratorBase& iter) {
   if (isIntegralType(iter.common_dtype(), /*includeBool=*/false)) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "fmod_cpu", [&]() {
       cpu_kernel(iter, [=](scalar_t x, scalar_t d) -> scalar_t {
-        TORCH_CHECK(d != 0, "ZeroDivisionError");
+        // x % d is undefined if d == 0 or if x / d is not representable in the result type
+        TORCH_CHECK(d != 0 && !(x == std::numeric_limits<scalar_t>::min() && d == -1),
+                    "Invalid input to modulo operation.");
         return x % d;
       });
     });

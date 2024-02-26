@@ -522,6 +522,19 @@ class TestTorchDeviceType(TestCase):
                 dims_small = [ds] + dims_small
         return (dims_small, dims_large, dims_full)
 
+    def test_fmod_raise_on_invalid_input(self):
+        # This used to throw SIGFPE for -2**63 % -1
+        # see https://github.com/pytorch/pytorch/issues/120597
+        with self.assertRaisesRegex(RuntimeError, "^Invalid input to modulo operation."):
+            x = torch.tensor([-9223372036854775808], dtype=torch.int64)
+            y = torch.tensor([[-1]], dtype=torch.int64)
+            _ = torch.fmod(x, y)
+
+        with self.assertRaisesRegex(RuntimeError, "^Invalid input to modulo operation."):
+            x = torch.tensor([-9223372036854775808], dtype=torch.int64)
+            y = torch.tensor([[0]], dtype=torch.int64)
+            _ = torch.fmod(x, y)
+
     # collected tests of ops that used scalar_check in Declarations.cwrap for
     # correctness
     def test_scalar_check(self, device):
