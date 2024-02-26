@@ -5,8 +5,9 @@ Notice that there is no copy_ to copy the mutated values back to the input. Why?
 """
 
 """
-git pull && TORCH_COMPILE_DEBUG=1 python3 test_resize_foreach_copy.py >output.txt 2>&1
+TORCH_COMPILE_DEBUG=1 python3 test_resize_foreach_copy.py >output.txt 2>&1
 """
+import functools
 import contextlib
 import logging
 import os
@@ -40,26 +41,28 @@ class TestModule(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.x1 = torch.nn.Parameter(torch.randn(4, 4))
+        self.x1.register_hook(functools.partial(pre_backward, self))  # do alloc_storage before backward
+        self.x1.register_post_accumulate_grad_hook(post_backward_hook)  # do free_storage after backward
 
-    def forward(x3):
+    def forward(self, x3):
         unsafe_alloc_storage(self.x1)
         x5 = self.x1[:]
         with torch.no_grad():
-            torch._foreach_copy_([x5], [self.x3])
-        out = torch.matmul(x5, x5)
+            torch._foreach_copy_([x5], [x3])
+        out = self.x1 * self.x1
         unsafe_free_storage(self.x1)
-        out.register_hook(functools.partial(pre_backward, mod))  # in order to do alloc_storage before backward
         return out
 
+device = "cpu"
 
 if __name__ == "__main__":
-    x3 = torch.randn(4, 4)
+    x3 = torch.randn(4, 4, device=device, requires_grad=True)
     mod = TestModule()
-    mod.x1.register_post_accumulate_grad_hook(post_backward_hook)  # in order to do free_storage after backward
+    mod = mod.to(device)
 
     def compiler_fn(gm):
         print("Compiling autograd?")
-        return torch.compile(gm, backend="inductor", fullgraph=True)
+        return torch.compile(gm, backend="aot_eager", fullgraph=True)
     with compiled_autograd.enable(compiler_fn):
-        out1 = torch.compile(mod, backend="inductor", fullgraph=True)(x3)
-        out1.sum().backward()
+        out = torch.compile(mod, backend="aot_eager", fullgraph=True)(x3)
+        out.sum().backward()
