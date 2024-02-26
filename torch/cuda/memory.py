@@ -17,7 +17,7 @@ from torch.types import Device
 from . import _get_device_index, _get_nvml_device_index, _lazy_init, is_initialized
 
 from ._memory_viz import memory as _memory, segments as _segments
-from ._utils import _dummy_type
+from .._utils import _dummy_type
 
 __all__ = [
     "caching_allocator_alloc",
