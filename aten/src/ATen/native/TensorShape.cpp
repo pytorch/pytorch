@@ -509,7 +509,7 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
     }
   }
   // to_broadcast conserves is_coalesced property iff only the last
-  // sparse dimensions are expaned. Possible expansion of dense
+  // sparse dimensions are expanded. Possible expansion of dense
   // dimensions can be discarded as it does not affect the is_coalesce
   // property.
   bool is_coalesced = self.dim()==0 || (self.is_coalesced() && (max_unchanged_dim < min_broadcast_dim || min_broadcast_dim == -1));
@@ -1444,16 +1444,12 @@ static _permute_size_stride_estimation(const Tensor& self, IntArrayRef dims) {
 }
 
 Tensor permute(const Tensor& self, IntArrayRef dims) {
-  DimVector new_sizes, new_strides;
-  std::vector<int64_t> _;
-  std::tie(new_sizes, new_strides, _) = _permute_size_stride_estimation(self, dims);
+  auto [new_sizes, new_strides, _] = _permute_size_stride_estimation(self, dims);
   return self.as_strided(new_sizes, new_strides);
 }
 
 Tensor permute_sparse_coo(const Tensor& self, IntArrayRef dims) {
-  DimVector new_sizes, _;
-  std::vector<int64_t> wrapped_dims;
-  std::tie(new_sizes, _, wrapped_dims) = _permute_size_stride_estimation(self, dims);
+  auto [new_sizes, _, wrapped_dims] = _permute_size_stride_estimation(self, dims);
 
   const auto ndim = self.dim();
   const auto sparse_ndim = self.sparse_dim();
@@ -1827,7 +1823,7 @@ Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index) {
   auto size = self.sym_sizes()[dim];
   // Note: `size < -index` is not equivalent to `size <= -1 - index` if index is INT64_MIN
   // For std::numeric_limits<int64_t>::min() result of unary minus is undefined by the standard
-  // but in practice is equal to self. On the other hand, indexing wraping is valid for all
+  // but in practice is equal to self. On the other hand, indexing wrapping is valid for all
   // negative int64_t values, as x[INT64_MIN] is the same as x[INT64_MAX]
   if (size <= -1 - index || size <= index) {
     if (self.has_names() && self.names()[dim] != Dimname::wildcard()) {
@@ -1878,7 +1874,7 @@ Tensor select_backward_symint(const Tensor& grad, c10::SymIntArrayRef input_size
 Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& index) {
   /*
     Algorithm:
-    index - a 1-D tensor of indicies with shape (n,)
+    index - a 1-D tensor of indices with shape (n,)
     self - sparse tensor, its shape is sizes = sparse_shape + dense_shape
       indices - 2-D tensor of indices, shape is (sparse_dims, nnz)
       values - (1+len(dense_shape))-D tensor of values, shape is (nnz,) + dense_shape
@@ -2023,15 +2019,13 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
             return std::make_tuple(dim_indices, at::arange(nnz, dim_indices.options()), nneg_index);
           }
           else {
-            Tensor sorted_dim_indices, sorted_dim_indices_idx;
-            std::tie(sorted_dim_indices, sorted_dim_indices_idx) = dim_indices.sort();
+            auto [sorted_dim_indices, sorted_dim_indices_idx] = dim_indices.sort();
             return std::make_tuple(sorted_dim_indices, sorted_dim_indices_idx, nneg_index);
           }
         }
         // sort nneg_index to binary search into it
         else {
-          Tensor sorted_nneg_index, sorted_nneg_index_idx;
-          std::tie(sorted_nneg_index, sorted_nneg_index_idx) = nneg_index.sort();
+          auto [sorted_nneg_index, sorted_nneg_index_idx] = nneg_index.sort();
           return std::make_tuple(sorted_nneg_index, sorted_nneg_index_idx, dim_indices);
         }
       }();
@@ -2357,8 +2351,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         return std::make_tuple(src_idx, src_idx_offsets);
       }();
 
-      Tensor idx_selected, src_selected;
-      std::tie(idx_selected, src_selected) = [&](
+      auto [idx_selected, src_selected] = [&](
           int64_t grain_size = at::internal::GRAIN_SIZE
       ) -> std::tuple<Tensor, Tensor> {
         const auto thread_offset = [&]() {
@@ -2429,8 +2422,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
     const auto get_result_small_nnz_small_index = [&]()
       -> Tensor {
       const auto dim_indices_in_inner_loop = nnz >= index_len;
-      Tensor outer, inner;
-      std::tie(outer, inner) = [&]() -> std::tuple<Tensor, Tensor> {
+      auto [outer, inner] = [&]() -> std::tuple<Tensor, Tensor> {
         if (dim_indices_in_inner_loop) {
           return std::make_tuple(nneg_index, dim_indices);
         }
@@ -2940,11 +2932,11 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   }
 
   // Sparse COO is an exceptional sparse format as it allows transpose
-  // to be a view operation which is a convinient property for
+  // to be a view operation which is a convenient property for
   // in-place operations. For other sparse formats, the in-place
   // transpose would not be possible without shuffling the specified
   // values. So we don't support this as it would defeat the purpose
-  // of in-place opeations of being memory-efficient.
+  // of in-place opreations of being memory-efficient.
   if (self.is_sparse()) {
     return sparse_transpose_(self, dim0, dim1);
   }
@@ -3211,13 +3203,11 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 // dim is present if squeezing a single dimension and absent if squeezing all dimensions
 Tensor squeeze_qtensor(const Tensor& self, c10::OptionalIntArrayRef dims) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
-  SymDimVector sizes;
-  SymDimVector strides;
   const auto ndim = self.dim();
   auto mask = dims.has_value()
       ? dim_list_to_bitset(dims, self.dim())
       : std::bitset<dim_bitset_size>((1ull << self.dim()) - 1);
-  std::tie(sizes, strides) = inferSqueezeGeometry(self, mask);
+  auto [sizes, strides] = inferSqueezeGeometry(self, mask);
   if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
     const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
     auto axis = per_channel_quantizer->axis();

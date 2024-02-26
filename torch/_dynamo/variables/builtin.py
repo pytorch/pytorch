@@ -481,7 +481,7 @@ class BuiltinVariable(VariableTracker):
         name = self.fn.__name__
         assert self.fn.__module__ == "builtins"
         assert name not in codegen.tx.f_globals, "shadowed global"
-        return [codegen.create_load_global(name, False, add=True)]
+        codegen.append_output(codegen.create_load_global(name, False, add=True))
 
     def constant_args(self, *args, **kwargs):
         return check_constant_args(args, kwargs)
@@ -1323,7 +1323,9 @@ class BuiltinVariable(VariableTracker):
         elif isinstance(obj, TorchInGraphFunctionVariable):
             # Get OpOverload from an OpOverloadPacket, e.g., torch.ops.aten.add.default.
             member = getattr(obj.value, name)
-            if trace_rules.is_aten_op_or_tensor_method(member):
+            if isinstance(
+                member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
+            ) and trace_rules.is_aten_op_or_tensor_method(member):
                 return TorchInGraphFunctionVariable(member, **options)
         elif isinstance(obj, (PythonModuleVariable, DummyModule)):
             if obj.is_torch:

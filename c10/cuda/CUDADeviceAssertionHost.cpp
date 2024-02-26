@@ -6,13 +6,12 @@
 #include <c10/util/irange.h>
 #include <cuda_runtime.h>
 
-#include <algorithm>
-#include <iostream>
 #include <memory>
-#include <sstream>
-#include <stdexcept>
 #include <string>
+#ifdef TORCH_USE_CUDA_DSA
+#include <chrono>
 #include <thread>
+#endif
 
 #define C10_CUDA_CHECK_WO_DSA(EXPR)                                 \
   do {                                                              \
