@@ -727,8 +727,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                         # If we really escape from a block and the current
                         # instruction is not in another block, then there
                         # should be no other nested blocks that we are in.
-                        # assert len(self.block_stack) == 1  # this is no longer true?
-                        # pytest -rs -sv test/functorch/test_eager_transforms.py -k test_grad_deprecated_api_cpu
+                        assert len(self.block_stack) == 1
                         self.block_stack.pop()
                 elif (
                     # current instruction is in the previous block
