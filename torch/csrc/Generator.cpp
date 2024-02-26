@@ -25,10 +25,6 @@
 #include <ATen/mps/MPSGeneratorImpl.h>
 #endif
 
-#ifdef USE_XPU
-#include <ATen/xpu/XPUGeneratorImpl.h>
-#endif
-
 using namespace at;
 using namespace torch;
 
@@ -76,12 +72,9 @@ static PyObject* THPGenerator_pynew(
     self->cdata = make_generator<MPSGeneratorImpl>();
   }
 #endif
-#ifdef USE_XPU
   else if (device.type() == at::kXPU) {
-    self->cdata = make_generator<XPUGeneratorImpl>(device.index());
-  }
-#endif
-  else if (device.type() == at::kIPU) {
+    self->cdata = at::detail::getXPUHooks().getXPUGenerator(device.index());
+  } else if (device.type() == at::kIPU) {
     self->cdata = at::detail::getIPUHooks().newIPUGenerator(device.index());
   } else if (device.type() == at::kPrivateUse1) {
     self->cdata = at::GetGeneratorForPrivateuse1(device.index());
