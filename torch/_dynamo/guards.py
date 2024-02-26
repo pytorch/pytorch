@@ -497,7 +497,9 @@ class GuardBuilder(GuardBuilderBase):
             self.EQUALS_MATCH(guard)
 
     def FULLGRAPH(self, guard: Guard):
-        code = [f"___check_current_fullgraph({torch._dynamo.eval_frame.guarded_backend_cache.nopython})"]
+        code = [
+            f"___check_current_fullgraph({torch._dynamo.eval_frame.guarded_backend_cache.nopython})"
+        ]
         self._produce_guard_code(guard, code)
 
     def NN_MODULE(self, guard: Guard):

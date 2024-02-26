@@ -14,8 +14,10 @@ except ModuleNotFoundError:
 def is_compiling() -> bool:
     return False
 
+
 def is_fullgraph_compiling() -> bool:
     return False
+
 
 def wrap_inline(fn):
     """

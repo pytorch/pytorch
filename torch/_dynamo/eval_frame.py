@@ -123,6 +123,7 @@ def check_current_backend(backend_obj_id: int):
         or current_backend == cached_backends.get(backend_obj_id, None)
     )
 
+
 def check_nopython(ref_nopython: bool):
     return guarded_backend_cache.nopython is ref_nopython
 
@@ -339,7 +340,9 @@ class _TorchDynamoContext:
         self.export = export
         self.compiler_config = compiler_config
         self.cleanup_fns: List[Callable[[], Any]] = []
-        self.enter_exit_hooks = [backend_cache_manager(self.callback, nopython=nopython)]
+        self.enter_exit_hooks = [
+            backend_cache_manager(self.callback, nopython=nopython)
+        ]
         patch_fn()
 
         if dynamic is not None:

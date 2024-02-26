@@ -1938,6 +1938,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         export: bool,
         inline_depth: int,
         speculation_log: SpeculationLog,
+        one_graph: bool,
     ):
         super().__init__()
         self.speculation_log = speculation_log
@@ -1977,6 +1978,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.nn_module_stack: Dict[str, Tuple[str, Type[Any]]] = {}
         # Flag to indicate whether tracing is used for export.
         self.export = export
+        self.one_graph = one_graph
 
         self.current_speculation = None
 
@@ -2061,6 +2063,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             export=export,
             inline_depth=0,
             speculation_log=speculation_log,
+            one_graph=one_graph,
         )
 
         self._throw_if_in_vmap()
@@ -2432,6 +2435,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             export=parent.export,
             inline_depth=parent.inline_depth + 1,
             speculation_log=parent.speculation_log,
+            one_graph=parent.one_graph,
         )
         self.one_graph = parent.one_graph
         self.parent = parent
