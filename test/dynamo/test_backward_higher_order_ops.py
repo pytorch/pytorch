@@ -191,17 +191,15 @@ class GraphModule(torch.nn.Module):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s0 : torch.SymInt, L_inputs_0_ : torch.Tensor, L_inputs_1_ : torch.Tensor, L_inputs_2_ : torch.Tensor):
+    def forward(self, s0 : torch.SymInt, L_inputs_0_ : torch.Tensor):
         getitem = L_inputs_0_
-        getitem_1 = L_inputs_1_
-        getitem_2 = L_inputs_2_
 
-        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem);  getitem_1 = None
+        new_grad = torch.clone(getitem)
 
         call_hook = getitem * getitem;  getitem = None
 
-        accumulate_grad__default_1 = torch.ops.inductor.accumulate_grad_.default(getitem_2, call_hook);  getitem_2 = call_hook = None
-        return ()
+        new_grad_1 = torch.clone(call_hook);  call_hook = None
+        return (new_grad, new_grad_1)
 """,
             )
 

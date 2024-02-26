@@ -44,4 +44,4 @@ def accumulate_grad(x, new_grad):
     if x.grad is None:
         x.grad = new_grad
     else:
-        x.grad += new_grad
+        x.grad.add_(new_grad)
