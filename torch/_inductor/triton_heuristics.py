@@ -518,9 +518,15 @@ class CachingAutotuner(KernelInterface):
                     "%s: %f, nreg %d, nspill %d, #shared-mem %d",
                     k.config,
                     v,
+<<<<<<< HEAD
                     k.n_regs,
                     k.n_spills,
                     k.metadata.shared if hasattr(k.metadata, "shared") else k.shared,
+=======
+                    k.n_regs if k.n_regs is not None else -1,
+                    k.n_spills if k.n_spills is not None else -1,
+                    k.shared if k.shared is not None else -1
+>>>>>>> parent of 5a1803b068 (fixed the 'shared' property of the logged parameter)
                 )
 
         return timings
