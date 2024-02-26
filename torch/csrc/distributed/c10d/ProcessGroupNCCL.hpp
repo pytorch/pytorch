@@ -99,6 +99,8 @@ constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
 constexpr const char* TIMEOUT_DUMP = "timeout_dump";
 
+constexpr const int kWorkStatusUpdatePeriodMs = 10 * 1000; // 10 seconds
+
 constexpr auto kProcessGroupNCCLDefaultTimeout =
     std::chrono::milliseconds(10 * 60 * 1000);
 

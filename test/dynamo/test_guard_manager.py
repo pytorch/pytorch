@@ -5,9 +5,25 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 from torch._C._dynamo import guards
+from torch.testing._internal.common_utils import set_default_dtype
 
 RootGuardManager = guards.RootGuardManager
 GetAttrGuardAccessor = guards.GetAttrGuardAccessor
+GetItemGuardAccessor = guards.GetItemGuardAccessor
+TypeGuardAccessor = guards.TypeGuardAccessor
+TENSOR_ALIASING = guards.TENSOR_ALIASING
+install_tensor_aliasing_guard = guards.install_tensor_aliasing_guard
+NO_TENSOR_ALIASING = guards.NO_TENSOR_ALIASING
+install_no_tensor_aliasing_guard = guards.install_no_tensor_aliasing_guard
+
+
+class Pair:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+
+global_pair = Pair(torch.randn(4), 1)
 
 
 def id_type(x):
@@ -39,6 +55,20 @@ def less_match_verbose_code_parts(expected):
 
 
 class GuardManagerTests(torch._dynamo.test_case.TestCase):
+    def test_global_state_guard(self):
+        guard = guards.GLOBAL_STATE(["global_state_check"])
+        self.assertTrue(guard(None))
+        with set_default_dtype(torch.double):
+            self.assertFalse(guard(None))
+        self.assertTrue(guard(None))
+        _orig = torch.are_deterministic_algorithms_enabled()
+        try:
+            torch.use_deterministic_algorithms(not _orig)
+            self.assertFalse(guard(None))
+        finally:
+            torch.use_deterministic_algorithms(_orig)
+        self.assertTrue(guard(None))
+
     def test_python_lambda_leaf_guard(self):
         const_guard = guards.LAMBDA_GUARD(
             functools.partial(equals_match, expected=5),
@@ -121,6 +151,111 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(guard(int))
         self.assertFalse(guard(float))
 
+    def test_default_device_guard(self):
+        foo = 1
+        guard = guards.DEFAULT_DEVICE(["cpu device"])
+        self.assertTrue(guard(foo))
+
+        try:
+            torch.set_default_device("cuda")
+            self.assertFalse(guard(foo))
+        finally:
+            torch.set_default_device(None)
+
+    def test_data_ptr_match_guard(self):
+        foo = torch.tensor([1, 2, 3])
+        guard = guards.DATA_PTR_MATCH(foo, ["x.data_ptr() == foo.data_ptr()"])
+        self.assertTrue(guard(foo))
+        self.assertFalse(guard(torch.tensor([1, 2, 3])))
+
+    def test_tensor_aliasing_guard(self):
+        guard_manager = RootGuardManager()
+
+        a = torch.randn(3, 4)
+
+        class Foo:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        f_locals = Foo(a, a)
+
+        x_guard_mgr = guard_manager.getattr_manager("x", a)
+        y_guard_mgr = guard_manager.getattr_manager("y", a)
+        install_tensor_aliasing_guard(x_guard_mgr, y_guard_mgr, ["x is y"])
+
+        # Check structure
+        x_guards = x_guard_mgr.get_leaf_guards()
+        y_guards = y_guard_mgr.get_leaf_guards()
+        self.assertEqual(len(x_guards), 1)
+        self.assertEqual(len(y_guards), 1)
+        self.assertTrue(isinstance(x_guards[0], TENSOR_ALIASING))
+        self.assertTrue(isinstance(y_guards[0], TENSOR_ALIASING))
+        # Check that the two guards are the same object
+        self.assertTrue(x_guards[0] is y_guards[0])
+
+        f_locals_unaliased = Foo(torch.randn(3, 4), torch.randn(3, 4))
+        self.assertEqual(len(x_guard_mgr.get_leaf_guards()), 1)
+        self.assertEqual(len(y_guard_mgr.get_leaf_guards()), 1)
+        self.assertTrue(guard_manager.check(f_locals))
+
+        self.assertFalse(guard_manager.check(f_locals_unaliased))
+
+    def test_no_tensor_aliasing_guard(self):
+        guard_manager = RootGuardManager()
+
+        a = torch.randn(3, 4)
+
+        class Foo:
+            def __init__(self, x, y, z):
+                self.x = x
+                self.y = y
+                self.z = z
+
+        f_locals = Foo(a, a, a)
+
+        x_guard_mgr = guard_manager.getattr_manager("x", a)
+        y_guard_mgr = guard_manager.getattr_manager("y", a)
+        z_guard_mgr = guard_manager.getattr_manager("z", a)
+        install_no_tensor_aliasing_guard(
+            [x_guard_mgr, y_guard_mgr, z_guard_mgr],
+            ["x", "y", "z"],
+            ["no_aliasing(x, y, z)"],
+        )
+
+        # Check structure
+        x_guards = x_guard_mgr.get_leaf_guards()
+        y_guards = y_guard_mgr.get_leaf_guards()
+        z_guards = z_guard_mgr.get_leaf_guards()
+        self.assertEqual(len(x_guards), 1)
+        self.assertEqual(len(y_guards), 1)
+        self.assertEqual(len(z_guards), 1)
+        self.assertTrue(isinstance(x_guards[0], NO_TENSOR_ALIASING))
+        self.assertTrue(isinstance(y_guards[0], NO_TENSOR_ALIASING))
+        self.assertTrue(isinstance(z_guards[0], NO_TENSOR_ALIASING))
+        # Check that the two guards are the same object
+        self.assertTrue(x_guards[0] is y_guards[0] is z_guards[0])
+        self.assertFalse(guard_manager.check(f_locals))
+        self.assertFalse(guard_manager.check_verbose(f_locals).result)
+
+        f_locals_unaliased = Foo(
+            torch.randn(3, 4),
+            torch.randn(3, 4),
+            torch.randn(3, 4),
+        )
+        self.assertTrue(guard_manager.check(f_locals_unaliased))
+        self.assertTrue(guard_manager.check_verbose(f_locals_unaliased).result)
+        # Check that hash map is cleared.
+        self.assertTrue(guard_manager.check(f_locals_unaliased))
+
+        f_locals_unaliased = Foo(
+            a,
+            torch.randn(3, 4),
+            a,
+        )
+        self.assertFalse(guard_manager.check(f_locals_unaliased))
+        self.assertFalse(guard_manager.check_verbose(f_locals_unaliased).result)
+
     def test_guard_manager_leaf_guard(self):
         guard_manager = RootGuardManager()
         guard_manager.add_type_match_guard(id_type(5), ["type(x) == int"])
@@ -175,6 +310,95 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(guard_manager.check(foo))
         self.assertFalse(guard_manager.check(Foo(3, 4)))
         self.assertFalse(guard_manager.check("foo"))
+
+    def test_item_guard_manager(self):
+        foo = [1, 2]
+        guard_manager = RootGuardManager()
+        guard_manager.add_type_match_guard(id_type(foo), ["type(x) == Foo"])
+        guard_manager.getitem_manager(0, 1).add_lambda_guard(
+            functools.partial(equals_match, expected=foo[0]),
+            equals_match_verbose_code_parts(foo[0]),
+        )
+        guard_manager.getitem_manager(1, 2).add_lambda_guard(
+            functools.partial(equals_match, expected=foo[1]),
+            equals_match_verbose_code_parts(foo[1]),
+        )
+        self.assertEqual(len(guard_manager.get_leaf_guards()), 1)
+        # 2 child managers, one for x and one for y
+        self.assertEqual(len(guard_manager.get_accessors()), 2)
+        self.assertTrue(
+            isinstance(guard_manager.get_accessors()[0], GetItemGuardAccessor)
+        )
+        self.assertTrue(
+            isinstance(guard_manager.get_accessors()[1], GetItemGuardAccessor)
+        )
+        # Check leaf guards on child managers
+        self.assertEqual(
+            len(guard_manager.getitem_manager(0, None).get_leaf_guards()), 1
+        )
+        self.assertEqual(
+            len(guard_manager.getitem_manager(1, None).get_leaf_guards()), 1
+        )
+
+        self.assertTrue(guard_manager.check(foo))
+        self.assertFalse(guard_manager.check([3, 4]))
+        self.assertFalse(guard_manager.check("foo"))
+
+    def test_globals(self):
+        global global_pair, Pair
+        guard_manager = RootGuardManager()
+        gpair_mgr = guard_manager.globals_dict_manager(globals(), None).getitem_manager(
+            "global_pair", global_pair
+        )
+
+        gpair_mgr.add_lambda_guard(
+            lambda x: isinstance(x, Pair)
+            and isinstance(x.x, torch.Tensor)
+            and isinstance(x.y, int),
+            "global guard fail",
+        )
+
+        self.assertTrue(guard_manager.check(global_pair))
+        global_pair.y = "foo"
+        self.assertFalse(guard_manager.check(global_pair))
+
+    def test_type_manager(self):
+        guard_manager = RootGuardManager()
+
+        class A:
+            a = 4
+
+        class B(A):
+            def mul(self, x):
+                super().mul(x)
+
+        foo = B()
+        f_locals = {"foo": foo}
+
+        # len(type(foo).__mro__) == 2
+        foo_mgr = guard_manager.getitem_manager("foo", foo)
+        type_manager = foo_mgr.type_manager(type(foo))
+        self.assertTrue(isinstance(foo_mgr.get_accessors()[0], TypeGuardAccessor))
+        mro_manager = type_manager.getattr_manager("__mro__", type(foo).__mro__)
+        self.assertTrue(
+            isinstance(type_manager.get_accessors()[0], GetAttrGuardAccessor)
+        )
+
+        # type(foo).__mro__[0].a = 4
+        item_manager = mro_manager.getitem_manager(1, type(foo).__mro__[1])
+        self.assertTrue(
+            isinstance(mro_manager.get_accessors()[0], GetItemGuardAccessor)
+        )
+        attr_manager = item_manager.getattr_manager("a", type(foo).__mro__[0].a)
+        self.assertTrue(
+            isinstance(item_manager.get_accessors()[0], GetAttrGuardAccessor)
+        )
+        attr_manager.add_lambda_guard(
+            lambda x: x == 4,
+            "Expected value 4",
+        )
+
+        self.assertTrue(guard_manager.check(f_locals))
 
 
 if __name__ == "__main__":

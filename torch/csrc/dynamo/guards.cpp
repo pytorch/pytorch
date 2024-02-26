@@ -438,6 +438,8 @@ static PyMethodDef TensorGuards_methods[] = {
 
 static PyTypeObject TensorGuardsType = {PyVarObject_HEAD_INIT(nullptr, 0)};
 
+// TODO (janimesh) - Remove the PyObject_HEAD part when C++ guard manager is
+// merged.
 struct GlobalStateGuard {
   PyObject_HEAD;
 
@@ -871,6 +873,82 @@ class EQUALS_MATCH : public LeafGuard {
   PyTypeObject* _value_type;
 };
 
+class DEFAULT_DEVICE : public LeafGuard {
+ public:
+  DEFAULT_DEVICE(py::object verbose_code_parts)
+      : LeafGuard(verbose_code_parts) {
+    py::handle device_module = py::module::import("torch.utils._device");
+    // Save the dict using py::object
+    _utils_device_dict = device_module.attr("__dict__");
+    _device = _utils_device_dict["CURRENT_DEVICE"];
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    // Create a static interned string. Interned string is faster than creating
+    // a new string every time. Even though its a new reference, we don't dec
+    // ref it. Interned strings are used for things like variable names and are
+    // leaked by design.
+    static PyObject* current_device_str =
+        PyUnicode_InternFromString("CURRENT_DEVICE");
+    PyObject* device = PyDict_GetItem(
+        _utils_device_dict.ptr(), current_device_str); // borrowed ref
+    if (device != _device.ptr()) {
+      int result = PyObject_RichCompareBool(device, _device.ptr(), Py_EQ);
+      if (result == -1) {
+        PyErr_Clear();
+        return false;
+      }
+      return result;
+    }
+    return true;
+  }
+
+ private:
+  // Save the current device and the module dict during the guard construction.
+  py::object _utils_device_dict;
+  py::object _device;
+};
+
+class GLOBAL_STATE : public LeafGuard {
+ public:
+  GLOBAL_STATE(py::object verbose_code_parts) : LeafGuard(verbose_code_parts) {
+    _guard = std::make_unique<GlobalStateGuard>();
+    _guard->init();
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    // Ignore value arg, this is just to satisfy the interface.
+    return _guard->check();
+  }
+
+ private:
+  std::unique_ptr<GlobalStateGuard> _guard;
+};
+
+class DATA_PTR_MATCH : public LeafGuard {
+ public:
+  DATA_PTR_MATCH(py::object tensor, py::object verbose_code_parts)
+      : LeafGuard(verbose_code_parts) {
+    PyObject* value = tensor.ptr();
+    if (!THPVariable_CheckExact(value) && !THPVariable_Check(value)) {
+      throw std::runtime_error("DATA_PTR_MATCH guard requires a tensor");
+    }
+    _data_ptr = THPVariable_Unpack(value).data_ptr();
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    if (!THPVariable_CheckExact(value) && !THPVariable_Check(value)) {
+      return false;
+    }
+    void* data_ptr = THPVariable_Unpack(value).data_ptr();
+    return data_ptr == _data_ptr;
+  }
+
+ private:
+  // Original tensor data pointer.
+  void* _data_ptr;
+};
+
 /**
  * Relational guards compare more than one value. We implement Relational
  * guards by capturing some state in the guard object. For example for tensor
@@ -901,6 +979,98 @@ class RelationalGuard : public LeafGuard {
   // reset the relational guard state on guard failure. This is called by the
   // guard manager.
   virtual void reset_state() = 0;
+};
+
+/**
+ * Checks that tensor x is tensor y.
+ */
+class TENSOR_ALIASING : public RelationalGuard {
+ public:
+  TENSOR_ALIASING(py::object verbose_code_parts)
+      : RelationalGuard(verbose_code_parts), _is_first_call(true) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    if (_is_first_call) {
+      _first_tensor = value;
+      _is_first_call = false;
+      return true;
+    }
+    bool result = _first_tensor == value;
+    reset_state();
+    return result;
+  }
+
+  void reset_state() final override {
+    _is_first_call = true;
+  }
+
+ private:
+  bool _is_first_call;
+  PyObject* _first_tensor;
+};
+
+/**
+ * Checks that none of the tensors alias.
+ */
+class NO_TENSOR_ALIASING : public RelationalGuard {
+ public:
+  NO_TENSOR_ALIASING(
+      long unsigned int num_tensors,
+      py::object tensor_names,
+      py::object verbose_code_parts)
+      : RelationalGuard(verbose_code_parts),
+        _num_tensors(num_tensors),
+        _tensor_names(tensor_names) {
+    _unique_tensors.reserve(num_tensors);
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    // Typically we don't have to increment the ref count here because the
+    // tensors are held in f_locals. But there is a special case for
+    // `from_numpy` source. `from_numpy` converts integers and such into tensors
+    // and these tensors are ephemeral. If we don't incref, those tensors can be
+    // garbage collected, and the next time from_numpy can reuse the memory
+    // address. Therefore, we incref here. They are decref'd in reset_state.
+    Py_INCREF(value);
+    auto insertion = _unique_tensors.insert({value, nullptr});
+    if (!insertion.second) {
+      // No need to clear _unique_tensors, reset_state will do
+      // it.
+      return false;
+    }
+    _counter++;
+    if (_counter == _num_tensors) {
+      reset_state();
+    }
+    return true;
+  }
+
+  virtual GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
+    bool result = check_nopybind(value);
+
+    if (!result) {
+      std::stringstream fail_reason;
+      fail_reason << "Duplicate tensor found where not expected! ";
+      fail_reason << py::cast<std::string>(_tensor_names[_counter])
+                  << " should not alias to anything, but is aliased";
+      return GuardDebugInfo(false, fail_reason.str(), 0);
+    }
+    return GuardDebugInfo(true, 1);
+  }
+
+  void reset_state() final override {
+    for (auto item : _unique_tensors) {
+      Py_DECREF(item.first);
+    }
+    _unique_tensors.clear();
+    _counter = 0;
+  }
+
+ private:
+  long unsigned int _num_tensors;
+  py::list _tensor_names;
+  ska::flat_hash_map<PyObject*, std::nullptr_t> _unique_tensors;
+  long unsigned int _counter = 0;
 };
 
 class GuardManager;
@@ -1407,6 +1577,157 @@ class GetAttrGuardAccessor : public GuardAccessor {
   PyObject* _attr_name;
 };
 
+/**
+ * Represents __getitem__ acccessor.
+ */
+class GetItemGuardAccessor : public GuardAccessor {
+ public:
+  GetItemGuardAccessor(
+      RootGuardManager* root,
+      py::object name,
+      py::handle example_value)
+      : GuardAccessor(root, name, example_value), _attr_name(name.ptr()) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    PyObject* x = PyObject_GetItem(obj, _attr_name); // new ref
+    if (x == nullptr) {
+      PyErr_Clear();
+      return false;
+    }
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* x = PyObject_GetItem(obj, _attr_name); // new ref
+    if (x == nullptr) {
+      PyErr_Clear();
+      return GuardDebugInfo(false, std::string("KeyError ") + repr(), 0);
+    }
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+  std::string repr() const override {
+    return "GetItemGuardAccessor(" + py::str(_attr_name).cast<std::string>() +
+        ")";
+  }
+
+ private:
+  // no need of py::object here because the attr_name is already passed on to
+  // the base class as accessor_key which is a py::object.
+  PyObject* _attr_name;
+};
+
+/**
+ * Represents f_globals acccessor. This sits as a child accessor of the
+ * RootGuardManager.
+ */
+class GlobalsGuardAccessor : public GuardAccessor {
+ public:
+  GlobalsGuardAccessor(
+      RootGuardManager* root,
+      py::dict globals_dict,
+      py::handle example_value)
+      : GuardAccessor(root, globals_dict, example_value),
+        _globals_dict(globals_dict.ptr()) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    // Ignore the obj arg. This is required to satisfy the function signature.
+    // Just pass on the globals dict to the child manager.
+    return _guard_manager->check_nopybind(_globals_dict);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    // Ignore the obj arg. This is required to satisfy the function signature.
+    // Just pass on the globals dict to the child manager.
+    return _guard_manager->check_verbose_nopybind(_globals_dict);
+  }
+
+  std::string repr() const override {
+    return "GlobalsGuardAccessor";
+  }
+
+ private:
+  // no need of py::object here because the globals_dict is already passed on to
+  // the base class as accessor_key which is a py::object.
+  PyObject* _globals_dict;
+};
+
+/**
+ * Represent type(...) accessor.
+ */
+class TypeGuardAccessor : public GuardAccessor {
+ public:
+  // name = __type_accessor__, a unique string used as attribute name.
+  TypeGuardAccessor(
+      RootGuardManager* root,
+      py::str name,
+      py::handle example_value)
+      : GuardAccessor(root, name, example_value) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    PyObject* x = (PyObject*)Py_TYPE(obj); // borrowed ref
+    return _guard_manager->check_nopybind(x);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* x = (PyObject*)Py_TYPE(obj); // borrowed ref
+    return _guard_manager->check_verbose_nopybind(x);
+  }
+
+  std::string repr() const override {
+    return "TypeGuardAccessor";
+  }
+};
+
+void install_tensor_aliasing_guard(
+    GuardManager* x,
+    GuardManager* y,
+    py::object verbose_code_parts) {
+  // Adds tensor X is tensor Y guard. This is a an example of relational guard.
+  // There is one guard object that is shared between two guard managers.
+  std::shared_ptr<RelationalGuard> guard =
+      std::make_shared<TENSOR_ALIASING>(verbose_code_parts);
+
+  // Register the resetter on the toor gaurd mananger, so that it can reset
+  // the newly added relational guard when the guard eval fails.
+  x->get_root()->add_relational_guard_resetter(guard);
+  x->add_leaf_guard(guard);
+  y->add_leaf_guard(guard);
+}
+
+void install_no_tensor_aliasing_guard(
+    py::list guard_managers,
+    py::list tensor_names,
+    py::object verbose_code_parts) {
+  // Adds a guard that checks none of tensors alias. This is a an example of
+  // relational guard. There is one guard object that is shared between multiple
+  // guard managers.
+  std::shared_ptr<RelationalGuard> guard = std::make_shared<NO_TENSOR_ALIASING>(
+      guard_managers.size(), tensor_names, verbose_code_parts);
+
+  // Register the resetter on the toor gaurd mananger, so that it can reset
+  // the newly added relational guard when the guard eval fails.
+  py::cast<GuardManager*>(guard_managers[0])
+      ->get_root()
+      ->add_relational_guard_resetter(guard);
+  for (py::size_t index = 0; index < guard_managers.size(); index++) {
+    py::cast<GuardManager*>(guard_managers[index])->add_leaf_guard(guard);
+  }
+}
+
 } // namespace
 
 static void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj) {
@@ -1505,6 +1826,24 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "EQUALS_MATCH")
       .def(py::init<py::object, py::list>())
       .def("__call__", &EQUALS_MATCH::check);
+  py::class_<DEFAULT_DEVICE, LeafGuard, std::shared_ptr<DEFAULT_DEVICE>>(
+      py_m, "DEFAULT_DEVICE")
+      .def(py::init<py::list>())
+      .def("__call__", &DEFAULT_DEVICE::check);
+  py::class_<GLOBAL_STATE, LeafGuard, std::shared_ptr<GLOBAL_STATE>>(
+      py_m, "GLOBAL_STATE")
+      .def(py::init<py::list>())
+      .def("__call__", &GLOBAL_STATE::check);
+  py::class_<DATA_PTR_MATCH, LeafGuard, std::shared_ptr<DATA_PTR_MATCH>>(
+      py_m, "DATA_PTR_MATCH")
+      .def(py::init<py::object, py::list>())
+      .def("__call__", &DATA_PTR_MATCH::check);
+  py::class_<TENSOR_ALIASING, LeafGuard, std::shared_ptr<TENSOR_ALIASING>>(
+      py_m, "TENSOR_ALIASING");
+  py::class_<
+      NO_TENSOR_ALIASING,
+      LeafGuard,
+      std::shared_ptr<NO_TENSOR_ALIASING>>(py_m, "NO_TENSOR_ALIASING");
 
   // Guard Accessors - These are present so that we can iterate over the
   // GuardManager hierarchy. We intentionally do not provide even an init
@@ -1516,6 +1855,18 @@ PyObject* torch_c_dynamo_guards_init() {
       GetAttrGuardAccessor,
       GuardAccessor,
       std::unique_ptr<GetAttrGuardAccessor>>(py_m, "GetAttrGuardAccessor");
+  py::class_<
+      GetItemGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<GetItemGuardAccessor>>(py_m, "GetItemGuardAccessor");
+  py::class_<
+      GlobalsGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<GlobalsGuardAccessor>>(py_m, "GlobalsGuardAccessor");
+  py::class_<
+      TypeGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<TypeGuardAccessor>>(py_m, "TypeGuardAccessor");
 
   // Guard Manager - No constructor in python, python should use
   // RootGuardManager.
@@ -1569,6 +1920,49 @@ PyObject* torch_c_dynamo_guards_init() {
             self.add_leaf_guard(
                 std::make_shared<EQUALS_MATCH>(value, verbose_code_parts));
           })
+      .def(
+          "add_default_device_guard",
+          [](GuardManager& self, py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(
+                std::make_shared<DEFAULT_DEVICE>(verbose_code_parts));
+          })
+      .def(
+          "add_global_state_guard",
+          [](GuardManager& self, py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(
+                std::make_shared<GLOBAL_STATE>(verbose_code_parts));
+          })
+      .def(
+          "add_data_ptr_guard",
+          [](GuardManager& self,
+             py::object data_ptr,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(
+                std::make_shared<DATA_PTR_MATCH>(data_ptr, verbose_code_parts));
+          })
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "getitem_manager",
+          &GuardManager::get_child_manager<GetItemGuardAccessor>,
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "globals_dict_manager",
+          &GuardManager::get_child_manager<GlobalsGuardAccessor>,
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "type_manager",
+          [](GuardManager& self, py::handle example_value) -> GuardManager* {
+            // A unique key is used to save as the accessor key.
+            py::str unique_key("__type_accessor__");
+            return self.get_child_manager<TypeGuardAccessor>(
+                unique_key, example_value);
+          },
+          py::return_value_policy::reference)
       // return by reference because C++ GuardManager has the ownership of
       // accessors and guard managers
       .def(
@@ -1596,6 +1990,10 @@ PyObject* torch_c_dynamo_guards_init() {
             self.add_epilogue_lambda_guard(
                 std::make_unique<LAMBDA_GUARD>(lambda, verbose_code_parts));
           });
+
+  py_m.def("install_tensor_aliasing_guard", install_tensor_aliasing_guard);
+  py_m.def(
+      "install_no_tensor_aliasing_guard", install_no_tensor_aliasing_guard);
 
   return m;
 }
