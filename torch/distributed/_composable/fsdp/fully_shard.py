@@ -6,6 +6,7 @@ import torch.nn as nn
 
 from torch.distributed._composable import contract
 from torch.distributed._tensor import DeviceMesh
+from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_init import (
     _get_device_from_mesh,
@@ -27,6 +28,7 @@ def fully_shard(
     *,
     mesh: Optional[DeviceMesh] = None,
     reshard_after_forward: Union[bool, int] = True,
+    mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
 ):
     """
     Shard module parameters across data parallel workers.
@@ -84,6 +86,9 @@ def fully_shard(
             between forward and backward, the registered parameters must be the
             sharded parameters. For ``False`` or an ``int``, this can be done
             by manually resharding via :meth:`reshard`.
+        mp_policy (MixedPrecisionPolicy): This controls the mixed precision
+            policy, which offers parameter/reduction mixed precision for this
+            module. See :class:`MixedPrecisionPolicy` for details.
     """
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
         raise ValueError(
@@ -102,15 +107,20 @@ def fully_shard(
     )
 
     state = fully_shard.state(module)
-    state.init(module, device)
+    state.init(module, device, mp_policy)
 
     managed_modules = _get_managed_modules(module)
     params, buffers = _get_managed_states(managed_modules)
     _move_states_to_device(params, buffers, device, mesh_info)
     if params:
         state._fsdp_param_group = FSDPParamGroup(
-            params, module, mesh_info, post_forward_mesh_info, device
+            params, module, mesh_info, post_forward_mesh_info, device, mp_policy
         )
+
+    # for dynamo
+    for module in managed_modules:
+        module._is_fsdp_managed_module = True  # type: ignore[assignment]
+        module._fsdp_use_orig_params = True  # type: ignore[assignment]
 
     # Place FSDP leftmost for highest priority in the method resolution order
     cls = module.__class__
@@ -157,6 +167,39 @@ class FSDP:
         """
         state = self._get_fsdp_state()
         state._state_ctx.is_last_backward = is_last_backward
+
+    def set_requires_gradient_sync(
+        self, requires_gradient_sync: bool, recurse: bool = True
+    ) -> None:
+        """
+        Sets if the module should sync gradients. This can be used to implement
+        gradient accumulation without communication. For HSDP, this controls
+        both reduce-scatter and all-reduce together.
+
+        Args:
+            requires_gradient_sync (bool): Whether to reduce gradients for the
+                module's parameters.
+            recurse (bool): Whether to set for all submodules or just the
+                passed-in module.
+        """
+        for module in cast(nn.Module, self).modules():
+            if isinstance(module, FSDP):
+                state = module._get_fsdp_state()
+                if fsdp_param_group := state._fsdp_param_group:
+                    fsdp_param_group.reduce_scatter_grads = requires_gradient_sync
+                    fsdp_param_group.all_reduce_grads = requires_gradient_sync
+
+    def set_requires_all_reduce(self, requires_all_reduce: bool, recurse: bool = True):
+        """
+        Sets if the module should all-reduce gradients. This can be used to
+        implement gradient accumulation with only reduce-scatter but not
+        all-reduce for HSDP.
+        """
+        for module in cast(nn.Module, self).modules():
+            if isinstance(module, FSDP):
+                state = module._get_fsdp_state()
+                if fsdp_param_group := state._fsdp_param_group:
+                    fsdp_param_group.all_reduce_grads = requires_all_reduce
 
     def _get_fsdp_state(self) -> FSDPState:
         if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:

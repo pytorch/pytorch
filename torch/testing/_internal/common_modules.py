@@ -126,7 +126,7 @@ class modules(_TestParametrizer):
                     def test_wrapper(*args, **kwargs):
                         return test(*args, **kwargs)
 
-                    if self.skip_if_dynamo:
+                    if self.skip_if_dynamo and not torch.testing._internal.common_utils.TEST_WITH_TORCHINDUCTOR:
                         test_wrapper = skipIfTorchDynamo("Policy: we don't run ModuleInfo tests w/ Dynamo")(test_wrapper)
 
                     decorator_fn = partial(module_info.get_decorators, generic_cls.__name__,
@@ -4138,6 +4138,10 @@ module_db: List[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.Embedding,
                module_inputs_func=module_inputs_torch_nn_Embedding,
+               decorators=[
+                   DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
+                                'TestModule', 'test_non_contiguous_tensors',
+                                device_type='mps')],
                skips=(
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
