@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     IS_ARM64,
     IS_MACOS,
+    IS_WINDOWS,
     IS_X86,
     compare_equal_outs_and_grads,
     outs_and_grads,
@@ -1472,8 +1473,15 @@ def forward(self, primals_1, primals_2):
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
-        self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
-        with self.assertRaisesRegex(AssertionError, "attempted to compile the backward with incorrect subclass metadata"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses"
+        ):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses"
+        ):
             self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
 
     # Mutations in the backward are allowed as long as the mutated object does not require grad
@@ -1572,7 +1580,7 @@ def forward(self, primals_1, primals_2):
         def inp_callable1(req_grad):
             base = torch.ones(4, 4, requires_grad=req_grad)
             x = base.add(1)
-            # create two non-contiguous views that share storage, but are actually non-overlapping
+            # create two views that share storage, but are actually non-overlapping
             a = x[0:2]
             b = x[2:4]
             return [base], [a, b]
@@ -3324,6 +3332,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         ):
             aot_export_module(mod, [inp], trace_joint=True, output_loss_index=1)
 
+    @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
     @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond needs dynamo to run")
     def test_aot_export_with_torch_cond(self):
         class M(torch.nn.Module):
@@ -4372,7 +4381,6 @@ aot_autograd_failures = {
 
 symbolic_aot_autograd_failures = {
     xfail('combinations', ''),  # aten.masked_select.default
-    xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('index_fill', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kthvalue', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.eigvals', ''),  # aten.linalg_eig.default - couldn't find symbolic meta function/decomposition

@@ -1,5 +1,6 @@
 import dataclasses
 import math
+import operator
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Type
 
 import torch
@@ -238,3 +239,137 @@ def get_buffer(
             return program.state_dict[buffer_name]
 
     return None
+
+
+def sequential_split(gm: torch.fx.GraphModule, node_call_back) -> torch.fx.GraphModule:
+    """
+    Splits the graph module into multiple submodules based on the node_call_back.
+    The node_call_back should return True if the node is a delimiter. Delimiter will be
+    the first node in the next submodule.
+    """
+    from torch.fx.passes.split_module import split_module
+
+    split_map = {}
+    split_id = 0
+    for node in gm.graph.nodes:
+        if node_call_back(node):
+            split_id += 1
+        split_map[node] = split_id
+
+    new_gm = split_module(
+        gm,
+        gm,
+        lambda node: split_map[node],
+        keep_original_order=True,
+        keep_original_node_name=True,
+    )
+    # Keep the codegen from original graph module to preserve e.g. pytree info.
+    new_gm.graph._codegen = gm.graph._codegen
+    new_gm.recompile()
+    return new_gm
+
+
+def nodes_filter(nodes: List[torch.fx.Node], node_call_back) -> List[torch.fx.Node]:
+    """Returns the nodes that match the node_call_back as a list."""
+    return [node for node in nodes if node_call_back(node)]
+
+
+def nodes_first(
+    nodes: List[torch.fx.Node], node_call_back=None
+) -> Optional[torch.fx.Node]:
+    """
+    Returns the first node that matches the node_call_back. If no node matches, returns None.
+    When node_call_back is None, returns the first node in the node list.
+    """
+    ret = nodes_filter(nodes, node_call_back if node_call_back else lambda node: True)
+    if len(ret) > 0:
+        return ret[0]
+    return None
+
+
+def nodes_count(nodes: List[torch.fx.Node], node_call_back) -> int:
+    """Returns the number of nodes that match the node_call_back."""
+    return len(nodes_filter(nodes, node_call_back))
+
+
+def nodes_map(nodes: List[torch.fx.Node], node_call_back) -> List[torch.fx.Node]:
+    """
+    Sequentially visit the nodes list and invoke node_call_back on each element.
+    Returns the nodes list after the node_call_back is invoked on each element.
+    """
+    for node in nodes:
+        node_call_back(node)
+    return nodes
+
+
+def node_replace_(
+    old_node: torch.fx.Node, new_node: torch.fx.Node, delete_old: bool = False
+) -> None:
+    """
+    Replace all uses of old_node with new_node.
+    """
+    old_node.replace_all_uses_with(new_node)
+    if delete_old:
+        old_node.users.clear()
+        old_node.graph.erase_node(old_node)
+
+
+def node_inline_(call_mod_node: torch.fx.Node) -> None:
+    """
+    Inline the submodule of the given node into the parent module.
+    Note: we only support the case where submodule takes tensors inputs.
+    """
+    assert call_mod_node.op == "call_module"
+    gm = call_mod_node.graph.owning_module
+
+    assert isinstance(call_mod_node.target, str)
+    sub_gm = getattr(gm, call_mod_node.target)
+
+    phs = (node for node in sub_gm.graph.nodes if node.op == "placeholder")
+    body = (
+        node for node in sub_gm.graph.nodes if node.op not in ("placeholder", "output")
+    )
+    output = [node for node in sub_gm.graph.nodes if node.op == "output"]
+
+    for ph, arg in zip(phs, call_mod_node.args):
+        assert isinstance(arg, torch.fx.Node)
+        node_replace_(ph, arg, delete_old=True)
+
+    with gm.graph.inserting_before(call_mod_node):
+        for node in body:
+            new_node = gm.graph.node_copy(node)
+            node_replace_(node, new_node, delete_old=True)
+
+        if len(output) > 0:
+            assert len(output) == 1 and len(output[0].args) == 1
+            new_output = output[0].args[0]
+
+            if isinstance(new_output, torch.fx.Node):
+                node_replace_(call_mod_node, new_output, delete_old=True)
+            elif isinstance(new_output, (list, tuple)):
+                # Inline the get_item calls for the output node.
+                get_item_users = nodes_filter(
+                    list(call_mod_node.users.keys()),
+                    lambda node: node.op == "call_function"
+                    and node.target == operator.getitem,
+                )
+                # get_item_node.args[1] is the idx referring to new_output[idx]
+                nodes_map(
+                    get_item_users,
+                    lambda get_item_node: node_replace_(
+                        get_item_node,
+                        new_output[get_item_node.args[1]],
+                        delete_old=True,
+                    ),
+                )
+                call_mod_node.graph.erase_node(call_mod_node)
+            else:
+                raise NotImplementedError(
+                    f"Unsupported output type {type(new_output)}. Expect it to be a Node or a list/tuple of Nodes."
+                )
+        else:
+            call_mod_node.graph.erase_node(call_mod_node)
+
+    gm.delete_all_unused_submodules()
+    gm.recompile()
+    return gm
