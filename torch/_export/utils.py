@@ -262,7 +262,9 @@ def get_lifted_tensor_constant(
     """
 
     if is_lifted_tensor_constant(program, node):
-        lifted_tensor_name = program.graph_signature.inputs_to_lifted_tensor_constants[node.name]
+        lifted_tensor_name = program.graph_signature.inputs_to_lifted_tensor_constants[
+            node.name
+        ]
         return program.constants[lifted_tensor_name]
 
     return None
