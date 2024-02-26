@@ -103,6 +103,9 @@ def lift_constants_pass(
                 else:
                     constant_fqn = constant_name
 
+                # Remove nn_module_stack from lifted placeholder node once FQN has been used
+                const_placeholder_node.meta.pop("nn_module_stack")
+
                 input_spec_arg: ArgumentSpec
                 if isinstance(constant_val, torch.Tensor):
                     if fake_mode is not None:
