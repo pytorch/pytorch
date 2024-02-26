@@ -3547,18 +3547,18 @@ class GraphModule(torch.nn.Module):
 
         _enter_dual_level = torch._C._enter_dual_level()
 
-        _get_current_dual_level = torch._C._get_current_dual_level()
+        maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
 
-        make_dual = torch.autograd.forward_ad.make_dual(p, t, level = 0);  p = t = None
+        _make_dual = torch._make_dual(p, t, level = 0);  p = t = None
 
-        sin = make_dual.sin();  make_dual = None
+        sin = _make_dual.sin();  _make_dual = None
         dual = sin.sum();  sin = None
 
         eq = dual == None
 
-        unpack_dual = torch.autograd.forward_ad.unpack_dual(dual, level = 0);  dual = None
-        child_2 = unpack_dual[0]
-        child_3 = unpack_dual[1];  unpack_dual = None
+        _unpack_dual = torch._unpack_dual(dual, level = 0);  dual = None
+        child_2 = _unpack_dual[0]
+        child_3 = _unpack_dual[1];  _unpack_dual = None
 
         primals_out_unflatten = torch._C._functorch._unwrap_for_grad(child_2, 1);  child_2 = None
 
@@ -3609,9 +3609,9 @@ class GraphModule(torch.nn.Module):
 
         _enter_dual_level = torch._C._enter_dual_level()
 
-        _get_current_dual_level = torch._C._get_current_dual_level()
+        maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
 
-        aux = torch.autograd.forward_ad.make_dual(p, t, level = 0);  p = t = None
+        aux = torch._make_dual(p, t, level = 0);  p = t = None
 
         sin = aux.sin()
         dual = sin.sum();  sin = None
@@ -3620,9 +3620,9 @@ class GraphModule(torch.nn.Module):
 
         eq = dual == None
 
-        unpack_dual = torch.autograd.forward_ad.unpack_dual(dual, level = 0);  dual = None
-        child_2 = unpack_dual[0]
-        child_3 = unpack_dual[1];  unpack_dual = None
+        _unpack_dual = torch._unpack_dual(dual, level = 0);  dual = None
+        child_2 = _unpack_dual[0]
+        child_3 = _unpack_dual[1];  _unpack_dual = None
 
         primals_out_unflatten = torch._C._functorch._unwrap_for_grad(child_2, 1);  child_2 = None
 
@@ -3675,23 +3675,26 @@ class GraphModule(torch.nn.Module):
 
         _enter_dual_level = torch._C._enter_dual_level()
 
-        _get_current_dual_level = torch._C._get_current_dual_level()
+        maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
 
-        aux = torch.autograd.forward_ad.make_dual(p, t, level = 0);  p = None
-        make_dual_1 = torch.autograd.forward_ad.make_dual(p_1, t, level = 0);  p_1 = t = None
+        aux = torch._make_dual(p, t, level = 0);  p = None
+
+        maybe_load_decompositions_1 = torch.autograd.forward_ad.maybe_load_decompositions()
+
+        _make_dual_1 = torch._make_dual(p_1, t, level = 0);  p_1 = t = None
 
         sin = aux.sin()
         sum_1 = sin.sum();  sin = None
-        cos = make_dual_1.cos();  make_dual_1 = None
+        cos = _make_dual_1.cos();  _make_dual_1 = None
         dual = sum_1 + cos;  sum_1 = cos = None
 
         aux_1 = torch._C._functorch._unwrap_for_grad(aux, 1);  aux = None
 
         eq = dual == None
 
-        unpack_dual = torch.autograd.forward_ad.unpack_dual(dual, level = 0);  dual = None
-        child_4 = unpack_dual[0]
-        child_5 = unpack_dual[1];  unpack_dual = None
+        _unpack_dual = torch._unpack_dual(dual, level = 0);  dual = None
+        child_4 = _unpack_dual[0]
+        child_5 = _unpack_dual[1];  _unpack_dual = None
 
         primals_out_unflatten = torch._C._functorch._unwrap_for_grad(child_4, 1);  child_4 = None
 
@@ -3744,18 +3747,18 @@ class GraphModule(torch.nn.Module):
 
         _enter_dual_level = torch._C._enter_dual_level()
 
-        _get_current_dual_level = torch._C._get_current_dual_level()
+        maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
 
-        make_dual = torch.autograd.forward_ad.make_dual(p, t, level = 0);  p = t = None
+        _make_dual = torch._make_dual(p, t, level = 0);  p = t = None
 
-        sin = make_dual.sin();  make_dual = None
+        sin = _make_dual.sin();  _make_dual = None
         dual = sin.sum();  sin = None
 
         eq = dual == None
 
-        unpack_dual = torch.autograd.forward_ad.unpack_dual(dual, level = 0);  dual = None
-        child_2 = unpack_dual[0]
-        child_3 = unpack_dual[1];  unpack_dual = None
+        _unpack_dual = torch._unpack_dual(dual, level = 0);  dual = None
+        child_2 = _unpack_dual[0]
+        child_3 = _unpack_dual[1];  _unpack_dual = None
 
         primals_out_unflatten = torch._C._functorch._unwrap_for_grad(child_2, 1);  child_2 = None
 
@@ -3822,18 +3825,18 @@ class GraphModule(torch.nn.Module):
 
         _enter_dual_level = torch._C._enter_dual_level()
 
-        _get_current_dual_level = torch._C._get_current_dual_level()
+        maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
 
-        make_dual = torch.autograd.forward_ad.make_dual(p, t, level = 0);  p = t = None
+        _make_dual = torch._make_dual(p, t, level = 0);  p = t = None
 
-        sin = make_dual.sin();  make_dual = None
+        sin = _make_dual.sin();  _make_dual = None
         dual = sin.sum();  sin = None
 
         eq = dual == None
 
-        unpack_dual = torch.autograd.forward_ad.unpack_dual(dual, level = 0);  dual = None
-        child_2 = unpack_dual[0]
-        child_3 = unpack_dual[1];  unpack_dual = None
+        _unpack_dual = torch._unpack_dual(dual, level = 0);  dual = None
+        child_2 = _unpack_dual[0]
+        child_3 = _unpack_dual[1];  _unpack_dual = None
 
         primals_out_unflatten = torch._C._functorch._unwrap_for_grad(child_2, 1);  child_2 = None
 

@@ -889,14 +889,14 @@ def assert_non_empty_list_of_tensors(output: List[torch.Tensor], api: str, argna
 jvp_str = 'jvp(f, primals, tangents)'
 
 
-def safe_unpack_dual(dual, strict, *, level=None):
+def safe_unpack_dual(dual, strict):
     if not isinstance(dual, torch.Tensor):
         raise RuntimeError(
             f'{jvp_str}: expected f(*args) to return only tensors'
             f', got unsupported type {type(dual)}'
         )
 
-    primal, tangent = fwAD.unpack_dual(dual, level=level)
+    primal, tangent = fwAD.unpack_dual(dual)
     if tangent is None:
         if strict:
             raise RuntimeError(
@@ -994,9 +994,8 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
         with fwAD._set_fwd_grad_enabled(True):
             JVP_NESTING = torch._C._functorch.count_jvp_interpreters()
             ctx = fwAD.dual_level if JVP_NESTING == 1 else noop
-            with ctx() as dual_level:
-                dual_level = torch._C._get_current_dual_level()
-                flat_duals = tuple(fwAD.make_dual(p, t, level=dual_level)
+            with ctx():
+                flat_duals = tuple(fwAD.make_dual(p, t)
                                    for p, t in zip(flat_primals, flat_tangents))
                 duals = tree_unflatten(flat_duals, primals_spec)
                 if argnums is not None:
@@ -1016,7 +1015,7 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
                 assert_non_empty_tensor_output(result_duals, jvp_str)
 
                 primals_out, tangents_out = \
-                    zip(*[safe_unpack_dual(dual, strict, level=dual_level) for dual in result_duals])
+                    zip(*[safe_unpack_dual(dual, strict) for dual in result_duals])
                 primals_out = tree_map(
                     partial(_undo_create_differentiable, level=level), primals_out)
                 tangents_out = tree_map(
