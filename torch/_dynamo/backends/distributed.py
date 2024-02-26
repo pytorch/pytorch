@@ -336,7 +336,9 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
 
             # Finally, we have to produce inputs for use compiling the next submodule,
             # and these need to be FakeTensors, so we execute the module under fake_mode
-            with self.fake_mode, mock.patch.object(self.fake_mode, "allow_non_fake_inputs", True):
+            with self.fake_mode, mock.patch.object(
+                self.fake_mode, "allow_non_fake_inputs", True
+            ):
                 if has_tracing_context:
                     return compiled_submod_real(*new_args, **kwargs)
                 else:
