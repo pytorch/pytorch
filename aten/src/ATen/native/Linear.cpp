@@ -814,7 +814,7 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
       rsizes.emplace_back(t2.sym_size(i));
     }
   }
-  // permut and reshape for matrix multiplication
+  // permute and reshape for matrix multiplication
   t1 = t1.permute(p1).reshape_symint({size1, csize});
   t2 = t2.permute(p2).reshape_symint({csize, size2});
   // multiply and reshape to target size
