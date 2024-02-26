@@ -1657,7 +1657,7 @@ def main():
             self.time = shards[which_shard - 1][0]
 
         def __str__(self):
-            s = f"Name: {self.name} (est. time: {round(self.time, 2)}s)\n"
+            s = f"Name: {self.name} (est. time: {round(self.time / 60, 2)}min)\n"
             serial = [test for test in self.sharded_tests if must_serial(test)]
             parallel = [test for test in self.sharded_tests if not must_serial(test)]
             s += f"  Serial tests ({len(serial)}):\n"
@@ -1666,7 +1666,7 @@ def main():
             s += "".join(f"    {test}\n" for test in parallel)
             return s.strip()
 
-    percent_to_run = 50 if options.enable_td else 100
+    percent_to_run = 25 if options.enable_td else 100
     print_to_stderr(
         f"Running {percent_to_run}% of tests based on TD"
         if options.enable_td
