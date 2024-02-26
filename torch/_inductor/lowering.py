@@ -1,3 +1,4 @@
+import contextlib
 import functools
 import itertools
 import logging
@@ -4398,16 +4399,28 @@ def _avg_poolnd(
         ih = [bh[i] * stride[i] + ih[i] - padding[i] for i in range(dim)]
         return x_loader([*prefix, *ih])
 
-    rv = Reduction.create(
-        reduction_type="sum",
-        input_node=x,
-        device=x.get_device(),
-        dst_dtype=output_dtype,
-        src_dtype=dtype,
-        inner_fn=fn_inner,
-        ranges=new_size,
-        reduction_ranges=kernel_size,
+    window_size = functools.reduce(operator.mul, kernel_size)
+
+    # TODO: remove this when #100331 is merged. We only do this
+    # for window_size <=25 to avoid performance regressions compared
+    # to the previous algorithm which unrolled manually for <=25
+    context = (
+        config.patch(unroll_reductions_threshold=25)
+        if dim == 2 and window_size <= 25
+        else contextlib.nullcontext
     )
+
+    with context:
+        rv = Reduction.create(
+            reduction_type="sum",
+            input_node=x,
+            device=x.get_device(),
+            dst_dtype=output_dtype,
+            src_dtype=dtype,
+            inner_fn=fn_inner,
+            ranges=new_size,
+            reduction_ranges=kernel_size,
+        )
     if isinstance(rv.data.data, Reduction):
         # Only realize if reduction isn't unrolled
         rv.realize()
@@ -4416,7 +4429,7 @@ def _avg_poolnd(
         if divisor_override:
             scale = 1 / divisor_override
         else:
-            scale = 1.0 / functools.reduce(operator.mul, kernel_size)
+            scale = 1.0 / window_size
 
         result = mul(rv, scale)
     else:
