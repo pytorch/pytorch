@@ -6,6 +6,8 @@ from typing import Dict, List
 import torch
 from .. import variables
 from ..exc import unimplemented
+from ..guards import GuardBuilder, install_guard
+from ..source import AttrSource, GlobalSource
 from ..utils import istype
 from .base import VariableTracker
 from .constant import ConstantVariable
@@ -255,3 +257,30 @@ class ProcessGroupVariable(DistributedVariable):
         from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
 
         return istype(value, (ProcessGroup, FakeProcessGroup))
+
+    @staticmethod
+    def get_global_pg_variable():
+        """
+        Make a ProcessGroupVariable from torch.distributed.group.WORLD and
+        intall guards.
+        """
+        import torch.distributed as dist
+
+        source = AttrSource(
+            AttrSource(
+                base=AttrSource(
+                    base=GlobalSource(global_name="torch"),
+                    member="distributed",
+                    get_static=False,
+                ),
+                member="group",
+                get_static=False,
+            ),
+            member="WORLD",
+            get_static=False,
+        )
+        install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+        return ProcessGroupVariable(
+            dist.group.WORLD,
+            source=source,
+        )
