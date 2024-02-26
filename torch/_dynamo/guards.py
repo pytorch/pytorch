@@ -1084,7 +1084,7 @@ class CheckFunctionManager:
 
             structured_guard_fns.append(
                 lambda: {
-                    "code": code,
+                    "code": code_part,
                     "stack": structured.from_traceback(guard.stack.summary())
                     if guard.stack
                     else None,
