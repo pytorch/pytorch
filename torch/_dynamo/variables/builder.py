@@ -1508,7 +1508,6 @@ def wrap_fx_proxy_cls(
         torch._C._functorch.count_jvp_interpreters,
         torch._C._functorch.maybe_current_level,
         torch._C._is_fwd_grad_enabled,
-        torch._C._get_current_dual_level,
         # some mac builds are missing torch.distributed.get_rank()
         getattr(torch.distributed, "get_rank", _missing),
         getattr(torch.distributed, "get_world_size", _missing),
