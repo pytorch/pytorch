@@ -46,7 +46,7 @@ def clip_grad_norm_(
         = _group_tensors_by_device_and_dtype([[g.detach() for g in grads]])  # type: ignore[assignment]
 
     if norm_type == inf:
-        norms = [torch.linalg.vector_norm(g.detach(), inf).to(first_device) for g in grads]
+        norms = [torch.linalg.vector_norm(g, inf).to(first_device) for g in grads]
         total_norm = norms[0] if len(norms) == 1 else torch.max(torch.stack(norms))
     else:
         norms = []
