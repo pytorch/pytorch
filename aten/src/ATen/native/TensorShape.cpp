@@ -39,6 +39,7 @@
 #include <ATen/ops/_conj_copy_native.h>
 #include <ATen/ops/_convert_indices_from_coo_to_csr.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
+#include <ATen/ops/_foreach_copy.h>
 #include <ATen/ops/_fw_primal_copy_native.h>
 #include <ATen/ops/_indices_copy_native.h>
 #include <ATen/ops/_make_dual.h>
@@ -2729,6 +2730,37 @@ static void check_stack_inputs(TensorList tensors, int64_t dim) {
       "stack expects each tensor to be equal size, but got ", entry_shape,
       " at entry 0 and ", tensors[i].sizes(), " at entry ", i);
   }
+}
+
+Tensor chunk_cat(TensorList tensors, int64_t dim, int64_t num_chunks) {
+  TORCH_CHECK(!tensors.empty(),
+           "chunk_cat expects a non-empty TensorList");
+  auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].dim());
+  auto num_tensors = tensors.size();
+  std::vector<Tensor> tensor_views;
+  std::vector<Tensor> tensors_to_copy;
+  std::vector<Tensor> padded_tensor_slices;
+  tensor_views.reserve(num_tensors);
+  tensors_to_copy.reserve(num_tensors);
+  padded_tensor_slices.reserve(num_tensors);
+  for (const auto & tensor : tensors) {
+    auto tensor_size = tensor.sizes();
+    std::vector<int64_t> padded_size(tensor_size.vec());
+    padded_size[wrapped_dim] = (tensor_size[wrapped_dim] + num_chunks - 1) / num_chunks * num_chunks;
+    Tensor padded_tensor = tensor;
+    if (padded_size != tensor_size) {
+      padded_tensor = tensor.new_zeros(padded_size);
+      padded_tensor_slices.push_back(padded_tensor.narrow(wrapped_dim, 0, tensor_size[wrapped_dim]));
+      tensors_to_copy.push_back(tensor);
+    }
+    std::vector<int64_t> view_sizes = std::vector<int64_t>(tensor_size.begin(), tensor_size.begin()+wrapped_dim);
+    view_sizes.insert(view_sizes.end(), {num_chunks, -1});
+    tensor_views.push_back(padded_tensor.view(view_sizes));
+  }
+  if (padded_tensor_slices.size() > 0) {
+    at::_foreach_copy_(padded_tensor_slices, tensors_to_copy);
+  }
+  return at::cat(tensor_views, wrapped_dim+1);
 }
 
 // TODO(msubkhankulov): refactor to use _stack
