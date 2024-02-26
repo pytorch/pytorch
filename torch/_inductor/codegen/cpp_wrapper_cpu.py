@@ -819,6 +819,9 @@ class CppWrapperCpu(WrapperCodeGen):
                             )
                         else:
                             self.wrapper_call.writeline(
+                                f"""aoti_torch_print_tensor_handle({output}, "{output}");"""
+                            )
+                            self.wrapper_call.writeline(
                                 f"output_handles[{idx}] = {output}.release();"
                             )
                 self.wrapper_call.writeline("} else {")
