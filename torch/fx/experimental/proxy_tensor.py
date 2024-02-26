@@ -407,11 +407,17 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     proxy_out = proxy_mode.tracer.create_proxy('call_function', func, proxy_args, proxy_kwargs,
                                                name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__))
 
-    # For inplace operations, use the original name throughout the graph, e.g.
-    # if we have copy_ = aten.copy_(x, y) future uses of x should refer to x,
-    # not copy_.
+    # This makes DCE marginally less likely to DCE inplace operations.
+    # It is not strictly necessary
+    # Kind of a hacky way to test if an op is in-place or not
     if func.overloadpacket.__name__[-1] == "_" and func.overloadpacket.__name__[0] != "_":
-        proxy_out = proxy_args[0]
+        if isinstance(args[0], List):
+            # e.g., c10d::allreduce_ returns a list of tensors as the first element
+            # in the output.
+            for i, a in enumerate(args[0]):
+                a.proxy = proxy_out[0][i]
+        else:
+            args[0].proxy = proxy_out
 
     out = func(*args, **kwargs)
 

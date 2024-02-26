@@ -459,7 +459,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 # node tracking logic to support the case.
                 copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
                 if copy_node is not None:
-                    graph.erase_node(copy_node)
+                    replace_dict[copy_node] = copy_node.args[0]
                 node.target = inplaceable_op.inplace_op
         elif node.target in inplaceable_triton_ops:
             # inplaceable_triton_ops take an additional argument called

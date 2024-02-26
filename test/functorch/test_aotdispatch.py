@@ -682,8 +682,8 @@ def forward(self, primals_1, primals_2, primals_3):
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, arg0_1, arg1_1):
     sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
-    copy_ = torch.ops.aten.copy_.default(arg1_1, sin);  sin = None
-    return (arg1_1,)""")
+    copy_ = torch.ops.aten.copy_.default(arg1_1, sin);  arg1_1 = sin = None
+    return (copy_,)""")
 
     def test_input_mutation_metadata(self):
         def f(a, b):
