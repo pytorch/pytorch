@@ -280,14 +280,14 @@ static PyObject* THXPModule_initExtension(PyObject* self, PyObject* noargs) {
   };
 
   auto num_gpus = c10::xpu::device_count();
-  PyObject* default_xpu_generators =
-      PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
+  THPObjectPtr default_xpu_generators(
+      PyTuple_New(static_cast<Py_ssize_t>(num_gpus)));
   for (const auto i : c10::irange(num_gpus)) {
-    PyObject* cast_gen = THPGenerator_initDefaultGenerator(
-        at::xpu::detail::getDefaultXPUGenerator(i));
-    PyTuple_SetItem(default_xpu_generators, i, cast_gen);
+    const auto& gen = at::xpu::detail::getDefaultXPUGenerator(i);
+    auto* cast_gen = THPGenerator_initDefaultGenerator(gen);
+    PyTuple_SetItem(default_xpu_generators.get(), i, cast_gen);
   }
-  set_module_attr("default_generators", default_xpu_generators);
+  set_module_attr("default_generators", default_xpu_generators.get());
   bindGetDeviceProperties(m);
 
   Py_RETURN_NONE;
