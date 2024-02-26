@@ -3028,9 +3028,9 @@ class TestNestedTensorSubclass(TestCase):
                                     "directly calling torch.ops.aten.size"):
             torch.ops.aten.size.default(nt)
 
-        singleton_int = torch.nested._internal.nested_tensor.get_tensor_symint(_offsets, coeff=1)
-        self.assertEqual(nt.size(), (3, singleton_int, 3))
-        self.assertEqual(nt.shape, (3, singleton_int, 3))
+        nested_int = torch.nested._internal.nested_tensor.get_tensor_symint(_offsets, coeff=1)
+        self.assertEqual(nt.size(), (3, nested_int, 3))
+        self.assertEqual(nt.shape, (3, nested_int, 3))
         self.assertEqual(nt.dim(), 3)
         self.assertEqual(nt.numel(), 27)
 

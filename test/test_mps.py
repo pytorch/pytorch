@@ -374,7 +374,13 @@ def mps_ops_modifier(ops):
         'exp2',
         'exp',
         'expm1',
+        'fft.fft',
+        'fft.fft2',
+        'fft.fftn',
         'fft.fftshift',
+        'fft.ifft',
+        'fft.ifft2',
+        'fft.ifftn',
         'fft.ifftshift',
         'flip',
         'fliplr',
@@ -423,6 +429,7 @@ def mps_ops_modifier(ops):
         'sqrt',
         'square',
         'stack',
+        'stft',
         'sum',
         'sum_to_size',
         'tan',
@@ -639,26 +646,9 @@ def mps_ops_modifier(ops):
         'log_sigmoid_forward': None,
         'linalg.eig': None,
         'linalg.eigvals': None,
-        'fft.fft': None,
-        'fft.fft2': None,
-        'fft.fftn': None,
-        'fft.hfft': None,
         'fft.hfft2': None,
         'fft.hfftn': None,
-        'fft.ifft': None,
-        'fft.ifft2': None,
-        'fft.ifftn': None,
-        'fft.ihfft': None,
-        'fft.ihfft2': None,
-        'fft.ihfftn': None,
-        'fft.irfft': None,
-        'fft.irfft2': None,
-        'fft.irfftn': None,
-        'fft.rfft': None,
-        'fft.rfft2': None,
-        'fft.rfftn': None,
         'put': None,
-        'stft': None,
         'nn.functional.conv_transpose3d': None,
         'rounddecimals_neg_3': None,
         'rounddecimals_3': None,
@@ -815,7 +805,6 @@ def mps_ops_modifier(ops):
         'geometric_': None,
         'log_normal_': None,
         'log_normal': None,
-        'bfloat16': [] if product_version >= 14.0 else None,
         'cdouble': None,
         'double': None,
         'nn.functional.softminwith_dtype': None,
@@ -889,6 +878,29 @@ def mps_ops_modifier(ops):
         # round not working properly for float16
         'round': [torch.float16],
     }
+
+    if product_version < 14.0:
+        # FFT and BFloat16 support was added in MacOS 14
+        UNIMPLEMENTED_XFAILLIST.update({
+            'bfloat16': None,
+            'fft.fft': None,
+            'fft.fft2': None,
+            'fft.fftn': None,
+            'fft.hfft': None,
+            'fft.ifft': None,
+            'fft.ifft2': None,
+            'fft.ifftn': None,
+            'fft.ihfft': None,
+            'fft.ihfft2': None,
+            'fft.ihfftn': None,
+            'fft.irfft': None,
+            'fft.irfft2': None,
+            'fft.irfftn': None,
+            'fft.rfft': None,
+            'fft.rfft2': None,
+            'fft.rfftn': None,
+            'stft': None,
+        })
 
     UNDEFINED_XFAILLIST = {
         # Top 60 operators
@@ -11469,6 +11481,11 @@ class TestConsistency(TestCaseMPS):
             elif op.name == "nn.functional.upsample_bilinear" and dtype == torch.uint8:
                 atol = 1.0
                 rtol = 0.0
+            elif op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.fft', 'fft.fftn', 'fft.rfft']:
+                # TODO: Investigate why this is needed
+                # See https://github.com/pytorch/pytorch/issues/120237
+                atol = 3e-5
+                rtol = 3e-5
             else:
                 atol = None
                 rtol = None
@@ -11531,6 +11548,11 @@ class TestConsistency(TestCaseMPS):
             elif op.name == "nn.functional.interpolate":
                 atol = 1e-3
                 rtol = 1e-4
+            elif op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.fft', 'fft.fftn', 'fft.rfft']:
+                # TODO: Investigate why this is needed
+                # See https://github.com/pytorch/pytorch/issues/120237
+                atol = 3e-5
+                rtol = 2e-5
             else:
                 atol = None
                 rtol = None
