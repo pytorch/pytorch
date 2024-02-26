@@ -502,10 +502,7 @@ class GuardBuilder(GuardBuilderBase):
 
         def setup_guard():
             assert istype(val.training, bool)
-            # TODO: Why doesn't this use produce_guard_code?
-            self.code.append(
-                GuardCodeList([f"{ref}.training == {val.training}"], guard)
-            )
+            self._guard_on_attribute(guard, "training", GuardBuilder.CONSTANT_MATCH)
 
         if hasattr(val, "training"):
             # There are cases where a monkeypatched object has a guard made between __new__ and __init__
@@ -1048,7 +1045,6 @@ class CheckFunctionManager:
 
             guard.create(builder)
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
-        self._weakrefs.clear()
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and check_fn and is used to
         # limit the number of cache entries with same ID_MATCH'd object.
@@ -1058,6 +1054,17 @@ class CheckFunctionManager:
         # queryable data structure such that this information is already present
         # in some form.
         self.check_fn.id_matched_objs = builder.id_matched_objs
+
+        # NB - We have to very careful of cleaning up here. Because of the
+        # invalidate function, we can create a weakref finalizer that keeps
+        # `self` alive for very long. Sometimes by mistake, we can run
+        # invalidate for a type/object (check id_ref method) that Python can
+        # leak by design, preventing us from calling the finalizer. In that
+        # case, the `self` will be alive even though the cache entry will be
+        # deleted (check invalidate method), which can cause a memory leak,
+        # e.g., not setting output_graph = None can keep hold of nn_modules.
+        self._weakrefs.clear()
+        self.output_graph = None
 
     def compile_check_fn(self, builder, guards_out, guard_fail_fn):
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
