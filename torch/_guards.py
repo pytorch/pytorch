@@ -608,7 +608,7 @@ class TracingContext:
         # careful not to accidentally induce guards on the SymInt if
         # you ever do change this in aot_autograd.py; you should check
         # on permutations preferentially.)
-        self.output_strides_listeners: List[Callable[[List[int]], None]] = []
+        self.output_strides: Optional[List[Optional[List[int]]]] = None
         # When this is True, whenever we encounter an int in Dynamo tracing,
         # we will (1) force unspec it and (2) force it as a size-like unbacked
         # integer.  This is currently used when processing certain lists of
@@ -712,24 +712,15 @@ class TracingContext:
     @contextlib.contextmanager
     def report_output_strides():
         tc = TracingContext.try_get()
-
-        output_strides = []
-
-        class Listener:
-            def __call__(self, li):
-                nonlocal output_strides
-                output_strides.extend(list(li))
-
         if tc is None:
             yield None
             return
-
-        listener = Listener()
-        tc.output_strides_listeners.append(listener)
+        old_output_strides = tc.output_strides
+        tc.output_strides = []
         try:
-            yield output_strides
+            yield tc.output_strides
         finally:
-            tc.output_strides_listeners.remove(listener)
+            tc.output_strides = old_output_strides
 
     @staticmethod
     def set_current_loc(filename, lineno, frame_name):

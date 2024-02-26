@@ -1149,9 +1149,6 @@ class GraphLowering(torch.fx.Interpreter):
                     return x
 
             if tracing_context := torch._guards.TracingContext.try_get():
-                if tracing_context.output_strides:
-                    tracing_context.output_strides.clear()
-
                 params_flat = [
                     param
                     for param in tracing_context.params_flat  # type: ignore[union-attr]
