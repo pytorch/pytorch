@@ -4334,10 +4334,6 @@ def adaptive_max_pool2d(x, output_size):
 
     h_out, w_out = output_size
 
-    # no-op if the same input and output
-    if h_in == h_out and w_in == w_out:
-        return clone(x), ones_like(x, dtype=torch.int64)
-
     if h_out == 0 or w_out == 0:
         o_size = [*batch, h_out, w_out]
         return empty(o_size, dtype=x.get_dtype(), device=x.get_device()), empty(
