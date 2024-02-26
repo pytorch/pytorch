@@ -540,8 +540,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
   Tensor grad_out_t = grad_out_.transpose(1,2);
   Tensor out_t = out.transpose(1,2);
 
-  Tensor grad_q, grad_k, grad_v;
-  std::tie(grad_q, grad_k, grad_v) = at::_flash_attention_backward(
+  auto [grad_q, grad_k, grad_v] = at::_flash_attention_backward(
     grad_out_t,
     q_t,
     k_t,
@@ -592,14 +591,14 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
 
   Tensor grad_q, grad_k, grad_v, grad_bias;
 
-  // This is needed because SaveVarible automatically converts
+  // This is needed because SaveVariable automatically converts
   // c10::optional to undefined tensor
   c10::optional<Tensor> kernel_bias;
   if (attn_bias.defined()) {
     kernel_bias = attn_bias;
   }
   // Will add with signauter changes for dropout and bias
-  // We are only handiling Dense inputs, but this should be passed
+  // We are only handling Dense inputs, but this should be passed
   // from forward to backward
   int64_t max_seqlen_q = q_t.size(1);
   int64_t max_seqlen_k = k_t.size(1);

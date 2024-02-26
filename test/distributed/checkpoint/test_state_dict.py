@@ -143,6 +143,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         use_composable: bool,
         use_dtensor: bool,
         wrapping: Tuple[nn.Module] = (),
+        compile_model: bool = False,
     ) -> None:
         if not use_orig_params and use_composable:
             return
@@ -182,6 +183,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                         use_orig_params=use_orig_params,
                     )
 
+            if compile_model:
+                dist_model = torch.compile(dist_model)
             dist_optim = torch.optim.Adam(dist_model.parameters(), lr=1e-3)
             return orig_model, orig_optim, copy_optim, dist_model, dist_optim
 
@@ -198,6 +201,17 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 "wrapping": [tuple(), (nn.Linear, UnitModule)],
             },
             self._test_fsdp,
+        )
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_compiled_fsdp(self) -> None:
+        self._test_fsdp(
+            use_orig_params=True,
+            use_composable=False,
+            use_dtensor=False,
+            wrapping=tuple(),
+            compile_model=True,
         )
 
     def _test_ddp(self, use_composable: bool) -> None:

@@ -21,7 +21,6 @@ from torch.export import (
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
-from torch._export import capture_pre_autograd_graph
 from torch._export.utils import (
     get_buffer,
     get_param,
@@ -210,6 +209,7 @@ class TestUnflatten(TestCase):
             id(getattr(unflattened_module.sub_net, "2")),
         )
 
+    @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
     @skipIfTorchDynamo("Non strict mode is not meant to run with dynamo")
     def test_unflatten_preserve_signature(self):
         class NestedChild(torch.nn.Module):

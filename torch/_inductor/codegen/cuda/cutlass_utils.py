@@ -254,12 +254,10 @@ def get_alignments(torch_dtype: torch.dtype) -> List[int]:
         return [8, 4, 2, 1]
     elif torch_dtype == torch.float:
         return [4, 2, 1]
-    elif torch_dtype == torch.int8:
-        return [16, 8, 4, 2]  # FIXME: check this!
-    elif torch_dtype == torch.uint8:
-        return [16, 8, 4, 2]  # FIXME: check this!
+    elif torch_dtype in (torch.uint8, torch.int8):
+        return [16, 8, 4, 2]
     elif torch_dtype == torch.int32:
-        return [8, 4, 2, 1]  # FIXME: check this! (should 8 be there?)
+        return [4, 2, 1]
     else:
         raise NotImplementedError(f"unsupported {torch_dtype=} for alignments")
 

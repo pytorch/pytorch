@@ -70,12 +70,21 @@ class TestSerialize(TestCase):
                 with torch.enable_grad():
                     return x + x
 
+        inp = (torch.ones(10),)
         with torch.no_grad():
             from torch.export._trace import _export
-            ep = _export(Foo(), (torch.ones(10),), pre_dispatch=True)
+            ep = _export(Foo(), inp, pre_dispatch=True)
 
-        with self.assertRaisesRegex(SerializeError, "Failed serializing node _set_grad_enabled"):
-            torch.export.save(ep, io.BytesIO())
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = torch.export.load(buffer)
+
+        exp_out = ep.module()(*inp)
+        actual_out = loaded_ep.module()(*inp)
+        self.assertEqual(exp_out, actual_out)
+        self.assertEqual(exp_out.requires_grad, actual_out.requires_grad)
+
 
     def test_serialize_multiple_returns_from_node(self) -> None:
         class MyModule(torch.nn.Module):
@@ -221,7 +230,7 @@ class TestSerialize(TestCase):
             g.nodes[1].inputs[0].arg.as_tensor.name
         )
 
-
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestDeserialize(TestCase):
     def check_graph(self, fn, inputs, dynamic_shapes=None, _check_meta=True) -> None:
