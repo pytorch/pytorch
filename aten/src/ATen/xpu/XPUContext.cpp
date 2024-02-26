@@ -46,7 +46,7 @@ void initDeviceGlobalIdx(DeviceIndex device) {
   TORCH_CHECK(
       it != devices.end(), "Can't find the global index of XPU device.");
   device_global_idxs[device] =
-      static_cast<c10::DeviceIndex>(std::distance(devices.begin(), it));
+      static_cast<int32_t>(std::distance(devices.begin(), it));
 }
 
 inline void check_device(DeviceIndex device) {
