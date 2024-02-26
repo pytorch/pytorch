@@ -18,7 +18,7 @@ from .common import IndentedBuffer
 from .wrapper import pexpr, WrapperCodeGen
 
 
-class CppWrapperCpu(WrapperCodeGen):
+class CppWrapperCodeGen(WrapperCodeGen):
     """
     Generates cpp wrapper for running on CPU and calls cpp kernels
     """
@@ -238,7 +238,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 from .cpp import DTYPE_TO_CPP
 
                 input_cpp_types = ", ".join(
-                    f"{CppWrapperCpu.get_input_cpp_type(x)}"
+                    f"{CppWrapperCodeGen.get_input_cpp_type(x)}"
                     for x in V.graph.graph_inputs.values()
                 )
 

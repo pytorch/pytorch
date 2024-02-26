@@ -845,7 +845,7 @@ class TestStandaloneCPPJIT(TestCase):
             shutil.rmtree(build_dir)
 
 
-class DummyPrivateUse1Module:
+class DummyXPUModule:
     @staticmethod
     def is_available():
         return True
@@ -886,18 +886,18 @@ class TestExtensionUtils(TestCase):
 
         # Wrong device type
         with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
-            torch._register_device_module('dummmy', DummyPrivateUse1Module)
+            torch._register_device_module('dummmy', DummyXPUModule)
 
         with self.assertRaises(AttributeError):
-            torch.privateuseone.is_available()  # type: ignore[attr-defined]
+            torch.xpu.is_available()  # type: ignore[attr-defined]
 
-        torch._register_device_module('privateuseone', DummyPrivateUse1Module)
+        torch._register_device_module('xpu', DummyXPUModule)
 
-        torch.privateuseone.is_available()  # type: ignore[attr-defined]
+        torch.xpu.is_available()  # type: ignore[attr-defined]
 
         # No supporting for override
         with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
-            torch._register_device_module('privateuseone', DummyPrivateUse1Module)
+            torch._register_device_module('xpu', DummyXPUModule)
 
     def test_external_module_and_backend_register(self):
         torch.utils.rename_privateuse1_backend('foo')
@@ -913,7 +913,7 @@ class TestExtensionUtils(TestCase):
         with self.assertRaisesRegex(AssertionError, "Tried to use AMP with the"):
             with torch.autocast(device_type=custom_backend_name):
                 pass
-        torch._register_device_module('foo', DummyPrivateUse1Module)
+        torch._register_device_module('foo', DummyXPUModule)
 
         torch.foo.is_available()  # type: ignore[attr-defined]
         with torch.autocast(device_type=custom_backend_name):

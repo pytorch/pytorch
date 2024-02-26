@@ -3,36 +3,31 @@
 #include <ATen/cuda/CUDAUtils.h>
 #include <ATen/Dispatch.h>
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
-#else
+#ifndef USE_ROCM
 #include <cuda_runtime.h>
 #include <cutlass/cutlass.h>
 #include <cutlass/layout/layout.h>
 #include <cutlass/tensor_ref.h>
-#include <cutlass/gemm/device/gemm_sparse_with_visitor.h>
-#include <cutlass/epilogue/threadblock/fusion/visitors.hpp>
+#include <cutlass/epilogue/thread/linear_combination.h>
+#include <cutlass/epilogue/thread/linear_combination_relu.h>
+#include <cutlass/epilogue/thread/linear_combination_silu.h>
+#include <cutlass/gemm/device/gemm_sparse_row_broadcast.h>
 #endif
 
 #include <type_traits>
 #include <tuple>
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
-#else
+#ifndef USE_ROCM
 #define CUTLASS_STATUS_CHECK(status)                                      \
   {                                                                       \
     TORCH_CHECK(status == cutlass::Status::kSuccess,                      \
                 "Got CUTLASS error: ", cutlassGetStatusString(status));   \
   }
-
-namespace {
-    enum class Activation{NONE, RELU, SILU};
-}
 #endif
 
 namespace at::native {
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
-#else
+#ifndef USE_ROCM
 // Wrapper function for CUTLASS sparse GEMM implementation, used
 // solely to simplify dispatching from
 // _sparse_semi_structured_linear() function below.
@@ -41,14 +36,14 @@ template <
     typename ElementInputB,
     typename ElementOutput,
     typename ElementAccumulator,
+    typename ElementComputeEpilogue,
     typename ThreadblockShape,
     typename WarpShape,
     typename InstructionShape,
+    typename EpilogueOp,
     typename LayoutInputA,
-    typename LayoutInputB,
-    bool use_bias,
-    Activation activation>
-Tensor two_four_sgemm(
+    typename LayoutInputB>
+Tensor two_four_sgemm_cutlass(
     const Tensor& tensor_a,
     const at::IntArrayRef::value_type& tensor_a_stride,
     const Tensor& tensor_b,
@@ -62,107 +57,22 @@ Tensor two_four_sgemm(
     using SmArch = cutlass::arch::Sm80; // Only CC 8.x devices are supported at the moment.
     using SwizzleThreadBlock = cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>; // This choice provides good performance across wide range of operand sizes.
     constexpr int NumStages = 3; // This choice provides good performance across wide range of operand sizes.
-    using Operator = cutlass::arch::OpMultiplyAdd;
-    constexpr int NumEVTEpilogueStages = 1;
-
-    constexpr int AlignmentInputA = 128 / cutlass::sizeof_bits<ElementInputA>::value;
-    constexpr int AlignmentInputB = 128 / cutlass::sizeof_bits<ElementInputB>::value;
-    constexpr int AlignmentOutput = 128 / cutlass::sizeof_bits<ElementOutput>::value;
-
-    using ElementComputeEpilogue = ElementAccumulator;
-    constexpr int AlignmentComputeEpilogue = 128 / cutlass::sizeof_bits<ElementComputeEpilogue>::value;
-    using ElementC = ElementOutput;
-    using LayoutC = LayoutOutput;
-    constexpr int AlignmentC = 128 / cutlass::sizeof_bits<ElementC>::value;
-
-    using BiasTileThreadMap = cutlass::epilogue::threadblock::OutputTileThreadLayout<
-        ThreadblockShape,
-        WarpShape,
-        ElementC,
-        AlignmentC,
-        NumEVTEpilogueStages>;
-    using OutputTileThreadMap = cutlass::epilogue::threadblock::OutputTileThreadLayout<
-        ThreadblockShape,
-        WarpShape,
-        ElementOutput,
-        AlignmentOutput,
-        NumEVTEpilogueStages>;
-
-    using Accum = cutlass::epilogue::threadblock::VisitorAccFetch;
-
-    using BiasScalar =
-        cutlass::epilogue::threadblock::VisitorScalarBroadcast<ElementC>;
-    using BiasTensor =
-        cutlass::epilogue::threadblock::VisitorColBroadcast<
-            BiasTileThreadMap,
-            ElementC,
-            cute::Stride<cute::_1, cute::_0, int64_t>>;
-    using Bias = std::conditional_t<use_bias, BiasTensor, BiasScalar>;
-    using BiasArguments = typename Bias::Arguments;
-
-    using ApplyBias = cutlass::epilogue::threadblock::VisitorCompute<
-        cutlass::plus, ElementComputeEpilogue, ElementComputeEpilogue,
-        cutlass::FloatRoundStyle::round_to_nearest>;
-    using EVTApplyBias = cutlass::epilogue::threadblock::Sm80EVT<
-        ApplyBias,
-        Accum,
-        Bias>;
-
-    using ApplyActivationNone = cutlass::epilogue::threadblock::VisitorCompute<
-        cutlass::epilogue::thread::Identity,
-        ElementComputeEpilogue,
-        ElementComputeEpilogue,
-        cutlass::FloatRoundStyle::round_to_nearest>;
-    using ApplyActivationReLu = cutlass::epilogue::threadblock::VisitorCompute<
-        cutlass::epilogue::thread::ReLu,
-        ElementComputeEpilogue,
-        ElementComputeEpilogue,
-        cutlass::FloatRoundStyle::round_to_nearest>;
-    using ApplyActivationSiLu = cutlass::epilogue::threadblock::VisitorCompute<
-        cutlass::epilogue::thread::SiLu,
-        ElementComputeEpilogue,
-        ElementComputeEpilogue,
-        cutlass::FloatRoundStyle::round_to_nearest>;
-    using ApplyActivation =
-        std::conditional_t<
-            activation == Activation::NONE,
-            ApplyActivationNone,
-            std::conditional_t<
-                activation == Activation::RELU,
-                ApplyActivationReLu,
-                ApplyActivationSiLu>>;
-    using EVTApplyActivation = cutlass::epilogue::threadblock::Sm80EVT<
-        ApplyActivation,
-        EVTApplyBias>;
-
-    using Output = cutlass::epilogue::threadblock::VisitorAuxStore<
-        OutputTileThreadMap, ElementOutput, cutlass::FloatRoundStyle::round_to_nearest,
-        cute::Stride<int64_t, cute::_1, int64_t>>;
-
-    using EVTOutput = cutlass::epilogue::threadblock::Sm80EVT<
-        Output,
-        EVTApplyActivation>;
-
-    using Gemm = cutlass::gemm::device::SparseGemmWithVisitor<
+    using Gemm = cutlass::gemm::device::SparseGemmRowBroadcast<
         ElementInputA,
         LayoutInputA,
         ElementInputB,
         LayoutInputB,
-        ElementC,
-        LayoutC,
+        ElementOutput,
+        LayoutOutput,
         ElementAccumulator,
         MMAOp,
         SmArch,
         ThreadblockShape,
         WarpShape,
         InstructionShape,
-        EVTOutput,
+        EpilogueOp,
         SwizzleThreadBlock,
-        NumStages,
-        AlignmentInputA,
-        AlignmentInputB,
-        Operator,
-        NumEVTEpilogueStages>;
+        NumStages>;
 
     // Datatype and layout of metadata matrix are inferred from sparse
     // GEMM template.
@@ -195,11 +105,11 @@ Tensor two_four_sgemm(
         meta_dtype = at::kInt;
         break;
     default:
-        AT_ERROR("two_four_sgemm: invalid size of meta tensor datatype "
+        AT_ERROR("two_four_sgemm_cutlass: invalid size of meta tensor datatype "
                  "encountered");
     }
     TORCH_CHECK(meta.dtype() == meta_dtype,
-                "two_four_sgemm: Expected meta datatype ", meta_dtype,
+                "two_four_sgemm_cutlass: Expected meta datatype ", meta_dtype,
                 ", but got ", meta.dtype());
 
     // Determine PyTorch datatype for the output matrix.
@@ -215,69 +125,64 @@ Tensor two_four_sgemm(
     } else if constexpr (std::is_same_v<ElementOutput, float>) {
         tensor_d_dtype = at::kFloat;
     } else {
-        AT_ERROR("two_four_sgemm: invalid datatype for sparse GEMM output ",
-                 "encountered");
+        AT_ERROR("two_four_sgemm_cutlass: invalid datatype for sparse GEMM ",
+                 " output encountered");
     }
-    if constexpr (use_bias) {
+    if (tensor_c.numel() != 0) {
         TORCH_CHECK(tensor_c.dtype() == tensor_d_dtype,
-                    "two_four_sgemm: Expected sparse GEMM bias datatype ",
-                    tensor_d_dtype, ", but got ", tensor_c.dtype());
+                    "two_four_sgemm_cutlass: Expected sparse GEMM bias "
+                    "datatype ", tensor_d_dtype, ", but got ",
+                    tensor_c.dtype());
     }
 
     // Create output matrix.
-    Tensor tensor_d =
-        tensor_a.new_empty({length_m, length_n},
-                           at::TensorOptions().dtype(tensor_d_dtype));
+    Tensor tensor_d;
+    if (tensor_c.numel() != 0) {
+        tensor_d = tensor_c.new_empty({length_m, length_n});
+    } else {
+        tensor_d =
+            tensor_a.new_empty({length_m, length_n},
+                               at::TensorOptions().dtype(tensor_d_dtype));
+    }
 
     // Prepare arguments for CUTLASS sparse GEMM kernel.
     cutlass::gemm::GemmCoord problem_size(length_m, length_n, length_k);
     LayoutInputA layout_a(tensor_a_stride);
     LayoutInputB layout_b(tensor_b_stride);
+    LayoutOutput layout_c(tensor_c.numel() != 0 ? tensor_c.stride(0) : 0);
+    LayoutOutput layout_d(tensor_d.stride(0));
     auto tensor_a_device_ref =
         cutlass::TensorRef<ElementInputA, LayoutInputA>(
             (ElementInputA*)tensor_a.data_ptr(), layout_a);
     auto tensor_b_device_ref =
         cutlass::TensorRef<ElementInputB, LayoutInputB>(
             (ElementInputB*)tensor_b.data_ptr(), layout_b);
+    auto tensor_c_device_ref =
+        cutlass::TensorRef<ElementOutput, LayoutOutput>(
+            (ElementOutput*)(tensor_c.numel() != 0 ?
+                             tensor_c.data_ptr() : tensor_d.data_ptr()),
+            layout_c);
+    auto tensor_d_device_ref =
+        cutlass::TensorRef<ElementOutput, LayoutOutput>(
+            (ElementOutput*)tensor_d.data_ptr(), layout_d);
     auto tensor_e_reordered_device_ref =
         cutlass::TensorRef<ElementInputE, ReorderedLayoutInputE>(
             (ElementInputE*)meta.data_ptr(),
             ReorderedLayoutInputE::packed({length_m, meta_ncols}));
-
-    BiasArguments bias_arguments{
-        [&]() -> BiasArguments {
-            if constexpr (use_bias) {
-                return {(ElementC*)tensor_c.data_ptr(),
-                        ElementC(0),
-                        {cute::_1{}, cute::_0{}, problem_size.m()}};
-            } else {
-                return {ElementC(0)};
-            }
-        }()
-    };
-    typename Output::Arguments output_arguments{
-        (ElementOutput*)tensor_d.data_ptr(),
-        {problem_size.n(), cute::_1{}, problem_size.mn().product()}
-    };
-    typename EVTOutput::Arguments callback_arguments{
-        {
-            {
-                {},                 // Accum
-                bias_arguments,     // Bias
-                {}                  // ApplyBias
-            },                      // EVTApplyBias
-            {}                      // ApplyActivation
-        },                          // EVTApplyActivation
-        output_arguments,           // Output
-    };                              // EVTOutput
+    ElementComputeEpilogue alpha(1);
+    ElementComputeEpilogue beta(tensor_c.numel() != 0 ? 1 : 0);
+    constexpr int split_k_slices = 1;
 
     // Create a tuple of CUTLASS sparse GEMM kernel arguments.
     typename Gemm::Arguments arguments{
         problem_size,
         tensor_a_device_ref,
         tensor_b_device_ref,
+        tensor_c_device_ref,
+        tensor_d_device_ref,
         tensor_e_reordered_device_ref,
-        callback_arguments};
+        {alpha, beta},
+        split_k_slices};
 
     cutlass::Status status;
 
@@ -314,16 +219,16 @@ template <
     typename ElementInputB,
     typename ElementOutput,
     typename ElementAccumulator,
+    typename ElementComputeEpilogue,
     typename ThreadblockShape,
     typename WarpShape,
     typename InstructionShape,
+    typename EpilogueOp,
     bool EnableRowMajorRowMajorLayouts,
     bool EnableRowMajorColumnMajorLayouts,
     bool EnableColumnMajorRowMajorLayouts,
-    bool EnableColumnMajorColumnMajorLayouts,
-    bool use_bias,
-    Activation activation>
-Tensor two_four_sgemm_dispatch_layouts(
+    bool EnableColumnMajorColumnMajorLayouts>
+Tensor two_four_sgemm_cutlass_dispatch_layouts(
     const Tensor& tensor_a, const Tensor& tensor_b, const Tensor& tensor_c,
     const Tensor& meta) {
     // Determine layouts (row-major or column-major) of input tensors.
@@ -337,18 +242,18 @@ Tensor two_four_sgemm_dispatch_layouts(
     // Perform dispatching.
     if constexpr (EnableRowMajorRowMajorLayouts) {
         if (tensor_a_row_major && tensor_b_row_major) {
-            return two_four_sgemm<
+            return two_four_sgemm_cutlass<
                 ElementInputA,
                 ElementInputB,
                 ElementOutput,
                 ElementAccumulator,
+                ElementComputeEpilogue,
                 ThreadblockShape,
                 WarpShape,
                 InstructionShape,
+                EpilogueOp,
                 cutlass::layout::RowMajor,
-                cutlass::layout::RowMajor,
-                use_bias,
-                activation>(
+                cutlass::layout::RowMajor>(
                 tensor_a,
                 tensor_a_stride,
                 tensor_b,
@@ -359,18 +264,18 @@ Tensor two_four_sgemm_dispatch_layouts(
     }
     if constexpr (EnableRowMajorColumnMajorLayouts) {
         if (tensor_a_row_major && !tensor_b_row_major) {
-            return two_four_sgemm<
+            return two_four_sgemm_cutlass<
                 ElementInputA,
                 ElementInputB,
                 ElementOutput,
                 ElementAccumulator,
+                ElementComputeEpilogue,
                 ThreadblockShape,
                 WarpShape,
                 InstructionShape,
+                EpilogueOp,
                 cutlass::layout::RowMajor,
-                cutlass::layout::ColumnMajor,
-                use_bias,
-                activation>(
+                cutlass::layout::ColumnMajor>(
                 tensor_a,
                 tensor_a_stride,
                 tensor_b,
@@ -381,18 +286,18 @@ Tensor two_four_sgemm_dispatch_layouts(
     }
     if constexpr (EnableColumnMajorRowMajorLayouts) {
         if (!tensor_a_row_major && tensor_b_row_major) {
-            return two_four_sgemm<
+            return two_four_sgemm_cutlass<
                 ElementInputA,
                 ElementInputB,
                 ElementOutput,
                 ElementAccumulator,
+                ElementComputeEpilogue,
                 ThreadblockShape,
                 WarpShape,
                 InstructionShape,
+                EpilogueOp,
                 cutlass::layout::ColumnMajor,
-                cutlass::layout::RowMajor,
-                use_bias,
-                activation>(
+                cutlass::layout::RowMajor>(
                 tensor_a,
                 tensor_a_stride,
                 tensor_b,
@@ -403,18 +308,18 @@ Tensor two_four_sgemm_dispatch_layouts(
     }
     if constexpr (EnableColumnMajorColumnMajorLayouts) {
         if (!tensor_a_row_major && !tensor_b_row_major) {
-            return two_four_sgemm<
+            return two_four_sgemm_cutlass<
                 ElementInputA,
                 ElementInputB,
                 ElementOutput,
                 ElementAccumulator,
+                ElementComputeEpilogue,
                 ThreadblockShape,
                 WarpShape,
                 InstructionShape,
+                EpilogueOp,
                 cutlass::layout::ColumnMajor,
-                cutlass::layout::ColumnMajor,
-                use_bias,
-                activation>(
+                cutlass::layout::ColumnMajor>(
                 tensor_a,
                 tensor_a_stride,
                 tensor_b,
@@ -424,69 +329,11 @@ Tensor two_four_sgemm_dispatch_layouts(
         }
     }
 
-    AT_ERROR("two_four_sgemm_dispatch_layouts: Combination of ",
+    AT_ERROR("two_four_sgemm_cutlass_dispatch_layouts: Combination of ",
              tensor_a_row_major ? "row-major" : "column_major", " and ",
              tensor_b_row_major ? "row-major" : "column_major",
              " layouts for input tensors is not supported");
     return Tensor{};
-}
-
-// Dispatch according to the bias tensor being provided or not.
-template <
-    typename ElementInputA,
-    typename ElementInputB,
-    typename ElementOutput,
-    typename ElementAccumulator,
-    typename ThreadblockShape,
-    typename WarpShape,
-    typename InstructionShape,
-    bool EnableRowMajorRowMajorLayouts,
-    bool EnableRowMajorColumnMajorLayouts,
-    bool EnableColumnMajorRowMajorLayouts,
-    bool EnableColumnMajorColumnMajorLayouts,
-    Activation activation>
-Tensor two_four_sgemm_dispatch_layouts_bias(
-    const Tensor& tensor_a, const Tensor& tensor_b, const Tensor& tensor_c,
-    const Tensor& meta) {
-    if (tensor_c.numel() > 0) {
-        return two_four_sgemm_dispatch_layouts<
-            ElementInputA,
-            ElementInputB,
-            ElementOutput,
-            ElementAccumulator,
-            ThreadblockShape,
-            WarpShape,
-            InstructionShape,
-            EnableRowMajorRowMajorLayouts,
-            EnableRowMajorColumnMajorLayouts,
-            EnableColumnMajorRowMajorLayouts,
-            EnableColumnMajorColumnMajorLayouts,
-            true,
-            activation>(
-            tensor_a,
-            tensor_b,
-            tensor_c,
-            meta);
-    } else {
-        return two_four_sgemm_dispatch_layouts<
-            ElementInputA,
-            ElementInputB,
-            ElementOutput,
-            ElementAccumulator,
-            ThreadblockShape,
-            WarpShape,
-            InstructionShape,
-            EnableRowMajorRowMajorLayouts,
-            EnableRowMajorColumnMajorLayouts,
-            EnableColumnMajorRowMajorLayouts,
-            EnableColumnMajorColumnMajorLayouts,
-            false,
-            activation>(
-            tensor_a,
-            tensor_b,
-            tensor_c,
-            meta);
-    }
 }
 
 // Dispatch according to the activation functions enabled.
@@ -495,6 +342,7 @@ template <
     typename ElementInputB,
     typename ElementOutput,
     typename ElementAccumulator,
+    typename ElementComputeEpilogue,
     typename ThreadblockShape,
     typename WarpShape,
     typename InstructionShape,
@@ -505,25 +353,32 @@ template <
     bool EnableActivationNone,
     bool EnableActivationReLU,
     bool EnableActivationSiLU>
-Tensor two_four_sgemm_dispatch_layouts_bias_activation(
+Tensor two_four_sgemm_cutlass_dispatch_layouts_activation(
     const Tensor& tensor_a, const Tensor& tensor_b, const Tensor& tensor_c,
     const Tensor& meta, const c10::string_view& activation) {
     // Perform dispatching.
     if constexpr (EnableActivationNone) {
         if (activation == "none") {
-            return two_four_sgemm_dispatch_layouts_bias<
+            using EpilogueOp =
+                cutlass::epilogue::thread::LinearCombination<
+                    ElementOutput,
+                    128 / cutlass::sizeof_bits<ElementOutput>::value,
+                    ElementAccumulator,
+                    ElementComputeEpilogue>;
+            return two_four_sgemm_cutlass_dispatch_layouts<
                 ElementInputA,
                 ElementInputB,
                 ElementOutput,
                 ElementAccumulator,
+                ElementComputeEpilogue,
                 ThreadblockShape,
                 WarpShape,
                 InstructionShape,
+                EpilogueOp,
                 EnableRowMajorRowMajorLayouts,
                 EnableRowMajorColumnMajorLayouts,
                 EnableColumnMajorRowMajorLayouts,
-                EnableColumnMajorColumnMajorLayouts,
-                Activation::NONE>(
+                EnableColumnMajorColumnMajorLayouts>(
                 tensor_a,
                 tensor_b,
                 tensor_c,
@@ -532,19 +387,26 @@ Tensor two_four_sgemm_dispatch_layouts_bias_activation(
     }
     if constexpr (EnableActivationReLU) {
         if (activation == "relu") {
-            return two_four_sgemm_dispatch_layouts_bias<
+            using EpilogueOp =
+                cutlass::epilogue::thread::LinearCombinationRelu<
+                    ElementOutput,
+                    128 / cutlass::sizeof_bits<ElementOutput>::value,
+                    ElementAccumulator,
+                    ElementComputeEpilogue>;
+            return two_four_sgemm_cutlass_dispatch_layouts<
                 ElementInputA,
                 ElementInputB,
                 ElementOutput,
                 ElementAccumulator,
+                ElementComputeEpilogue,
                 ThreadblockShape,
                 WarpShape,
                 InstructionShape,
+                EpilogueOp,
                 EnableRowMajorRowMajorLayouts,
                 EnableRowMajorColumnMajorLayouts,
                 EnableColumnMajorRowMajorLayouts,
-                EnableColumnMajorColumnMajorLayouts,
-                Activation::RELU>(
+                EnableColumnMajorColumnMajorLayouts>(
                 tensor_a,
                 tensor_b,
                 tensor_c,
@@ -553,19 +415,26 @@ Tensor two_four_sgemm_dispatch_layouts_bias_activation(
     }
     if constexpr (EnableActivationSiLU) {
         if (activation == "silu") {
-            return two_four_sgemm_dispatch_layouts_bias<
+            using EpilogueOp =
+                cutlass::epilogue::thread::LinearCombinationSilu<
+                    ElementOutput,
+                    128 / cutlass::sizeof_bits<ElementOutput>::value,
+                    ElementAccumulator,
+                    ElementComputeEpilogue>;
+            return two_four_sgemm_cutlass_dispatch_layouts<
                 ElementInputA,
                 ElementInputB,
                 ElementOutput,
                 ElementAccumulator,
+                ElementComputeEpilogue,
                 ThreadblockShape,
                 WarpShape,
                 InstructionShape,
+                EpilogueOp,
                 EnableRowMajorRowMajorLayouts,
                 EnableRowMajorColumnMajorLayouts,
                 EnableColumnMajorRowMajorLayouts,
-                EnableColumnMajorColumnMajorLayouts,
-                Activation::SILU>(
+                EnableColumnMajorColumnMajorLayouts>(
                 tensor_a,
                 tensor_b,
                 tensor_c,
@@ -573,8 +442,8 @@ Tensor two_four_sgemm_dispatch_layouts_bias_activation(
         }
     }
 
-    AT_ERROR("two_four_sgemm_dispatch_layouts: Activation \"", activation,
-             "\" is not supported for given input tensors");
+    AT_ERROR("two_four_sgemm_cutlass_dispatch_layouts: Activation \"",
+             activation, "\" is not supported for given input tensors");
     return Tensor{};
 }
 #endif
@@ -603,10 +472,7 @@ Tensor _sparse_semi_structured_linear(
       const Tensor& meta, const c10::optional<Tensor>& bias_opt,
       const c10::optional<c10::string_view> activation_opt,
       const c10::optional<c10::ScalarType> out_dtype_opt) {
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
-    AT_ERROR("_sparse_semi_structured_linear: CUTLASS not supported");
-    return Tensor{};
-#else
+#ifndef USE_ROCM
     // No need to check that all tensors are on CUDA device, as this
     // is provided by dispatch.
 
@@ -709,6 +575,7 @@ Tensor _sparse_semi_structured_linear(
                 using ElementInputA = int8_t;
                 using ElementInputB = int8_t;
                 using ElementAccumulator = int32_t;
+                using ElementComputeEpilogue = int32_t;
                 using ThreadblockShape =
                     cutlass::gemm::GemmShape<128, 128, 128>;
                 using WarpShape = cutlass::gemm::GemmShape<64, 64, 128>;
@@ -722,11 +589,12 @@ Tensor _sparse_semi_structured_linear(
                 const auto EnableActivationSiLU = false;
                 if (out_dtype_opt.has_value()) {
                   using ElementOutput = int32_t;
-                  output = two_four_sgemm_dispatch_layouts_bias_activation<
+                  output = two_four_sgemm_cutlass_dispatch_layouts_activation<
                       ElementInputA,
                       ElementInputB,
                       ElementOutput,
                       ElementAccumulator,
+                      ElementComputeEpilogue,
                       ThreadblockShape,
                       WarpShape,
                       InstructionShape,
@@ -744,11 +612,12 @@ Tensor _sparse_semi_structured_linear(
                       activation);
                 } else {
                   using ElementOutput = int8_t;
-                  output = two_four_sgemm_dispatch_layouts_bias_activation<
+                  output = two_four_sgemm_cutlass_dispatch_layouts_activation<
                       ElementInputA,
                       ElementInputB,
                       ElementOutput,
                       ElementAccumulator,
+                      ElementComputeEpilogue,
                       ThreadblockShape,
                       WarpShape,
                       InstructionShape,
@@ -774,6 +643,7 @@ Tensor _sparse_semi_structured_linear(
                 using ElementInputB = cutlass::half_t;
                 using ElementOutput = cutlass::half_t;
                 using ElementAccumulator = float;
+                using ElementComputeEpilogue = float;
                 using ThreadblockShape = cutlass::gemm::GemmShape<128, 128, 64>;
                 using WarpShape = cutlass::gemm::GemmShape<64, 64, 64>;
                 using InstructionShape = cutlass::gemm::GemmShape<16, 8, 32>;
@@ -784,11 +654,12 @@ Tensor _sparse_semi_structured_linear(
                 const auto EnableActivationNone = true;
                 const auto EnableActivationReLU = true;
                 const auto EnableActivationSiLU = true;
-                output = two_four_sgemm_dispatch_layouts_bias_activation<
+                output = two_four_sgemm_cutlass_dispatch_layouts_activation<
                     ElementInputA,
                     ElementInputB,
                     ElementOutput,
                     ElementAccumulator,
+                    ElementComputeEpilogue,
                     ThreadblockShape,
                     WarpShape,
                     InstructionShape,
@@ -813,6 +684,7 @@ Tensor _sparse_semi_structured_linear(
                 using ElementInputB = cutlass::bfloat16_t;
                 using ElementOutput = cutlass::bfloat16_t;
                 using ElementAccumulator = float;
+                using ElementComputeEpilogue = float;
                 using ThreadblockShape = cutlass::gemm::GemmShape<128, 128, 64>;
                 using WarpShape = cutlass::gemm::GemmShape<64, 64, 64>;
                 using InstructionShape = cutlass::gemm::GemmShape<16, 8, 32>;
@@ -823,11 +695,12 @@ Tensor _sparse_semi_structured_linear(
                 const auto EnableActivationNone = true;
                 const auto EnableActivationReLU = true;
                 const auto EnableActivationSiLU = true;
-                output = two_four_sgemm_dispatch_layouts_bias_activation<
+                output = two_four_sgemm_cutlass_dispatch_layouts_activation<
                     ElementInputA,
                     ElementInputB,
                     ElementOutput,
                     ElementAccumulator,
+                    ElementComputeEpilogue,
                     ThreadblockShape,
                     WarpShape,
                     InstructionShape,
@@ -852,6 +725,7 @@ Tensor _sparse_semi_structured_linear(
                 using ElementInputB = float;
                 using ElementOutput = float;
                 using ElementAccumulator = float;
+                using ElementComputeEpilogue = float;
                 using ThreadblockShape = cutlass::gemm::GemmShape<128, 64, 32>;
                 using WarpShape = cutlass::gemm::GemmShape<64, 32, 32>;
                 using InstructionShape = cutlass::gemm::GemmShape<16, 8, 16>;
@@ -862,11 +736,12 @@ Tensor _sparse_semi_structured_linear(
                 const auto EnableActivationNone = true;
                 const auto EnableActivationReLU = true;
                 const auto EnableActivationSiLU = true;
-                output = two_four_sgemm_dispatch_layouts_bias_activation<
+                output = two_four_sgemm_cutlass_dispatch_layouts_activation<
                     ElementInputA,
                     ElementInputB,
                     ElementOutput,
                     ElementAccumulator,
+                    ElementComputeEpilogue,
                     ThreadblockShape,
                     WarpShape,
                     InstructionShape,
@@ -889,6 +764,9 @@ Tensor _sparse_semi_structured_linear(
     auto output_sizes = input_sizes;
     output_sizes.back() = weight.size(0);
     return output.transpose(-1, -2).reshape(output_sizes);
+#else
+    AT_ERROR("_sparse_semi_structured_linear: ROCm doesn't support CUTLASS");
+    return Tensor{};
 #endif
 }
 
@@ -897,8 +775,7 @@ Tensor _sparse_semi_structured_linear(
 // Following is just for testing purposes.
 namespace at::native {
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
-#else
+#ifndef USE_ROCM
 // Copied from tools/util/include/host_reorder.h, from CUTLASS source
 // tree.  This is for simplicity - namely, this file is not under
 // include/cutlass in this tree, as other CUTLASS include files
@@ -935,10 +812,7 @@ static void reorder_meta(cutlass::TensorRef<Element, LayoutDest> dest,
 
 std::tuple<Tensor, Tensor>
 _to_sparse_semi_structured(const Tensor& dense) {
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
-  AT_ERROR("_to_sparse_semi_structured: CUTLASS not supported");
-  return std::make_tuple(Tensor{}, Tensor{});
-#else
+#ifndef USE_ROCM
   // Check dimensions of the dense matrix.
   TORCH_CHECK(dense.dim() == 2,
               "_to_sparse_semi_structured: Expected dense argument to be 2D "
@@ -1063,6 +937,9 @@ _to_sparse_semi_structured(const Tensor& dense) {
 
   return std::make_tuple(sparse_cpu.to(dense.device()),
                          meta_reordered_cpu.to(dense.device()));
+#else
+  AT_ERROR("_to_sparse_semi_structured: ROCm doesn't support CUTLASS");
+  return std::make_tuple(Tensor{}, Tensor{});
 #endif
 }
 

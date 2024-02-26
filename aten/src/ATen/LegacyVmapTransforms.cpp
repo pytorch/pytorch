@@ -135,7 +135,9 @@ static Tensor alignBatchDimsAtFront(
     const Tensor& self,
     std::bitset<kVmapNumLevels> requested_levels,
     int64_t requested_example_dim) {
-  auto [physical_tensor, tensor_levels] = getPhysicalTensorAndLevels(self);
+  Tensor physical_tensor;
+  std::bitset<kVmapNumLevels> tensor_levels;
+  std::tie(physical_tensor, tensor_levels) = getPhysicalTensorAndLevels(self);
 
   TORCH_INTERNAL_ASSERT(
     (tensor_levels | requested_levels) == requested_levels,
@@ -261,7 +263,10 @@ VmapPhysicalViewVec BroadcastingVmapTransform::logicalToPhysical(TensorList logi
 
   VmapPhysicalViewVec result;
 
-  auto [levels, largest_logical_dim] = getLevelsAndLargestLogicalDim(logical_tensors);
+  std::bitset<kVmapNumLevels> levels;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  int64_t largest_logical_dim;
+  std::tie(levels, largest_logical_dim) = getLevelsAndLargestLogicalDim(logical_tensors);
 
   for (const auto& tensor : logical_tensors) {
     // NB: It's possible that we didn't actually need to align `tensor`.

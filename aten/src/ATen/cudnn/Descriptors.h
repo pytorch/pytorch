@@ -318,15 +318,6 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
       }
     }
 #else
-    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-    auto math_type = CUDNN_DEFAULT_MATH;
-    if (prop->major >= 7) {
-      if (input_type == CUDNN_DATA_HALF) {
-        math_type = CUDNN_TENSOR_OP_MATH;
-      } else if (!allow_tf32) {
-        math_type = CUDNN_FMA_MATH;
-      }
-    }
     AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v8(
           mut_desc(),
           algo,
@@ -336,7 +327,7 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
           input_mode,
           input_type,
           datatype,
-          math_type,
+          allow_tf32 ? CUDNN_DEFAULT_MATH : CUDNN_FMA_MATH,
           input_size,
           hidden_size,
           proj_size ? proj_size : hidden_size,

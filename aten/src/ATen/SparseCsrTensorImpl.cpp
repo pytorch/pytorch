@@ -55,8 +55,7 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
                   "to https://github.com/pytorch/pytorch/issues.");
 
   TORCH_INTERNAL_ASSERT(((key_set.has(DispatchKey::SparseCsrCPU) && device().type() == kCPU)
-                         || (key_set.has(DispatchKey::SparseCsrCUDA) && device().type() == kCUDA)
-                         || (key_set.has(DispatchKey::SparseCsrMeta) && device().type() == kMeta)),
+                         || (key_set.has(DispatchKey::SparseCsrCUDA) && device().type() == kCUDA)),
                         "Inconsistent key_set (=", key_set, ") and device (=", device(), ")");
 
   set_storage_access_should_throw();
@@ -167,7 +166,9 @@ void SparseCsrTensorImpl::resize_as_sparse_compressed_tensor_(
       src.layout(),
       ")");
 
-  auto [compressed_indices, plain_indices] =
+  Tensor compressed_indices;
+  Tensor plain_indices;
+  std::tie(compressed_indices, plain_indices) =
       sparse_csr::getCompressedPlainIndices(src);
   // reuse self indices storage
   if (crow_indices_.sizes() != compressed_indices.sizes()) {
