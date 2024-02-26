@@ -171,6 +171,7 @@ def register_decomposition(
     assert type in {"post_autograd", "pre_autograd", "meta"}
 
     def decomposition_decorator(fn: Callable) -> Callable:
+        orig_fn = fn
         if not unsafe:
             fn = _convert_out_params(fn)
 
@@ -183,7 +184,7 @@ def register_decomposition(
 
         # To handle allowing multiple aten_ops at once
         pytree.tree_map_(register, aten_op)
-        return fn
+        return orig_fn
 
     return decomposition_decorator
 
@@ -275,6 +276,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.clamp_min,
             aten.col2im,
             aten.count_nonzero,
+            aten.linalg_cross,
             aten.cudnn_batch_norm,
             aten.cudnn_batch_norm_backward,
             aten.deg2rad,
@@ -323,6 +325,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.index_copy_,
             aten.index_fill,
             aten.index_fill_,
+            aten.isin,
             aten.isneginf,
             aten.isposinf,
             aten.l1_loss,
@@ -370,6 +373,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.norm,
             aten.ones,
             aten.ones_like,
+            aten.pixel_shuffle,
             aten.pixel_unshuffle,
             aten._prelu_kernel,
             aten._prelu_kernel_backward,
@@ -385,6 +389,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.renorm,
             aten.renorm_,
             aten.replication_pad2d,
+            aten.roll,
             aten.rot90,
             aten.rrelu_with_noise,
             aten.rrelu_with_noise_,

@@ -14,6 +14,7 @@ from functools import lru_cache
 from typing import (
     Any,
     Callable,
+    cast,
     Counter,
     DefaultDict,
     Dict,
@@ -28,8 +29,9 @@ from typing import (
 import sympy
 
 import torch
-
 import torch._logging
+
+from torch._inductor.metrics import is_metric_table_enabled, log_kernel_metadata
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -38,7 +40,7 @@ from torch.utils._triton import has_triton_package
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash, get_path, PyCodeCache
-from ..dependencies import Dep, MemoryDep, StarDep
+from ..dependencies import Dep, MemoryDep, StarDep, WeakDep
 from ..ir import IRNode, ReductionHint, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
@@ -846,17 +848,8 @@ class TritonOverrides(OpOverrides):
     def ceil(x):
         return f"tl.math.ceil({x})"
 
-    @staticmethod
-    def bessel_j0(x):
-        return f"tl.math.j0({x})"
 
-    @staticmethod
-    def bessel_j1(x):
-        return f"tl.math.j1({x})"
-
-    @staticmethod
-    def modified_bessel_i0(x):
-        return f"tl.math.cyl_bessel_i0({x})"
+TritonOverrides._initialize_pointwise_overrides("triton")
 
 
 # Use mypy to check protocol implemented correctly
@@ -911,6 +904,20 @@ class TritonKernelOverrides(TritonOverrides):
         return (
             f"tl.load({var} + {V.kernel.args.seed_offset('load_seed_offset', offset)})"
         )
+
+    @staticmethod
+    def frexp(x):
+        cache_key = f"frexp({x})"
+        if cache_key in V.kernel.cse.cache:
+            return V.kernel.cse.cache[cache_key]
+
+        mantissa = V.kernel.cse.newvar()
+        exponent = V.kernel.cse.newvar()
+        V.kernel.compute.writeline(
+            f"{mantissa}, {exponent} = triton_helpers.frexp({x})"
+        )
+        V.kernel.cse.cache[cache_key] = (mantissa, exponent)
+        return (mantissa, exponent)
 
 
 # Use mypy to check protocol implemented correctly
@@ -2226,7 +2233,7 @@ class TritonKernel(Kernel):
                     self.compute.splice(
                         f"""\
                     {accumulator}_next, {accumulator_m2}_next, {accumulator_weight}_next = triton_helpers.welford_reduce(
-                        {value}, {accumulator}, {accumulator_m2}, {accumulator_weight},
+                        {value}, {accumulator}, {accumulator_m2}, {accumulator_weight}, roffset == 0
                     )
                     """
                     )
@@ -2362,20 +2369,25 @@ class TritonKernel(Kernel):
         )
 
         default = triton_constant(init)
-        default_tensor = self.cse.generate(
-            self.body,
-            f"tl.full({[1] * self.triton_tensor_ndim()}, {default}, {triton_compute_type(dtype)})",
-        )
         dim = self.triton_tensor_ndim() - 1
         acc_type = triton_acc_type(dtype)
         cond = " & ".join(masks)
 
         combine_helper_fn = self._lift_helper(combine_fn, 2)
 
-        if self.persistent_reduction:
-            masked_value = self.cse.generate(
+        def where_cond(value):
+            if not cond:
+                return value
+            default_tensor = self.cse.generate(
+                self.body,
+                f"tl.full({[1] * self.triton_tensor_ndim()}, {default}, {triton_compute_type(dtype)})",
+            )
+            return self.cse.generate(
                 self.compute, f"tl.where({cond}, {value}, {default_tensor})"
             )
+
+        if self.persistent_reduction:
+            masked_value = where_cond(value)
             result_var = self.cse.generate(
                 self.compute,
                 f"tl.associative_scan({masked_value}, {dim}, {combine_helper_fn})",
@@ -2390,9 +2402,7 @@ class TritonKernel(Kernel):
                 f"{accumulator} = tl.full({reduced_size}, {default}, {acc_type})"
             )
 
-            masked_value = self.cse.generate(
-                self.compute, f"tl.where({cond}, {value}, {default_tensor})"
-            )
+            masked_value = where_cond(value)
             partial_reduce = self.cse.generate(
                 self.compute,
                 self.reduction_resize(
@@ -2571,6 +2581,9 @@ class TritonKernel(Kernel):
         import AttrsDescriptor if the triton version is new enough to have this
         class defined.
         """
+        if not has_triton_package():
+            return ""
+
         import triton.compiler.compiler
 
         if hasattr(triton.compiler.compiler, "AttrsDescriptor"):
@@ -2624,9 +2637,14 @@ class TritonKernel(Kernel):
                 # This arg points to a buf that has been sliced.
                 # We need to count each individual slice to have
                 # a better estimation.
-                indices = set()
+                indices: Set[Any] = set()
+                no_index_dep_count = 0
                 for dep in self.buf_accesses[arg]:
-                    indices.add(dep.index)
+                    if isinstance(dep, (StarDep, WeakDep)):
+                        indices.add(f"no_index_dep_{no_index_dep_count}")
+                        no_index_dep_count += 1
+                    else:
+                        indices.add(dep.index)
                 numel = len(indices) * out_numel
             else:
                 numel = buf_size
@@ -2644,8 +2662,6 @@ class TritonKernel(Kernel):
         return "pointwise"
 
     def codegen_kernel(self, name=None):
-        from triton import next_power_of_2
-
         code = IndentedBuffer()
 
         size_hints = []
@@ -2692,15 +2708,16 @@ class TritonKernel(Kernel):
                 code.splice(self.imports_for_benchmark_kernel())
 
         argdefs, _, signature = self.args.python_argdefs()
-        # maps actual expression to SizeArg if its in sizevars replacements
+        # maps actual expression to SizeArg if it is in sizevars replacements
         for i, arg in enumerate(signature):
-            if (
-                isinstance(arg, SizeArg)
-                and arg.expr in V.graph.sizevars.inv_precomputed_replacements
-            ):
-                signature[i] = SizeArg(
-                    arg.name, V.graph.sizevars.inv_precomputed_replacements[arg.expr]
-                )
+            if isinstance(arg, SizeArg):
+                # mypy is unhappy about the sympy.Expr
+                # type for the key of the dict below
+                symbol = cast(sympy.Symbol, arg.expr)
+                if symbol in V.graph.sizevars.inv_precomputed_replacements:
+                    signature[i] = SizeArg(
+                        arg.name, V.graph.sizevars.inv_precomputed_replacements[symbol]
+                    )
 
         mutated_args = set()
         for mutation in self.mutations:
@@ -3508,7 +3525,9 @@ class TritonScheduling(BaseScheduling):
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
             compile_wrapper.splice(src_code, strip=True)
-            compile_wrapper.writeline("''')")
+            compile_wrapper.writeline(
+                f"''', device_str='{V.graph.scheduler.current_device.type}')"
+            )
 
             metadata_comment = f"# kernel path: {kernel_path}"
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
@@ -3516,6 +3535,12 @@ class TritonScheduling(BaseScheduling):
             wrapper.define_kernel(
                 kernel_name, compile_wrapper.getvalue(), metadata_comment
             )
+
+            # log kernel metadata for offline analysis.
+            # E.g. one can find all unaligned inner reduction and check if
+            # padding helps with the perf kernel by kernel.
+            if is_metric_table_enabled("kernel_metadata"):
+                log_kernel_metadata(kernel_name, kernel_path, src_code)
 
         return kernel_name
 

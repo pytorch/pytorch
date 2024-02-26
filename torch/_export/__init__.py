@@ -31,15 +31,25 @@ from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
 from torch._functorch.aot_autograd import aot_export_module, GraphSignature
 from torch._functorch.eager_transforms import functionalize
 from torch._guards import detect_fake_mode
+from torch._inductor import config
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._subclasses.functional_tensor import FunctionalTensor
+from torch._utils_internal import log_export_usage
 from torch.export._tree_utils import reorder_kwargs
+from torch.export._unlift import _create_stateful_graph_module
+from torch.export.dynamic_shapes import (
+    _process_constraints,
+    _process_dynamic_shapes,
+    Constraint,
+    dims,
+    dynamic_dim,
+)
 from torch.export.exported_program import (
+    _disable_prexisiting_fake_mode,
     ExportedProgram,
     ModuleCallEntry,
     ModuleCallSignature,
-    _disable_prexisiting_fake_mode,
 )
 from torch.export.graph_signature import (
     _sig_to_specs,
@@ -53,14 +63,6 @@ from torch.export.graph_signature import (
     SymIntArgument,
     TensorArgument,
 )
-from torch.export.dynamic_shapes import (
-    Constraint,
-    dims,
-    dynamic_dim,
-    _process_constraints,
-    _process_dynamic_shapes,
-)
-from torch.export._unlift import _create_stateful_graph_module
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
@@ -77,7 +79,6 @@ from .passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
 )
 from .wrappers import _wrap_submodules
-from torch._inductor import config
 
 
 @dataclasses.dataclass
@@ -138,6 +139,8 @@ def capture_pre_autograd_graph(
     """
     from torch.export._trace import _convert_input_to_fake, DEFAULT_EXPORT_DYNAMO_CONFIG
     from torch.export.dynamic_shapes import _process_dynamic_shapes
+
+    log_export_usage(event="export.private_api", flags={"capture_pre_autograd_graph"})
 
     if kwargs is None:
         kwargs = {}
