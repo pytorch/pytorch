@@ -105,7 +105,7 @@ def emit_metric(
     env_var_metrics = [
         EnvVarMetric("repo", "GITHUB_REPOSITORY"),
         EnvVarMetric("workflow", "GITHUB_WORKFLOW"),
-        EnvVarMetric("build_environment", "BUILD_ENVIRONMENT"),
+        EnvVarMetric("build_environment", "BUILD_ENVIRONMENT", required=False),
         EnvVarMetric("job", "GITHUB_JOB"),
         EnvVarMetric("test_config", "TEST_CONFIG", required=False),
         EnvVarMetric("pr_number", "PR_NUMBER", required=False, type_conversion_fn=int),

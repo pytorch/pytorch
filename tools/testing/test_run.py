@@ -1,6 +1,6 @@
 from copy import copy
 from functools import total_ordering
-from typing import FrozenSet, Iterable, List, Optional, Union
+from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Union
 
 
 class TestRun:
@@ -209,6 +209,19 @@ class TestRun:
             return TestRun.empty()
 
         return (self | other) - (self - other) - (other - self)
+
+    def to_json(self) -> Dict[str, Any]:
+        return {
+            "test_file": self.test_file,
+            "included": list(self._included),
+            "excluded": list(self._excluded),
+        }
+
+    @staticmethod
+    def from_json(json: Dict[str, Any]) -> "TestRun":
+        return TestRun(
+            json["test_file"], included=json["included"], excluded=json["excluded"]
+        )
 
 
 @total_ordering

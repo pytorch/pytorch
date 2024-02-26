@@ -139,6 +139,52 @@ class TestPrioritizations:
                 return {"position": idx, "score": score}
         raise AssertionError(f"Test run {test_run} not found")
 
+    def to_json(self) -> Dict[str, Any]:
+        """
+        Returns a JSON dict that describes this TestPrioritizations object.
+        """
+        json_dict = {
+            "_test_scores": [
+                (test.to_json(), score) for test, score in self._test_scores.items()
+            ],
+            "_original_tests": list(self._original_tests),
+        }
+        return json_dict
+
+    @staticmethod
+    def from_json(json_dict: Dict[str, Any]) -> "TestPrioritizations":
+        """
+        Returns a TestPrioritizations object from a JSON dict.
+        """
+        test_prioritizations = TestPrioritizations(
+            tests_being_ranked=json_dict["_original_tests"],
+            scores={
+                TestRun.from_json(testrun_json): score
+                for testrun_json, score in json_dict["_test_scores"]
+            },
+        )
+        return test_prioritizations
+
+    def amend_tests(self, tests: List[str]) -> None:
+        """
+        Removes tests that are not in the given list from the
+        TestPrioritizations.  Adds tests that are in the list but not in the
+        TestPrioritizations.
+        """
+        valid_scores = {
+            test: score
+            for test, score in self._test_scores.items()
+            if test.test_file in tests
+        }
+        self._test_priorities = valid_scores
+
+        for test in tests:
+            if test not in self._original_tests:
+                self._test_scores[TestRun(test)] = 0
+        self._original_tests = frozenset(tests)
+
+        self.validate()
+
 
 class AggregatedHeuristics:
     """
@@ -223,6 +269,16 @@ class AggregatedHeuristics:
         ).get_priority_info_for_test(test)
 
         return stats
+
+    def to_json(self) -> Dict[str, Any]:
+        """
+        Returns a JSON dict that describes this AggregatedHeuristics object.
+        """
+        json_dict: Dict[str, Any] = {}
+        for heuristic, heuristic_results in self._heuristic_results.items():
+            json_dict[heuristic.name] = heuristic_results.to_json()
+
+        return json_dict
 
 
 class HeuristicInterface:
