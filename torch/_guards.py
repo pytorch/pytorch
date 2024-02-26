@@ -645,9 +645,9 @@ class TracingContext:
         self = TracingContext.try_get()
         if self is None:
             return traceback.StackSummary()
-        stack = list(self.frame_summary_stack)
+        stack = self.frame_summary_stack
         if self.loc_in_frame is not None:
-            stack.append(self.loc_in_frame)
+            stack = stack + [self.loc_in_frame]
         return traceback.StackSummary.from_list(stack)
 
     # Call this when you want to call into some code that isn't necessarily

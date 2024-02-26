@@ -57,7 +57,6 @@ inductor_decompositions = get_decompositions(
         aten.native_batch_norm,
         aten.native_group_norm,
         aten.native_layer_norm,
-        aten.pixel_shuffle,
         aten._softmax,
         aten.sin_,
         aten.sqrt_,
@@ -248,12 +247,32 @@ def mm(self, input2):
     return NotImplemented
 
 
+# This pass does two things:
+# - Eliminate cat when there is only one tensor input
+# - Normalize cat calls, so that legacy empty 1-D tensors are removed (NB: we
+#   don't remove ALL empty tensors, only the naughty ones)
 @register_decomposition([aten.cat.default])
 def cat(tensors, dim=0):
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     def non_empty_tensor(x):
-        # special case for cat'ing with an empty tensor -
-        # just drop the 'empty' inputs so they don't confuse the logic below.
-        return len(x.shape) > 1 or x.shape[0] > 0
+        # For better or worse, this is a valid cat:
+        #
+        #   torch.cat([torch.randn(2, 2, 4), torch.randn(0), torch.randn(3, 2, 4)])
+        #
+        # We'd like to eliminate naughtiness like this for downstream passes
+        # like split_cat.  The easiest way is to just drop such inputs
+        # (guarding that they are non-zero).
+        #
+        # Is it permissible for this filtering to be size-oblivious?  A case
+        # where this could matter is cat([(2, 2), (u0,)], dim=0); if u0
+        # happened to be zero, we would have liked to have filtered it out.
+        # But actually, the ONLY way this could have passed is if u0 == 0,
+        # so by the time we get here we have already installed a deferred
+        # runtime assert forcing u0 to be zero.  So if this hasn't happened,
+        # we know that the unbacked SymInt has appropriate size and there are
+        # no problems.
+        return len(x.shape) != 1 or guard_size_oblivious(x.shape[0] > 0)
 
     filtered_tensors = list(filter(non_empty_tensor, tensors))
 
