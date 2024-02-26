@@ -31,12 +31,10 @@ device_type = "cuda"
 
 
 def func(x1, x2, x3, x4):
+    x5 = x1[:]
+    x6 = x2[:]
     with torch.no_grad():
-        torch._foreach_copy_([x1, x2], [x3, x4])
-    # x5 = x1[:]
-    # x6 = x2[:]
-    # with torch.no_grad():
-    #     torch._foreach_copy_([x5, x6], [x3, x4])
+        torch._foreach_copy_([x5, x6], [x3, x4])
     return torch.matmul(x1, x2)
 
 if __name__ == "__main__":
