@@ -15,7 +15,7 @@ namespace {
  */
 c10::once_flag init_flag;
 DeviceIndex num_gpus = -1;
-std::vector<c10::once_flag> xpu_gens_init_flag;
+std::deque<c10::once_flag> xpu_gens_init_flag;
 std::vector<Generator> default_gens_xpu;
 
 void initXPUGenVector() {

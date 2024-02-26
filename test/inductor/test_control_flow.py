@@ -289,6 +289,54 @@ class CondTests(TestCase):
                 torch.randn(10, 20),
             )
 
+    @requires_cuda
+    @parametrize("device", ["cpu", "cuda"])
+    def test_cond_decompose_ops_in_subgraph(self, device):
+        class Model(torch.nn.Module):
+            def forward(self, p, a):
+                def true_fn(x):
+                    return torch.zeros_like(x)
+
+                def false_fn(x):
+                    return torch.ones_like(x)
+
+                b = torch.ones_like(a)
+                c = torch.cond(p, true_fn, false_fn, [b])
+                return c
+
+        self._run_test(
+            model=Model(),
+            inputs=(torch.rand(10, 20),),
+            device=device,
+        )
+
+    @requires_cuda
+    @parametrize("device", ["cpu", "cuda"])
+    def test_cond_decompose_ops_in_subgraph_recursive(self, device):
+        def inner_fn1(x):
+            return torch.zeros_like(x)
+
+        def inner_fn2(x):
+            return torch.ones_like(x)
+
+        class Model(torch.nn.Module):
+            def forward(self, p, a):
+                def true_fn(x):
+                    return torch.cond(p, inner_fn2, inner_fn1, [x])
+
+                def false_fn(x):
+                    return torch.cond(p, inner_fn1, inner_fn2, [x])
+
+                b = torch.ones_like(a)
+                c = torch.cond(p, true_fn, false_fn, [b])
+                return c
+
+        self._run_test(
+            model=Model(),
+            inputs=(torch.rand(10, 20),),
+            device=device,
+        )
+
 
 instantiate_parametrized_tests(CondTests)
 
