@@ -116,6 +116,9 @@ class FakeTensorUpdater:
             ):
                 return False
 
+            if new.device != old.device:
+                return False
+
             if get_storage(new) == get_storage(old):
                 return True
 
