@@ -760,33 +760,34 @@ class GuardBuilder(GuardBuilderBase):
                 self.tensor_check_examples.append(value)
                 self.tensor_check_guards.append(guard)
 
-            # A frame is valid for reuse with dynamic dimensions if the new dynamic dimensions are a
-            # strict subset of the old.
+            # A frame is valid for reuse with dynamic dimensions if the new
+            # (user-requested) dynamic dimensions are a subset of the old
+            # (already compiled) dynamic dimensions.
             #
-            # The logic here is as follows:
+            # It's a little non-obvious why you'd want this: in particular,
+            # if an already compiled frame matches all of the guards, why
+            # not just use it, why force a recompile?
             #
-            # Every mark_dynamic directive is a user-knows-best command, which can incur a raise at tracing
-            # time if we find guards that run counter to the user directive.
-            # If compiling a frame with explicit dynamic dims X could cause an exception, we MUST NOT skip compiling.
+            # We force it for two reasons:
             #
-            # If the frame is compiled with any marked dynamic indices, let's call that set of indices X.
-            # When we evaluated inputs against the guards, given the same tensor with potentially new dynamic indices,
-            # let's call that set Y.
+            #   - The user *required* us to compile with a new dynamic dimension,
+            #     we should not ignore that and serve up the old, specialized
+            #     frame.  Listen to the user!
             #
-            # When X is a strict subset of Y, the potential new raises introduced during compilation are a strict subset
-            # of the raises we
-            # could have encountered. The frame compiled under Y is safe to reuse with X.
-            # When X is not a strict subset of Y, the non-overlapping new elements of X may cause new raises, and the
-            # frame is no longer fit for reuse.
+            #   - In fact, we are obligated to *raise an error* if we fail to
+            #     make the requested dimension dynamic.  If we don't
+            #     recompile, we can't tell if that dimension can actually be
+            #     made dynamic.
             #
-            # This is the case because any newly introduced mark_dynamic directives have a chance of
-            # raising, failing compilation. Any existing mark_dynamic indices that we lost are safe to lose
-            # as all it means is that we have gotten rid of a user directive which could incur a raise at compile time.
-            # In the case of when there is no Y, that is, there are no dynamic indices marked at all, the frame is safe
-            # to reuse
-            # as an empty set is a safe degeneration - that is, a strictly static tensor is always valid for a frame
-            # compiled with that same
-            # tensor + more onerous user directives.
+            # If the new dynamic dims are a subset of the old, we already know
+            # we can make them dynamic (since we made them dynamic in old).
+            # This is slightly unsound, because maybe your input size is
+            # [s0, s0, s1] and so you can do it dynamic if you say dynamic
+            # dims {0, 1, 2} but you can't if you only do {0, 2} (because now
+            # the second s0 is specialized).  But we're not entirely sure if
+            # this is a good idea anyway lol... (if you want to try removing
+            # this logic, be my guest!  -- ezyang 2024)
+            #
             assert guard.source is not None
             static, reason = tensor_always_has_static_shape(
                 value, is_tensor=True, guard_source=guard.source

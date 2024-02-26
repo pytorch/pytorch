@@ -1170,7 +1170,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # `if clip_coef < 1`
         clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
         for grad in grads:
-            grad.detach().mul_(clip_coef_clamped.to(grad.device, grad.dtype))
+            grad.mul_(clip_coef_clamped.to(grad.device, grad.dtype))
         # Use the "largest" dtype by type promotion semantics to use the same
         # dtype as if we did not force local norm computation to be in FP32
         if len(grads) == 0:
