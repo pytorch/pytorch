@@ -15337,14 +15337,7 @@ op_db: List[OpInfo] = [
                    handles_large_floats=False,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
-                   promotes_int_to_float=True,
-                   decorators=(precisionOverride({torch.bfloat16: 1e-2,
-                                                  torch.float16: 1e-2}),),
-                   skips=(
-                       # Reference: https://github.com/pytorch/pytorch/issues/49133
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                    dtypes=[torch.cfloat]),
-                   )),
+                   promotes_int_to_float=True),
     UnaryUfuncInfo('sinh',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.sinh),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),

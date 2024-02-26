@@ -309,9 +309,36 @@ void cacheAllocatorDeregisterHook(
   }
 }
 
+#ifdef IS_NCCL_EXP
+#ifdef NCCL_COMM_DUMP
 std::string dump_nccl_trace() {
-  return NCCLTraceBuffer::get()->dump();
+  std::unordered_map<
+      std::string /* ncclUniqueID */,
+      std::unordered_map<std::string, std::string> /* dump from this comm */>
+      ncclDumpMap;
+  // dump_nccl_trace is only called from the default PG (uid_=0), but we want to
+  // dump from all comms so we need to iterate over ncclCommDevIdxMap, which
+  // is static
+  std::vector<std::shared_ptr<NCCLComm>> allNCCLComms;
+  // within the critical section, we don't want to dump while holding the lock
+  // as dump might hang
+  ncclCommDevIdxMapMutex.lock();
+  for (auto& [ncclComm, _] : ncclCommDevIdxMap) {
+    allNCCLComms.push_back(ncclComm);
+  }
+  ncclCommDevIdxMapMutex.unlock();
+  for (auto& ncclComm : allNCCLComms) {
+    std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getNcclId());
+    ncclDumpMap[ncclUniqueIDStr] = ncclComm->ncclCommDump();
+  }
+  return NCCLTraceBuffer::get()->dump(ncclDumpMap);
 }
+#endif
+#else
+std::string dump_nccl_trace() {
+  return NCCLTraceBuffer::get()->dump(c10::nullopt);
+}
+#endif
 
 c10::optional<std::function<std::string()>>& get_cpp_trace_dumper() {
   static c10::optional<std::function<std::string()>> dumper(c10::nullopt);
@@ -1524,6 +1551,20 @@ void ProcessGroupNCCL::watchdogHandler() {
         [&]() -> bool { return terminateProcessGroup_.load(); });
     // Bump up heart beat by one.
     heartbeat_++;
+
+// Some versions of GLOG support less-spammy version of LOG_EVERY_MS
+// in which case we don't want to spam the logs.
+#ifdef LOG_EVERY_MS
+    // Log the progress of this PG periodically
+    C10_LOG_EVERY_MS(INFO, kWorkStatusUpdatePeriodMs) << c10::str(
+        logPrefix(),
+        "NCCL Work update periodically: ",
+        "last enqueued NCCL work: ",
+        lastEnqueuedSeq_,
+        ", last completed NCCL work: ",
+        lastCompletedSeq_,
+        ".");
+#endif
 
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {

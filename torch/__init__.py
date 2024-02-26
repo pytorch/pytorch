@@ -301,9 +301,8 @@ class SymInt:
         return str(self.node)
 
     def __hash__(self) -> builtins.int:
-        ret = self.node.nested_int()
-        if ret is not None:
-            return hash(ret)
+        if self.node.is_nested_int():
+            return hash(self.node.nested_int())
         else:
             # We could support constant SymInts as well, but not doing it for now
             raise TypeError("unhashable type: non-nested SymInt")
