@@ -300,7 +300,8 @@ class NCCLComm {
   }
 #endif
 
-#if defined(IS_NCCL_EXP) && defined(NCCL_COMM_DUMP)
+#ifdef IS_NCCL_EXP
+#ifdef NCCL_COMM_DUMP
   std::unordered_map<std::string, std::string> ncclCommDump() {
     std::unordered_map<std::string, std::string> dump;
     if (isAborted()) {
@@ -310,6 +311,7 @@ class NCCLComm {
     C10D_NCCL_CHECK(::ncclCommDump(ncclComm_, dump), c10::nullopt);
     return dump;
   }
+#endif
 #endif
 
   ncclUniqueId getNcclId() {

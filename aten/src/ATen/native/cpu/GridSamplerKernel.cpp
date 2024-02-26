@@ -389,7 +389,8 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Border, align_corners>
   }
 
   inline std::pair<Vec, Vec> apply_get_grad(const Vec &in) const {
-    auto [res, grad_clip] = clip_coordinates_get_grad(unnormalize(in));
+    Vec res, grad_clip;
+    std::tie(res, grad_clip) = clip_coordinates_get_grad(unnormalize(in));
     return std::make_pair(res, grad_clip & Vec(scaling_factor));
   }
 };
@@ -420,8 +421,8 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Reflection, align_corners>
   }
 
   inline std::pair<Vec, Vec> apply_get_grad(const Vec &in) const {
-    auto [res, grad_refl] = reflect_coordinates_get_grad(unnormalize(in));
-    Vec grad_clip, grad(scaling_factor);
+    Vec res, grad_refl, grad_clip, grad(scaling_factor);
+    std::tie(res, grad_refl) = reflect_coordinates_get_grad(unnormalize(in));
     grad = grad_refl * grad;
     std::tie(res, grad_clip) = clip_coordinates_get_grad(res);
     grad = grad_clip & grad;
@@ -592,12 +593,16 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
                        const TensorAccessor<scalar_t, 3>& inp_slice,
                        int64_t offset, const Vec& grid_x, const Vec& grid_y,
                        int64_t len) const {
-    auto [x, gx_mult] = compute_W.apply_get_grad(grid_x);
-    auto [y, gy_mult] = compute_H.apply_get_grad(grid_y);
+    Vec x, y, gx_mult, gy_mult;
+    std::tie(x, gx_mult) = compute_W.apply_get_grad(grid_x);
+    std::tie(y, gy_mult) = compute_H.apply_get_grad(grid_y);
 
-    auto [
+    Vec n, s, w, e, nw, ne, sw, se, nw_mask, ne_mask, sw_mask, se_mask;
+    iVec i_y_n, i_x_w;
+
+    std::tie(
       n, s, w, e, nw, ne, sw, se, nw_mask, ne_mask, sw_mask, se_mask,
-      i_y_n, i_x_w] = compute_interp_params(x, y);
+      i_y_n, i_x_w) = compute_interp_params(x, y);
 
     auto i_nw_offset = i_y_n * iVec(inp_sH) + i_x_w * iVec(inp_sW);
     auto i_ne_offset = i_nw_offset + iVec(inp_sW);

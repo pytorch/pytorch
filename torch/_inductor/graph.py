@@ -30,8 +30,8 @@ from .codegen.common import (
     get_wrapper_codegen_for_device,
     register_backend_for_device,
 )
-from .codegen.cpp_wrapper_cpu import CppWrapperCpu
-from .codegen.cpp_wrapper_cuda import CppWrapperCuda
+from .codegen.cpp_wrapper_cpu import CppWrapperCodeGen
+from .codegen.cpp_wrapper_cuda import CudaWrapperCodeGen
 from .codegen.wrapper import WrapperCodeGen
 from .exc import (
     CppWrapperCodeGenError,
@@ -1105,7 +1105,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.cuda = "cuda" in self.device_types
         if self.cpp_wrapper:
             self.validate_can_generate_cpp_wrapper()
-            self.wrapper_code = CppWrapperCuda() if self.cuda else CppWrapperCpu()
+            self.wrapper_code = (
+                CudaWrapperCodeGen() if self.cuda else CppWrapperCodeGen()
+            )
             return
 
         device_types = self.device_types.copy()

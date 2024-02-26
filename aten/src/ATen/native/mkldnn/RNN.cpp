@@ -541,7 +541,8 @@ std::pair<Tensor, hidden_type> mkldnn_impl(
     const Tensor& input, const hidden_type& hidden,
     TensorList params, bool has_biases, ideep::rnn_kind mode,
     int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
-  auto [hx, cx] = unpack_hidden(hidden);
+  Tensor hx, cx;
+  std::tie(hx, cx) = unpack_hidden(hidden);
   int64_t hidden_size = hx.size(2);
 
   auto mkldnn_output = mkldnn_rnn(

@@ -25,7 +25,8 @@
 #include <type_traits>
 #include <vector>
 
-namespace torch::tensors {
+namespace torch {
+namespace tensors {
 
 using namespace at;
 using namespace torch::autograd;
@@ -214,15 +215,29 @@ static void py_initialize_tensor_type(
   }
 }
 
+static const char* get_module(Backend backend) {
+  switch (backend) {
+    case Backend::CPU:
+      return "torch";
+    case Backend::CUDA:
+      return "torch.cuda";
+    case Backend::SparseCPU:
+      return "torch.sparse";
+    case Backend::SparseCUDA:
+      return "torch.cuda.sparse";
+    default:
+      AT_ERROR("invalid backend: ", toString(backend));
+  }
+}
+
 static std::string get_name(Backend backend, ScalarType scalarType) {
   std::ostringstream ss;
-  ss << torch::utils::backend_to_string(backend) << "." << toString(scalarType)
-     << "Tensor";
+  ss << get_module(backend) << "." << toString(scalarType) << "Tensor";
   return ss.str();
 }
 
 static THPObjectPtr get_storage_obj(Backend backend, ScalarType dtype) {
-  auto module_name = torch::utils::backend_to_string(backend);
+  auto module_name = get_module(backend);
   auto module_obj = THPObjectPtr(PyImport_ImportModule(module_name));
   if (!module_obj)
     throw python_error();
@@ -463,4 +478,5 @@ ScalarType get_default_scalar_type() {
   return get_default_dtype_as_scalartype();
 }
 
-} // namespace torch::tensors
+} // namespace tensors
+} // namespace torch

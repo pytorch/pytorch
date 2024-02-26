@@ -685,10 +685,8 @@ constexpr DispatchKeySet python_ks = DispatchKeySet({
 
 constexpr DispatchKeySet sparse_ks = DispatchKeySet(DispatchKey::Sparse);
 
-constexpr DispatchKeySet sparse_csr_ks = DispatchKeySet(
-    {DispatchKey::SparseCsrCPU,
-     DispatchKey::SparseCsrCUDA,
-     DispatchKey::SparseCsrMeta});
+constexpr DispatchKeySet sparse_csr_ks =
+    DispatchKeySet({DispatchKey::SparseCsrCPU, DispatchKey::SparseCsrCUDA});
 
 constexpr DispatchKeySet mkldnn_ks = DispatchKeySet(DispatchKey::MkldnnCPU);
 

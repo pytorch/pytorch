@@ -8,12 +8,10 @@ from typing import (
     List,
     Literal,
     NamedTuple,
-    NoReturn,
     Optional,
     overload,
     Sequence,
     Tuple,
-    Type,
     TypeVar,
     Union,
 )
@@ -31,6 +29,4 @@ from torch.types import (
     Number,
 )
 
-${structseq_defs}
-
-all_return_types: List[Type] = []
+${namedtuple_defs}

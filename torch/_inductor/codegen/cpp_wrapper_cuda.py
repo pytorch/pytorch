@@ -11,7 +11,7 @@ from .. import config
 from ..codecache import CudaKernelParamCache
 from ..triton_heuristics import grid as default_grid
 from ..virtualized import V
-from .cpp_wrapper_cpu import CppWrapperCpu
+from .cpp_wrapper_cpu import CppWrapperCodeGen
 from .wrapper import SymbolicCallArg
 
 
@@ -37,7 +37,7 @@ def is_float(s: str) -> bool:
     return True
 
 
-class CppWrapperCuda(CppWrapperCpu):
+class CudaWrapperCodeGen(CppWrapperCodeGen):
     """
     Generates cpp wrapper for running on GPU and calls CUDA kernels
     """
@@ -245,7 +245,7 @@ class CppWrapperCuda(CppWrapperCpu):
         grid_fn: str = "grid",
     ):
         if not cuda:
-            # Even in CppWrapperCuda, we may see cpp kernels
+            # Even in CudaWrapperCodeGen, we may see cpp kernels
             return super().generate_kernel_call(
                 name, call_args, grid, device_index, cuda, triton, arg_types
             )

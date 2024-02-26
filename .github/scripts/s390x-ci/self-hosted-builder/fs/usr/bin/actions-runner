@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-
-set -e -u
-
-# Run one job.
-./run.sh --once

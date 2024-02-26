@@ -44,7 +44,8 @@ using at::Tensor;
 using at::TensorOptions;
 using c10::optional;
 
-namespace torch::utils {
+namespace torch {
+namespace utils {
 namespace {
 const int MAX_DIMS = 128;
 
@@ -534,7 +535,6 @@ void check_base_legacy_new(
         c10::DispatchKey::SparseCUDA,
         c10::DispatchKey::SparseHIP,
         c10::DispatchKey::SparseXPU,
-        c10::DispatchKey::SparsePrivateUse1,
     });
     TORCH_CHECK(
         expected_key_set.has(dispatch_key),
@@ -1786,4 +1786,5 @@ Tensor asarray(
   return tensor;
 }
 
-} // namespace torch::utils
+} // namespace utils
+} // namespace torch
