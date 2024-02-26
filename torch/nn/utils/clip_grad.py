@@ -43,7 +43,7 @@ def clip_grad_norm_(
         return torch.tensor(0.)
     first_device = grads[0].device
     grouped_grads: Dict[Tuple[torch.device, torch.dtype], List[List[Tensor]]] \
-        = _group_tensors_by_device_and_dtype([[g.detach() for g in grads]])  # type: ignore[assignment]
+        = _group_tensors_by_device_and_dtype([grads])  # type: ignore[assignment]
 
     if norm_type == inf:
         norms = [torch.linalg.vector_norm(g, inf).to(first_device) for g in grads]
