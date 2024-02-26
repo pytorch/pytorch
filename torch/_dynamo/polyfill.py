@@ -5,8 +5,6 @@ Python polyfills for common builtins.
 """
 import math
 
-import torch
-
 
 def all(iterator):
     for elem in iterator:
@@ -37,11 +35,3 @@ def repeat(item, count):
 
 def radians(x):
     return math.pi / 180.0 * x
-
-
-def accumulate_grad(x, new_grad):
-    new_grad = torch.clone(new_grad)
-    if x.grad is None:
-        x.grad = new_grad
-    else:
-        x.grad += new_grad
