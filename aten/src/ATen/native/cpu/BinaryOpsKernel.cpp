@@ -974,7 +974,7 @@ void fmod_kernel(TensorIteratorBase& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "fmod_cpu", [&]() {
       cpu_kernel(iter, [=](scalar_t x, scalar_t d) -> scalar_t {
         // x % d is undefined if d == 0 or if x / d is not representable in the result type
-        TORCH_CHECK(d != 0 && !(x == std::numeric_limits<scalar_t>::min() && d == -1),
+        TORCH_CHECK(d != 0 && !(x == std::numeric_limits<scalar_t>::min() && static_cast<std::make_signed_t<scalar_t>>(d) == -1),
                     "Invalid input to modulo operation.");
         return x % d;
       });
