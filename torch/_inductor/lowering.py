@@ -3287,7 +3287,14 @@ def scatter_fallback(
         or torch.are_deterministic_algorithms_enabled()
     ):
         ir.ScatterFallback(
-            fn, self, dim, index, src, reduce=reduce, include_self=include_self
+            V.graph.current_node.target,
+            fn,
+            self,
+            dim,
+            index,
+            src,
+            reduce=reduce,
+            include_self=include_self,
         )
         return self
 

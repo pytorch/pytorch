@@ -409,8 +409,15 @@ def convolution(
         V.graph.sizevars.evaluate_static_shapes(bias.get_size())
 
     choices = [
-        aten_convolution.bind(args, layout, ordered_kwargs_for_cpp_kernel, **kwargs)
+        aten_convolution.bind(
+            args,
+            layout,
+            ordered_kwargs_for_cpp_kernel,
+            aten.convolution.default,
+            **kwargs,
+        )
     ]
+
     if (
         use_triton_template(layout)
         # templates only support these:
