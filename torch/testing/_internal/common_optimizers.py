@@ -1053,6 +1053,13 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
                 "TestOptimRenewed",
@@ -1142,6 +1149,13 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
                 "TestOptimRenewed",
@@ -1202,6 +1216,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_peak_memory_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1277,6 +1298,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_peak_memory_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
             ),
             DecorateInfo(
                 unittest.skip("Uses too much memory, even for H100, surprisingly."),
@@ -1431,6 +1459,13 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
                 "TestOptimRenewed",
@@ -1486,6 +1521,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
             ),
             DecorateInfo(
                 toleranceOverride(
@@ -1598,6 +1640,13 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
                 "TestOptimRenewed",
@@ -1668,6 +1717,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1845,6 +1901,13 @@ optim_db: List[OptimizerInfo] = [
                 "test_set_default_dtype_works_with_foreach",
             ),
             DecorateInfo(
+                skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
                 toleranceOverride(
                     {  # previously atol=5-05, rtol=0.001, https://github.com/pytorch/pytorch/issues/116202
                         torch.float32: tol(atol=5e-04, rtol=0.01),
@@ -1926,6 +1989,13 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
                 "TestOptimRenewed",
@@ -1981,6 +2051,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
+                ),
+                "TestOptimRenewed",
+                "test_complex_2d",
             ),
             DecorateInfo(
                 toleranceOverride(
@@ -2108,7 +2185,17 @@ optim_db: List[OptimizerInfo] = [
 ]
 
 
+
 class TensorTracker:
+    """
+    A utility to track tensor clones in a list, with the expectation of popping them later (in
+    order) to make fair comparisons between two multi-step computation. The intended use case is 
+    usually when comparing two supposed equal computations, such as an optimizer step that each
+    individually consists of multiple steps, where numerical deviation could multiply.
+
+    The goal is to be able to compare and align numbers at every milestone so as to minimize
+    numerical discrepancies, and so when the test fails, it is likely a real problem.
+    """
     def __init__(self):
         self.tensors = []
 
@@ -2126,6 +2213,7 @@ class TensorTracker:
             assert tensor_to_set is None
             return
 
+        # torch.allclose does not variably compare based on dtype, look up tolerances beforehand
         rtol, atol = torch.testing._comparison.get_tolerances(
             ref.dtype, rtol=None, atol=None
         )

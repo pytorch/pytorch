@@ -241,7 +241,6 @@ class TestOptimRenewed(TestCase):
             if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
                     and not optim_input.kwargs.get("foreach", False)):
                 continue
-            print(optim_input.kwargs)
 
             a1 = torch.randn(2, device=device, dtype=dtype, requires_grad=True)
             a1_real = a1.real.clone().detach()
@@ -274,12 +273,12 @@ class TestOptimRenewed(TestCase):
 
             def closure2():
                 optim2.zero_grad()
+                a1_reals.pop_and_set(a1_real)
+                a1_imags.pop_and_set(a1_imag)
                 a2 = torch.complex(a1_real, a1_imag)
                 loss = rosenbrock(a2).abs()
                 losses.pop_and_set(loss)
                 loss.backward()
-                a1_reals.pop_and_set(a1_real)
-                a1_imags.pop_and_set(a1_imag)
                 a1_grad_reals.pop_and_set(a1_real.grad)
                 a1_grad_imags.pop_and_set(a1_imag.grad)
                 return loss
@@ -291,22 +290,19 @@ class TestOptimRenewed(TestCase):
                     optim1.step(closure1)
                     optim2.step(closure2)
                 else:
-                    # optim_complex.zero_grad()
-                    # optim_real.zero_grad()
-                    # a2 = torch.complex(a1_real, a1_imag)
-                    # rosenbrock(a1).abs().backward()
-                    # rosenbrock(a2).abs().backward()
                     closure1()
                     closure2()
-
-                    self.assertEqual(a1.grad.real, a1_real.grad)
-                    self.assertEqual(a1.grad.imag, a1_imag.grad)
-
                     optim1.step()
                     optim2.step()
 
                 self.assertEqual(a1.real, a1_real)
                 self.assertEqual(a1.imag, a1_imag)
+
+            self.assertTrue(a1_reals.all_popped())
+            self.assertTrue(a1_imags.all_popped())
+            self.assertTrue(a1_grad_reals.all_popped())
+            self.assertTrue(a1_grad_imags.all_popped())
+            self.assertTrue(losses.all_popped())
 
 
     def _test_derived_optimizers(self, device, dtype, optim_info, flag, reduced_precision=False, assert_step_dtype=None):
