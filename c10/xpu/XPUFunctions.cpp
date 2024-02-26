@@ -145,7 +145,8 @@ DeviceIndex get_device_idx_from_pointer(void* ptr) {
   TORCH_CHECK(
       it != gDevicePool.devices.end(),
       "Can't find the pointer from XPU devices.");
-  return static_cast<DeviceIndex>(std::distance(gDevicePool.devices.begin(), it));
+  return static_cast<DeviceIndex>(
+      std::distance(gDevicePool.devices.begin(), it));
 }
 
 DeviceIndex device_count() {

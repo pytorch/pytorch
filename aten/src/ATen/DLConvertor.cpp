@@ -90,7 +90,7 @@ DLDataType getDLDataType(const Tensor& t) {
 
 static DLDevice getDLDevice(const Tensor& tensor, c10::DeviceIndex device_id) {
   DLDevice ctx;
-  ctx.device_id = static_cast<int>(device_id);
+  ctx.device_id = static_cast<int32_t>(device_id);
   switch (tensor.device().type()) {
     case DeviceType::CPU:
       ctx.device_type = DLDeviceType::kDLCPU;
