@@ -654,7 +654,7 @@ class FunctionEvent(FormattedTimesMixin):
                 [child.xpu_time_total for child in self.cpu_children]
             )
         elif self.device_type == DeviceType.XPU:
-            return self.xpu_time_total
+            return self.time_range.elapsed_us()
         else:
             return 0
 
@@ -667,7 +667,7 @@ class FunctionEvent(FormattedTimesMixin):
                 [child.privateuse1_time_total for child in self.cpu_children]
             )
         elif self.device_type == DeviceType.PrivateUse1:
-            return self.privateuse1_time_total
+            return self.time_range.elapsed_us()
         else:
             return 0
 
