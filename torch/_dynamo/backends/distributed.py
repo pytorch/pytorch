@@ -332,15 +332,13 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
                 # TODO - make sure the first outputs of inductor match with user visible outputs
                 # (I think thats the case)
                 out = curr_submod(*new_args, **kwargs)
-                if not isinstance(out, (list, tuple)):
-                    out_new = [out]
-                out_new = [
+                wrap_tuple = not isinstance(out,  (list, tuple))
+                out = [out] if wrap_tuple else out
+                out = [
                     o.as_strided(o.shape, output_strides[i])
-                    for i, o in enumerate(out_new)
+                    for i, o in enumerate(out)
                 ]
-                if not isinstance(out, (list, tuple)):
-                    out_new = out_new[0]
-                return out_new
+                return out if not wrap_tuple else out[0]
         else:
             # placeholder or output nodes don't need to get compiled, just executed
             return getattr(self, n.op)(n.target, new_args, kwargs)
