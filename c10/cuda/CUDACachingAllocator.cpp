@@ -3032,6 +3032,22 @@ class NativeCachingAllocator : public CUDAAllocator {
       auto snap = da->snapshot();
       result.segments.insert(result.segments.end(), snap.begin(), snap.end());
     }
+
+    auto& md = result.config_metadata;
+    md.garbage_collection_threshold =
+        CUDAAllocatorConfig::garbage_collection_threshold();
+    md.max_split_size = CUDAAllocatorConfig::max_split_size();
+    md.pinned_num_register_threads =
+        CUDAAllocatorConfig::pinned_num_register_threads();
+    md.expandable_segments = CUDAAllocatorConfig::expandable_segments();
+    md.release_lock_on_malloc =
+        CUDAAllocatorConfig::release_lock_on_cudamalloc();
+    md.pinned_use_host_register =
+        CUDAAllocatorConfig::pinned_use_cuda_host_register();
+    md.last_allocator_settings = CUDAAllocatorConfig::last_allocator_settings();
+    md.roundup_power2_divisions =
+        CUDAAllocatorConfig::roundup_power2_divisions();
+
     return result;
   }
 
