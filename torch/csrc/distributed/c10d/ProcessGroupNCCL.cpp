@@ -1552,6 +1552,20 @@ void ProcessGroupNCCL::watchdogHandler() {
     // Bump up heart beat by one.
     heartbeat_++;
 
+// Some versions of GLOG support less-spammy version of LOG_EVERY_MS
+// in which case we don't want to spam the logs.
+#ifdef LOG_EVERY_MS
+    // Log the progress of this PG periodically
+    C10_LOG_EVERY_MS(INFO, kWorkStatusUpdatePeriodMs) << c10::str(
+        logPrefix(),
+        "NCCL Work update periodically: ",
+        "last enqueued NCCL work: ",
+        lastEnqueuedSeq_,
+        ", last completed NCCL work: ",
+        lastCompletedSeq_,
+        ".");
+#endif
+
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {
       auto& work = *it;
