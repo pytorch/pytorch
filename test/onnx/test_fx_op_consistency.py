@@ -904,18 +904,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="Functionalize pass failed",
     ),
     xfail(
-        "nn.functional.interpolate",
-        variant_name="linear",
-        dtypes=(torch.float16, torch.float32,),
-        reason="Mismatched elements with high difference",
-    ),
-    xfail(
-        "nn.functional.interpolate",
-        variant_name="trilinear",
-        dtypes=(torch.float16, torch.float32),
-        reason="Mismatched elements with high difference",
-    ),
-    xfail(
         "nn.functional.local_response_norm",
         dtypes=(torch.int64,),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("avgpool", "int64"),
@@ -1828,12 +1816,6 @@ def _run_test_output_match(
                     atol = 2e-5
                 elif (
                     dtype == torch.float16
-                    and op.name in test_suite.fp16_low_precision_dict
-                ):
-                    rtol = test_suite.fp16_low_precision_dict[op.name][0]
-                    atol = test_suite.fp16_low_precision_dict[op.name][1]
-                elif (
-                    dtype == torch.float16
                     and (op.name, op.variant_test_name)
                     in test_suite.fp16_low_precision_variant_dict
                 ):
@@ -1843,6 +1825,12 @@ def _run_test_output_match(
                     atol = test_suite.fp16_low_precision_variant_dict[
                         (op.name, op.variant_test_name)
                     ][1]
+                elif (
+                    dtype == torch.float16
+                    and op.name in test_suite.fp16_low_precision_dict
+                ):
+                    rtol = test_suite.fp16_low_precision_dict[op.name][0]
+                    atol = test_suite.fp16_low_precision_dict[op.name][1]
                 else:
                     rtol = None
                     atol = None
