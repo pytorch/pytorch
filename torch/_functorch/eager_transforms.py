@@ -1274,7 +1274,7 @@ def grad_and_value_impl(func, argnums, has_aux, args, kwargs) -> Callable:
 
             grad_input = _undo_create_differentiable(grad_input, level)
             output = _undo_create_differentiable(output, level)
-            if aux is not None:
+            if has_aux:
                 aux = _undo_create_differentiable(aux, level)
 
         if has_aux:
