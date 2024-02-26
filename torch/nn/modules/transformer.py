@@ -178,8 +178,10 @@ class Transformer(Module):
 
             Note: [src/tgt/memory]_mask ensures that position :math:`i` is allowed to attend the unmasked
             positions. If a BoolTensor is provided, positions with ``True``
-            are not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
-            is provided, it will be added to the attention weight.
+            are not allowed to attend while ``False`` values will be unchanged.
+            (This definition is oppsite to that of :attr:`attn_mask` in
+            torch.nn.functional.scaled_dot_product_attention.)
+            If a FloatTensor is provided, it will be added to the attention weight.
             [src/tgt/memory]_key_padding_mask provides specified elements in the key to be ignored by
             the attention. If a BoolTensor is provided, the positions with the
             value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
