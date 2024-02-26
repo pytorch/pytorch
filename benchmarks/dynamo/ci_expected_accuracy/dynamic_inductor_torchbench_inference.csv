@@ -138,6 +138,14 @@ hf_Bart,pass,0
 
 
 
+hf_Bert,pass,0
+
+
+
+hf_Bert_large,pass,0
+
+
+
 hf_BigBird,fail_to_run,0
 
 
@@ -198,6 +206,10 @@ llama_v2_7b_16h,model_fail_to_load,0
 
 
 
+maml,pass_due_to_skip,0
+
+
+
 maml_omniglot,pass,0
 
 
@@ -218,7 +230,7 @@ mobilenet_v3_large,pass,0
 
 
 
-moco,pass,11
+moco,pass,5
 
 
 

@@ -157,9 +157,7 @@ def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="device
         devices = list(devices)
 
     cpu_rng_state = torch.get_rng_state()
-    device_rng_states = []
-    for device in devices:
-        device_rng_states.append(device_mod.get_rng_state(device))
+    device_rng_states = [device_mod.get_rng_state(device) for device in devices]
 
     try:
         yield
