@@ -3183,7 +3183,7 @@ class CommonTemplate:
 
     def test_adaptive_max_pool2d1(self):
         def fn(x):
-            aten.adaptive_max_pool2d(x, (6, 6))
+            return aten.adaptive_max_pool2d(x, (6, 6))
 
         self.common(
             fn,
