@@ -281,22 +281,12 @@ def register_module_full_backward_pre_hook(
         This adds global state to the `nn.module` module
         and it is only intended for debugging/profiling purposes.
 
-    The hook will be called every time the gradients for the module are computed.
-    The hook should have the following signature::
+    Hooks registered using this function behave in the same way as those
+    registered by :meth:`torch.nn.Module.register_full_backward_pre_hook`.
+    Refer to its documentation for more details.
 
-        hook(module, grad_output) -> Tensor or None
-
-    The :attr:`grad_output` is a tuple. The hook should
-    not modify its arguments, but it can optionally return a new gradient with
-    respect to the output that will be used in place of :attr:`grad_output` in
-    subsequent computations. Entries in :attr:`grad_output` will be ``None`` for
-    all non-Tensor arguments.
-
-    For technical reasons, when this hook is applied to a Module, its forward function will
-    receive a view of each Tensor passed to the Module. Similarly the caller will receive a view
-    of each Tensor returned by the Module's forward function.
-
-    Global hooks are called before hooks registered with `register_backward_pre_hook`
+    Hooks registered using this function will be called before hooks registered
+    using :meth:`torch.nn.Module.register_full_backward_pre_hook`.
 
     Returns:
         :class:`torch.utils.hooks.RemovableHandle`:
@@ -318,26 +308,12 @@ def register_module_full_backward_hook(
         This adds global state to the `nn.module` module
         and it is only intended for debugging/profiling purposes.
 
-    The hook will be called every time the gradients with respect to a module
-    are computed, i.e. the hook will execute if and only if the gradients with
-    respect to module outputs are computed. The hook should have the following
-    signature::
+    Hooks registered using this function behave in the same way as those
+    registered by :meth:`torch.nn.Module.register_full_backward_hook`.
+    Refer to its documentation for more details.
 
-        hook(module, grad_input, grad_output) -> Tensor or None
-
-    The :attr:`grad_input` and :attr:`grad_output` are tuples. The hook should
-    not modify its arguments, but it can optionally return a new gradient with
-    respect to the input that will be used in place of :attr:`grad_input` in
-    subsequent computations. :attr:`grad_input` will only correspond to the inputs given
-    as positional arguments and all kwarg arguments will not appear in the hook. Entries
-    in :attr:`grad_input` and :attr:`grad_output` will be ``None`` for all non-Tensor
-    arguments.
-
-    For technical reasons, when this hook is applied to a Module, its forward function will
-    receive a view of each Tensor passed to the Module. Similarly the caller will receive a view
-    of each Tensor returned by the Module's forward function.
-
-    Global hooks are called before hooks registered with `register_backward_hook`
+    Hooks registered using this function will be called before hooks registered
+    using :meth:`torch.nn.Module.register_full_backward_hook`.
 
     Returns:
         :class:`torch.utils.hooks.RemovableHandle`:
@@ -780,7 +756,7 @@ class Module:
             "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml "
             "to report this bug.")
 
-    def set_extra_state(self, state: Any):
+    def set_extra_state(self, state: Any) -> None:
         """Set extra state contained in the loaded `state_dict`.
 
         This function is called from :func:`load_state_dict` to handle any extra state

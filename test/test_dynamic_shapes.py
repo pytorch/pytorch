@@ -529,14 +529,14 @@ def forward(self, x_1):
         _constrain_range_for_size(i0)
         _constrain_range_for_size(i1)
         self.assertTrue(expect_true(i0 == i1 * 4))
-        self.assertExpectedInline(str(i0), """u0""")
+        self.assertExpectedInline(str(i0), """4*u1""")
 
         i2 = shape_env.create_unbacked_symint()
         i3 = shape_env.create_unbacked_symint()
         _constrain_range_for_size(i2)
         _constrain_range_for_size(i3)
         self.assertTrue(expect_true(i2 * 4 == i3))
-        self.assertExpectedInline(str(i3), """u3""")
+        self.assertExpectedInline(str(i3), """4*u2""")
 
     def test_avoid_unbacked_substitution(self):
         shape_env = ShapeEnv()
@@ -849,10 +849,10 @@ class TestSymNumberMagicMethods(TestCase):
             with self.assertRaisesRegex(TypeError, "unhashable"):
                 hash(x)
 
-        # Singleton SymInt, constant SymBool, SymNode are hashable
-        j1 = torch._C._get_singleton_int(1, 1)
-        j1_copy = torch._C._get_singleton_int(1, 1)
-        j2 = torch._C._get_singleton_int(2, 1)
+        # NestedInt (SymInt), constant SymBool, SymNode are hashable
+        j1 = torch._C._get_nested_int(1, 1)
+        j1_copy = torch._C._get_nested_int(1, 1)
+        j2 = torch._C._get_nested_int(2, 1)
         t = self.get_constant_bool(True)
         t_copy = self.get_constant_bool(True)
         f = self.get_constant_bool(False)
@@ -872,14 +872,14 @@ class TestSymNumberMagicMethods(TestCase):
         hash(m)
 
     def test_non_symbolic_symnode(self):
-        j1 = torch._C._get_singleton_int(1, 1)
-        j2 = torch._C._get_singleton_int(1, 1)
-        j3 = torch._C._get_singleton_int(3, 1)
+        j1 = torch._C._get_nested_int(1, 1)
+        j2 = torch._C._get_nested_int(1, 1)
+        j3 = torch._C._get_nested_int(3, 1)
 
         self.assertIsInstance(j1, torch.SymInt)
         self.assertNotIsInstance(j1, int)
 
-        with self.assertRaisesRegex(RuntimeError, "add not supported by SingletonSymNode"):
+        with self.assertRaisesRegex(RuntimeError, "add not supported by NestedIntSymNode"):
             j1 + 3
 
         self.assertFalse(j1 == 3)

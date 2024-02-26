@@ -18,7 +18,6 @@ from torch import Tensor
 from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
-from .functional_utils import _get_mutation_type
 from .schemas import (
     BackwardSignature,
     GraphSignature,
@@ -151,14 +150,6 @@ def create_synthetic_base_metadata(
             m.input_info[x].mutations_under_no_grad_or_inference_mode
             for x in outer_indices
         )
-        mutation_type = _get_mutation_type(
-            m.keep_input_mutations,
-            mutates_data,
-            mutates_metadata,
-            mutations_hidden_from_autograd,
-            mutations_under_no_grad_or_inference_mode,
-            requires_grad,
-        )
 
         inpt_info = InputAliasInfo(
             # If len(outer_indices) > 1, then this input is a synthetic base.
@@ -176,7 +167,7 @@ def create_synthetic_base_metadata(
             mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
             is_leaf=any_leaf,
             requires_grad=requires_grad,
-            mutation_type=mutation_type,
+            keep_input_mutations=m.keep_input_mutations,
         )
         input_infos.append(inpt_info)
 

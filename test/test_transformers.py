@@ -41,7 +41,8 @@ from torch.testing._internal.common_methods_invocations import wrapper_set_seed
 from torch.testing._internal.common_cuda import (
     SM80OrLater, PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    PLATFORM_SUPPORTS_FUSED_ATTENTION
+    PLATFORM_SUPPORTS_FUSED_ATTENTION,
+    PLATFORM_SUPPORTS_CUDNN_ATTENTION
 )
 
 if TEST_FAIRSEQ:
@@ -122,6 +123,8 @@ def get_platform_specific_sdpa():
         ret.append(SDPBackend.FLASH_ATTENTION)
     if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
         ret.append(SDPBackend.EFFICIENT_ATTENTION)
+    if PLATFORM_SUPPORTS_CUDNN_ATTENTION:
+        ret.append(SDPBackend.CUDNN_ATTENTION)
     if not ret:
         # Add a placeholder, an empty list causes "An empty arg_values was passed to @parametrize"
         ret.append(SDPBackend.EFFICIENT_ATTENTION)
@@ -3302,6 +3305,9 @@ class TestAttnBias(NNTestCase):
         [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)],
     )
     @unittest.skipIf(IS_WINDOWS, "torch.compile is not supported on windows")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
     def test_causal_variants_compile(self, device, causal_variant: CausalVariant, shape: List[Tuple[int]]):
         cnts = CompileCounterWithBackend("aot_eager")
         make_tensor = partial(

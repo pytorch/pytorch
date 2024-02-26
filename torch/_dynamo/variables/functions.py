@@ -129,11 +129,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         assert isinstance(
             fn, (types.FunctionType, torch.jit.ScriptFunction)
         ), f"expected FunctionType found {typestr(fn)} {fn}"
-        # unpack @torch._dynamo.optimize()(fn) wrapped function
-        fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
-        # unpack torch.jit.script_if_tracing
-        if inspect.getattr_static(fn, "__script_if_tracing_wrapper", False):
-            fn = inspect.getattr_static(fn, "__original_fn", fn)
         self.fn: types.FunctionType = fn
 
     def as_python_constant(self):
@@ -553,8 +548,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             codegen.extend_output(create_rot_n(2))
             codegen.extend_output(create_call_function(1, True))
 
-        return []
-
 
 class SkipFunctionVariable(VariableTracker):
     def __init__(self, value, reason=None, **kwargs):
@@ -715,12 +708,13 @@ class FunctoolsPartialVariable(VariableTracker):
         if self.args:
             codegen.foreach(self.args)
         if not self.keywords:
-            return create_call_function(len(self.args) + 1, True)
+            codegen.extend_output(create_call_function(len(self.args) + 1, True))
+            return
 
         codegen.foreach(self.keywords.values())
         keys = tuple(self.keywords.keys())
-        return codegen.create_call_function_kw(
-            len(keys) + len(self.args) + 1, keys, True
+        codegen.extend_output(
+            codegen.create_call_function_kw(len(keys) + len(self.args) + 1, keys, True)
         )
 
     def get_function(self):

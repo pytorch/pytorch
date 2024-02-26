@@ -17,7 +17,6 @@ from typing import (
 
 import torch
 from torch._dynamo.utils import counters
-from torch._utils_internal import print_graph
 
 from .. import config
 from ..pattern_matcher import (
@@ -936,7 +935,6 @@ def generate_fusion_from_config(config_options: Dict[str, Any], pre_grad=True):
 
 
 def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
-    print_graph(graph, "Before group_batch fusion in pre grad pass.")
     fusions: List[GroupBatchFusionBase] = []
     # we keep all current pre grad fusions to keep
     # current implementation, will remove this later
@@ -965,4 +963,3 @@ def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
 
     for rule in fusions:
         apply_group_batch_fusion(graph, rule)  # type: ignore[arg-type]
-        print_graph(graph, f"Apply fusion {rule.__class__.__name__}.")
