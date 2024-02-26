@@ -1,6 +1,8 @@
 import triton
 import triton.language as tl
 
+import torch
+
 
 @triton.jit
 def promote_to_tensor(x):
@@ -91,23 +93,39 @@ def max_with_index(value, index, dim):
     return tl.reduce((value, index), dim, maximum_with_index)
 
 
+# Causing timeouts in CI with triton-rocm
+if torch.version.hip is None:
+
+    @triton.jit
+    def div_approx(a, b):
+        return a * tl.math.rcp_rn(b)
+
+else:
+
+    @triton.jit
+    def div_approx(a, b):
+        return a * (1.0 / b)
+
+
 @triton.jit
-def welford_reduce(value, mean, m2, weight):
-    delta = value - mean
-    new_weight = weight + 1
-    new_mean = mean + delta / new_weight
-    return (
-        new_mean,
-        m2 + delta * (value - new_mean),
-        new_weight,
-    )
+def welford_reduce(value, mean, m2, weight, first_iteration):
+    if first_iteration:
+        new_weight = tl.full(weight.shape, 1, weight.dtype)
+        new_mean = value
+        new_m2 = tl.zeros_like(m2)
+    else:
+        delta = value - mean
+        new_weight = weight + 1
+        new_mean = mean + div_approx(delta, new_weight)
+        new_m2 = m2 + delta * (value - new_mean)
+    return new_mean, new_m2, new_weight
 
 
 @triton.jit
 def welford_combine(mean_1, m2_1, weight_1, mean_2, m2_2, weight_2):
     delta = mean_2 - mean_1
     new_weight = weight_1 + weight_2
-    w2_over_w = tl.where(new_weight == 0.0, 0.0, weight_2 / new_weight)
+    w2_over_w = tl.where(new_weight == 0.0, 0.0, div_approx(weight_2, new_weight))
     return (
         mean_1 + delta * w2_over_w,
         m2_1 + m2_2 + delta * delta * weight_1 * w2_over_w,
