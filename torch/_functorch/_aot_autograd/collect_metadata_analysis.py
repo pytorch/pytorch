@@ -121,6 +121,21 @@ def run_functionalized_fw_and_collect_metadata(
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
         for i, (arg, f_arg) in enumerate(zip(flat_args, flat_f_args)):
+            # NB: Mutation of non-contiguous tensor subclass input can result in a mismatch in
+            # strides between the functionalized arg inner tensors and non-functionalized arg inner
+            # tensors. This is a problem as the inner tensor stride change may not be reflected
+            # correctly in the outer tensor, so disallow this for now.
+            mutates_data = has_data_mutation(f_arg)
+            if (
+                mutates_data
+                and not arg.is_contiguous()
+                and is_traceable_wrapper_subclass(arg)
+            ):
+                raise RuntimeError(
+                    "Mutations on non-contiguous inputs are currently not allowed on "
+                    "tensor subclasses"
+                )
+
             if not isinstance(arg, Tensor):
                 new_arg = arg
             else:
@@ -135,7 +150,6 @@ def run_functionalized_fw_and_collect_metadata(
             mutates_storage_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=True
             )
-            mutates_data = has_data_mutation(f_arg)
             mutations_hidden_from_autograd = are_all_mutations_hidden_from_autograd(
                 f_arg
             )
