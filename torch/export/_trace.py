@@ -888,7 +888,7 @@ def _export(
     constants = ep_non_strict.constants
 
     # Withhold nn_module_stack metadata from params/buffers, since these are not well-defined
-    for fqn, metadata in params_buffers_to_node_meta.items():
+    for metadata in params_buffers_to_node_meta.values():
         if "nn_module_stack" in metadata:
             del metadata["nn_module_stack"]
 

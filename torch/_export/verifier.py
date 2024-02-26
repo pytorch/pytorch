@@ -209,7 +209,7 @@ class Verifier(metaclass=_VerifierMeta):
                         raise SpecViolationError(
                             f"Node {node} of type {node.op} is missing nn_module_stack metadata"
                         )
-                else: # placeholder, output
+                else:  # placeholder, output
                     if node.meta.get('nn_module_stack', None):
                         raise SpecViolationError(
                             f"Node {node} of type {node.op} contains nn_module_stack metadata, this should be None"
