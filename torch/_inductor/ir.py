@@ -4787,15 +4787,8 @@ class FallbackKernel(ExternKernelAlloc):
             return self.python_kernel_name
 
         def sdpa_ver_fn():
-            # For sdpa, we need the v2 version only if any optional
-            # kwarg is missing.
-            if any(
-                self.get_kwargs_value(arg_name) is None
-                for arg_name in self.ordered_kwargs_for_cpp_kernel
-            ):
-                return f"{self.cpp_kernel_name}_v2"
-            else:
-                return self.cpp_kernel_name
+            # For sdpa, we need the v2 version since v1 didn't consider optional arg
+            return f"{self.cpp_kernel_name}_v2"
 
         kernel_to_ver = {"at::_scaled_dot_product_flash_attention": sdpa_ver_fn}
         ver_fn = kernel_to_ver.get(self.cpp_kernel_name, None)  # type: ignore[arg-type]
