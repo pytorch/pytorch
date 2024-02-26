@@ -1180,6 +1180,22 @@ class TestFSDPStateDict(FSDPTest):
             self.assertEqual(state_dict["net2.0.weight"], state_dict["net3.0.weight"])
 
     @skip_if_lt_x_gpu(2)
+    def test_full_state_dict_missing_unexpected_keys_cleaned(self):
+        model = self._get_simple_nested_model()
+        sd = model.state_dict()
+        # Create a missing key
+        sd.pop(list(sd.keys())[0])
+        # Create an unexpected key
+        sd['unexpected'] = torch.ones(1)
+        missing, unexpected = model.load_state_dict(sd, strict=False)
+        from torch.distributed.fsdp._common_utils import FSDP_PREFIX
+        assert len(missing) == 1
+        assert len(unexpected) == 1
+        self.assertTrue(FSDP_PREFIX not in missing[0])
+        self.assertTrue(FSDP_PREFIX not in unexpected[0])
+
+
+    @skip_if_lt_x_gpu(2)
     def test_sharded_load_multi_backend_pg(self):
         auto_wrap_policy = ModuleWrapPolicy(
             {TransformerEncoderLayer, TransformerDecoderLayer}
