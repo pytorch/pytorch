@@ -94,10 +94,8 @@
 
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAConfig.h>
-#include <ATen/native/transformers/cuda/sdp_utils.h>
-#if AT_CUDNN_ENABLED()
 #include <ATen/native/cudnn/BatchNorm.h>
-#endif
+#include <ATen/native/transformers/cuda/sdp_utils.h>
 #endif
 
 #ifdef USE_DISTRIBUTED
