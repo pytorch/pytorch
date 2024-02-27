@@ -3560,6 +3560,18 @@ class GraphModule(torch.nn.Module):
             torch.vmap(fn, randomness="different")(x)
 
     @config.patch(capture_func_transforms=True)
+    @config.patch(error_on_recompile=True)
+    def test_grad_recompile(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            return torch.func.grad(torch.sin)(x)
+
+        x = torch.randn([])
+        torch.func.grad(fn)(x)
+        # should not recompile on second call
+        torch.func.grad(fn)(x)
+
+    @config.patch(capture_func_transforms=True)
     def test_vmap_get_wrapped(self):
         counters.clear()
 
