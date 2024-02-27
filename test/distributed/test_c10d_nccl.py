@@ -4065,13 +4065,14 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         ver = t['version']
-        self.assertEqual(ver, "1.1")
+        self.assertEqual(ver, "1.2")
         t = t['entries']
         self.assertEqual(len(t), 2)
         last = t[-1]
         self.assertEqual(last['state'], 'completed')
         s = last['time_discovered_started_ns']
         f = last['time_discovered_completed_ns']
+        self.assertEqual(last['record_id'] == 1)
         self.assertIsNotNone(f)
         if timing_enabled:
             self.assertIsNotNone(s)
@@ -4299,6 +4300,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         self.assertEqual(len(t['entries']), num_coalesced_ops * (ops_per_coalesce + 1))
+        expected_record_id = 0
         for seq in range(num_coalesced_ops):
             first_op = seq * (ops_per_coalesce + 1)
             coalesced_op = first_op + ops_per_coalesce
@@ -4307,6 +4309,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 # the indivudal ops inside the coalescing group the individual op metadata,
                 # but not the timing info coming from the actual coalesced kernel
                 profiling_name = 'nccl:recv 0<-1' if self.rank == 0 else 'nccl:send 1->0'
+                self.assertEqual(t['entries'][p2p_op_idx]['record_id'], expected_record_id)
+                expected_record_id += 1
                 self.assertEqual(t['entries'][p2p_op_idx]['profiling_name'], profiling_name)
                 self.assertEqual(t['entries'][p2p_op_idx]['seq_id'], expected_seq)
                 self.assertEqual(t['entries'][p2p_op_idx]['input_sizes'], [input_sizes])
@@ -4317,6 +4321,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
             # the coalesced op has no metadata but indicates that coalescing was used,
             # and accurately reflects the timing and state info for the whole group
+            self.assertEqual(t['entries'][coalesced_op]['record_id'], expected_record_id)
+            expected_record_id += 1
             self.assertEqual(t['entries'][coalesced_op]['profiling_name'], 'nccl:coalesced')
             self.assertEqual(t['entries'][coalesced_op]['seq_id'], expected_seq)
             self.assertEqual(t['entries'][coalesced_op]['state'], 'completed')
