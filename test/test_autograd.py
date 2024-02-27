@@ -8874,6 +8874,22 @@ get_out().sum().backward()
             nt = nested_view_from_values_offsets(values, offsets).clone().detach()
             _test_fn(torch.ops.aten._nested_get_values.default, nt, use_unsafe_view_func=True)
 
+            def chain_nt_to_dense_back_and_forth1(nt):
+                # NJT1 -> dense -> NJT2 -> dense
+                offsets2 = nt.offsets().clone().detach()
+                return nested_view_from_values_offsets(nt.values(), offsets2).values()
+
+            _test_fn(chain_nt_to_dense_back_and_forth1, nt, use_unsafe_view_func=True)
+
+            def chain_dense_to_nt_back_and_forth(values, offsets):
+                offsets2 = offsets.clone().detach()
+                # dense -> NJT1 -> dense -> NJT2
+                return nested_view_from_values_offsets(
+                    nested_view_from_values_offsets(values, offsets).values(),
+                    offsets2)
+
+            _test_fn(chain_dense_to_nt_back_and_forth, values, offsets, use_unsafe_view_func=True)
+
     def test_view_func_replay_with_modified_state(self):
         with torch.autograd._force_original_view_tracking(True):
             base = torch.randn(3, 4, 5)

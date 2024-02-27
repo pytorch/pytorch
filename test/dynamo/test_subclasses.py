@@ -19,9 +19,9 @@ from torch.fx.experimental.symbolic_shapes import (
     StatelessSymbolicContext,
 )
 from torch.nested._internal.nested_tensor import (
-    buffer_from_jagged,
     jagged_from_list,
     jagged_from_tensor_and_lengths,
+    nested_view_from_values_offsets,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -1222,10 +1222,10 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         ret = fn_c(nt, y)[0]
         ref = fn(nt_copy, y_copy)[0]
 
-        self.assertEqual(buffer_from_jagged(ret), buffer_from_jagged(ref))
+        self.assertEqual(ret.values(), ref.values())
 
-        buffer_from_jagged(ret).sum().backward()
-        buffer_from_jagged(ref).sum().backward()
+        ret.values().sum().backward()
+        ref.values().sum().backward()
         for ref_v, res_v in zip(values_copy, values):
             self.assertEqual(ref_v.grad, res_v.grad)
 
@@ -1303,6 +1303,20 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         # Subclass -> Dense
         x = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[0].clone()
         yield x.values()
+
+        # Subclass -> Dense -> Subclass -> Dense
+        # TODO: Fix this case!! Or at least error nicely
+        # x = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[0].clone()
+        # offsets2 = x.offsets().clone().detach()
+        # yield nested_view_from_values_offsets(x.values(), offsets2).values()
+
+        # Dense -> Subclass -> Dense -> Subclass
+        values = torch.randn(10, 5)
+        offsets = torch.tensor([0, 3, 6, 10])
+        offsets2 = offsets.clone().detach()
+        yield nested_view_from_values_offsets(
+            nested_view_from_values_offsets(values, offsets).values(), offsets
+        )
 
     def test_inputs_to_compiled_fn_are_views(self):
         for nt_view in self._get_views():

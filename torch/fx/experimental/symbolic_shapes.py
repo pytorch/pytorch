@@ -862,7 +862,9 @@ class StatelessSymbolicContext(SymbolicContext):
     """
     dynamic_sizes: DimList[DimDynamic]
     constraint_sizes: DimList[DimConstraint] = None
-    # if the tensor is a view, this should be populated for the base
+    # If the tensor is a view, this should be populated for the base. It contains
+    # information on how to allocate symbols when recursively fakeifying the base
+    # during view fake-ification.
     view_base_context: Optional[SymbolicContext] = None
     # TODO: add storage offset and stride symbolic_context
 
