@@ -296,10 +296,6 @@ class TestLazyScheduler(TestCase):
       if not skip_check:
         self.assertEqual(result, expected, msg="Output mismatch between torch.compile and eager versions")
         if not fwd_only:
-          # TODO: we need to compare module.param gradients as well, to check whether reusing the same LazyScheduler is a good idea or not.
-          # mainly handle is already scheduled in first iteration and it's not refreshed.
-          # print(f"eager_module.param.grad: {eager_module.param.grad}")
-          # print(f"eager_module_clone.param.grad: {eager_module_clone.param.grad}")
           self.assertEqual(
             eager_module.param.grad, eager_module_clone.param.grad,
             msg=f"Gradient mismatch between torch.compile and eager versions. eager_module.param.grad: {eager_module.param.grad}, eager_module_clone.param.grad: {eager_module_clone.param.grad}",
