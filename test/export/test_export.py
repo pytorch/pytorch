@@ -761,7 +761,10 @@ class TestExport(TestCase):
             a: Tensor
             b: Tensor
 
-        register_dataclass_as_pytree_node(DataClass)
+        register_dataclass_as_pytree_node(
+            DataClass,
+            serialized_type_name="test_export_api_with_dynamic_shapes.DataClass",
+        )
 
         class Foo(torch.nn.Module):
             def forward(self, inputs):
@@ -806,7 +809,7 @@ class TestExport(TestCase):
                 dynamic_shapes={"kjt": [{0: dim}, None, {0: dim}, {0: dim_plus_one}]},
             )
             self.assertEqual(
-                [out.shape for out in efoo.module()(*inputs)],
+                [out.shape for out in efoo(*inputs)],
                 [out.shape for out in foo(*inputs)]
             )
 
@@ -947,7 +950,7 @@ class TestExport(TestCase):
         self.assertEqual(
             spec,
             TreeSpec(
-                MyDataClass, (MyDataClass, ["x", "y"], ["z"]), [LeafSpec(), LeafSpec()]
+                MyDataClass, [["x", "y"], ["z"]], [LeafSpec(), LeafSpec()]
             ),
         )
         self.assertEqual(flat, [3, 4])
@@ -980,11 +983,7 @@ class TestExport(TestCase):
             spec,
             TreeSpec(
                 MyOtherDataClass,
-                (
-                    MyOtherDataClass,
-                    ["x", "y", "z"],
-                    [],
-                ),
+                [["x", "y", "z"], []],
                 [LeafSpec(), LeafSpec(), LeafSpec()],
             ),
         )
@@ -1987,7 +1986,10 @@ def forward(self, arg_0):
             f: torch.Tensor
             p: torch.Tensor
 
-        torch._export.utils.register_dataclass_as_pytree_node(Input)
+        torch._export.utils.register_dataclass_as_pytree_node(
+            Input,
+            serialized_type_name="test_preserve_shape_dynamism_for_unused_inputs.Input"
+        )
 
         class Module(torch.nn.Module):
             def forward(self, x: Input):
@@ -2964,17 +2966,22 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         m = MyModule()
         ep = export(m, (inp,), {})
 
+        self.assertEqual(ep(inp), m(inp))
         # Non-persistent buffers should not show up in the state dict
         self.assertNotIn("foo", ep.state_dict)
         named_buffers = {name: buffer for (name, buffer) in ep.named_buffers()}
         # But they should show up in named_buffers()
         self.assertIn("foo", named_buffers)
+        self.assertIn("foo", ep.constants)
+        self.assertEqual(len(ep.constants), 1)
 
         # Check the same properties of the unlifted module
         mod = ep.module()
         self.assertNotIn("foo", mod.state_dict())
         mod_named_buffers = {name: buffer for (name, buffer) in mod.named_buffers()}
         self.assertIn("foo", mod_named_buffers)
+        self.assertIn("foo", ep.constants)
+        self.assertEqual(len(ep.constants), 1)
         self.assertEqual(mod(inp), m(inp))
 
     def test_nonstrict_retrace_preserves_metadata(self):
@@ -3147,7 +3154,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return [((1, 3), [x + x, x * x])]
 
         ep = torch.export.export(M(), (torch.ones(2, 3),))
-        res = ep.module()(torch.ones(2, 3))
+        res = ep(torch.ones(2, 3))
         self.assertEqual(res[0][0], (1, 3))
 
     def test_primitive_constant_output(self):
@@ -3156,7 +3163,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return y * x
 
         ep = torch.export.export(Z(), (torch.tensor(3), 5))
-        res = ep.module()(torch.tensor(4), 5)
+        res = ep(torch.tensor(4), 5)
         self.assertEqual(res, torch.tensor(20))
 
         class B(torch.nn.Module):
@@ -3164,12 +3171,12 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return y * x, y
 
         ep = torch.export.export(B(), (torch.tensor(3), 5))
-        res = ep.module()(torch.tensor(4), 5)
+        res = ep(torch.tensor(4), 5)
         self.assertEqual(res[0], torch.tensor(20))
         self.assertEqual(res[1], 5)
 
         with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[1] to be equal to 5, but got 20")):
-            res = ep.module()(torch.tensor(4), 20)
+            res = ep(torch.tensor(4), 20)
 
         class F(torch.nn.Module):
             def forward(self, x):
@@ -3178,7 +3185,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return y * x, y
 
         ep = torch.export.export(F(), (torch.tensor(3),))
-        res = ep.module()(torch.tensor(4))
+        res = ep(torch.tensor(4))
         self.assertEqual(res[0], torch.tensor(20))
         self.assertEqual(res[1], 5)
 
@@ -3187,7 +3194,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return y * x, y - 1
 
         ep = torch.export.export(Q(), (torch.tensor(3), 5))
-        res = ep.module()(torch.tensor(4), 5)
+        res = ep(torch.tensor(4), 5)
         self.assertEqual(res[0], torch.tensor(20))
         self.assertEqual(res[1], 4)
 
@@ -3197,7 +3204,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return x * x
 
         ep = torch.export.export(Z(), (torch.tensor(3), None))
-        res = ep.module()(torch.tensor(4), None)
+        res = ep(torch.tensor(4), None)
         self.assertEqual(res, torch.tensor(16))
 
         class B(torch.nn.Module):
@@ -3205,12 +3212,12 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return x * x, y
 
         ep = torch.export.export(B(), (torch.tensor(3), None))
-        res = ep.module()(torch.tensor(4), None)
+        res = ep(torch.tensor(4), None)
         self.assertEqual(res[0], torch.tensor(16))
         self.assertEqual(res[1], None)
 
         decomp = ep.run_decompositions()
-        res = decomp.module()(torch.tensor(4), None)
+        res = decomp(torch.tensor(4), None)
         self.assertEqual(res[0], torch.tensor(16))
         self.assertEqual(res[1], None)
 
@@ -3218,6 +3225,29 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res = gm(torch.tensor(4), None)
         self.assertEqual(res[0], torch.tensor(16))
         self.assertEqual(res[1], None)
+
+    def test_constant_fqn(self):
+        class Nested(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.constant = torch.rand(2, 3)
+                self.parameter = torch.nn.Parameter(torch.rand(2, 3))
+
+            def forward(self, x):
+                return x + self.constant
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.nested = Nested()
+
+            def forward(self, x):
+                return self.nested(x) + self.nested.constant + self.nested.parameter
+
+        m = Mod()
+        ep = export(m, (torch.rand(2, 3),), strict=True)
+        self.assertEqual(ep.constants["nested.constant"], m.nested.constant)
+        self.assertEqual(ep.module()(torch.ones(2, 3)), m(torch.ones(2, 3)))
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestExportCustomClass(TorchTestCase):
@@ -3266,7 +3296,7 @@ class TestExportCustomClass(TorchTestCase):
 
         from torch._export.passes.lift_constants_pass import lift_constants_pass
         from torch._export.serde.serialize import serialize, deserialize
-        constants = lift_constants_pass(ep.graph_module, ep.graph_signature)
+        constants = lift_constants_pass(ep.graph_module, ep.graph_signature, {})
         for k, v in constants.items():
             assert k not in ep.constants
             ep._constants[k] = v

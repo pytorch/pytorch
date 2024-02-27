@@ -33,13 +33,20 @@ from torch._dynamo import (
     logging as dynamo_logging,
     utils as dynamo_utils,
 )
-from torch._dynamo.utils import counters, detect_fake_mode, lazy_format_graph_code
+from torch._dynamo.utils import (
+    counters,
+    detect_fake_mode,
+    lazy_format_graph_code,
+    optimus_scuba_log,
+)
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
+from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
+from torch._utils_internal import signpost_event
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 from .._dynamo.backends.common import aot_autograd
@@ -584,6 +591,9 @@ def fx_codegen_and_compile(
         f"graph {graph_id}",
     )
     V.debug.fx_graph(gm, example_inputs)
+    # TODO: Should we actually dump this?  It should be redundant with the aot
+    # structured logs...
+    # trace_structured("inductor_input_graph", payload_fn=lambda: gm.print_readable(print_output=False))
 
     shape_env = _shape_env_from_inputs(example_inputs)
 
@@ -621,9 +631,15 @@ def fx_codegen_and_compile(
         post_grad_passes(gm, is_inference=is_inference)
         V.debug.fx_graph_transformed(gm, example_inputs)
         post_grad_graphs_log.debug("%s", lazy_format_graph_code("AFTER POST GRAD", gm))
-        log.debug(
-            "counters of inductor dict after apply passes on the input FX graph in the post grad pass: %s",
-            counters["inductor"],
+        trace_structured(
+            "inductor_post_grad_graph",
+            payload_fn=lambda: gm.print_readable(print_output=False),
+        )
+        optimus_scuba_log["inductor_post_grad"] = counters["inductor"]
+        signpost_event(
+            "optimus",
+            "compile_fx.post_grad_passes",
+            optimus_scuba_log,
         )
 
     with V.set_fake_mode(fake_mode):
@@ -1159,9 +1175,11 @@ def compile_fx(
             )
 
         model_ = pre_grad_passes(model_, example_inputs_)
-        log.debug(
-            "counters of inductor dict after apply passes on the input FX graph in the pre grad pass: %s",
-            counters["inductor"],
+        optimus_scuba_log["inductor_pre_grad"] = counters["inductor"]
+        signpost_event(
+            "optimus",
+            "compile_fx.pre_grad_passes",
+            optimus_scuba_log,
         )
 
     if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
@@ -1280,6 +1298,7 @@ def compile_fx(
         )
 
     @dynamo_utils.dynamo_timed
+    @dynamo_utils.maybe_cprofile
     def bw_compiler(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         fixed = count_tangents(model)
         return inner_compile(

@@ -651,6 +651,7 @@ class TestCompiledAutograd(TestCase):
             torch._dynamo.mark_dynamic(y, 0)
 
         def f():
+            y.grad = None
             out = x + y
 
             # make sure the backward call does not trigger any error when

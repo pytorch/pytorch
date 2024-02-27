@@ -1,11 +1,15 @@
 # Owner(s): ["module: inductor"]
 
+import unittest
+
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, optimus_scuba_log
 from torch._inductor.fx_passes.misc_patterns import numpy_compat_normalization
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
+
+requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 
 def patch(f):
@@ -90,6 +94,10 @@ class TestSplitCatFxPasses(TestCase):
                 counters["inductor"]["split_cat_norm"],
                 expected_split_norm_count,
             )
+            if expected_split_norm_count > 0:
+                self.assertIn(
+                    "split_cat_pattern_normalization_pass_pre_grad", optimus_scuba_log
+                )
             counters.clear()
 
     @patch
@@ -223,6 +231,18 @@ class TestSplitCatFxPasses(TestCase):
 
             return torch.cat(final_items, dim=1)
 
+        def split_partial_getitem_cat(x):
+            fs = torch.split(x, [4, 4, 24], dim=1)
+            item0 = fs[0]
+            item2 = fs[2]
+
+            final_items = [
+                item0,
+            ]
+            final_items.extend(item2.split((4, 4, 4, 4, 4, 4), 1))
+
+            return torch.cat(final_items, dim=1)
+
         args = [
             torch.randn(2, 32),
         ]
@@ -242,6 +262,7 @@ class TestSplitCatFxPasses(TestCase):
             (duplicate_getitems_neg_index, 1),
             (split_getitem_gap, 1),
             (split_getitem_out_of_order, 1),
+            (split_partial_getitem_cat, 1),
         ]:
             expected = fn(*args)
             actual = torch.compile(fn)(*args)
@@ -251,6 +272,10 @@ class TestSplitCatFxPasses(TestCase):
                 counters["inductor"]["consecutive_split_merged"],
                 expected_split_merged,
             )
+            if expected_split_merged > 0:
+                self.assertIn(
+                    "split_cat_pattern_merge_splits_pass_pre_grad", optimus_scuba_log
+                )
             counters.clear()
 
     @patch
@@ -725,13 +750,13 @@ class TestSplitCatFxPasses(TestCase):
     @patch
     def test_unbind_stack(self):
         def unbind_stack(x):
-            return torch.stack(torch.unbind(x, dim=1), 1)
+            return torch.stack(torch.unbind(x, 1), 1)
 
         def unbind_cat(x):
-            return torch.cat(torch.unbind(x, dim=1), 1)
+            return torch.cat(torch.unbind(x, dim=-3), 1)
 
         def unbind_stack_argspec1(x):
-            return torch.stack(torch.unbind(x, dim=1), dim=1)
+            return torch.stack(torch.unbind(input=x, dim=1), dim=1)
 
         def unbind_stack_argspec2(x):
             return torch.stack(tensors=torch.unbind(x, dim=1), dim=1)
@@ -830,22 +855,23 @@ class TestSplitCatFxPasses(TestCase):
             expected_cat_added,
             expected_cat_removed,
             expected_sections_removed,
+            expected_unbind_normalized,
         ) in [
-            (unbind_stack, 0, 1, 0, 1, 31),
-            (unbind_stack_argspec1, 0, 1, 0, 1, 31),
-            (unbind_stack_argspec2, 0, 1, 0, 1, 31),
-            (dim_mismatch, 0, 1, 0, 1, 31),
-            (split_squeeze_stack, 0, 1, 0, 1, 31),
-            (split_squeeze_stack_callmethod, 0, 1, 0, 1, 31),
-            (other_users, 0, 0, 0, 0, 0),
-            (other_users_2, 0, 0, 0, 0, 0),
-            (unbind_cat_addn_args, 0, 1, 1, 1, 31),
-            (unbind_stack_addn_args, 0, 1, 1, 1, 31),
-            (unbind_cat_addn_args_dim2, 0, 1, 1, 1, 31),
-            (unbind_cat_dim_mismatch, 0, 1, 1, 1, 31),
-            (unbind_stack_dim_mismatch, 0, 1, 1, 1, 31),
-            (unbind_cat_multi_users, 0, 1, 2, 2, 31),
-            (unbind_cat_multi_users_diff_dims, 0, 1, 2, 2, 31),
+            (unbind_stack, 0, 1, 0, 1, 31, 2),
+            (unbind_stack_argspec1, 0, 1, 0, 1, 31, 2),
+            (unbind_stack_argspec2, 0, 1, 0, 1, 31, 2),
+            (dim_mismatch, 0, 1, 0, 1, 31, 2),
+            (split_squeeze_stack, 0, 1, 0, 1, 31, 2),
+            (split_squeeze_stack_callmethod, 0, 1, 0, 1, 31, 2),
+            (other_users, 0, 0, 0, 0, 0, 2),
+            (other_users_2, 0, 0, 0, 0, 0, 2),
+            (unbind_cat_addn_args, 0, 1, 1, 1, 31, 2),
+            (unbind_stack_addn_args, 0, 1, 1, 1, 31, 2),
+            (unbind_cat_addn_args_dim2, 0, 1, 1, 1, 31, 2),
+            (unbind_cat_dim_mismatch, 0, 1, 1, 1, 31, 2),
+            (unbind_stack_dim_mismatch, 0, 1, 1, 1, 31, 2),
+            (unbind_cat_multi_users, 0, 1, 2, 2, 31, 3),
+            (unbind_cat_multi_users_diff_dims, 0, 1, 2, 2, 31, 3),
         ]:
             print()
             print(fn)
@@ -873,10 +899,14 @@ class TestSplitCatFxPasses(TestCase):
                 counters["inductor"]["scmerge_split_sections_removed"],
                 expected_sections_removed,
             )
+            self.assertEqual(
+                counters["inductor"]["split_cat_norm"],
+                expected_unbind_normalized,
+            )
             counters.clear()
 
     @patch
-    def test_getitem_cat_merge(self):
+    def test_split_cat_new_patterns(self):
         def split_cat_split(x):
             l1_out = torch.split(x, [200, 50, 50, 20, 20, 20, 20, 20, 20, 50, 30], 1)
             item0 = l1_out[0]
@@ -967,7 +997,7 @@ class TestSplitCatFxPasses(TestCase):
             )
             return output
 
-        def split_cat_split_with_multiple_users(x):
+        def remove_cat_node_with_all_getitmes(x):
             l1_out = torch.split(
                 x, [50, 50, 200, 20, 20, 20, 20, 20, 40, 10, 50], dim=0
             )
@@ -982,6 +1012,22 @@ class TestSplitCatFxPasses(TestCase):
             item8 = l1_out[8]
             item9 = l1_out[9]
             item10 = l1_out[10]
+            cat = torch.cat(
+                (
+                    item0,
+                    item1,
+                    item2,
+                    item3,
+                    item4,
+                    item5,
+                    item6,
+                    item7,
+                    item8,
+                    item9,
+                    item10,
+                ),
+                dim=0,
+            )
             cat_1 = torch.cat((item0, item1), dim=0)
             cat_2 = torch.cat((item0, item10), dim=0)
             l2_out = torch.split(cat_1, [20, 30, 50], dim=0)
@@ -1011,15 +1057,70 @@ class TestSplitCatFxPasses(TestCase):
                 ],
                 dim=0,
             )
-            return output
+            return torch.cat((output, cat), dim=0)
+
+        def mutate_cat_node_with_some_getitmes(x):
+            l1_out = torch.split(
+                x, [50, 50, 200, 20, 20, 20, 20, 20, 40, 10, 50], dim=0
+            )
+            item0 = l1_out[0]
+            item1 = l1_out[1]
+            item2 = l1_out[2]
+            item3 = l1_out[3]
+            item4 = l1_out[4]
+            item5 = l1_out[5]
+            item6 = l1_out[6]
+            item7 = l1_out[7]
+            item8 = l1_out[8]
+            item9 = l1_out[9]
+            item10 = l1_out[10]
+            cat = torch.cat(
+                (
+                    item6,
+                    item7,
+                    item8,
+                    item9,
+                    item10,
+                    item2,
+                    item3,
+                    item4,
+                    item5,
+                ),
+                dim=0,
+            )
+            cat_1 = torch.cat((item0, item1), dim=0)
+            cat_2 = torch.cat((item0, item10), dim=0)
+            l2_out = torch.split(cat_1, [20, 30, 50], dim=0)
+            l3_out = torch.split(cat_2, [10, 60, 30], dim=0)
+            item11 = l2_out[0]
+            item12 = l2_out[1]
+            item13 = l2_out[2]
+            item14 = l3_out[0]
+            item15 = l3_out[1]
+            item16 = l3_out[2]
+
+            output = torch.cat(
+                [
+                    item11,
+                    item12,
+                    item13,
+                    item14,
+                    item15,
+                    item16,
+                    item2,
+                ],
+                dim=0,
+            )
+            return torch.cat((output, cat), dim=0)
 
         args = [
             torch.randn(500, 500),
         ]
-        for fn, expected_getitem_cat_merged in [
-            (split_cat_split, 2),
-            (split_cat_split_kwarg, 2),
-            (split_cat_split_with_multiple_users, 0),
+        for fn, expected_getitem_cat_merged, expected_cat_removed in [
+            (split_cat_split, 2, 0),
+            (split_cat_split_kwarg, 2, 0),
+            (remove_cat_node_with_all_getitmes, 0, 2),
+            (mutate_cat_node_with_some_getitmes, 0, 1),
         ]:
             expected = fn(*args)
             actual = torch.compile(fn)(*args)
@@ -1028,6 +1129,10 @@ class TestSplitCatFxPasses(TestCase):
             self.assertEqual(
                 counters["inductor"]["getitem_cat_merged"],
                 expected_getitem_cat_merged,
+            )
+            self.assertEqual(
+                counters["inductor"]["cat_mutated"],
+                expected_cat_removed,
             )
             counters.clear()
 
@@ -1063,6 +1168,9 @@ class TestSplitCatFxPasses(TestCase):
                 counters["inductor"]["stack_tahn_unbind_merged"],
                 expected_stack_tahn_unbind_merged,
             )
+            self.assertIn(
+                "split_cat_pattern_merge_getitem_cat_pass_pre_grad", optimus_scuba_log
+            )
             counters.clear()
 
     def test_numpy_compat_normalization(self):
@@ -1083,6 +1191,7 @@ class TestSplitCatFxPasses(TestCase):
                 self.assertTrue(k not in {"x", "x1", "x2", "a", "axis", "keepdims"})
 
     @patch
+    @requires_cuda
     def test_stack_normalization_axis_kwarg(self):
         def fn(x, y):
             return torch.stack([x, y], axis=1)

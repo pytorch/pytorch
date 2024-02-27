@@ -588,7 +588,7 @@ void spmm(
   c10::MaybeOwned<Tensor> result_ = prepare_dense_matrix_for_cusparse(result);
   c10::MaybeOwned<Tensor> mat2_ = prepare_dense_matrix_for_cusparse(mat2);
 
-  // Here subscript "c" stands for column-major, substript "r" stands for
+  // Here subscript "c" stands for column-major, subscript "r" stands for
   // row-major order Both orders are supported by cuSPARSE. For mixed input we
   // need to cast 'mat2' to order of 'result'. We compute
   // result = mat1 @ op(mat2) + result.
@@ -809,8 +809,7 @@ void spgemm(
             buffer2.get()));
 
         // Get how many specified elements are there in C
-        int64_t C_num_rows, C_num_cols, C_nnz;
-        std::tie(C_num_rows, C_num_cols, C_nnz) = descC.get_size();
+        auto [C_num_rows, C_num_cols, C_nnz] = descC.get_size();
 
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(C_num_rows == m);
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(C_num_cols == n);

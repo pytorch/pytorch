@@ -8534,14 +8534,17 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
     )
 
     # jagged (with query/keys offsets)
+    cu_seqlens_k = torch.arange(-1, 32 * 2 + 1, dtype=torch.int32, device=device)
+    cu_seqlens_k[-1] = 62
+    cu_seqlens_k[0] = 0
     samples.append(
         SampleInput(
-            make((4, 2, 64)).view(-1, 8, 8).unsqueeze(0),
+            make((32, 2, 64)).view(-1, 8, 8).unsqueeze(0),
             make((6, 64)).view(-1, 8, 8).unsqueeze(0),
             make((6, 64)).view(-1, 8, 8).unsqueeze(0),
             bias=None,
-            cu_seqlens_q=torch.tensor((0, 2, 4, 6, 8), dtype=torch.int32, device=device),
-            cu_seqlens_k=torch.tensor((0, 1, 3, 5, 6), dtype=torch.int32, device=device),
+            cu_seqlens_q=torch.arange(0, 32 * 2 + 2, dtype=torch.int32, device=device),
+            cu_seqlens_k=cu_seqlens_k,
             max_seqlen_q=2,
             max_seqlen_k=2,
             dropout_p=0.0,
@@ -9693,11 +9696,7 @@ foreach_reduce_op_db: List[ForeachFuncInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
         ),
     ),
 ]
@@ -15341,14 +15340,7 @@ op_db: List[OpInfo] = [
                    handles_large_floats=False,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
-                   promotes_int_to_float=True,
-                   decorators=(precisionOverride({torch.bfloat16: 1e-2,
-                                                  torch.float16: 1e-2}),),
-                   skips=(
-                       # Reference: https://github.com/pytorch/pytorch/issues/49133
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                    dtypes=[torch.cfloat]),
-                   )),
+                   promotes_int_to_float=True),
     UnaryUfuncInfo('sinh',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.sinh),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -20158,6 +20150,16 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/85258
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.frexp",
+        torch_opinfo_name="frexp",
+        # Skipped due to numerical failures on Windows CI.
+        # This is also skipped in frexp earlier in the file.
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                         active_if=IS_WINDOWS),
+        ),
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.frac",
         torch_opinfo_name="frac",
         skips=(
@@ -21758,6 +21760,11 @@ python_ref_db = [
         "_refs.roll",
         torch_opinfo_name="roll",
         validate_view_consistency=False,
+        skips=(
+            # RuntimeError: no _refs support for torch.Tensor.__getitem__
+            # Leaving it as a ref because fftshift uses it
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+        ),
     ),
     PythonRefInfo(
         "_refs.rot90",

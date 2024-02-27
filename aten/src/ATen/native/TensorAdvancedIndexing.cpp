@@ -1880,8 +1880,7 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
 }
 
 Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {
-  c10::MaybeOwned<Tensor> _mask, _self;
-  std::tie(_mask, _self) = expand_outplace(mask, self);
+  auto [_mask, _self] = expand_outplace(mask, self);
   return _self->clone(at::MemoryFormat::Contiguous).masked_scatter_(*_mask, source);
 }
 
@@ -1954,8 +1953,7 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Scalar& sourc
   auto maybe_outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
   {
     NoNamesGuard guard;
-    c10::MaybeOwned<Tensor> _mask, _self;
-    std::tie(_mask, _self) = expand_outplace(mask, self);
+    auto [_mask, _self] = expand_outplace(mask, self);
     result = _self->clone(at::MemoryFormat::Contiguous);
     result.masked_fill_(mask, source);
   }
@@ -1968,8 +1966,7 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & sour
   auto maybe_outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
   {
     NoNamesGuard guard;
-    c10::MaybeOwned<Tensor> _mask, _self;
-    std::tie(_mask, _self) = expand_outplace(mask, self);
+    auto [_mask, _self] = expand_outplace(mask, self);
     result = _self->clone(at::MemoryFormat::Contiguous);
     result.masked_fill_(mask, source);
   }
@@ -1989,8 +1986,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   at::assert_no_overlap(result, self);
   at::assert_no_overlap(result, mask);
 
-  c10::MaybeOwned<Tensor> _mask, _self;
-  std::tie(_mask, _self) = expand_outplace(mask, self);
+  auto [_mask, _self] = expand_outplace(mask, self);
 
   auto shape = _self->sizes();
   int64_t numel = _mask->sum().item().toLong();
@@ -2130,10 +2126,7 @@ static inline void checkDevice(CheckedFrom c, at::ArrayRef<Tensor> tensors, Devi
 Tensor take_along_dim(const Tensor& self, const Tensor& indices, c10::optional<int64_t> opt_dim) {
   checkDevice("torch.take_along_dim():", {self, indices}, self.device());
   if (opt_dim.has_value()) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t dim;
-    Tensor self_broadcasted, indices_broadcasted;
-    std::tie(self_broadcasted, indices_broadcasted, dim) =
+    auto [self_broadcasted, indices_broadcasted, dim] =
         _take_along_dim_helper(self, indices, opt_dim.value());
     return self_broadcasted.gather(dim, indices_broadcasted);
   }
@@ -2145,10 +2138,7 @@ Tensor take_along_dim(const Tensor& self, const Tensor& indices, c10::optional<i
 Tensor& take_along_dim_out(const Tensor& self, const Tensor& indices, c10::optional<int64_t> opt_dim, Tensor& result) {
   checkDevice("torch.take_along_dim():", {self, indices, result}, self.device());
   if (opt_dim.has_value()) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t dim;
-    Tensor self_broadcasted, indices_broadcasted;
-    std::tie(self_broadcasted, indices_broadcasted, dim) =
+    auto [self_broadcasted, indices_broadcasted, dim] =
         _take_along_dim_helper(self, indices, opt_dim.value());
     return at::gather_out(result, self_broadcasted, dim, indices_broadcasted);
   }
