@@ -110,7 +110,15 @@ class StructuredTraceTest(TestCase):
         out = tempfile.mkdtemp()
         try:
             subprocess.check_call(
-                ["tlparse", "-o", out, "--overwrite", "--strict", self.raw_file.name]
+                [
+                    "tlparse",
+                    "-o",
+                    out,
+                    "--overwrite",
+                    "--no-browser",
+                    "--strict",
+                    self.raw_file.name,
+                ]
             )
         finally:
             shutil.rmtree(out, ignore_errors=True)
