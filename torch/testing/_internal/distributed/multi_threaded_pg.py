@@ -328,11 +328,21 @@ class ProcessLocalGroup(dist.ProcessGroup):
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def _reduce_scatter_base(self, output_tensor, input_tensor, opts=AllgatherOptions()):
+    def _reduce_scatter_base(self, output_tensor, input_tensor, opts=ReduceScatterOptions()):
         tensor_list = list(torch.chunk(input_tensor, self._world_size))
         return self.reduce_scatter([output_tensor], [tensor_list], opts)
 
-    def allgather_into_tensor_coalesced(self, output_tensor_list, input_tensor_list):
+    def reduce_scatter_tensor_coalesced(self, output_tensors, input_tensors, opts=ReduceScatterOptions()):
+        works = [
+            self._reduce_scatter_base(output_tensor, input_tensor, opts)
+            for output_tensor, input_tensor
+            in zip(output_tensors, input_tensors)
+        ]
+        for work in works[:-1]:
+            work.wait()
+        return works[-1]
+
+    def allgather_into_tensor_coalesced(self, output_tensor_list, input_tensor_list, opts=AllgatherOptions()):
         res = None
         for o_t, i_t in zip(output_tensor_list, input_tensor_list):
             res = self._allgather_base(o_t, i_t)

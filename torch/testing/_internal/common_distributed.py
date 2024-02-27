@@ -38,6 +38,10 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TSAN,
     TestCase,
 )
+from torch.testing._internal.common_utils import (
+    parametrize,
+    subtest,
+)
 from torch.testing._internal.distributed.multi_threaded_pg import (
     _install_threaded_pg,
     _uninstall_threaded_pg,
@@ -1256,3 +1260,61 @@ class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
         self.rank = rank
         self.file_name = file_name
         self.run_test(test_name, parent_pipe)
+
+
+# NOTE [test parametrization utils for native funcol migration]
+#
+# Between the time we switch to the native funcol by default and the time when
+# we are confident that we can remove the legacy implementation, we want to
+# ensure that the legacy funcol remains covered by unit tests. This is to
+# prepare for any potential (but unlikely) reverts. The following utilities
+# help achieve this goal.
+#
+# run_with_{native,legacy}_funcol - mark a test to run with only
+# {native,legacy} funcol. These decorators are for impl specific tests (e.g.
+# verifying generated code with FileCheck).
+#
+# run_with_both_funcol_impls - parametrize a test to run with both legacy and
+# native funcol.
+#
+# run_with_both_funcol_impls_with_arg - same as run_with_both_funcol_impls, but
+# passes `enable_native_funcol` to the test so impl specific checks can be
+# carried out.
+def with_native_funcol(use_native_funcol: bool, remove_arg: bool):
+    import torch.distributed._functional_collectives_impl as funcol_impl
+
+    def decorator(fn):
+        def inner(*args, **kwargs):
+            if remove_arg:
+                del kwargs["use_native_funcol"]
+            prev = funcol_impl._use_native_funcol
+            funcol_impl._use_native_funcol = use_native_funcol
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                funcol_impl._use_native_funcol = prev
+
+        return inner
+
+    return decorator
+
+
+run_with_native_funcol = with_native_funcol(True, remove_arg=False)
+run_with_legacy_funcol = with_native_funcol(False, remove_arg=False)
+
+
+run_with_both_funcol_impls = parametrize(
+    "use_native_funcol",
+    [
+        subtest(True, decorators=[with_native_funcol(True, remove_arg=True)]),
+        subtest(False, decorators=[with_native_funcol(False, remove_arg=True)]),
+    ]
+)
+
+run_with_both_funcol_impls_with_arg = parametrize(
+    "use_native_funcol",
+    [
+        subtest(True, decorators=[with_native_funcol(True, remove_arg=False)]),
+        subtest(False, decorators=[with_native_funcol(False, remove_arg=False)]),
+    ]
+)
