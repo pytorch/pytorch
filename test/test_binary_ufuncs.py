@@ -2689,7 +2689,7 @@ class TestBinaryUfuncs(TestCase):
             zero = torch.zeros_like(x)
             # RuntimeError on CPU
             if self.device_type == "cpu":
-                with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
+                with self.assertRaisesRegex(RuntimeError, "^Invalid input to modulo operation."):
                     fn(x, zero)
             elif torch.version.hip is not None:
                 # ROCm behavior: x % 0 is a no-op; x is returned
