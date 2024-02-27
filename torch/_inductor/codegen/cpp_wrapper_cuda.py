@@ -264,6 +264,11 @@ class CppWrapperCuda(CppWrapperCpu):
 
         self.generate_load_kernel_once(name, mangled_name, cubin_path, shared_mem)
 
+        # args with value 1 are added into equal_to_1 and constants
+        # in triton_meta (in the Python codegen) which makes them
+        # inlined in the PTX and compiled CUBIN
+        call_args = [arg for arg in call_args if arg != 1]
+
         call_args = self.generate_args_decl(call_args)
         kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
         self.writeline(f"void* {kernel_args_var}[] = {{{call_args}}};")
