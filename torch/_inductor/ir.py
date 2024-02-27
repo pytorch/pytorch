@@ -4772,7 +4772,10 @@ class FallbackKernel(ExternKernelAlloc):
         self.init_args_default_value(kernel._schema)
 
     def is_legacy_abi_kernel(self):
-        return "_scaled_dot_product_flash_attention" in str(self.python_kernel_name)
+        return (
+            config.c_shim_version == "1"
+            and "_scaled_dot_product_flash_attention" in str(self.python_kernel_name)
+        )
 
     def init_args_default_value(self, schema):
         self.args_default_value = [
@@ -4814,6 +4817,9 @@ class FallbackKernel(ExternKernelAlloc):
     def _get_abi_compatible_kernel(self):
         if not V.graph.cpp_wrapper:
             return self.python_kernel_name
+
+        if config.c_shim_version == "v2":
+            return self.cpp_kernel_name
 
         def sdpa_ver_fn():
             # For sdpa, we need the v2 version since v1 didn't consider optional arg
@@ -4993,7 +4999,13 @@ class FallbackKernel(ExternKernelAlloc):
             # Aten Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
             if V.graph.cpp_wrapper:
-                if config.is_fbcode() and kernel not in has_c_shim:
+                if (
+                    config.is_fbcode()
+                    and kernel not in has_c_shim
+                    # C shim v2 is torchgen-ed, which should cover all aten ops.
+                    # If you do hit a missed op, please update gen_aoti_c_shim.py.
+                    and config.c_shim_version == "1"
+                ):
                     log.warning(
                         "%s is missing a c-shim implementation, using proxy executor as fallback",
                         kernel,
