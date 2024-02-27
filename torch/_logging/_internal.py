@@ -6,7 +6,6 @@ import logging
 import os
 import os.path
 import re
-import tempfile
 from dataclasses import dataclass, field
 from importlib import __import__
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
