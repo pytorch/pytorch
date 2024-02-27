@@ -258,7 +258,7 @@ static void _validate_sparse_compressed_tensor_args_worker(const Tensor& compres
       compressed_indices_name, " and ", plain_indices_name, " dtype must be Int or Long, but got ",
       compressed_indices_type);
 
-  if (!values.is_meta()) {
+  if (!compressed_indices.is_meta()) {
     // Indices invariants
     at::_validate_compressed_sparse_indices(
         /*is_crow = */layout == kSparseCsr || layout == kSparseBsr,
@@ -718,19 +718,19 @@ Tensor row_indices_sparse_csr(const Tensor& self) {
 }
 
 Tensor crow_indices_default(const Tensor& self) {
-  TORCH_CHECK(false, "crow_indices expected sparse row compressed tensor layout but got ", self.device(), " tensor with ", self.layout(), " layout");
+  TORCH_CHECK(false, "crow_indices expected sparse row compressed tensor layout but got ", self.layout());
 }
 
 Tensor col_indices_default(const Tensor& self) {
-  TORCH_CHECK(false, "col_indices expected sparse row compressed tensor layout but got ", self.device(), " tensor with ", self.layout(), " layout");
+  TORCH_CHECK(false, "col_indices expected sparse row compressed tensor layout but got ", self.layout());
 }
 
 Tensor ccol_indices_default(const Tensor& self) {
-  TORCH_CHECK(false, "ccol_indices expected sparse column compressed tensor layout but got ", self.device(), " tensor with ", self.layout(), " layout");
+  TORCH_CHECK(false, "ccol_indices expected sparse column compressed tensor layout but got ", self.layout());
 }
 
 Tensor row_indices_default(const Tensor& self) {
-  TORCH_CHECK(false, "row_indices expected sparse column compressed tensor layout but got ", self.device(), " tensor with ", self.layout(), " layout");
+  TORCH_CHECK(false, "row_indices expected sparse column compressed tensor layout but got ", self.layout());
 }
 
 int64_t sparse_dim_sparse_csr(const SparseCsrTensor& self) {

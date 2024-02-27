@@ -1050,7 +1050,7 @@ class FakeTensorMode(TorchDispatchMode):
                     raise _BypassDispatchCache("symbolic shape")
                 if arg.constant is not None:
                     raise _BypassDispatchCache("constant attribute")
-                if arg.is_sparse:
+                if is_sparse_any(arg):
                     raise _BypassDispatchCache("sparse tensor")
                 result.append(extract_tensor_metadata(arg))
             elif isinstance(arg, torch.Tensor):
@@ -1091,7 +1091,7 @@ class FakeTensorMode(TorchDispatchMode):
             raise _BypassDispatchCache("constant attribute")
 
         # TODO: support caching sparse outputs?
-        if output.is_sparse:
+        if is_sparse_any(output):
             raise _BypassDispatchCache("sparse output")
 
         # Can an in-place op really reference a kwarg? If so, then we need
@@ -1147,7 +1147,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Synthesize a new FakeTensor with the cached metadata.
         metadata = entry.metadata
-        assert not metadata.is_sparse
+        assert not is_sparse_any(metadata)
 
         empty = torch.empty_strided(
             metadata.shape,
@@ -1376,7 +1376,7 @@ class FakeTensorMode(TorchDispatchMode):
                     # TODO: Remove these exclusions, so that we can remove
                     # this leg entirely
                     torch_decomp_decompositions(func)
-                    and all(not e.is_sparse for e in flat_arg_fake_tensors)
+                    and all(not is_sparse_any(e) for e in flat_arg_fake_tensors)
                 )
             ):
                 with self:
@@ -1605,7 +1605,7 @@ class FakeTensorMode(TorchDispatchMode):
     def may_turn_const(self, t):
         return (
             t.numel() <= CONSTANT_NUMEL_LIMIT
-            and not t.is_sparse
+            and not is_sparse_any(t)
             and not self.is_our_fake(t)
             and not t.device.type == "meta"
         )
@@ -1698,7 +1698,7 @@ def run_fallback_kernel(
 
     for e in flat_args:
         if isinstance(e, torch.Tensor):
-            if not e.is_sparse:
+            if not is_sparse_any(e):
                 storages.add(e._typed_storage()._cdata)
 
     # TODO: also check metadata change on inputs
@@ -1709,7 +1709,7 @@ def run_fallback_kernel(
     def map_out(e):
         if id(e) not in inp_impls and (
             isinstance(e, torch.Tensor)
-            and not e.is_sparse
+            and not is_sparse_any(e)
             and e._typed_storage()._cdata in storages
         ):
             raise orig_not_implemented_exception
