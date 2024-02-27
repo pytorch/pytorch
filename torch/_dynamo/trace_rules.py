@@ -222,6 +222,7 @@ manual_torch_name_rule_map = {
     "torch._C._functorch.is_batchedtensor": TorchInGraphFunctionVariable,
     "torch._dynamo.mark_static": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
+    "torch.cuda._get_device_properties": TorchInGraphFunctionVariable,
 }
 
 
@@ -1929,6 +1930,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.positive",
         "torch.pow",
         "torch.prelu",
+        "torch._print",
         "torch.prod",
         "torch.promote_types",
         "torch.put",

@@ -523,6 +523,40 @@ class TestExport(TestCase):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
+    def test_unbacked_slice(self):
+        class M(torch.nn.Module):
+            def forward(
+                self, scores, score_thr, topk: torch.Tensor, results=None
+            ):
+                valid_mask = scores > score_thr
+                scores = scores[valid_mask]
+                valid_idxs = torch.nonzero(valid_mask).to(scores.device)
+
+                num_topk = torch.minimum(topk, torch.tensor(valid_idxs.shape[0])).item()
+                torch._constrain_as_size(num_topk)
+                torch._check(scores.shape[0] >= num_topk)
+                scores, idxs = scores.sort(descending=True)
+                scores = scores[:num_topk]
+                topk_idxs = valid_idxs[idxs[:num_topk]]
+                keep_idxs, labels = topk_idxs.unbind(dim=1)
+
+                return scores, labels, keep_idxs
+
+        score = torch.tensor(
+            [[0.1, 0.3, 0.2], [0.12, 0.7, 0.9], [0.02, 0.8, 0.08], [0.4, 0.1, 0.08]]
+        )
+        bbox_pred = torch.tensor([[0.2, 0.3], [0.4, 0.7], [0.1, 0.1], [0.5, 0.1]])
+        score_thr = 0.15
+        nms_pre = torch.tensor(4)
+        inputs = (score, score_thr, nms_pre, dict(bbox_pred=bbox_pred))
+
+        ep = torch.export.export(M(), inputs)
+        orig_res = M()(*inputs)
+        ep_res = ep.module()(*inputs)
+        self.assertTrue(torch.allclose(orig_res[0], ep_res[0]))
+        self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
+        self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
+
     def test_export_func_with_var_keyword_pytree_args(self):
         def kw_func(arg1, arg2, *args, kw1, kw2, **kwargs):
             return (
@@ -727,7 +761,10 @@ class TestExport(TestCase):
             a: Tensor
             b: Tensor
 
-        register_dataclass_as_pytree_node(DataClass)
+        register_dataclass_as_pytree_node(
+            DataClass,
+            serialized_type_name="test_export_api_with_dynamic_shapes.DataClass",
+        )
 
         class Foo(torch.nn.Module):
             def forward(self, inputs):
@@ -913,7 +950,7 @@ class TestExport(TestCase):
         self.assertEqual(
             spec,
             TreeSpec(
-                MyDataClass, (MyDataClass, ["x", "y"], ["z"]), [LeafSpec(), LeafSpec()]
+                MyDataClass, [["x", "y"], ["z"]], [LeafSpec(), LeafSpec()]
             ),
         )
         self.assertEqual(flat, [3, 4])
@@ -946,11 +983,7 @@ class TestExport(TestCase):
             spec,
             TreeSpec(
                 MyOtherDataClass,
-                (
-                    MyOtherDataClass,
-                    ["x", "y", "z"],
-                    [],
-                ),
+                [["x", "y", "z"], []],
                 [LeafSpec(), LeafSpec(), LeafSpec()],
             ),
         )
@@ -1391,7 +1424,7 @@ def forward(self, arg_0):
 
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
-        with self.assertRaisesRegex(RuntimeError, r"Invalid value range for -1 between \[0,"):
+        with self.assertRaisesRegex(RuntimeError, r"_local_scalar_dense is outside of inline constraint \[0, 9223372036854775807\]"):
             _ = ep.module()(torch.tensor(-1), torch.randn(4, 5))
 
         self.assertTrue(
@@ -1953,7 +1986,10 @@ def forward(self, arg_0):
             f: torch.Tensor
             p: torch.Tensor
 
-        torch._export.utils.register_dataclass_as_pytree_node(Input)
+        torch._export.utils.register_dataclass_as_pytree_node(
+            Input,
+            serialized_type_name="test_preserve_shape_dynamism_for_unused_inputs.Input"
+        )
 
         class Module(torch.nn.Module):
             def forward(self, x: Input):
@@ -2936,12 +2972,16 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         named_buffers = {name: buffer for (name, buffer) in ep.named_buffers()}
         # But they should show up in named_buffers()
         self.assertIn("foo", named_buffers)
+        self.assertIn("foo", ep.constants)
+        self.assertEqual(len(ep.constants), 1)
 
         # Check the same properties of the unlifted module
         mod = ep.module()
         self.assertNotIn("foo", mod.state_dict())
         mod_named_buffers = {name: buffer for (name, buffer) in mod.named_buffers()}
         self.assertIn("foo", mod_named_buffers)
+        self.assertIn("foo", ep.constants)
+        self.assertEqual(len(ep.constants), 1)
         self.assertEqual(mod(inp), m(inp))
 
     def test_nonstrict_retrace_preserves_metadata(self):
@@ -3186,6 +3226,29 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertEqual(res[0], torch.tensor(16))
         self.assertEqual(res[1], None)
 
+    def test_constant_fqn(self):
+        class Nested(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.constant = torch.rand(2, 3)
+                self.parameter = torch.nn.Parameter(torch.rand(2, 3))
+
+            def forward(self, x):
+                return x + self.constant
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.nested = Nested()
+
+            def forward(self, x):
+                return self.nested(x) + self.nested.constant + self.nested.parameter
+
+        m = Mod()
+        ep = export(m, (torch.rand(2, 3),), strict=True)
+        self.assertEqual(ep.constants["nested.constant"], m.nested.constant)
+        self.assertEqual(ep.module()(torch.ones(2, 3)), m(torch.ones(2, 3)))
+
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestExportCustomClass(TorchTestCase):
     def setUp(self):
@@ -3233,7 +3296,7 @@ class TestExportCustomClass(TorchTestCase):
 
         from torch._export.passes.lift_constants_pass import lift_constants_pass
         from torch._export.serde.serialize import serialize, deserialize
-        constants = lift_constants_pass(ep.graph_module, ep.graph_signature)
+        constants = lift_constants_pass(ep.graph_module, ep.graph_signature, {})
         for k, v in constants.items():
             assert k not in ep.constants
             ep._constants[k] = v
