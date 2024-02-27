@@ -4065,13 +4065,14 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         ver = t['version']
-        self.assertEqual(ver, "1.1")
+        self.assertEqual(ver, "1.2")
         t = t['entries']
         self.assertEqual(len(t), 2)
         last = t[-1]
         self.assertEqual(last['state'], 'completed')
         s = last['time_discovered_started_ns']
         f = last['time_discovered_completed_ns']
+        self.assertEqual(last['record_id'] == 1)
         self.assertIsNotNone(f)
         if timing_enabled:
             self.assertIsNotNone(s)
