@@ -5,10 +5,10 @@ import io
 import json
 import logging
 import os
-import unittest.mock
-import tempfile
 import shutil
 import subprocess
+import tempfile
+import unittest.mock
 
 import torch
 import torch._dynamo.test_case
@@ -93,7 +93,9 @@ class StructuredTraceTest(TestCase):
         self.handler.addFilter(StructuredTraceTestingFilter())
         trace_log.addHandler(self.handler)
 
-        self.raw_file = tempfile.NamedTemporaryFile(mode='w', delete=True)  # set this to False to keep temporary files
+        self.raw_file = tempfile.NamedTemporaryFile(
+            mode="w", delete=True
+        )  # set this to False to keep temporary files
         self.raw_handler = logging.StreamHandler(self.raw_file)
         self.raw_handler.setFormatter(TorchLogsFormatter(trace=True))
         trace_log.addHandler(self.raw_handler)
@@ -107,7 +109,9 @@ class StructuredTraceTest(TestCase):
     def assertParses(self):
         out = tempfile.mkdtemp()
         try:
-            subprocess.check_call(["tlparse", "-o", out, "--overwrite", "--strict", self.raw_file.name])
+            subprocess.check_call(
+                ["tlparse", "-o", out, "--overwrite", "--strict", self.raw_file.name]
+            )
         finally:
             shutil.rmtree(out, ignore_errors=True)
 
@@ -145,6 +149,8 @@ class StructuredTraceTest(TestCase):
 """,  # noqa: B950
         )
 
+        self.assertParses()
+
     def test_recompiles(self):
         def fn(x, y):
             return torch.add(x, y)
@@ -171,6 +177,8 @@ class StructuredTraceTest(TestCase):
 """,  # noqa: B950
         )
 
+        self.assertParses()
+
     def test_example_fn(self):
         fn_opt = torch._dynamo.optimize("inductor")(example_fn)
         fn_opt(torch.ones(1000, 1000))
@@ -186,6 +194,8 @@ class StructuredTraceTest(TestCase):
 """,  # noqa: B950
         )
 
+        self.assertParses()
+
     def test_dynamo_error(self):
         try:
             fn_opt = torch._dynamo.optimize("inductor")(dynamo_error_fn)
@@ -198,6 +208,8 @@ class StructuredTraceTest(TestCase):
 {"dynamo_start": {"stack": "STACK"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 """,  # noqa: B950
         )
+
+        self.assertParses()
 
     def test_inductor_error(self):
         import torch._inductor.lowering
@@ -229,6 +241,8 @@ class StructuredTraceTest(TestCase):
 {"inductor_post_grad_graph": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 """,  # noqa: B950
         )
+
+        self.assertParses()
 
     @requires_distributed()
     @requires_cuda
@@ -281,6 +295,8 @@ class StructuredTraceTest(TestCase):
 """,  # noqa: B950
         )
 
+        self.assertParses()
+
     def test_graph_breaks(self):
         @torch._dynamo.optimize("inductor")
         def fn(x):
@@ -302,6 +318,8 @@ class StructuredTraceTest(TestCase):
 {"dynamo_guards": {}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 """,  # noqa: B950
         )
+
+        self.assertParses()
 
     # TODO: bring in the trace_source tests once we start emitting bytecode
 
@@ -326,6 +344,8 @@ class StructuredTraceTest(TestCase):
 {"dynamo_guards": {}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
 """,  # noqa: B950
         )
+
+        self.assertParses()
 
     def test_guards_recompiles(self):
         def fn(x, ys, zs):
@@ -355,6 +375,8 @@ class StructuredTraceTest(TestCase):
 {"dynamo_guards": {}, "frame_id": 0, "frame_compile_id": 1, "attempt": 0, "has_payload": "HASH"}
 """,  # noqa: B950
         )
+
+        self.assertParses()
 
 
 if __name__ == "__main__":
