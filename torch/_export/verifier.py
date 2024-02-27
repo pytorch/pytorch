@@ -205,8 +205,8 @@ class Verifier(metaclass=_VerifierMeta):
             # Check top-level graph for all nodes, submodule graphs for placeholder & output nodes
             for i, mod in enumerate(graph_module.modules()):
                 for node in mod.graph.nodes:
-                    if i == 0:
-                        if node.op in ['call_module', 'call_method', 'call_function', 'get_attr']:
+                    if node.op in ['call_module', 'call_method', 'call_function', 'get_attr']:
+                        if i == 0:
                             if node.meta.get('nn_module_stack', None) is None:
                                 raise SpecViolationError(
                                     f"Node {node} of type {node.op} is missing nn_module_stack metadata"
