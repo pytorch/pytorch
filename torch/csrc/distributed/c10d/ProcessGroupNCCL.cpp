@@ -309,9 +309,34 @@ void cacheAllocatorDeregisterHook(
   }
 }
 
+#if defined(IS_NCCL_EXP) && defined(NCCL_COMM_DUMP)
 std::string dump_nccl_trace() {
-  return NCCLTraceBuffer::get()->dump();
+  std::unordered_map<
+      std::string /* ncclUniqueID */,
+      std::unordered_map<std::string, std::string> /* dump from this comm */>
+      ncclDumpMap;
+  // dump_nccl_trace is only called from the default PG (uid_=0), but we want to
+  // dump from all comms so we need to iterate over ncclCommDevIdxMap, which
+  // is static
+  std::vector<std::shared_ptr<NCCLComm>> allNCCLComms;
+  // within the critical section, we don't want to dump while holding the lock
+  // as dump might hang
+  ncclCommDevIdxMapMutex.lock();
+  for (auto& [ncclComm, _] : ncclCommDevIdxMap) {
+    allNCCLComms.push_back(ncclComm);
+  }
+  ncclCommDevIdxMapMutex.unlock();
+  for (auto& ncclComm : allNCCLComms) {
+    std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getNcclId());
+    ncclDumpMap[ncclUniqueIDStr] = ncclComm->ncclCommDump();
+  }
+  return NCCLTraceBuffer::get()->dump(ncclDumpMap);
 }
+#else
+std::string dump_nccl_trace() {
+  return NCCLTraceBuffer::get()->dump(c10::nullopt);
+}
+#endif
 
 c10::optional<std::function<std::string()>>& get_cpp_trace_dumper() {
   static c10::optional<std::function<std::string()>> dumper(c10::nullopt);
@@ -616,7 +641,6 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
     // Python, thus blocking current stream would already block the next
     // compute kernel;
     // - achieve better barrier performance.
-    LOG(INFO) << logPrefix() << "Waiting in barrier; this is a CPU halt";
     auto currentStream = at::cuda::getCurrentCUDAStream(device_.index());
     AT_CUDA_CHECK(cudaStreamSynchronize(currentStream));
   }
@@ -693,6 +717,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
   logPrefix_ = createLogPrefix();
   blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
+  abortInDestroyProcessGroup_ =
+      getCvarBool(TORCH_NCCL_ABORT_IN_DESTROY_PG, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
   desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
@@ -704,7 +730,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   heartbeatTimeoutInSec_ =
       getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 10 /*10 Mins*/);
   waitTimeoutDumpInMilSec_ =
-      getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 2000);
+      getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 60 * 1000 /*60 Sec*/);
   coordCheckIntervalMilSec_ = getCvarInt(TORCH_NCCL_COORD_CHECK_MILSEC, 1000);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
   enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
@@ -840,7 +866,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // segment when SEGMENT_ALLOC action occurs, and deregister a segment when
   // SEGMENT_FREE action occurs.
   // We attach hooks only once at the first PG creation.
+  // Attaching hooks fails if CUDACachingAllocator is not initialized, so
+  // lazyInitCUDA is called (and is a no-op if CUDA is already initialized).
   if (useTensorRegisterAllocatorHook_ && !allocatorHooksAttached) {
+    at::globalContext().lazyInitCUDA();
     c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
         &cacheAllocatorRegisterHook);
     c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
@@ -940,63 +969,51 @@ void ProcessGroupNCCL::enableCollectivesTiming() {
   enableTiming_.store(true);
 }
 
-std::future<bool> ProcessGroupNCCL::launchAsyncDebugDump() {
-  std::promise<bool> resultPromise;
-  std::future<bool> resultFuture = resultPromise.get_future();
-
-  std::thread workerThread(
-      [promise = std::move(resultPromise), this]() mutable {
-        try {
-          promise.set_value(dumpDebuggingInfo());
-        } catch (...) {
-          promise.set_exception(std::current_exception());
-        }
-      });
-
-  // Detach the thread to allow it to run independently
-  workerThread.detach();
-
-  return resultFuture;
-}
-
-std::chrono::time_point<std::chrono::steady_clock> getWakeupTime(
-    int intervalInMilSec) {
-  return std::chrono::steady_clock::now() +
-      std::chrono::milliseconds(intervalInMilSec);
-}
-
-void ProcessGroupNCCL::waitForDumpOrTimeout(
+void ProcessGroupNCCL::waitForFutureOrTimeout(
     std::future<bool>& fut,
-    const std::chrono::time_point<std::chrono::steady_clock>& wakeUpTime,
-    size_t timeout_sec) {
+    const std::chrono::milliseconds& timeOutMilSec,
+    const std::string& futDescription,
+    bool throwException) {
+  std::string errorMsg;
   TORCH_CHECK(fut.valid(), "Expected a valid future");
-
-  auto futStatus = fut.wait_for(std::chrono::seconds(timeout_sec));
-  TORCH_CHECK(
-      futStatus != std::future_status::deferred, "Expected eager launch.");
-  if (futStatus == std::future_status::ready) {
+  std::future_status status = fut.wait_for(timeOutMilSec);
+  if (status == std::future_status::ready) {
     // Calling .get() will re-raise any exception from the future, and we don't
     // care about the retval
     try {
-      fut.get();
-      std::this_thread::sleep_until(wakeUpTime);
+      bool result = fut.get();
+      if (result) {
+        LOG(INFO) << logPrefix()
+                  << "future is successfully executed for: " << futDescription;
+      }
     } catch (const std::exception& e) {
-      LOG(ERROR) << logPrefix()
-                 << "Caught exception during async debug dump: \"" << e.what()
-                 << "\"\n";
+      errorMsg = c10::str(
+          logPrefix(),
+          "Exception thrown when waitng for future ",
+          futDescription,
+          ": ",
+          e.what());
+      LOG(ERROR) << errorMsg;
     } catch (...) {
-      LOG(ERROR) << logPrefix()
-                 << "Caught unknown exception during async debug dump.";
+      errorMsg = c10::str(
+          logPrefix(),
+          "Unknown exception thrown when waitng for future ",
+          futDescription);
+      LOG(ERROR) << errorMsg;
     }
   } else {
-    LOG(INFO)
-        << logPrefix() << "Debug dump timed out and is being abandoned."
-        << " This may be due to slow ADDR2LINE performance processing stacktraces."
-        << " Try TORCH_DISABLE_ADDR2LINE=1 and TORCH_NCCL_TRACE_CPP_STACK=0 to work around.";
+    errorMsg = c10::str(
+        logPrefix(),
+        "Future for ",
+        futDescription,
+        " timed out after ",
+        timeOutMilSec.count(),
+        " ms");
+    LOG(ERROR) << errorMsg;
   }
-  // Ensure we sleep at least until wakeUpTime regardless of future execution
-  // time
-  std::this_thread::sleep_until(wakeUpTime);
+  if (throwException && !errorMsg.empty()) {
+    C10_THROW_ERROR(DistBackendError, errorMsg);
+  }
 }
 
 void ProcessGroupNCCL::abortCommsFromMap(
@@ -1034,7 +1051,7 @@ void ProcessGroupNCCL::abortCommsFromMap(
 }
 
 // Abort all communicators on this rank
-void ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
+bool ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
   // Remove record from global ncclCommDevIdxMapMutex before aboarting,
   // so that a new cache segment would not register to already aborded
   // communicators. Note that ncclCommDevIdxMap is a global container which may
@@ -1050,6 +1067,7 @@ void ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
   std::lock_guard<std::mutex> lock(mutex_);
   abortCommsFromMap(devNCCLCommMap_, abortReason);
   abortCommsFromMap(inInitializationCommMap_, abortReason);
+  return true;
 }
 
 void ProcessGroupNCCL::shutdown() {
@@ -1057,50 +1075,62 @@ void ProcessGroupNCCL::shutdown() {
   // communicators and signal the threads to exit. Joining on the threads could
   // potentially block and hence avoid it in this method.
   terminateProcessGroup_.store(true);
+  workMetaListCV_.notify_one();
 
   std::string abortReason = c10::str("Process Group shutdown on rank ", rank_);
-  abort(abortReason);
+  // lauch abort asynchrounously and wait for it to complete or timeout
+  LOG(INFO) << logPrefix()
+            << "Launching ProcessGroupNCCL abort asynchrounously.";
+  std::future<bool> fut = std::async(std::launch::async, [this, abortReason]() {
+    return this->abort(abortReason);
+  });
 
-  workMetaListCV_.notify_one();
+  waitForFutureOrTimeout(fut, options_->timeout, "ProcessGroup abort", true);
+  LOG(INFO) << logPrefix() << "ProcessGroupNCCL aborts successfully.";
+
+  // We need to wait for abort to finish before we can safely shut down
+  // heartbeat monitoring thread.
   terminateHeartbeatMonitorThread_.store(true);
   monitorWakeUpCV_.notify_one();
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
-  terminateProcessGroup_.store(true);
-  workMetaListCV_.notify_one();
 
+  if (!terminateProcessGroup_.load()) {
+    // Only if TORCH_NCCL_ABORT_IN_DESTROY_PG is enabled, terminateProcessGroup_
+    // will be set to true through destroy_process_group
+    if (abortInDestroyProcessGroup_) {
+      LOG(WARNING) << c10::str(
+          "WARNING: process group has NOT been destroyed before it is being destructed. ",
+          "On normal program exit, the application should call destroy_process_group to ",
+          "ensure that any pending NCCL data transfers have finished in this process. "
+          "In rare cases this process can exit before this point and block the progress of "
+          "another member of the process group. This constraint has always been present, "
+          " but this warning has only been added since PyTorch 2.3");
+    }
+    // If user haven't explicitly destroy/shutdown process group, destructor
+    // needs to do so
+    shutdown();
+  }
+
+  // Wait for all threads to finish before returning
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   if (ncclCommWatchdogThread_.joinable()) {
     ncclCommWatchdogThread_.join();
+    LOG(INFO) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
   }
-  LOG(INFO) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
-#endif
-
-  if (onCompletionHookThread_.joinable())
-    onCompletionHookThread_.join();
-
-  // Abort communicators after all threads have exited to avoid having the
-  // threads dying due to aborted communicator and raising a SIGABRT
-  // We need to include PG information in the abort reason so we can tell the
-  // abort order.
-  std::string abortReason = c10::str("Process Group destroyed on rank ", rank_);
-  LOG(INFO)
-      << logPrefix()
-      << "ProcessGroupNCCL aborting communicators, check for 'abort finished' logs or look for abort hang";
-  abort(abortReason);
-  LOG(INFO) << logPrefix() << "ProcessGroupNCCL abort finished.";
-
-  // We need to wait for abort to finish before we can safely shut down
-  // heartbeat monitoring thread.
-  terminateHeartbeatMonitorThread_.store(true);
-  monitorWakeUpCV_.notify_one();
-#ifdef ENABLE_NCCL_ERROR_CHECKING
   if (ncclHeartbeatMonitorThread_.joinable()) {
     ncclHeartbeatMonitorThread_.join();
+    LOG(INFO) << logPrefix()
+              << "ProcessGroupNCCL heart beat monitor thread joined.";
   }
 #endif
+  if (onCompletionHookThread_.joinable()) {
+    onCompletionHookThread_.join();
+    LOG(INFO) << logPrefix()
+              << "ProcessGroupNCCL onCompletionHookThread thread joined.";
+  }
 }
 
 bool ProcessGroupNCCL::dumpDebuggingInfo() {
@@ -1144,7 +1174,6 @@ void ProcessGroupNCCL::heartbeatMonitor() {
                                                : heartbeatTimeoutInSec_ * 1000;
   auto lastTimePollStore = std::chrono::steady_clock::now();
   auto lastTimeHeartBeatCheck = std::chrono::steady_clock::now();
-  std::future<bool> asyncDebugDump;
   while (true) {
     // This won't have any lock since this lock is only used here.
     // Please be aware that mutex `monitorMutex_` should not be used
@@ -1239,10 +1268,16 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     LOG(INFO) << "Dumping c++ stacktraces: " << cpp_dumper.value()();
   }
 
-  auto wakeUpTime = getWakeupTime(waitTimeoutDumpInMilSec_);
   // Store debug info to storage if no other thread does it. (By default to
   // local disk)
-  asyncDebugDump = launchAsyncDebugDump();
+  std::future<bool> asyncDebugDump = std::async(
+      std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
+
+  // wait for the dump until timeout
+  waitForFutureOrTimeout(
+      asyncDebugDump,
+      std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
+      "Flight recorder dump in heartbeatMonitor");
 
   if (get_gil_checker() != nullptr) {
     auto fut = launchAsyncGilCheck();
@@ -1285,7 +1320,6 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // We already log completion inside the thread, so it may not be necessary to
   // check the return value here.  We mainly use a future so we can exit early
   // if done.
-  waitForDumpOrTimeout(asyncDebugDump, wakeUpTime);
 
   if (!terminateHeartbeatMonitorThread_.load()) {
     // Create a error message reported from MonitorThread, so
@@ -1463,10 +1497,30 @@ void ProcessGroupNCCL::watchdogHandler() {
     // Bump up heart beat by one.
     heartbeat_++;
 
+// Some versions of GLOG support less-spammy version of LOG_EVERY_MS
+// in which case we don't want to spam the logs.
+#ifdef LOG_EVERY_MS
+    // Log the progress of this PG periodically
+    C10_LOG_EVERY_MS(INFO, kWorkStatusUpdatePeriodMs) << c10::str(
+        logPrefix(),
+        "NCCL Work update periodically: ",
+        "last enqueued NCCL work: ",
+        lastEnqueuedSeq_,
+        ", last completed NCCL work: ",
+        lastCompletedSeq_,
+        ".");
+#endif
+
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {
       auto& work = *it;
-      work.checkAndSetException();
+      // When terminateProcessGroup_ is true, communicators have already been
+      // aborted, So cannot check exception based on them. But watchdog needs to
+      // finish the check for the works that have already been enqueued to
+      // workMetaList_
+      if (!terminateProcessGroup_.load()) {
+        work.checkAndSetException();
+      }
       bool timedOut = work.checkTimeout();
 
       // If work hits an exception (either an error or timeout)
@@ -1499,22 +1553,29 @@ void ProcessGroupNCCL::watchdogHandler() {
               globalStore_->set(std::string(TIMEOUT_DUMP), vec);
             }
 
-            auto wakeUpTime = getWakeupTime(waitTimeoutDumpInMilSec_);
             if (dumpOnTimeout_ && !optAsyncDebugDump) {
               // Store debug info to storage. (By default to local disk)
-              optAsyncDebugDump = launchAsyncDebugDump();
+              optAsyncDebugDump = std::async(std::launch::async, [this]() {
+                return this->dumpDebuggingInfo();
+              });
+              // wait for the dump until timeout
+              waitForFutureOrTimeout(
+                  *optAsyncDebugDump,
+                  std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
+                  "Flight recorder dump in watchdog");
+              // This sleep is used to give additional time for other ranks to
+              // receive the dump signal and then dump flight records, the same
+              // sleep time used in the heartbeatmonitor thread
+              // TODO, we should probably dump from a single thread in the
+              // future
+              std::this_thread::sleep_for(
+                  std::chrono::seconds(heartbeatTimeoutInSec_));
             }
 
             if (desyncDebug_) {
               auto desyncMsg = getNCCLWatchdogDebugInfo();
               LOG(ERROR) << logPrefix() << desyncMsg;
             }
-
-            if (dumpOnTimeout_) {
-              // Store debug info to storage. (By default to local disk)
-              waitForDumpOrTimeout(*optAsyncDebugDump, wakeUpTime);
-            }
-
           } catch (const std::exception& e) {
             LOG(ERROR) << logPrefix()
                        << "Failed to retrieve TORCH_NCCL_DESYNC_DEBUG report. "
@@ -1571,7 +1632,9 @@ void ProcessGroupNCCL::watchdogHandler() {
     // requests, but this is fine since all PG's feed into the same flight
     // recorder and dump.
     if (dumpPipe.has_value() && dumpPipe->shouldDump()) {
-      launchAsyncDebugDump();
+      std::future<bool> fut = std::async(
+          std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
+      // best effort dump, watchdog is not waiting for the dump here
     }
     done = workMetaList_.empty();
   }
@@ -1872,7 +1935,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     rank = p2pRank;
   }
   // Get the device index
-  int deviceIndex = device.index();
+  auto deviceIndex = device.index();
   gpuGuard.set_index(deviceIndex);
 #ifdef NCCL_HAS_COMM_SPLIT
   if (options_->split_from) {
@@ -2096,7 +2159,8 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
   r->trace_id_ = NCCLTraceBuffer::get()->record(
       uid_,
       seq_,
-      profilingTitle,
+      // create a string copy of profilingTitle
+      profilingTitle ? profilingTitle : "",
       inputs,
       outputs,
       r->ncclStartEvent_.get(),
@@ -2727,61 +2791,59 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
   tensor = tensor.coalesce();
   at::Tensor outputTensor =
       torch::zeros(tensor.sizes(), tensor.options().layout(torch::kStrided));
-}
-int dev_in_group = 0;
-auto work = collective(
-    tensor,
-    outputTensor,
-    [&](at::Tensor& input,
-        at::Tensor& output,
-        ncclComm_t comm,
-        at::cuda::CUDAStream& stream) {
-      auto ncclDataType = getNcclDataType(input.scalar_type());
-      auto ncclReduceOp =
-          getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
+  auto work = collective(
+      tensor,
+      outputTensor,
+      [&](at::Tensor& input,
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        auto ncclDataType = getNcclDataType(input.scalar_type());
+        auto ncclReduceOp =
+            getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
 
-      size_t num_elements = output.numel();
-      auto indices = input.indices();
-      auto sizes = input.sizes();
-      int colSize = sizes[1];
-      auto rows = indices[0];
-      size_t blockCount = rows.sizes()[0];
-      auto recvIndices = indices[0] * colSize;
+        size_t num_elements = output.numel();
+        auto indices = input.indices();
+        auto sizes = input.sizes();
+        int colSize = sizes[1];
+        auto rows = indices[0];
+        size_t blockCount = rows.sizes()[0];
+        auto recvIndices = indices[0] * colSize;
 
-      // prevent output and recvIndices from being freed
-      c10::cuda::CUDACachingAllocator::recordStream(
-          output.storage().data_ptr(), stream);
-      c10::cuda::CUDACachingAllocator::recordStream(
-          recvIndices.storage().data_ptr(), stream);
-      auto result = ncclAllReduceSparseBlock(
-          input._values().data_ptr(), // sendbuff
-          recvIndices.data_ptr<int64_t>(), // recv_indices
-          blockCount, // block_count
-          colSize, // block_length
-          output.data_ptr(), // recvbuff
-          output.numel(), // recv_count
-          ncclDataType,
-          ncclReduceOp,
-          comm,
-          stream.stream());
-      return result;
-    },
-    [](at::cuda::CUDAStream& ncclStream,
-       c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
-    [&](at::cuda::CUDAStream& ncclStream,
-        c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {
-      // Convert output tensors to sparse and back into tensors.
-      at::cuda::CUDAStreamGuard guard(ncclStream);
-      if (opts.sparseIndices.has_value()) {
-        tensor = at::sparse_coo_tensor(
-            opts.sparseIndices.value(), outputTensor, tensor.sizes());
-      } else {
-        tensor = outputTensor.to_sparse();
-      }
-    },
-    OpType::_ALLREDUCE_SPARSE,
-    "nccl:all_reduce_sparse");
-return work;
+        // prevent output and recvIndices from being freed
+        c10::cuda::CUDACachingAllocator::recordStream(
+            output.storage().data_ptr(), stream);
+        c10::cuda::CUDACachingAllocator::recordStream(
+            recvIndices.storage().data_ptr(), stream);
+        auto result = ncclAllReduceSparseBlock(
+            input._values().data_ptr(), // sendbuff
+            recvIndices.data_ptr<int64_t>(), // recv_indices
+            blockCount, // block_count
+            colSize, // block_length
+            output.data_ptr(), // recvbuff
+            output.numel(), // recv_count
+            ncclDataType,
+            ncclReduceOp,
+            comm,
+            stream.stream());
+        return result;
+      },
+      [](at::cuda::CUDAStream& ncclStream,
+         c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
+      [&](at::cuda::CUDAStream& ncclStream,
+          c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {
+        // Convert output tensors to sparse and back into tensors.
+        at::cuda::CUDAStreamGuard guard(ncclStream);
+        if (opts.sparseIndices.has_value()) {
+          tensor = at::sparse_coo_tensor(
+              opts.sparseIndices.value(), outputTensor, tensor.sizes());
+        } else {
+          tensor = outputTensor.to_sparse();
+        }
+      },
+      OpType::_ALLREDUCE_SPARSE,
+      "nccl:all_reduce_sparse");
+  return work;
 #else
   // If the nccl branch is not "exp" then we just error
   C10_THROW_ERROR(
