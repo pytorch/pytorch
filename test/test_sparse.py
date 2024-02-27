@@ -4660,15 +4660,6 @@ class TestSparseAny(TestCase):
                         r"conversion from Sparse to .* for input tensors with sparse_dim\(\)!=2 is not supported"):
                     explicit_to_sparse(t)
                 continue
-            elif from_layout in {torch.sparse_csr, torch.sparse_csc,
-                                 torch.sparse_bsr, torch.sparse_bsc} and to_layout is torch.sparse_coo and is_batch:
-                with self.assertRaisesRegex(RuntimeError,
-                                            "crow_indices is supposed to be a vector, but got \\d+ dimensional tensor"):
-                    t.to_sparse(layout=to_layout, blocksize=blocksize)
-                with self.assertRaisesRegex(RuntimeError,
-                                            "crow_indices is supposed to be a vector, but got \\d+ dimensional tensor"):
-                    explicit_to_sparse(t)
-                continue
             elif (from_layout, to_layout) in {(torch.sparse_bsc, torch.sparse_csr), (torch.sparse_bsc, torch.sparse_csc),
                                               (torch.sparse_bsr, torch.sparse_csr), (torch.sparse_bsr, torch.sparse_csc)}:
                 with self.assertRaisesRegex(

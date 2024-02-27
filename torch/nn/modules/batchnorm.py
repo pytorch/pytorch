@@ -781,8 +781,8 @@ class SyncBatchNorm(_BatchNorm):
                 running_var,
                 self.eps,
                 exponential_average_factor,
-                process_group,
-                world_size,
+                process_group,  # type: ignore[possibly-undefined]
+                world_size,  # type: ignore[possibly-undefined]
             )
 
     @classmethod

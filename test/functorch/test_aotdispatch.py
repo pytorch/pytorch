@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     IS_ARM64,
     IS_MACOS,
+    IS_WINDOWS,
     IS_X86,
     compare_equal_outs_and_grads,
     outs_and_grads,
@@ -1020,9 +1021,7 @@ def forward(self, primals_1):
         inp_clone = inp.clone()
         out_ref = f3(inp_ref_clone)
         out_test = f3_compiled(inp_clone)
-        # We rely on autograd's view-replay here, and view-replay gives up and uses as_strided
-        # for multi-output views
-        self.assertTrue(all('AsStridedBackward' in str(o.grad_fn) for o in out_test[:3]))
+        self.assertTrue(all('UnbindBackward' in str(o.grad_fn) for o in out_test[:3]))
 
         # The last output is not from a multi-output view, so autograd will let us mutate it.
         out_ref[-1].mul_(2)
@@ -1474,8 +1473,15 @@ def forward(self, primals_1, primals_2):
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
-        self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
-        with self.assertRaisesRegex(AssertionError, "attempted to compile the backward with incorrect subclass metadata"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses"
+        ):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses"
+        ):
             self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
 
     # Mutations in the backward are allowed as long as the mutated object does not require grad
@@ -1568,13 +1574,13 @@ def forward(self, primals_1, primals_2):
         def f(a, b):
             a.mul_(3)
             b.mul_(2)
-            return a + b
+            return a.clone().view(-1) + b.clone().view(-1)
 
         # No overlap, contiguous
         def inp_callable1(req_grad):
             base = torch.ones(4, 4, requires_grad=req_grad)
             x = base.add(1)
-            # create two non-contiguous views that share storage, but are actually non-overlapping
+            # create two views that share storage, but are actually non-overlapping
             a = x[0:2]
             b = x[2:4]
             return [base], [a, b]
@@ -1593,7 +1599,11 @@ def forward(self, primals_1, primals_2):
 def forward(self, arg0_1, arg1_1):
     mul = torch.ops.aten.mul.Tensor(arg0_1, 3);  arg0_1 = None
     mul_1 = torch.ops.aten.mul.Tensor(arg1_1, 2);  arg1_1 = None
-    add = torch.ops.aten.add.Tensor(mul, mul_1)
+    clone = torch.ops.aten.clone.default(mul)
+    view = torch.ops.aten.view.default(clone, [-1]);  clone = None
+    clone_1 = torch.ops.aten.clone.default(mul_1)
+    view_1 = torch.ops.aten.view.default(clone_1, [-1]);  clone_1 = None
+    add = torch.ops.aten.add.Tensor(view, view_1);  view = view_1 = None
     return (mul, mul_1, add)""")
 
         # No overlap, non-contiguous: first tensor ends before second tensor start
@@ -1628,6 +1638,16 @@ def forward(self, arg0_1, arg1_1):
             b = x.as_strided((4, 4), (9, 1), storage_offset=23)
             return [base], [a, b]
 
+        # No overlap, non-contiguous
+        def inp_callable6(req_grad):
+            base = torch.ones(256, requires_grad=req_grad)
+            x = base.add(1)
+            # a's last element is at offset 195 (24 total elements)
+            a = x.as_strided((2, 4, 3), (110, 24, 4), storage_offset=5)
+            # b's first element is at offset 196: no overlap
+            b = x[196:196 + a.numel()]
+            return [base], [a, b]
+
         # overlap! non-contiguous
         def inp_callable_overlap1(req_grad):
             base = torch.ones(256, requires_grad=req_grad)
@@ -1644,10 +1664,21 @@ def forward(self, arg0_1, arg1_1):
             b = x.as_strided((4, 4), (9, 1), storage_offset=25)
             return [base], [a, b]
 
+        # overlap! non-contiguous
+        def inp_callable_overlap3(req_grad):
+            base = torch.ones(256, requires_grad=req_grad)
+            x = base.add(1)
+            # a's last element is at offset 195 (24 total elements)
+            a = x.as_strided((2, 4, 3), (110, 24, 4), storage_offset=5)
+            # b's first element is at offset 195: overlap!
+            b = x[195:195 + a.numel()]
+            return [base], [a, b]
+
         fw_graph2 = self.verify_aot_autograd(f, partial(inp_callable2, req_grad=False), test_mutation=True)
         fw_graph3 = self.verify_aot_autograd(f, partial(inp_callable3, req_grad=False), test_mutation=True)
         fw_graph4 = self.verify_aot_autograd(f, partial(inp_callable4, req_grad=False), test_mutation=True)
         fw_graph5 = self.verify_aot_autograd(f, partial(inp_callable5, req_grad=False), test_mutation=True)
+        fw_graph6 = self.verify_aot_autograd(f, partial(inp_callable6, req_grad=False), test_mutation=True)
 
         fw_graph_overlap1 = self.verify_aot_autograd(f, partial(inp_callable_overlap2, req_grad=False), test_mutation=True)
         fw_graph_overlap2 = self.verify_aot_autograd(f, partial(inp_callable_overlap1, req_grad=False), test_mutation=True)
@@ -1657,6 +1688,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(str(fw_graph.code), str(fw_graph3.code))
         self.assertEqual(str(fw_graph.code), str(fw_graph4.code))
         self.assertEqual(str(fw_graph.code), str(fw_graph5.code))
+        self.assertEqual(str(fw_graph.code), str(fw_graph6.code))
 
         # All overlap graphs should be the same since we detected real aliasing
         self.assertNotEqual(str(fw_graph.code), str(fw_graph_overlap1.code))
@@ -1738,8 +1770,8 @@ def forward(self, primals_1):
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = add = None
     as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
-    as_strided_3 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
-    add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_3);  as_strided_2 = as_strided_3 = None
+    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
+    add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_5);  as_strided_2 = as_strided_5 = None
     return [as_strided_scatter, add_1]""")  # noqa: B950
 
     def test_input_mutation_aliases_other_input2(self):
@@ -1764,8 +1796,8 @@ def forward(self, primals_1):
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [2], [1], 0);  clone = add = None
     as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [2], [1], 0)
-    as_strided_3 = torch.ops.aten.as_strided.default(as_strided_scatter, [2, 2], [2, 1], 0)
-    add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_3);  as_strided_2 = as_strided_3 = None
+    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [2, 2], [2, 1], 0)
+    add_1 = torch.ops.aten.add.Tensor(as_strided_2, as_strided_5);  as_strided_2 = as_strided_5 = None
     return [as_strided_scatter, add_1]""")  # noqa: B950
 
     def test_input_mutation_aliases_and_output_alias(self):
@@ -1788,8 +1820,8 @@ def forward(self, primals_1):
     as_strided = torch.ops.aten.as_strided.default(clone, [4], [1], 0)
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = add = None
-    as_strided_6 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    view_1 = torch.ops.aten.view.default(as_strided_6, [4]);  as_strided_6 = None
+    as_strided_8 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    view_1 = torch.ops.aten.view.default(as_strided_8, [4]);  as_strided_8 = None
     return [as_strided_scatter, view_1]""")  # noqa: B950
 
     def test_input_aliased_with_mutation_output_alias(self):
@@ -1818,8 +1850,8 @@ def forward(self, primals_1, primals_2):
     mul = torch.ops.aten.mul.Tensor(as_strided_1, 2);  as_strided_1 = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = mul = None
     add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
-    as_strided_6 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    view_1 = torch.ops.aten.view.default(as_strided_6, [-1]);  as_strided_6 = None
+    as_strided_7 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    view_1 = torch.ops.aten.view.default(as_strided_7, [-1]);  as_strided_7 = None
     return [as_strided_scatter, add, view_1]""")  # noqa: B950
 
     def test_input_metadata_mutation_aliases(self):
@@ -1909,11 +1941,11 @@ def forward(self, primals_1, primals_2, primals_3):
     add = torch.ops.aten.add.Tensor(as_strided, 1);  as_strided = None
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, add, [4], [1], 0);  clone = add = None
     add_1 = torch.ops.aten.add.Tensor(primals_2, primals_3);  primals_2 = primals_3 = None
-    as_strided_3 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    unsqueeze_1 = torch.ops.aten.unsqueeze.default(as_strided_3, 0);  as_strided_3 = None
+    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    unsqueeze_1 = torch.ops.aten.unsqueeze.default(as_strided_5, 0);  as_strided_5 = None
     add_2 = torch.ops.aten.add.Tensor(add_1, unsqueeze_1);  add_1 = None
-    as_strided_11 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    view_2 = torch.ops.aten.view.default(as_strided_11, [-1]);  as_strided_11 = None
+    as_strided_14 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    view_2 = torch.ops.aten.view.default(as_strided_14, [-1]);  as_strided_14 = None
     return [as_strided_scatter, add_2, view_2, unsqueeze_1]""")  # noqa: B950
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
@@ -1977,8 +2009,8 @@ def forward(self, primals_1, primals_2):
     as_strided_scatter = torch.ops.aten.as_strided_scatter.default(clone, mul, [4], [1], 0);  clone = mul = None
     as_strided_2 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
     t = torch.ops.aten.t.default(view);  view = None
-    as_strided_3 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
-    add = torch.ops.aten.add.Tensor(as_strided_3, as_strided_2);  as_strided_3 = as_strided_2 = None
+    as_strided_5 = torch.ops.aten.as_strided.default(as_strided_scatter, [4], [1], 0)
+    add = torch.ops.aten.add.Tensor(as_strided_5, as_strided_2);  as_strided_5 = as_strided_2 = None
     view_1 = torch.ops.aten.view.default(add, [-1])
     t_1 = torch.ops.aten.t.default(t)
     unsqueeze = torch.ops.aten.unsqueeze.default(view_1, 0)
@@ -2736,6 +2768,45 @@ class TestMod(torch.nn.Module):
 
 class TestAOTExport(AOTTestCase):
 
+    def test_aot_export_ban_dropout_mut_pre_dispatch(self):
+        def fn(p, x):
+            y = torch.ops.aten.dropout.default(x, 0.1, train=False)
+            y.add_(1)
+            return (y,)
+
+        mod = TestMod(fn)
+        inp = torch.randn(2, 2)
+
+        with self.assertRaisesRegex(RuntimeError, "cannot mutate tensors with frozen storage"):
+            aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+
+        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=False)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    clone = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
+    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
+    return (add,)""")
+
+        fw_graph_cell = [None]
+        bw_graph_cell = [None]
+
+        compiled_outs = aot_function(
+            fn,
+            fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+            bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
+            partition_fn=default_partition,
+            decompositions=default_decompositions,
+            dynamic=True)(*inp)
+        fw_graph = fw_graph_cell[0]
+        bw_graph = bw_graph_cell[0]
+
+        self.assertExpectedInline(str(fw_graph.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    clone = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
+    add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
+    return (add,)""")
+
+
     def test_aot_export_predispatch_func_simple(self):
         def fn(p, x):
             y = x + 2
@@ -3146,7 +3217,7 @@ class <lambda>(torch.nn.Module):
             aot_export_joint_simple(fn, [mod.p, inp], trace_joint=True)
             aot_export_module(mod, [inp], trace_joint=False)
 
-    def test_aot_export_forward_mutation_no_buffer_mut_banned(self):
+    def test_aot_export_forward_mutation_no_buffer_mut(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -3156,10 +3227,20 @@ class <lambda>(torch.nn.Module):
                 x.add_(4)
                 return (x.cos().sum() + self.buffer1.sum(),)
 
-        with self.assertRaisesRegex(RuntimeError, "Found following user inputs located at \\[0\\] are mutated"):
-            aot_export_module(M(), [torch.ones(6, 4)], trace_joint=False)
+        mod = M()
+        inp = torch.ones(6, 4)
+        gm, sig = aot_export_module(mod, [inp], trace_joint=False)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    add = torch.ops.aten.add.Tensor(arg1_1, 4);  arg1_1 = None
+    cos = torch.ops.aten.cos.default(add)
+    sum_1 = torch.ops.aten.sum.default(cos);  cos = None
+    sum_2 = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
+    add_1 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+    return (add, add_1)""")  # noqa: B950
+        self.assertEqual(sig.user_inputs_to_mutate, {"add": "arg1_1"})
 
-    def test_aot_export_forward_mutation_multiple_mut_banned(self):
+    def test_aot_export_forward_mutation_multiple_mut(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -3170,8 +3251,35 @@ class <lambda>(torch.nn.Module):
                 self.buffer1.add_(5)
                 return (x.cos().sum() + y.sin().sum(), self.buffer1.sum(),)
 
-        with self.assertRaisesRegex(RuntimeError, "Found following user inputs located at \\[1\\] are mutated"):
-            aot_export_module(M(), [torch.ones(6, 4), torch.zeros(6, 4)], trace_joint=False)
+        mod = M()
+        inp = [torch.ones(6, 4), torch.zeros(6, 4)]
+        gm, sig = aot_export_module(mod, inp, trace_joint=False)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    add = torch.ops.aten.add.Tensor(arg2_1, 4);  arg2_1 = None
+    add_1 = torch.ops.aten.add.Tensor(arg0_1, 5);  arg0_1 = None
+    cos = torch.ops.aten.cos.default(arg1_1);  arg1_1 = None
+    sum_1 = torch.ops.aten.sum.default(cos);  cos = None
+    sin = torch.ops.aten.sin.default(add)
+    sum_2 = torch.ops.aten.sum.default(sin);  sin = None
+    add_2 = torch.ops.aten.add.Tensor(sum_1, sum_2);  sum_1 = sum_2 = None
+    sum_3 = torch.ops.aten.sum.default(add_1)
+    return (add_1, add, add_2, sum_3)""")  # noqa: B950
+        self.assertEqual(sig.user_inputs_to_mutate, {"add": "arg2_1"})
+        self.assertEqual(sig.buffers_to_mutate, {"add_1": "buffer1"})
+
+    def test_aot_export_input_mutation_on_input_requiring_grad_banned(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x.add_(4)
+                return (x,)
+
+        mod = M()
+        inp = torch.randn(2, requires_grad=True)
+        with self.assertRaisesRegex(
+            RuntimeError, "Found a graph input that requires gradients, and received a mutation"
+        ):
+            aot_export_module(mod, [inp], trace_joint=False)
 
     def test_aot_export_input_mutation_on_parameter_banned(self):
         def fn(p, x):
@@ -3224,6 +3332,7 @@ class <lambda>(torch.nn.Module):
         ):
             aot_export_module(mod, [inp], trace_joint=True, output_loss_index=1)
 
+    @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
     @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond needs dynamo to run")
     def test_aot_export_with_torch_cond(self):
         class M(torch.nn.Module):
@@ -3269,17 +3378,6 @@ def forward(self, arg0_1):
     add_1 = torch.ops.aten.add.Tensor(add, 6);  add = None
     sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
     return (sin,)""")
-
-    def test_aot_export_simplified_input_mutations_banned(self):
-        def fn(x):
-            x.mul_(2)
-            return (x + x,)
-        inp = torch.randn(2)
-        with self.assertRaisesRegex(
-            RuntimeError, "Found following user inputs located at \\[0\\] are mutated"
-        ):
-            aot_export_joint_simple(fn, [inp], trace_joint=False)
-            aot_export_joint_simple(fn, [inp], trace_joint=True)
 
     def test_aot_export_simplified_pytrees_banned(self):
         def fn(inps):
@@ -4177,6 +4275,46 @@ class TestAOTModuleSimplified(AOTTestCase):
         res = compiled_f(*inputs)
         res[0].sum().backward()
 
+    def test_aot_module_simplified_preserves_stack_trace_from_mutation(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                x_view = x[0]
+                x_view.mul_(2)
+                return (x + x, )
+
+        tracer = torch.fx.Tracer()
+        tracer.record_stack_traces = True
+        graph = tracer.trace(MockModule())
+        mod = torch.fx.GraphModule(tracer.root, graph)
+
+        for node in mod.graph.nodes:
+            if node.op == 'output':
+                continue
+            self.assertTrue(node.stack_trace is not None)
+            assert 'test_aotdispatch.py' in node.stack_trace
+
+        def assert_compiler(gm: torch.fx.GraphModule, _):
+            assert torch.ops.aten.copy_.default in [x.target for x in gm.graph.nodes]
+            for node in gm.graph.nodes:
+                if node.target == torch.ops.aten.copy_.default:
+                    assert 'stack_trace' in node.meta
+                    assert 'x_view.mul_(2)' in node.meta['stack_trace']
+            return gm.forward  # return a python callable
+
+        x = torch.randn(128, 20)
+        inputs = [x]
+
+        aot_module_simplified(
+            mod,
+            inputs,
+            fw_compiler=assert_compiler,
+            bw_compiler=assert_compiler,
+            keep_inference_input_mutations=True,
+        )
+
     def test_aot_module_simplified_fake_tensor_gm_raises(self):
         fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
         real_x = torch.randn(4, requires_grad=True)
@@ -4243,8 +4381,6 @@ aot_autograd_failures = {
 
 symbolic_aot_autograd_failures = {
     xfail('combinations', ''),  # aten.masked_select.default
-    xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('index_fill', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kthvalue', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.eigvals', ''),  # aten.linalg_eig.default - couldn't find symbolic meta function/decomposition
@@ -4259,14 +4395,9 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.fractional_max_pool2d', ''),  # rand() received an invalid combination of arguments - g...
     xfail('nn.functional.fractional_max_pool3d', ''),  # rand() received an invalid combination of arguments - g...
     xfail('nn.functional.group_norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.interpolate', 'linear'),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.interpolate', 'trilinear'),  # Cannot call sizes() on tensor with symbolic sizes/st...
     xfail('nn.functional.nll_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.pixel_shuffle', ''),  # aten.pixel_shuffle.default - couldn't find symbolic meta fun...
-    xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta...
     xfail('_segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
-    xfail('special.i1', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('trace', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('_upsample_bilinear2d_aa'),  # RuntimeError: isIntList() INTERNAL ASSERT FAILED  Expected IntList but got GenericList
     decorate('linalg.householder_product', decorator=unittest.skipIf(IS_MACOS and IS_X86, 'flaky')),

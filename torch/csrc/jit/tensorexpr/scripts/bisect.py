@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import subprocess
 
 import click

@@ -2,6 +2,8 @@
 
 #ifdef USE_VULKAN_API
 
+#include <c10/util/ArrayRef.h>
+
 #include <ATen/core/List.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/vulkan/api/api.h>

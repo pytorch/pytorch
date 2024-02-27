@@ -17,24 +17,18 @@
 
 #include <c10/util/CallOnce.h>
 
-#include <deque>
 #include <exception>
 #include <functional>
 #include <memory>
 #include <queue>
-#include <thread>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 struct ReadyQueue;
 }
-} // namespace torch
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 // Maximum reentrant backward depth before switching to a new thread
 // This limit is based on the TSAN's deadlock detector, where it will
@@ -291,5 +285,4 @@ struct TORCH_API Engine {
 using EngineStub = Engine& (*)();
 TORCH_API void set_default_engine_stub(EngineStub stub);
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

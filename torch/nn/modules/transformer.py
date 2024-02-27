@@ -176,7 +176,7 @@ class Transformer(Module):
             - tgt_key_padding_mask: :math:`(T)` for unbatched input otherwise :math:`(N, T)`.
             - memory_key_padding_mask: :math:`(S)` for unbatched input otherwise :math:`(N, S)`.
 
-            Note: [src/tgt/memory]_mask ensures that position i is allowed to attend the unmasked
+            Note: [src/tgt/memory]_mask ensures that position :math:`i` is allowed to attend the unmasked
             positions. If a BoolTensor is provided, positions with ``True``
             are not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
             is provided, it will be added to the attention weight.
@@ -191,8 +191,8 @@ class Transformer(Module):
             the output sequence length of a transformer is same as the input sequence
             (i.e. target) length of the decoder.
 
-            where S is the source sequence length, T is the target sequence length, N is the
-            batch size, E is the feature number
+            where :math:`S` is the source sequence length, :math:`T` is the target sequence length, :math:`N` is the
+            batch size, :math:`E` is the feature number
 
         Examples:
             >>> # xdoctest: +SKIP
@@ -279,6 +279,8 @@ class TransformerEncoder(Module):
                                           "(use batch_first for better inference performance)")
         elif not encoder_layer.self_attn._qkv_same_embed_dim:
             why_not_sparsity_fast_path = f"{enc_layer}.self_attn._qkv_same_embed_dim was not True"
+        elif encoder_layer.self_attn.in_proj_bias is None:
+            why_not_sparsity_fast_path = f"{enc_layer}.self_attn was passed bias=False"
         elif not encoder_layer.activation_relu_or_gelu:
             why_not_sparsity_fast_path = f"{enc_layer}.activation_relu_or_gelu was not True"
         elif not (encoder_layer.norm1.eps == encoder_layer.norm2.eps) :
@@ -312,7 +314,7 @@ class TransformerEncoder(Module):
                 compatibility.
 
         Shape:
-            see the docs in Transformer class.
+            see the docs in :class:`~torch.nn.Transformer`.
         """
         src_key_padding_mask = F._canonical_mask(
             mask=src_key_padding_mask,
@@ -462,7 +464,7 @@ class TransformerDecoder(Module):
                 forward and backward compatibility.
 
         Shape:
-            see the docs in Transformer class.
+            see the docs in :class:`~torch.nn.Transformer`.
         """
         output = tgt
 
@@ -620,7 +622,7 @@ class TransformerEncoderLayer(Module):
                 compatibility.
 
         Shape:
-            see the docs in Transformer class.
+            see the docs in :class:`~torch.nn.Transformer`.
         """
         src_key_padding_mask = F._canonical_mask(
             mask=src_key_padding_mask,
@@ -651,6 +653,8 @@ class TransformerEncoderLayer(Module):
             why_not_sparsity_fast_path = "training is enabled"
         elif not self.self_attn.batch_first:
             why_not_sparsity_fast_path = "self_attn.batch_first was not True"
+        elif self.self_attn.in_proj_bias is None:
+            why_not_sparsity_fast_path = "self_attn was passed bias=False"
         elif not self.self_attn._qkv_same_embed_dim:
             why_not_sparsity_fast_path = "self_attn._qkv_same_embed_dim was not True"
         elif not self.activation_relu_or_gelu:
@@ -854,7 +858,7 @@ class TransformerDecoderLayer(Module):
                 forward and backward compatibility.
 
         Shape:
-            see the docs in Transformer class.
+            see the docs in :class:`~torch.nn.Transformer`.
         """
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
 

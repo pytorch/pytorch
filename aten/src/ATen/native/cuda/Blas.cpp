@@ -253,7 +253,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
           mat2_sizes[0] > 1 && mat2_sizes[1] > 1 &&
           mat2_sizes[0] < 65535 * 32 && mat2_sizes[1] < 65535 * 32 &&
           mat1_sizes[0] < 65535 * 32 && mat1_sizes[1] < 65535 * 32 &&
-          // avoid leaing dim >> rows bugs
+          // avoid leading dim >> rows bugs
           ((mat1.strides()[0] == 1 && mat1.strides()[1] == mat1_sizes[0]) ||
            (mat1.strides()[1] == 1 && mat1.strides()[0] == mat1_sizes[1]) ||
            (scalar_type != at::ScalarType::Half &&
@@ -309,7 +309,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     // That requires some fixing some internal build dependencies though.
     return at::mul_out(
         result,
-        self,
+        self.expand(result.sizes()),
         at::native::scalar_tensor(
             beta,
             self.scalar_type(),
@@ -339,7 +339,13 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               args.lda,
               args.matb->data_ptr<scalar_t>(),
               args.ldb,
+#if defined(USE_ROCM)
+              // This condition is needed for mm case on ROCm for hipblasLt path.
+              // Passing the bias ptr as null to avoid accuracy issues for mm case.
+              (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
+#else
               self.const_data_ptr<scalar_t>(),
+#endif
               args.result->data_ptr<scalar_t>(),
               args.result_ld,
 #if (defined(CUDA_VERSION) && CUDA_VERSION >= 11080) || defined(USE_ROCM)
@@ -769,6 +775,19 @@ Tensor _int_mm_cuda(const Tensor& self, const Tensor& mat2) {
 // Known limitations:
 //  - Only works if mat1 is row-major and mat2 is column-major
 //  - Only works if matrices sizes are divisible by 32
+//
+//  Arguments:
+//    - `mat1`: the first operand of the matrix multiply, can be type `torch.float8_e4m3fn` or `torch.float8_e5m2`
+//    - `mat2`: the second operand of the matrix multiply, can be type `torch.float8_e4m3fn` or `torch.float8_e5m2`
+//    - `bias`: the bias, can be type `torch.float16` or `torch.bfloat16`
+//    - `out_dtype`: the output dtype, can either be a float8 or a higher precision floating point type
+//    - `scale_a`: a scalar tensor with the inverse scale of `mat1`, only needed if `mat1` is a float8 type
+//    - `scale_b`: a scalar tensor with the inverse scale of `mat2`, only needed if `mat2` is a float8 type
+//    - `scale_result`: a scalar tensor with the scale of the output, only needed if the output is a float8 type
+//    - `use_fast_accum`: if true, enables fast float8 accumulation
+//    - `out`: a reference to the output tensor
+//    - `amax`: a reference to the amax tensor of the output, only needed if the output is a float8 type and will be updated inplace
+
 std::tuple<Tensor&, Tensor&>
 _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           const c10::optional<at::Tensor>& bias,
@@ -780,7 +799,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           Tensor& out, Tensor& amax) {
   // Check sizes
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  TORCH_CHECK(dprops->major >= 9, "torch._scaled_mm is only supported on devices with compute capability >= 9.0)");
+  bool allowed_device = dprops->major >= 9 || (dprops->major == 8 && dprops->minor == 9);
+  TORCH_CHECK(allowed_device, "torch._scaled_mm is only supported on devices with compute capability >= 9.0 or 8.9)");
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   TORCH_CHECK(
@@ -796,7 +816,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
        " but got ", bias->numel());
   TORCH_CHECK(
       mat1.sizes()[1] % 16 == 0,
-      "Expected trailing dimension of mat1 to be divisble by 16 ",
+      "Expected trailing dimension of mat1 to be divisible by 16 ",
       "but got mat1 shape: (",
       mat1.sizes()[0],
       "x",

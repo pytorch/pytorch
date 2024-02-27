@@ -57,8 +57,7 @@ __all__ = [
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not', 'unravel_index',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'sym_ite', 'compile', 'vmap',
-    'sym_sqrt',
-    'export', 'autocast', 'cond',
+    'export', 'autocast', 'cond', 'GradScaler',
 ]
 
 ################################################################################
@@ -280,6 +279,12 @@ class SymInt:
     def __ge__(self, other) -> builtins.bool:
         raise AssertionError("type stub not overridden")
 
+    def __add__(self, other) -> "SymInt":
+        raise AssertionError("type stub not overridden")
+
+    def __mul__(self, other) -> "SymInt":
+        raise AssertionError("type stub not overridden")
+
     def __sym_max__(self, other):
         raise AssertionError("type stub not overridden")
 
@@ -296,12 +301,11 @@ class SymInt:
         return str(self.node)
 
     def __hash__(self) -> builtins.int:
-        ret = self.node.singleton_int()
-        if ret is not None:
-            return hash(ret)
+        if self.node.is_nested_int():
+            return hash(self.node.nested_int())
         else:
             # We could support constant SymInts as well, but not doing it for now
-            raise TypeError("unhashable type: non-singleton SymInt")
+            raise TypeError("unhashable type: non-nested SymInt")
 
 class SymFloat:
     """
@@ -491,15 +495,33 @@ def sym_min(a, b):
         return b.__sym_min__(a)
     return builtins.min(a, b)  # type: ignore[operator]
 
-# Drop in replacement for math.sqrt
-def sym_sqrt(a):
-    from .overrides import has_torch_function_unary, handle_torch_function
+# Drop in replacement for math.sqrt, math.sin, math.cos etc
+current_module = sys.modules[__name__]
 
-    if has_torch_function_unary(a):
-        return handle_torch_function(sym_sqrt, (a,), a)
-    if hasattr(a, "__sym_sqrt__"):
-        return a.__sym_sqrt__()
-    return math.sqrt(a)
+def _get_sym_math_fn(name):
+    def fn(a):
+        from .overrides import has_torch_function_unary, handle_torch_function
+
+        if has_torch_function_unary(a):
+            return handle_torch_function(fn, (a,), a)
+        if hasattr(a, f"__sym_{name}__"):
+            return getattr(a, f"__sym_{name}__")()
+        return getattr(math, name)(a)
+
+    return fn
+
+for name in ("sqrt", "cos", "cosh", "sin", "sinh", "tan", "tanh", "asin", "acos", "atan"):
+    sym_name = f"_sym_{name}"
+    fn = _get_sym_math_fn(name)
+    fn.__qualname__ = fn.__name__ = sym_name
+    setattr(current_module, sym_name, fn)
+
+# Adding temporary shortcut
+sym_sqrt = current_module._sym_sqrt
+__all__.append("sym_sqrt")
+
+del fn, name, sym_name, current_module  # type: ignore[possibly-undefined]
+
 
 def sym_ite(b, t, f):
     from .overrides import has_torch_function, handle_torch_function
@@ -992,24 +1014,24 @@ def set_float32_matmul_precision(precision: str) -> None:
     Supports three settings:
 
         * "highest", float32 matrix multiplications use the float32 datatype (24 mantissa
-          bits) for internal computations.
+          bits with 23 bits explicitly stored) for internal computations.
         * "high", float32 matrix multiplications either use the TensorFloat32 datatype (10
-          mantissa bits) or treat each float32 number as the sum of two bfloat16 numbers
-          (approximately 16 mantissa bits), if the appropriate fast matrix multiplication
+          mantissa bits explicitly stored) or treat each float32 number as the sum of two bfloat16 numbers
+          (approximately 16 mantissa bits with 14 bits explicitly stored), if the appropriate fast matrix multiplication
           algorithms are available.  Otherwise float32 matrix multiplications are computed
           as if the precision is "highest".  See below for more information on the bfloat16
           approach.
         * "medium", float32 matrix multiplications use the bfloat16 datatype (8 mantissa
-          bits) for internal computations, if a fast matrix multiplication algorithm
+          bits with 7 bits explicitly stored) for internal computations, if a fast matrix multiplication algorithm
           using that datatype internally is available. Otherwise float32
           matrix multiplications are computed as if the precision is "high".
 
     When using "high" precision, float32 multiplications may use a bfloat16-based algorithm
     that is more complicated than simply truncating to some smaller number mantissa bits
-    (e.g. 10 for TensorFloat32, 8 for bfloat16).  Refer to [Henry2019]_ for a complete
+    (e.g. 10 for TensorFloat32, 7 for bfloat16 explicitly stored).  Refer to [Henry2019]_ for a complete
     description of this algorithm.  To briefly explain here, the first step is to realize
     that we can perfectly encode a single float32 number as the sum of three bfloat16
-    numbers (because float32 has 24 mantissa bits while bfloat16 has 8, and both have the
+    numbers (because float32 has 23 mantissa bits while bfloat16 has 7 explicitly stored, and both have the
     same number of exponent bits).  This means that the product of two float32 numbers can
     be exactly given by the sum of nine products of bfloat16 numbers.  We can then trade
     accuracy for speed by dropping some of these products.  The "high" precision algorithm
@@ -1424,7 +1446,7 @@ _storage_classes = {
     TypedStorage
 }
 
-# The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
+# The _tensor_classes set is initialized by the call to initialize_python_bindings.
 _tensor_classes: Set[Type] = set()
 
 # If you edit these imports, please update torch/__init__.py.in as well
@@ -1445,7 +1467,7 @@ def manager_path():
         raise RuntimeError("Unable to find torch_shm_manager at " + path)
     return path.encode('utf-8')
 
-from torch.amp import autocast
+from torch.amp import autocast, GradScaler
 
 # Initializing the extension shadows the built-in python float / int classes;
 # store them for later use by SymInt / SymFloat.
@@ -1490,6 +1512,15 @@ for name in dir(_C._VariableFunctions):
         __all__.append(name)
 
 
+################################################################################
+# Add torch.dtype instances to the public API
+################################################################################
+
+import torch
+
+for attribute in dir(torch):
+    if isinstance(getattr(torch, attribute), torch.dtype):
+        __all__.append(attribute)
 
 ################################################################################
 # Import TorchDynamo's lazy APIs to avoid circular dependenices
@@ -1537,6 +1568,7 @@ def _assert(condition, message):
 from torch import cuda as cuda
 from torch import cpu as cpu
 from torch import mps as mps
+from torch import xpu as xpu
 from torch import autograd as autograd
 from torch.autograd import (
     no_grad as no_grad,

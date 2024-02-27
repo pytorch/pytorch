@@ -138,11 +138,12 @@ class LineLoader(YamlLoader):
         return mapping
 
 
-_GLOBAL_PARSE_NATIVE_YAML_CACHE = {}
-_GLOBAL_PARSE_TAGS_YAML_CACHE = {}
-
 # Parse native_functions.yaml into a sequence of NativeFunctions and Backend Indices.
 ParsedYaml = namedtuple("ParsedYaml", ["native_functions", "backend_indices"])
+
+
+_GLOBAL_PARSE_NATIVE_YAML_CACHE: Dict[str, ParsedYaml] = {}
+_GLOBAL_PARSE_TAGS_YAML_CACHE: Dict[str, Set[str]] = {}
 
 
 def parse_native_yaml_struct(
@@ -274,6 +275,7 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
             "inplace_view" in f.tags
             and str(f.func.name) != "resize_"
             and str(f.func.name) != "resize_as_"
+            and str(f.func.name.name) != "set_"
         ):
             base_name = f.func.name.name
             overload_name = f.func.name.overload_name
@@ -2426,9 +2428,9 @@ def gen_source_files(
         },
     )
 
-    cpu_fm.write("Functions.cpp", lambda: {})
+    cpu_fm.write("Functions.cpp", dict)
 
-    core_fm.write("TensorMethods.cpp", lambda: {})
+    core_fm.write("TensorMethods.cpp", dict)
 
     core_fm.write(
         "ATenOpList.cpp",

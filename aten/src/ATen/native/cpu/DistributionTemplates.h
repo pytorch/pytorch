@@ -2,6 +2,7 @@
 
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/ExpandBase.h>
 #include <ATen/core/DistributionsHelper.h>
 #include <ATen/native/TensorIterator.h>
@@ -25,13 +26,13 @@ namespace {
 
 template<typename RNG>
 void random_from_to_kernel(TensorIteratorBase& iter, uint64_t range, int64_t base, RNG generator) {
-  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_from_to_kernel_cpu", [&] {
+  AT_DISPATCH_V2(iter.dtype(), "random_from_to_kernel_cpu", AT_WRAP([&] {
     std::lock_guard<std::mutex> lock(generator->mutex_);
     cpu_serial_kernel(iter, [range, base, generator]() -> scalar_t {
       uniform_int_from_to_distribution<scalar_t> random(range, base);
       return random(generator);
     });
-  });
+  }), kBool, kHalf, kBFloat16, AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
 }
 
 // This is the special kernel to handle single specific case:

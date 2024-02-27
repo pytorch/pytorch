@@ -1,11 +1,11 @@
 import contextlib
-from typing import Sequence
+from typing import Optional, Sequence
 
 import torch
 from torch._custom_op.impl import custom_op
 from torch.utils._content_store import ContentStoreReader
 
-LOAD_TENSOR_READER = None
+LOAD_TENSOR_READER: Optional[ContentStoreReader] = None
 
 
 @contextlib.contextmanager

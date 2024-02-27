@@ -26,6 +26,9 @@ from torch.distributed._state_dict_utils import (
     _offload_state_dict_to_cpu,
 )
 from torch.distributed._tensor import DTensor
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    _CHECKPOINT_PREFIX,
+)
 from torch.distributed.fsdp import (
     FullOptimStateDictConfig,
     FullStateDictConfig,
@@ -129,7 +132,12 @@ class _StateDictInfo(StateDictOptions):
     fsdp_modules: List[nn.Module] = field(default_factory=list)
 
 
-def _get_fqns(model: nn.Module, name: str, skip_ddp_prefix: bool = True) -> FQNS_T:
+def _get_fqns(
+    model: nn.Module,
+    name: str,
+    skip_ddp_prefix: bool = True,
+    skip_compiler_prefix: bool = True,
+) -> FQNS_T:
     """
     This API is used to convert the name of a parameter to the FQNs. For FSDP
     without `use_orig_params`, the name of FlatParameter can be mapped to
@@ -145,7 +153,7 @@ def _get_fqns(model: nn.Module, name: str, skip_ddp_prefix: bool = True) -> FQNS
         The canonical FQNs based on the model traversal.
     """
     if "." not in name:
-        return {name}
+        return {name.replace(_CHECKPOINT_PREFIX, "")}
 
     obj_names = name.split(".")
     fqn_obj_names = []
@@ -162,16 +170,23 @@ def _get_fqns(model: nn.Module, name: str, skip_ddp_prefix: bool = True) -> FQNS
                 flat_param = getattr(curr_obj, FLAT_PARAM)
                 if prefix:
                     prefix = f"{prefix}."
+                # FSDP already handles removal of checkpoint prefix, so we can return
+                # directly
                 return {f"{prefix}{fqn}" for fqn in flat_param._fqns}
             curr_obj = getattr(curr_obj, FSDP_WRAPPED_MODULE)
             if curr_obj_name != FSDP_WRAPPED_MODULE:
                 fqn_obj_names.append(curr_obj_name)
                 curr_obj = getattr(curr_obj, curr_obj_name)
+        elif isinstance(curr_obj, torch._dynamo.eval_frame.OptimizedModule):
+            assert curr_obj_name == "_orig_mod"
+            curr_obj = curr_obj._orig_mod
+            if not skip_compiler_prefix:
+                fqn_obj_names.append(curr_obj_name)
         else:
             fqn_obj_names.append(curr_obj_name)
             curr_obj = getattr(curr_obj, curr_obj_name)
 
-    return {".".join(fqn_obj_names)}
+    return {".".join(fqn_obj_names).replace(_CHECKPOINT_PREFIX, "")}
 
 
 def _verify_options(
@@ -196,7 +211,7 @@ def _verify_options(
         Union[str, torch.Tensor], Union[Set[str], torch.Tensor]
     ] = {}
     all_fqns = set()
-    for name, param in model.named_parameters():
+    for name, param in chain(model.named_parameters(), model.named_buffers()):
         fqns = _get_fqns(model, name)
         fqn_param_mapping[param] = fqns
         for fqn in fqns:
@@ -229,7 +244,9 @@ def _verify_options(
             )
             state_dict_type = StateDictType.FULL_STATE_DICT
         else:
-            state_dict_config = ShardedStateDictConfig()
+            state_dict_config = ShardedStateDictConfig(
+                offload_to_cpu=options.cpu_offload,
+            )
             optim_state_dict_config = ShardedOptimStateDictConfig(
                 offload_to_cpu=options.cpu_offload,
             )
@@ -327,8 +344,9 @@ def _get_model_state_dict(
         assert len(fqns) == 1
         fqn = next(iter(fqns))
         if fqn != key:
-            # As we only support FSDP, DDP, and TP, the only case is
-            # wrapper-based DDP. Verify the assumption is correct.
+            # As we only support FSDP, DDP, and TP, the only cases are
+            # wrapper-based DDP and compiler. Verify if the assumption
+            # is correct.
             def verify(key, fqn) -> bool:
                 if len(fqn) >= len(key):
                     return False
@@ -340,7 +358,7 @@ def _get_model_state_dict(
                         fqn_idx += 1
                         if fqn_idx == len(fqn_split):
                             return key_idx == len(key_split) - 1
-                    elif key_name == "module":
+                    elif key_name in ("module", "_orig_mod"):
                         continue
                     else:
                         return False
@@ -395,12 +413,14 @@ def _load_model_state_dict(
     if not info.handle_model or not state_dict:
         return _IncompatibleKeys({}, {})
 
-    for key, _ in model.named_parameters():
+    for key, _ in chain(model.named_parameters(), model.named_buffers()):
         fqns = _get_fqns(model, key)
-        fqns_with_ddp_prefix = _get_fqns(model, key, skip_ddp_prefix=False)
-        for fqn, fqn_with_ddp_prefix in zip(fqns, fqns_with_ddp_prefix):
-            if fqn != fqn_with_ddp_prefix:
-                state_dict[fqn_with_ddp_prefix] = state_dict.pop(fqn)
+        fqns_with_prefix = _get_fqns(
+            model, key, skip_ddp_prefix=False, skip_compiler_prefix=False
+        )
+        for fqn, fqn_with_prefix in zip(fqns, fqns_with_prefix):
+            if fqn != fqn_with_prefix:
+                state_dict[fqn_with_prefix] = state_dict.pop(fqn)
 
     with info.fsdp_context():
         return cast(
@@ -451,6 +471,19 @@ def _get_optim_state_dict(
         if info.fsdp_modules:
             with info.fsdp_context():
                 osd = FSDP.optim_state_dict(model, optim, osd)
+
+            # We need to specially handle FlatParameter FSDP as
+            # FlatParameter FSDP converts the FQNs.
+            # There are no easy ways to do this conversion systematically.
+            # We can only use a string replacment without correctness check.
+            if not osd:
+                continue
+            for k in list(osd[STATE].keys()):
+                if "_orig_mod" in k:
+                    osd[STATE][k.replace("_orig_mod.", "")] = osd[STATE].pop(k)
+            for g in osd[PG]:
+                params = [k.replace("_orig_mod.", "") for k in g[PARAMS]]
+                g[PARAMS] = params
         else:
             params = list(chain.from_iterable(g[PARAMS] for g in optim.param_groups))
             param_pid_mapping = dict(zip(params, range(len(params))))
@@ -555,6 +588,30 @@ def _load_optim_state_dict(
     for optim in optimizers:
         optim_state_dict = _split_optim_state_dict(model, optim, state_dict, info)
         if info.fsdp_modules:
+            # We need to specially handle FlatParameter FSDP as
+            # FlatParameter FSDP converts the FQNs.
+            for original_fqn, _ in model.named_parameters():
+                fqns = _get_fqns(model, original_fqn)
+                fqns_with_compiler = _get_fqns(
+                    model, original_fqn, skip_compiler_prefix=False
+                )
+                if fqns == fqns_with_compiler:
+                    continue
+
+                assert len(fqns) == 1
+                fqn = fqns.pop()
+                fqn_with_compiler = fqns_with_compiler.pop()
+                for g in optim_state_dict[PG]:
+                    val = cast(Dict[str, Any], g)
+                    params = [
+                        key.replace(fqn, fqn_with_compiler) for key in val[PARAMS]
+                    ]
+                    val[PARAMS] = params
+                osd_state = cast(DictValueType, optim_state_dict[STATE])
+                for k in list(osd_state.keys()):
+                    if fqn in k:
+                        osd_state[k.replace(fqn, fqn_with_compiler)] = osd_state.pop(k)
+
             with info.fsdp_context():
                 optim_state_dict = FSDP.optim_state_dict_to_load(
                     model, optim, optim_state_dict
@@ -678,25 +735,25 @@ def get_state_dict(
     optimizer parameter IDs to the canonical FQNs.
 
     Example:
+        >>> # xdoctest: +SKIP
+        >>> import torch
+        >>> from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+        >>> from torch.nn.parallel import DistributedDataParallel as DDP
+        >>> from torch.distributed.checkpoint.state_dict import get_state_dict
 
-        import torch
-        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-        from torch.nn.parallel import DistributedDataParallel as DDP
-        from torch.distributed.checkpoint.state_dict import get_state_dict
-
-        fsdp_model = FSDP(copy.deepcopy(model))
-        fsdp_optim = torch.optim.Adam(model.parameters(), lr=1e-3)
-        ddp_model = DDP(copy.deepcopy(model))
-        ddp_optim = torch.optim.Adam(model.parameters(), lr=1e-3)
+        >>> fsdp_model = FSDP(copy.deepcopy(model))
+        >>> fsdp_optim = torch.optim.Adam(model.parameters(), lr=1e-3)
+        >>> ddp_model = DDP(copy.deepcopy(model))
+        >>> ddp_optim = torch.optim.Adam(model.parameters(), lr=1e-3)
 
 
-        ddp_state_dict, ddp_optim_state_dict = get_state_dict(ddp_model, ddp_optim)
-        fsdp_state_dict, fsdp_optim_state_dict = get_state_dict(fsdp_model, fsdp_optim)
+        >>> ddp_state_dict, ddp_optim_state_dict = get_state_dict(ddp_model, ddp_optim)
+        >>> fsdp_state_dict, fsdp_optim_state_dict = get_state_dict(fsdp_model, fsdp_optim)
 
-        # if we simply call ddp_model.state_dict() and fsdp_model.state_dict(),
-        # the asserts will fail.
-        assert ddp_state_dict == fsdp_state_dict
-        assert ddp_optim_state == fsdp_optim_state_dict
+        >>> # if we simply call ddp_model.state_dict() and fsdp_model.state_dict(),
+        >>> # the asserts will fail.
+        >>> assert ddp_state_dict == fsdp_state_dict
+        >>> assert ddp_optim_state == fsdp_optim_state_dict
 
 
     Args:
@@ -711,6 +768,8 @@ def get_state_dict(
 
     Returns:
         ``Tuple`` that contain model state_dict and optimizer state_dict.
+
+    :rtype: typing.Tuple[typing.Dict[str, ValueType], OptimizerStateType]
     """
 
     with gc_context():

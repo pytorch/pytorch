@@ -575,7 +575,7 @@ class _SplitterBase:
                     else:
                         total_output_bytes += get_size_of_node(submod, node)[0]
 
-                map_arg(output_node.args, get_bytes)
+                map_arg(output_node.args, get_bytes)  # type: ignore[possibly-undefined]
                 qps = self.PCIe_BW / max(total_input_bytes, total_output_bytes)
                 reports += f"Total input size in bytes is {total_input_bytes}, total output size in bytes is {total_output_bytes},"
                 reports += f" theoretical max qps (bounds by PCIe bandwidth) for this submodule is {qps}.\n"
