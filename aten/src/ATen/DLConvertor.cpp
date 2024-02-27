@@ -242,8 +242,7 @@ ScalarType toScalarType(const DLDataType& dtype) {
       }
       break;
     default:
-      TORCH_CHECK(
-          false, "Unsupported code " + c10::to_string(dtype.code));
+      TORCH_CHECK(false, "Unsupported code " + c10::to_string(dtype.code));
   }
   return stype;
 }
@@ -265,7 +264,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   // gh-83069
   auto shape = src.sizes();
   auto strides = src.strides().vec();
-  for (int i=0; i<src.dim(); i++) {
+  for (int i = 0; i < src.dim(); i++) {
     if (shape[i] < 2) {
       strides[i] = 1;
     }
@@ -306,14 +305,14 @@ Tensor fromDLPack(const DLManagedTensor* src) {
 
 Tensor fromDLPack(
     const DLManagedTensor* src,
-    const std::function<void(void*)>& deleter) {
+    std::function<void(void*)> deleter) {
   Device device = getATenDevice(src->dl_tensor.device, src->dl_tensor.data);
   ScalarType stype = toScalarType(src->dl_tensor.dtype);
   if (!src->dl_tensor.strides) {
     return at::from_blob(
         src->dl_tensor.data,
         IntArrayRef(src->dl_tensor.shape, src->dl_tensor.ndim),
-        deleter,
+        std::move(deleter),
         at::device(device).dtype(stype),
         {device});
   }
@@ -323,6 +322,6 @@ Tensor fromDLPack(
       IntArrayRef(src->dl_tensor.strides, src->dl_tensor.ndim),
       deleter,
       at::device(device).dtype(stype),
-      { device });
+      {device});
 }
 } // namespace at
