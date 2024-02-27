@@ -1049,7 +1049,7 @@ class DATA_PTR_MATCH : public LeafGuard {
 class NO_HASATTR : public LeafGuard {
  public:
   NO_HASATTR(py::object attr_name, py::object verbose_code_parts)
-      : LeafGuard(verbose_code_parts), _attr_name(attr_name) {}
+      : LeafGuard(verbose_code_parts), _attr_name(std::move(attr_name)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     return PyObject_HasAttr(value, _attr_name.ptr()) == 0;
@@ -1067,7 +1067,9 @@ class NO_HASATTR : public LeafGuard {
 class DICT_CONTAINS : public LeafGuard {
  public:
   DICT_CONTAINS(bool contains, py::object key, py::object verbose_code_parts)
-      : LeafGuard(verbose_code_parts), _contains(contains ? 1 : 0), _key(key) {}
+      : LeafGuard(verbose_code_parts),
+        _contains(contains ? 1 : 0),
+        _key(std::move(key)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     int result = PyDict_Contains(value, _key.ptr());
