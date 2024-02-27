@@ -204,8 +204,6 @@ exclude_patterns = [
     'c10/**/cuda/*pp',
     'aten/**/cuda/*pp',
     '**/cuda/*pp',
-    '**/*XPU*',
-    '**/xpu/*pp',
     'c10/cuda/CUDAAlgorithm.h',
     'c10/util/complex_math.h',
     'c10/util/complex_utils.h',
