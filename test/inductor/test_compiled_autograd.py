@@ -699,6 +699,7 @@ def make_wrapped(fn):
 
     return wrapped
 
+
 def wrap_test_class(orig_cls):
     dct = orig_cls.__dict__.copy()
     for name in list(dct.keys()):
@@ -711,7 +712,7 @@ def wrap_test_class(orig_cls):
             dct[name] = make_wrapped(fn)
 
     return type(
-        orig_cls.__name__ + 'WithCompiledAutograd',
+        orig_cls.__name__ + "WithCompiledAutograd",
         orig_cls.__bases__,
         dct,
     )
@@ -840,15 +841,16 @@ known_failing_tests = {
     "test_lobpcg",  # torch._dynamo.exc.Unsupported: 'call_function LOBPCGAutogradFunction.backward in skip_files
     "test_backward_dict_grad_for_nontensor",  # AssertionError: "non-Tensor-like types" does not match "'skip function
     "test_backward_dict_invalid_keys",  # AssertionError: "to have keys {'x'}" does not match "'skip function
-    "test_backward_dict_requires_keys_for_input_optional_tensors",  # AssertionError: "to have keys {.*'y'.*}" does not match "'skip function
-    "test_backward_dict_requires_keys_for_input_tensors",  # AssertionError: "to have keys {.*'y'.*}" does not match "'skip function
-    "test_backward_grads_are_tensor_or_none",  # AssertionError: "either None or a Tensor" does not match "'skip function
+    "test_backward_dict_requires_keys_for_input_optional_tensors",  # AssertionError: "to have keys {.*'y'.*}"
+    "test_backward_dict_requires_keys_for_input_tensors",  # AssertionError: "to have keys {.*'y'.*}" does not
+    "test_backward_grads_are_tensor_or_none",  # AssertionError: "either None or a Tensor" does not match "'
     "test_backward_impl_on_existing_op",  # torch._dynamo.exc.Unsupported: 'skip function
     "test_backward_returns_dict",  # AssertionError: "to be a dict" does not match "'skip function
-    "test_backward_tensorlist_input_requires_list_grads",  # AssertionError: "list of gradients" does not match "'skip function
-    "test_backward_tensorlist_input_requires_list_grads_none_or_Tensor",  # AssertionError: "None or Tensor" does not match "'skip function
-    "test_backward_tensorlist_input_requires_list_grads_with_same_numel",  # AssertionError: "3 gradients but got 2" does not match "'skip function
+    "test_backward_tensorlist_input_requires_list_grads",  # AssertionError: "list of gradients" does not
+    "test_backward_tensorlist_input_requires_list_grads_none_or_Tensor",  # AssertionError: "None or Tensor"
+    "test_backward_tensorlist_input_requires_list_grads_with_same_numel",  # AssertionError: "3 gradients
     "test_save_for_backward_inputs_are_namedtuple",  # torch._dynamo.exc.Unsupported: 'skip function
+    "test_autograd_function_backed_op",  # RuntimeError: compiled_args not implemented
 }
 
 if not HAS_CUDA:
