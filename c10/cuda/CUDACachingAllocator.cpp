@@ -1413,6 +1413,9 @@ class DeviceCachingAllocator {
 
     stats.num_alloc_retries = 0;
     stats.num_ooms = 0;
+    stats.num_sync_all_streams = 0;
+    stats.num_device_alloc = 0;
+    stats.num_device_free = 0;
     reset_accumulated_stat(stats.oversize_allocations);
     reset_accumulated_stat(stats.oversize_segments);
   }
@@ -2022,6 +2025,7 @@ class DeviceCachingAllocator {
       update_stat(stats.reserved_bytes[stat_type], mapped_range.size);
     });
 
+    stats.num_device_alloc++;
     record_trace(
         TraceEntry::SEGMENT_MAP,
         int64_t(mapped_range.ptr),
@@ -2442,6 +2446,7 @@ class DeviceCachingAllocator {
 
     // p.block came from new, not cudaMalloc. It should not be nullptr here.
     TORCH_INTERNAL_ASSERT(p.block != nullptr && p.block->ptr != nullptr);
+    stats.num_device_alloc++;
     record_trace(
         TraceEntry::SEGMENT_ALLOC,
         int64_t(p.block->ptr),
@@ -2547,6 +2552,7 @@ class DeviceCachingAllocator {
       Block* block,
       const std::shared_ptr<GatheredContext>& context) {
     TORCH_INTERNAL_ASSERT(!block->expandable_segment_);
+    stats.num_device_free++;
     record_trace(
         TraceEntry::SEGMENT_FREE,
         int64_t(block->ptr),
@@ -2629,6 +2635,7 @@ class DeviceCachingAllocator {
       update_stat(stats.reserved_bytes[stat_type], -unmapped.size);
     });
 
+    stats.num_device_free++;
     record_trace(
         TraceEntry::SEGMENT_UNMAP,
         int64_t(unmapped.ptr),
@@ -2672,6 +2679,7 @@ class DeviceCachingAllocator {
   void synchronize_and_free_events(
       const std::shared_ptr<GatheredContext>& context) {
     // Synchronize on outstanding events and then free associated blocks.
+    stats.num_sync_all_streams++;
 
     // This function syncs, so capture should not be underway. Might as well
     // make sure capture-deferred end of life events get processed too.
@@ -3032,6 +3040,22 @@ class NativeCachingAllocator : public CUDAAllocator {
       auto snap = da->snapshot();
       result.segments.insert(result.segments.end(), snap.begin(), snap.end());
     }
+
+    auto& md = result.config_metadata;
+    md.garbage_collection_threshold =
+        CUDAAllocatorConfig::garbage_collection_threshold();
+    md.max_split_size = CUDAAllocatorConfig::max_split_size();
+    md.pinned_num_register_threads =
+        CUDAAllocatorConfig::pinned_num_register_threads();
+    md.expandable_segments = CUDAAllocatorConfig::expandable_segments();
+    md.release_lock_on_malloc =
+        CUDAAllocatorConfig::release_lock_on_cudamalloc();
+    md.pinned_use_host_register =
+        CUDAAllocatorConfig::pinned_use_cuda_host_register();
+    md.last_allocator_settings = CUDAAllocatorConfig::last_allocator_settings();
+    md.roundup_power2_divisions =
+        CUDAAllocatorConfig::roundup_power2_divisions();
+
     return result;
   }
 

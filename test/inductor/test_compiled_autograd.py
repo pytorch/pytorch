@@ -651,6 +651,7 @@ class TestCompiledAutograd(TestCase):
             torch._dynamo.mark_dynamic(y, 0)
 
         def f():
+            y.grad = None
             out = x + y
 
             # make sure the backward call does not trigger any error when
@@ -850,7 +851,6 @@ known_failing_tests = {
     "test_backward_tensorlist_input_requires_list_grads_none_or_Tensor",  # AssertionError: "None or Tensor"
     "test_backward_tensorlist_input_requires_list_grads_with_same_numel",  # AssertionError: "3 gradients
     "test_save_for_backward_inputs_are_namedtuple",  # torch._dynamo.exc.Unsupported: 'skip function
-    "test_autograd_function_backed_op",  # RuntimeError: compiled_args not implemented
 }
 
 if not HAS_CUDA:

@@ -6,6 +6,8 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/autograd/variable_info.h>
+#include <torch/csrc/dynamo/compiled_autograd.h>
 #include <vector>
 
 namespace torch::autograd {
@@ -162,20 +164,6 @@ struct TORCH_API AutogradContext {
   friend struct CppNode;
 };
 
-struct TORCH_API VariableInfo {
-  explicit VariableInfo();
-  explicit VariableInfo(const Variable& var);
-
-  Variable zeros(at::OptionalDeviceGuard& device_guard) const;
-
-  at::Layout layout = at::Layout::Strided;
-  at::Device device = at::kCPU;
-  at::ScalarType scalar_type = at::kFloat;
-  std::vector<c10::SymInt> size;
-  bool requires_grad;
-  bool is_empty;
-};
-
 // CppNode<T> is the Node in the autograd graph that represents the user defined
 // backward function for Function<T>. Calls to CppNode::apply are forward to
 // T::backward().
@@ -193,7 +181,18 @@ struct CppNode : public Node {
   void save_variables_to_ctx();
 
   void compiled_args(CompiledNodeArgs& args) override {
-    // TODO: collect key
+    // TODO: collect the actual function id by calling the python counter
+    // // args.collect(ctx_.saved_data);
+    // // args.collect(ctx_.non_differentiable_);
+    // // args.collect(ctx_.dirty_inputs_);
+    // args.collect(ctx_.saved_variables_);
+    // // args.collect(ctx_.to_save_);
+    // // args.collect(ctx_.materialize_grads_);
+    // // args.collect(ctx_.grad_fn_);
+    // args.collect(ctx_.has_freed_buffers_);
+    // args.collect(is_variable_input_);
+    // args.collect(input_info_);
+    // args.collect(output_info_);
   }
 
   variable_list apply_with_saved(
@@ -204,8 +203,30 @@ struct CppNode : public Node {
           std::string("apply_with_saved not implemented for non-traceable node: ") + name());
     }
 
-    // TODO: swap
-    return apply(inputs);
+    // // saved.before(ctx_.saved_data);
+    // // saved.before(ctx_.non_differentiable_);
+    // // saved.before(ctx_.dirty_inputs_);
+    // saved.before(ctx_.saved_variables_);
+    // // saved.before(ctx_.to_save_);
+    // // saved.before(ctx_.materialize_grads_);
+    // // saved.before(ctx_.grad_fn_);
+    // saved.before(ctx_.has_freed_buffers_);
+    // saved.before(is_variable_input_);
+    // saved.before(input_info_);
+    // saved.before(output_info_);
+    auto results = apply(variable_list(inputs));
+    // // saved.after(ctx_.saved_data);
+    // // saved.after(ctx_.non_differentiable_);
+    // // saved.after(ctx_.dirty_inputs_);
+    // saved.after(ctx_.saved_variables_);
+    // // saved.after(ctx_.to_save_);
+    // // saved.after(ctx_.materialize_grads_);
+    // // saved.after(ctx_.grad_fn_);
+    // saved.after(ctx_.has_freed_buffers_);
+    // saved.after(is_variable_input_);
+    // saved.after(input_info_);
+    // saved.after(output_info_);
+    return results;
   }
 };
 

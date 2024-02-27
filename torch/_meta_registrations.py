@@ -597,6 +597,11 @@ def assert_async_meta(val, assert_msg):
     return
 
 
+@register_meta(aten._print.default)
+def print_meta(s):
+    return
+
+
 @register_meta(aten._make_dep_token.default)
 def make_dep_token(
     *,
@@ -3073,6 +3078,7 @@ def register_meta_foreach(ops):
         aten._foreach_log1p,
         aten._foreach_log2,
         aten._foreach_neg,
+        aten._foreach_norm,
         aten._foreach_reciprocal,
         aten._foreach_round,
         aten._foreach_sigmoid,
@@ -5457,7 +5463,13 @@ def meta__efficient_attention_forward(
     res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
 
     logsumexp_batch_dim = cu_seqlens_q.size(0) - 1 if (cu_seqlens_q is not None) else B
-    logsumexp_dim = math.ceil(M / 32) * 32 if compute_log_sumexp else 0
+    actual_max_seqlen_q = M
+    if cu_seqlens_q is not None:
+        assert max_seqlen_q is not None
+        actual_max_seqlen_q = max_seqlen_q
+    logsumexp_dim = (
+        math.ceil(actual_max_seqlen_q / 32) * 32 if compute_log_sumexp else 0
+    )
     logsum_exp = torch.empty(
         (logsumexp_batch_dim, num_heads, logsumexp_dim),
         dtype=torch.float,
