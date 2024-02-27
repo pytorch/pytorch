@@ -2292,8 +2292,6 @@ make_fallback(aten.view_as_complex, require_contiguous)
 
 # The following were added as a result of https://github.com/pytorch/pytorch/pull/94039 to pass tests
 # It's not necessarily a priority to implement these
-make_fallback(aten.upsample_linear1d)
-make_fallback(aten.upsample_trilinear3d)
 make_fallback(aten.upsample_linear1d_backward)
 make_fallback(aten.upsample_trilinear3d_backward)
 make_fallback(aten._adaptive_avg_pool3d)
