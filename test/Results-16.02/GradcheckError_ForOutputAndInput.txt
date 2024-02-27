@@ -1,0 +1,3 @@
+torch.autograd.gradcheck.GradcheckError: For output 0 and input 0: gradcheck failed while testing batched gradient computation with forward-mode AD.
+
+TestFwdGradientsCPU.test_forward_mode_AD_dot_cpu_complex128

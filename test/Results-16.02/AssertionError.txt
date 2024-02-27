@@ -1,0 +1,6 @@
+AssertionError: tensor(False) is not true : Reference result was farther (4.0) from the precise computation than the torch result was (0.0)!
+
+TestCommonCPU.test_python_ref__refs_div_trunc_rounding_cpu_float16
+TestCommonCPU.test_python_ref_torch_fallback__refs_div_trunc_rounding_cpu_float16
+TestCommonCPU.test_python_ref_torch_fallback__refs_dot_cpu_complex64
+TestCommonCPU.test_python_ref_torch_fallback__refs_vdot_cpu_complex64
