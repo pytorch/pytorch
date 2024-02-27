@@ -890,134 +890,6 @@ but got:
       test_debug_mode_expected_msg_substrs=["end of `func1_fwd` (exclusive) to end of `func2_fwd` (inclusive) depends on output of `func1_fwd`", "Delayed segments: ['func1_fwd']", "Segments that contain in-place mutation ops: ['func1']"])
     # TODO add a case to trigger "end of `func2_fwd` (exclusive) to end of `func3_fwd` (inclusive) depends on output of `func1_fwd`" for schedule [2, 1, 3]
 
-  # def DISABLED_test_graph_break_within_segment(self):
-  #   # TODO: maybe unify with other `_run_test` functions
-  #   def _run_test(lazy_scheduler_gen=None, expected_execution_order=None, mod_class=None, additional_check=None):
-  #     device = "cuda"
-  #     m = mod_class()
-  #     m = m.to(device)
-  #     x = torch.randn(4, 4, requires_grad=True, device=device)
-  #     y = torch.randn(4, 4, requires_grad=True, device=device)
-
-  #     self._validate(
-  #       m,
-  #       lazy_scheduler_gen,
-  #       expected_execution_order=expected_execution_order,
-  #       inps=[x, y],
-  #       additional_check=additional_check,
-  #     )
-
-  #   expected_execution_order = [
-  #     "func2_fwd",
-  #     "func1_fwd",
-  #     "forward_fwd",
-  #     "forward_bwd",
-  #     "func2_bwd",
-  #     "func1_bwd",
-  #   ]
-  #   def check_segment_fwd_bwd(lazy_scheduler, is_compile=False):
-  #     return check_segment(
-  #       lazy_scheduler,
-  #       {
-  #         "func1_fwd": [['mm.default', 't.default', 't.default']],
-  #         "func2_fwd": [['add.Tensor']],
-  #         "forward_fwd": "forward_fwd": [{
-  #           'eager': ['mm.default', 'mul.Tensor', 't.default', 't.default'],
-  #           'compiled': ['mm.default', 'mul.Tensor', 'permute.default', 'permute.default'],
-  #         }],
-  #         "forward_bwd": [['mul.Tensor', 'mul.Tensor', 'mm.default', 'mm.default']],
-  #         "func2_bwd": [[]],
-  #         "func1_bwd": [['mm.default', 'mm.default']],
-  #       },
-  #       is_compile=is_compile,
-  #     )
-  #   def lazy_scheduler_gen(module, is_compile=False):
-  #     return LazyScheduler(
-  #       module,
-  #       segments=[
-  #         Segment("func1_fwd", module.func1, backend="aot_eager"),
-  #         Segment("func2_fwd", module.func2, backend="aot_eager"),
-  #         Segment("forward_fwd", module.forward, backend="inductor"),
-  #         Segment("func1_bwd", module.func1, backend="aot_eager"),
-  #         Segment("func2_bwd", module.func2, backend="aot_eager"),
-  #         Segment("forward_bwd", module.forward, backend="inductor"),
-  #       ],
-  #       schedule=expected_execution_order,
-  #       compile_options=None if not is_compile else {
-  #         "fullgraph": False,
-  #         "backend": "inductor",
-  #       },
-  #       debug_mode=debug_mode,
-  #     )
-
-  #   def segment_has_graph_break_not_using_async_tensor_output():
-  #     class TestModule(torch.nn.Module):
-  #       def __init__(self):
-  #         super().__init__()
-
-  #       def func1(self, x, y):
-  #         y2 = torch.matmul(x, y)
-  #         print("y2")  # guaranteed graph-break
-  #         return torch.matmul(x, y2)
-
-  #       def func2(self, x, y):
-  #         y3 = torch.add(x, y)
-  #         print("y3")  # guaranteed graph-break
-  #         return torch.add(x, y3)
-
-  #       def forward(self, x, y):
-  #         z1 = self.func1(x, y)
-  #         z2 = self.func2(x, y)
-  #         z = z1 * z2
-  #         return z
-
-  #     return {
-  #       "mod_class": TestModule,
-  #       "additional_check": None,
-  #     }
-
-  #   def segment_has_graph_break_using_async_tensor_output():
-  #     global_dict = {}
-  #     class TestModule(torch.nn.Module):
-  #       def __init__(self):
-  #         super().__init__()
-
-  #       def func1(self, x, y):
-  #         global global_dict
-  #         y2 = torch.matmul(x, y)
-  #         global_dict["y2_sum"] = y2.sum()
-  #         print(global_dict["y2_sum"])  # guaranteed graph-break
-  #         return torch.matmul(x, y2)
-
-  #       def func2(self, x, y):
-  #         global global_dict
-  #         y3 = torch.add(x, y)
-  #         global_dict["y3_sum"] = y3.sum()
-  #         print(global_dict["y3_sum"])  # guaranteed graph-break
-  #         return torch.add(x, y3)
-
-  #       def forward(self, x, y):
-  #         z1 = self.func1(x, y)
-  #         z2 = self.func2(x, y)
-  #         z = z1 * z2
-  #         return z
-
-  #     def check_async_tensor_is_early_scheduled(lazy_scheduler, is_compile=False):
-  #       # TODO how to check that AsyncTensor is early scheduled? maybe check the recorded execution order?
-  #       pass
-
-  #     return {
-  #       "mod_class": TestModule,
-  #       "additional_check": check_async_tensor_is_early_scheduled,
-  #     }
-
-  #   # TODO: if only 1 iteration, the execution order won't be as expected due to need for early materialization during compile
-  #   # if 2 iterations, fails with: `'function' object has no attribute '__self__'`
-  #   # After above is fixed, recorded execution order still has no reordering, because we always recompile per iteration and thus always trigger the early materialization.
-  #   _run_test(lazy_scheduler_gen, expected_execution_order, **segment_has_graph_break_not_using_async_tensor_output())
-  #   _run_test(lazy_scheduler_gen, expected_execution_order, **segment_has_graph_break_using_async_tensor_output())
-
-
   def DISABLED_example_usage(self):
     # Use segment hook instead of explicit schedule to specify the execution order
     """
@@ -1085,21 +957,20 @@ but got:
 """
 TODO:
 Design doc: https://docs.google.com/document/d/1vv0H5IMGwUMyzmJKnksJOnRSult1B4YlbBSs_MeAvXM/edit?usp=sharing
-- Rebase to latest master, make sure everything works
 - Try on Ads model: https://docs.google.com/document/d/1tFLUh4Xe4_eGKOtgpj08kfNDhy7Fqp-dSq0d7lejdZU/edit#bookmark=id.wds06wiqwjh2 figure out integration point with trainer loop
 
 - For named segments, show its segment ID (prefix + fwd/bwd + nth_call) in profiler annotation in GPU trace
+- Logging for better user debugging (what is scheduled and when, and the compilation output). Look at the generated graph and the original code.
+- Also log memory usage, how much memory I am keeping above.
 - Integration with DDPOptimizer
 - Integration with FSDP (graph break version, not tracing)
 - Support user calling a method multiple times and only tag a specific call as segment (i.e. make `nth_call=X` work)
 - Integration with (selective) activation checkpointing
-- What if a segment is in the schedule but is never run due to dynamic control flow change? we should either throw error or gracefully fall back to no-scheduler mode
 - (Later) Integration with compiled autograd
 - Support graph break within segment (i.e. multiple graphs per segment), either in the delayed segment or in the anchored segment
   - In the delayed segment case, also add output usage within the graph break eager region, to trigger the immediate materialization of AsyncTensor output
   - Make sure to assert that each GM contains the ops you expect.
-- Logging for better user debugging (what is scheduled and when, and the compilation output). Look at the generated graph and the original code.
-- Also log memory usage, how much memory I am keeping above.
+- What if a segment is in the schedule but is never run due to dynamic control flow change? we should either throw error or gracefully fall back to no-scheduler mode
 
 NOTE:
 - Even if the segment is only in the backward, its corresponding forward segment will also be carved out (graph-break'ed).
