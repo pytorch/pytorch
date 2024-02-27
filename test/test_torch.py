@@ -544,7 +544,6 @@ class TestTorchDeviceType(TestCase):
         y = torch.tensor([[-1]], dtype=torch.int8)
         self.assertEqual(torch.fmod(x, y).item(), 0.)
 
-
     # collected tests of ops that used scalar_check in Declarations.cwrap for
     # correctness
     def test_scalar_check(self, device):
