@@ -131,7 +131,15 @@ class OpStrategy(StrategyType):
 
     @property
     def output_mesh_shape(self):
-        return self.strategies[0].output_spec.mesh.shape
+        output_spec = self.strategies[0].output_specs
+        if isinstance(output_spec, DTensorSpec):
+            return output_spec.mesh.shape
+        else:
+            assert isinstance(
+                output_spec, tuple
+            ), "found no DTensorSpec in the OpStrategy!"
+            assert output_spec[0] is not None
+            return output_spec[0].mesh.shape
 
     @property
     def output_ndim(self):
@@ -268,9 +276,10 @@ class OpSchema:
 
         return all(isinstance(e, DTensorSpec) or e is None for e in arg)
 
-    def return_type_tuple_tensors(self) -> bool:
+    def return_type_tuple_tensor_like(self) -> bool:
+        # all dispatch ops could only return Tuple[Tensor] or have None/ints/floats
+        # in the tuple, but the first element must be a Tensor, so this check is enough
         return_types = self.op._schema.returns
-        # all dispatch ops only return Tensor or Tuple[Tensor], so this check if enough
         return len(return_types) > 1 and isinstance(
             return_types[0].type, torch.TensorType
         )
