@@ -1046,7 +1046,21 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         val = self.f_builtins[inst.argval]
 
         if callable(val):
-            self.push(VariableBuilder(self, GlobalSource(inst.argval))(val))
+            # From https://docs.python.org/3/library/builtins.html
+
+            # As an implementation detail, most modules have the name
+            # __builtins__ made available as part of their globals. The value of
+            # __builtins__ is normally either this module or the value of this
+            # module’s __dict__ attribute. Since this is an implementation
+            # detail, it may not be used by alternate implementations of Python.
+            accessor = GetItemSource
+            # TODO(janimesh) - Something fishy going on - self.f_globals is
+            # different from self.output.global_scope
+            if not isinstance(self.output.global_scope["__builtins__"], dict):
+                accessor = AttrSource
+            source = accessor(GlobalSource("__builtins__"), inst.argval)
+            self.push(VariableBuilder(self, source)(val))
+            # self.push(VariableBuilder(self, GlobalSource(inst.argval))(val))
         else:
             assert is_builtin_constant(val)
             self.push(ConstantVariable.create(value=val))
