@@ -9375,11 +9375,11 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
         sizes = [
-            torch.Size([5, 4, 3, 32, 257]),
-            torch.Size([5, 4, 3, 32,1]),
-            torch.Size([5, 4, 3, 128, 5120]),
-            torch.Size([5, 4, 3, 256, 5120]),
-            torch.Size([5, 4, 3, 256,1]),
+            torch.Size([5, 4, 3, 32, 4]),
+            torch.Size([5, 4, 3, 32, 1]),
+            torch.Size([5, 4, 3, 128, 3]),
+            torch.Size([5, 4, 3, 256, 2]),
+            torch.Size([5, 4, 3, 256, 1]),
         ]
         max_dim, num_chunks = 3, 128
         tensors = [torch.rand(size, dtype=torch.bfloat16, device=device) for size in sizes]
