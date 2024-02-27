@@ -1200,7 +1200,14 @@ class FakeTensorMode(TorchDispatchMode):
 
     def dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
-        log.debug("%s tensor:%s %s %s", func, id(args[0]), args[1:], kwargs)
+        # Some attribute queries that can be serviced directly
+        # See Note [is_coalesced is dispatched]
+        if func in _DISPATCH_HANDLE_DIRECTLY:
+            # NB: no_dispatch is ok here too, this func is very simple
+            with in_kernel_invocation_manager(self):
+                return func(*args, **kwargs)
+
+        log.debug("%s %s %s", func, args, kwargs)
 
         if func in _DISPATCH_META_HANDLERS:
             return _DISPATCH_META_HANDLERS[func](args)
@@ -1211,13 +1218,6 @@ class FakeTensorMode(TorchDispatchMode):
             )
             # NOTE: incr is intentionally unused for a RAII pattern
             incr = IncrementRecursionCount()
-
-        # Some attribute queries that can be serviced directly
-        # See Note [is_coalesced is dispatched]
-        if func in _DISPATCH_HANDLE_DIRECTLY:
-            # NB: no_dispatch is ok here too, this func is very simple
-            with in_kernel_invocation_manager(self):
-                return func(*args, **kwargs)
 
         if self.cache_enabled:
             return self._cached_dispatch_impl(func, types, args, kwargs)
@@ -1787,6 +1787,8 @@ _DISPATCH_HANDLE_DIRECTLY = ordered_set(
     torch.ops.aten.is_coalesced.default,
     torch.ops.aten.dense_dim.default,
     torch.ops.aten.sparse_dim.default,
+    torch.ops.aten._indices.default,
+    torch.ops.aten._values.default,
 )
 
 from torch._subclasses.fake_impls import (  # noqa: F401
