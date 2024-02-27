@@ -2425,7 +2425,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([])      # with grad_increment_nesting() as level:  # _functorch/eager_transforms.py:N in grad_and_value_impl""",
+    - torch._functorch.pyfunctorch.compare_functorch_state([])""",
             munge_exc(record.getMessage()),
         )
 
@@ -2473,8 +2473,8 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'same')])  # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:N in _flat_vmap""",
-            munge_exc(record.getMessage()),
+    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'same')])""",
+            record.getMessage(),
         )
 
     @xfailIfTorchDynamo
@@ -2500,8 +2500,8 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])  # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:N in _flat_vmap""",
-            munge_exc(record.getMessage()),
+    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])""",
+            record.getMessage(),
         )
 
     @xfailIfTorchDynamo
@@ -2531,7 +2531,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])  # with grad_increment_nesting() as level:  # _functorch/eager_transforms.py:N in grad_and_value_impl""",
+    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])""",
             munge_exc(record.getMessage()),
         )
 
@@ -2553,7 +2553,7 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertIn(
             """\
     triggered by the following guard failure(s):
-    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'same')])  # with vmap_increment_nesting(batch_size, randomness) as vmap_level:  # _functorch/vmap.py:N in _flat_vmap""",
+    - torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'same')])""",
             munge_exc(record.getMessage()),
         )
 
