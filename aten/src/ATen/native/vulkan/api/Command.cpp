@@ -413,7 +413,7 @@ void CommandPool::flush() {
 }
 
 void CommandPool::allocate_new_batch(const uint32_t count) {
-  // No-ops if there are still command buffers availble
+  // No-ops if there are still command buffers available
   if (in_use_ < buffers_.size()) {
     return;
   }

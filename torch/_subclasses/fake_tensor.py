@@ -39,7 +39,16 @@ if TYPE_CHECKING:
 DimList = List
 
 log = logging.getLogger(__name__)
-not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
+
+# TODO: Hack to unblock https://github.com/pytorch/pytorch/pull/108186
+# Proper fix tracked by https://github.com/pytorch/pytorch/issues/120105
+try:
+    not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
+except ValueError as e:
+    if "'not_implemented' not registered" in str(e):
+        import logging as not_implemented_log
+    else:
+        raise e
 
 pytree = torch.utils._pytree
 T = TypeVar("T")
@@ -157,8 +166,12 @@ def torch_decomp_decompositions(func):
     from torch._decomp import decomposition_table
 
     decompositions = torch._decomp.decompositions
-    decomp_attrs = [getattr(decompositions, attr) for attr in dir(decompositions)]
-    return decomposition_table[func] in decomp_attrs
+    # Note that the function in the decomposition table might be
+    # different from the one in the module because of the difference
+    # in out handling in aten API and torch public API
+    return decomposition_table[func].__module__.startswith(
+        "torch._decomp"
+    ) and decomposition_table[func].__name__ in dir(decompositions)
 
 
 def tree_flatten_only(ty: Type[T], tree: PyTree):
@@ -1000,6 +1013,9 @@ class FakeTensorMode(TorchDispatchMode):
             # Capture the current device to support, e.g., cache tensor creation,
             # where there isn't necessarily a tensor to take the device from.
             torch._C._get_default_device(),
+            # We want to create tensors from cached metadata only when the inference
+            # mode is the same.
+            torch.is_inference_mode_enabled(),
             # Shape env settings could affect behavior. One example seen in the wild:
             # Disasllowing dynamic shapes can introduce a DynamicOutputShapeException
             # where it wasn't seen on a previous instance of the same op.

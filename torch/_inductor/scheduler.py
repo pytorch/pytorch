@@ -4,6 +4,7 @@ import functools
 import itertools
 import logging
 import math
+import operator
 import os
 import pprint
 import textwrap
@@ -27,7 +28,6 @@ import sympy
 import torch
 from torch._dynamo.utils import dynamo_timed
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
@@ -44,6 +44,8 @@ from .utils import (
     get_dtype_size,
     get_gpu_dram_gbps,
     green_text,
+    is_collective,
+    is_wait,
     red_text,
     sympy_product,
 )
@@ -108,6 +110,41 @@ def fuse(node1: "BaseSchedulerNode", node2: "BaseSchedulerNode"):
         return ForeachKernelSchedulerNode.fuse(node1, node2)
     else:
         return FusedSchedulerNode.fuse(node1, node2)
+
+
+def _prune_redundant_deps(node, name_to_fused_node):
+    """
+    Prunes weakdeps intended for mutation ordering
+    on an upstream fused node if after fusion there is another dependency
+    on the fused upstream node, making the weakdep redundant
+
+    In essence this enforces an ordering on fusions. As fusions occur, weakdeps will
+    be incrementally removed, enabling other fusions, ensuring they are fused in order.
+    """
+    name_to_dep_count: Counter[str] = collections.Counter()
+
+    for dep in node.unmet_dependencies:
+        if not isinstance(dep, WeakDep):
+            name_to_dep_count[name_to_fused_node[dep.name].get_name()] += 1
+
+    def should_prune(dep):
+        if isinstance(dep, WeakDep):
+            is_redundant = (
+                name_to_dep_count[name_to_fused_node[dep.name].get_name()] > 0
+            )
+            # These can occur because fused nodes always gather deps from their snodes
+            # If B has a weakdep on A
+            # B gets fused with C, then any time BC is fused, the weakdep will reappear
+            is_self_dep = name_to_fused_node[dep.name] == node
+            return is_redundant or is_self_dep
+        else:
+            return False
+
+    deps_to_prune = {dep for dep in node.unmet_dependencies if should_prune(dep)}
+
+    if deps_to_prune:
+        node.unmet_dependencies = node.unmet_dependencies - deps_to_prune
+        node.set_read_writes(node.read_writes.remove_reads(deps_to_prune))
 
 
 # TODO(xmfan): reuse an existing mapping for this if it exists, or formalize this into ir.py:ExternKernel
@@ -246,38 +283,7 @@ class BaseSchedulerNode:
         self.set_read_writes(self.read_writes.remove_reads(to_remove))
 
     def prune_redundant_deps(self, name_to_fused_node):
-        """
-        Prunes weakdeps intended for mutation ordering
-        on an upstream fused node if after fusion there is another dependency
-        on the fused upstream node, making the weakdep redundant
-
-        In essence this enforces an ordering on fusions. As fusions occur, weakdeps will
-        be incrementally removed, enabling other fusions, ensuring they are fused in order.
-        """
-        name_to_dep_count: Counter[str] = collections.Counter()
-
-        for dep in self.unmet_dependencies:
-            if not isinstance(dep, WeakDep):
-                name_to_dep_count[name_to_fused_node[dep.name].get_name()] += 1
-
-        def should_prune(dep):
-            if isinstance(dep, WeakDep):
-                is_redundant = (
-                    name_to_dep_count[name_to_fused_node[dep.name].get_name()] > 0
-                )
-                # These can occur because fused nodes always gather deps from their snodes
-                # If B has a weakdep on A
-                # B gets fused with C, then any time BC is fused, the weakdep will reappear
-                is_self_dep = name_to_fused_node[dep.name] == self
-                return is_redundant or is_self_dep
-            else:
-                return False
-
-        deps_to_prune = {dep for dep in self.unmet_dependencies if should_prune(dep)}
-
-        if deps_to_prune:
-            self.unmet_dependencies = self.unmet_dependencies - deps_to_prune
-            self.set_read_writes(self.read_writes.remove_reads(deps_to_prune))
+        _prune_redundant_deps(self, name_to_fused_node)
 
     def get_name(self) -> str:
         return self.node.get_name()
@@ -584,6 +590,16 @@ class BaseSchedulerNode:
             # default to no reordering based on runtime
             return 0
 
+        # Collective kernels
+        if is_collective(self.node):
+            return estimate_nccl_collective_runtime(self.node)
+        elif is_wait(self.node):
+            # ir.Wait is only used for collective ops.
+            # The time needed for the collective op is already estimated and considered
+            # when we are processing the collective op IR node, so ir.Wait takes 0 time
+            # since it doesn't take extra time to get the result after the collective is completed.
+            return 0
+
         try:
             gpu_memory_bandwidth = get_gpu_dram_gbps()
             gpu_flops = get_device_tflops(dtype) * 10**12
@@ -628,16 +644,6 @@ class BaseSchedulerNode:
         ):
             # Return estimated runtime in nanoseconds (bytes / gbps)
             return self.get_read_write_buffers_sizes() / gpu_memory_bandwidth
-
-        # Collective kernels
-        if isinstance(self.node, ir.CollectiveKernel):
-            return estimate_nccl_collective_runtime(self)
-        elif isinstance(self.node, ir.Wait):
-            # ir.Wait is only used for collective ops.
-            # The time needed for the collective op is already estimated and considered
-            # when we are processing the collective op IR node, so ir.Wait takes 0 time
-            # since it doesn't take extra time to get the result after the collective is completed.
-            return 0
 
         return 0
 
@@ -1137,6 +1143,8 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         return self.snodes[0].get_first_name()
 
     def prune_redundant_deps(self, name_to_fused_node):
+        _prune_redundant_deps(self, name_to_fused_node)
+
         for node in self.snodes:
             node.prune_redundant_deps(name_to_fused_node)
 
@@ -1507,16 +1515,13 @@ class Scheduler:
 
         # make sure unbacked symints aren't dead-code-eliminated
         for node in V.graph.graph_outputs:
-            if isinstance(node, ir.ShapeAsConstantBuffer):
-                for s in free_unbacked_symbols(node.shape):
-                    assert (
-                        s in unbacked_symbol_to_origin_node
-                    ), f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
-                    node_name = unbacked_symbol_to_origin_node[s].node.name
-                    log.debug(
-                        "scheduling output %s for unbacked symint %s", node_name, s
-                    )
-                    add_user(node_name, OutputNode(StarDep(node_name)))
+            for s in node.get_unbacked_symbol_uses():
+                assert (
+                    s in unbacked_symbol_to_origin_node
+                ), f"{s} not in {unbacked_symbol_to_origin_node.keys()}"
+                node_name = unbacked_symbol_to_origin_node[s].node.name
+                log.debug("scheduling output %s for unbacked symint %s", node_name, s)
+                add_user(node_name, OutputNode(StarDep(node_name)))
 
         # make sure input mutation isn't dead-code-eliminated
         for name in self.mutation_renames:
@@ -1788,6 +1793,7 @@ class Scheduler:
                 fusion_log.debug(
                     "fusing %s with %s", node1.get_name(), node2.get_name()
                 )
+
                 node3 = fuse(node1, node2)
                 fused_nodes.remove(node1)
                 fused_nodes.remove(node2)
@@ -1933,9 +1939,6 @@ class Scheduler:
         ):
             why("node2 is extern or nop")
             return False
-
-        if node1.is_foreach() or node2.is_foreach():
-            return ForeachKernelSchedulerNode.can_fuse(node1, node2)
 
         if node2.get_names() & node1.ancestors:
             why("node1 must go before node2")
@@ -2246,9 +2249,13 @@ class Scheduler:
                 self.origin_to_index.update({n: i for i, n in enumerate(n.graph.nodes)})
             return self.origin_to_index[n]
 
-        origins = [(get_order(e), e) for n in node.get_nodes() for e in n.node.origins]
+        # Use a dict to have ordering
+        origins = {
+            (get_order(e), e): None for n in node.get_nodes() for e in n.node.origins
+        }
+        origins = list(origins.keys())
         if origins:
-            _, last = max(origins)
+            _, last = max(origins, key=operator.itemgetter(0))
             V.graph.wrapper_code.enter_context(last)
 
     @dynamo_timed
@@ -2313,6 +2320,11 @@ class Scheduler:
                 device = node.get_device()
                 if self.get_backend(device).ready_to_flush():
                     self.flush()
+
+        if self.current_device and self.current_device.type == "cuda":
+            # exit the outermost CUDA device guard. this is
+            # important for nested indentation codegen-ing.
+            V.graph.wrapper_code.codegen_device_guard_exit()
 
         self.flush()
 
