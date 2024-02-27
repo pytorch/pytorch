@@ -242,7 +242,7 @@ class SideEffects:
         options,
     ):
         if user_cls is torch.autograd.function.FunctionCtx:
-            obj = torch.autograd.Function()
+            obj = torch.autograd.function.FunctionCtx()
         elif issubclass(user_cls, torch.nn.Module):
             obj = nn_module_new(user_cls)
         else:
