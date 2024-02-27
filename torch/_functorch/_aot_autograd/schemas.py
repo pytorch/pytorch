@@ -4,6 +4,7 @@ input/output types, metadata, config, function signatures etc.
 """
 
 import collections
+import functools
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Dict, List, NewType, Optional, Set, Tuple, Union
@@ -16,6 +17,7 @@ from torch._subclasses.fake_tensor import is_fake
 
 from .. import config
 
+from .functional_utils import _check_if_mutation_can_be_in_graph
 from .utils import strict_zip
 
 zip = strict_zip
@@ -100,7 +102,7 @@ class InputAliasInfo:
     mutations_under_no_grad_or_inference_mode: bool
     mutates_storage_metadata: bool
     requires_grad: bool
-    mutation_type: MutationType
+    keep_input_mutations: bool
 
     def __post_init__(self):
         if self.mutates_storage_metadata:
@@ -109,6 +111,23 @@ class InputAliasInfo:
             # to additionally fix  up the tensor metadata, since our runtime
             # call to inp.set_(updated_inp) will already have the right metadata
             assert self.mutates_metadata
+
+    @functools.cached_property
+    def mutation_type(self) -> MutationType:
+        if (not self.mutates_data) and (not self.mutates_metadata):
+            return MutationType.NOT_MUTATED
+
+        if _check_if_mutation_can_be_in_graph(
+            self.keep_input_mutations,
+            self.mutates_data,
+            self.mutates_metadata,
+            self.mutations_hidden_from_autograd,
+            self.mutations_under_no_grad_or_inference_mode,
+            self.requires_grad,
+        ):
+            return MutationType.MUTATED_IN_GRAPH
+
+        return MutationType.MUTATED_OUT_GRAPH
 
 
 @dataclass
@@ -232,9 +251,6 @@ class ViewAndMutationMeta:
     # TODO: we should kill this
     # (need to default it to not break internal)
     is_train: bool = False
-    # We're plumbing this requires_subclass_dispatch here is because it's painful to support input mutations
-    # on subclasses, and that info isn't easily available.
-    requires_subclass_dispatch: bool = False
 
     num_symints_saved_for_bw: Optional[int] = None
 
@@ -256,28 +272,16 @@ class ViewAndMutationMeta:
         # When keep_input_mutations is set, we don't need to worry about our epilogue
         # handling data-only mutations, because we keep them directly in the graph.
 
-        # TODO (tmanlaibaatar) Ideally input mutation type should be calculated
-        # based on requires_subclass_dispatch argument but this is not easy to do because you would
-        # have to pass around this argument multiple level down.
-        if not self.requires_subclass_dispatch:
-            mutated_inp_runtime_indices = [
-                i
-                for i, m in enumerate(self.input_info)
-                if (m.mutation_type == MutationType.MUTATED_OUT_GRAPH)
-            ]
-        else:
-            mutated_inp_runtime_indices = [
-                i
-                for i, m in enumerate(self.input_info)
-                if m.mutation_type
-                in (MutationType.MUTATED_IN_GRAPH, MutationType.MUTATED_OUT_GRAPH)
-            ]
+        mutated_inp_runtime_indices = [
+            i
+            for i, m in enumerate(self.input_info)
+            if (m.mutation_type == MutationType.MUTATED_OUT_GRAPH)
+        ]
 
         mutated_graph_handled_indices = [
             i
             for i, m in enumerate(self.input_info)
             if m.mutation_type == MutationType.MUTATED_IN_GRAPH
-            and not self.requires_subclass_dispatch
         ]
         self.mutated_graph_handled_indices = mutated_graph_handled_indices
         self.num_mutated_graph_handled_indices = len(self.mutated_graph_handled_indices)
@@ -538,6 +542,7 @@ class GraphSignature:
     # "graph outputs that correspond to updated buffers"
     # to the FQN names of those mutated buffers.
     buffers_to_mutate: Dict[GraphOutputName, FQN]
+    user_inputs_to_mutate: Dict[GraphOutputName, GraphInputName]
 
     in_spec: pytree.TreeSpec
     out_spec: pytree.TreeSpec
@@ -582,22 +587,27 @@ class GraphSignature:
             )
         )
 
-        state_names = [*parameters, *buffers]
-        mutated_buffers = []
+        names = [*parameters, *buffers, *user_inputs]
+        mutations = []
         for idx, input_info in enumerate(view_mutation_metadata.input_info):
             if input_info.mutates_data:
                 # Only buffers can be mutated, not parameters
                 assert idx >= len(parameters)
-                buffer_name = state_names[idx]
-                mutated_buffers.append(buffer_name)
+                mutations.append(names[idx])
 
-        assert (
-            len(mutated_buffers)
-            == view_mutation_metadata.num_mutated_inp_runtime_indices
-        )
+        assert len(mutations) == view_mutation_metadata.num_mutated_inp_runtime_indices
 
         start, stop = 0, view_mutation_metadata.num_mutated_inp_runtime_indices
-        buffers_to_mutate = dict(zip(graph_outputs[start:stop], mutated_buffers))
+        outputs_to_mutations = dict(zip(graph_outputs[start:stop], mutations))
+
+        user_inputs_to_mutate = {}
+        buffers_to_mutate = {}
+        for output_name, mutation_name in outputs_to_mutations.items():
+            if mutation_name in user_inputs:
+                user_inputs_to_mutate[output_name] = mutation_name
+            else:
+                assert mutation_name in buffers
+                buffers_to_mutate[output_name] = mutation_name
 
         start, stop = stop, stop + num_user_outputs
         user_outputs = graph_outputs[start:stop]
@@ -616,6 +626,7 @@ class GraphSignature:
             user_outputs=user_outputs,  # type: ignore[arg-type]
             inputs_to_buffers=inputs_to_buffers,  # type: ignore[arg-type]
             inputs_to_parameters=inputs_to_parameters,  # type: ignore[arg-type]
+            user_inputs_to_mutate=user_inputs_to_mutate,
             buffers_to_mutate=buffers_to_mutate,  # type: ignore[arg-type]
             in_spec=in_spec,
             out_spec=out_spec,

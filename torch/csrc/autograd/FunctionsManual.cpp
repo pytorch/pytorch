@@ -912,34 +912,35 @@ Tensor logcumsumexp_backward(
 
   // Reference: https://github.com/tensorflow/tensorflow/blob/
   // 2a5910906a0e0f3dbc186ff9db6386d81a63448c/tensorflow/python/ops/math_grad.py#L1832-L1863
-  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
+
+  auto scalar_min = AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
       at::ScalarType::BFloat16,
       at::typeMetaToScalarType(grad.dtype()),
       "logcumsumexp_backward",
-      [grad, self, result, dim]() {
-        auto grad_min = at::empty_like(grad);
-        auto reverse_logcumsumexp = [dim](auto x) {
-          return at::flip(at::logcumsumexp(at::flip(x, {dim}), dim), {dim});
-        };
+      []() { return c10::Scalar(std::numeric_limits<scalar_t>::lowest()); });
 
-        if (!at::is_complex(grad)) {
-          grad_min.fill_(std::numeric_limits<scalar_t>::lowest());
-          auto log_grad_positive = at::where(grad > 0, grad.log(), grad_min);
-          auto log_grad_negative = at::where(grad < 0, (-grad).log(), grad_min);
+  auto reverse_logcumsumexp = [dim](auto x) {
+    return at::flip(at::logcumsumexp(at::flip(x, {dim}), dim), {dim});
+  };
 
-          auto output_pos =
-              (reverse_logcumsumexp(log_grad_positive - result) + self).exp();
-          auto output_neg =
-              (reverse_logcumsumexp(log_grad_negative - result) + self).exp();
+  if (!at::is_complex(grad)) {
+    auto grad_min = at::scalar_tensor(scalar_min, grad.options());
+    auto log_abs_grad = grad.abs().log();
+    auto log_grad_positive = at::where(grad > 0, log_abs_grad, grad_min);
+    auto log_grad_negative = at::where(grad < 0, log_abs_grad, grad_min);
 
-          return output_pos - output_neg;
-        } else {
-          // no trick separating the positive and negative required
-          auto log_grad = grad.conj().log();
-          auto output = (reverse_logcumsumexp(log_grad - result) + self).exp();
-          return output.conj();
-        }
-      });
+    auto output_pos =
+        (reverse_logcumsumexp(log_grad_positive - result) + self).exp();
+    auto output_neg =
+        (reverse_logcumsumexp(log_grad_negative - result) + self).exp();
+
+    return output_pos - output_neg;
+  } else {
+    // no trick separating the positive and negative required
+    auto log_grad = grad.conj().log();
+    auto output = (reverse_logcumsumexp(log_grad - result) + self).exp();
+    return output.conj();
+  }
 }
 
 Tensor logcumsumexp_jvp(
@@ -7112,8 +7113,7 @@ Tensor values_backward(const Tensor& grad, const Tensor& self) {
           self.options(),
           /*is_coalesced=*/true);
     } else if (at::sparse_csr::is_sparse_compressed(self)) {
-      Tensor compressed_indices, plain_indices;
-      std::tie(compressed_indices, plain_indices) =
+      auto [compressed_indices, plain_indices] =
           at::sparse_csr::getCompressedPlainIndices(self);
       return at::_sparse_compressed_tensor_unsafe_symint(
           compressed_indices,

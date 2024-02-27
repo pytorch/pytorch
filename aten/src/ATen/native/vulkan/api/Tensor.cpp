@@ -435,6 +435,44 @@ vTensor::BufferMetadata vTensor::get_cpu_buffer_metadata() const {
   };
 }
 
+VmaAllocationCreateInfo vTensor::get_allocation_create_info() const {
+  switch (storage_type()) {
+    case api::StorageType::BUFFER:
+      return view_->buffer_.allocation_create_info();
+    case api::StorageType::TEXTURE_2D:
+    case api::StorageType::TEXTURE_3D:
+      return view_->image_.allocation_create_info();
+    case api::StorageType::UNKNOWN:
+      return {};
+  }
+}
+
+VkMemoryRequirements vTensor::get_memory_requirements() const {
+  switch (storage_type()) {
+    case api::StorageType::BUFFER:
+      return view_->buffer_.get_memory_requirements();
+    case api::StorageType::TEXTURE_2D:
+    case api::StorageType::TEXTURE_3D:
+      return view_->image_.get_memory_requirements();
+    case api::StorageType::UNKNOWN:
+      return {};
+  }
+}
+
+void vTensor::bind_allocation(const api::MemoryAllocation& allocation) {
+  switch (storage_type()) {
+    case api::StorageType::BUFFER:
+      view_->buffer_.bind_allocation(allocation);
+      break;
+    case api::StorageType::TEXTURE_2D:
+    case api::StorageType::TEXTURE_3D:
+      view_->image_.bind_allocation(allocation);
+      break;
+    case api::StorageType::UNKNOWN:
+      break;
+  }
+}
+
 //
 // vTensorStorage
 //

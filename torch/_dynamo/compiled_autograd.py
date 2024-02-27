@@ -6,7 +6,7 @@ import torch
 from torch._dynamo.external_utils import call_backward, call_hook
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import counters, lazy_format_graph_code
-from torch._logging import getArtifactLogger
+from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses import FakeTensorMode
 from torch.fx import GraphModule
@@ -201,6 +201,10 @@ class AutogradCompilerInstance:
         compiled_autograd_log.info(
             "%s", lazy_format_graph_code("Compiled autograd graph", graph)
         )
+        trace_structured(
+            "compiled_autograd_graph",
+            payload_fn=lambda: graph.print_readable(print_output=False),
+        )
         return self.compiler_fn(graph)
 
     def to_proxy(self, t):
@@ -222,18 +226,35 @@ class AutogradCompilerInstance:
 
 compiled_autograd_enabled = False
 
+# We may have code like:
+# with enable(compiler_fn):
+#   ...
+#   with disable():
+#     ...
+#   ...
+# The disable() call just want to disable compiled autograd temporarily.
+# But overall the feature is enabled.
+#
+# The code covered by the disable context manager has no way to know if
+# compiled autograd is overall eanbled. Use another variable
+# compiled_autograd_enabled_count to indicate how many times compiled
+# autograd has been enabled in the call stack for this purpose.
+compiled_autograd_enabled_count = 0
+
 
 @contextlib.contextmanager
 def enable(compiler_fn):
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
         functools.partial(AutogradCompilerInstance, compiler_fn)
     )
-    global compiled_autograd_enabled
+    global compiled_autograd_enabled, compiled_autograd_enabled_count
     compiled_autograd_enabled = True
+    compiled_autograd_enabled_count += 1
     try:
         with torch.autograd.set_multithreading_enabled(False):
             yield
     finally:
+        compiled_autograd_enabled_count -= 1
         if not prior:
             compiled_autograd_enabled = False
         torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)

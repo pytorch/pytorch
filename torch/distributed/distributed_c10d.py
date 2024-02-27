@@ -288,9 +288,11 @@ class BackendConfig:
         if backend == Backend.UNDEFINED:
             # default config when backend is not specified
             # supported since PyTorch 2.0
-            for device in Backend.default_device_backend_map:
-                if is_backend_available(Backend.default_device_backend_map[device]):
-                    self.device_backend_map[device] = Backend(Backend.default_device_backend_map[device])
+            for device, default_backend in Backend.default_device_backend_map.items():
+                if is_backend_available(default_backend):
+                    if default_backend == Backend.NCCL and not torch.cuda.is_available():
+                        continue
+                    self.device_backend_map[device] = Backend(default_backend)
         elif backend.lower() in Backend.backend_list:
             # Cases for when backend is a single string (without device types)
             # e.g. "nccl", "gloo", "ucc", "mpi"
@@ -547,22 +549,19 @@ class _World:
         return self._pg_default_device
 
     @property
-    def pg_config_info(self) -> List[Dict[str, Union[int, str, List[int]]]]:
+    def pg_config_info(self) -> List[Dict[str, Any]]:
         """
         Return a list of dict with process groups and backends.
 
         Along with their unique IDs and configurations (types and ranks).
         """
-        config_info: List[Dict[str, Union[int, str, List[int]]]] = []
+        config_info: List[Dict[str, Any]] = []
         default_pg_size = _get_group_size(None)
-        for pg, backend in self.pg_map.items():
-            # backend is a tuple with the first element being the backend type ("nccl", etc.)
-            backend_type = Backend.backend_type_map[backend[0]]
+        for pg in self.pg_map.keys():
             ranks = self.pg_group_ranks[pg]
             config_info.append(
                 {
                     "pg_name": self.pg_names[pg],
-                    "backend_id": pg._backend_id(backend_type),
                     "backend_config": self.pg_backend_config[pg],
                     "ranks": list(ranks.keys())
                     if len(ranks) != default_pg_size
@@ -848,6 +847,15 @@ def _get_group_size_by_name(group_name: str) -> int:
     return group.size()
 
 
+def _resolve_group_name_by_ranks_and_tag(ranks: List[int], tag: str) -> str:
+    # TODO(yifu): remove this function once ranks + tag is not a supported
+    # identifier for process group for functional collectives.
+    group = _find_pg_by_ranks_and_tag(tag, ranks)
+    if group is None:
+        raise ValueError("")
+    return group.group_name
+
+
 def _check_single_tensor(param, param_name) -> None:
     """Check that the parameter ``param_name`` is a single tensor."""
     if not isinstance(param, torch.Tensor):
@@ -985,6 +993,12 @@ def _is_barrier_after_init() -> int:
     # experience issue with this setting, you may set
     # `TORCH_DIST_INIT_BARRIER=1` to add the barrier.
     return int(os.getenv("TORCH_DIST_INIT_BARRIER", "0"))
+
+
+def _abort_in_destroy_pg() -> bool:
+    # Environment variable to control whether to abort the communicators when users call destroy_process_group()
+    env = os.getenv("TORCH_NCCL_ABORT_IN_DESTROY_PG", "0")
+    return env == "1" or env.lower() == "true"
 
 
 def _get_default_group() -> ProcessGroup:
@@ -1327,6 +1341,21 @@ def _get_split_source(pg):
 
     return split_from
 
+def _shutdown_backend(pg):
+    """
+    Try to shut down the backend of a process group.
+    Currently, only ProcessGroupNCCL backend is supported.
+    No op for other backends.
+    """
+    backend = None
+    try:
+        backend = pg._get_backend(torch.device("cuda"))
+    except RuntimeError:
+        pass
+    if isinstance(backend, ProcessGroupNCCL):
+        # explictly call shutdown to ensure that NCCL resources are released
+        backend._shutdown()
+
 def _new_process_group_helper(
     group_size,
     group_rank,
@@ -1596,6 +1625,12 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         pg._wait_for_pending_works()
 
     if group is None or group == GroupMember.WORLD:
+        if _abort_in_destroy_pg():
+            # shutdown all backends in the order of pg names. shutting down in order because
+            # ncclCommAbort() was a 'collective' call in some versions of NCCL.
+            for pg_to_shutdown in sorted(_world.pg_names, key=lambda x: _world.pg_names[x], reverse=True):
+                _shutdown_backend(pg_to_shutdown)
+
         _update_default_pg(None)
         _world.pg_map.clear()
         _world.pg_names.clear()
@@ -1617,6 +1652,8 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
     else:
+        if _abort_in_destroy_pg():
+            _shutdown_backend(pg)
         del _world.pg_map[pg]
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
@@ -2077,25 +2114,26 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
         >>> # xdoctest: +SKIP("no rank")
         >>> # All tensors below are of torch.int64 type.
         >>> # We have 2 process groups, 2 ranks.
-        >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
+        >>> device = torch.device(f'cuda:{rank}')
+        >>> tensor = torch.arange(2, dtype=torch.int64, device=device) + 1 + 2 * rank
         >>> tensor
-        tensor([1, 2]) # Rank 0
-        tensor([3, 4]) # Rank 1
+        tensor([1, 2], device='cuda:0') # Rank 0
+        tensor([3, 4], device='cuda:1') # Rank 1
         >>> dist.all_reduce(tensor, op=ReduceOp.SUM)
         >>> tensor
-        tensor([4, 6]) # Rank 0
-        tensor([4, 6]) # Rank 1
+        tensor([4, 6], device='cuda:0') # Rank 0
+        tensor([4, 6], device='cuda:1') # Rank 1
 
         >>> # All tensors below are of torch.cfloat type.
         >>> # We have 2 process groups, 2 ranks.
-        >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cfloat) + 2 * rank * (1+1j)
+        >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cfloat, device=device) + 2 * rank * (1+1j)
         >>> tensor
-        tensor([1.+1.j, 2.+2.j]) # Rank 0
-        tensor([3.+3.j, 4.+4.j]) # Rank 1
+        tensor([1.+1.j, 2.+2.j], device='cuda:0') # Rank 0
+        tensor([3.+3.j, 4.+4.j], device='cuda:1') # Rank 1
         >>> dist.all_reduce(tensor, op=ReduceOp.SUM)
         >>> tensor
-        tensor([4.+4.j, 6.+6.j]) # Rank 0
-        tensor([4.+4.j, 6.+6.j]) # Rank 1
+        tensor([4.+4.j, 6.+6.j], device='cuda:0') # Rank 0
+        tensor([4.+4.j, 6.+6.j], device='cuda:1') # Rank 1
 
     """
     _check_single_tensor(tensor, "tensor")
@@ -2713,31 +2751,34 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
         >>> # xdoctest: +SKIP("need process group init")
         >>> # All tensors below are of torch.int64 dtype.
         >>> # We have 2 process groups, 2 ranks.
-        >>> tensor_list = [torch.zeros(2, dtype=torch.int64) for _ in range(2)]
+        >>> device = torch.device(f'cuda:{rank}')
+        >>> tensor_list = [torch.zeros(2, dtype=torch.int64, device=device) for _ in range(2)]
         >>> tensor_list
-        [tensor([0, 0]), tensor([0, 0])] # Rank 0 and 1
-        >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
+        [tensor([0, 0], device='cuda:0'), tensor([0, 0], device='cuda:0')] # Rank 0
+        [tensor([0, 0], device='cuda:0'), tensor([0, 0], device='cuda:1')] # Rank 1
+        >>> tensor = torch.arange(2, dtype=torch.int64, device=device) + 1 + 2 * rank
         >>> tensor
-        tensor([1, 2]) # Rank 0
-        tensor([3, 4]) # Rank 1
+        tensor([1, 2], device='cuda:0') # Rank 0
+        tensor([3, 4], device='cuda:1') # Rank 1
         >>> dist.all_gather(tensor_list, tensor)
         >>> tensor_list
-        [tensor([1, 2]), tensor([3, 4])] # Rank 0
-        [tensor([1, 2]), tensor([3, 4])] # Rank 1
+        [tensor([1, 2], device='cuda:0'), tensor([3, 4], device='cuda:0')] # Rank 0
+        [tensor([1, 2], device='cuda:1'), tensor([3, 4], device='cuda:1')] # Rank 1
 
         >>> # All tensors below are of torch.cfloat dtype.
         >>> # We have 2 process groups, 2 ranks.
-        >>> tensor_list = [torch.zeros(2, dtype=torch.cfloat) for _ in range(2)]
+        >>> tensor_list = [torch.zeros(2, dtype=torch.cfloat, device=device) for _ in range(2)]
         >>> tensor_list
-        [tensor([0.+0.j, 0.+0.j]), tensor([0.+0.j, 0.+0.j])] # Rank 0 and 1
-        >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cfloat) + 2 * rank * (1+1j)
+        [tensor([0.+0.j, 0.+0.j], device='cuda:0'), tensor([0.+0.j, 0.+0.j], device='cuda:0')] # Rank 0
+        [tensor([0.+0.j, 0.+0.j], device='cuda:1'), tensor([0.+0.j, 0.+0.j], device='cuda:1')] # Rank 1
+        >>> tensor = torch.tensor([1+1j, 2+2j], dtype=torch.cfloat, device=device) + 2 * rank * (1+1j)
         >>> tensor
-        tensor([1.+1.j, 2.+2.j]) # Rank 0
-        tensor([3.+3.j, 4.+4.j]) # Rank 1
+        tensor([1.+1.j, 2.+2.j], device='cuda:0') # Rank 0
+        tensor([3.+3.j, 4.+4.j], device='cuda:1') # Rank 1
         >>> dist.all_gather(tensor_list, tensor)
         >>> tensor_list
-        [tensor([1.+1.j, 2.+2.j]), tensor([3.+3.j, 4.+4.j])] # Rank 0
-        [tensor([1.+1.j, 2.+2.j]), tensor([3.+3.j, 4.+4.j])] # Rank 1
+        [tensor([1.+1.j, 2.+2.j], device='cuda:0'), tensor([3.+3.j, 4.+4.j], device='cuda:0')] # Rank 0
+        [tensor([1.+1.j, 2.+2.j], device='cuda:1'), tensor([3.+3.j, 4.+4.j], device='cuda:1')] # Rank 1
 
     """
     _check_tensor_list(tensor_list, "tensor_list")

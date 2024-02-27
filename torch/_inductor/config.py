@@ -27,6 +27,11 @@ fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
+# codegen cpp wrapper code in an ABI compatible mode
+abi_compatible = (
+    os.environ.get("TORCHINDUCTOR_ABI_COMPATIBLE", "1" if is_fbcode() else "0") == "1"
+)
+
 # dead code elimination
 dce = False
 
@@ -271,7 +276,7 @@ enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", ""
 max_fusion_size = 64
 
 # max number of inputs to generate cat as a pointwise op with masked laods
-max_pointwise_cat_inputs = 4
+max_pointwise_cat_inputs = 8
 
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
@@ -414,6 +419,9 @@ allow_stack_allocation: bool = True
 # but performance for that interface may be degraded.
 use_minimal_arrayref_interface: bool = False
 
+# decompose some memory bound matmul/bmm to mul
+decompose_mem_bound_mm: bool = False
+
 
 # config specific to codegen/cpp.py
 class cpp:
@@ -535,8 +543,8 @@ class triton:
         os.environ.get("TORCHINDUCTOR_PERSISTENT_REDUCTIONS", "1") == "1"
     )
 
-    # 0: disable
-    # 1: enable, use tuning to pick between different subkernels
+    # 0/False: disable
+    # 1/True: enable, use tuning to pick between different subkernels
     # 2: enable, force using persistent reduction (for debugging)
     # 3: enable, force using non-persistent reduction (for debugging)
     multi_kernel = int(os.environ.get("TORCHINDUCTOR_MULTI_KERNEL", "0"))
@@ -555,6 +563,10 @@ class triton:
         "Z": 1024,
         "R": 4096 * (16 if multi_kernel else 1),
     }
+
+    # Minimum RBLOCK to be used for a TritonSplitScanKernel
+    # NOTE: This also indirectly controls the size of workspace buffer required
+    min_split_scan_rblock = 256
 
     # Store the generated cubin files for cpp wrapper code to load
     store_cubin = False
@@ -592,14 +604,14 @@ class aot_inductor:
 
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
 
-    # Wether to codegen abi compatible model.so
-    abi_compatible = is_fbcode()
-
     # Serialized tree spec for flattening inputs
     serialized_in_spec = ""
 
     # Serialized tree spec for flattening outputs
     serialized_out_spec = ""
+
+    # flag to decide whether to create a submodule for constant graph.
+    use_runtime_constant_folding: bool = False
 
 
 class cuda:
