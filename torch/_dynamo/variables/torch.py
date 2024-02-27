@@ -308,6 +308,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return SourcelessBuilder()(
                 tx, torch.overrides.get_default_nowrap_functions()
             )
+        elif self.value == torch.ops.inductor.accumulate_grad_.default:
+            from .builder import SourcelessBuilder
+
+            return tx.inline_user_function_return(
+                SourcelessBuilder()(tx, polyfill.accumulate_grad), args, kwargs
+            )
         elif self.value == math.radians and not (constant_args or unspec_python_args):
             # Use polyfill to convert math.radians(x) into math.pi * x / 180.0
             from .builder import SourcelessBuilder
