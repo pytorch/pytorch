@@ -1458,6 +1458,27 @@ def get_sharding_opts(options) -> Tuple[int, int]:
     return (which_shard, num_shards)
 
 
+def do_sharding(
+    options,
+    selected_tests: Sequence[TestRun],
+    test_file_times: Dict[str, float],
+    test_class_times: Dict[str, Dict[str, float]],
+    sort_by_time: bool = True,
+) -> Tuple[float, List[ShardedTest]]:
+    which_shard, num_shards = get_sharding_opts(options)
+
+    # Do sharding
+    shards = calculate_shards(
+        num_shards,
+        selected_tests,
+        test_file_times,
+        test_class_times=test_class_times,
+        must_serial=must_serial,
+        sort_by_time=sort_by_time,
+    )
+    return shards[which_shard - 1]
+
+
 class TestFailure(NamedTuple):
     test: TestRun
     message: str
@@ -1644,17 +1665,13 @@ def main():
         ):
             self.name = name
             self.failures = []
-            which_shard, num_shards = get_sharding_opts(options)
-            shards = calculate_shards(
-                num_shards,
+            self.time, self.sharded_tests = do_sharding(
+                options,
                 raw_tests,
                 test_file_times_dict,
-                test_class_times=test_class_times_dict,
-                must_serial=must_serial,
+                test_class_times_dict,
                 sort_by_time=should_sort_shard,
             )
-            self.sharded_tests = shards[which_shard - 1][1]
-            self.time = shards[which_shard - 1][0]
 
         def __str__(self):
             s = f"Name: {self.name} (est. time: {round(self.time / 60, 2)}min)\n"
