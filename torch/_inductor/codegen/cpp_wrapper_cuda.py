@@ -11,7 +11,7 @@ from .. import config
 from ..codecache import CudaKernelParamCache
 from ..triton_heuristics import grid as default_grid
 from ..virtualized import V
-from .cpp_wrapper_cpu import CppWrapperCodeGen
+from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import SymbolicCallArg
 
 
@@ -37,7 +37,7 @@ def is_float(s: str) -> bool:
     return True
 
 
-class CudaWrapperCodeGen(CppWrapperCodeGen):
+class CppWrapperCuda(CppWrapperCpu):
     """
     Generates cpp wrapper for running on GPU and calls CUDA kernels
     """
@@ -138,7 +138,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             """
         )
 
-    def write_get_raw_stream(self, index):
+    def write_get_raw_stream(self, index, graph=None):
         name = f"stream{index}"
         self.writeline(
             f"cudaStream_t {name} = at::cuda::getCurrentCUDAStream({index});"
@@ -245,7 +245,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         grid_fn: str = "grid",
     ):
         if not cuda:
-            # Even in CudaWrapperCodeGen, we may see cpp kernels
+            # Even in CppWrapperCuda, we may see cpp kernels
             return super().generate_kernel_call(
                 name, call_args, grid, device_index, cuda, triton, arg_types
             )
@@ -268,7 +268,9 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
         self.writeline(f"void* {kernel_args_var}[] = {{{call_args}}};")
         stream = (
-            "stream" if V.graph.aot_mode else self.write_get_raw_stream(device_index)
+            "stream"
+            if V.graph.aot_mode
+            else self.write_get_raw_stream(device_index, V.graph)
         )
         grid_name = f"{name}_grid_{next(self.grid_id)}"
         assert isinstance(
