@@ -774,11 +774,6 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type):
-            if value is torch.nn.Parameter:
-                # TODO(jansel): combine this case with the one above
-                return trace_rules.lookup(value).create_with_source(
-                    value, source=self.source
-                )
             # This is a userdefined class, so install an ID_MATCH even if its a
             # global variable.
             self.install_guards(GuardBuilder.ID_MATCH)

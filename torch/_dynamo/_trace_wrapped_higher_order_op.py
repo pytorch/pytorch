@@ -8,6 +8,7 @@ from torch.fx.experimental._backward_state import BackwardState
 
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils._python_dispatch import _get_current_dispatch_mode
+from torch.utils._pytree import tree_map_only
 
 
 __all__ = ["trace_wrapped"]
@@ -61,11 +62,7 @@ def _assert_meta(grad, size, stride, dtype):
 
 @_trace_wrapped_op.py_impl(ProxyTorchDispatchMode)
 def inner_trace(mode, *args, bw_state=None, **kwargs):
-    import torch
-
-    assert len(args) == 1
     grad = args[0]
-    assert isinstance(grad, torch.Tensor), grad
     proxy_kwargs = {}
     if bw_state is not None:
         assert isinstance(bw_state, BackwardState) and bw_state.proxy is not None
@@ -82,26 +79,8 @@ def inner_trace(mode, *args, bw_state=None, **kwargs):
         proxy_kwargs,
         name="trace_wrapped",
     )
-    grad = torch.zeros_like(grad)
-    grad = track_tensor_tree(grad, out_proxy, constant=None, tracer=mode.tracer)
 
-    # We have a little shortcut here, wherein we DO NOT yet run a meta func, and so
-    # we take on an assumption that input and output meta matches. As such, we must introduce
-    # a runtime assert
-    proxy_args = (
-        mode.tracer.unwrap_proxy(grad),
-        grad.size(),
-        grad.stride(),
-        grad.dtype,
-    )
-    out_proxy = mode.tracer.create_proxy(
-        "call_function",
-        _assert_meta,
-        proxy_args,
-        {},
-        name="assert",
-    )
-    grad = torch.empty_like(grad)
+    grad = tree_map_only(torch.Tensor, torch.zeros_like, grad)
     grad = track_tensor_tree(grad, out_proxy, constant=None, tracer=mode.tracer)
     return grad
 

@@ -65,8 +65,7 @@ class BackwardHigherOrderOpTests(torch._dynamo.test_case.TestCase):
 class _multiply_invoke(torch.nn.Module):
     def forward(self, grad_1: "f32[2]"):
         trace_wrapped: "f32[2]" = torch__dynamo__trace_wrapped_higher_order_op_self_invoke(grad_1);  grad_1 = None
-        assert_1: "f32[2]" = torch__dynamo__trace_wrapped_higher_order_op__assert_meta(trace_wrapped, (2,), (1,), torch.float32);  trace_wrapped = None
-        return assert_1
+        return trace_wrapped
 """,
         )
 
@@ -89,8 +88,7 @@ class _multiply_invoke(torch.nn.Module):
 class _multiply_invoke(torch.nn.Module):
     def forward(self, grad_1: "f32[2]"):
         trace_wrapped: "f32[2]" = torch__dynamo__trace_wrapped_higher_order_op_self_invoke(grad_1);  grad_1 = None
-        assert_1: "f32[2]" = torch__dynamo__trace_wrapped_higher_order_op__assert_meta(trace_wrapped, (2,), (1,), torch.float32);  trace_wrapped = None
-        return assert_1
+        return trace_wrapped
 """,
         )
 

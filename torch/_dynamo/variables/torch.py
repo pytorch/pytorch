@@ -8,10 +8,7 @@ import re
 from typing import Dict, List
 
 from torch._streambase import _StreamBase
-from ..._guards import TracingContext
-from ..codegen import PyCodegen
 from ..guards import install_guard
-from ..source import LocalSource
 
 try:
     import numpy as np
@@ -436,8 +433,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return ConstantVariable.create(
                 torch.backends.cudnn.is_acceptable(tensor_inp)
             )
-        elif self.value is torch.nn.Parameter:
-            return self.call_nn_parameter(*args, **kwargs)
         elif (
             self.value == torch.numel
             and len(args) == 1
@@ -745,49 +740,3 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             return variables.LambdaVariable(handle_ntuple)
         else:
             return handle_ntuple(args[0])
-
-    @staticmethod
-    def call_nn_parameter(data=None, requires_grad=True):
-        """A call to torch.nn.Parameter() gets lifted to before the graph"""
-        from ..symbolic_convert import InstructionTranslator
-        from .builder import VariableBuilder
-
-        if isinstance(requires_grad, variables.VariableTracker):
-            try:
-                requires_grad = requires_grad.as_python_constant()
-            except NotImplementedError:
-                unimplemented("Parameter(requires_grad=...) not constant")
-
-        if data is None:
-            unimplemented("Parameter(data=None) not implemented")
-
-        if data.source is None:
-            unimplemented("Parameter without source")
-
-        if data.python_type() is not torch.Tensor:
-            unimplemented(f"Parameter with tensor subclass: {data.python_type()}")
-
-        tx = InstructionTranslator.current_tx()
-        varname = tx.output.new_var()
-
-        # construct the nn.Parmeter before the graph save it to varname
-        cg = PyCodegen(tx)
-        cg.load_import_from("torch.nn", "Parameter")
-        cg(data.source)
-        cg(variables.ConstantVariable(requires_grad))
-        cg.call_function(2, True)
-        cg.store(varname)
-        tx.output.pregraph_bytecode.extend(cg.get_instructions())
-
-        # add the newly constructed nn.Parameter as a graph input
-        source = LocalSource(varname)
-        example_value = torch.nn.Parameter(
-            tx.output.example_value_from_input_node(data.as_proxy().node)
-        )
-        result = VariableBuilder(tx, source)(example_value)
-        # No need to guard on this since we already guarded on `data`.
-        # These guards would fail since varname doesn't exist until after the function starts
-        TracingContext.get().guards_context.dynamo_guards.remove_guards_with_source(
-            source
-        )
-        return result
