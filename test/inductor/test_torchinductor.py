@@ -3216,6 +3216,41 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 0)
 
+    def test_fractional_max_pool2d1(self):
+        random.seed(1234)
+        torch.manual_seed(1234)
+
+        def fn(x):
+            return torch.nn.functional.fractional_max_pool2d_with_indices(x, (3, 3), (6, 6))
+
+        self.common(fn, (torch.randn(2, 4, 16, 16), ), check_lowp=False)
+
+    @config.patch(fallback_random=True)
+    def test_fractional_max_pool2d2(self):
+        # fallback for larger kernel size
+        random.seed(1234)
+        torch.manual_seed(1234)
+
+        def fn(x):
+            return torch.nn.functional.fractional_max_pool2d_with_indices(x, (8, 8), (10, 10))
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(fn,
+            (torch.randn(2, 4, 36, 36), ),
+            check_lowp=False,
+        )
+        assertGeneratedKernelCountEqual(self, 0)
+
+    @config.patch(fallback_random=True)
+    def test_fractional_max_pool2d3(self):
+        random.seed(1234)
+        torch.manual_seed(1234)
+        def fn(x):
+            return torch.nn.functional.fractional_max_pool2d_with_indices(x, (1, 1), (16, 16))
+
+        self.common(fn, (torch.randn(2, 4, 16, 16),), check_lowp=False) 
+
+
     def test_multi_threading(self):
         model = torch.nn.Linear(2, 3).eval()
         inp = torch.randn(4, 2)
