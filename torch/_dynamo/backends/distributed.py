@@ -315,11 +315,12 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
 
             class FakifyGuard:
                 def __init__(self):
-                    assert torch._guards.TracingContext.try_get()
+                    self.tc = torch._guards.TracingContext.try_get()
+                    assert self.tc
                     torch._guards.TracingContext.try_get().fakify_first_call = True
 
                 def __del__(self):
-                    torch._guards.TracingContext.try_get().fakify_first_call = False
+                    self.tc.fakify_first_call = False
 
             # For aot_eager and other backends, tracing context is not set
             has_tracing_context = torch._guards.TracingContext.try_get() is not None

@@ -66,6 +66,21 @@ aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 aten = torch.ops.aten
 
 
+def _compute_output_meta_with_inductor_strides(fw_module, fwd_output_strides):
+    out = [n.meta["val"] for n in (list(fw_module.graph.nodes)[-1].args[0])]
+    # will only be set for inductor
+    if not fwd_output_strides:
+        return out
+    with TracingContext.get().fake_mode.shape_env.suppress_guards():
+        for i in range(len(out)):
+            if not isinstance(out[i], Tensor):
+                continue
+            if all(s1 == s2 for s1, s2 in zip(out[i].stride(), fwd_output_strides[i])):
+                continue
+            out[i] = out[i].as_strided(out[i].shape, fwd_output_strides[i])
+    return out
+
+
 def aot_dispatch_base(
     flat_fn,
     flat_args: List[Tensor],
@@ -79,6 +94,7 @@ def aot_dispatch_base(
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = torch._C._DisableAutocast if disable_amp else nullcontext
+    fakified_out = None
 
     with context(), track_graph_compiling(aot_config, "inference"):
         compiler = (
@@ -98,9 +114,15 @@ def aot_dispatch_base(
                 if maybe_subclass_meta is None
                 else maybe_subclass_meta.fw_metadata
             )
-        compiled_fw = compiler(fw_module, updated_flat_args)
 
-    # This boxed_call handling happens inside create_runtime_wrapper as well.
+        with TracingContext.report_output_strides() as fwd_output_strides:
+            compiled_fw = compiler(fw_module, updated_flat_args)
+
+        if tracing_context and tracing_context.fakify_first_call:
+            fakified_out = _compute_output_meta_with_inductor_strides(
+                fw_module, fwd_output_strides
+            )
+
     # However, create_runtime_wrapper does not expect the rng offsets in the
     # output. So, we have to create another wrapper and take out the offset. As
     # a result, we have to account for not boxed_call compilers as well.
@@ -140,6 +162,7 @@ def aot_dispatch_base(
         trace_joint=False,
         keep_input_mutations=aot_config.keep_inference_input_mutations,
         disable_amp=disable_amp,
+        fakified_first_outputs=fakified_out,
     )
 
     return compiled_fn
@@ -313,25 +336,9 @@ def aot_dispatch_autograd(
                 compiled_fw_func = make_boxed_func(compiled_fw_func)
 
             if tracing_context and tracing_context.fakify_first_call:
-                out = [n.meta["val"] for n in (list(fw_module.graph.nodes)[-1].args[0])]
-                # will only be set for inductor
-                if fwd_output_strides:
-                    with tracing_context.fake_mode.shape_env.suppress_guards():
-                        for i in range(len(out)):
-                            if not isinstance(out[i], Tensor):
-                                continue
-                            if all(
-                                s1 == s2
-                                for s1, s2 in zip(
-                                    out[i].stride(), fwd_output_strides[i]
-                                )
-                            ):
-                                continue
-                            out[i] = out[i].as_strided(
-                                out[i].shape, fwd_output_strides[i]
-                            )
-
-                fakified_out = out
+                fakified_out = _compute_output_meta_with_inductor_strides(
+                    fw_module, fwd_output_strides
+                )
                 fakify_first_call = True
 
             if maybe_subclass_meta is not None:
