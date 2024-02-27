@@ -620,6 +620,7 @@ class TracingContext:
 
         # If this true, Aot Autograd will return output Fake Tensors with appropiate
         # meta on the first invocation
+        # see note: [Returning Fake Tensors on First AOT Autograd Call]
         self.fakify_first_call = False
 
     def clear(self):

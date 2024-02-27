@@ -258,10 +258,11 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             ],
         )
 
-        return WrapperModule(
+        wrapper = WrapperModule(
             self.compiler(input_mod, args),
             unwrap_singleton_tuple,
         )
+        return wrapper
 
     # Note:
     #
@@ -312,6 +313,19 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             # be FakeTensors already since Dynamo would have made them FakeTensors in the
             # non-DDP flow.  However, the parameters are _not_ expected to be FakeTensors,
             # since this wrapping happens during compilation
+
+            # Note: Returning Fake Tensors on First AOT Autograd Call
+            #
+            # Inductor will optimize strides of outputs when it deems it profitable.
+            # For instance, converting to channels last. When we split the graph here
+            # into multiple inductor compilations, we need to make sure that the
+            # output strides of one compilation is appropriately passed to the subsequent
+            # compilations. However, the mapping from inductor output to dynamo output
+            # is non-trivial due to aot_autograd's deduping, de-aliasing, mutation, re-writing,
+            # subclass handling, etc. In order to replay all this logic we set a flag such that
+            # the first invocation of inductor in aot_autograd will return Fake Tensors with
+            # appropriate strides. Then, all of aot autograd's runtime logic is replayed.
+            # This gives us the appropriately strided outputs here which will reflect runtime strides.
 
             class FakifyGuard:
                 def __init__(self):

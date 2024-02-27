@@ -118,6 +118,7 @@ def aot_dispatch_base(
         with TracingContext.report_output_strides() as fwd_output_strides:
             compiled_fw = compiler(fw_module, updated_flat_args)
 
+        # see note: [Returning Fake Tensors on First AOT Autograd Call]
         if tracing_context and tracing_context.fakify_first_call:
             fakified_out = _compute_output_meta_with_inductor_strides(
                 fw_module, fwd_output_strides
@@ -335,6 +336,7 @@ def aot_dispatch_autograd(
             if not hasattr(compiled_fw_func, "_boxed_call"):
                 compiled_fw_func = make_boxed_func(compiled_fw_func)
 
+            # see note: [Returning Fake Tensors on First AOT Autograd Call]
             if tracing_context and tracing_context.fakify_first_call:
                 fakified_out = _compute_output_meta_with_inductor_strides(
                     fw_module, fwd_output_strides
@@ -479,6 +481,7 @@ def aot_dispatch_autograd(
                 )
             else:
                 nonlocal fakified_out
+                assert fakified_out is not None
                 CompiledFunction._fakify_first_call = False
                 fw_outs = fakified_out
                 fakified_out = None
