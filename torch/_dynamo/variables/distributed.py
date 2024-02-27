@@ -53,6 +53,7 @@ def is_constant_pg_functions(value):
         _get_group_size_by_name,
         _get_group_tag,
         _rank_not_in_group,
+        _resolve_group_name_by_ranks_and_tag,
         get_process_group_ranks,
     )
 
@@ -61,6 +62,7 @@ def is_constant_pg_functions(value):
         _get_group_tag,
         _rank_not_in_group,
         get_process_group_ranks,
+        _resolve_group_name_by_ranks_and_tag,
     ]
 
     return inspect.isfunction(value) and value in constant_processgroup_functions
@@ -235,6 +237,8 @@ class ProcessGroupVariable(DistributedVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx, name):
+        if name == "group_name":
+            return variables.ConstantVariable.create(self.value.group_name)
         if name in ["rank", "size"]:
             return variables.LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
