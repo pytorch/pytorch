@@ -1906,9 +1906,6 @@ class DictGuardManager : public GuardManager {
     if (_tag == tag) {
       // Fast path for the common case.
       return true;
-    } else {
-      // update the tag and then fallback to the slow path.
-      _tag = tag;
     }
 
     if (PyDict_Size(obj) != _size) {
@@ -1936,6 +1933,9 @@ class DictGuardManager : public GuardManager {
       }
       dict_pointer += 1;
     }
+
+    // update the tag so that we can use the fast path next time.
+    _tag = tag;
     return true;
   }
 
