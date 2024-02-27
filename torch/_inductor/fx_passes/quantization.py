@@ -150,39 +150,28 @@ def get_dequantize_qconv_pt2e_pattern(users=1):
     )
 
 
-qlinear_pt2e_pattern = CallFunction(
-    torch.ops.onednn.qlinear_pointwise.default,
-    KeywordArg("x"),
-    KeywordArg("x_scale"),
-    KeywordArg("x_zp"),
-    KeywordArg("packed_weight"),
-    KeywordArg("w_scale"),
-    KeywordArg("w_zp"),
-    KeywordArg("b"),
-    KeywordArg("output_scale"),
-    KeywordArg("output_zero_point"),
-    KeywordArg("output_dtype"),
-    KeywordArg("postop_name"),
-    KeywordArg("postop_args"),
-    KeywordArg("postop_algorithm"),
-)
-
-qlinear_tensor_pt2e_pattern = CallFunction(
-    torch.ops.onednn.qlinear_pointwise.tensor,
-    KeywordArg("x"),
-    KeywordArg("x_scale"),
-    KeywordArg("x_zp"),
-    KeywordArg("packed_weight"),
-    KeywordArg("w_scale"),
-    KeywordArg("w_zp"),
-    KeywordArg("b"),
-    KeywordArg("output_scale"),
-    KeywordArg("output_zero_point"),
-    KeywordArg("output_dtype"),
-    KeywordArg("postop_name"),
-    KeywordArg("postop_args"),
-    KeywordArg("postop_algorithm"),
-)
+def get_qlinear_pt2e_pattern(x_scale_zp_are_tensors):
+    qlinear_op = (
+        torch.ops.onednn.qlinear_pointwise.tensor
+        if x_scale_zp_are_tensors
+        else torch.ops.onednn.qlinear_pointwise.default
+    )
+    return CallFunction(
+        qlinear_op,
+        KeywordArg("x"),
+        KeywordArg("x_scale"),
+        KeywordArg("x_zp"),
+        KeywordArg("packed_weight"),
+        KeywordArg("w_scale"),
+        KeywordArg("w_zp"),
+        KeywordArg("b"),
+        KeywordArg("output_scale"),
+        KeywordArg("output_zero_point"),
+        KeywordArg("output_dtype"),
+        KeywordArg("postop_name"),
+        KeywordArg("postop_args"),
+        KeywordArg("postop_algorithm"),
+    )
 
 
 dequantize_accum_pattern = CallFunction(
@@ -688,7 +677,8 @@ def _register_quantization_unary_fusion():
             )
 
         # QLinear
-        for qlinear_pattern in (qlinear_pt2e_pattern, qlinear_tensor_pt2e_pattern):
+        for x_scale_zp_are_tensors in (False, True):
+            qlinear_pattern = get_qlinear_pt2e_pattern(x_scale_zp_are_tensors)
             # Priority 1 to match: QLinear Unary pattern with int8 output
             linear_unary_replace_patterns = {
                 UnaryAttr("none", [], ""): generate_pattern_with_output_quant(

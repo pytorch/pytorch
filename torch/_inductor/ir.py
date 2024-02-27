@@ -6426,28 +6426,16 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             ),
         )
         self.cpp_kernel_key = "qlinear_pointwise"
-        self.cpp_op_schema = (
-            """
-            at::Tensor(
-                at::Tensor act,
-                at::Tensor act_scale,
-                at::Tensor act_zero_point,
-                at::Tensor weight,
-                at::Tensor weight_scales,
-                at::Tensor weight_zero_points,
-                c10::optional<at::Tensor> bias,
-                double inv_output_scale,
-                int64_t output_zero_point,
-                c10::optional<c10::ScalarType> output_dtype,
-                std::string post_op_name,
-                torch::List<c10::optional<at::Scalar>> post_op_args,
-                std::string post_op_algorithm)"""
+        x_scale_type_str, x_zp_type_str = (
+            ("at::Tensor", "at::Tensor")
             if x_scale_zp_are_tensors
-            else """
+            else ("double", "int64_t")
+        )
+        self.cpp_op_schema = f"""
             at::Tensor(
                 at::Tensor act,
-                double act_scale,
-                int64_t act_zero_point,
+                {x_scale_type_str} act_scale,
+                {x_zp_type_str} act_zero_point,
                 at::Tensor weight,
                 at::Tensor weight_scales,
                 at::Tensor weight_zero_points,
@@ -6458,7 +6446,6 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
                 std::string post_op_name,
                 torch::List<c10::optional<at::Scalar>> post_op_args,
                 std::string post_op_algorithm)"""
-        )
 
     def codegen(self, wrapper):
         # Parser the inputs and constant
