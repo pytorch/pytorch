@@ -80,6 +80,7 @@ select = [
     "SIM1",
     "W",
     # Not included in flake8
+    "LOG",
     "NPY",
     "PERF",
     "PGH004",

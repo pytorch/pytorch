@@ -873,11 +873,12 @@ class DummyPrivateUse1Module:
 
 class TestExtensionUtils(TestCase):
     def tearDown(self):
-        # Clean up from test_external_module_register
-        if hasattr(torch, "xpu"):
-            delattr(torch, "xpu")
-        if "torch.xpu" in sys.modules:
-            del sys.modules["torch.xpu"]
+        # Clean up
+        backend_name = torch._C._get_privateuse1_backend_name()
+        if hasattr(torch, backend_name):
+            delattr(torch, backend_name)
+        if f"torch.{backend_name}" in sys.modules:
+            del sys.modules[f"torch.{backend_name}"]
 
     def test_external_module_register(self):
         # Built-in module
@@ -899,7 +900,7 @@ class TestExtensionUtils(TestCase):
         with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
             torch._register_device_module('privateuseone', DummyPrivateUse1Module)
 
-    def test_external_module_and_backend_register(self):
+    def test_external_module_register_with_renamed_backend(self):
         torch.utils.rename_privateuse1_backend('foo')
         with self.assertRaisesRegex(RuntimeError, "has already been set"):
             torch.utils.rename_privateuse1_backend('dummmy')
@@ -1016,6 +1017,22 @@ class TestDeviceUtils(TestCase):
                 tree_all_only(torch.Tensor, lambda x: x.device.type == 'meta', r)
             )
 
+    def test_int16_device_index(self):
+        # Test if index does not wrap around when larger than int8
+        large_index = 500
+        x = torch.device('meta', large_index)
+        self.assertEqual(x.index, large_index)
+
+    def test_raise_on_device_index_out_of_bounds(self):
+        # Tests if an error is raised when the device index is out of bounds
+        index_larger_than_max = 100000
+        error_msg_regex = "^Device index must be.*"
+        # Explicit index
+        with self.assertRaisesRegex(RuntimeError, error_msg_regex):
+            x = torch.device('meta', index=index_larger_than_max)
+        # Index in device string
+        with self.assertRaisesRegex(RuntimeError, error_msg_regex):
+            x = torch.device(f'meta:{index_larger_than_max}')
 
 instantiate_device_type_tests(TestDeviceUtils, globals())
 
