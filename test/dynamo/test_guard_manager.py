@@ -536,6 +536,19 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         del x
         self.assertFalse(guard_manager.check(None))
 
+    def test_lambda_manager(self):
+        a = (1, 1, 3, 4, 5, 6)
+
+        guard_manager = RootGuardManager()
+
+        # Check that we can use the same accessor
+        foo_mgr = guard_manager.lambda_manager(lambda x: x[2], None)
+        foo_mgr.add_lambda_guard(
+            lambda x: x == 3,
+            "Expected value 3",
+        )
+        self.assertTrue(guard_manager.check(a))
+
     def test_dict_contains_guard(self):
         foo = {"a": 1, "b": 2}
         guard = guards.DICT_CONTAINS(True, "a", ["has a"])
