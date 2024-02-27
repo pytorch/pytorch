@@ -268,8 +268,19 @@ class PyCodegen:
             self.code_options["co_names"] += (name,)
         return create_instruction("LOAD_ATTR", argval=name)
 
+    def load_attr(self, name):
+        self.append_output(self.create_load_attr(name))
+
     def create_load_attrs(self, names):
         return [self.create_load_attr(name) for name in names.split(".")]
+
+    def create_store_attr(self, name) -> Instruction:
+        if name not in self.code_options["co_names"]:
+            self.code_options["co_names"] += (name,)
+        return create_instruction("STORE_ATTR", argval=name)
+
+    def store_attr(self, name):
+        self.append_output(self.create_store_attr(name))
 
     def load_function_name(self, fn_name, push_null, num_on_stack=0):
         """Load the global fn_name on the stack num_on_stack down"""

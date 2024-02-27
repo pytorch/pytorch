@@ -121,6 +121,7 @@ manual_torch_name_rule_map = {
     # https://github.com/pytorch/pytorch/issues/93501
     "torch.nn.utils.rnn.pack_padded_sequence": SkipFunctionVariable,
     "torch.nn.Parameter": TorchInGraphFunctionVariable,
+    "torch.utils.hooks.BackwardHook": TorchInGraphFunctionVariable,
     "torch._nested_tensor_from_mask": SkipFunctionVariable,
     "torch._nested_from_padded": SkipFunctionVariable,
     # symbol operators implemented in Python
@@ -1604,7 +1605,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cross",
         "torch.crow_indices_copy",
         "torch.ctc_loss",
-        "torch.cuda._get_device_properties",
         "torch.cudnn_affine_grid_generator",
         "torch.cudnn_batch_norm",
         "torch.cudnn_convolution_add_relu",
@@ -1897,6 +1897,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.positive",
         "torch.pow",
         "torch.prelu",
+        "torch._print",
         "torch.prod",
         "torch.promote_types",
         "torch.put",
@@ -3187,6 +3188,7 @@ MOD_INLINELIST = {
     "torch.utils._contextlib",
     "torch.utils._foreach_utils",
     "torch.utils._pytree",
+    "torch.utils.hooks",
     "torch._tensor",
     "torch._higher_order_ops.strict_mode",
     "torch._higher_order_ops.while_loop",

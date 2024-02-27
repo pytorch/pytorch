@@ -436,8 +436,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return ConstantVariable.create(
                 torch.backends.cudnn.is_acceptable(tensor_inp)
             )
+        elif self.value is torch.utils.hooks.BackwardHook:
+            return variables.BackwardHookVariable.create(tx, *args, **kwargs)
         elif self.value is torch.nn.Parameter:
-            return self.call_nn_parameter(*args, **kwargs)
+            return self.call_nn_parameter(tx, *args, **kwargs)
         elif (
             self.value == torch.numel
             and len(args) == 1
@@ -694,18 +696,18 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                             unimplemented("out variants with resizing on graph inputs")
                 elif isinstance(tensor_variable, TensorVariable):
                     assert isinstance(kwargs["out"], TensorVariable)
+                    assert "example_value" in kwargs["out"].proxy.node.meta
+                    fake_tensor = tensor_variable.proxy.node.meta["example_value"]
+                    fake_out = kwargs["out"].proxy.node.meta["example_value"]
                     if (
                         kwargs["out"].source
                         and kwargs["out"] in tx.output.graphargs
-                        and kwargs["out"].size != tensor_variable.size
+                        and fake_out.shape != fake_tensor.shape
                     ):
                         # It's hard to get out variants with resizing on graph inputs work
                         # properly across dynamo/aot/inductor, just fall back.
                         unimplemented("out variants with resizing on graph inputs")
-                    assert "example_value" in kwargs["out"].proxy.node.meta
-                    if not torch._prims_common.is_contiguous(
-                        kwargs["out"].proxy.node.meta["example_value"]
-                    ):
+                    if not torch._prims_common.is_contiguous(fake_out):
                         # It's difficult to handle strides correctly in functionalization
                         # when calling an out= op with a non-contiguous out argument
                         unimplemented(
@@ -747,10 +749,9 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             return handle_ntuple(args[0])
 
     @staticmethod
-    def call_nn_parameter(data=None, requires_grad=True):
+    def call_nn_parameter(tx, data=None, requires_grad=True):
         """A call to torch.nn.Parameter() gets lifted to before the graph"""
-        from ..symbolic_convert import InstructionTranslator
-        from .builder import VariableBuilder
+        from .builder import VariableBuilder, wrap_fx_proxy_cls
 
         if isinstance(requires_grad, variables.VariableTracker):
             try:
@@ -761,13 +762,27 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         if data is None:
             unimplemented("Parameter(data=None) not implemented")
 
-        if data.source is None:
-            unimplemented("Parameter without source")
-
         if data.python_type() is not torch.Tensor:
             unimplemented(f"Parameter with tensor subclass: {data.python_type()}")
 
-        tx = InstructionTranslator.current_tx()
+        if data.source is None:
+            # lifting params to inputs (handled at the end) is a bit more
+            # robust, since in the source=None case functionalization can
+            # change aliasing relationships.  But here we have no choice,
+            # so we put it in the graph.
+            def fake_param_call(x):
+                t = x.detach().requires_grad_(requires_grad)
+                t._is_param = True
+                return t
+
+            return wrap_fx_proxy_cls(
+                target_cls=variables.TensorVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function", fake_param_call, (data.as_proxy(),), {}
+                ),
+            )
+
         varname = tx.output.new_var()
 
         # construct the nn.Parmeter before the graph save it to varname

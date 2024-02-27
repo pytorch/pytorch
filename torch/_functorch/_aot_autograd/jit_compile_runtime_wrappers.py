@@ -13,7 +13,6 @@ from functools import wraps
 from typing import Any, List, Optional
 
 import torch
-import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dynamo.utils import lazy_format_graph_code
@@ -21,6 +20,7 @@ from torch._guards import detect_fake_mode, tracing, TracingContext
 from torch._logging import getArtifactLogger
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
+from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
 from .. import config
@@ -158,10 +158,6 @@ def aot_dispatch_autograd(
     )
 
     # Copied from aot_dispatch_autograd_graph.
-    traced_tangents = pytree.tree_map(
-        lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
-        fw_metadata.traced_tangents,
-    )
     disable_amp = torch._C._is_any_autocast_enabled()
 
     if aot_config.enable_log:
@@ -407,6 +403,11 @@ def aot_dispatch_autograd(
 
     saved_context = TracingContext.try_get()
 
+    backward_state_indices = [
+        idx for idx, x in enumerate(flat_args) if isinstance(x, BackwardState)
+    ]
+    assert len(backward_state_indices) <= 1
+
     class CompiledFunction(torch.autograd.Function):
         compiled_fw = compiled_fw_func
         compiled_bw = compiled_bw_func
@@ -422,6 +423,10 @@ def aot_dispatch_autograd(
         @staticmethod
         def forward(ctx, *deduped_flat_tensor_args):
             args = deduped_flat_tensor_args
+            if backward_state_indices:
+                bw_state = args[backward_state_indices[0]]
+                assert isinstance(bw_state, BackwardState)
+                ctx._compiled_autograd_backward_state = bw_state
 
             marked_dirty_inps = []
             for i in fw_metadata.mutated_graph_handled_indices_seen_by_autograd:
@@ -445,8 +450,6 @@ def aot_dispatch_autograd(
 
             num_outputs = CompiledFunction.metadata.num_outputs
             num_outputs_aliased = CompiledFunction.metadata.num_outputs_aliased
-            num_intermediate_bases = CompiledFunction.metadata.num_intermediate_bases
-            num_symints_saved_for_bw = CompiledFunction.num_symints_saved_for_bw
             num_mutated_runtime_inps = (
                 CompiledFunction.metadata.num_mutated_inp_runtime_indices
             )
@@ -730,6 +733,9 @@ Got grad_output types: {str(grad_output_types)}"""
                     symints = ctx._get_compiled_autograd_symints()
                     assert len(symints) == len(ctx.symints)
                     all_args[: len(symints)] = symints
+                    if backward_state_indices:
+                        assert ctx._compiled_autograd_backward_state.proxy is not None
+                        all_args.append(ctx._compiled_autograd_backward_state)
                     context = torch._C._DisableAutocast if disable_amp else nullcontext
                     with context():
                         out = normalize_as_list(bw_module(*all_args))
@@ -737,6 +743,9 @@ Got grad_output types: {str(grad_output_types)}"""
                         CompiledFunction.metadata, out
                     )
                     return tuple(out)
+                assert (
+                    not backward_state_indices
+                ), "BackwardState requires CompiledAutograd"
                 ctx.maybe_clear_saved_tensors()
                 if CompiledFunction.compiled_bw is None:
                     context = torch._C._DisableAutocast if disable_amp else nullcontext

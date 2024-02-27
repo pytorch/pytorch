@@ -9,6 +9,8 @@ from torch._C._dynamo import guards
 from torch.testing._internal.common_utils import set_default_dtype
 
 RootGuardManager = guards.RootGuardManager
+DictGuardManager = guards.DictGuardManager
+KeyValueDictGuardManager = guards.KeyValueDictGuardManager
 GetAttrGuardAccessor = guards.GetAttrGuardAccessor
 GetItemGuardAccessor = guards.GetItemGuardAccessor
 TypeGuardAccessor = guards.TypeGuardAccessor
@@ -179,6 +181,23 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(guard(foo))
         self.assertFalse(guard([]))
 
+    def test_no_hasattr_guard(self):
+        class Bar:
+            def __init__(self):
+                self.bar = 2
+
+        bar = Bar()
+
+        class Foo:
+            def __init__(self):
+                self.foo = 2
+
+        foo = Foo()
+
+        guard = guards.NO_HASATTR("foo", ["hasattr(x, 'foo') == False"])
+        self.assertTrue(guard(bar))
+        self.assertFalse(guard(foo))
+
     def test_tensor_aliasing_guard(self):
         guard_manager = RootGuardManager()
 
@@ -211,6 +230,17 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(guard_manager.check(f_locals))
 
         self.assertFalse(guard_manager.check(f_locals_unaliased))
+
+    def test_dict_version_guard(self):
+        foo = {"a": 1, "b": 2}
+        guard = guards.DICT_VERSION(foo, ["x.version == foo.version"])
+
+        self.assertTrue(guard(foo))
+        self.assertFalse(guard(dict(foo)))
+        foo["a"] = 2
+        self.assertFalse(guard(foo))
+        self.assertFalse(guard({"a": 1, "b": 2}))
+        self.assertFalse(guard({}))
 
     def test_dynamic_indices_guard(self):
         guard1 = guards.DYNAMIC_INDICES(False, set(), ["x.size(0) == y.size(0)"])
@@ -302,6 +332,15 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         )
         self.assertFalse(guard_manager.check(f_locals_unaliased))
         self.assertFalse(guard_manager.check_verbose(f_locals_unaliased).result)
+
+    def test_weakref_alive_guard(self):
+        x = torch.rand(3, 4)
+        weakref_x = weakref.ref(x)
+
+        guard = guards.WEAKREF_ALIVE(["weakref_x is not None"])
+        self.assertTrue(guard(weakref_x()))
+        del x
+        self.assertFalse(guard(weakref_x()))
 
     def test_guard_manager_leaf_guard(self):
         guard_manager = RootGuardManager()
@@ -489,6 +528,84 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         global x
         del x
         self.assertFalse(guard_manager.check(None))
+
+    def test_dict_guard_manager(self):
+        root = RootGuardManager()
+
+        def nothing():
+            pass
+
+        f_locals = {
+            "d": {"a": 1, nothing: {"z": 3}, 100: torch.randn(4)},
+        }
+
+        # its a getitem_manager just for f_locals. But the child guard manager
+        # should be a DictGuardManager.
+        dict_mgr = root.getitem_manager("d", f_locals["d"])
+        self.assertTrue(isinstance(dict_mgr, DictGuardManager))
+
+        self.assertTrue(root.check(f_locals))
+
+        # Check that no one can add a leaf guard
+        with self.assertRaises(RuntimeError):
+            dict_mgr.add_length_check_guard(3, "len check")
+
+        # Check that no one can add an arbitrary accessor
+        with self.assertRaises(RuntimeError):
+            dict_mgr.getitem_manager("a", f_locals["d"]["a"])
+
+        # Check that it fails with different length dict
+        f_locals_prime = {
+            "d": {"a": 1, "b": 2},
+        }
+        self.assertFalse(root.check(f_locals_prime))
+
+        # Add key-value manager ("a" : 1)
+        mgr0 = dict_mgr.get_key_value_manager(0)
+        self.assertTrue(root.check(f_locals))
+        mgr0.get_key_manager("a").add_equals_match_guard("a", ["dict.keys()[0] == a"])
+        self.assertTrue(root.check(f_locals))
+        mgr0.get_value_manager(1).add_equals_match_guard(1, ["d[0] == 1"])
+        self.assertTrue(root.check(f_locals))
+
+        # Check that we can't add a guard to a key-value manager
+        with self.assertRaises(RuntimeError):
+            mgr0.add_length_check_guard(2, "len check")
+
+        # Check that we can't add an accessor to the key-value manager
+        with self.assertRaises(RuntimeError):
+            mgr0.getitem_manager("a", f_locals["d"]["a"])
+
+        # Add key-value manager (nothing : {"z" : 3})
+        mgr1 = dict_mgr.get_key_value_manager(1)
+        self.assertTrue(root.check(f_locals))
+        mgr1.get_key_manager(nothing).add_lambda_guard(
+            lambda x: x is nothing, ["x is nothing"]
+        )
+        self.assertTrue(root.check(f_locals))
+        value_mgr = mgr1.get_value_manager(f_locals["d"][nothing])
+        self.assertTrue(isinstance(value_mgr, DictGuardManager))
+        self.assertTrue(root.check(f_locals))
+
+        # Check structure
+        # Check that we are only guarding on two keys. This is common in
+        # LazyVariableTracker.
+        self.assertEqual(len(dict_mgr.get_child_managers()), 2)
+        self.assertTrue(isinstance(mgr0, KeyValueDictGuardManager))
+        self.assertTrue(isinstance(mgr1, KeyValueDictGuardManager))
+        self.assertEqual(len(mgr0.get_child_managers()), 2)
+        self.assertEqual(len(mgr1.get_child_managers()), 2)
+
+        f_locals["d"]["a"] = 2
+        self.assertFalse(root.check(f_locals))
+        self.assertFalse(root.check_verbose(f_locals).result)
+
+        f_locals["d"]["a"] = 1
+        self.assertTrue(root.check(f_locals))
+
+        f_locals["d"].pop(100)
+        # fails because of len check
+        self.assertFalse(root.check(f_locals))
 
 
 if __name__ == "__main__":
