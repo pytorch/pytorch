@@ -92,8 +92,8 @@ class TensorParallelTest(DTensorTestBase):
         self.assert_has_c10d_ops(
             tp_exported_program.graph_module,
             {
-                "_c10d_functional.all_gather_into_tensor.default": 1,
-                "_c10d_functional.wait_tensor.default": 1,
+                "c10d_functional.all_gather_into_tensor.default": 1,
+                "c10d_functional.wait_tensor.default": 1,
             },
         )
 
@@ -131,8 +131,8 @@ class TensorParallelTest(DTensorTestBase):
         self.assert_has_c10d_ops(
             tp_exported_program.graph_module,
             {
-                "_c10d_functional.all_reduce.default": 2,
-                "_c10d_functional.wait_tensor.default": 2,
+                "c10d_functional.all_reduce.default": 2,
+                "c10d_functional.wait_tensor.default": 2,
             },
         )
 
@@ -167,8 +167,8 @@ class TensorParallelTest(DTensorTestBase):
         self.assert_has_c10d_ops(
             tp_exported_program.graph_module,
             {
-                "_c10d_functional.all_reduce.default": 1,
-                "_c10d_functional.wait_tensor.default": 1,
+                "c10d_functional.all_reduce.default": 1,
+                "c10d_functional.wait_tensor.default": 1,
             },
         )
 
