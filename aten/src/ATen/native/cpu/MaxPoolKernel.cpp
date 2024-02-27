@@ -179,8 +179,7 @@ compute_internal(
         for (; d2 < len; d2 += Vec::size()) {
           iVec index_ivec = iVec(id * input_height * input_width + ih * input_width + iw);
           Vec val_bvec = Vec::loadu(in + d2);
-          fVec val_fvec0, val_fvec1;
-          std::tie(val_fvec0, val_fvec1) = convert_to_float<scalar_t>(val_bvec);
+          auto [val_fvec0, val_fvec1] = convert_to_float<scalar_t>(val_bvec);
 
           iVec maxindex_ivec0 = iVec::loadu(index_ptr + d2);
           iVec maxindex_ivec1 = iVec::loadu(index_ptr + d2 + iVec::size());
