@@ -335,7 +335,7 @@ TORCH_API inline void TensorBackendMetaRegistry(
   const auto& DeviceTypeAllowlist = GetBackendMetaAllowlist();
   TORCH_CHECK(
       DeviceTypeAllowlist.find(t) != DeviceTypeAllowlist.end(),
-      "Registering the serialization method of backendMeta data "
+      "Registering the serialization method of backendMeta data ",
       "is allowed only for PrivateUse1. ",
       "If you have related serialization requirements, ",
       "please expand the allowlist");
