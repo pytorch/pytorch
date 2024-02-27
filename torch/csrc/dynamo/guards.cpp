@@ -1939,6 +1939,16 @@ class DictGuardManager : public GuardManager {
     return true;
   }
 
+  void skip_adding_guard(py::object a, py::object b) {
+    // The `add_leaf_guard` method in `DictGuardManager` is overridden to block
+    // the addition of leaf guards. However, this is too strict. Python side of
+    // guard management frequently adds TYPE_MATCH and DICT_LENGTH on
+    // DictGuardManager. We could refactor Python side to never call these
+    // guards on dict objects, but that results in messy code. Instead, we just
+    // override these two guards to not go through add_leaf_guard code path and
+    // skip adding guards. This makes the python side easy.
+  }
+
   virtual GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
     if (!PyDict_Check(obj)) {
@@ -2951,7 +2961,9 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "get_key_value_manager",
           &DictGuardManager::get_key_value_manager,
-          py::return_value_policy::reference);
+          py::return_value_policy::reference)
+      .def("add_type_match_guard", &DictGuardManager::skip_adding_guard)
+      .def("add_length_check_guard", &DictGuardManager::skip_adding_guard);
 
   // Dict key value guard Manager
   py::class_<
