@@ -562,6 +562,7 @@ class TritonTemplate(KernelTemplate):
             extra_args=extra_args,
             num_stages=num_stages,
             num_warps=num_warps,
+            matrix_instr_nonkdim=kwargs.get("matrix_instr_nonkdim", 0),
             input_tensor_meta=TensorMeta.from_irnodes(input_nodes),
             output_tensor_meta=TensorMeta.from_irnodes(layout),
         )
