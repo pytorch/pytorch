@@ -221,7 +221,9 @@ def _recursive_fake_tensor_prop(gm, inputs, force_allow_non_fake_inputs=False):
     for subgraph_name, input_nodes in _get_subgraphs_names_and_input_nodes(gm):
         subgraph = getattr(gm, subgraph_name)
         subgraph_inputs = [n.meta["val"] for n in input_nodes]
-        _recursive_fake_tensor_prop(subgraph, subgraph_inputs, False)
+        _recursive_fake_tensor_prop(
+            subgraph, subgraph_inputs, force_allow_non_fake_inputs
+        )
 
 
 def _recursive_pre_grad_passes(gm, example_inputs):
@@ -1211,7 +1213,12 @@ def compile_fx(
         # potentially nested subgraphs to be able to apply the
         # pre_grad passes recursively to those nested subgraphs
         # (as the latter requires example inputs per subgraph)
-        _recursive_fake_tensor_prop(model_, example_inputs_, True)
+        fake_mode = detect_fake_mode(example_inputs_)
+        fake_inputs = pytree.tree_map(
+            lambda t: fake_mode.from_tensor(t) if isinstance(t, torch.Tensor) else t,
+            example_inputs_,
+        )
+        _recursive_fake_tensor_prop(model_, fake_inputs, True)
         model_ = _recursive_pre_grad_passes(model_, example_inputs_)
         optimus_scuba_log["inductor_pre_grad"] = counters["inductor"]
         signpost_event(
