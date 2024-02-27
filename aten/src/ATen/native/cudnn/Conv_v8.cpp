@@ -850,13 +850,19 @@ void try_plans(
       benchmark_cache.update(key, plan);
       return;
     } catch (cudnn_frontend::cudnnException& e) {
+      TORCH_WARN("Plan failed with a cudnnException: ", e.what());
     } catch (CuDNNError& e) {
+      TORCH_WARN("Plan failed with a CuDNNError: ", e.what());
     } catch (c10::OutOfMemoryError& e) {
       (void)cudaGetLastError(); // clear CUDA error
+      TORCH_WARN("Plan failed with an OutOfMemoryError: ", e.what());
     }
   }
   TORCH_CHECK(
-      false, "FIND was unable to find an engine to execute this computation");
+      false,
+      "FIND was unable to find an engine to execute this computation after trying ",
+      plans.size(),
+      " plans.");
 }
 
 void try_plans_fused(
@@ -874,13 +880,19 @@ void try_plans_fused(
       benchmark_cache_fused.update(key, plan);
       return;
     } catch (cudnn_frontend::cudnnException& e) {
+      TORCH_WARN("Plan failed with a cudnnException: ", e.what());
     } catch (CuDNNError& e) {
+      TORCH_WARN("Plan failed with a CuDNNError: ", e.what());
     } catch (c10::OutOfMemoryError& e) {
       (void)cudaGetLastError(); // clear CUDA error
+      TORCH_WARN("Plan failed with an OutOfMemoryError: ", e.what());
     }
   }
   TORCH_CHECK(
-      false, "FIND was unable to find an engine to execute this computation");
+      false,
+      "FIND was unable to find an engine to execute this computation after trying ",
+      plans.size(),
+      " plans.");
 }
 
 bool try_configs(
