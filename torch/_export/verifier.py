@@ -202,28 +202,20 @@ class Verifier(metaclass=_VerifierMeta):
 
             TODO(pianpwk): make this a consistent node-level check once nn_module_stack is populated for cond submodules.
             '''
-            # Check top-level graph
-            for node in graph_module.graph.nodes:
-                if node.op in ['call_module', 'call_method', 'call_function', 'get_attr']:
-                    if node.meta.get('nn_module_stack', None) is None:
-                        raise SpecViolationError(
-                            f"Node {node} of type {node.op} is missing nn_module_stack metadata"
-                        )
-                else:  # placeholder, output
-                    if node.meta.get('nn_module_stack', None):
-                        raise SpecViolationError(
-                            f"Node {node} of type {node.op} contains nn_module_stack metadata, this should be None"
-                        )
-
-            # Check submodule graphs
+            # Check top-level graph for all nodes, submodule graphs for placeholder & output nodes
             for i, mod in enumerate(graph_module.modules()):
-                if i == 0:
-                    continue
                 for node in mod.graph.nodes:
-                    if node.op in ['placeholder', 'output'] and node.meta.get('nn_module_stack', None):
-                        raise SpecViolationError(
-                            f"Node {node} of type {node.op} contains nn_module_stack metadata, this should be None"
-                        )
+                    if i == 0:
+                        if node.op in ['call_module', 'call_method', 'call_function', 'get_attr']:
+                            if node.meta.get('nn_module_stack', None) is None:
+                                raise SpecViolationError(
+                                    f"Node {node} of type {node.op} is missing nn_module_stack metadata"
+                                )
+                    else:  # placeholder, output
+                        if node.meta.get('nn_module_stack', None):
+                            raise SpecViolationError(
+                                f"Node {node} of type {node.op} contains nn_module_stack metadata, this should be None"
+                            )
 
         for mod in gm.modules():
             if not isinstance(mod, torch.fx.GraphModule):

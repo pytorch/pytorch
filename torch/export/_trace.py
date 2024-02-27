@@ -385,8 +385,7 @@ def _export_non_strict(
     for mod in gm.modules():
         for node in mod.graph.nodes:
             if node.op in ["placeholder", "output"]:
-                if "nn_module_stack" in node.meta:
-                    del node.meta["nn_module_stack"]
+                node.meta.pop("nn_module_stack", None)
 
     if pre_dispatch:
         from torch._export.passes.replace_set_grad_with_hop_pass import (
@@ -816,7 +815,7 @@ def _export(
                     attr, static_shapes=True
                 )
 
-    # When aot_export lifts the params, we lose various metadata (e.g. source_fn_stack, stack_trace)
+    # When aot_export lifts the params, we lose metadata (e.g. source_fn_stack, stack_trace)
     # from the param nodes as they are treated as fresh inputs
     # Therefore, we manually extract them before calling into aot_export
     params_buffers_to_node_meta = {}
@@ -887,10 +886,9 @@ def _export(
     export_graph_signature = ep_non_strict.sig
     constants = ep_non_strict.constants
 
-    # Withhold nn_module_stack metadata from params/buffers, since these are not well-defined
+    # Don't copy over nn_module_stack metadata for params/buffers nodes from Dynamo-exported graph
     for metadata in params_buffers_to_node_meta.values():
-        if "nn_module_stack" in metadata:
-            del metadata["nn_module_stack"]
+        metadata.pop("nn_module_stack", None)
 
     # After aot_export, set the param/buffer metadata back into placeholders
     # Technically, users can still construct this data from param names
