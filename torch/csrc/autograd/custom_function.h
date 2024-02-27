@@ -97,6 +97,11 @@ struct TORCH_API Function {
   template <typename X = T, typename... Args>
   static auto apply(Args&&... args)
       -> std::enable_if_t<std::is_same_v<X, T>, forward_t<X, Args...>>;
+
+  // Flag overriden by user to enable compiled autograd tracing for custom function <T>.
+  // To set this flag to true, you need to ensure that all operations within <T> happen on tensors,
+  // and that there are no side effects.
+  static constexpr bool is_traceable = false;
 };
 
 /// Context to save information during `forward` that can be accessed in
@@ -186,6 +191,22 @@ struct CppNode : public Node {
 
   void set_ctx_grad_fn(const std::shared_ptr<Node>& node);
   void save_variables_to_ctx();
+
+  void compiled_args(CompiledNodeArgs& args) override {
+    // TODO: collect key
+  }
+
+  variable_list apply_with_saved(
+      const variable_list& inputs,
+      SwapSavedVariables& saved) override {
+    if (!T::is_traceable) {
+      throw std::runtime_error(
+          std::string("apply_with_saved not implemented for non-traceable node: ") + name());
+    }
+
+    // TODO: swap
+    return apply(inputs);
+  }
 };
 
 struct ExtractVariables : IterArgs<ExtractVariables> {

@@ -301,10 +301,10 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
     throw_python_error();
   TORCH_CHECK(
       PyTuple_CheckExact(pykey.get()),
-      "_compiled_autograd_key shoud return tuple of ints");
+      "_compiled_autograd_key should return tuple of ints");
   auto size = PyTuple_GET_SIZE(pykey.get());
   TORCH_INTERNAL_ASSERT(size > 0);
-  // first value is unique ID of the AotAutograd graph
+  // first value is unique id managed by AUTOGRAD_FUNCTION_COUNTER
   auto key = PyLong_AsSsize_t(PyTuple_GET_ITEM(pykey.get(), 0));
   if (C10_UNLIKELY(key < 0)) {
     TORCH_CHECK(PyErr_Occurred(), "key must be positive");
