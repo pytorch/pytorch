@@ -4,12 +4,12 @@
 
 namespace c10 {
 
-// Returns true if executed while a ParallelGuard object is alive in the current
-// thread.
-C10_API bool is_parallel_guard_alive();
-
+// RAII thread local guard that tracks whether code is being executed in
+// `at::parallel_for` or `at::parallel_reduce` loop function.
 class C10_API ParallelGuard {
  public:
+  static bool is_enabled();
+
   ParallelGuard(bool state);
   ~ParallelGuard();
 

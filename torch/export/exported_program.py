@@ -454,7 +454,10 @@ class ExportedProgram:
         from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
             _AddRuntimeAssertionsForInlineConstraintsPass,
         )
-        from torch._export.passes.lift_constants_pass import lift_constants_pass
+        from torch._export.passes.lift_constants_pass import (
+            ConstantAttrMap,
+            lift_constants_pass,
+        )
         from torch._export.passes.replace_sym_size_ops_pass import (
             _replace_sym_size_ops_pass,
         )
@@ -548,7 +551,7 @@ class ExportedProgram:
 
         new_range_constraints = _get_updated_range_constraints(gm)
 
-        constants = lift_constants_pass(gm, new_graph_signature)
+        constants = lift_constants_pass(gm, new_graph_signature, ConstantAttrMap())
         for k, v in constants.items():
             assert k not in self.constants
             self.constants[k] = v

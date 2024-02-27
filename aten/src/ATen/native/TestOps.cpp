@@ -25,8 +25,6 @@
 
 #include <c10/util/irange.h>
 
-#include <thread>
-
 namespace at::native {
 
 /// If addends is nullopt, return values.
@@ -115,11 +113,13 @@ Tensor _test_check_tensor(const Tensor& self) {
   return self.clone();
 }
 
-Tensor _test_parallel_materialize(const Tensor& self, int64_t num_parallel, bool skip_main_thread) {
-  std::thread::id main_thread_id = std::this_thread::get_id();
+Tensor _test_parallel_materialize(const Tensor& self, int64_t num_parallel, bool skip_first) {
   at::parallel_for(0, num_parallel, 1, [&](int64_t begin, int64_t end){
-    std::thread::id this_thread_id = std::this_thread::get_id();
-    if (skip_main_thread && this_thread_id == main_thread_id) {
+    // NOTE: skip_first is meant to avoid triggering the materialization from
+    // the first thread, to ensure that the subthreads throw the error
+    // correctly. On some platforms, the first thread is the main thread and it
+    // begins executing the loop function much earlier than the subthreads.
+    if (skip_first && begin == 0 && end == 1) {
       return;
     } else {
       self.mutable_data_ptr();
