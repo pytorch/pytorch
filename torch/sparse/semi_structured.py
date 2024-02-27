@@ -187,6 +187,11 @@ class SparseSemiStructuredTensor(torch.Tensor):
             requires_grad=requires_grad,
         )
 
+    # This most likely should be removed (and thus use the disabled impl)
+    # but part of the code here relies on the auto-wrapping.
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        return super().__torch_function__(func, types, args, kwargs)
+
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs) -> Any:
         if func._overloadpacket not in cls.SPARSE_DISPATCH:
