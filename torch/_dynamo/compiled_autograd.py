@@ -10,6 +10,7 @@ from torch._logging import getArtifactLogger
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses import FakeTensorMode
 from torch.fx import GraphModule
+from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import (
     decompose,
     disable_autocast_cache,
@@ -218,6 +219,13 @@ class AutogradCompilerInstance:
             proxies = [proxies[i] for i in range(len(tensors))]
         assert len(tensors) == len(proxies)
         track_tensor_tree(tensors, proxies, constant=None, tracer=self.fx_tracer)
+
+    def bind_backward_state(self, index: int):
+        assert self.hooks_proxy is not None
+        proxy = self.hooks_proxy[index]  # type: ignore[index]
+        bw_state = BackwardState()
+        track_tensor_tree(bw_state, proxy, constant=None, tracer=self.fx_tracer)
+        return bw_state
 
 
 compiled_autograd_enabled = False

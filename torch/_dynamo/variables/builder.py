@@ -27,6 +27,7 @@ from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
 from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
+from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
     DimDynamic,
@@ -77,7 +78,7 @@ from ..utils import (
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
-    unwrap_if_wrapper,
+    unwrap_with_attr_name_if_wrapper,
     wrap_fake_exception,
 )
 
@@ -211,6 +212,24 @@ class GraphArg:
 
     def __eq__(self, other):
         return self.source.name() == other.source.name()
+
+
+class BackwardStateGraphArg(GraphArg):
+    def __init__(self):
+        super().__init__(
+            source=None,
+            _example=BackwardState(),
+            is_unspecialized=False,
+            fake_tensor=None,
+            is_tensor=False,
+        )
+
+    def reconstruct(self, codegen):
+        assert codegen.tx.output.backward_state_var
+        codegen.load_import_from(BackwardState.__module__, "BackwardState")
+        codegen.call_function(0, True)
+        codegen.dup_top()
+        codegen.store(codegen.tx.output.backward_state_var)
 
 
 @dataclasses.dataclass
@@ -408,6 +427,7 @@ class VariableBuilder:
             }
             return ConstDictVariable(result, type(value))
         elif value is sys.modules:
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return PythonSysModulesVariable(source=self.source)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             if not value and self.get_source().is_nn_module():
@@ -709,7 +729,11 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return TorchCtxManagerClassVariable(value, source=self.source)
         elif is_function_or_wrapper(value):
-            value = unwrap_if_wrapper(value)
+            value, attr_name = unwrap_with_attr_name_if_wrapper(value)
+            # For these wrappers, Dynamo points to the wrapped function,
+            # so source needs to be updated as well.
+            if attr_name is not None:
+                self.source = AttrSource(self.source, attr_name)
             return trace_rules.lookup(value).create_with_source(
                 value, source=self.source
             )
@@ -755,6 +779,11 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type):
+            if value in (torch.utils.hooks.BackwardHook,):
+                # TODO(jansel): combine this case with the one above
+                return trace_rules.lookup(value).create_with_source(
+                    value, source=self.source
+                )
             # This is a userdefined class, so install an ID_MATCH even if its a
             # global variable.
             self.install_guards(GuardBuilder.ID_MATCH)

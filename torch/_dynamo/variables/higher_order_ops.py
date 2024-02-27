@@ -1440,18 +1440,19 @@ class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
+    """
+    Handles torch._dynamo._trace_wrapped_higher_order_op.inner_trace
+    by unwrapping the higher order op and inlining through it.  This op
+    is created by dynamo to survive through AotAutograd, then unwrapped
+    here in the call to dynamo from compiled autograd.
+    """
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import TensorVariable
-
-        assert "fn" in kwargs
-        fn = kwargs["fn"]
-        assert len(args) == 1
-        grad = args[0]
-        assert isinstance(grad, TensorVariable)
-
-        return fn.call_function(tx, args, {})
+        kwargs = dict(kwargs)
+        fn = kwargs.pop("fn")
+        return fn.call_function(tx, args, kwargs)
 
 
 class AutogradFunctionApplyVariable(VariableTracker):
