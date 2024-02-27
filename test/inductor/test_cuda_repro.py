@@ -40,6 +40,7 @@ except unittest.SkipTest:
         sys.exit(0)
     raise
 
+
 TestCase = test_torchinductor.TestCase
 ToTuple = test_torchinductor.ToTuple
 check_model_cuda = test_torchinductor.check_model_cuda
@@ -198,7 +199,6 @@ class CudaReproTests(TestCase):
     def test_dynamic_to_static_cudagraphs(self):
         for b in [False, True]:
             with config.patch({"triton.cudagraph_trees": b}):
-
 
                 @torch._dynamo.optimize("inductor")
                 def fn(x, y):
