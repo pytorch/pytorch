@@ -1173,9 +1173,10 @@ class CheckFunctionManager:
         )
         for guard in aotautograd_guards:
             if isinstance(guard, DuplicateInputs):
-                source_a = guard.input_source_a
-                source_b = guard.input_source_b
-                add_code_part(f"{source_a.name()} is {source_b.name()}", None)
+                # Dynamo already has infra to detect duplicate inputs - check
+                # make_dupe_guard. So, AOT Autograd should not even see
+                # duplicate inputs.
+                raise RuntimeError(f"Dynamo missed duplicate inputs: {guard}")
             else:
                 raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
 
