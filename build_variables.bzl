@@ -770,6 +770,7 @@ libtorch_python_cuda_sources = libtorch_python_cuda_core_sources + [
 ]
 
 libtorch_python_xpu_sources = [
+    "torch/csrc/xpu/Event.cpp",
     "torch/csrc/xpu/Module.cpp",
     "torch/csrc/xpu/Stream.cpp",
 ]
@@ -1036,7 +1037,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/operator_name.cpp",
     "aten/src/ATen/core/TorchDispatchUtils.cpp",
     "aten/src/ATen/core/register_symbols.cpp",
-    "aten/src/ATen/core/SingletonSymNodeImpl.cpp",
+    "aten/src/ATen/core/NestedIntSymNodeImpl.cpp",
     "aten/src/ATen/core/class_type.cpp",
     "aten/src/ATen/core/type.cpp",
     "aten/src/ATen/core/type_factory.cpp",

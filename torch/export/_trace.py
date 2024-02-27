@@ -3,6 +3,7 @@ import functools
 import inspect
 import logging
 import re
+import time
 import warnings
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
@@ -23,6 +24,7 @@ from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
 )
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
 from torch._export.passes.lift_constants_pass import (
+    ConstantAttrMap,
     lift_constants_pass,
     rewrite_script_object_meta,
 )
@@ -241,6 +243,31 @@ def _get_param_buffer_mapping(
     return param_buffer_table
 
 
+def _remap_constants(
+    orig_constant_attrs: ConstantAttrMap,
+    graph_signature: ExportGraphSignature,
+    constants: Dict[str, Union[torch.Tensor, torch.ScriptObject]],
+) -> None:
+    """Rewrite the graph signature and constants table to use the FQN from the original module."""
+    remap_table: Dict[str, str] = {}
+    for name, value in constants.items():
+        if value in orig_constant_attrs:
+            remap_table[name] = orig_constant_attrs[value]
+
+    for spec in graph_signature.input_specs:
+        if spec.kind in (
+            InputKind.CONSTANT_TENSOR,
+            InputKind.CUSTOM_OBJ,
+        ):
+            orig_target = spec.target
+            assert orig_target is not None
+            spec.target = remap_table.get(orig_target, orig_target)
+
+            constant = constants[orig_target]
+            del constants[orig_target]
+            constants[spec.target] = constant
+
+
 def _restore_state_dict(
     original_module: torch.nn.Module, traced_module: torch.fx.GraphModule
 ) -> None:
@@ -344,11 +371,43 @@ def _export_to_torch_ir(
     return gm_torch_level
 
 
+def _gather_constant_attrs(m: torch.nn.Module) -> ConstantAttrMap:
+    """Search the module hierarchy, gathering up all tensor and ScriptObject constants.
+
+    Returns a dictionary mapping hash(value) to the name of the constant. We
+    have to abuse `hash` here unfortunately, see: [ScriptObject hash].
+    """
+    constants = ConstantAttrMap()
+    buffers_parameters = set(m.buffers())
+    buffers_parameters.update(m.parameters())
+
+    def inner(m: torch.nn.Module, prefix_atoms: List[str], constants):
+        for k, v in m.__dict__.items():
+            if isinstance(v, (torch.Tensor, torch.ScriptObject)):
+                if v in buffers_parameters:
+                    # filter out buffers and parameters, leaving only constants
+                    continue
+
+                fqn = ".".join(prefix_atoms + [k])
+                if v in constants:
+                    raise ValueError(
+                        f"Duplicate reference to constant attribute found: '{constants[v]}' and '{fqn}'."
+                    )
+
+                constants[v] = fqn
+        for k, v in m.named_children():
+            inner(v, prefix_atoms + [k], constants)
+
+    inner(m, [], constants)
+    return constants
+
+
 def _export_non_strict(
     mod,
     fake_args,
     fake_kwargs,
     fake_params_buffers,
+    constant_attrs: ConstantAttrMap,
     *,
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
     pre_dispatch=False,
@@ -378,6 +437,13 @@ def _export_non_strict(
     # (The node-level meta is addressed above.)
     if isinstance(mod, torch.fx.GraphModule) and hasattr(mod, "meta"):
         gm.meta.update(mod.meta)
+
+    if pre_dispatch:
+        from torch._export.passes.replace_set_grad_with_hop_pass import (
+            replace_set_grad_with_hop_pass,
+        )
+
+        gm = replace_set_grad_with_hop_pass(gm)
 
     # NOTE: aot_export adds symint metadata for placeholders with int values;
     # since these become specialized, we replace such metadata with the original values
@@ -441,7 +507,7 @@ def _export_non_strict(
     )
 
     constants = rewrite_script_object_meta(gm)
-    constants.update(lift_constants_pass(gm, export_graph_signature))
+    constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
 
     @dataclasses.dataclass
     class _ExportedProgramNonStrict:
@@ -507,23 +573,39 @@ def rewrite_non_persistent_buffers(
                 constants[spec.target] = orig_mod.get_buffer(spec.target)
 
 
-def _log_export_error(fn):
+_EXPORT_FLAGS: Optional[Set[str]] = None
+
+
+def _log_export_wrapper(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
+        global _EXPORT_FLAGS
         try:
-            return fn(*args, **kwargs)
+            start = time.time()
+            ep = fn(*args, **kwargs)
+            end = time.time()
+            log_export_usage(
+                event="export.time", metrics=end - start, flags=_EXPORT_FLAGS
+            )
         except Exception as e:
             t = type(e)
             error_type = t.__module__ + "." + t.__qualname__
             log_export_usage(
-                event="export.error", error_type=error_type, error_message=str(e)
+                event="export.error",
+                type=error_type,
+                message=str(e),
+                flags=_EXPORT_FLAGS,
             )
             raise e
+        finally:
+            _EXPORT_FLAGS = None
+
+        return ep
 
     return wrapper
 
 
-@_log_export_error
+@_log_export_wrapper
 @_disable_prexisiting_fake_mode
 def _export(
     f: torch.nn.Module,
@@ -579,10 +661,12 @@ def _export(
     """
     from .dynamic_shapes import _process_dynamic_shapes
 
+    global _EXPORT_FLAGS
     flags = set()
     flags.add("strict" if strict else "non_strict")
     flags.add("pre_dispatch" if pre_dispatch else "aot_dispatch")
     log_export_usage(event="export.enter", flags=flags)
+    _EXPORT_FLAGS = flags
 
     if constraints is not None:
         log_export_usage(event="export.private_api", flags={"constraints"})
@@ -597,6 +681,8 @@ def _export(
         constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes) or []
 
     kwargs = kwargs or {}
+
+    constant_attrs = _gather_constant_attrs(f)
 
     flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
 
@@ -684,7 +770,13 @@ def _export(
             fake_mode, _get_params_buffers(f)
         )
         ep_non_strict = _export_non_strict(
-            f, fake_args, fake_kwargs, fake_params_buffers, transform=_tuplify_outputs
+            f,
+            fake_args,
+            fake_kwargs,
+            fake_params_buffers,
+            constant_attrs,
+            pre_dispatch=pre_dispatch,
+            transform=_tuplify_outputs,
         )
         range_constraints, equality_constraints = make_constraints(
             fake_mode, src_equalities, original_signature, ep_non_strict.gm
@@ -841,6 +933,7 @@ def _export(
         _convert_to_positional_args(orig_arg_names, fake_args, fake_kwargs),
         {},
         fake_params_buffers,
+        constant_attrs,
         pre_dispatch=pre_dispatch,
     )
 
@@ -902,6 +995,9 @@ def _export(
 
     # 3. Remove non-persistent buffers from the graph signature
     rewrite_non_persistent_buffers(f, ep_non_strict.sig, ep_non_strict.constants)
+
+    # 4. Rewrite constants to have the same FQN as the original module.
+    _remap_constants(constant_attrs, export_graph_signature, constants)
 
     module_call_signatures = {
         fqn: ModuleCallSignature(inputs=[], outputs=[], **specs)
