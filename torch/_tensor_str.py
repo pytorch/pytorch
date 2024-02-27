@@ -482,6 +482,8 @@ def _str_intern(inp, *, tensor_contents=None):
         torch.sparse_bsr,
         torch.sparse_bsc,
     }:
+        from torch._subclasses.fake_tensor import FakeTensor
+
         suffixes.append("size=" + str(tuple(self.shape)))
         is_meta = self.is_meta or isinstance(self, FakeTensor)
         if not is_meta:

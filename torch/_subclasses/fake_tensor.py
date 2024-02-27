@@ -18,7 +18,13 @@ import torch._logging
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import suggest_memory_format
-from torch._subclasses.meta_utils import assert_eq, assert_metadata_eq, MetaConverter
+from torch._subclasses.meta_utils import (
+    assert_eq,
+    assert_metadata_eq,
+    is_sparse_any,
+    is_sparse_compressed,
+    MetaConverter,
+)
 from torch._utils import render_call
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -677,7 +683,8 @@ class TensorMetadata:
     is_conj: bool
     is_neg: bool
     is_inference: bool
-    is_sparse: bool
+    is_sparse: bool  # read: is sparse COO
+    is_sparse_compressed: bool
     is_coalesced: Optional[bool]
     dense_dim: Optional[int]
     sparse_dim: Optional[int]
@@ -688,7 +695,7 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
     Extract the TensorMetadata of a tensor.
     """
     memory_format = suggest_memory_format(t)
-    if not t.is_contiguous(memory_format=memory_format):
+    if not is_sparse_any(t) and not t.is_contiguous(memory_format=memory_format):
         memory_format = None
 
     return TensorMetadata(
@@ -705,9 +712,10 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
         is_neg=t.is_neg(),
         is_inference=t.is_inference(),
         is_sparse=t.is_sparse,
+        is_sparse_compressed=is_sparse_compressed(t),
         is_coalesced=t.is_coalesced() if t.is_sparse else None,
-        dense_dim=t.dense_dim() if t.is_sparse else None,
-        sparse_dim=t.sparse_dim() if t.is_sparse else None,
+        dense_dim=t.dense_dim() if is_sparse_any(t) else None,
+        sparse_dim=t.sparse_dim() if is_sparse_any(t) else None,
     )
 
 

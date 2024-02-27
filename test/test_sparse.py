@@ -9,7 +9,7 @@ import unittest
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
-    DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, \
+    DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_TORCHDYNAMO, TEST_WITH_ROCM, skipIfTorchDynamo, \
     parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests, \
     skipIfCrossRef
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -4245,6 +4245,8 @@ class TestSparseMeta(TestCase):
         self.assertTrue(r3.is_meta)
         self.assertEqual(r, r3)
         r.sparse_resize_((4, 4), 1, 1)
+        if TEST_WITH_TORCHDYNAMO:
+            self.skipTest("usage of sparse_resize_and_clear_ leads to failure with dynamo")
         r.sparse_resize_and_clear_((4, 4, 4), 2, 1)
         self.assertEqual(r.sparse_dim(), 2)
         self.assertEqual(r.dense_dim(), 1)
