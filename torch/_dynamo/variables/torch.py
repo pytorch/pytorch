@@ -433,6 +433,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return ConstantVariable.create(
                 torch.backends.cudnn.is_acceptable(tensor_inp)
             )
+        elif self.value is torch.utils.hooks.BackwardHook:
+            return variables.BackwardHookVariable.create(tx, *args, **kwargs)
         elif (
             self.value == torch.numel
             and len(args) == 1
