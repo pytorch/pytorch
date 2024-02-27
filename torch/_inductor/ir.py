@@ -6419,12 +6419,9 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
                 if x_scale_zp_are_tensors
                 else "torch.ops.onednn.qlinear_pointwise.default"
             ),
-            cpp_kernel_name=(
-                "onednn::qlinear_pointwise.tensor"
-                if x_scale_zp_are_tensors
-                else "onednn::qlinear_pointwise.default"
-            ),
+            cpp_kernel_name="onednn::qlinear_pointwise",
         )
+        self.cpp_kernel_overload_name = "tensor" if x_scale_zp_are_tensors else ""
         self.cpp_kernel_key = "qlinear_pointwise"
         x_scale_type_str, x_zp_type_str = (
             ("at::Tensor", "at::Tensor")
@@ -6502,6 +6499,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             codegen_args,
             self.cpp_op_schema,
             self.cpp_kernel_key,
+            self.cpp_kernel_overload_name,
         )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
