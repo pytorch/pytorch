@@ -392,8 +392,10 @@ void assert_leading_dimension_matches(TensorList tensors, uint64_t dim) {
   );
   std::vector<c10::SymInt> leading_dim_sizes;
   for (const auto i : c10::irange(dim)) {
+    TORCH_CHECK(tensors[0].size(i) > 0, "assert_leading_dimension_matches() error: tensor size should be positive.");
     leading_dim_sizes.push_back(tensors[0].size(i));
   }
+  auto expected_dtype = tensors[0].dtype();
   for (const auto i : c10::irange(num_tensors)) {
     at::Tensor tensor = tensors[i];
     TORCH_CHECK(tensor.numel() > 0, "assert_leading_dimension_matches() error: tensor should have at least 1 element");
@@ -405,6 +407,10 @@ void assert_leading_dimension_matches(TensorList tensors, uint64_t dim) {
         "chunk_cat_cuda() has invalid args: tensors should have same sizes in the first dim dimensions"
       );
     }
+    TORCH_CHECK(
+      tensor.dtype() == expected_dtype,
+      "chunk_cat_cuda() has invalid args: tensors should have same sizes in the first dim dimensions"
+    );
   }
 }
 
