@@ -977,7 +977,8 @@ void fmod_kernel(TensorIteratorBase& iter) {
         bool valid_operands = !(x == std::numeric_limits<scalar_t>::min() &&
                 (std::is_same<scalar_t, int64_t>() || std::is_same<scalar_t, int32_t>()) &&
                 d == -1);
-        TORCH_CHECK(d != 0 && valid_operands, "Invalid input to modulo operation.");
+        TORCH_CHECK(valid_operands, "Invalid input to modulo operation.")
+        TORCH_CHECK(d != 0, "ZeroDivisionError");
         return x % d;
       });
     });

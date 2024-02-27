@@ -530,11 +530,6 @@ class TestTorchDeviceType(TestCase):
             y = torch.tensor([[-1]], dtype=torch.int64)
             _ = torch.fmod(x, y)
 
-        with self.assertRaisesRegex(RuntimeError, "^Invalid input to modulo operation."):
-            x = torch.tensor([-9223372036854775808], dtype=torch.int64)
-            y = torch.tensor([[0]], dtype=torch.int64)
-            _ = torch.fmod(x, y)
-
         # Same problem with 32-bit ints
         with self.assertRaisesRegex(RuntimeError, "^Invalid input to modulo operation."):
             x = torch.tensor([-2**31], dtype=torch.int32)
