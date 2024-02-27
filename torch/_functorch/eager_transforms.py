@@ -61,8 +61,11 @@ def enable_inplace_requires_grad(enabled):
 
 
 def _vjp_treespec_compare(primals_out, cotangents):
+    # Revert this once #116264 gets fixed
     _, primals_out_spec = tree_flatten(primals_out)
     _, cotangents_spec = tree_flatten(cotangents)
+    # Dynamo fails to trace operator.ne below. To bypass this limitation, this
+    # function is not inlined.
     if primals_out_spec != cotangents_spec:
         raise RuntimeError(
             f'Expected pytree structure of cotangents to be the same '
@@ -72,6 +75,7 @@ def _vjp_treespec_compare(primals_out, cotangents):
 
 
 def _jvp_treespec_compare(primals, tangents):
+    # Revert this once #116264 gets fixed
     _, primals_spec = tree_flatten(primals)
     _, tangents_spec = tree_flatten(tangents)
     if primals_spec != tangents_spec:
@@ -340,7 +344,7 @@ def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = N
         # See NOTE [grad and vjp interaction with no_grad]
         with torch.enable_grad():
             primals = _wrap_all_tensors(primals, level)
-            if argnums is None:
+            if not argnums:
                 diff_primals = _create_differentiable(primals, level)
             else:
                 diff_primals = _slice_argnums(primals, argnums, as_tuple=False)
@@ -998,7 +1002,7 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
                 flat_duals = tuple(fwAD.make_dual(p, t)
                                    for p, t in zip(flat_primals, flat_tangents))
                 duals = tree_unflatten(flat_duals, primals_spec)
-                if argnums is not None:
+                if argnums:
                     primals = _wrap_all_tensors(primals, level)
                     duals = _replace_args(primals, duals, argnums)
                 result_duals = func(*duals)

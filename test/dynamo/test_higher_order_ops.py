@@ -3876,6 +3876,9 @@ class GraphModule(torch.nn.Module):
     def test_jvp_jvp(self):
         counters.clear()
 
+        if check_dynamic_shape_capture():
+            self.skipTest("test fails with dynamic shapes")
+
         def fn(x):
             return torch.func.jvp(torch.sin, (x,), (x,))
 
