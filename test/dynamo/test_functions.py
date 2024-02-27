@@ -91,6 +91,16 @@ def inline_unused(x):
     return x + 5.6
 
 
+@functools.lru_cache
+def inline_lru_cache_fn_with_default_args(x, y, _=None):
+    return torch.sin(x * y)
+
+
+@torch.jit.script_if_tracing
+def inline_script_if_tracing_fn_with_default_args(x, y, _=None):
+    return torch.cos(x * y)
+
+
 class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_inline_jit_annotations(x):
@@ -98,6 +108,14 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         x = inline_ignore(x)
         x = inline_unused(x)
         return
+
+    @make_test
+    def test_inline_script_if_tracing_fn_with_default_args(a, b):
+        return inline_script_if_tracing_fn_with_default_args(a, 2, b)
+
+    @make_test
+    def test_inline_lru_cache_fn_with_default_args(a, b):
+        return inline_lru_cache_fn_with_default_args(a, 2, b)
 
     @make_test
     def test_add(a, b):
