@@ -1185,9 +1185,9 @@ class TestFSDPStateDict(FSDPTest):
         model = self._get_simple_nested_model()
         sd = model.state_dict()
         # Create a missing key
-        sd.pop(list(sd.keys())[0])
+        sd.pop(next(iter(sd.keys())))
         # Create an unexpected key
-        sd['unexpected'] = torch.ones(1)
+        sd["unexpected"] = torch.ones(1)
         missing, unexpected = model.load_state_dict(sd, strict=False)
         assert len(missing) == 1
         assert len(unexpected) == 1
