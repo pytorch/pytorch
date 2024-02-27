@@ -1368,6 +1368,12 @@ def fmod(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.fmod(a, b)
 
 
+@register_decomposition(aten.frexp)
+@out_wrapper("mantissa", "exponent")
+def frexp(self: TensorLikeType) -> Tuple[TensorLikeType, TensorLikeType]:
+    return torch.return_types.frexp(prims.frexp(self))
+
+
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_lhs_python_scalar=False,
@@ -3752,7 +3758,7 @@ def roll(
     # Avoid modulo by zero
     if a.numel() == 0:
         # Keeping this as ref for now as FakeTensor runs into some issues with complex tensors
-        return clone(a)
+        return a.clone()
 
     if a.dim() == 0 and len(dims) > 0:
         raise IndexError(
@@ -3783,9 +3789,8 @@ def roll(
     dim = dims[0]
     size = a.shape[dim]
     start = (size - shifts[0]) % size
-    t0 = torch.narrow(a, dim, start, size - start)
-    t1 = torch.narrow(a, dim, 0, start)
-    return torch.cat((t0, t1), dim)
+    idx = torch.arange(size, device=a.device)
+    return a.index_select(dim, torch.fmod(start + idx, size))
 
 
 @register_decomposition(aten.rot90)
