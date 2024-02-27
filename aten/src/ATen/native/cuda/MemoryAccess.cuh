@@ -109,7 +109,7 @@ struct LoadWithCast {
   size_array_t element_sizes;
 
   LoadWithCast(const TensorIteratorBase& iter) {
-    assert(iter.ninputs() == N);
+    CUDA_KERNEL_ASSERT(iter.ninputs() == N);
     #pragma unroll
     for (auto i = 0; i < N; ++i) {
       this->dtypes[i] = iter.dtype(i + iter.noutputs());
@@ -140,7 +140,7 @@ struct StoreWithCast {
   size_array_t element_sizes;
 
   StoreWithCast(const TensorIteratorBase& iter) {
-    assert(iter.noutputs() == N);
+    CUDA_KERNEL_ASSERT(iter.noutputs() == N);
     #pragma unroll
     for (auto i = 0; i < N; ++i) {
       this->dtypes[i] = iter.dtype(i);

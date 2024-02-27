@@ -1,12 +1,13 @@
 # Owner(s): ["oncall: distributed"]
 
 import functools
-from typing import Callable, List, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 
+from torch.distributed._composable import checkpoint
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp._fsdp_common import TrainingState
 from torch.distributed._composable.fsdp._fsdp_param import ShardedState
@@ -111,21 +112,30 @@ class TestFullyShardBackwardPrefetch(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_fully_shard_backward_prefetch(self):
+        # Activation checkpointing should not affect the expected FSDP events
         self.run_subtests(
-            {"reshard_after_forward": [True, False, 2]},
+            {
+                "reshard_after_forward": [True, False, 2],
+                "checkpoint_impl": [None, "utils", "composable"],
+            },
             self._test_backward_prefetch_forward_backward,
         )
         self.run_subtests(
-            {"reshard_after_forward": [True, False, 2]},
+            {
+                "reshard_after_forward": [True, False, 2],
+                "checkpoint_impl": [None, "utils", "composable"],
+            },
             self._test_backward_prefetch_multi_forward,
         )
         self._test_backward_prefetch_unused_in_backward(True)
 
     def _test_backward_prefetch_forward_backward(
-        self, reshard_after_forward: Union[bool, int]
+        self, reshard_after_forward: Union[bool, int], checkpoint_impl: Optional[str]
     ):
         n_layers = 3
-        model, optim, inp = self._init_transformer(n_layers, reshard_after_forward)
+        model, optim, inp = self._init_transformer(
+            n_layers, reshard_after_forward, checkpoint_impl
+        )
         events: List[EventType] = []
         unshard_with_record = self._get_unshard_with_record(
             FSDPParamGroup.unshard, events
@@ -171,10 +181,12 @@ class TestFullyShardBackwardPrefetch(FSDPTest):
                 optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
 
     def _test_backward_prefetch_multi_forward(
-        self, reshard_after_forward: Union[bool, int]
+        self, reshard_after_forward: Union[bool, int], checkpoint_impl: Optional[str]
     ):
         n_layers = 3
-        model, optim, inp = self._init_transformer(n_layers, reshard_after_forward)
+        model, optim, inp = self._init_transformer(
+            n_layers, reshard_after_forward, checkpoint_impl
+        )
         events: List[EventType] = []
         unshard_with_record = self._get_unshard_with_record(
             FSDPParamGroup.unshard, events
@@ -298,11 +310,20 @@ class TestFullyShardBackwardPrefetch(FSDPTest):
             self.assertEqual(events, expected_events)
             events.clear()
 
-    def _init_transformer(self, n_layers: int, reshard_after_forward: Union[bool, int]):
-        model_args = ModelArgs(n_layers=n_layers)
+    def _init_transformer(
+        self,
+        n_layers: int,
+        reshard_after_forward: Union[bool, int],
+        checkpoint_impl: Optional[str],
+    ):
+        model_args = ModelArgs(
+            n_layers=n_layers, checkpoint_activations=(checkpoint_impl == "utils")
+        )
         model = Transformer(model_args)
         for module in model.modules():
             if isinstance(module, TransformerBlock):
+                if checkpoint_impl == "composable":
+                    checkpoint(module)
                 fully_shard(module, reshard_after_forward=reshard_after_forward)
         fully_shard(model, reshard_after_forward=reshard_after_forward)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
