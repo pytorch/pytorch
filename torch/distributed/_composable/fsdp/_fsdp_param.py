@@ -459,11 +459,11 @@ class FSDPParam:
                 sharded_param_data = sharded_param_data.to(
                     self.device, non_blocking=True
                 )
-            return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
             if self._use_all_gather_extensions:
                 fsdp_pre_all_gather = self._inner_tensor.fsdp_pre_all_gather  # type: ignore[attr-defined]
                 all_gather_inputs, self._all_gather_metadata = fsdp_pre_all_gather()
                 return [t.view(-1) for t in all_gather_inputs]
+            return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             # TODO: Add extensions path.
             all_gather_input = _to_dtype_if_needed(
