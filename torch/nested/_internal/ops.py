@@ -29,13 +29,9 @@ def _wrap_jagged_dim(
 
     wrapped = canonicalize_dims(ndim, dim)
     if wrapped == 1:
-        raise RuntimeError(
-            f"{op_name}(): not supported for NestedTensor on dim=1"
-        )
+        raise RuntimeError(f"{op_name}(): not supported for NestedTensor on dim=1")
     elif wrapped == 0 and not allow_batch_dim:
-        raise RuntimeError(
-            f"{op_name}(): not supported for NestedTensor on dim=0"
-        )
+        raise RuntimeError(f"{op_name}(): not supported for NestedTensor on dim=0")
     return _outer_to_inner_dim(ndim, wrapped) if convert_to_inner_dim else wrapped
 
 
@@ -556,7 +552,7 @@ def chunk_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
 
     new_kwargs["dim"] = _wrap_jagged_dim(
-        inp.dim(), new_kwargs["dim"], "chunk", allow_dim_zero=True
+        inp.dim(), new_kwargs["dim"], "chunk", allow_batch_dim=True
     )
 
     if new_kwargs["dim"] == 0:
