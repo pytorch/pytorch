@@ -60,8 +60,10 @@ class Segment:
   backend: Any = None
 
 
-def segment_prefix_assignment_fn(gm, method_to_segment_prefix_map):
+def segment_prefix_assignment_fn(gm):
   global next_unnamed_segment_id
+  method_to_segment_prefix_map = LazyScheduler._current_scheduler._method_to_segment_prefix_map
+  print(f"method_to_segment_prefix_map: {method_to_segment_prefix_map}")
   in_unnamed_segment = False
   for _, node in enumerate(gm.graph.nodes):
     if is_call_func_node(node):
@@ -298,6 +300,7 @@ class LazyScheduler:
   # NOTE: this is not a hard requirement, but to implement multi-LazyScheduler,
   # we need to be careful of _compile_fx_inner_for_graph_in_segment caching by torch.compile
   # and make sure we don't reuse old LazyScheduler instance.
+  # Also, is multi-LazyScheduler ever useful in practice?
   _current_scheduler = None
 
   def __init__(self, module, *, segments=[], schedule=[], compile_options=None):
@@ -444,7 +447,7 @@ Please do not register the same function with different segment prefixes.
       functools.partial(
         self._split_segments_and_compile,
         # TODO: avoid caching `method_to_segment_prefix_map` here too! use LazyScheduler singleton.
-        segment_prefix_assignment_fn=functools.partial(segment_prefix_assignment_fn, method_to_segment_prefix_map=self._method_to_segment_prefix_map),
+        segment_prefix_assignment_fn=segment_prefix_assignment_fn,
       )
     ):
       if self._compile_options is not None:  # compile mode

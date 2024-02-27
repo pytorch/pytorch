@@ -907,6 +907,16 @@ def catch_errors_wrapper(callback, hooks: Hooks):
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
             # nametuple constructor
             return None
+
+        if config.lazy_scheduler_compile_fn:
+            assert hasattr(
+                callback, "_clone_with_backend"
+            ), "LazyScheduler only supports callback fns that know how to clone themselves."
+            hijacked_callback = callback._clone_with_backend(
+                functools.partial(config.lazy_scheduler_compile_fn, backend_compile_fn=callback._torchdynamo_orig_callable),
+            )
+            return hijacked_callback(frame, cache_entry, hooks, frame_state)
+
         if config._get_optimize_ddp_mode() == "ddp_optimizer":
             ddp_module = DistributedDataParallel._get_active_ddp_module()
             if ddp_module:

@@ -6,7 +6,7 @@ CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::Te
 CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_explicit_schedule_reordering_fwd_segments && \
 CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_explicit_schedule_reordering_fwd_and_bwd_segments && \
 CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_segment_compiled_with_different_backend && \
-CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_debug_mode_catch_issues
+CUDA_VISIBLE_DEVICES=7 pytest -vs test/lazy_scheduler/test_lazy_scheduler.py::TestLazyScheduler::test_debug_mode_msg
 
  >output.log 2>&1
 """
@@ -687,7 +687,7 @@ but got:
     _run_test(*segment_use_dynamo_eager_fwd_only(), fwd_only=True)
     _run_test(*segment_use_dynamo_aot_eager_fwd_bwd(), fwd_only=False)
 
-  def test_debug_mode_catch_issues(self):
+  def test_debug_mode_msg(self):
     device = "cuda"
     expected_execution_order = [
       "func2_fwd",
@@ -699,7 +699,9 @@ but got:
       return LazyScheduler(
         module,
         segments=[
+          # SegmentA (also called "delayed_segment", because it's delayed in the schedule)
           Segment("func1_fwd", module.func1, backend="aot_eager"),
+          # SegmentB
           Segment("func2_fwd", module.func2, backend="aot_eager"),
           Segment("forward_fwd", module.forward, backend="inductor"),
         ],
@@ -732,7 +734,7 @@ but got:
         test_debug_mode_expected_msg_substrs=test_debug_mode_expected_msg_substrs,
       )
 
-    class test_read_shared_buf_mutated_by_segmentB_in_delayed_segment_Module(torch.nn.Module):
+    class TestModule_read_shared_buf_mutated_by_segmentB_in_delayed_segment(torch.nn.Module):
       def __init__(self):
         super().__init__()
         self.param = torch.nn.Parameter(torch.randn(4, 4))
@@ -755,7 +757,7 @@ but got:
         z = z1 * z2
         return z
 
-    class test_read_shared_buf_mutated_by_delayed_segment_in_segmentB_Module(torch.nn.Module):
+    class TestModule_read_shared_buf_mutated_by_delayed_segment_in_segmentB(torch.nn.Module):
       def __init__(self):
         super().__init__()
         self.param = torch.nn.Parameter(torch.randn(4, 4))
@@ -779,7 +781,7 @@ but got:
         return z
 
     glb_tensor = torch.zeros(4, 4, device=device)
-    class test_read_global_tensor_mutated_by_segmentB_in_delayed_segment_Module(torch.nn.Module):
+    class TestModule_read_global_tensor_mutated_by_segmentB_in_delayed_segment(torch.nn.Module):
       def __init__(self):
         global glb_tensor
         super().__init__()
@@ -805,7 +807,7 @@ but got:
         return z
 
     glb_tensor = torch.zeros(4, 4, device=device)
-    class test_read_global_tensor_mutated_by_delayed_segment_in_segmentB_Module(torch.nn.Module):
+    class TestModule_read_global_tensor_mutated_by_delayed_segment_in_segmentB(torch.nn.Module):
       def __init__(self):
         global glb_tensor
         super().__init__()
@@ -830,7 +832,7 @@ but got:
         z = z1 * z2
         return z
 
-    class test_read_input_tensor_mutated_by_segmentB_in_delayed_segment_Module(torch.nn.Module):
+    class TestModule_read_input_tensor_mutated_by_segmentB_in_delayed_segment(torch.nn.Module):
       def __init__(self):
         super().__init__()
         self.param = torch.nn.Parameter(torch.randn(4, 4))
@@ -852,7 +854,7 @@ but got:
         z = z1 * z2
         return z
 
-    class test_read_input_tensor_mutated_by_delayed_segment_in_segmentB_Module(torch.nn.Module):
+    class TestModule_read_input_tensor_mutated_by_delayed_segment_in_segmentB(torch.nn.Module):
       def __init__(self):
         super().__init__()
         self.param = torch.nn.Parameter(torch.randn(4, 4))
@@ -874,17 +876,17 @@ but got:
         z = z1 * z2
         return z
 
-    _run_test(test_read_shared_buf_mutated_by_segmentB_in_delayed_segment_Module, lazy_scheduler_gen, expected_execution_order,
+    _run_test(TestModule_read_shared_buf_mutated_by_segmentB_in_delayed_segment, lazy_scheduler_gen, expected_execution_order,
       test_debug_mode_expected_msg_substrs=["Delayed segments: ['func1_fwd']", "Segments that contain in-place mutation ops: ['func2']"])
-    _run_test(test_read_shared_buf_mutated_by_delayed_segment_in_segmentB_Module, lazy_scheduler_gen, expected_execution_order,
+    _run_test(TestModule_read_shared_buf_mutated_by_delayed_segment_in_segmentB, lazy_scheduler_gen, expected_execution_order,
       test_debug_mode_expected_msg_substrs=["Delayed segments: ['func1_fwd']", "Segments that contain in-place mutation ops: ['func1']"])
-    _run_test(test_read_global_tensor_mutated_by_segmentB_in_delayed_segment_Module, lazy_scheduler_gen, expected_execution_order,
+    _run_test(TestModule_read_global_tensor_mutated_by_segmentB_in_delayed_segment, lazy_scheduler_gen, expected_execution_order,
       test_debug_mode_expected_msg_substrs=["Delayed segments: ['func1_fwd']", "Segments that contain in-place mutation ops: ['func2']"])
-    _run_test(test_read_global_tensor_mutated_by_delayed_segment_in_segmentB_Module, lazy_scheduler_gen, expected_execution_order, test_non_debug_mode_expected_error_regex="['func1_fwd', 'func2_fwd', 'forward_fwd']",
+    _run_test(TestModule_read_global_tensor_mutated_by_delayed_segment_in_segmentB, lazy_scheduler_gen, expected_execution_order, test_non_debug_mode_expected_error_regex="['func1_fwd', 'func2_fwd', 'forward_fwd']",
       test_debug_mode_expected_msg_substrs=["end of `func1_fwd` (exclusive) to end of `func2_fwd` (inclusive) depends on output of `func1_fwd`", "Delayed segments: ['func1_fwd']", "Segments that contain in-place mutation ops: ['func1']"])
-    _run_test(test_read_input_tensor_mutated_by_segmentB_in_delayed_segment_Module, lazy_scheduler_gen, expected_execution_order, extra_input_no_require_grad=True,
+    _run_test(TestModule_read_input_tensor_mutated_by_segmentB_in_delayed_segment, lazy_scheduler_gen, expected_execution_order, extra_input_no_require_grad=True,
       test_debug_mode_expected_msg_substrs=["Delayed segments: ['func1_fwd']", "Segments that contain in-place mutation ops: ['func2']"])
-    _run_test(test_read_input_tensor_mutated_by_delayed_segment_in_segmentB_Module, lazy_scheduler_gen, expected_execution_order, extra_input_no_require_grad=True, test_non_debug_mode_expected_error_regex="['func1_fwd', 'func2_fwd', 'forward_fwd']",
+    _run_test(TestModule_read_input_tensor_mutated_by_delayed_segment_in_segmentB, lazy_scheduler_gen, expected_execution_order, extra_input_no_require_grad=True, test_non_debug_mode_expected_error_regex="['func1_fwd', 'func2_fwd', 'forward_fwd']",
       test_debug_mode_expected_msg_substrs=["end of `func1_fwd` (exclusive) to end of `func2_fwd` (inclusive) depends on output of `func1_fwd`", "Delayed segments: ['func1_fwd']", "Segments that contain in-place mutation ops: ['func1']"])
     # TODO add a case to trigger "end of `func2_fwd` (exclusive) to end of `func3_fwd` (inclusive) depends on output of `func1_fwd`" for schedule [2, 1, 3]
 
