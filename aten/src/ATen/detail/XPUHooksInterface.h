@@ -39,7 +39,7 @@ struct TORCH_API XPUHooksInterface {
         XPU_HELP);
   }
 
-  virtual DeviceIndex getGlobalIdxFromDevice(const Device& device) const {
+  virtual int32_t getGlobalIdxFromDevice(const Device& device) const {
     TORCH_CHECK(false, "Cannot get XPU global device index without ATen_xpu library.");
   }
 
