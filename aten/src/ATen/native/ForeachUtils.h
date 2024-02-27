@@ -252,10 +252,17 @@ using IndicesT = std::vector<size_t>;
 using nested_optional_tensorvec_t =
     std::vector<std::vector<c10::optional<at::Tensor>>>;
 using TensorsAndIndicesT = std::pair<nested_optional_tensorvec_t, IndicesT>;
-using FlatMap = std::unordered_map<
-    DeviceDtypeKey,
-    TensorsAndIndicesT,
-    ParamsHash<DeviceDtypeKey>>;
+
+// Warning: Do not use ParamsHash for keys with potentially uninitialized
+// padding bytes!
+struct _DeviceDtypeHasher {
+  std::size_t operator()(const DeviceDtypeKey& k) const noexcept {
+    return std::hash<at::Device>{}(k.first) ^
+        std::hash<at::ScalarType>{}(k.second);
+  }
+};
+using FlatMap =
+    std::unordered_map<DeviceDtypeKey, TensorsAndIndicesT, _DeviceDtypeHasher>;
 
 inline FlatMap _group_tensors_by_first_tensors_device_and_dtype(
     const nested_optional_tensorvec_t& nested_tensorlist,

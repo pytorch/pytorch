@@ -16,7 +16,7 @@ import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
-from torch._logging import LazyString
+from torch._logging import LazyString, trace_structured
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import has_free_symbols, ShapeEnv, SymTypes
@@ -1242,6 +1242,11 @@ class GraphLowering(torch.fx.Interpreter):
         log_module_code(mod.__file__)
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.debug("Output code: \n%s", code)
+        trace_structured(
+            "inductor_output_code",
+            lambda: {"filename": mod.__file__},
+            payload_fn=lambda: code,
+        )
         output_code_log.info("Output code written to: %s", mod.__file__)
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)

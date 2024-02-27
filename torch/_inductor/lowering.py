@@ -2292,8 +2292,6 @@ make_fallback(aten.view_as_complex, require_contiguous)
 
 # The following were added as a result of https://github.com/pytorch/pytorch/pull/94039 to pass tests
 # It's not necessarily a priority to implement these
-make_fallback(aten.upsample_linear1d)
-make_fallback(aten.upsample_trilinear3d)
 make_fallback(aten.upsample_linear1d_backward)
 make_fallback(aten.upsample_trilinear3d_backward)
 make_fallback(aten._adaptive_avg_pool3d)
@@ -5597,15 +5595,6 @@ def foobar(self, *args, **kwargs):
 def _realize(x):
     x.realize()
     return clone(x)
-
-
-@register_lowering(torch.ops.inductor.accumulate_grad_)
-def accumulate_grad_(variable, new_grad):
-    # TODO(jansel): decompose into `variable.grad += new_grad` when variable.grad is defined
-    variable.realize()
-    new_grad.realize()
-    ir.AccumulateGrad(variable, new_grad)
-    return variable
 
 
 @register_lowering(torch.ops.inductor.resize_storage_bytes_)
