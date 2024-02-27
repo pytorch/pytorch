@@ -388,8 +388,7 @@ _autograd_backward_strict_mode_banned_ops.extend(
 
 # Enables caching of dispatches to fake tensors.
 fake_tensor_cache_enabled = (
-    os.environ.get("TORCH_FAKE_TENSOR_DISPATCH_CACHE", "0" if is_fbcode() else "1")
-    == "1"
+    os.environ.get("TORCH_FAKE_TENSOR_DISPATCH_CACHE", "1") == "1"
 )
 
 # Enables cross checking between the fake tensor cache and dispatch.
@@ -409,7 +408,8 @@ max_loop_unroll_nodes = int(os.environ.get("TORCHDYNAMO_MAX_LOOP_UNROLL_NODES", 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
-    def _make_closure_patcher(**changes): ...
+    def _make_closure_patcher(**changes):
+        ...
 
 
 from torch.utils._config_module import install_config_module

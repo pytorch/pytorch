@@ -2007,9 +2007,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         # Properties of the input/output code
         self.instructions: List[Instruction] = instructions
         self.indexof: Dict[Instruction, int] = get_indexof(self.instructions)
-        self.f_locals: Dict[str, Any] = (
-            f_locals  # needed for recording accessed locals for replay
-        )
+        self.f_locals: Dict[
+            str, Any
+        ] = f_locals  # needed for recording accessed locals for replay
         self.f_globals: Dict[str, Any] = f_globals
         self.f_builtins: Dict[str, Any] = f_builtins
         self.code_options: Dict[str, Any] = code_options
