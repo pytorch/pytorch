@@ -132,6 +132,12 @@ class Transformer(Module):
                 memory_is_causal: bool = False) -> Tensor:
         r"""Take in and process masked source/target sequences.
 
+        .. note::
+
+        If a boolean tensor is provided for any of the [src/tgt/memory]_mask arguments, positions with a ``True`` value are
+        not allowed to participate in the attention,
+        which is the opposite of the definition for :attr:`attn_mask` in :func:`torch.nn.functional.scaled_dot_product_attention`.
+
         Args:
             src: the sequence to the encoder (required).
             tgt: the sequence to the decoder (required).
@@ -179,8 +185,6 @@ class Transformer(Module):
             Note: [src/tgt/memory]_mask ensures that position :math:`i` is allowed to attend the unmasked
             positions. If a BoolTensor is provided, positions with ``True``
             are not allowed to attend while ``False`` values will be unchanged.
-            (This definition is opposite to that of :attr:`attn_mask` in
-            torch.nn.functional.scaled_dot_product_attention.)
             If a FloatTensor is provided, it will be added to the attention weight.
             [src/tgt/memory]_key_padding_mask provides specified elements in the key to be ignored by
             the attention. If a BoolTensor is provided, the positions with the
