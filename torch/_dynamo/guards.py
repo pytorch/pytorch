@@ -382,7 +382,9 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, [code])
 
     def HASATTR(self, guard: Guard):
-        assert isinstance(guard.originating_source, AttrSource), f"invalid source {guard.name}"
+        assert isinstance(
+            guard.originating_source, AttrSource
+        ), f"invalid source {guard.name}"
         base_source = guard.originating_source.base
         base = base_source.name()
         attr = guard.originating_source.member
