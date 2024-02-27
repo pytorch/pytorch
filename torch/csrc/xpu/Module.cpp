@@ -254,7 +254,7 @@ static void bindGetDeviceProperties(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   m.def(
       "_get_device_properties",
-      [](int device) -> c10::xpu::DeviceProp* {
+      [](c10::DeviceIndex device) -> c10::xpu::DeviceProp* {
         return at::xpu::getDeviceProperties(device);
       },
       py::return_value_policy::reference);

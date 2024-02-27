@@ -549,22 +549,19 @@ class _World:
         return self._pg_default_device
 
     @property
-    def pg_config_info(self) -> List[Dict[str, Union[int, str, List[int]]]]:
+    def pg_config_info(self) -> List[Dict[str, Any]]:
         """
         Return a list of dict with process groups and backends.
 
         Along with their unique IDs and configurations (types and ranks).
         """
-        config_info: List[Dict[str, Union[int, str, List[int]]]] = []
+        config_info: List[Dict[str, Any]] = []
         default_pg_size = _get_group_size(None)
-        for pg, backend in self.pg_map.items():
-            # backend is a tuple with the first element being the backend type ("nccl", etc.)
-            backend_type = Backend.backend_type_map[backend[0]]
+        for pg in self.pg_map.keys():
             ranks = self.pg_group_ranks[pg]
             config_info.append(
                 {
                     "pg_name": self.pg_names[pg],
-                    "backend_id": pg._backend_id(backend_type),
                     "backend_config": self.pg_backend_config[pg],
                     "ranks": list(ranks.keys())
                     if len(ranks) != default_pg_size
@@ -848,6 +845,15 @@ def _get_group_size(group) -> int:
 def _get_group_size_by_name(group_name: str) -> int:
     group = _resolve_process_group(group_name)
     return group.size()
+
+
+def _resolve_group_name_by_ranks_and_tag(ranks: List[int], tag: str) -> str:
+    # TODO(yifu): remove this function once ranks + tag is not a supported
+    # identifier for process group for functional collectives.
+    group = _find_pg_by_ranks_and_tag(tag, ranks)
+    if group is None:
+        raise ValueError("")
+    return group.group_name
 
 
 def _check_single_tensor(param, param_name) -> None:
