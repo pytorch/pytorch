@@ -979,10 +979,6 @@ class LazyString:
         return self.func(*self.args, **self.kwargs)
 
 
-def is_fbcode():
-    return not hasattr(torch.version, "git_version")
-
-
 def trace_structured(
     name: str,
     # NB: metadata expected to be dict so adding more info is forward compatible
@@ -1041,4 +1037,3 @@ def trace_structured(
 import torch._guards
 import torch._utils_internal
 import torch.distributed as dist
-import torch.version
