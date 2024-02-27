@@ -6,7 +6,7 @@ namespace c10 {
 
 namespace {
 bool _eq(const char* op, c10::SymNodeImpl* lhs, c10::SymNodeImpl* rhs) {
-  TORCH_INTERNAL_ASSERT(lhs->nested_int().has_value());
+  TORCH_INTERNAL_ASSERT(lhs->is_nested_int());
   c10::optional<int64_t> c = rhs->nested_int();
   return (
       c.has_value() && lhs->nested_int() == *c &&
