@@ -923,7 +923,7 @@ class BuiltinVariable(VariableTracker):
                         obj.source.make_guard(GuardBuilder.TUPLE_ITERATOR_LEN)
                     )
                 else:
-                    install_guard(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
+                    install_guard(obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
             return cls(
                 list(obj.unpack_var_sequence(tx)),

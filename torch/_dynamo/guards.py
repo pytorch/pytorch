@@ -424,19 +424,19 @@ class GuardBuilder(GuardBuilderBase):
             elif istype(source, AttrSource):
                 return base_guard_manager.getattr_manager(source.member, example_value)
             elif istype(source, GetItemSource):
-                if isinstance(source.index, ConstDictKeySource):
-                    if not isinstance(base_guard_manager, DictGuardManager):
-                        raise AssertionError("DictGuardManager should not be here")
-                    return base_guard_manager.get_key_value_manager(
-                        source.index.index
-                    ).get_value_manager(example_value)
-                elif isinstance(base_guard_manager, DictGuardManager):
-                    # Get the const key source
-                    assert isinstance(base_example_value, dict)
-                    index = list(base_example_value.keys()).index(source.index)
+                if isinstance(base_guard_manager, DictGuardManager):
+                    if isinstance(source.index, ConstDictKeySource):
+                        index = source.index.index
+                    else:
+                        # TODO (anijain2305) - Consider DictGetItemSource with
+                        # invariant that index is always ConstDictKeySource
+                        assert isinstance(base_example_value, dict)
+                        index = list(base_example_value.keys()).index(source.index)
                     return base_guard_manager.get_key_value_manager(
                         index
                     ).get_value_manager(example_value)
+
+
 
                 index = source.index
                 if source.index_is_slice:
@@ -564,10 +564,9 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, [code])
 
         if config.enable_cpp_guard_manager:
-            pass
-            # self.get_guard_manager(guard).add_dict_version_guard(
-            #     val, get_verbose_code_parts(code, guard)
-            # )
+            # DictGuardManager already checks for dict versions internally. So,
+            # just get the guard manager for the dict.
+            self.get_guard_manager(guard)
 
     def DICT_CONTAINS(self, guard: Guard, key: str, invert: bool):
         dict_ref = self.arg_ref(guard)
@@ -601,7 +600,7 @@ class GuardBuilder(GuardBuilderBase):
             # Nothing to do here. DictGuardManager stores the size of the dict,
             # so we don't need this. Delete this guard when cpp_guard_manager is
             # ON by default.
-            pass
+            self.get_guard_manager(guard)
 
     def ID_MATCH(self, guard: Guard):
         # ___check_obj_id is same as `id(x) == y`
@@ -744,8 +743,9 @@ class GuardBuilder(GuardBuilderBase):
                     CLOSURE_VARS["__math_isnan"], get_verbose_code_parts(code, guard)
                 )
             return
+
         # Python math library doesn't support complex nan, so we need to use numpy
-        elif istype(val, complex) and np.isnan(val):
+        if istype(val, complex) and np.isnan(val):
             self.TYPE_MATCH(guard)
             code = list()
             code.append(f"__numpy_isnan({ref})")
@@ -757,14 +757,20 @@ class GuardBuilder(GuardBuilderBase):
                 )
             return
 
+        if config.enable_cpp_guard_manager:
+            code = f"{ref} == {val!r}"
+            self.get_guard_manager(guard).add_equals_match_guard(
+                val, get_verbose_code_parts(code, guard)
+            )
+            return
+
         code = list()
 
         # If matching equality against list/tuple, we must also check that
         # the internal types match.  (TODO: what about nested lists?)
         if istype(val, (list, tuple)):
-            # NB: LIST_LENGTH takes care of the outer __check_type_id test
-            if not config.enable_cpp_guard_manager:
-                self.LIST_LENGTH(guard)
+            # NB: SEQUENCE_LENGTH takes care of the outer __check_type_id test
+            self.SEQUENCE_LENGTH(guard)
 
             for idx, elem in enumerate(val):
                 code.append(
@@ -772,10 +778,8 @@ class GuardBuilder(GuardBuilderBase):
                 )
         else:
             # Add type check to prevent equality check between tensor and non-tensor.
-            if not config.enable_cpp_guard_manager:
-                self.TYPE_MATCH(guard)
+            self.TYPE_MATCH(guard)
 
-        # TODO(anijain2305) - Revisit this line. Should we just remove this?
         if istype(val, torch.Size):
             val = tuple(val)
 
@@ -784,11 +788,6 @@ class GuardBuilder(GuardBuilderBase):
         # and NaN tests
         code.append(f"{ref} == {val!r}")
         self._produce_guard_code(guard, code)
-
-        if config.enable_cpp_guard_manager:
-            self.get_guard_manager(guard).add_equals_match_guard(
-                val, get_verbose_code_parts(code, guard)
-            )
 
     def CONSTANT_MATCH(self, guard: Guard):
         val = self.get(guard.name)
@@ -834,7 +833,7 @@ class GuardBuilder(GuardBuilderBase):
     def PYMODULE_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)
 
-    def LIST_LENGTH(self, guard):
+    def SEQUENCE_LENGTH(self, guard):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
@@ -858,7 +857,7 @@ class GuardBuilder(GuardBuilderBase):
             # DictGuardManager internally handles the length check
             pass
         else:
-            self.LIST_LENGTH(guard)
+            self.SEQUENCE_LENGTH(guard)
 
     def TUPLE_ITERATOR_LEN(self, guard):
         ref = self.arg_ref(guard)
@@ -1003,9 +1002,7 @@ class GuardBuilder(GuardBuilderBase):
     def BACKEND_MATCH(self, guard: Guard):
         """Guard on backend matching based on id of current_backend"""
         assert guard.source is GuardSource.GLOBAL
-        backend_id = (
-            f"{id(torch._dynamo.eval_frame.guarded_backend_cache.current_backend)}"
-        )
+        backend_id = id(torch._dynamo.eval_frame.guarded_backend_cache.current_backend)
         code = [f"___check_current_backend({backend_id})"]
         self._produce_guard_code(guard, code)
 
