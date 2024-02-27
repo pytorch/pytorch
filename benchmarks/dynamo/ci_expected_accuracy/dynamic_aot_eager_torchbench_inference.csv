@@ -102,6 +102,10 @@ detectron2_maskrcnn_r_50_fpn,eager_fail_to_run,0
 
 
 
+detectron2_fcos_r_50_fpn,pass,0
+
+
+
 dlrm,pass,0
 
 

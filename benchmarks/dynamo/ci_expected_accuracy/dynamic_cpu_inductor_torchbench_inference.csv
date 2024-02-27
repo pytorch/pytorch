@@ -54,6 +54,10 @@ densenet121,pass,0
 
 
 
+detectron2_fcos_r_50_fpn,pass,0
+
+
+
 dlrm,pass,0
 
 
