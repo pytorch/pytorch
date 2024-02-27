@@ -244,7 +244,7 @@ class ShardingPropagator:
                     suggestion_schema = [reshard_schema]
 
                 # construct output spec for the op
-                if op_schema.return_type_tuple_tensors():
+                if op_schema.return_type_tuple_tensor_like():
                     # for ops that return multiple tensors and the output_specs is not
                     # a tuple, we use a tuple of that single output spec as the new
                     # output_specs

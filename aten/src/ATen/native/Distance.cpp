@@ -316,7 +316,7 @@ Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, doub
   // We want to divide each tensor by its norm first, as it's more numerically stable.
   // This keeps the result between -1.0 and 1.0
   // We clone them, as we're going to modify them in-place
-  // This allows the gradients to propagate propertly all the way to x1 and x2
+  // This allows the gradients to propagate properly all the way to x1 and x2
   auto x1_norm = at::linalg_vector_norm(*x1, 2, /*dim=*/dim, /*keepdim=*/true).clone();
   auto x2_norm = at::linalg_vector_norm(*x2, 2, /*dim=*/dim, /*keepdim=*/true).clone();
 

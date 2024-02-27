@@ -219,8 +219,22 @@ class MemoryPlanningState:
         self.reuse_pool[key].append(item)
 
 
+class WrapperLine:
+    pass
+
+
+class IndentLine(WrapperLine):
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.do_indent()
+
+
+class UnindentLine(WrapperLine):
+    def codegen(self, code: IndentedBuffer) -> None:
+        code.do_unindent()
+
+
 @dataclasses.dataclass
-class EnterDeviceContextManagerLine:
+class EnterDeviceContextManagerLine(WrapperLine):
     device_idx: int
     last_seen_device_guard_index: Optional[int]
 
@@ -260,14 +274,14 @@ class EnterDeviceContextManagerLine:
             code.writeline(V.graph.device_ops.set_device(self.device_idx))
 
 
-class ExitDeviceContextManagerLine:
+class ExitDeviceContextManagerLine(WrapperLine):
     def codegen(self, code: IndentedBuffer) -> None:
         if not V.graph.cpp_wrapper:
             code.do_unindent()
 
 
 @dataclasses.dataclass
-class MemoryPlanningLine:
+class MemoryPlanningLine(WrapperLine):
     wrapper: "WrapperCodeGen"
 
     def plan(self, state: MemoryPlanningState) -> "MemoryPlanningLine":
@@ -544,7 +558,10 @@ class WrapperCodeGen(CodeGen):
             if config.nan_asserts:
                 self.codegen_input_nan_asserts()
 
-    def write_get_raw_stream(self, device_idx: int) -> str:
+    # this function (and below) takes a graph as input so
+    # that stream caching happens per graph instance. this
+    # is important for nested subgraph codegening.
+    def write_get_raw_stream(self, device_idx: int, graph=None) -> str:
         self.write_triton_header_once()
         name = f"stream{device_idx}"
         self.writeline(f"{name} = get_raw_stream({device_idx})")
@@ -614,7 +631,9 @@ class WrapperCodeGen(CodeGen):
         with self.prefix.indent():
             self.prefix.splice(code)
 
-        stream_name = self.write_get_raw_stream(V.graph.scheduler.current_device.index)
+        stream_name = self.write_get_raw_stream(
+            V.graph.scheduler.current_device.index, V.graph
+        )
         self.writeline(
             f"{kernel_name}.run({', '.join(args)}, grid={grid}, stream={stream_name})"
         )
@@ -677,14 +696,7 @@ class WrapperCodeGen(CodeGen):
                 self.memory_plan_reuse()
 
             for line in self.lines:
-                if isinstance(
-                    line,
-                    (
-                        MemoryPlanningLine,
-                        EnterDeviceContextManagerLine,
-                        ExitDeviceContextManagerLine,
-                    ),
-                ):
+                if isinstance(line, WrapperLine):
                     line.codegen(self.wrapper_call)
                 else:
                     self.wrapper_call.writeline(line)
@@ -991,42 +1003,49 @@ class WrapperCodeGen(CodeGen):
 
         signature: List[KernelArgType] = []
         constants = {}
-        for key, arg in kwargs.items():
-            idx = kernel.arg_names.index(key)
+        non_constant_indices = []
+        for idx, key in enumerate(kernel.arg_names):
+            if key not in kwargs:
+                continue
+            arg = kwargs[key]
             if idx in kernel.constexprs:
                 constants[key] = arg
-            elif isinstance(arg, ir.Buffer):
-                signature.append(
-                    TensorArg(
-                        name=key,
-                        buffer=arg.get_name(),
-                        dtype=arg.get_dtype(),
-                    )
-                )
-            elif isinstance(arg, ir.ReinterpretView):
-                # for ReinterpretView we use the underlying
-                # buffer name and note the (possibly non-zero)
-                # offset relative to the underlying buffer
-                signature.append(
-                    TensorArg(
-                        name=key,
-                        buffer=arg.data.get_name(),
-                        dtype=arg.get_dtype(),
-                        offset=arg.layout.offset,
-                    )
-                )
             else:
-                signature.append(SizeArg(key, arg))
+                non_constant_indices.append(idx)
+                if isinstance(arg, ir.Buffer):
+                    signature.append(
+                        TensorArg(
+                            name=key,
+                            buffer=arg.get_name(),
+                            dtype=arg.get_dtype(),
+                        )
+                    )
+                elif isinstance(arg, ir.ReinterpretView):
+                    # for ReinterpretView we use the underlying
+                    # buffer name and note the (possibly non-zero)
+                    # offset relative to the underlying buffer
+                    signature.append(
+                        TensorArg(
+                            name=key,
+                            buffer=arg.data.get_name(),
+                            dtype=arg.get_dtype(),
+                            offset=arg.layout.offset,
+                        )
+                    )
+                else:
+                    signature.append(SizeArg(key, arg))
         index_dtype = "tl.int32"
         inductor_meta = {
             "kernel_name": name,
         }
         triton_meta = {
-            "signature": signature_to_meta(signature, size_dtype=index_dtype),
+            "signature": signature_to_meta(
+                signature, size_dtype=index_dtype, indices=non_constant_indices
+            ),
             "device": V.graph.scheduler.current_device.index,
             "device_type": V.graph.scheduler.current_device.type,
             "constants": constants,
-            "configs": [config_of(signature)],
+            "configs": [config_of(signature, indices=non_constant_indices)],
         }
         configs = [
             {
@@ -1074,7 +1093,9 @@ class WrapperCodeGen(CodeGen):
 
         traverse(kernel)
 
-        compile_wrapper.writeline("''')")
+        compile_wrapper.writeline(
+            f"''', device_str='{V.graph.scheduler.current_device.type}')"
+        )
         _, lineno = inspect.getsourcelines(kernel.fn)
         srcfile = inspect.getsourcefile(kernel.fn)
         metadata = f"# Original path: {srcfile}:{lineno}"
@@ -1153,7 +1174,7 @@ class WrapperCodeGen(CodeGen):
         if cuda:
             call_args_str = ", ".join(pexpr(item) for item in call_args)
             stream_name = self.write_get_raw_stream(
-                V.graph.scheduler.current_device.index
+                V.graph.scheduler.current_device.index, V.graph
             )
             if triton:
                 grid_str = ", ".join(pexpr(item) for item in grid)
@@ -1345,9 +1366,42 @@ class WrapperCodeGen(CodeGen):
         if name in self.unbacked_symbol_decls:
             return name
         else:
-            # When in CppWrapperCodeGen, we should only generate the declaration once
+            # When in CppWrapperCpu, we should only generate the declaration once
             self.unbacked_symbol_decls.add(name)
             return self.declare + name
+
+    def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
+        self.writeline(f"# subgraph: {subgraph.name}")
+        for inner_input, outer_input in zip(subgraph.graph.graph_inputs, outer_inputs):
+            self.writeline(f"{self.declare}{inner_input} = {outer_input}{self.ending}")
+        parent_graph = V.graph
+        with V.set_graph_handler(subgraph.graph):
+            subgraph.graph.codegen_subgraph(
+                parent_graph=parent_graph,
+            )
+        for inner_output, outer_output in zip(
+            subgraph.graph.graph_outputs, outer_outputs
+        ):
+            self.writeline(
+                f"{self.declare}{outer_output} = {inner_output.codegen_reference()}{self.ending}"
+            )
+
+    def codegen_conditional(self, conditional):
+        name = conditional.get_name()
+        outer_inputs = [buf.codegen_reference() for buf in conditional.operands]
+        outer_outputs = [f"{name}[{i}]" for i in range(len(conditional.outputs))]
+
+        # predefine the list of outer outputs before entering the conditional
+        # TODO(aakhundov): make this work for C++ wrapper codegen (and ABI mode)
+        self.writeline(f"{name} = [None] * {len(conditional.outputs)}")
+        self.writeline(f"if {conditional.predicate.codegen_reference()}.item():")
+        self.writeline(IndentLine())
+        self.codegen_subgraph(conditional.true_subgraph, outer_inputs, outer_outputs)
+        self.writeline(UnindentLine())
+        self.writeline("else:")
+        self.writeline(IndentLine())
+        self.codegen_subgraph(conditional.false_subgraph, outer_inputs, outer_outputs)
+        self.writeline(UnindentLine())
 
     @staticmethod
     def statically_known_int_or_none(x):
