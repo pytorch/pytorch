@@ -52,19 +52,9 @@ class AsyncTensor(torch.Tensor):
     tensor_ctor_kwargs["requires_grad"] = fake_tensor.requires_grad
     tensor_ctor_kwargs["dtype"] = fake_tensor.dtype
     out = torch.Tensor._make_wrapper_subclass(cls, shape, **tensor_ctor_kwargs)
-    # if unused_real_tensor is None:
-    #   # TODO figure out this:
-    #   # this maybe uses extra memory.
-    #   # without this, it likely throws: https://gist.github.com/yf225/e6330c85d1b92fa68a5013acd9427466
-    #   # I believe meta tensor creation needs a concrete inner tensor to track shared storage.
-    #   out._unused_real_tensor = torch.empty(shape, dtype=fake_tensor.dtype, layout=fake_tensor.layout, device=fake_tensor.device, requires_grad=fake_tensor.requires_grad)
-    # else:
-    #   out._unused_real_tensor = unused_real_tensor
     out._fake_tensor = fake_tensor
     out._handle = handle
     out._materialized_tensor_container = materialized_tensor_container
-    # traceback.print_stack()
-    # print(f"here7: id(out): {id(out)}")
     return out
 
   # TODO: follow DTensor impl in https://github.com/pytorch/pytorch/blob/main/torch/distributed/_tensor/api.py#L207
@@ -134,7 +124,6 @@ class AsyncTensor(torch.Tensor):
   def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
     # TODO: implement randn_like etc. method that doesn't require a materialized tensor as input
     # TODO: implement other new_X etc. similar to new_empty_strided
-    # print(f"func: {func}")
     if kwargs is None:
       kwargs = {}
     if func in [torch.ops.aten.ones_like.default]:
@@ -155,51 +144,13 @@ class AsyncTensor(torch.Tensor):
       # kwargs_materialized = {k: pytree.tree_map_only(AsyncTensor, lambda x: x._materialized_tensor_container.get_tensor(), v) for k, v in kwargs.items()}
       # out = func(*args_materialized, **kwargs_materialized)
       assert not any(isinstance(x, AsyncTensor) for x in args_materialized)
-      # with torch.fx.experimental.proxy_tensor.maybe_disable_fake_tensor_mode():
-      # if any(isinstance(x, torch._subclasses.fake_tensor.FakeTensor) for x in args_materialized):
-      #   args_fake = []
-      #   for arg in args_materialized:
-      #     if isinstance(arg, torch._subclasses.fake_tensor.FakeTensor):
-      #       args_fake.append(arg)
-      #     else:
-      #       args_fake.append(torch._guards.detect_fake_mode().from_tensor(arg))
-      #   out = func(*args_fake, **kwargs)
-      # else:
-      #   with torch.fx.experimental.proxy_tensor.maybe_disable_fake_tensor_mode():
-      #     out = func(*args_materialized, **kwargs)
       out = func(*args_materialized, **kwargs)
       # NOTE: if we don't re-wrap the output with AsyncTensor, sometimes the output will still be re-wrapped as AsyncTensor
       # (by another unknown mechanism outside of this code, maybe in `def __torch_function__(...)` in torch/_tensor.py?)
-      # but lose all its AsyncTensor attributes like `_materialized_tensor_container`
+      # but it will lose all its AsyncTensor attributes like `_materialized_tensor_container`
       if isinstance(out, torch.Tensor) and not isinstance(out, AsyncTensor):
-        # TODO maybe look at input args to know if we are compiling? see how we do it for SAC dispatch mode. We should not re-wrap with AsyncTensor if we are compiling with AsyncTensor input
-        """
-        def _is_compiling(func, args, kwargs):
-          # Check if we are under AOTAutograd tracing
-          # There should probably be a better way to do this...
-          # TODO: unify _is_compiling across all compile stacks
-          for arg in args:
-              if isinstance(arg, torch.Tensor) and is_fun(arg):
-                  return True
-          return False
-        """
-        # breakpoint()
         out = AsyncTensor(fake_tensor=get_fake_mode().from_tensor(out), handle=None, materialized_tensor_container=TensorContainer(out))
-      # print(f"in dispatch: out._is_view(): {out._is_view()}")
       return out
-      # return return_and_correct_aliasing(func, args, kwargs, out)
-
-  # @classmethod
-  # def __torch_function__(cls, func, types, args=(), kwargs=None):
-  #   if kwargs is None:
-  #     kwargs = {}
-
-  #   with torch._C.DisableTorchFunctionSubclass():
-  #     ret = func(*args, **kwargs)
-  #     if func in get_default_nowrap_functions():
-  #       return ret
-  #     else:
-  #       return _convert(ret, cls)
 
   def materialize_with_value(self, materialized_tensor):
     assert (not isinstance(materialized_tensor, AsyncTensor)) and isinstance(materialized_tensor, torch.Tensor), f"Received type: {type(materialized_tensor)}"
