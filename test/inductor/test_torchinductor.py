@@ -3181,6 +3181,41 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 0)
 
+    def test_adaptive_max_pool2d1(self):
+        def fn(x):
+            return aten.adaptive_max_pool2d(x, (6, 6))
+
+        self.common(
+            fn,
+            (torch.randn(2, 4, 16, 16),),
+            check_lowp=False,
+        )
+
+        # lowering to max_pool2d case
+        self.common(
+            fn,
+            (torch.randn(2, 4, 3, 3),),
+        )
+
+        # no-op case
+        self.common(
+            fn,
+            (torch.randn(2, 4, 6, 6),),
+        )
+
+    def test_adaptive_max_pool2d2(self):
+        # Big kernel size, use fallback
+        def fn(x):
+            return aten.adaptive_max_pool2d(x, (4, 4))
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            (torch.randn(2, 4, 21, 21),),
+            check_lowp=False,
+        )
+        assertGeneratedKernelCountEqual(self, 0)
+
     def test_multi_threading(self):
         model = torch.nn.Linear(2, 3).eval()
         inp = torch.randn(4, 2)
