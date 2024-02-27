@@ -61,8 +61,11 @@ def enable_inplace_requires_grad(enabled):
 
 
 def _vjp_treespec_compare(primals_out, cotangents):
+    # Revert this once #116264 gets fixed
     _, primals_out_spec = tree_flatten(primals_out)
     _, cotangents_spec = tree_flatten(cotangents)
+    # Dynamo fails to trace operator.ne below. To bypass this limitation, this
+    # function is not inlined.
     if primals_out_spec != cotangents_spec:
         raise RuntimeError(
             f'Expected pytree structure of cotangents to be the same '
@@ -320,7 +323,7 @@ def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = N
         # See NOTE [grad and vjp interaction with no_grad]
         with torch.enable_grad():
             primals = _wrap_all_tensors(primals, level)
-            if argnums is None:
+            if not argnums:
                 diff_primals = _create_differentiable(primals, level)
             else:
                 diff_primals = _slice_argnums(primals, argnums, as_tuple=False)
