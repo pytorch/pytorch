@@ -547,6 +547,21 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         del x
         self.assertFalse(guard_manager.check(None))
 
+    def test_dict_contains_guard(self):
+        foo = {"a": 1, "b": 2}
+        guard = guards.DICT_CONTAINS(True, "a", ["has a"])
+
+        self.assertTrue(guard(foo))
+        self.assertTrue(guard({"a": 1, "b": 2}))
+        self.assertFalse(guard({"b": 2, "c": 3}))
+        self.assertFalse(guard({}))
+
+        guard = guards.DICT_CONTAINS(False, "c", ["not has c"])
+        self.assertTrue(guard(foo))
+        self.assertTrue(guard({"a": 1, "b": 2}))
+        self.assertFalse(guard({"b": 2, "c": 3}))
+        self.assertTrue(guard({}))
+
     def test_dict_guard_manager(self):
         root = RootGuardManager()
 

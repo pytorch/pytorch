@@ -1049,14 +1049,38 @@ class DATA_PTR_MATCH : public LeafGuard {
 class NO_HASATTR : public LeafGuard {
  public:
   NO_HASATTR(py::object attr_name, py::object verbose_code_parts)
-      : LeafGuard(verbose_code_parts), _attr_name(attr_name.ptr()) {}
+      : LeafGuard(verbose_code_parts), _attr_name(attr_name) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    return PyObject_HasAttr(value, _attr_name) == 0;
+    return PyObject_HasAttr(value, _attr_name.ptr()) == 0;
   }
 
  private:
-  PyObject* _attr_name;
+  py::object _attr_name;
+};
+
+// Checks that dict contains or does not contain a key. This happens for
+// PythonSysModulesVariable tracker.
+// TODO(janimesh) - Check if we can use DictGuardManager. The downside could be
+// large number of keys for sys module, so DICT_CONTAINS might still end up
+// being faster.
+class DICT_CONTAINS : public LeafGuard {
+ public:
+  DICT_CONTAINS(bool contains, py::object key, py::object verbose_code_parts)
+      : LeafGuard(verbose_code_parts), _contains(contains ? 1 : 0), _key(key) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    int result = PyDict_Contains(value, _key.ptr());
+    if (result == -1) {
+      PyErr_Clear();
+      return false;
+    }
+    return result == _contains;
+  }
+
+ private:
+  int _contains;
+  py::object _key;
 };
 
 /**
@@ -2586,6 +2610,10 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "NO_HASATTR")
       .def(py::init<py::object, py::list>())
       .def("__call__", &NO_HASATTR::check);
+  py::class_<DICT_CONTAINS, LeafGuard, std::shared_ptr<DICT_CONTAINS>>(
+      py_m, "DICT_CONTAINS")
+      .def(py::init<bool, py::object, py::list>())
+      .def("__call__", &DICT_CONTAINS::check);
   py::class_<DYNAMIC_INDICES, LeafGuard, std::shared_ptr<DYNAMIC_INDICES>>(
       py_m, "DYNAMIC_INDICES")
       .def(py::init<bool, py::set, py::list>())
@@ -2751,6 +2779,15 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(
                 std::make_shared<NO_HASATTR>(attr_name, verbose_code_parts));
+          })
+      .def(
+          "add_dict_contains_guard",
+          [](GuardManager& self,
+             bool contains,
+             py::object key,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<DICT_CONTAINS>(
+                contains, key, verbose_code_parts));
           })
       .def(
           "add_dynamic_indices_guard",
