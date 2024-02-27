@@ -380,9 +380,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         ] = []
         self.random_values_var = None
 
-        # Bytecode to insert right before we call the graph
-        self.pregraph_bytecode: List[Instruction] = []
-
     # This gets its own helper function so guards DEBUG logs are more informative
     def init_ambient_guards(self):
         # Register a SHAPE_ENV guard to make sure we setup shape guards
@@ -857,10 +854,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     )
                 else:
                     prefix_insts.append(copy.copy(inst))
-        assert not (
-            self.pregraph_bytecode and self.export
-        ), "export does not support pregraph_bytecode"
-        prefix_insts.extend(self.pregraph_bytecode)
 
         def append_prefix_insts():
             self.add_output_instructions(prefix_insts)
@@ -1521,13 +1514,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self, register_finalizer: Callable[[fx.GraphModule], None]
     ) -> None:
         self.register_finalizer_fns.append(register_finalizer)
-
-    def example_value_from_input_node(self, node: torch.fx.Node):
-        """Extract the non-fake example tensor"""
-        if node.op == "placeholder":
-            return node.meta["grapharg"].example
-        assert node.op == "get_attr"
-        return self.nn_modules[node.target]  # type: ignore[index]
 
 
 err_epilogue = (
