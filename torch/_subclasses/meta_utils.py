@@ -307,14 +307,37 @@ class MetaConverter:
                 outer_stride=outer_stride,
             )
 
-        # Returns a fake-ified version of t with the same view relationship wrt the given
-        # fake base. For views involving subclasses, this performs view replay, while
-        # dense -> dense views can be simplified to an as_strided() call. Note that view
-        # replay involves handling any closed-over state present in the view func:
-        #   * Closed-over tensors are fake-ified
-        #   * Closed-over SymInts are made symbolic
+        # Returns a fake-ified version of an input view tensor t, given an already fake-ified
+        # base. At a high level, we want two things:
+        #   1. fake_t should have the same view relationship to the given fake base as the
+        #      input t has to its _base.
+        #   2. fake_t should have symbolic sizes / strides / storage offset according to the
+        #      appropriate symbolic context (i.e. from the automatic dynamic algorithm).
+        #
+        # We currently take different strategies across view types:
+        #   * For dense -> dense views, accomplish both (1) and (2) simultaneously via an
+        #     as_strided() call on the fake-ified base, passing symbolic metadata.
+        #   * For views involving subclasses, perform view replay using view funcs to
+        #     achieve (1). It's necessary for (2) to swap out any closed-over state in
+        #     the view funcs with symbolicized SymInts and fake-ified tensors. Doing this
+        #     avoids specialization (and thus over-eager simplification of symbols) that
+        #     could occur during view replay on the fake-ified base.
+        #
+        # Examples:
+        #   * t.unsqueeze(-1) with dense t is a dense -> dense view. It can be modeled
+        #     with an as_strided() call on the fake base passing symbolic metadata.
+        #   * sub.select(dim=0, index=3) is a subclass -> subclass view. The index arg
+        #     is made symbolic to avoid invalid specialization and view replay is then
+        #     done to reconstruct the view.
+        #   * _nested_from_jagged(values, offsets) is a dense -> subclass view
+        #     that returns a subclass instance from a dense values tensor. The offsets
+        #     tensor is closed over in the view func, as it can be considered view metadata.
+        #     First, the offsets tensor is fake-ified according to the inner symbolic
+        #     context and with the correct relationship to the outer size / stride metadata.
+        #     Then view replay is done, swapping in the fake offsets so the view replay output
+        #     is fully fake with no invalid specialization.
         def view_from_base(base, t, source=source, shape_env=shape_env):
-            # fake-ify t naively; view relationship isn't correct yet
+            # fake-ify t's metadata according to the outer symbolic context
             (sizes, strides, storage_offset) = sym_sizes_strides_storage_offset(
                 t, source
             )
@@ -334,13 +357,27 @@ class MetaConverter:
 
                 # NB: The source is meaningless; the symbol here is expected to be simplified out.
                 sym_source = ConstantSource("view_func")
-                val = int(s)
-                symbol = shape_env.create_symbol(val, sym_source)
-                return shape_env.create_symintnode(symbol, hint=val, source=sym_source)
+                symbol = shape_env.create_symbol(s, sym_source)
+                return shape_env.create_symintnode(symbol, hint=s, source=sym_source)
 
-            # Assume the only closed-over tensors encountered will be subclass inner tensors.
+            # Assume the only closed-over tensors encountered -that matter- will be inner tensors
+            # of the final view if it's a subclass.
+            #
+            # Examples:
+            #   * Dense -> NJT view: NJT has (values, offsets) components; we want a view of
+            #     values with the offsets closed over. As the offsets component is needed
+            #     to describe the output view, it's important that it's fakeified.
+            #   * Dense -> NJT1 -> Dense -> NJT2 view: The Dense -> NJT2 part of this view
+            #     is the same as the previous example; a fakeified form of NJT2's offsets
+            #     is required for the output view. On the contrary, the NJT1 -> Dense view
+            #     part makes NJT1's offsets irrelevant to the fakeified NJT2 view and thus we
+            #     don't need to fakeify it.
             real_to_fake_mapping = {}
             if is_traceable_wrapper_subclass(t):
+                # Fake-ify t naively here; this is only done so we can get fake-ified inner
+                # tensors with the correct relationships to the outer sizes / strides for use
+                # in view replay. It's done beforehand here because it's not easy to do when
+                # visiting tensors one-by-one during view replay.
                 fake_t = empty_create_subclass(
                     t, outer_size=sizes, outer_stride=strides
                 )
@@ -349,17 +386,21 @@ class MetaConverter:
                     real_to_fake_mapping[getattr(t, attr)] = getattr(fake_t, attr)
 
             def tensor_visitor_fn(t):
+                # NB: If we don't have a corresponding fake-ified closed-over tensor,
+                # just return the real one. The assumption here is that this won't matter,
+                # as stated above (only inner tensors of the final view are relevant).
                 return real_to_fake_mapping.get(t, t)
 
             # Replay the view, swapping out any non-symbolic SymInts or real tensors
             # for symbolic SymInts or fake tensors.
             fake_t = t._view_func_unsafe(base, symint_visitor_fn, tensor_visitor_fn)
 
-            # Ensure the output has symbolic shapes according to the symbolic context.
-            # NB: These asserts simplify out any symbolicized closed-over view func state.
-            assert fake_t.size() == sizes
-            assert fake_t.stride() == strides
-            assert fake_t.storage_offset() == storage_offset
+            # Ensure the output has symbolic shapes according to the outer symbolic context.
+            # These checks should simplify out any symbols created for closed-over view func
+            # SymInts.
+            torch._check(fake_t.size() == sizes)
+            torch._check(fake_t.stride() == strides)
+            torch._check(fake_t.storage_offset() == storage_offset)
             return fake_t
 
         # see expired-storages
