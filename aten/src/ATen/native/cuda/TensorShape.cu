@@ -284,6 +284,8 @@ std::pair<at::Tensor, std::vector<int64_t*>> pack_vecs(
   return std::make_pair(std::move(packed), std::move(ptrs));
 }
 
+// Copy `max_chunk_size` bytes from `src` to `dst` by `num_threads`, and pad zero when
+// `src` size (i.e., actual_chunk_size) is less than `max_chunk_size`.
 static __device__ __inline__ void copy_chunk_with_pad(
   char* dst,
   const char* src,
@@ -337,6 +339,10 @@ static __device__ __inline__ void copy_chunk_with_pad(
   }
 }
 
+// NOTE [CUDA kernel for chunk_cat]
+// chunk_cat_cuda adopts a "jagged grid" strategy, inspired by NOTE [CUDA fast path for split_with_sizes_copy.out].
+// In addition, chunk_cat_cuda supports padding via copy_chunk_with_pad when src chunk size is less than
+// dst chunk size.
 static __global__ void chunk_cat_cuda_kernel(
   char** src,
   char* dst,
@@ -362,6 +368,7 @@ static __global__ void chunk_cat_cuda_kernel(
       + slice_idx * slice_size
       + chunk_idx  * chunk_size
       + block_idx_to_start_tensor_bytes[tensor_idx];
+  // Compute the actual number of bytes to copy from src.
   const int64_t actual_copy_size = minInt64(
     pad_tensor_chunk_sizes[tensor_idx],
     maxInt64(0, actual_tensor_sizes[tensor_idx]-chunk_idx * pad_tensor_chunk_sizes[tensor_idx])
@@ -376,6 +383,7 @@ static __global__ void chunk_cat_cuda_kernel(
   );
 }
 
+// Assert that all tensors have the same shape for `(0,1,...,dim-1)`-th dimensions.
 void assert_leading_dimension_matches(TensorList tensors, uint64_t dim) {
   const auto num_tensors = tensors.size();
   TORCH_CHECK(
@@ -560,6 +568,7 @@ void split_with_sizes_copy_out_cuda(
   }
 }
 
+// See [CUDA kernel for chunk_cat_cuda]
 Tensor chunk_cat_cuda(
   TensorList tensors,
   int64_t dim,
