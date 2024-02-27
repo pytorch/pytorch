@@ -228,7 +228,8 @@ void FatalSignalHandler::fatalSignalHandler(int signum) {
         // a single thread that wouldn't receive the SIGUSR2
         if (std::cv_status::timeout == writingCond.wait_until(ul, now + 2s)) {
           if (!signalReceived) {
-            std::cerr << "signal lost waiting for stacktrace " << pid << ":" << tid << std::endl;
+            std::cerr << "signal lost waiting for stacktrace " << pid << ":"
+                      << tid << std::endl;
             break;
           }
         }
