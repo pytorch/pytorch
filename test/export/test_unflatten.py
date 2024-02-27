@@ -585,5 +585,36 @@ class TestUnflatten(TestCase):
 
         self.compare_outputs(export_module, unflattened, (torch.randn((2, 3)),))
 
+    def test_nested_leaf_non_strict(self):
+        class Leaf(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        class Nested(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.leaf = Leaf()
+
+            def forward(self, x):
+                return self.leaf(x) + 2
+
+        class TopLevel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.nested = Nested()
+
+            def forward(self, x):
+                return self.nested(x) + 3
+
+        ep = torch.export.export(
+            TopLevel(),
+            (torch.randn(3),),
+            strict=False,
+            preserve_module_call_signature=("nested",),
+        )
+
+        torch.export.unflatten(ep)
+
+
 if __name__ == "__main__":
     run_tests()

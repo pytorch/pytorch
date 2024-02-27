@@ -153,6 +153,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         except TypeError as e:
             self.assertIn("expected a code object!", str(e))
 
+        # test get cache entry on skipped code object
+        def h(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 1
+
+        torch.compile(h)(torch.randn(3, 3))
+
+        entries = _debug_get_cache_entry_list(torch._dynamo.graph_break)
+        self.assertEqual(len(entries), 0)
+
     def test_boolarg(self):
         def boolarg(aa, bb, flag):
             if flag:
@@ -2545,6 +2556,29 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_fn = torch.compile(fn, backend=cnts)
         self.assertTrue(same(fn(x, y), opt_fn(x.clone(), y.clone())))
         self.assertEqual(cnts.frame_count, 1)
+
+    def test_out_variants_with_resizing_on_graph_inputs_with_dynamic(self):
+        # https://github.com/pytorch/pytorch/issues/120482
+        class CustomModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, inputs):
+                return torch.outer(**inputs)
+
+        compile_fn = torch.compile(CustomModel(), fullgraph=True)
+
+        shapes = [(2, 1), (6, 1), (4, 1)]
+        for shape in shapes:
+            vec1, vec2 = shape
+            input_tensor1 = torch.randn(vec1)
+            input_tensor2 = torch.randn(vec2)
+            out_tensor = torch.empty(shape)
+            args = {"input": input_tensor1, "vec2": input_tensor2, "out": out_tensor}
+            res = compile_fn(args)
+            opt_res = res.clone()  # cuz this is out and we mutate it
+            res = CustomModel()(args)
+            self.assertEqual(res, opt_res)
 
     def test_dict_mutation_side_effect(self):
         def fn(d):
@@ -9652,6 +9686,58 @@ fn
         del m2
         c5 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c5), 0)
+
+    def test_grad_none(self):
+        def fn(x, y):
+            x.grad = torch.abs(y)
+            x.grad.add_(y)
+            return torch.abs(y)
+
+        y = torch.arange(4).reshape(2, 2).to(torch.float)
+        x = torch.randn(2, 2)
+        x.grad = None
+
+        z = fn(x, y)
+        ref_y = torch.clone(z).detach()
+        ref_x_grad = torch.clone(x.grad).detach()
+
+        y = torch.arange(4).reshape(2, 2).to(torch.float)
+        x = torch.randn(2, 2)
+        x.grad = None
+
+        opt_fn = torch.compile(fn, backend="eager")
+        z = opt_fn(x, y)
+        self.assertEqual(z, ref_y)
+        self.assertEqual(x.grad, ref_x_grad)
+
+    def test_grad_non_none(self):
+        def fn(x, y):
+            x.grad.add_(y)
+            return torch.abs(y)
+
+        y = torch.ones(2, 2)
+        x = torch.randn(2, 2)
+        x.grad = torch.arange(4).reshape(2, 2).to(torch.float)
+
+        z = fn(x, y)
+        ref_y = torch.clone(z).detach()
+        ref_x_grad = torch.clone(x.grad).detach()
+
+        y = torch.ones(2, 2)
+        x = torch.randn(2, 2)
+        x.grad = torch.arange(4).reshape(2, 2).to(torch.float)
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        opt_fn = torch.compile(fn, backend=cnt)
+        z = opt_fn(x, y)
+
+        # Ensure that the generated graph returns only one output. We want the
+        # add_ on the grad to be part of the graph itself, so that inductor can
+        # theoretically move the add_ and resutling copy_ nodes at the right
+        # place to free memory.
+        self.assertEqual(len(list(cnt.graphs[0].graph.nodes)[-1].all_input_nodes), 1)
+        self.assertEqual(z, ref_y)
+        self.assertEqual(x.grad, ref_x_grad)
 
 
 class TestTracer(JitTestCase):
