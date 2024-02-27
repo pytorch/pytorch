@@ -2,6 +2,7 @@
 
 import contextlib
 import functools
+import unittest
 
 import torch
 import torch._dynamo
@@ -696,6 +697,26 @@ class HooksTests(torch._dynamo.test_case.TestCase):
                 )
                 with compiled_bwd_ctx:
                     test_fn(compiled_fn)
+
+    def test_recompile(self):
+        def hook(param):
+            param.grad *= 2
+
+        x = torch.ones(10)
+        x.requires_grad = True
+
+        def run(input):
+            return x * input
+
+        x.register_post_accumulate_grad_hook(hook)
+        with compiled_autograd.enable(compiler_fn):
+            for i in range(5):
+                with unittest.mock.patch(
+                    "torch._dynamo.config.error_on_recompile", True
+                ):
+                    # Mimic optimizer.zero_grad() to clear the gradient
+                    x.grad = None
+                    run(i).sum().backward()
 
 
 if __name__ == "__main__":

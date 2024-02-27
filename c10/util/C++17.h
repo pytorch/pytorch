@@ -78,17 +78,10 @@ using negation = std::negation<B>;
 template <class T>
 using void_t = std::void_t<T>;
 
-#if defined(USE_ROCM)
-// rocm doesn't like the C10_HOST_DEVICE
-#define CUDA_HOST_DEVICE
-#else
-#define CUDA_HOST_DEVICE C10_HOST_DEVICE
-#endif
-
-#if defined(__cpp_lib_apply) && !defined(__CUDA_ARCH__)
+#if defined(__cpp_lib_apply) && !defined(__CUDA_ARCH__) && !defined(__HIP__)
 
 template <class F, class Tuple>
-CUDA_HOST_DEVICE inline constexpr decltype(auto) apply(F&& f, Tuple&& t) {
+C10_HOST_DEVICE inline constexpr decltype(auto) apply(F&& f, Tuple&& t) {
   return std::apply(std::forward<F>(f), std::forward<Tuple>(t));
 }
 
@@ -109,7 +102,7 @@ C10_HOST_DEVICE constexpr auto apply_impl(
     std::index_sequence<INDEX...>)
 #else
 // GCC/Clang need the decltype() return type
-CUDA_HOST_DEVICE constexpr decltype(auto) apply_impl(
+C10_HOST_DEVICE constexpr decltype(auto) apply_impl(
     F&& f,
     Tuple&& t,
     std::index_sequence<INDEX...>)
@@ -120,7 +113,7 @@ CUDA_HOST_DEVICE constexpr decltype(auto) apply_impl(
 } // namespace detail
 
 template <class F, class Tuple>
-CUDA_HOST_DEVICE constexpr decltype(auto) apply(F&& f, Tuple&& t) {
+C10_HOST_DEVICE constexpr decltype(auto) apply(F&& f, Tuple&& t) {
   return detail::apply_impl(
       std::forward<F>(f),
       std::forward<Tuple>(t),
@@ -129,8 +122,6 @@ CUDA_HOST_DEVICE constexpr decltype(auto) apply(F&& f, Tuple&& t) {
 }
 
 #endif
-
-#undef CUDA_HOST_DEVICE
 
 template <typename Functor, typename... Args>
 std::enable_if_t<
