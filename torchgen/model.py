@@ -281,6 +281,7 @@ dispatch_keys = [
     # kernels
     DispatchKey.Meta,
     DispatchKey.SparseMeta,
+    DispatchKey.SparseCsrMeta,
     DispatchKey.QuantizedMeta,
     DispatchKey.NestedTensorMeta,
     DispatchKey.ZeroTensor,
