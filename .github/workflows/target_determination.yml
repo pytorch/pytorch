@@ -35,6 +35,7 @@ jobs:
 
       - name: Do TD
         id: td
+        continue-on-error: true
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_WORKFLOW: ${{ github.workflow }}
@@ -50,7 +51,7 @@ jobs:
 
       - name: Upload TD results to s3
         uses: seemethere/upload-artifact-s3@v5
-        if: steps.td.outcome != 'skipped'
+        if: steps.td.outcome == 'success'
         with:
           name: td_results
           retention-days: 14
@@ -59,7 +60,7 @@ jobs:
 
       - name: Store TD results on GHA
         uses: actions/upload-artifact@v3
-        if: steps.td.outcome != 'skipped'
+        if: steps.td.outcome == 'success'
         with:
           name: td_results.json
           retention-days: 14
