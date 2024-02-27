@@ -269,11 +269,7 @@ def _compile_fx_inner_for_graph_in_segment(
   # Build segment -> GMs mapping
   if segment_name not in lazy_scheduler._segment_to_gms_map:
     lazy_scheduler._segment_to_gms_map[segment_name] = []
-  print(f"here123: segment_name: {segment_name}")
   lazy_scheduler._segment_to_gms_map[segment_name].append(gm)
-  print(f"here123: id(lazy_scheduler): {id(lazy_scheduler)}")
-  print(f"here123: lazy_scheduler._segment_to_gms_map: {lazy_scheduler._segment_to_gms_map}")
-  print(f"here123: id(lazy_scheduler._segment_to_gms_map): {id(lazy_scheduler._segment_to_gms_map)}")
 
   return lazy_gm
 
@@ -458,11 +454,6 @@ Please do not register the same function with different segment prefixes.
       else:  # eager mode
         for segment in self._segments:
           self._register_segment(segment)
-          print(f"here3 we are here")
-          print(f"here3 type(self._module): {type(self._module)}")
-          print(f"here3 id(self._module): {id(self._module)}")
-          if hasattr(self._module, "func1"):
-            print(f"here3 self._module.func1: {self._module.func1}")
         outs = self._module(*args, **kwargs)
     return outs
 
@@ -517,15 +508,9 @@ Please do not register the same function with different segment prefixes.
     else:
       raise RuntimeError(f"Unsupported backend: {backend}")
 
-    print(f"here4: _compile_fx_for_graph_in_segment: segment_prefix: {segment_prefix}")
-    print(f"here4: _compile_fx_for_graph_in_segment: gm: {gm}")
     return compiler_fn(gm, example_inputs, **kwargs)
 
   def _split_segments_and_compile(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor], backend_compile_fn, segment_prefix_assignment_fn):
-    # Do segment prefix assignment, and then split the graph module based on segment prefix.
-    # for node in gm.graph.nodes:
-    #   assert "nn_module_method" in node.meta
-
     segment_prefix_assignment_fn(gm)
     split_gm = split_module_based_on_segment_info(gm)
 
@@ -556,15 +541,11 @@ Please do not register the same function with different segment prefixes.
     if gm in self._gm_to_handle_map:
       cur_handle = self._gm_to_handle_map[gm]
     else:
-      try:
-        cur_handle = AsyncFuncHandle(
-          compiled_fn, cur_segment_name, args=args,
-          outs_fake=outs_fake,
-          scheduler=self,
-        )
-      except Exception as e:
-        print(f"here555 cur_segment_name: {cur_segment_name}")
-        raise
+      cur_handle = AsyncFuncHandle(
+        compiled_fn, cur_segment_name, args=args,
+        outs_fake=outs_fake,
+        scheduler=self,
+      )
       self._gm_to_handle_map[gm] = cur_handle
 
     # First, try to schedule all graphs from all segments that are before the incoming graph in the schedule.
