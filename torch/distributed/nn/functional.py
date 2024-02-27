@@ -330,7 +330,7 @@ class _AllGather(Function):
         if dist.get_backend(group=ctx.group) is dist.Backend.NCCL:
             rank = dist.get_rank()
             gx = torch.empty_like(grad_outputs[rank])
-            _Reduce_Scatter.apply(ReduceOp.SUM, ctx.group, gx, *grad_outputs)
+            gx = _Reduce_Scatter.apply(ReduceOp.SUM, ctx.group, gx, *grad_outputs)
         else:
             # As many backends doesn't support ReduceScatter, we use AlltoAll with .sum()
             # to emulate the ReduceScatter behavior
