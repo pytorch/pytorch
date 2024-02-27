@@ -430,6 +430,24 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(guard_manager.check([3, 4]))
         self.assertFalse(guard_manager.check("foo"))
 
+    def test_dict_getitem_accessor(self):
+        foo = {
+            "a": 1,
+            "b": 2,
+        }
+
+        guards_manager = RootGuardManager()
+        guards_manager.add_type_match_guard(id_type(foo), ["type(x) == Foo"])
+        guards_manager.dict_getitem_manager("a", 1).add_equals_match_guard(
+            1, ["a == 1"]
+        )
+        guards_manager.dict_getitem_manager("b", 2).add_equals_match_guard(
+            2, ["b == 2"]
+        )
+
+        self.assertTrue(guards_manager.check(foo))
+        self.assertFalse(guards_manager.check({"a": 1, "b": 3}))
+
     def test_globals(self):
         global global_pair, Pair
         guard_manager = RootGuardManager()
