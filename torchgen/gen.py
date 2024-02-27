@@ -2481,9 +2481,9 @@ def gen_source_files(
         },
     )
 
-    cpu_fm.write("Functions.cpp", lambda: {})
+    cpu_fm.write("Functions.cpp", dict)
 
-    core_fm.write("TensorMethods.cpp", lambda: {})
+    core_fm.write("TensorMethods.cpp", dict)
 
     core_fm.write(
         "ATenOpList.cpp",

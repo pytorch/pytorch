@@ -1,27 +1,6 @@
+import logging
 import os
 import sys
-
-
-def find_test_dir():
-    if sys.platform == "win32":
-        return None
-    main = sys.modules["__main__"]
-    file = getattr(main, "__file__", None)
-    if file is None:
-        # Generated file do not have a module.__file__
-        return None
-    main_dir = os.path.dirname(os.path.abspath(file))
-    components = ["/"]
-    for c in main_dir.split(os.path.sep):
-        components.append(c)
-        if c == "test":
-            break
-    test_dir = os.path.join(*components)
-    assert os.path.exists(test_dir)
-    return test_dir
-
-
-test_dir = find_test_dir()
 
 # NOTE: [dynamo_test_failures.py]
 #
@@ -37,6 +16,48 @@ test_dir = find_test_dir()
 # *These are not exactly unittest.expectedFailure and unittest.skip. We'll
 # always execute the test and then suppress the signal, if necessary.
 # If your tests crashes, or is slow, please use @skipIfTorchDynamo instead.
+#
+# The expected failure and skip files are located in test/dynamo_skips and
+# test/dynamo_expected_failures. They're individual files rather than a list so
+# git will merge changes easier.
+
+
+def find_test_dir():
+    # Find the path to the dynamo expected failure and skip files.
+    from os.path import abspath, basename, dirname, exists, join, normpath
+
+    if sys.platform == "win32":
+        return None
+
+    # Check relative to this file (local build):
+    test_dir = normpath(join(dirname(abspath(__file__)), "../../../test"))
+    if exists(join(test_dir, "dynamo_expected_failures")):
+        return test_dir
+
+    # Check relative to __main__ (installed builds relative to test file):
+    main = sys.modules["__main__"]
+    file = getattr(main, "__file__", None)
+    if file is None:
+        # Generated files do not have a module.__file__
+        return None
+    test_dir = dirname(abspath(file))
+    while dirname(test_dir) != test_dir:
+        if basename(test_dir) == "test" and exists(
+            join(test_dir, "dynamo_expected_failures")
+        ):
+            return test_dir
+        test_dir = dirname(test_dir)
+
+    # Not found
+    return None
+
+
+test_dir = find_test_dir()
+if not test_dir:
+    logger = logging.getLogger(__name__)
+    logger.warning(
+        "test/dynamo_expected_failures directory not found - known dynamo errors won't be skipped."
+    )
 
 # Tests that run without strict mode in PYTORCH_TEST_WITH_INDUCTOR=1.
 # Please don't add anything to this list.

@@ -710,7 +710,12 @@ def _export(
             fake_mode, _get_params_buffers(f)
         )
         ep_non_strict = _export_non_strict(
-            f, fake_args, fake_kwargs, fake_params_buffers, transform=_tuplify_outputs
+            f,
+            fake_args,
+            fake_kwargs,
+            fake_params_buffers,
+            pre_dispatch=pre_dispatch,
+            transform=_tuplify_outputs,
         )
         range_constraints, equality_constraints = make_constraints(
             fake_mode, src_equalities, original_signature, ep_non_strict.gm

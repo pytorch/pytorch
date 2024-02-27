@@ -6,11 +6,6 @@ from torchgen.api.types import DispatcherSignature
 from torchgen.api.types.signatures import CppSignature, CppSignatureGroup
 
 from torchgen.context import method_with_native_function
-from torchgen.gen_vmap_plumbing import (
-    accepts_at_least_one_tensor_input,
-    is_tensor,
-    is_tensor_list,
-)
 from torchgen.model import (
     Argument,
     BackendIndex,
@@ -21,7 +16,6 @@ from torchgen.model import (
     ListType,
     NativeFunction,
     OptionalType,
-    Return,
     Type,
 )
 from torchgen.utils import mapMaybe
@@ -101,7 +95,7 @@ def convert_arg_type_and_name(typ: Type, name: str) -> Tuple[List[str], List[str
             )
         else:
             # TODO: BaseTy.Dimname, BaseTy.Generator, etc.
-            raise NotImplementedError(f"TODO: add support for type {repr(typ)}")
+            raise NotImplementedError(f"TODO: add support for arg type {repr(typ)}")
     elif isinstance(typ, OptionalType):
         c_types, names, aten_types, callsite_exprs = convert_arg_type_and_name(
             typ.elem, name
@@ -197,36 +191,44 @@ def gen_arguments(flat_arguments: Sequence[Argument]) -> Tuple[List[str], List[s
 # Return values are passed out as pointer arguments because all the C shim functions
 # are expected to return AOTITorchError.
 # Generate returns as declarations and callsite expressions
-def gen_returns(returns: Tuple[Return, ...]) -> Tuple[List[str], List[str]]:
-    idx = 0
+def gen_returns(schema: FunctionSchema) -> Tuple[List[str], List[str]]:
     types = []
     names = []
-    for idx, ret in enumerate(returns):
-        if is_tensor(ret.type):
-            types.append("AtenTensorHandle*")
-            names.append(f"ret{idx}")
-            idx += 1
-        elif is_tensor_list(ret.type):
-            if hasattr(ret.type, "size") and ret.type.size:
-                for _ in range(ret.type.size):
-                    types.append("AtenTensorHandle*")
-                    names.append(f"ret{idx}")
-                    idx += 1
-            else:
-                raise NotImplementedError("Return tensor list with unknown length")
+    for idx, ret in enumerate(schema.returns):
+        names.append(f"ret{idx}")
+        if isinstance(ret.type, BaseType) and ret.type.name in base_type_to_c_type:
+            types.append(base_type_to_c_type[ret.type.name] + "*")
         else:
-            raise AssertionError(f"Unexpected return type {repr(ret.type)}")
+            raise NotImplementedError(
+                f"TODO: add support for return type {repr(ret.type)}"
+            )
+
+    def convert_return(typ: BaseType, val: str) -> str:
+        if typ.name == BaseTy.Tensor:
+            return f"new_tensor_handle(std::move({val}));"
+        elif typ.name == BaseTy.SymInt:
+            return f"{val}.expect_int()"
+        elif typ.name == BaseTy.Scalar:
+            return f"{val}.toDouble()"
+        else:
+            return val
+
+    ret_pointer_can_be_null = False
+    unambiguous_name = schema.name.unambiguous_name()
+    for name in ["_scaled_dot_product_flash_attention"]:
+        if name in unambiguous_name:
+            ret_pointer_can_be_null = True
+            break
 
     callsite_exprs: List[str] = []
-    if len(names) == 1:
-        callsite_exprs.append(
-            f"*{names[0]} = new_tensor_handle(std::move(tmp_result));"
-        )
-    elif len(names) > 1:
-        for idx, name in enumerate(names):
-            callsite_exprs.append(
-                f"*{name} = new_tensor_handle(std::move(std::get<{idx}>(tmp_result)));"
-            )
+    for idx, ret in enumerate(schema.returns):
+        tmp = "tmp_result" if len(names) == 1 else f"std::get<{idx}>(tmp_result)"
+        assert isinstance(ret.type, BaseType)
+        rval = convert_return(ret.type, tmp)
+        if ret_pointer_can_be_null:
+            callsite_exprs.append(f"if ({names[idx]}) {{ *{names[idx]} = {rval}; }}")
+        else:
+            callsite_exprs.append(f"*{names[idx]} = {rval};")
 
     return zip_type_and_name(types, names), callsite_exprs
 
@@ -256,7 +258,7 @@ def gen_declaration_and_definition(
         ret_assignments: List[str] = []
     else:
         args, callsite_exprs = gen_arguments(schema.arguments.flat_all)
-        ret_declarations, ret_assignments = gen_returns(schema.returns)
+        ret_declarations, ret_assignments = gen_returns(schema)
         args.extend(ret_declarations)
 
     declaration = f"AOTITorchError aoti_torch_{device}_{func_name}({', '.join(args)})"
@@ -337,12 +339,6 @@ def gen_c_shim(
         return None
 
     schema = f.func
-    # Only support cases where all returns are Tensors or vector<Tensor>
-    if not accepts_at_least_one_tensor_input(schema) or not returns_are_all_tensor(
-        schema
-    ):
-        return None
-
     device = dispatch_key.lower()
     backend_call = gen_static_dispatch_backend_call(
         f,
