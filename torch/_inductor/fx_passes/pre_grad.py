@@ -157,7 +157,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
         config.pattern_matcher
         and hasattr(config, "fx_passes_numeric_check")
         and config.fx_passes_numeric_check.get("pre_grad", False)
-        and all(not isinstance(x, torch.FakeTensor) for x in example_inputs)
+        and all(not isinstance(x, torch._subclasses.FakeTensor) for x in example_inputs)
     ):
         from .numeric_utils import numeric_check_if_enabled
 

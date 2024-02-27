@@ -43,6 +43,7 @@ from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
+from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
@@ -231,7 +232,9 @@ def _recursive_pre_grad_passes(gm, fake_gm, example_inputs):
         subgraph = getattr(gm, subgraph_name)
         fake_subgraph = getattr(fake_gm, subgraph_name)
         subgraph_inputs = [n.meta["val"] for n in input_nodes]
-        new_subgraph = _recursive_pre_grad_passes(subgraph, fake_subgraph, subgraph_inputs)
+        new_subgraph = _recursive_pre_grad_passes(
+            subgraph, fake_subgraph, subgraph_inputs
+        )
         setattr(gm, subgraph_name, new_subgraph)
     return pre_grad_passes(gm, example_inputs)
 
@@ -634,6 +637,9 @@ def fx_codegen_and_compile(
         f"graph {graph_id}",
     )
     V.debug.fx_graph(gm, example_inputs)
+    # TODO: Should we actually dump this?  It should be redundant with the aot
+    # structured logs...
+    # trace_structured("inductor_input_graph", payload_fn=lambda: gm.print_readable(print_output=False))
 
     shape_env = _shape_env_from_inputs(example_inputs)
 
@@ -671,6 +677,10 @@ def fx_codegen_and_compile(
         _recursive_post_grad_passes(gm, is_inference=is_inference)
         V.debug.fx_graph_transformed(gm, example_inputs)
         post_grad_graphs_log.debug("%s", lazy_format_graph_code("AFTER POST GRAD", gm))
+        trace_structured(
+            "inductor_post_grad_graph",
+            payload_fn=lambda: gm.print_readable(print_output=False),
+        )
         optimus_scuba_log["inductor_post_grad"] = counters["inductor"]
         signpost_event(
             "optimus",

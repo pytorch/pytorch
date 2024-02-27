@@ -153,6 +153,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         except TypeError as e:
             self.assertIn("expected a code object!", str(e))
 
+        # test get cache entry on skipped code object
+        def h(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 1
+
+        torch.compile(h)(torch.randn(3, 3))
+
+        entries = _debug_get_cache_entry_list(torch._dynamo.graph_break)
+        self.assertEqual(len(entries), 0)
+
     def test_boolarg(self):
         def boolarg(aa, bb, flag):
             if flag:

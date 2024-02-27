@@ -141,7 +141,7 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
   PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
   ExtraState* extra = get_extra_state(code);
   py::list result;
-  if (extra) {
+  if (extra && extra != SKIP_CODE) {
     for (CacheEntry& e : extra->cache_entry_list) {
       result.append(py::cast(e, py::return_value_policy::reference));
     }
