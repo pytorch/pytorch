@@ -436,8 +436,6 @@ class GuardBuilder(GuardBuilderBase):
                         index
                     ).get_value_manager(example_value)
 
-
-
                 index = source.index
                 if source.index_is_slice:
                     index = source.unpack_slice()
