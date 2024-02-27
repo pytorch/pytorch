@@ -15,9 +15,9 @@ from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
-    _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
+    reenter_make_fx,
     UnsupportedAliasMutationException,
 )
 
@@ -25,7 +25,6 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
-    make_fx,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
@@ -157,19 +156,8 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
 
     with disable_proxy_modes_tracing():
-        # We'll use the current decomposition table to make sure operatos in subgraphs are
-        # decomposed properly.
-        decomp_table = torch.fx.experimental.proxy_tensor.CURRENT_DECOMPOSITION_TABLE
-        true_graph = make_fx(
-            _maybe_run_with_interpreter(true_fn),
-            decomposition_table=decomp_table,
-            pre_dispatch=pre_dispatch,
-        )(*operands)
-        false_graph = make_fx(
-            _maybe_run_with_interpreter(false_fn),
-            decomposition_table=decomp_table,
-            pre_dispatch=pre_dispatch,
-        )(*operands)
+        true_graph = reenter_make_fx(true_fn, pre_dispatch)(*operands)
+        false_graph = reenter_make_fx(false_fn, pre_dispatch)(*operands)
 
     true_outs = []
     false_outs = []

@@ -322,7 +322,7 @@ class TensorVariable(VariableTracker):
         # For attributes (not methods) that were not caught in the special handling above,
         # (e.g. tensor.real), we handle these generically, assuming that the output type is
         # a tensor.
-        if result is None:
+        if result is None and name != "grad":
 
             def try_generic_attr_handling():
                 from .builder import wrap_fx_proxy
