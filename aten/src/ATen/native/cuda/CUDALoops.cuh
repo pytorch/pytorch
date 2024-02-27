@@ -39,7 +39,6 @@
 #include <c10/core/DynamicCast.h>
 #include <c10/core/ScalarType.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/C++17.h>
 #include <c10/util/TypeCast.h>
 
 #ifdef __NVCC__
@@ -303,6 +302,20 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
   bool contiguous = iter.is_contiguous();
 
   if (contiguous) {
+#ifdef USE_ROCM
+    at::detail::Array<ScalarType, ntensors> dtypes;
+    auto inner_strides = iter.get_inner_strides();
+    at::detail::Array<int, ntensors> strides;
+    for (int i = 0; i < ntensors; i++) {
+      dtypes[i] = iter.dtype(i);
+      strides[i] = inner_strides[i];
+    }
+    launch_legacy_kernel<512, 1>(numel, [=]GPU_LAMBDA(int idx) {
+      void* out = data[0] + strides[0] * idx;
+      arg0_t result = invoke(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx);
+      c10::cast_and_store<arg0_t>(dtypes[0], out, result);
+    });
+#else
     auto loader = memory::LoadWithCast<traits::arity>(iter);
     auto storer = memory::StoreWithCast<1>(iter);
     auto input_offset_calculator = TrivialOffsetCalculator<traits::arity>();
@@ -315,6 +328,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
         output_offset_calculator,
         loader,
         storer);
+#endif
   } else {
     at::detail::Array<ScalarType, ntensors> dtypes;
     for (int i = 0; i < ntensors; i++) {
@@ -324,8 +338,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
     launch_legacy_kernel<128, 4>(numel, [=] GPU_LAMBDA(int idx) {
       auto offsets = offset_calc.get(idx);
       void* out = data[0] + offsets[0];
-      arg0_t result =
-          invoke(f, &data.data[1], &offsets.data[1], &dtypes.data[1], 1);
+      arg0_t result = invoke(f, &data.data[1], &offsets.data[1], &dtypes.data[1], 1);
       c10::cast_and_store<arg0_t>(dtypes[0], out, result);
     });
   }

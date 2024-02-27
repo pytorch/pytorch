@@ -1194,6 +1194,61 @@ class CPUReproTests(TestCase):
     def test_per_tensor_fake_quant_int8(self):
         self._test_per_tensor_fake_quant_helper(torch.int8)
 
+    def _test_per_channel_fake_quant_helper(self, dtype, input_dtype=torch.float32):
+        def fn(input, scales, zero_points, axis, quant_min, quant_max, dtype):
+            input = torch.ops.quantized_decomposed.quantize_per_channel(
+                input, scales, zero_points, axis, quant_min, quant_max, dtype
+            )
+            input = torch.ops.quantized_decomposed.dequantize_per_channel(
+                input, scales, zero_points, axis, quant_min, quant_max, dtype
+            )
+            return input
+
+        assert dtype in [torch.uint8, torch.int8]
+        quant_min = 0 if dtype == torch.uint8 else -128
+        quant_max = 255 if dtype == torch.uint8 else 127
+        x = torch.clamp(
+            torch.randn((1, 3, 224, 224), dtype=torch.float32) * 100,
+            quant_min,
+            quant_max,
+        )
+        if input_dtype != torch.float32:
+            x = x.to(dtype=input_dtype)
+        scales = torch.ones((3,))
+        zero_points = torch.zeros((3,))
+        axis = 1
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x, scales, zero_points, axis, quant_min, quant_max, dtype))
+            assert metrics.generated_cpp_vec_kernel_count == 1
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_per_channel_fake_quant_uint8(self):
+        self._test_per_channel_fake_quant_helper(torch.uint8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_per_channel_fake_quant_int8(self):
+        self._test_per_channel_fake_quant_helper(torch.int8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_per_channel_fake_quant_uint8_bf16_input(self):
+        self._test_per_channel_fake_quant_helper(
+            torch.uint8, input_dtype=torch.bfloat16
+        )
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_per_channel_fake_quant_int8_bf16_input(self):
+        self._test_per_channel_fake_quant_helper(torch.int8, input_dtype=torch.bfloat16)
+
     def _test_non_contiguous_load_buf_quant_helper(self, dtype):
         def fn(
             x1,
@@ -1472,19 +1527,25 @@ class CPUReproTests(TestCase):
     def test_auto_simd(self):
         vec_avx512 = codecache.supported_vec_isa_list[0]
         vec_avx2 = codecache.supported_vec_isa_list[1]
+        vec_neon = codecache.supported_vec_isa_list[2]
         self.assertTrue(vec_avx512.bit_width() == 512)
         self.assertTrue(vec_avx2.bit_width() == 256)
+        self.assertTrue(vec_neon.bit_width() == 256)
         self.assertTrue(vec_avx512.nelements() == 16)
         self.assertTrue(vec_avx2.nelements() == 8)
+        self.assertTrue(vec_neon.nelements() == 8)
         self.assertTrue(vec_avx512.nelements(torch.bfloat16) == 32)
         self.assertTrue(vec_avx2.nelements(torch.bfloat16) == 16)
+        self.assertTrue(vec_neon.nelements(torch.bfloat16) == 16)
 
         with config.patch({"cpp.simdlen": None}):
             isa = codecache.pick_vec_isa()
             if vec_avx512 in codecache.valid_vec_isa_list():
                 self.assertTrue(isa == vec_avx512)
-            else:
+            elif vec_avx2 in codecache.valid_vec_isa_list():
                 self.assertTrue(isa == vec_avx2)
+            else:
+                self.assertTrue(isa == vec_neon)
 
         with config.patch({"cpp.simdlen": 0}):
             isa = codecache.pick_vec_isa()
@@ -1514,6 +1575,9 @@ class CPUReproTests(TestCase):
             if vec_avx2 in isa_list:
                 isa = codecache.pick_vec_isa()
                 self.assertTrue(isa == vec_avx2)
+            elif vec_neon in isa_list:
+                isa = codecache.pick_vec_isa()
+                self.assertTrue(isa == vec_neon)
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -1559,13 +1623,47 @@ class CPUReproTests(TestCase):
                 cpp_op_list.append(k)
 
         diff = [
+            "airy_ai",
             "bessel_j0",
             "bessel_j1",
+            "bessel_y0",
+            "bessel_y1",
             "modified_bessel_i0",
+            "modified_bessel_i1",
+            "modified_bessel_k0",
+            "modified_bessel_k1",
+            "scaled_modified_bessel_k0",
+            "scaled_modified_bessel_k1",
+            "spherical_bessel_j0",
+            "i1",
+            "i1e",
+            "ndtr",
+            "ndtri",
+            "log_ndtr",
+            "erfcx",
+            "gammainc",
+            "gammaincc",
+            "igamma",
+            "igammac",
+            "polygamma",
+            "zeta",
+            "shifted_chebyshev_polynomial_u",
+            "chebyshev_polynomial_u",
+            "chebyshev_polynomial_t",
+            "shifted_chebyshev_polynomial_w",
+            "chebyshev_polynomial_w",
+            "shifted_chebyshev_polynomial_t",
+            "chebyshev_polynomial_v",
+            "shifted_chebyshev_polynomial_v",
+            "hermite_polynomial_he",
+            "laguerre_polynomial_l",
+            "hermite_polynomial_h",
+            "legendre_polynomial_p",
             "constant",
             "index_expr",
             "signbit",
             "isinf",
+            "frexp",
             "mod",
             "masked",
             "randn",
@@ -3282,6 +3380,34 @@ class CPUReproTests(TestCase):
         metrics.reset()
         self.common(fn, (x,))
         assert metrics.generated_cpp_vec_kernel_count == 1
+
+    def test_no_redundant_to_dtypes_between_fused_scheduler_node(self):
+        # https://github.com/pytorch/pytorch/issues/115260
+        p0 = torch.tensor([1.0879], dtype=torch.float16)
+
+        class Model1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, *args):
+                cat = torch.cat((args[3], args[2], args[1], args[0]), dim=2)
+                max_1 = torch.max(args[4], p0)
+                mul = torch.mul(cat, max_1)
+                tan = torch.tan(mul)
+                return (mul, tan)
+
+        metrics.reset()
+        m = Model1()
+        self.common(
+            m,
+            (
+                torch.randn((17, 5, 1, 7)).half(),
+                torch.randn((17, 5, 1, 7)).half(),
+                torch.randn((17, 5, 11, 7)).half(),
+                torch.randn((17, 5, 1, 7)).half(),
+                torch.tensor(4.39, dtype=torch.float16),
+            ),
+        )
 
 
 if __name__ == "__main__":

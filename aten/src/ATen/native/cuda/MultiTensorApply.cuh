@@ -2,7 +2,6 @@
 #include <ATen/ceil_div.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAGraph.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
@@ -61,11 +60,6 @@ __device__ __forceinline__ void load_store(
 // copy is negligible.
 //
 // However, when the problem size is small, the latency of the cudaMemcpyAsync
-// becomes more pronounced. In such cases, we try to fit the arrays into the
-// 4kb kernel argument space. The technique is akin to small buffer
-// optimization.
-//
-// However, when the problem size is small, the latency of the cudaMemcpyAsync
 // becomes more pronounced. In such cases, we attempt to fit the arrays into
 // the 4KB kernel argument space. This technique is akin to the small buffer
 // optimization.
@@ -106,7 +100,7 @@ struct DevArrayPack {
 };
 
 template <typename T>
-void pack_vectors_helper(
+void process_vector(
     std::vector<const void*>& ptrs,
     std::vector<size_t>& sizes,
     std::vector<size_t>& offsets,
@@ -118,6 +112,20 @@ void pack_vectors_helper(
   offsets.push_back(total_bytes);
   sizes.push_back(sizeof(T) * vec.size());
   total_bytes += sizeof(T) * vec.size();
+}
+
+template <typename T, typename... Ts>
+void process_vectors(
+    std::vector<const void*>& ptrs,
+    std::vector<size_t>& sizes,
+    std::vector<size_t>& offsets,
+    size_t& total_bytes,
+    const std::vector<T>& first,
+    const std::vector<Ts>&... vecs) {
+  process_vector(ptrs, sizes, offsets, total_bytes, first);
+  if constexpr (sizeof...(Ts) > 0) {
+    process_vectors(ptrs, sizes, offsets, total_bytes, vecs...);
+  }
 }
 
 // Pack multiple vectors into a DevArrayPack
@@ -139,9 +147,9 @@ std::tuple<DevArrayPack, c10::optional<at::Tensor>> pack_vectors(
   size_t total_bytes = 0;
 
   for (auto d = 0; d < n; ++d) {
-    pack_vectors_helper(ptrs, sizes, offsets, total_bytes, addresses[d]);
+    process_vector(ptrs, sizes, offsets, total_bytes, addresses[d]);
   }
-  (pack_vectors_helper(ptrs, sizes, offsets, total_bytes, vecs), ...);
+  process_vectors(ptrs, sizes, offsets, total_bytes, vecs...);
 
   TORCH_CHECK(ptrs.size() <= DevArrayPack::max_arrays);
   DevArrayPack pack{};
@@ -156,7 +164,7 @@ std::tuple<DevArrayPack, c10::optional<at::Tensor>> pack_vectors(
     return std::make_tuple(pack, c10::optional<at::Tensor>(c10::nullopt));
   }
 
-  bool is_capturing = at::cuda::currentStreamCaptureStatusMayInitCtx() !=
+  const bool is_capturing = at::cuda::currentStreamCaptureStatusMayInitCtx() !=
       at::cuda::CaptureStatus::None;
 
   // Use dynamically allocated buffer to pack the vectors
@@ -176,10 +184,12 @@ std::tuple<DevArrayPack, c10::optional<at::Tensor>> pack_vectors(
     // lifetime of the buffer with a CUDA User Object, and transferring the
     // ownership of the CUDA User Object to the capturing graph.
     //
-    // NOTE: based on PR feedback, we want to be conservative and replicate the
-    // behavior w/o CUDA Graph first. This means that a HtoD copy will be
-    // issued on every replay. This copy can be eliminated by having the CUDA
-    // User Object manage a device buffer.
+    // NOTE: based on PR feedback (see details in
+    // https://github.com/pytorch/pytorch/pull/119764#issuecomment-1951485700),
+    // we want to be conservative and replicate the behavior w/o CUDA Graph
+    // first. This means that a HtoD copy will be issued on every replay. This
+    // copy can be eliminated by having the CUDA User Object manage a device
+    // buffer.
     uint8_t* buf = new uint8_t[total_bytes];
 
     // Manage the ownership of buf with a cuda user object
