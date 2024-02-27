@@ -471,10 +471,6 @@ def _compile(
     tracer: Optional[InstructionTranslator] = None
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
-    fail_type: Optional[str] = None
-    fail_reason: Optional[str] = None
-    fail_user_frame_filename: Optional[str] = None
-    fail_user_frame_lineno: Optional[int] = None
     speculation_log = SpeculationLog()
 
     @preserve_global_state
@@ -671,6 +667,10 @@ def _compile(
             },
         )
         start_time = time.time()
+        fail_type: Optional[str] = None
+        fail_reason: Optional[str] = None
+        fail_user_frame_filename: Optional[str] = None
+        fail_user_frame_lineno: Optional[int] = None
         try:
             guarded_code = compile_inner(code, one_graph, hooks, transform)
             return guarded_code

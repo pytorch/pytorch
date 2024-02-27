@@ -248,7 +248,7 @@ tb-nightly==2.13.0a20230426
 #Pinned versions:
 #test that import:
 
-tlparse==0.3.3
+tlparse==0.3.4
 #Description: torch log parser
 #Pinned versions:
 #test that import:
