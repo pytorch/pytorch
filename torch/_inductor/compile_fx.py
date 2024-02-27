@@ -95,7 +95,7 @@ def is_avx512_bf16_supported():
 
 
 IS_AVX512_VNNI_SUPPORTED = is_avx512_vnni_supported()
-IS_AVX512_BF16_SUPPORTED = is_avx512_vnni_supported()
+IS_AVX512_BF16_SUPPORTED = is_avx512_bf16_supported()
 
 
 def may_use_onednn_graph(example_inputs):

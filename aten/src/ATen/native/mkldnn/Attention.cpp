@@ -1,7 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Config.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/native/utils/ParamUtils.h>
+#include <c10/core/SymIntArrayRef.h>
+#include <c10/util/ArrayRef.h>
 #include <omp.h>
 #include <torch/library.h>
 
@@ -14,31 +15,8 @@
 #include <ATen/ops/empty_like.h>
 #endif
 
-#if !AT_ONEDNN_GRAPH_ENABLED()
+#if AT_ONEDNN_GRAPH_ENABLED()
 
-namespace at {
-namespace native {
-
-namespace {
-
-Tensor mkldnn_graph_sdpa_pattern(
-    const int64_t uniqueID,
-    const Tensor& key,
-    const Tensor& query,
-    const Tensor& value,
-    const c10::optional<Tensor>& scale,
-    const c10::optional<Tensor>& attn_mask) {
-  TORCH_CHECK(
-      false,
-      "mkldnn_graph_sdpa_pattern: ATen not compiled with oneDNN Graph support");
-}
-
-} // end anonymous namespace
-
-#else
-
-// custom hash function when key is a vector of int64 values
-// c10::get_hash() does not provide unique outputs, so can't reuse it.
 namespace std {
 template <>
 struct hash<std::vector<int64_t>> {
@@ -340,20 +318,20 @@ Tensor mkldnn_graph_sdpa_pattern(
   // Algo ID
   map_key.push_back(patternID);
 
-  map_key.insert(map_key.end(), key.sizes().begin(), key.strides().end());
-  map_key.insert(map_key.end(), query.sizes().begin(), query.strides().end());
-  map_key.insert(map_key.end(), value.sizes().begin(), value.strides().end());
+  map_key.insert(map_key.end(), key.sizes().begin(), key.sizes().end());
+  map_key.insert(map_key.end(), query.sizes().begin(), query.sizes().end());
+  map_key.insert(map_key.end(), value.sizes().begin(), value.sizes().end());
   if (scale.has_value()) {
     auto scale_val = scale.value();
     map_key.insert(
-        map_key.end(), scale_val.sizes().begin(), scale_val.strides().end());
+        map_key.end(), scale_val.sizes().begin(), scale_val.sizes().end());
   }
   if (attn_mask.has_value()) {
     auto attn_mask_val = attn_mask.value();
     map_key.insert(
         map_key.end(),
         attn_mask_val.sizes().begin(),
-        attn_mask_val.strides().end());
+        attn_mask_val.sizes().end());
   }
 
   auto iter = cache_items_map_.find(map_key);
@@ -363,7 +341,9 @@ Tensor mkldnn_graph_sdpa_pattern(
     partition graph_partition;
     if (graph_partition_iter == partition_map_.end()) {
       auto dtype = query.scalar_type();
-      TORCH_CHECK(((dtype == at::ScalarType::Float) || (dtype == at::ScalarType::BFloat16)),
+      TORCH_CHECK(
+          ((dtype == at::ScalarType::Float) ||
+           (dtype == at::ScalarType::BFloat16)),
           "Only BF16 & FP32 datatypes are currently supported");
       switch (patternID) {
         case ONEDNN_GRAPH_SDPA_PATTERN_5_FP32:
@@ -409,14 +389,156 @@ Tensor mkldnn_graph_sdpa_pattern(
 }
 
 } // end anonymous namespace
+} // namespace native
 
-#endif // !AT_ONEDNN_GRAPH_ENABLED()
+namespace meta {
+namespace {
 
+bool is_any_shape_symbolic(SymIntArrayRef& shape) {
+  auto shape_vec = shape.vec();
+  for (auto& shape_symbol : shape_vec) {
+    if (shape_symbol.is_symbolic()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+Tensor mkldnn_graph_sdpa_pattern_meta(
+    const int64_t patternID,
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const c10::optional<Tensor>& scale,
+    const c10::optional<Tensor>& attn_mask) {
+  // first check cache
+  // The key has a pattern ID, as well as the shapes of input tenors
+  std::vector<int64_t> map_key;
+  map_key.reserve(1024);
+  // We use this because different thread-pools may be used
+  map_key.push_back(omp_get_max_threads());
+  // Algo ID
+  map_key.push_back(patternID);
+  auto key_sym_sizes = key.sym_sizes();
+  if (is_any_shape_symbolic(key_sym_sizes)) {
+    return query;
+  }
+  auto key_sym_sizes_vec = asIntArrayRefUnchecked(key_sym_sizes).vec();
+  std::vector<int64_t> key_sizes(
+      key_sym_sizes_vec.begin(), key_sym_sizes_vec.end());
+
+  auto query_sym_sizes = query.sym_sizes();
+  if (is_any_shape_symbolic(query_sym_sizes)) {
+    return query;
+  }
+  auto query_sym_sizes_vec = asIntArrayRefUnchecked(query_sym_sizes).vec();
+  std::vector<int64_t> query_sizes(
+      query_sym_sizes_vec.begin(), query_sym_sizes_vec.end());
+
+  auto value_sym_sizes = value.sym_sizes();
+  if (is_any_shape_symbolic(value_sym_sizes)) {
+    return query;
+  }
+  auto value_sym_sizes_vec = asIntArrayRefUnchecked(value_sym_sizes).vec();
+  std::vector<int64_t> value_sizes(
+      value_sym_sizes_vec.begin(), value_sym_sizes_vec.end());
+  map_key.insert(map_key.end(), key_sizes.begin(), key_sizes.end());
+  map_key.insert(map_key.end(), query_sizes.begin(), query_sizes.end());
+  map_key.insert(map_key.end(), value_sizes.begin(), value_sizes.end());
+
+  if (scale.has_value()) {
+    auto scale_sym_sizes = scale.value().sym_sizes();
+    if (is_any_shape_symbolic(scale_sym_sizes)) {
+      return query;
+    }
+    auto scale_sym_sizes_vec = asIntArrayRefUnchecked(scale_sym_sizes).vec();
+    std::vector<int64_t> scale_sizes(
+        scale_sym_sizes_vec.begin(), scale_sym_sizes_vec.end());
+    map_key.insert(map_key.end(), scale_sizes.begin(), scale_sizes.end());
+  }
+  if (attn_mask.has_value()) {
+    auto attn_mask_sym_sizes = attn_mask.value().sym_sizes();
+    if (is_any_shape_symbolic(attn_mask_sym_sizes)) {
+      return query;
+    }
+    auto attn_mask_sym_sizes_vec =
+        asIntArrayRefUnchecked(attn_mask_sym_sizes).vec();
+    std::vector<int64_t> attn_mask_sizes(
+        attn_mask_sym_sizes_vec.begin(), attn_mask_sym_sizes_vec.end());
+    map_key.insert(
+        map_key.end(), attn_mask_sizes.begin(), attn_mask_sizes.end());
+  }
+
+  auto iter = at::native::cache_items_map_.find(map_key);
+  if (iter == at::native::cache_items_map_.end()) {
+    at::native::cp_entry compiledPartitionEntry;
+    auto graph_partition_iter = at::native::partition_map_.find(patternID);
+    dnnl::graph::partition graph_partition;
+    if (graph_partition_iter == at::native::partition_map_.end()) {
+      auto dtype = query.scalar_type();
+      TORCH_CHECK(
+          ((dtype == at::ScalarType::Float) ||
+           (dtype == at::ScalarType::BFloat16)),
+          "Only BF16 & FP32 datatypes are currently supported");
+      switch (patternID) {
+        case ONEDNN_GRAPH_SDPA_PATTERN_5_FP32:
+          at::native::create_graph_sdpa_pattern_5(
+              dnnl::graph::logical_tensor::data_type::f32);
+          break;
+        case ONEDNN_GRAPH_SDPA_PATTERN_5_BF16:
+          at::native::create_graph_sdpa_pattern_5(
+              dnnl::graph::logical_tensor::data_type::bf16);
+          break;
+      }
+      graph_partition_iter = at::native::partition_map_.find(patternID);
+    }
+    graph_partition = graph_partition_iter->second;
+    switch (patternID) {
+      case ONEDNN_GRAPH_SDPA_PATTERN_5_FP32:
+      case ONEDNN_GRAPH_SDPA_PATTERN_5_BF16:
+        at::native::compile_and_cache_sdpa_pattern_5(
+            graph_partition,
+            query,
+            key,
+            value,
+            scale.value(),
+            attn_mask.value(),
+            compiledPartitionEntry);
+    }
+    at::native::cache_items_list_.push_front(at::native::key_value_pair_t(
+        map_key, std::move(compiledPartitionEntry)));
+    at::native::cache_items_map_[map_key] =
+        at::native::cache_items_list_.begin();
+    if (at::native::cache_items_map_.size() > at::native::capacity_) {
+      auto last = at::native::cache_items_list_.end();
+      last--;
+      at::native::cache_items_map_.erase(last->first);
+      at::native::cache_items_list_.pop_back();
+    }
+  } else {
+    at::native::cache_items_list_.splice(
+        at::native::cache_items_list_.begin(),
+        at::native::cache_items_list_,
+        iter->second);
+  }
+  return query;
+}
+} // end anonymous namespace
+
+TORCH_LIBRARY_IMPL(mkldnn, Meta, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_graph_sdpa_pattern"),
+      c10::DispatchKey::Meta,
+      TORCH_FN(mkldnn_graph_sdpa_pattern_meta));
+}
+} // namespace meta
+
+namespace native {
 TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_graph_sdpa_pattern"),
       TORCH_FN(mkldnn_graph_sdpa_pattern));
 }
-
 } // namespace native
 } // namespace at
+#endif // AT_ONEDNN_GRAPH_ENABLED
