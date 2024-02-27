@@ -1,4 +1,4 @@
-// !$*UTF8*$!
+ios/TestApp/TestApp.xcodeproj/project.pbxproj// !$*UTF8*$!
 {
 	archiveVersion = 1;
 	classes = {
