@@ -21,7 +21,7 @@ std::deque<c10::once_flag> device_prop_flags;
 std::vector<DeviceProp> device_properties;
 
 std::deque<c10::once_flag> device_global_idx_flags;
-std::vector<c10::DeviceIndex> device_global_idxs;
+std::vector<int32_t> device_global_idxs;
 
 void initXPUContextVectors() {
   num_gpus = c10::xpu::device_count();
