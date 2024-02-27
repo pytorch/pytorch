@@ -792,7 +792,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_view_dtype(
 AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
     AtenTensorHandle self,
     const char* msg) {
-  at::Tensor* t = reinterpret_cast<at::Tensor*>(self);
+  at::Tensor* t = tensor_handle_to_tensor_pointer(self);
   std::cout << "[";
   if (msg) {
     std::cout << msg;
