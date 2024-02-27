@@ -999,7 +999,16 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     self.graph.erase_node(node1)
                     self.graph.erase_node(node2)
 
-    def get_graph_sizes_log_str(self, name):
+    def get_graph_sizes_structured(self):
+        ret = {}
+        for node in self.graph.nodes:
+            example_value = node.meta.get("example_value", None)
+            if isinstance(example_value, torch._subclasses.FakeTensor):
+                size = example_value.size()
+                ret[node.name] = [s if isinstance(s, int) else repr(s) for s in size]
+        return ret
+
+    def get_graph_sizes(self, name: str):
         graph_sizes_str = "TRACED GRAPH TENSOR SIZES\n"
         graph_sizes_str += f"===== {name} =====\n"
         for node in self.graph.nodes:
@@ -1082,10 +1091,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         ] = self.dynamo_flat_name_to_original_fqn.copy()
 
         graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
-        graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
-        graph_sizes_log.debug(
-            "%s", LazyString(lambda: self.get_graph_sizes_log_str(name))
+        torch._logging.trace_structured(
+            "dynamo_output_graph",
+            lambda: {"sizes": self.get_graph_sizes_structured()},
+            payload_fn=lambda: gm.print_readable(print_output=False),
         )
+        graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
+        graph_sizes_log.debug("%s", LazyString(lambda: self.get_graph_sizes(name)))
         self.call_cleanup_hooks()
         old_fake_mode = self.tracing_context.fake_mode
         if not self.export:
@@ -1431,15 +1443,12 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                             res = sympy_interp(
                                 PythonReferenceAnalysis, symbol_to_proxy, ra.expr
                             ).node
-                            res2 = self.graph.call_function(
-                                torch.ops.aten.scalar_tensor.default, (res,)
-                            )
                             self.graph.call_function(
-                                torch.ops.aten._assert_async.msg,
+                                torch.ops.aten._assert_scalar.default,
                                 # TODO: use ra.msg here, but it's pretty
                                 # useless right now
                                 (
-                                    res2,
+                                    res,
                                     f"Deferred runtime assertion failed {ra.expr}",
                                 ),
                             )
