@@ -1682,12 +1682,7 @@ def _register_qlinear_weight_prepack_pass(
                 "",  # post op algorithm
             )
             Node = torch.fx.node.Node
-            if (
-                isinstance(x_scale, Node)
-                and x_scale.target == operator.getitem
-                and isinstance(x_zp, Node)
-                and x_zp.target == operator.getitem
-            ):
+            if isinstance(x_scale, Node) and isinstance(x_zp, Node):
                 new_linear_node = graph.call_function(
                     torch.ops.onednn.qlinear_pointwise.tensor, args=new_args
                 )
