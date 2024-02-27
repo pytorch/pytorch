@@ -574,7 +574,6 @@ def aot_dispatch_subclass(
         metadata_fn,
         keep_input_mutations=meta.keep_input_mutations,
         is_train=meta.is_train,
-        requires_subclass_dispatch=True,
     )(*primals_unwrapped)
 
     subclass_meta.fw_metadata = meta_updated
