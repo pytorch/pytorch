@@ -1,873 +1,476 @@
-ios/TestApp/TestApp.xcodeproj/project.pbxproj// !$*UTF8*$!
+// !$*UTF8*$!
 {
-	archiveVersion = 1;
-	classes = {
-	};
-	objectVersion = 50;
-	objects = {
+    archiveVersion = 1;
+    classes = {
+    };
+    objectVersion = 50;
+    objects = {
 
 /* Begin PBXBuildFile section */
-		04A2C6F4411E7B07962A9EDB /* pooling_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 707D68D2A02AC03FF3671936 /* pooling_ops.ptl */; };
-		05BFC86043C3ACBC83E75E5E /* general_quant_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 2CDA6A3C2FEBFA0788D21BB3 /* general_quant_ops.ptl */; };
-		0A6011928BCA2A3F29F902D9 /* activation_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 054A2708DFA57C21C907A243 /* activation_ops.ptl */; };
-		0BEA7500CC6C893CFC4577EA /* config.json in Resources */ = {isa = PBXBuildFile; fileRef = AB5A176547FE644C1DCEE209 /* config.json */; };
-		0C6BDBE5F6009E73FFCB7C75 /* Accelerate.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0EC2E5110173675071DBFB75 /* Accelerate.framework */; };
-		0D355E169FC8B1D8563DE321 /* sampling_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 3463AF6247C050651AD40F79 /* sampling_ops.ptl */; };
-		0D6A72E4DB7EE1DC91081D1D /* android_api_module.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 36D3A4D0DB0CEF8DC4B54775 /* android_api_module.ptl */; };
-		0FA8F51DA3FF05817934D72C /* spectral_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 357F9D4594D5EE2DC560F5A8 /* spectral_ops.ptl */; };
-		10BAF5C75DC7E51FF2BFF4DA /* tensor_view_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 115FCB5DF3F9BB67E1911344 /* tensor_view_ops.ptl */; };
-		13F84CA6F342936AA28E1F4D /* libtorch_cpu.a in Frameworks */ = {isa = PBXBuildFile; fileRef = D9B30315BBCADD0241CC0CED /* libtorch_cpu.a */; };
-		1C784BBE42C2605CA5B2021E /* torchscript_collection_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = F81375E8039532F9F387AB66 /* torchscript_collection_ops.ptl */; };
-		1F4800B67116377B96C3A3A9 /* nn_utils_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = C6AEEF1F26B00E3080A1894A /* nn_utils_ops.ptl */; };
-		24EE20E6D28CC4F00D5E88BB /* android_api_module.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 36D3A4D0DB0CEF8DC4B54775 /* android_api_module.ptl */; };
-		25285EB98746CF0DBB42AD24 /* normalization_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 18645B15D1817E375AAA39CB /* normalization_ops.ptl */; };
-		2EF877A5AA0A76CB77040C88 /* model_coreml.pt in Resources */ = {isa = PBXBuildFile; fileRef = 3F32F54E0B8B1AF44BBCBBDE /* model_coreml.pt */; };
-		31F087104C64225E21C31FB0 /* torchscript_builtin_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = F278E74B802F78981A4B863D /* torchscript_builtin_ops.ptl */; };
-		3D1E97B8F36671FE0DFEEDA6 /* libeigen_blas.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E718394DE3DE444A7AC05371 /* libeigen_blas.a */; };
-		3FCADDA9147D505FAF990F82 /* padding_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 35EF287962F938AB8A5297A2 /* padding_ops.ptl */; };
-		4070844B0F6F5D96D085D7AB /* linear_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 3F2D96B981CB5F1F139C022B /* linear_ops.ptl */; };
-		431A4BB93BDE227D2067F0CD /* loss_function_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 83D0665F91F7B986868D8146 /* loss_function_ops.ptl */; };
-		4807DA69F58F2F7E4C32CF3C /* mobilenet_v2.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 0733C1017096AF062658EBFB /* mobilenet_v2.ptl */; };
-		4C636CFD28DDAE0200FF9B4D /* Benchmark.mm in Sources */ = {isa = PBXBuildFile; fileRef = 4C636CFB28DDAE0200FF9B4D /* Benchmark.mm */; };
-		4F4846C635A325C6F555C35B /* config.json in Resources */ = {isa = PBXBuildFile; fileRef = AB5A176547FE644C1DCEE209 /* config.json */; };
-		4F9146E0C38034D164F6EF6A /* shuffle_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 264B0B4D63C6B9AE626D4B38 /* shuffle_ops.ptl */; };
-		507B0C6535F7690096CC4679 /* torchscript_collection_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = F81375E8039532F9F387AB66 /* torchscript_collection_ops.ptl */; };
-		52033793A301A0CACFFF2014 /* blas_lapack_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 7B2B5080104EDE0672120DD7 /* blas_lapack_ops.ptl */; };
-		520F7807EF4F2FC0A86BB8D7 /* comparison_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 12641005DF4DDD91F9ED254D /* comparison_ops.ptl */; };
-		571580C9D889CB3943F43DA4 /* libcpuinfo.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 527AA62793F3C5E912FB1ECC /* libcpuinfo.a */; };
-		57E83518919CAB1983497009 /* fused_quant_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = B1C2885698C73B931D2824BD /* fused_quant_ops.ptl */; };
-		5BFBF9B884F37D4EF606B6EB /* tensor_creation_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 153DDB8C80C0C852DFF4E357 /* tensor_creation_ops.ptl */; };
-		5E1054B1D04564C5913B92E1 /* distance_function_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 92D5556C34F6833D9D2E7F82 /* distance_function_ops.ptl */; };
-		5E422C0B38CED164FF6D174F /* libXNNPACK.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 2C610099FA7A58CF40F73CA6 /* libXNNPACK.a */; };
-		6989D413ECDF4030472F7B64 /* sparse_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 41A9FB1448A1EAD3D8986594 /* sparse_ops.ptl */; };
-		6DD2DC68893D04131D730C10 /* nn_utils_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = C6AEEF1F26B00E3080A1894A /* nn_utils_ops.ptl */; };
-		6FB29D846495ED07CA8811DE /* tensor_view_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 115FCB5DF3F9BB67E1911344 /* tensor_view_ops.ptl */; };
-		70A1EB1CDB77F47637E4BA4D /* normalization_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 18645B15D1817E375AAA39CB /* normalization_ops.ptl */; };
-		759418A4FC0808277500DB5E /* dynamic_quant_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 915B95DDD3B3953052D985AC /* dynamic_quant_ops.ptl */; };
-		763B439AE7C7BE4BE5638C6C /* mobilenet_v2.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 0733C1017096AF062658EBFB /* mobilenet_v2.ptl */; };
-		78137FE7385FBD70D1296928 /* convolution_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = D66914D0CE16681ED71A74E2 /* convolution_ops.ptl */; };
-		78C28D34A4EE6054413EB98C /* tensor_indexing_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 7E3711B1F9AC2DB9497472E6 /* tensor_indexing_ops.ptl */; };
-		821243263CDBD39B371D6448 /* model_coreml.ptl in Resources */ = {isa = PBXBuildFile; fileRef = DDC369ECDA5B44CE89B871F0 /* model_coreml.ptl */; };
-		83F3C813B9CD290423E06A58 /* libc10.a in Frameworks */ = {isa = PBXBuildFile; fileRef = DF713016F5A413753BAD9451 /* libc10.a */; };
-		88D09AC5C309476DD0921AD9 /* dynamic_quant_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 915B95DDD3B3953052D985AC /* dynamic_quant_ops.ptl */; };
-		88E723087C009634F3B3B128 /* model_lite.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 6A9A6966A331F1054FD89B30 /* model_lite.ptl */; };
-		8A5AB2D5DA571AAEB0665A27 /* loss_function_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 83D0665F91F7B986868D8146 /* loss_function_ops.ptl */; };
-		95FF338EAC46ADA4D87283B2 /* linear_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 3F2D96B981CB5F1F139C022B /* linear_ops.ptl */; };
-		96766E3B73E2EEAB416A470A /* spectral_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 357F9D4594D5EE2DC560F5A8 /* spectral_ops.ptl */; };
-		9AFEC12B1F02438DF97A600E /* libclog.a in Frameworks */ = {isa = PBXBuildFile; fileRef = EABB30060562C6858914DB2B /* libclog.a */; };
-		9FE560C81A4F9C9CA6E21E3E /* vision_function_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 5310F5A1F99098F91C525EBD /* vision_function_ops.ptl */; };
-		A01AE9293DC016DEAC62D2D3 /* dropout_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = B72FEBC7D2C26315349BE17F /* dropout_ops.ptl */; };
-		A06D4CB5232F0DB200763E16 /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CB4232F0DB200763E16 /* AppDelegate.m */; };
-		A06D4CB8232F0DB200763E16 /* ViewController.mm in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CB7232F0DB200763E16 /* ViewController.mm */; };
-		A06D4CBB232F0DB200763E16 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CB9232F0DB200763E16 /* Main.storyboard */; };
-		A06D4CBD232F0DB200763E16 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CBC232F0DB200763E16 /* Assets.xcassets */; };
-		A06D4CC0232F0DB200763E16 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CBE232F0DB200763E16 /* LaunchScreen.storyboard */; };
-		A06D4CC3232F0DB200763E16 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CC2232F0DB200763E16 /* main.m */; };
-		A18BF1438E9F151CC16E266D /* transformer_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 5AFF96E24D62E7E78EB6D223 /* transformer_ops.ptl */; };
-		A90D03763433F40E6093D0B0 /* transformer_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 5AFF96E24D62E7E78EB6D223 /* transformer_ops.ptl */; };
-		AB8882E868B820CA4B5C48C4 /* pointwise_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 3B265E4F99762D76AD7327DF /* pointwise_ops.ptl */; };
-		AF462E68FC1687E13F44DFD3 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 43CB01ACB26BF86497FB2621 /* UIKit.framework */; };
-		AF8B5FAC4BD0CAF9D43401FE /* dropout_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = B72FEBC7D2C26315349BE17F /* dropout_ops.ptl */; };
-		B1B738B7EC457CF8CB326418 /* MetalPerformanceShaders.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7DFED279A4B242E562D65437 /* MetalPerformanceShaders.framework */; };
-		B21B92525E661DE778EFE5D2 /* recurrent_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 564E648925E8D84EC1441D19 /* recurrent_ops.ptl */; };
-		B4FD2EB4A524A18682656B1E /* tensor_typing_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = D404EA28CDD581BD4104B244 /* tensor_typing_ops.ptl */; };
-		BB45FDD06367AE280A2013DB /* pooling_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 707D68D2A02AC03FF3671936 /* pooling_ops.ptl */; };
-		BCB490A0FC738E033C929126 /* reduction_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 0BE2D5F6903CFC2B17842B47 /* reduction_ops.ptl */; };
-		BE5BAE1E3BBBF326DEB471B2 /* tensor_general_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 93440E47842AFE9CD437B343 /* tensor_general_ops.ptl */; };
-		BED98D467388DDD775C215DA /* model_lite.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 6A9A6966A331F1054FD89B30 /* model_lite.ptl */; };
-		BF244A32DB8DCAF36684D62C /* CoreML.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D606A3B1A4D0E0EB9DECFB41 /* CoreML.framework */; };
-		C1D405BBB570B45FF792D7B1 /* fused_quant_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = B1C2885698C73B931D2824BD /* fused_quant_ops.ptl */; };
-		C58BB8772A69E4DDA824C236 /* distance_function_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 92D5556C34F6833D9D2E7F82 /* distance_function_ops.ptl */; };
-		C9A1734D15980D3B8188429D /* padding_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 35EF287962F938AB8A5297A2 /* padding_ops.ptl */; };
-		CC4E885F4608FE1914A96886 /* reduction_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 0BE2D5F6903CFC2B17842B47 /* reduction_ops.ptl */; };
-		D06547AD47C2151F17077FD0 /* tensor_typing_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = D404EA28CDD581BD4104B244 /* tensor_typing_ops.ptl */; };
-		D19A0241F49311FFEAA38A1B /* tensor_indexing_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 7E3711B1F9AC2DB9497472E6 /* tensor_indexing_ops.ptl */; };
-		D25EE411678C03380FE048FF /* libpytorch_qnnpack.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3B09D41374DA4873DBB96E19 /* libpytorch_qnnpack.a */; };
-		D4223902DD0F8B0B0D2C0D72 /* recurrent_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 564E648925E8D84EC1441D19 /* recurrent_ops.ptl */; };
-		D59397F5C487597C7847B729 /* pointwise_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 3B265E4F99762D76AD7327DF /* pointwise_ops.ptl */; };
-		D7DC1556E00609A375079A4F /* sparse_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 41A9FB1448A1EAD3D8986594 /* sparse_ops.ptl */; };
-		D92C50A7371EF9F76335AF0D /* shuffle_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 264B0B4D63C6B9AE626D4B38 /* shuffle_ops.ptl */; };
-		D9CC8AD7F7DE26D5171E9466 /* torchscript_builtin_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = F278E74B802F78981A4B863D /* torchscript_builtin_ops.ptl */; };
-		DA3C69E453C539FC3F936DB7 /* comparison_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 12641005DF4DDD91F9ED254D /* comparison_ops.ptl */; };
-		DD469FAF96310AFE7D30C9B5 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 54ECAE55FEFA084367BC2442 /* Metal.framework */; };
-		DED9CEA21EB944634B5E700D /* tensor_creation_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 153DDB8C80C0C852DFF4E357 /* tensor_creation_ops.ptl */; };
-		DFD6705886102B0E944DA72B /* libpthreadpool.a in Frameworks */ = {isa = PBXBuildFile; fileRef = A745CA929E6B92EF0A5BEA52 /* libpthreadpool.a */; };
-		E461C379CB7A4BDEFE529AA5 /* activation_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 054A2708DFA57C21C907A243 /* activation_ops.ptl */; };
-		E785544947E9C39F6EDDE42F /* tensor_general_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 93440E47842AFE9CD437B343 /* tensor_general_ops.ptl */; };
-		E7C7DDBAE5DE676CF7396E24 /* blas_lapack_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 7B2B5080104EDE0672120DD7 /* blas_lapack_ops.ptl */; };
-		E7E759C2B6F58B2C3D8CA193 /* vision_function_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 5310F5A1F99098F91C525EBD /* vision_function_ops.ptl */; };
-		EA8938E25D21375DABE40340 /* other_math_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 9E1C1FF7101C408D0F4E19EF /* other_math_ops.ptl */; };
-		EC69ABA7699D7405E32B413D /* static_quant_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 8F2D7F3E4F4CA02F676CFDC4 /* static_quant_ops.ptl */; };
-		F05E73DF0C155C7E52639950 /* model_coreml.pt in Resources */ = {isa = PBXBuildFile; fileRef = 3F32F54E0B8B1AF44BBCBBDE /* model_coreml.pt */; };
-		F1944F8CA6C7179EBC683C56 /* sampling_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 3463AF6247C050651AD40F79 /* sampling_ops.ptl */; };
-		F49A457315C1BC89DFD2454A /* libtorch.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 4DE517E52C027E6C0A5E6128 /* libtorch.a */; };
-		F7E1733D0B04FD519DF4167D /* other_math_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 9E1C1FF7101C408D0F4E19EF /* other_math_ops.ptl */; };
-		F81B4AB2A536241DB4A85D72 /* general_quant_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 2CDA6A3C2FEBFA0788D21BB3 /* general_quant_ops.ptl */; };
-		F9FAFEB5DB7FBA9E0321E3E7 /* TestLiteInterpreter.mm in Sources */ = {isa = PBXBuildFile; fileRef = A8891018776F25BDFC259275 /* TestLiteInterpreter.mm */; };
-		FA521E26EE1FC977B3BA1DE3 /* static_quant_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = 8F2D7F3E4F4CA02F676CFDC4 /* static_quant_ops.ptl */; };
-		FEBF89F5D0BFF868A6097E9F /* model_coreml.ptl in Resources */ = {isa = PBXBuildFile; fileRef = DDC369ECDA5B44CE89B871F0 /* model_coreml.ptl */; };
-		FFFDA308FC5DDC769B0138F5 /* convolution_ops.ptl in Resources */ = {isa = PBXBuildFile; fileRef = D66914D0CE16681ED71A74E2 /* convolution_ops.ptl */; };
+        4C636CFD28DDAE0200FF9B4D /* Benchmark.mm in Sources */ = {isa = PBXBuildFile; fileRef = 4C636CFB28DDAE0200FF9B4D /* Benchmark.mm */; };
+        A06D4CB5232F0DB200763E16 /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CB4232F0DB200763E16 /* AppDelegate.m */; };
+        A06D4CB8232F0DB200763E16 /* ViewController.mm in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CB7232F0DB200763E16 /* ViewController.mm */; };
+        A06D4CBB232F0DB200763E16 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CB9232F0DB200763E16 /* Main.storyboard */; };
+        A06D4CBD232F0DB200763E16 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CBC232F0DB200763E16 /* Assets.xcassets */; };
+        A06D4CC0232F0DB200763E16 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = A06D4CBE232F0DB200763E16 /* LaunchScreen.storyboard */; };
+        A06D4CC3232F0DB200763E16 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = A06D4CC2232F0DB200763E16 /* main.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		A0EA3B04237FCB08007CEA34 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = A06D4CA8232F0DB200763E16 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = A06D4CAF232F0DB200763E16;
-			remoteInfo = TestApp;
-		};
+        A0EA3B04237FCB08007CEA34 /* PBXContainerItemProxy */ = {
+            isa = PBXContainerItemProxy;
+            containerPortal = A06D4CA8232F0DB200763E16 /* Project object */;
+            proxyType = 1;
+            remoteGlobalIDString = A06D4CAF232F0DB200763E16;
+            remoteInfo = TestApp;
+        };
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		054A2708DFA57C21C907A243 /* activation_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = activation_ops.ptl; path = ../models/activation_ops.ptl; sourceTree = "<group>"; };
-		0733C1017096AF062658EBFB /* mobilenet_v2.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = mobilenet_v2.ptl; path = ../models/mobilenet_v2.ptl; sourceTree = "<group>"; };
-		0BE2D5F6903CFC2B17842B47 /* reduction_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = reduction_ops.ptl; path = ../models/reduction_ops.ptl; sourceTree = "<group>"; };
-		0D0EC0D9A809F2E14FB99114 /* libpytorch_qnnpack.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpytorch_qnnpack.a; path = ../../build_ios/install/lib/libpytorch_qnnpack.a; sourceTree = "<group>"; };
-		0EC2E5110173675071DBFB75 /* Accelerate.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Accelerate.framework; path = System/Library/Frameworks/Accelerate.framework; sourceTree = SDKROOT; };
-		115FCB5DF3F9BB67E1911344 /* tensor_view_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = tensor_view_ops.ptl; path = ../models/tensor_view_ops.ptl; sourceTree = "<group>"; };
-		12641005DF4DDD91F9ED254D /* comparison_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = comparison_ops.ptl; path = ../models/comparison_ops.ptl; sourceTree = "<group>"; };
-		153DDB8C80C0C852DFF4E357 /* tensor_creation_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = tensor_creation_ops.ptl; path = ../models/tensor_creation_ops.ptl; sourceTree = "<group>"; };
-		18645B15D1817E375AAA39CB /* normalization_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = normalization_ops.ptl; path = ../models/normalization_ops.ptl; sourceTree = "<group>"; };
-		24BD7CA1C688762491423725 /* Accelerate.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Accelerate.framework; path = System/Library/Frameworks/Accelerate.framework; sourceTree = SDKROOT; };
-		264B0B4D63C6B9AE626D4B38 /* shuffle_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = shuffle_ops.ptl; path = ../models/shuffle_ops.ptl; sourceTree = "<group>"; };
-		2C610099FA7A58CF40F73CA6 /* libXNNPACK.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libXNNPACK.a; path = ../../build_ios/install/lib/libXNNPACK.a; sourceTree = "<group>"; };
-		2CDA6A3C2FEBFA0788D21BB3 /* general_quant_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = general_quant_ops.ptl; path = ../models/general_quant_ops.ptl; sourceTree = "<group>"; };
-		3463AF6247C050651AD40F79 /* sampling_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = sampling_ops.ptl; path = ../models/sampling_ops.ptl; sourceTree = "<group>"; };
-		357F9D4594D5EE2DC560F5A8 /* spectral_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = spectral_ops.ptl; path = ../models/spectral_ops.ptl; sourceTree = "<group>"; };
-		35EF287962F938AB8A5297A2 /* padding_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = padding_ops.ptl; path = ../models/padding_ops.ptl; sourceTree = "<group>"; };
-		36D3A4D0DB0CEF8DC4B54775 /* android_api_module.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = android_api_module.ptl; path = ../models/android_api_module.ptl; sourceTree = "<group>"; };
-		3B09D41374DA4873DBB96E19 /* libpytorch_qnnpack.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpytorch_qnnpack.a; path = ../../build_ios/install/lib/libpytorch_qnnpack.a; sourceTree = "<group>"; };
-		3B265E4F99762D76AD7327DF /* pointwise_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = pointwise_ops.ptl; path = ../models/pointwise_ops.ptl; sourceTree = "<group>"; };
-		3F1124FB60F6D324D9B266AD /* libcpuinfo.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libcpuinfo.a; path = ../../build_ios/install/lib/libcpuinfo.a; sourceTree = "<group>"; };
-		3F2D96B981CB5F1F139C022B /* linear_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = linear_ops.ptl; path = ../models/linear_ops.ptl; sourceTree = "<group>"; };
-		3F32F54E0B8B1AF44BBCBBDE /* model_coreml.pt */ = {isa = PBXFileReference; includeInIndex = 1; name = model_coreml.pt; path = ../models/model_coreml.pt; sourceTree = "<group>"; };
-		41A9FB1448A1EAD3D8986594 /* sparse_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = sparse_ops.ptl; path = ../models/sparse_ops.ptl; sourceTree = "<group>"; };
-		43CB01ACB26BF86497FB2621 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
-		4417A2CFDC368FED65C1483B /* libXNNPACK.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libXNNPACK.a; path = ../../build_ios/install/lib/libXNNPACK.a; sourceTree = "<group>"; };
-		4C636CFB28DDAE0200FF9B4D /* Benchmark.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = Benchmark.mm; sourceTree = "<group>"; };
-		4C636CFC28DDAE0200FF9B4D /* Benchmark.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Benchmark.h; sourceTree = "<group>"; };
-		4DE517E52C027E6C0A5E6128 /* libtorch.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch.a; path = ../../build_ios/install/lib/libtorch.a; sourceTree = "<group>"; };
-		527AA62793F3C5E912FB1ECC /* libcpuinfo.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libcpuinfo.a; path = ../../build_ios/install/lib/libcpuinfo.a; sourceTree = "<group>"; };
-		5310F5A1F99098F91C525EBD /* vision_function_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = vision_function_ops.ptl; path = ../models/vision_function_ops.ptl; sourceTree = "<group>"; };
-		54ECAE55FEFA084367BC2442 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
-		564E648925E8D84EC1441D19 /* recurrent_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = recurrent_ops.ptl; path = ../models/recurrent_ops.ptl; sourceTree = "<group>"; };
-		5AFF96E24D62E7E78EB6D223 /* transformer_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = transformer_ops.ptl; path = ../models/transformer_ops.ptl; sourceTree = "<group>"; };
-		6A162377172630FE631D91B4 /* MetalPerformanceShaders.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalPerformanceShaders.framework; path = System/Library/Frameworks/MetalPerformanceShaders.framework; sourceTree = SDKROOT; };
-		6A9A6966A331F1054FD89B30 /* model_lite.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = model_lite.ptl; path = ../models/model_lite.ptl; sourceTree = "<group>"; };
-		707D68D2A02AC03FF3671936 /* pooling_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = pooling_ops.ptl; path = ../models/pooling_ops.ptl; sourceTree = "<group>"; };
-		718B664BBF9CFF9639B88992 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
-		7B2B5080104EDE0672120DD7 /* blas_lapack_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = blas_lapack_ops.ptl; path = ../models/blas_lapack_ops.ptl; sourceTree = "<group>"; };
-		7DFED279A4B242E562D65437 /* MetalPerformanceShaders.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalPerformanceShaders.framework; path = System/Library/Frameworks/MetalPerformanceShaders.framework; sourceTree = SDKROOT; };
-		7E3711B1F9AC2DB9497472E6 /* tensor_indexing_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = tensor_indexing_ops.ptl; path = ../models/tensor_indexing_ops.ptl; sourceTree = "<group>"; };
-		83D0665F91F7B986868D8146 /* loss_function_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = loss_function_ops.ptl; path = ../models/loss_function_ops.ptl; sourceTree = "<group>"; };
-		8A2B15AADBCFAC2066E07449 /* libpthreadpool.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpthreadpool.a; path = ../../build_ios/install/lib/libpthreadpool.a; sourceTree = "<group>"; };
-		8F2D7F3E4F4CA02F676CFDC4 /* static_quant_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = static_quant_ops.ptl; path = ../models/static_quant_ops.ptl; sourceTree = "<group>"; };
-		915B95DDD3B3953052D985AC /* dynamic_quant_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = dynamic_quant_ops.ptl; path = ../models/dynamic_quant_ops.ptl; sourceTree = "<group>"; };
-		92D5556C34F6833D9D2E7F82 /* distance_function_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = distance_function_ops.ptl; path = ../models/distance_function_ops.ptl; sourceTree = "<group>"; };
-		93440E47842AFE9CD437B343 /* tensor_general_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = tensor_general_ops.ptl; path = ../models/tensor_general_ops.ptl; sourceTree = "<group>"; };
-		9E1C1FF7101C408D0F4E19EF /* other_math_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = other_math_ops.ptl; path = ../models/other_math_ops.ptl; sourceTree = "<group>"; };
-		A06D4CB0232F0DB200763E16 /* TestApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TestApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A06D4CB3232F0DB200763E16 /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
-		A06D4CB4232F0DB200763E16 /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
-		A06D4CB6232F0DB200763E16 /* ViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ViewController.h; sourceTree = "<group>"; };
-		A06D4CB7232F0DB200763E16 /* ViewController.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = ViewController.mm; sourceTree = "<group>"; };
-		A06D4CBA232F0DB200763E16 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
-		A06D4CBC232F0DB200763E16 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		A06D4CBF232F0DB200763E16 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
-		A06D4CC1232F0DB200763E16 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		A06D4CC2232F0DB200763E16 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
-		A0EA3AFF237FCB08007CEA34 /* TestAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TestAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		A0EA3B03237FCB08007CEA34 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		A745CA929E6B92EF0A5BEA52 /* libpthreadpool.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libpthreadpool.a; path = ../../build_ios/install/lib/libpthreadpool.a; sourceTree = "<group>"; };
-		A8891018776F25BDFC259275 /* TestLiteInterpreter.mm */ = {isa = PBXFileReference; includeInIndex = 1; path = TestLiteInterpreter.mm; sourceTree = "<group>"; };
-		A9A2038FB95773ECA5349193 /* libclog.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libclog.a; path = ../../build_ios/install/lib/libclog.a; sourceTree = "<group>"; };
-		AB5A176547FE644C1DCEE209 /* config.json */ = {isa = PBXFileReference; includeInIndex = 1; name = config.json; path = ../benchmark/config.json; sourceTree = "<group>"; };
-		B1C2885698C73B931D2824BD /* fused_quant_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = fused_quant_ops.ptl; path = ../models/fused_quant_ops.ptl; sourceTree = "<group>"; };
-		B72FEBC7D2C26315349BE17F /* dropout_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = dropout_ops.ptl; path = ../models/dropout_ops.ptl; sourceTree = "<group>"; };
-		C6AEEF1F26B00E3080A1894A /* nn_utils_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = nn_utils_ops.ptl; path = ../models/nn_utils_ops.ptl; sourceTree = "<group>"; };
-		D0B49BF1DB52A419B8E7EA5A /* libeigen_blas.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libeigen_blas.a; path = ../../build_ios/install/lib/libeigen_blas.a; sourceTree = "<group>"; };
-		D404EA28CDD581BD4104B244 /* tensor_typing_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = tensor_typing_ops.ptl; path = ../models/tensor_typing_ops.ptl; sourceTree = "<group>"; };
-		D473DFA19DDDCF493CF19469 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
-		D606A3B1A4D0E0EB9DECFB41 /* CoreML.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreML.framework; path = System/Library/Frameworks/CoreML.framework; sourceTree = SDKROOT; };
-		D66914D0CE16681ED71A74E2 /* convolution_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = convolution_ops.ptl; path = ../models/convolution_ops.ptl; sourceTree = "<group>"; };
-		D9B30315BBCADD0241CC0CED /* libtorch_cpu.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch_cpu.a; path = ../../build_ios/install/lib/libtorch_cpu.a; sourceTree = "<group>"; };
-		D9E0DCF8A94CECE89025939C /* CoreML.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreML.framework; path = System/Library/Frameworks/CoreML.framework; sourceTree = SDKROOT; };
-		DBB49D6AA2970C9C292B498A /* libtorch_cpu.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch_cpu.a; path = ../../build_ios/install/lib/libtorch_cpu.a; sourceTree = "<group>"; };
-		DDC369ECDA5B44CE89B871F0 /* model_coreml.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = model_coreml.ptl; path = ../models/model_coreml.ptl; sourceTree = "<group>"; };
-		DF713016F5A413753BAD9451 /* libc10.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libc10.a; path = ../../build_ios/install/lib/libc10.a; sourceTree = "<group>"; };
-		E132BEE140A7A97C7F73286C /* libtorch.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libtorch.a; path = ../../build_ios/install/lib/libtorch.a; sourceTree = "<group>"; };
-		E718394DE3DE444A7AC05371 /* libeigen_blas.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libeigen_blas.a; path = ../../build_ios/install/lib/libeigen_blas.a; sourceTree = "<group>"; };
-		EABB30060562C6858914DB2B /* libclog.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libclog.a; path = ../../build_ios/install/lib/libclog.a; sourceTree = "<group>"; };
-		F278E74B802F78981A4B863D /* torchscript_builtin_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = torchscript_builtin_ops.ptl; path = ../models/torchscript_builtin_ops.ptl; sourceTree = "<group>"; };
-		F81375E8039532F9F387AB66 /* torchscript_collection_ops.ptl */ = {isa = PBXFileReference; includeInIndex = 1; name = torchscript_collection_ops.ptl; path = ../models/torchscript_collection_ops.ptl; sourceTree = "<group>"; };
-		FB144B5799D2DDE67C404BD9 /* libc10.a */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = archive.ar; name = libc10.a; path = ../../build_ios/install/lib/libc10.a; sourceTree = "<group>"; };
+        4C636CFB28DDAE0200FF9B4D /* Benchmark.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = Benchmark.mm; sourceTree = "<group>"; };
+        4C636CFC28DDAE0200FF9B4D /* Benchmark.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Benchmark.h; sourceTree = "<group>"; };
+        A06D4CB0232F0DB200763E16 /* TestApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TestApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+        A06D4CB3232F0DB200763E16 /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
+        A06D4CB4232F0DB200763E16 /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
+        A06D4CB6232F0DB200763E16 /* ViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ViewController.h; sourceTree = "<group>"; };
+        A06D4CB7232F0DB200763E16 /* ViewController.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = ViewController.mm; sourceTree = "<group>"; };
+        A06D4CBA232F0DB200763E16 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
+        A06D4CBC232F0DB200763E16 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+        A06D4CBF232F0DB200763E16 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
+        A06D4CC1232F0DB200763E16 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+        A06D4CC2232F0DB200763E16 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
+        A0EA3AFF237FCB08007CEA34 /* TestAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TestAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+        A0EA3B03237FCB08007CEA34 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		A06D4CAD232F0DB200763E16 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				83F3C813B9CD290423E06A58 /* libc10.a in Frameworks */,
-				9AFEC12B1F02438DF97A600E /* libclog.a in Frameworks */,
-				DFD6705886102B0E944DA72B /* libpthreadpool.a in Frameworks */,
-				5E422C0B38CED164FF6D174F /* libXNNPACK.a in Frameworks */,
-				3D1E97B8F36671FE0DFEEDA6 /* libeigen_blas.a in Frameworks */,
-				571580C9D889CB3943F43DA4 /* libcpuinfo.a in Frameworks */,
-				D25EE411678C03380FE048FF /* libpytorch_qnnpack.a in Frameworks */,
-				13F84CA6F342936AA28E1F4D /* libtorch_cpu.a in Frameworks */,
-				F49A457315C1BC89DFD2454A /* libtorch.a in Frameworks */,
-				BF244A32DB8DCAF36684D62C /* CoreML.framework in Frameworks */,
-				DD469FAF96310AFE7D30C9B5 /* Metal.framework in Frameworks */,
-				B1B738B7EC457CF8CB326418 /* MetalPerformanceShaders.framework in Frameworks */,
-				0C6BDBE5F6009E73FFCB7C75 /* Accelerate.framework in Frameworks */,
-				AF462E68FC1687E13F44DFD3 /* UIKit.framework in Frameworks */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		A0EA3AFC237FCB08007CEA34 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
+        A06D4CAD232F0DB200763E16 /* Frameworks */ = {
+            isa = PBXFrameworksBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+        A0EA3AFC237FCB08007CEA34 /* Frameworks */ = {
+            isa = PBXFrameworksBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		5290B94EC86BAC5C3AC28679 /* Frameworks */ = {
-			isa = PBXGroup;
-			children = (
-				FB144B5799D2DDE67C404BD9 /* libc10.a */,
-				A9A2038FB95773ECA5349193 /* libclog.a */,
-				8A2B15AADBCFAC2066E07449 /* libpthreadpool.a */,
-				4417A2CFDC368FED65C1483B /* libXNNPACK.a */,
-				D0B49BF1DB52A419B8E7EA5A /* libeigen_blas.a */,
-				3F1124FB60F6D324D9B266AD /* libcpuinfo.a */,
-				0D0EC0D9A809F2E14FB99114 /* libpytorch_qnnpack.a */,
-				DBB49D6AA2970C9C292B498A /* libtorch_cpu.a */,
-				E132BEE140A7A97C7F73286C /* libtorch.a */,
-				D9E0DCF8A94CECE89025939C /* CoreML.framework */,
-				D473DFA19DDDCF493CF19469 /* Metal.framework */,
-				6A162377172630FE631D91B4 /* MetalPerformanceShaders.framework */,
-				24BD7CA1C688762491423725 /* Accelerate.framework */,
-				718B664BBF9CFF9639B88992 /* UIKit.framework */,
-				DF713016F5A413753BAD9451 /* libc10.a */,
-				EABB30060562C6858914DB2B /* libclog.a */,
-				A745CA929E6B92EF0A5BEA52 /* libpthreadpool.a */,
-				2C610099FA7A58CF40F73CA6 /* libXNNPACK.a */,
-				E718394DE3DE444A7AC05371 /* libeigen_blas.a */,
-				527AA62793F3C5E912FB1ECC /* libcpuinfo.a */,
-				3B09D41374DA4873DBB96E19 /* libpytorch_qnnpack.a */,
-				D9B30315BBCADD0241CC0CED /* libtorch_cpu.a */,
-				4DE517E52C027E6C0A5E6128 /* libtorch.a */,
-				D606A3B1A4D0E0EB9DECFB41 /* CoreML.framework */,
-				54ECAE55FEFA084367BC2442 /* Metal.framework */,
-				7DFED279A4B242E562D65437 /* MetalPerformanceShaders.framework */,
-				0EC2E5110173675071DBFB75 /* Accelerate.framework */,
-				43CB01ACB26BF86497FB2621 /* UIKit.framework */,
-			);
-			name = Frameworks;
-			sourceTree = "<group>";
-		};
-		A06D4CA7232F0DB200763E16 = {
-			isa = PBXGroup;
-			children = (
-				A06D4CB2232F0DB200763E16 /* TestApp */,
-				A0EA3B00237FCB08007CEA34 /* TestAppTests */,
-				A06D4CB1232F0DB200763E16 /* Products */,
-				5290B94EC86BAC5C3AC28679 /* Frameworks */,
-			);
-			sourceTree = "<group>";
-		};
-		A06D4CB1232F0DB200763E16 /* Products */ = {
-			isa = PBXGroup;
-			children = (
-				A06D4CB0232F0DB200763E16 /* TestApp.app */,
-				A0EA3AFF237FCB08007CEA34 /* TestAppTests.xctest */,
-			);
-			name = Products;
-			sourceTree = "<group>";
-		};
-		A06D4CB2232F0DB200763E16 /* TestApp */ = {
-			isa = PBXGroup;
-			children = (
-				4C636CFC28DDAE0200FF9B4D /* Benchmark.h */,
-				4C636CFB28DDAE0200FF9B4D /* Benchmark.mm */,
-				A06D4CB3232F0DB200763E16 /* AppDelegate.h */,
-				A06D4CB4232F0DB200763E16 /* AppDelegate.m */,
-				A06D4CB6232F0DB200763E16 /* ViewController.h */,
-				A06D4CB7232F0DB200763E16 /* ViewController.mm */,
-				A06D4CB9232F0DB200763E16 /* Main.storyboard */,
-				A06D4CBC232F0DB200763E16 /* Assets.xcassets */,
-				A06D4CBE232F0DB200763E16 /* LaunchScreen.storyboard */,
-				A06D4CC1232F0DB200763E16 /* Info.plist */,
-				A06D4CC2232F0DB200763E16 /* main.m */,
-				AB5A176547FE644C1DCEE209 /* config.json */,
-				9E1C1FF7101C408D0F4E19EF /* other_math_ops.ptl */,
-				92D5556C34F6833D9D2E7F82 /* distance_function_ops.ptl */,
-				0BE2D5F6903CFC2B17842B47 /* reduction_ops.ptl */,
-				41A9FB1448A1EAD3D8986594 /* sparse_ops.ptl */,
-				C6AEEF1F26B00E3080A1894A /* nn_utils_ops.ptl */,
-				F81375E8039532F9F387AB66 /* torchscript_collection_ops.ptl */,
-				12641005DF4DDD91F9ED254D /* comparison_ops.ptl */,
-				5310F5A1F99098F91C525EBD /* vision_function_ops.ptl */,
-				8F2D7F3E4F4CA02F676CFDC4 /* static_quant_ops.ptl */,
-				D66914D0CE16681ED71A74E2 /* convolution_ops.ptl */,
-				3F32F54E0B8B1AF44BBCBBDE /* model_coreml.pt */,
-				93440E47842AFE9CD437B343 /* tensor_general_ops.ptl */,
-				36D3A4D0DB0CEF8DC4B54775 /* android_api_module.ptl */,
-				3B265E4F99762D76AD7327DF /* pointwise_ops.ptl */,
-				153DDB8C80C0C852DFF4E357 /* tensor_creation_ops.ptl */,
-				915B95DDD3B3953052D985AC /* dynamic_quant_ops.ptl */,
-				707D68D2A02AC03FF3671936 /* pooling_ops.ptl */,
-				7E3711B1F9AC2DB9497472E6 /* tensor_indexing_ops.ptl */,
-				2CDA6A3C2FEBFA0788D21BB3 /* general_quant_ops.ptl */,
-				3F2D96B981CB5F1F139C022B /* linear_ops.ptl */,
-				264B0B4D63C6B9AE626D4B38 /* shuffle_ops.ptl */,
-				0733C1017096AF062658EBFB /* mobilenet_v2.ptl */,
-				B72FEBC7D2C26315349BE17F /* dropout_ops.ptl */,
-				DDC369ECDA5B44CE89B871F0 /* model_coreml.ptl */,
-				B1C2885698C73B931D2824BD /* fused_quant_ops.ptl */,
-				357F9D4594D5EE2DC560F5A8 /* spectral_ops.ptl */,
-				5AFF96E24D62E7E78EB6D223 /* transformer_ops.ptl */,
-				3463AF6247C050651AD40F79 /* sampling_ops.ptl */,
-				18645B15D1817E375AAA39CB /* normalization_ops.ptl */,
-				7B2B5080104EDE0672120DD7 /* blas_lapack_ops.ptl */,
-				35EF287962F938AB8A5297A2 /* padding_ops.ptl */,
-				83D0665F91F7B986868D8146 /* loss_function_ops.ptl */,
-				6A9A6966A331F1054FD89B30 /* model_lite.ptl */,
-				115FCB5DF3F9BB67E1911344 /* tensor_view_ops.ptl */,
-				D404EA28CDD581BD4104B244 /* tensor_typing_ops.ptl */,
-				054A2708DFA57C21C907A243 /* activation_ops.ptl */,
-				F278E74B802F78981A4B863D /* torchscript_builtin_ops.ptl */,
-				564E648925E8D84EC1441D19 /* recurrent_ops.ptl */,
-			);
-			path = TestApp;
-			sourceTree = SOURCE_ROOT;
-		};
-		A0EA3B00237FCB08007CEA34 /* TestAppTests */ = {
-			isa = PBXGroup;
-			children = (
-				A0EA3B03237FCB08007CEA34 /* Info.plist */,
-				A8891018776F25BDFC259275 /* TestLiteInterpreter.mm */,
-			);
-			path = TestAppTests;
-			sourceTree = "<group>";
-		};
+        A06D4CA7232F0DB200763E16 = {
+            isa = PBXGroup;
+            children = (
+                A06D4CB2232F0DB200763E16 /* TestApp */,
+                A0EA3B00237FCB08007CEA34 /* TestAppTests */,
+                A06D4CB1232F0DB200763E16 /* Products */,
+            );
+            sourceTree = "<group>";
+        };
+        A06D4CB1232F0DB200763E16 /* Products */ = {
+            isa = PBXGroup;
+            children = (
+                A06D4CB0232F0DB200763E16 /* TestApp.app */,
+                A0EA3AFF237FCB08007CEA34 /* TestAppTests.xctest */,
+            );
+            name = Products;
+            sourceTree = "<group>";
+        };
+        A06D4CB2232F0DB200763E16 /* TestApp */ = {
+            isa = PBXGroup;
+            children = (
+                4C636CFC28DDAE0200FF9B4D /* Benchmark.h */,
+                4C636CFB28DDAE0200FF9B4D /* Benchmark.mm */,
+                A06D4CB3232F0DB200763E16 /* AppDelegate.h */,
+                A06D4CB4232F0DB200763E16 /* AppDelegate.m */,
+                A06D4CB6232F0DB200763E16 /* ViewController.h */,
+                A06D4CB7232F0DB200763E16 /* ViewController.mm */,
+                A06D4CB9232F0DB200763E16 /* Main.storyboard */,
+                A06D4CBC232F0DB200763E16 /* Assets.xcassets */,
+                A06D4CBE232F0DB200763E16 /* LaunchScreen.storyboard */,
+                A06D4CC1232F0DB200763E16 /* Info.plist */,
+                A06D4CC2232F0DB200763E16 /* main.m */,
+            );
+            path = TestApp;
+            sourceTree = "<group>";
+        };
+        A0EA3B00237FCB08007CEA34 /* TestAppTests */ = {
+            isa = PBXGroup;
+            children = (
+                A0EA3B03237FCB08007CEA34 /* Info.plist */,
+            );
+            path = TestAppTests;
+            sourceTree = "<group>";
+        };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		A06D4CAF232F0DB200763E16 /* TestApp */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = A06D4CC6232F0DB200763E16 /* Build configuration list for PBXNativeTarget "TestApp" */;
-			buildPhases = (
-				A06D4CAC232F0DB200763E16 /* Sources */,
-				A06D4CAD232F0DB200763E16 /* Frameworks */,
-				A06D4CAE232F0DB200763E16 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = TestApp;
-			productName = TestApp;
-			productReference = A06D4CB0232F0DB200763E16 /* TestApp.app */;
-			productType = "com.apple.product-type.application";
-		};
-		A0EA3AFE237FCB08007CEA34 /* TestAppTests */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = A0EA3B08237FCB08007CEA34 /* Build configuration list for PBXNativeTarget "TestAppTests" */;
-			buildPhases = (
-				A0EA3AFB237FCB08007CEA34 /* Sources */,
-				A0EA3AFC237FCB08007CEA34 /* Frameworks */,
-				A0EA3AFD237FCB08007CEA34 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				A0EA3B05237FCB08007CEA34 /* PBXTargetDependency */,
-			);
-			name = TestAppTests;
-			productName = TestAppTests;
-			productReference = A0EA3AFF237FCB08007CEA34 /* TestAppTests.xctest */;
-			productType = "com.apple.product-type.bundle.unit-test";
-		};
+        A06D4CAF232F0DB200763E16 /* TestApp */ = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = A06D4CC6232F0DB200763E16 /* Build configuration list for PBXNativeTarget "TestApp" */;
+            buildPhases = (
+                A06D4CAC232F0DB200763E16 /* Sources */,
+                A06D4CAD232F0DB200763E16 /* Frameworks */,
+                A06D4CAE232F0DB200763E16 /* Resources */,
+            );
+            buildRules = (
+            );
+            dependencies = (
+            );
+            name = TestApp;
+            productName = TestApp;
+            productReference = A06D4CB0232F0DB200763E16 /* TestApp.app */;
+            productType = "com.apple.product-type.application";
+        };
+        A0EA3AFE237FCB08007CEA34 /* TestAppTests */ = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = A0EA3B08237FCB08007CEA34 /* Build configuration list for PBXNativeTarget "TestAppTests" */;
+            buildPhases = (
+                A0EA3AFB237FCB08007CEA34 /* Sources */,
+                A0EA3AFC237FCB08007CEA34 /* Frameworks */,
+                A0EA3AFD237FCB08007CEA34 /* Resources */,
+            );
+            buildRules = (
+            );
+            dependencies = (
+                A0EA3B05237FCB08007CEA34 /* PBXTargetDependency */,
+            );
+            name = TestAppTests;
+            productName = TestAppTests;
+            productReference = A0EA3AFF237FCB08007CEA34 /* TestAppTests.xctest */;
+            productType = "com.apple.product-type.bundle.unit-test";
+        };
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		A06D4CA8232F0DB200763E16 /* Project object */ = {
-			isa = PBXProject;
-			attributes = {
-				LastUpgradeCheck = 1030;
-				TargetAttributes = {
-					A06D4CAF232F0DB200763E16 = {
-						CreatedOnToolsVersion = 10.3;
-					};
-					A0EA3AFE237FCB08007CEA34 = {
-						CreatedOnToolsVersion = 11.2.1;
-						TestTargetID = A06D4CAF232F0DB200763E16;
-					};
-				};
-			};
-			buildConfigurationList = A06D4CAB232F0DB200763E16 /* Build configuration list for PBXProject "TestApp" */;
-			compatibilityVersion = "Xcode 9.3";
-			developmentRegion = en;
-			hasScannedForEncodings = 0;
-			knownRegions = (
-				en,
-				Base,
-			);
-			mainGroup = A06D4CA7232F0DB200763E16;
-			productRefGroup = A06D4CB1232F0DB200763E16 /* Products */;
-			projectDirPath = "";
-			projectRoot = "";
-			targets = (
-				A06D4CAF232F0DB200763E16 /* TestApp */,
-				A0EA3AFE237FCB08007CEA34 /* TestAppTests */,
-			);
-		};
+        A06D4CA8232F0DB200763E16 /* Project object */ = {
+            isa = PBXProject;
+            attributes = {
+                LastUpgradeCheck = 1030;
+                TargetAttributes = {
+                    A06D4CAF232F0DB200763E16 = {
+                        CreatedOnToolsVersion = 10.3;
+                    };
+                    A0EA3AFE237FCB08007CEA34 = {
+                        CreatedOnToolsVersion = 11.2.1;
+                        TestTargetID = A06D4CAF232F0DB200763E16;
+                    };
+                };
+            };
+            buildConfigurationList = A06D4CAB232F0DB200763E16 /* Build configuration list for PBXProject "TestApp" */;
+            compatibilityVersion = "Xcode 9.3";
+            developmentRegion = en;
+            hasScannedForEncodings = 0;
+            knownRegions = (
+                en,
+                Base,
+            );
+            mainGroup = A06D4CA7232F0DB200763E16;
+            productRefGroup = A06D4CB1232F0DB200763E16 /* Products */;
+            projectDirPath = "";
+            projectRoot = "";
+            targets = (
+                A06D4CAF232F0DB200763E16 /* TestApp */,
+                A0EA3AFE237FCB08007CEA34 /* TestAppTests */,
+            );
+        };
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		A06D4CAE232F0DB200763E16 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				A06D4CC0232F0DB200763E16 /* LaunchScreen.storyboard in Resources */,
-				A06D4CBD232F0DB200763E16 /* Assets.xcassets in Resources */,
-				A06D4CBB232F0DB200763E16 /* Main.storyboard in Resources */,
-				0BEA7500CC6C893CFC4577EA /* config.json in Resources */,
-				EA8938E25D21375DABE40340 /* other_math_ops.ptl in Resources */,
-				5E1054B1D04564C5913B92E1 /* distance_function_ops.ptl in Resources */,
-				BCB490A0FC738E033C929126 /* reduction_ops.ptl in Resources */,
-				D7DC1556E00609A375079A4F /* sparse_ops.ptl in Resources */,
-				1F4800B67116377B96C3A3A9 /* nn_utils_ops.ptl in Resources */,
-				507B0C6535F7690096CC4679 /* torchscript_collection_ops.ptl in Resources */,
-				520F7807EF4F2FC0A86BB8D7 /* comparison_ops.ptl in Resources */,
-				E7E759C2B6F58B2C3D8CA193 /* vision_function_ops.ptl in Resources */,
-				EC69ABA7699D7405E32B413D /* static_quant_ops.ptl in Resources */,
-				78137FE7385FBD70D1296928 /* convolution_ops.ptl in Resources */,
-				2EF877A5AA0A76CB77040C88 /* model_coreml.pt in Resources */,
-				BE5BAE1E3BBBF326DEB471B2 /* tensor_general_ops.ptl in Resources */,
-				0D6A72E4DB7EE1DC91081D1D /* android_api_module.ptl in Resources */,
-				AB8882E868B820CA4B5C48C4 /* pointwise_ops.ptl in Resources */,
-				5BFBF9B884F37D4EF606B6EB /* tensor_creation_ops.ptl in Resources */,
-				759418A4FC0808277500DB5E /* dynamic_quant_ops.ptl in Resources */,
-				04A2C6F4411E7B07962A9EDB /* pooling_ops.ptl in Resources */,
-				78C28D34A4EE6054413EB98C /* tensor_indexing_ops.ptl in Resources */,
-				05BFC86043C3ACBC83E75E5E /* general_quant_ops.ptl in Resources */,
-				95FF338EAC46ADA4D87283B2 /* linear_ops.ptl in Resources */,
-				D92C50A7371EF9F76335AF0D /* shuffle_ops.ptl in Resources */,
-				4807DA69F58F2F7E4C32CF3C /* mobilenet_v2.ptl in Resources */,
-				AF8B5FAC4BD0CAF9D43401FE /* dropout_ops.ptl in Resources */,
-				821243263CDBD39B371D6448 /* model_coreml.ptl in Resources */,
-				57E83518919CAB1983497009 /* fused_quant_ops.ptl in Resources */,
-				0FA8F51DA3FF05817934D72C /* spectral_ops.ptl in Resources */,
-				A90D03763433F40E6093D0B0 /* transformer_ops.ptl in Resources */,
-				F1944F8CA6C7179EBC683C56 /* sampling_ops.ptl in Resources */,
-				25285EB98746CF0DBB42AD24 /* normalization_ops.ptl in Resources */,
-				52033793A301A0CACFFF2014 /* blas_lapack_ops.ptl in Resources */,
-				C9A1734D15980D3B8188429D /* padding_ops.ptl in Resources */,
-				431A4BB93BDE227D2067F0CD /* loss_function_ops.ptl in Resources */,
-				BED98D467388DDD775C215DA /* model_lite.ptl in Resources */,
-				10BAF5C75DC7E51FF2BFF4DA /* tensor_view_ops.ptl in Resources */,
-				B4FD2EB4A524A18682656B1E /* tensor_typing_ops.ptl in Resources */,
-				0A6011928BCA2A3F29F902D9 /* activation_ops.ptl in Resources */,
-				31F087104C64225E21C31FB0 /* torchscript_builtin_ops.ptl in Resources */,
-				D4223902DD0F8B0B0D2C0D72 /* recurrent_ops.ptl in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		A0EA3AFD237FCB08007CEA34 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				4F4846C635A325C6F555C35B /* config.json in Resources */,
-				F7E1733D0B04FD519DF4167D /* other_math_ops.ptl in Resources */,
-				C58BB8772A69E4DDA824C236 /* distance_function_ops.ptl in Resources */,
-				CC4E885F4608FE1914A96886 /* reduction_ops.ptl in Resources */,
-				6989D413ECDF4030472F7B64 /* sparse_ops.ptl in Resources */,
-				6DD2DC68893D04131D730C10 /* nn_utils_ops.ptl in Resources */,
-				1C784BBE42C2605CA5B2021E /* torchscript_collection_ops.ptl in Resources */,
-				DA3C69E453C539FC3F936DB7 /* comparison_ops.ptl in Resources */,
-				9FE560C81A4F9C9CA6E21E3E /* vision_function_ops.ptl in Resources */,
-				FA521E26EE1FC977B3BA1DE3 /* static_quant_ops.ptl in Resources */,
-				FFFDA308FC5DDC769B0138F5 /* convolution_ops.ptl in Resources */,
-				F05E73DF0C155C7E52639950 /* model_coreml.pt in Resources */,
-				E785544947E9C39F6EDDE42F /* tensor_general_ops.ptl in Resources */,
-				24EE20E6D28CC4F00D5E88BB /* android_api_module.ptl in Resources */,
-				D59397F5C487597C7847B729 /* pointwise_ops.ptl in Resources */,
-				DED9CEA21EB944634B5E700D /* tensor_creation_ops.ptl in Resources */,
-				88D09AC5C309476DD0921AD9 /* dynamic_quant_ops.ptl in Resources */,
-				BB45FDD06367AE280A2013DB /* pooling_ops.ptl in Resources */,
-				D19A0241F49311FFEAA38A1B /* tensor_indexing_ops.ptl in Resources */,
-				F81B4AB2A536241DB4A85D72 /* general_quant_ops.ptl in Resources */,
-				4070844B0F6F5D96D085D7AB /* linear_ops.ptl in Resources */,
-				4F9146E0C38034D164F6EF6A /* shuffle_ops.ptl in Resources */,
-				763B439AE7C7BE4BE5638C6C /* mobilenet_v2.ptl in Resources */,
-				A01AE9293DC016DEAC62D2D3 /* dropout_ops.ptl in Resources */,
-				FEBF89F5D0BFF868A6097E9F /* model_coreml.ptl in Resources */,
-				C1D405BBB570B45FF792D7B1 /* fused_quant_ops.ptl in Resources */,
-				96766E3B73E2EEAB416A470A /* spectral_ops.ptl in Resources */,
-				A18BF1438E9F151CC16E266D /* transformer_ops.ptl in Resources */,
-				0D355E169FC8B1D8563DE321 /* sampling_ops.ptl in Resources */,
-				70A1EB1CDB77F47637E4BA4D /* normalization_ops.ptl in Resources */,
-				E7C7DDBAE5DE676CF7396E24 /* blas_lapack_ops.ptl in Resources */,
-				3FCADDA9147D505FAF990F82 /* padding_ops.ptl in Resources */,
-				8A5AB2D5DA571AAEB0665A27 /* loss_function_ops.ptl in Resources */,
-				88E723087C009634F3B3B128 /* model_lite.ptl in Resources */,
-				6FB29D846495ED07CA8811DE /* tensor_view_ops.ptl in Resources */,
-				D06547AD47C2151F17077FD0 /* tensor_typing_ops.ptl in Resources */,
-				E461C379CB7A4BDEFE529AA5 /* activation_ops.ptl in Resources */,
-				D9CC8AD7F7DE26D5171E9466 /* torchscript_builtin_ops.ptl in Resources */,
-				B21B92525E661DE778EFE5D2 /* recurrent_ops.ptl in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
+        A06D4CAE232F0DB200763E16 /* Resources */ = {
+            isa = PBXResourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                A06D4CC0232F0DB200763E16 /* LaunchScreen.storyboard in Resources */,
+                A06D4CBD232F0DB200763E16 /* Assets.xcassets in Resources */,
+                A06D4CBB232F0DB200763E16 /* Main.storyboard in Resources */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+        A0EA3AFD237FCB08007CEA34 /* Resources */ = {
+            isa = PBXResourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		A06D4CAC232F0DB200763E16 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				A06D4CB8232F0DB200763E16 /* ViewController.mm in Sources */,
-				A06D4CC3232F0DB200763E16 /* main.m in Sources */,
-				A06D4CB5232F0DB200763E16 /* AppDelegate.m in Sources */,
-				4C636CFD28DDAE0200FF9B4D /* Benchmark.mm in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		A0EA3AFB237FCB08007CEA34 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				F9FAFEB5DB7FBA9E0321E3E7 /* TestLiteInterpreter.mm in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
+        A06D4CAC232F0DB200763E16 /* Sources */ = {
+            isa = PBXSourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+                A06D4CB8232F0DB200763E16 /* ViewController.mm in Sources */,
+                A06D4CC3232F0DB200763E16 /* main.m in Sources */,
+                A06D4CB5232F0DB200763E16 /* AppDelegate.m in Sources */,
+                4C636CFD28DDAE0200FF9B4D /* Benchmark.mm in Sources */,
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
+        A0EA3AFB237FCB08007CEA34 /* Sources */ = {
+            isa = PBXSourcesBuildPhase;
+            buildActionMask = 2147483647;
+            files = (
+            );
+            runOnlyForDeploymentPostprocessing = 0;
+        };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		A0EA3B05237FCB08007CEA34 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = A06D4CAF232F0DB200763E16 /* TestApp */;
-			targetProxy = A0EA3B04237FCB08007CEA34 /* PBXContainerItemProxy */;
-		};
+        A0EA3B05237FCB08007CEA34 /* PBXTargetDependency */ = {
+            isa = PBXTargetDependency;
+            target = A06D4CAF232F0DB200763E16 /* TestApp */;
+            targetProxy = A0EA3B04237FCB08007CEA34 /* PBXContainerItemProxy */;
+        };
 /* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
-		A06D4CB9232F0DB200763E16 /* Main.storyboard */ = {
-			isa = PBXVariantGroup;
-			children = (
-				A06D4CBA232F0DB200763E16 /* Base */,
-			);
-			name = Main.storyboard;
-			sourceTree = "<group>";
-		};
-		A06D4CBE232F0DB200763E16 /* LaunchScreen.storyboard */ = {
-			isa = PBXVariantGroup;
-			children = (
-				A06D4CBF232F0DB200763E16 /* Base */,
-			);
-			name = LaunchScreen.storyboard;
-			sourceTree = "<group>";
-		};
+        A06D4CB9232F0DB200763E16 /* Main.storyboard */ = {
+            isa = PBXVariantGroup;
+            children = (
+                A06D4CBA232F0DB200763E16 /* Base */,
+            );
+            name = Main.storyboard;
+            sourceTree = "<group>";
+        };
+        A06D4CBE232F0DB200763E16 /* LaunchScreen.storyboard */ = {
+            isa = PBXVariantGroup;
+            children = (
+                A06D4CBF232F0DB200763E16 /* Base */,
+            );
+            name = LaunchScreen.storyboard;
+            sourceTree = "<group>";
+        };
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
-		A06D4CC4232F0DB200763E16 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				CLANG_ANALYZER_NONNULL = YES;
-				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++17";
-				CLANG_CXX_LIBRARY = "libc++";
-				CLANG_ENABLE_MODULES = YES;
-				CLANG_ENABLE_OBJC_ARC = YES;
-				CLANG_ENABLE_OBJC_WEAK = YES;
-				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
-				CLANG_WARN_BOOL_CONVERSION = YES;
-				CLANG_WARN_COMMA = YES;
-				CLANG_WARN_CONSTANT_CONVERSION = YES;
-				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
-				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
-				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
-				CLANG_WARN_EMPTY_BODY = YES;
-				CLANG_WARN_ENUM_CONVERSION = YES;
-				CLANG_WARN_INFINITE_RECURSION = YES;
-				CLANG_WARN_INT_CONVERSION = YES;
-				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
-				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
-				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
-				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
-				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
-				CLANG_WARN_STRICT_PROTOTYPES = YES;
-				CLANG_WARN_SUSPICIOUS_MOVE = YES;
-				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
-				CLANG_WARN_UNREACHABLE_CODE = YES;
-				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
-				COPY_PHASE_STRIP = NO;
-				DEBUG_INFORMATION_FORMAT = dwarf;
-				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_TESTABILITY = YES;
-				GCC_C_LANGUAGE_STANDARD = gnu11;
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_NO_COMMON_BLOCKS = YES;
-				GCC_OPTIMIZATION_LEVEL = 0;
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"DEBUG=1",
-					"$(inherited)",
-				);
-				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
-				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
-				GCC_WARN_UNDECLARED_SELECTOR = YES;
-				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
-				GCC_WARN_UNUSED_FUNCTION = YES;
-				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 12.4;
-				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
-				MTL_FAST_MATH = YES;
-				ONLY_ACTIVE_ARCH = YES;
-				SDKROOT = iphoneos;
-			};
-			name = Debug;
-		};
-		A06D4CC5232F0DB200763E16 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				CLANG_ANALYZER_NONNULL = YES;
-				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++17";
-				CLANG_CXX_LIBRARY = "libc++";
-				CLANG_ENABLE_MODULES = YES;
-				CLANG_ENABLE_OBJC_ARC = YES;
-				CLANG_ENABLE_OBJC_WEAK = YES;
-				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
-				CLANG_WARN_BOOL_CONVERSION = YES;
-				CLANG_WARN_COMMA = YES;
-				CLANG_WARN_CONSTANT_CONVERSION = YES;
-				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
-				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
-				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
-				CLANG_WARN_EMPTY_BODY = YES;
-				CLANG_WARN_ENUM_CONVERSION = YES;
-				CLANG_WARN_INFINITE_RECURSION = YES;
-				CLANG_WARN_INT_CONVERSION = YES;
-				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
-				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
-				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
-				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
-				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
-				CLANG_WARN_STRICT_PROTOTYPES = YES;
-				CLANG_WARN_SUSPICIOUS_MOVE = YES;
-				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
-				CLANG_WARN_UNREACHABLE_CODE = YES;
-				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
-				COPY_PHASE_STRIP = NO;
-				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				ENABLE_NS_ASSERTIONS = NO;
-				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				GCC_C_LANGUAGE_STANDARD = gnu11;
-				GCC_NO_COMMON_BLOCKS = YES;
-				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
-				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
-				GCC_WARN_UNDECLARED_SELECTOR = YES;
-				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
-				GCC_WARN_UNUSED_FUNCTION = YES;
-				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 12.4;
-				MTL_ENABLE_DEBUG_INFO = NO;
-				MTL_FAST_MATH = YES;
-				SDKROOT = iphoneos;
-				VALIDATE_PRODUCT = YES;
-			};
-			name = Release;
-		};
-		A06D4CC7232F0DB200763E16 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = 9HKVT38N77;
-				ENABLE_BITCODE = No;
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"$(inherited)",
-					BUILD_LITE_INTERPRETER,
-				);
-				HEADER_SEARCH_PATHS = (
-					"$(inherited)",
-					/Users/huydo/Storage/mine/pytorch/build_ios/install/include,
-				);
-				INFOPLIST_FILE = TestApp/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				LIBRARY_SEARCH_PATHS = (
-					"$(inherited)",
-					/Users/huydo/Storage/mine/pytorch/build_ios/install/lib,
-				);
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					"-all_load",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestApp;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				PROVISIONING_PROFILE_SPECIFIER = "";
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
-		};
-		A06D4CC8232F0DB200763E16 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = 9HKVT38N77;
-				ENABLE_BITCODE = No;
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"$(inherited)",
-					BUILD_LITE_INTERPRETER,
-				);
-				HEADER_SEARCH_PATHS = (
-					"$(inherited)",
-					/Users/huydo/Storage/mine/pytorch/build_ios/install/include,
-				);
-				INFOPLIST_FILE = TestApp/Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				LIBRARY_SEARCH_PATHS = (
-					"$(inherited)",
-					/Users/huydo/Storage/mine/pytorch/build_ios/install/lib,
-				);
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					"-all_load",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestApp;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				PROVISIONING_PROFILE_SPECIFIER = "";
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
-		};
-		A0EA3B06237FCB08007CEA34 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = 9HKVT38N77;
-				ENABLE_BITCODE = No;
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"$(inherited)",
-					BUILD_LITE_INTERPRETER,
-				);
-				HEADER_SEARCH_PATHS = (
-					"$(inherited)",
-					/Users/huydo/Storage/mine/pytorch/build_ios/install/include,
-				);
-				INFOPLIST_FILE = TestAppTests/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 12.4;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@loader_path/Frameworks",
-				);
-				LIBRARY_SEARCH_PATHS = (
-					"$(inherited)",
-					/Users/huydo/Storage/mine/pytorch/build_ios/install/lib,
-				);
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					"-all_load",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestAppTests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				PROVISIONING_PROFILE_SPECIFIER = "";
-				"PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "";
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TestApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TestApp";
-			};
-			name = Debug;
-		};
-		A0EA3B07237FCB08007CEA34 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = 9HKVT38N77;
-				ENABLE_BITCODE = No;
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"$(inherited)",
-					BUILD_LITE_INTERPRETER,
-				);
-				HEADER_SEARCH_PATHS = (
-					"$(inherited)",
-					/Users/huydo/Storage/mine/pytorch/build_ios/install/include,
-				);
-				INFOPLIST_FILE = TestAppTests/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 12.4;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-					"@loader_path/Frameworks",
-				);
-				LIBRARY_SEARCH_PATHS = (
-					"$(inherited)",
-					/Users/huydo/Storage/mine/pytorch/build_ios/install/lib,
-				);
-				OTHER_LDFLAGS = (
-					"$(inherited)",
-					"-all_load",
-				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestAppTests;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TestApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TestApp";
-			};
-			name = Release;
-		};
+        A06D4CC4232F0DB200763E16 /* Debug */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ALWAYS_SEARCH_USER_PATHS = NO;
+                CLANG_ANALYZER_NONNULL = YES;
+                CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+                CLANG_CXX_LANGUAGE_STANDARD = "gnu++17";
+                CLANG_CXX_LIBRARY = "libc++";
+                CLANG_ENABLE_MODULES = YES;
+                CLANG_ENABLE_OBJC_ARC = YES;
+                CLANG_ENABLE_OBJC_WEAK = YES;
+                CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+                CLANG_WARN_BOOL_CONVERSION = YES;
+                CLANG_WARN_COMMA = YES;
+                CLANG_WARN_CONSTANT_CONVERSION = YES;
+                CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+                CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+                CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+                CLANG_WARN_EMPTY_BODY = YES;
+                CLANG_WARN_ENUM_CONVERSION = YES;
+                CLANG_WARN_INFINITE_RECURSION = YES;
+                CLANG_WARN_INT_CONVERSION = YES;
+                CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+                CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+                CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+                CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+                CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+                CLANG_WARN_STRICT_PROTOTYPES = YES;
+                CLANG_WARN_SUSPICIOUS_MOVE = YES;
+                CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+                CLANG_WARN_UNREACHABLE_CODE = YES;
+                CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+                CODE_SIGN_IDENTITY = "iPhone Developer";
+                COPY_PHASE_STRIP = NO;
+                DEBUG_INFORMATION_FORMAT = dwarf;
+                ENABLE_STRICT_OBJC_MSGSEND = YES;
+                ENABLE_TESTABILITY = YES;
+                GCC_C_LANGUAGE_STANDARD = gnu11;
+                GCC_DYNAMIC_NO_PIC = NO;
+                GCC_NO_COMMON_BLOCKS = YES;
+                GCC_OPTIMIZATION_LEVEL = 0;
+                GCC_PREPROCESSOR_DEFINITIONS = (
+                    "DEBUG=1",
+                    "$(inherited)",
+                );
+                GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+                GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+                GCC_WARN_UNDECLARED_SELECTOR = YES;
+                GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+                GCC_WARN_UNUSED_FUNCTION = YES;
+                GCC_WARN_UNUSED_VARIABLE = YES;
+                IPHONEOS_DEPLOYMENT_TARGET = 12.4;
+                MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+                MTL_FAST_MATH = YES;
+                ONLY_ACTIVE_ARCH = YES;
+                SDKROOT = iphoneos;
+            };
+            name = Debug;
+        };
+        A06D4CC5232F0DB200763E16 /* Release */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ALWAYS_SEARCH_USER_PATHS = NO;
+                CLANG_ANALYZER_NONNULL = YES;
+                CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+                CLANG_CXX_LANGUAGE_STANDARD = "gnu++17";
+                CLANG_CXX_LIBRARY = "libc++";
+                CLANG_ENABLE_MODULES = YES;
+                CLANG_ENABLE_OBJC_ARC = YES;
+                CLANG_ENABLE_OBJC_WEAK = YES;
+                CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+                CLANG_WARN_BOOL_CONVERSION = YES;
+                CLANG_WARN_COMMA = YES;
+                CLANG_WARN_CONSTANT_CONVERSION = YES;
+                CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+                CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+                CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+                CLANG_WARN_EMPTY_BODY = YES;
+                CLANG_WARN_ENUM_CONVERSION = YES;
+                CLANG_WARN_INFINITE_RECURSION = YES;
+                CLANG_WARN_INT_CONVERSION = YES;
+                CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+                CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+                CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+                CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+                CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+                CLANG_WARN_STRICT_PROTOTYPES = YES;
+                CLANG_WARN_SUSPICIOUS_MOVE = YES;
+                CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+                CLANG_WARN_UNREACHABLE_CODE = YES;
+                CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+                CODE_SIGN_IDENTITY = "iPhone Developer";
+                COPY_PHASE_STRIP = NO;
+                DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+                ENABLE_NS_ASSERTIONS = NO;
+                ENABLE_STRICT_OBJC_MSGSEND = YES;
+                GCC_C_LANGUAGE_STANDARD = gnu11;
+                GCC_NO_COMMON_BLOCKS = YES;
+                GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+                GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+                GCC_WARN_UNDECLARED_SELECTOR = YES;
+                GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+                GCC_WARN_UNUSED_FUNCTION = YES;
+                GCC_WARN_UNUSED_VARIABLE = YES;
+                IPHONEOS_DEPLOYMENT_TARGET = 12.4;
+                MTL_ENABLE_DEBUG_INFO = NO;
+                MTL_FAST_MATH = YES;
+                SDKROOT = iphoneos;
+                VALIDATE_PRODUCT = YES;
+            };
+            name = Release;
+        };
+        A06D4CC7232F0DB200763E16 /* Debug */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+                CODE_SIGN_STYLE = Automatic;
+                DEVELOPMENT_TEAM = "";
+                ENABLE_BITCODE = NO;
+                INFOPLIST_FILE = TestApp/Info.plist;
+                LD_RUNPATH_SEARCH_PATHS = (
+                    "$(inherited)",
+                    "@executable_path/Frameworks",
+                );
+                PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestApp;
+                PRODUCT_NAME = "$(TARGET_NAME)";
+                PROVISIONING_PROFILE_SPECIFIER = "";
+                TARGETED_DEVICE_FAMILY = "1,2";
+            };
+            name = Debug;
+        };
+        A06D4CC8232F0DB200763E16 /* Release */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+                CODE_SIGN_STYLE = Automatic;
+                DEVELOPMENT_TEAM = "";
+                ENABLE_BITCODE = NO;
+                INFOPLIST_FILE = TestApp/Info.plist;
+                LD_RUNPATH_SEARCH_PATHS = (
+                    "$(inherited)",
+                    "@executable_path/Frameworks",
+                );
+                PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestApp;
+                PRODUCT_NAME = "$(TARGET_NAME)";
+                PROVISIONING_PROFILE_SPECIFIER = "";
+                TARGETED_DEVICE_FAMILY = "1,2";
+            };
+            name = Release;
+        };
+        A0EA3B06237FCB08007CEA34 /* Debug */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                BUNDLE_LOADER = "$(TEST_HOST)";
+                CODE_SIGN_IDENTITY = "iPhone Developer";
+                CODE_SIGN_STYLE = Automatic;
+                DEVELOPMENT_TEAM = "";
+                INFOPLIST_FILE = TestAppTests/Info.plist;
+                IPHONEOS_DEPLOYMENT_TARGET = 12.4;
+                LD_RUNPATH_SEARCH_PATHS = (
+                    "$(inherited)",
+                    "@executable_path/Frameworks",
+                    "@loader_path/Frameworks",
+                );
+                PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestAppTests;
+                PRODUCT_NAME = "$(TARGET_NAME)";
+                PROVISIONING_PROFILE_SPECIFIER = "";
+                "PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "";
+                TARGETED_DEVICE_FAMILY = "1,2";
+                TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TestApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TestApp";
+            };
+            name = Debug;
+        };
+        A0EA3B07237FCB08007CEA34 /* Release */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                BUNDLE_LOADER = "$(TEST_HOST)";
+                CODE_SIGN_STYLE = Automatic;
+                INFOPLIST_FILE = TestAppTests/Info.plist;
+                IPHONEOS_DEPLOYMENT_TARGET = 12.4;
+                LD_RUNPATH_SEARCH_PATHS = (
+                    "$(inherited)",
+                    "@executable_path/Frameworks",
+                    "@loader_path/Frameworks",
+                );
+                PRODUCT_BUNDLE_IDENTIFIER = com.pytorch.ios.TestAppTests;
+                PRODUCT_NAME = "$(TARGET_NAME)";
+                TARGETED_DEVICE_FAMILY = "1,2";
+                TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TestApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TestApp";
+            };
+            name = Release;
+        };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		A06D4CAB232F0DB200763E16 /* Build configuration list for PBXProject "TestApp" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				A06D4CC4232F0DB200763E16 /* Debug */,
-				A06D4CC5232F0DB200763E16 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		A06D4CC6232F0DB200763E16 /* Build configuration list for PBXNativeTarget "TestApp" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				A06D4CC7232F0DB200763E16 /* Debug */,
-				A06D4CC8232F0DB200763E16 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		A0EA3B08237FCB08007CEA34 /* Build configuration list for PBXNativeTarget "TestAppTests" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				A0EA3B06237FCB08007CEA34 /* Debug */,
-				A0EA3B07237FCB08007CEA34 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
+        A06D4CAB232F0DB200763E16 /* Build configuration list for PBXProject "TestApp" */ = {
+            isa = XCConfigurationList;
+            buildConfigurations = (
+                A06D4CC4232F0DB200763E16 /* Debug */,
+                A06D4CC5232F0DB200763E16 /* Release */,
+            );
+            defaultConfigurationIsVisible = 0;
+            defaultConfigurationName = Release;
+        };
+        A06D4CC6232F0DB200763E16 /* Build configuration list for PBXNativeTarget "TestApp" */ = {
+            isa = XCConfigurationList;
+            buildConfigurations = (
+                A06D4CC7232F0DB200763E16 /* Debug */,
+                A06D4CC8232F0DB200763E16 /* Release */,
+            );
+            defaultConfigurationIsVisible = 0;
+            defaultConfigurationName = Release;
+        };
+        A0EA3B08237FCB08007CEA34 /* Build configuration list for PBXNativeTarget "TestAppTests" */ = {
+            isa = XCConfigurationList;
+            buildConfigurations = (
+                A0EA3B06237FCB08007CEA34 /* Debug */,
+                A0EA3B07237FCB08007CEA34 /* Release */,
+            );
+            defaultConfigurationIsVisible = 0;
+            defaultConfigurationName = Release;
+        };
 /* End XCConfigurationList section */
-	};
-	rootObject = A06D4CA8232F0DB200763E16 /* Project object */;
+    };
+    rootObject = A06D4CA8232F0DB200763E16 /* Project object */;
 }
