@@ -1,6 +1,8 @@
 import triton
 import triton.language as tl
 
+import torch
+
 
 @triton.jit
 def promote_to_tensor(x):
@@ -91,9 +93,18 @@ def max_with_index(value, index, dim):
     return tl.reduce((value, index), dim, maximum_with_index)
 
 
-@triton.jit
-def div_approx(a, b):
-    return a * tl.math.rcp_rn(b)
+# Causing timeouts in CI with triton-rocm
+if torch.version.hip is None:
+
+    @triton.jit
+    def div_approx(a, b):
+        return a * tl.math.rcp_rn(b)
+
+else:
+
+    @triton.jit
+    def div_approx(a, b):
+        return a * (1.0 / b)
 
 
 @triton.jit
@@ -329,3 +340,12 @@ def exclusive_scan_decoupled_lookback_64(
     tl.atomic_xchg(scratch_base + 3 * index + 0, flag_two, sem="release")
 
     return exclusive_prefix
+
+
+@triton.jit
+def frexp(x):
+    # TODO(isuruf): use inline_asm_elementwise here
+    y = tl.math.ilogb(x) + 1
+    exponent = tl.where(x == 0, 0, y)
+    mantissa = tl.where(x == 0, 0, tl.math.ldexp(x, -y))
+    return mantissa, exponent

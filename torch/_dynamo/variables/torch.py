@@ -676,20 +676,31 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                     for idx, name in enumerate(output_tensor_names):
                         if name in tx.symbolic_locals:
                             tx.symbolic_locals[name] = tensor_variable.items[idx]
+                    for out_tensor, result_tensor in zip(
+                        kwargs["out"].items, tensor_variable.items
+                    ):
+                        if (
+                            out_tensor.source
+                            and out_tensor in tx.output.graphargs
+                            and out_tensor.size != result_tensor.size
+                        ):
+                            # It's hard to get out variants with resizing on graph inputs work
+                            # properly across dynamo/aot/inductor, just fall back.
+                            unimplemented("out variants with resizing on graph inputs")
                 elif isinstance(tensor_variable, TensorVariable):
                     assert isinstance(kwargs["out"], TensorVariable)
+                    assert "example_value" in kwargs["out"].proxy.node.meta
+                    fake_tensor = tensor_variable.proxy.node.meta["example_value"]
+                    fake_out = kwargs["out"].proxy.node.meta["example_value"]
                     if (
                         kwargs["out"].source
                         and kwargs["out"] in tx.output.graphargs
-                        and kwargs["out"].size != tensor_variable.size
+                        and fake_out.shape != fake_tensor.shape
                     ):
                         # It's hard to get out variants with resizing on graph inputs work
                         # properly across dynamo/aot/inductor, just fall back.
                         unimplemented("out variants with resizing on graph inputs")
-                    assert "example_value" in kwargs["out"].proxy.node.meta
-                    if not torch._prims_common.is_contiguous(
-                        kwargs["out"].proxy.node.meta["example_value"]
-                    ):
+                    if not torch._prims_common.is_contiguous(fake_out):
                         # It's difficult to handle strides correctly in functionalization
                         # when calling an out= op with a non-contiguous out argument
                         unimplemented(
