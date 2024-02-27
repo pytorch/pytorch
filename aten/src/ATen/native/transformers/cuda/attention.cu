@@ -560,7 +560,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
     // strides from packed projection for nested tensors when seq_len is 1 will be
     // and will trigger a contiguous call in the kernel, so we prevent this
     bool no_seq_len_1_nested = query.is_nested() ? check_for_seq_len_1_nested_tensor(kernel_params, false) : true;
-    // The API for transfomer_encoder is a mask of shape (Batch_Size, Seq_len_q)
+    // The API for transformer_encoder is a mask of shape (Batch_Size, Seq_len_q)
     // For mem-eff attention this will cause the expand call to error
     // For now I am going to turn of that path not have to deal with all the annoying
     // Mask type shape grossness
