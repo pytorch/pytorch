@@ -3334,12 +3334,11 @@ class ShapeEnv:
                     subst[sympy.Lt(e.lhs, e.rhs)] = sympy.false
                     subst[sympy.Lt(-e.lhs, -e.rhs)] = sympy.false
                 elif isinstance(e, sympy.Lt):
+                    subst[sympy.Lt(e.lhs, e.rhs)] = sympy.true
                     subst[sympy.Le(e.lhs, e.rhs)] = sympy.true
-                    subst[sympy.Le(-e.lhs, -e.rhs)] = sympy.true
-                    subst[sympy.Lt(e.lhs, e.rhs)] = sympy.false
-                    subst[sympy.Lt(-e.lhs, -e.rhs)] = sympy.false
-                    subst[sympy.Eq(e.lhs, e.rhs)] = sympy.false
-                    subst[sympy.Eq(-e.lhs, -e.rhs)] = sympy.false
+                    subst[sympy.Gt(e.lhs, e.rhs)] = sympy.false
+                    subst[sympy.Ge(e.lhs, e.rhs)] = sympy.false
+                    subst[sympy.Ne(e.lhs, e.rhs)] = sympy.true
 
             # NB: this helps us deal with And/Or connectives
             expr = expr.subs(subst)
