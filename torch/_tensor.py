@@ -459,16 +459,8 @@ class Tensor(torch._C.TensorBase):
             return handle_torch_function(
                 Tensor.__repr__, (self,), self, tensor_contents=tensor_contents
             )
-
-        in_recursive_repr = getattr(self, "_in_recursive_repr", False)
-        if in_recursive_repr:
-            return f"<recursive tensor {id(self)}>"
-        self._in_recursive_repr = True
-        try:
-            # All strings are unicode in Python 3.
-            return torch._tensor_str._str(self, tensor_contents=tensor_contents)
-        finally:
-            del self._in_recursive_repr
+        # All strings are unicode in Python 3.
+        return torch._tensor_str._str(self, tensor_contents=tensor_contents)
 
     def backward(
         self, gradient=None, retain_graph=None, create_graph=False, inputs=None
