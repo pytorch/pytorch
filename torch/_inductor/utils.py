@@ -966,7 +966,7 @@ def use_cutlass_template(layout):
     if torch.version.hip:
         return False
 
-    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
+    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
     res = _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
         "CUTLASS"
     )

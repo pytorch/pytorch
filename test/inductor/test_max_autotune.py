@@ -27,7 +27,7 @@ from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM75OrLater, SM90OrLater
+from torch.testing._internal.common_cuda import SM75OrLater, SM80OrLater, SM90OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -343,6 +343,47 @@ class TestMaxAutotune(TestCase):
 
         a = torch.randn(100, 10).cuda().half()
         b = torch.randn(10, 100).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": False,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 2,
+            }
+        ):
+            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
+            Y = mm(a, b)
+            torch.testing.assert_close(Y_compiled, Y)
+
+    # TODO: Enable dynamic test cases when dynamic support is added.
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    @parametrize("dynamic", (False,))
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "CUTLASS,ATen"))
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_max_autotune_cutlass_backend_int_mm(
+        self, dynamic: bool, max_autotune_gemm_backends: str
+    ):
+        """
+        Make sure autotuning mm in sub processes work without crashes.
+        """
+
+        if max_autotune_gemm_backends == "CUTLASS" and torch.version.hip:
+            return
+
+        def mm(a, b):
+            return torch._int_mm(a, b)
+
+        # CUTLASS only supports row-major/column-major combination of
+        # layouts for this operation, thus the transpose of tensor b
+        # (on the other side, Triton at the moment doesn't support
+        # this combination, so it's excluded from the test).  Also,
+        # for CUTLASS alignment requirements, number of columns in
+        # both tensors has to be divisible by 16.
+        a = torch.randint(0, 5, (100, 16), dtype=torch.int8).cuda()
+        b = torch.randint(0, 5, (32, 16), dtype=torch.int8).cuda().T
 
         with config.patch(
             {
