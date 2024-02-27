@@ -19,6 +19,7 @@ pytest-flakefinder==1.1.0
 scipy==1.10.1
 sympy==1.11.1
 unittest-xml-reporting<=3.2.0,>=2.0.0
+tlparse==0.3.3
 xdoctest==1.1.0
 filelock==3.6.0
 sympy==1.11.1
