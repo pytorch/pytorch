@@ -908,29 +908,8 @@ def _init_logs(log_file_name=None):
     # to /logs/dedicated_logs_XXX
     trace_file_name = os.environ.get(TRACE_ENV_VAR, None)
     handler: Optional[logging.Handler] = None
-    TRACE_LOG_DIR = "/logs"
     if trace_file_name is not None:
         handler = logging.FileHandler(trace_file_name)
-    elif (
-        is_fbcode()
-        and os.path.exists(TRACE_LOG_DIR)
-        and os.access(TRACE_LOG_DIR, os.W_OK)
-        and torch._utils_internal.justknobs_check("pytorch/trace:enable")
-    ):
-
-        def filename_cb():
-            ranksuffix = ""
-            if dist.is_available() and dist.is_initialized():
-                ranksuffix = f"rank_{dist.get_rank()}_"
-            _, filename = tempfile.mkstemp(
-                suffix=".log",
-                prefix=f"dedicated_log_torch_trace_{ranksuffix}",
-                dir=TRACE_LOG_DIR,
-            )
-            log.info("Automatically enabled TORCH_TRACE=%s", filename)
-            return filename
-
-        handler = FreshFileHandler(filename_cb)
     if handler is not None:
         trace_log.setLevel(logging.DEBUG)
         trace_log_handler = _track_handler(handler)
