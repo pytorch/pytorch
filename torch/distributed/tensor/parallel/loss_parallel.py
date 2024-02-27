@@ -23,7 +23,40 @@ aten = torch.ops.aten
 @contextlib.contextmanager
 def loss_parallel():
     """
-    A Context Manager to enable loss parallelism.
+    A context manager which enables loss parallelism, where efficient parallelized cross-entropy loss
+    computation can be performed when the input is sharded on the class dimension. Within this context
+    manager, one can use ``torch.nn.functional.cross_entropy`` and :class:`~torch.nn.CrossEntropyLoss`
+    as usual, with the following assumptions on the input parameters.
+
+    Parameters to the cross entropy function:
+        input (:class:`DTensor`):
+            Input logits. Assumed to be sharded on the class dimension.
+        target (Union[:class:`torch.Tensor`, :class:`DTensor`]):
+            Must be ground truth class indices (class probabilities currently not supported).
+            Assumed to be replicated across the ``DeviceMesh``.
+        weight (Union[:class:`torch.Tensor`, :class:`DTensor`], optional):
+            If given, assumed to be replicated across the ``DeviceMesh``.
+        label_smoothing:
+            Currently not supported.
+
+    Returns::
+        A replicated :class:`DTensor`.
+
+    Example::
+        >>> # xdoctest: +SKIP("distributed")
+        >>> from torch.distributed.tensor.parallel import loss_parallel
+        >>> from torch.distributed.device_mesh import init_device_mesh
+        >>> ...
+        >>> # A sharded DTensor is manually created here to showcase the usage.
+        >>> # In practice, it is usually the output of a TP module.
+        >>> device_mesh = init_device_mesh("cuda", (8,))
+        >>> input = torch.randn(3, 5, device="cuda", requires_grad=True)
+        >>> dist_input = distribute_tensor(input, device_mesh, placements=[Shard(1)])
+        >>> target = torch.randint(5, (3,), device="cuda")
+        >>> with loss_parallel():
+        >>>     loss = F.cross_entropy(dist_input, target, reduction="mean")
+        >>>     loss.backward()
+        >>> ...
     """
     _enable_custom_loss_ops()
 
@@ -208,6 +241,7 @@ def _nll_loss_forward(
 
     if weight is not None:
         w = _weight_view(weight)
+        assert local_weight is not None
         local_w = _weight_view(local_weight)
         x = x * local_w
     safe_target = torch.where(target != ignore_index, target, 0)
@@ -216,7 +250,9 @@ def _nll_loss_forward(
     # The following code block is a distributed version of
     # result = -torch.gather(self, channel_dim, safe_target_).squeeze(channel_dim)
     partial_placement = _MaskPartial(logical_dim_size=channel_dim_size)
-    safe_target_partial_ = partial_placement._partition_value(safe_target_, mesh, mesh_dim)
+    safe_target_partial_ = partial_placement._partition_value(
+        safe_target_, mesh, mesh_dim
+    )
     result_partial = torch.gather(x, channel_dim, safe_target_partial_)
     # an all_reduce happens here
     result_reduced = partial_placement._reduce_value(result_partial, mesh, mesh_dim)
@@ -277,8 +313,9 @@ def _nll_loss_forward_handler(
         # For local computation, both (replicated) weight and (sharded) local_weight
         # are needed in _nll_loss_forward(). local_weight is generated here using
         # DTensor API, without incurring any communication.
-        sharded_placements = list(all_replicate_placements)
-        sharded_placements[mesh_dim] = Shard(0)
+        sharded_placements = [
+            Shard(0) if i == mesh_dim else Replicate() for i in range(spec.mesh.ndim)
+        ]
         local_weight = weight.redistribute(spec.mesh, sharded_placements)._local_tensor
         assert local_weight.shape[0] == x._local_tensor.shape[channel_dim]
 
@@ -356,9 +393,13 @@ def _nll_loss_and_log_softmax_backward(
     arange_1d = torch.arange(
         masked_safe_target.shape[0], device=masked_safe_target.device
     )
-    if x.dim() <= 2:  # for aten.nll_loss_backward.default
+    # The first two cases with x.dim() <= 2 are for aten.nll_loss_backward.default;
+    # the last case is for aten.nll_loss2d_backward.default.
+    if x.dim() == 1:
+        grad_input[masked_safe_target] = grad_update
+    elif x.dim() == 2:
         grad_input[arange_1d, masked_safe_target] = grad_update
-    else:  # for aten.nll_loss2d_backward.default
+    else:
         grad_input_t = grad_input.transpose(channel_dim, -1)
         intermidate_shape = grad_input_t.shape
         grad_input_2d = grad_input_t.reshape(-1, x.shape[channel_dim])
