@@ -43,12 +43,13 @@ from torch._guards import (
     GuardSource,
     Source,
 )
+
+from torch._logging import structured
 from torch.fx.experimental.symbolic_shapes import (
     EqualityConstraint,
     is_symbolic,
     SYMPY_INTERP,
 )
-
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
 
@@ -1077,10 +1078,23 @@ class CheckFunctionManager:
         # Don't report this guard, it's always the same, useless!
         code_parts = ["___check_global_state()"]
         verbose_code_parts = code_parts[:]
+        structured_guard_fns = []
 
         def add_code_part(code_part, guard, log_only=False):
             verbose_code_part = get_verbose_code_part(code_part, guard)
             guards_log.debug("%s", verbose_code_part)
+
+            structured_guard_fns.append(
+                lambda: {
+                    "code": code_part,
+                    "stack": structured.from_traceback(guard.stack.summary())
+                    if guard.stack
+                    else None,
+                    "user_stack": structured.from_traceback(guard.user_stack)
+                    if guard.user_stack
+                    else None,
+                }
+            )
 
             if verbose_guards_log.isEnabledFor(logging.DEBUG):
                 maybe_stack = ""
@@ -1175,6 +1189,11 @@ class CheckFunctionManager:
         for gcl in builder.shape_env_code:
             for code in gcl.code_list:
                 add_code_part(code, gcl.guard)
+
+        # OK, all done generating guards
+        torch._logging.trace_structured(
+            "dynamo_guards", payload_fn=lambda: [f() for f in structured_guard_fns]
+        )
 
         global_state = convert_frame.initial_global_state
         if global_state is None:
