@@ -68,7 +68,7 @@ class AsyncTensor(torch.Tensor):
   # Instead, we want it to be treated as real tensor starting from beginning of Dynamo so that model is traced normally.
   # def __tensor_flatten__(self):
   #   """
-  #   protocol to inform how to flatten a DTensor to local tensor
+  #   protocol to inform how to flatten a AsyncTensor to local tensor
   #   for PT2 tracing
   #   """
   #   ctx = {
