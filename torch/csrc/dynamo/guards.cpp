@@ -2440,6 +2440,54 @@ class GlobalWeakRefGuardAccessor : public GuardAccessor {
   PyObject* _global_name;
 };
 
+/**
+ * Similar to PythonLambdaLeafGuard, this class is a way to allow developers to
+ * supply accessor as a python function. This is useful for from_numpy source.
+ */
+class PythonLambdaGuardAccessor : public GuardAccessor {
+ public:
+  PythonLambdaGuardAccessor(
+      RootGuardManager* root,
+      py::function accessor_fn,
+      py::handle example_value)
+      : GuardAccessor(root, accessor_fn, example_value),
+        _accessor_fn(accessor_fn) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    PyObject* x = PyObject_CallOneArg(_accessor_fn.ptr(), obj); // new ref
+    if (x == nullptr) {
+      // The accessor function failed.
+      PyErr_Clear();
+      return false;
+    }
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* x = PyObject_CallOneArg(_accessor_fn.ptr(), obj); // new ref
+    if (x == nullptr) {
+      // The accessor function failed.
+      PyErr_Clear();
+      return GuardDebugInfo(false, std::string("Call failed ") + repr(), 0);
+    }
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+  std::string repr() const override {
+    return "PythonLambdaGuardAccessor";
+  }
+
+ private:
+  py::object _accessor_fn;
+};
+
 void install_tensor_aliasing_guard(
     GuardManager* x,
     GuardManager* y,
@@ -2862,6 +2910,12 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "global_weakref_manager",
           &GuardManager::get_child_manager<GlobalWeakRefGuardAccessor>,
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "lambda_manager",
+          &GuardManager::get_child_manager<PythonLambdaGuardAccessor>,
           py::return_value_policy::reference)
       // return by reference because C++ GuardManager has the ownership of
       // accessors and guard managers
