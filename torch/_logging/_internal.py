@@ -768,10 +768,14 @@ class TorchLogsFormatter(logging.Formatter):
 
         shortlevel = glog_level_to_abbr.get(record.levelname, record.levelname)
 
+        record.artifactprefix = ""
+        if artifact_name is not None:
+            record.artifactprefix = f" [__{artifact_name}]"
+
         prefix = (
             f"{record.rankprefix}{shortlevel}{record.asctime}.{int(record.msecs*1000):06d} {record.thread} "
             f"{os.path.relpath(record.pathname, os.path.dirname(os.path.dirname(torch.__file__)))}:"
-            f"{record.lineno}]{record.traceid}"
+            f"{record.lineno}]{record.traceid}{record.artifactprefix}"
         )
         if self._is_trace:
             assert s == ""
