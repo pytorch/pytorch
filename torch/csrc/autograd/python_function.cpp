@@ -29,6 +29,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_tracer.h>
+#include <torch/csrc/profiler/api.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 
@@ -833,6 +834,8 @@ static std::unordered_set<at::TensorImpl*> _parse_non_differentiable(
 struct UnpackedInput {
   THPObjectPtr input_tuple;
   variable_list input_vars;
+  // record_function_inputs is for RECORD_FUNCTION only
+  std::vector<c10::IValue> record_function_inputs;
 };
 
 struct InputFlags {
@@ -850,6 +853,9 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
   auto num_args = PyTuple_GET_SIZE(args);
   unpacked.input_tuple = PyTuple_New(num_args);
   flags.needs_input_grad = PyTuple_New(num_args);
+  bool profiler_need_input = torch::autograd::profiler::profilerEnabled() &&
+      torch::autograd::profiler::getProfilerConfig().report_input_shapes;
+
   for (const auto i : c10::irange(num_args)) {
     PyObject* arg = PyTuple_GET_ITEM(args, i);
 
@@ -865,12 +871,23 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
       }
       Py_INCREF(Py_False);
       PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, Py_False);
+
+      if (profiler_need_input) {
+        // The following conversion from PyObject to IValue is expensive
+        // Only do it if profiler is enabled and needs input shapes
+        auto match = torch::jit::tryToInferType(arg);
+        if (match.success()) {
+          unpacked.record_function_inputs.push_back(
+              torch::jit::toIValue(arg, match.type()));
+        }
+      }
     } else {
       const auto& tensor = THPVariable_Unpack(arg);
       unpacked.input_vars.push_back(tensor);
       PyObject* needs_grad = tensor.requires_grad() ? Py_True : Py_False;
       Py_INCREF(needs_grad);
       PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, needs_grad);
+      unpacked.record_function_inputs.push_back(tensor);
     }
     Py_INCREF(arg);
     PyTuple_SET_ITEM(unpacked.input_tuple.get(), i, arg);
@@ -1229,8 +1246,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   // before context has been allocated.
   RECORD_FUNCTION(
       ((PyTypeObject*)cls)->tp_name,
-      std::vector<c10::IValue>(
-          unpacked_input.input_vars.begin(), unpacked_input.input_vars.end()),
+      unpacked_input.record_function_inputs,
       seq_id);
 
   const auto& functorch_tls = at::functorch::functorchTLSAccessor();
