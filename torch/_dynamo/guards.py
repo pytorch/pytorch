@@ -862,15 +862,20 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard.name)
         t = type(value)
 
-        self.TYPE_MATCH(guard)
+        if not config.enable_cpp_guard_manager:
+            self.TYPE_MATCH(guard)
+
         code = list()
         code.append(f"___tuple_iterator_len({ref}) == {tuple_iterator_len(value)}")
 
         self._produce_guard_code(guard, code)
 
         if config.enable_cpp_guard_manager:
+            t = type(value)
+            obj_id = self.id_ref(t)
+
             self.get_guard_manager(guard).add_tuple_iterator_length_guard(
-                tuple_iterator_len(value), get_verbose_code_parts(code, guard)
+                tuple_iterator_len(value), obj_id, get_verbose_code_parts(code, guard)
             )
 
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
