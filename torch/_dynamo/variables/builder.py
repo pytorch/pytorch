@@ -27,6 +27,7 @@ from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
 from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
+from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
     DimDynamic,
@@ -211,6 +212,24 @@ class GraphArg:
 
     def __eq__(self, other):
         return self.source.name() == other.source.name()
+
+
+class BackwardStateGraphArg(GraphArg):
+    def __init__(self):
+        super().__init__(
+            source=None,
+            _example=BackwardState(),
+            is_unspecialized=False,
+            fake_tensor=None,
+            is_tensor=False,
+        )
+
+    def reconstruct(self, codegen):
+        assert codegen.tx.output.backward_state_var
+        codegen.load_import_from(BackwardState.__module__, "BackwardState")
+        codegen.call_function(0, True)
+        codegen.dup_top()
+        codegen.store(codegen.tx.output.backward_state_var)
 
 
 @dataclasses.dataclass

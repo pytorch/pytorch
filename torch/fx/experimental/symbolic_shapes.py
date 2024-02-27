@@ -286,6 +286,8 @@ def _iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Basic]:
         raise AssertionError(f"cannot extract sympy expressions from {val} {type(val)}")
 
 def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
+    if val is None:
+        return set()
     itr = _iterate_exprs(val)
     # we need at least 1 to call union, so we hand code the identity
     try:
