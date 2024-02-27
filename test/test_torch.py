@@ -5218,7 +5218,7 @@ else:
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_parallel_cow_materialize_error(self, device, dtype):
 
-        def run(num_threads, num_parallel, skip_first_thread, should_error):
+        def run(num_threads, num_parallel, skip_first, should_error):
             orig_num_threads = torch.get_num_threads()
 
             try:
@@ -5229,13 +5229,13 @@ else:
                 if should_error:
                     with self.assertRaisesRegex(RuntimeError, r'Materializing a storage'):
                         torch._test_parallel_materialize(
-                            a, num_parallel, skip_first_thread)
+                            a, num_parallel, skip_first)
                 else:
-                    torch._test_parallel_materialize(a, num_parallel, skip_first_thread)
+                    torch._test_parallel_materialize(a, num_parallel, skip_first)
 
                 # Error should not raise in any case if the tensor is not COW
                 b = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
-                torch._test_parallel_materialize(b, num_parallel, skip_first_thread)
+                torch._test_parallel_materialize(b, num_parallel, skip_first)
 
             finally:
                 torch.set_num_threads(orig_num_threads)
@@ -5243,14 +5243,11 @@ else:
         run(1, 1, False, True)
         run(1, 1, True, False)
         run(1, 10, False, True)
-        run(1, 10, True, False)
+        run(1, 10, True, True)
         run(10, 1, False, True)
         run(10, 1, True, False)
         run(10, 10, False, True)
-
-        # KURT: fails on parallelnative-linux-jammy-py3.8-gcc11
         run(10, 10, True, True)
-
         run(10, 2, False, True)
         run(10, 2, True, True)
 

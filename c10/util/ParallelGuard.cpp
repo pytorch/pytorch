@@ -4,12 +4,11 @@ namespace c10 {
 
 thread_local bool in_at_parallel = false;
 
-C10_API bool is_parallel_guard_alive() {
+bool ParallelGuard::is_enabled() {
   return in_at_parallel;
 }
 
-ParallelGuard::ParallelGuard(bool state)
-    : previous_state_(is_parallel_guard_alive()) {
+ParallelGuard::ParallelGuard(bool state) : previous_state_(is_enabled()) {
   in_at_parallel = state;
 }
 
