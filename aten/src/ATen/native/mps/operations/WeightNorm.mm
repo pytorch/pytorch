@@ -76,16 +76,8 @@ std::tuple<Tensor, Tensor> weight_norm_mps(const Tensor& v, const Tensor& g, int
     Placeholder norms_placeholder = Placeholder(cachedGraph->norms_, norms);
     Placeholder w_placeholder = Placeholder(cachedGraph->w_, w);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      v_placeholder.getMPSGraphTensor() : v_placeholder.getMPSGraphTensorData(),
-      g_placeholder.getMPSGraphTensor() : g_placeholder.getMPSGraphTensorData()
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      norms_placeholder.getMPSGraphTensor() : norms_placeholder.getMPSGraphTensorData(),
-      w_placeholder.getMPSGraphTensor() : w_placeholder.getMPSGraphTensorData()
-    };
-
+    auto feeds = dictionaryFromPlaceholders(v_placeholder, g_placeholder);
+    auto results = dictionaryFromPlaceholders(norms_placeholder, w_placeholder);
     runMPSGraph(mpsStream, cachedGraph->graph(), feeds, results);
   }
 
@@ -171,18 +163,8 @@ std::tuple<Tensor, Tensor> weight_norm_backward_mps(const Tensor& grad_w,
     Placeholder grad_g_placeholder = Placeholder(cachedGraph->grad_g, grad_g);
     Placeholder grad_v_placeholder = Placeholder(cachedGraph->grad_v, grad_v);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      grad_w_placeholder.getMPSGraphTensor() : grad_w_placeholder.getMPSGraphTensorData(),
-      norms_placeholder.getMPSGraphTensor() : norms_placeholder.getMPSGraphTensorData(),
-      v_placeholder.getMPSGraphTensor() : v_placeholder.getMPSGraphTensorData(),
-      g_placeholder.getMPSGraphTensor() : g_placeholder.getMPSGraphTensorData()
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      grad_g_placeholder.getMPSGraphTensor() : grad_g_placeholder.getMPSGraphTensorData(),
-      grad_v_placeholder.getMPSGraphTensor() : grad_v_placeholder.getMPSGraphTensorData()
-    };
-
+    auto feeds = dictionaryFromPlaceholders(grad_w_placeholder, norms_placeholder, v_placeholder, g_placeholder);
+    auto results = dictionaryFromPlaceholders(grad_g_placeholder, grad_v_placeholder);
     runMPSGraph(mpsStream, cachedGraph->graph(), feeds, results);
   }
 

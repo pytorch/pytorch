@@ -313,7 +313,7 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
     return nullptr;
   }
 
-  int deviceIdx = at::cuda::current_device();
+  auto deviceIdx = at::cuda::current_device();
   c10::cuda::CUDAGuard guard(deviceIdx);
 
   // First hand shake: exchange hostname and device bus ID

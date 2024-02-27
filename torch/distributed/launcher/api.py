@@ -63,7 +63,7 @@ class LaunchConfig:
         metrics_cfg: configuration to initialize metrics.
         local_addr: address of the local node if any. If not set, a lookup on the local
                 machine's FQDN will be performed.
-        filter_local_ranks: ranks for which to show logs in console. If not set, show from all.
+        local_ranks_filter: ranks for which to show logs in console. If not set, show from all.
     ..note:
         `rdzv_timeout` is a legacy argument that will be removed in future.
         Set the timeout via `rdzv_configs['timeout']`
@@ -88,7 +88,7 @@ class LaunchConfig:
     tee: Union[Std, Dict[int, Std]] = Std.NONE
     metrics_cfg: Dict[str, str] = field(default_factory=dict)
     local_addr: Optional[str] = None
-    filter_local_ranks: Optional[Set[int]] = None
+    local_ranks_filter: Optional[Set[int]] = None
 
     def __post_init__(self):
         default_timeout = 900
@@ -252,7 +252,7 @@ def launch_agent(
         start_method=config.start_method,
         log_dir=config.log_dir,
         log_line_prefix_template=config.log_line_prefix_template,
-        filter_local_ranks=config.filter_local_ranks,
+        local_ranks_filter=config.local_ranks_filter,
     )
 
     shutdown_rdzv = True

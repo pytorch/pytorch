@@ -22,6 +22,7 @@ from torch import nn
 from torch._subclasses import fake_tensor
 from torch.onnx._internal import _beartype, exporter
 from torch.onnx._internal.fx import (
+    diagnostics,
     fx_symbolic_graph_extractor,
     patcher,
     serialization as fx_serialization,
@@ -431,7 +432,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail(
-        error_message="Unsupported FX nodes: {'call_function': ['aten._assert_async.msg']}."
+        error_message=("Unsupported FX nodes: {'call_function': [")
     )
     def test_squeeze_runtime_dim(self):
         class Squeeze(torch.nn.Module):
@@ -1059,6 +1060,17 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
             onnx_test_common.assert_dynamic_shapes(onnx_program, self.dynamic_shapes)
 
+            if diagnostics.is_onnx_diagnostics_log_artifact_enabled():
+                onnx_program.save_diagnostics(
+                    f"test_report_{self._testMethodName}"
+                    f"_op_level_debug_{self.op_level_debug}"
+                    f"_dynamic_axes_{self.dynamic_shapes}"
+                    f"_load_checkpoint_{self.load_checkpoint_during_init}"
+                    f"_export_within_fake_mode_{self.export_within_fake_mode}"
+                    f"model_type_{self.model_type}"
+                    ".sarif"
+                )
+
             with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
                 onnx_program.save(
                     tmp_onnx_file.name, model_state_dict=tmp_checkpoint_file.name
@@ -1451,6 +1463,41 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_model,
             create_args,
             create_kwargs,
+            load_checkpoint_during_init=self.load_checkpoint_during_init,
+            export_within_fake_mode=self.export_within_fake_mode,
+            model_type=self.model_type,
+        )
+
+    @pytorch_test_common.skip_dynamic_fx_test(
+        reason="Dynamic shape check is not expected for exported program in this test suite.",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+    )
+    @pytorch_test_common.xfail_if_model_type_is_not_exportedprogram(
+        error_message="Expected 4 inputs, got 2",
+        reason="https://github.com/pytorch/pytorch/issues/115745",
+    )
+    def test_fake_tensor_mode_huggingface_tiny_gpt2_torch_load(self):
+        model_name = "sshleifer/tiny-gpt2"
+        device = "cpu"
+
+        def create_model():
+            return transformers.AutoModel.from_pretrained(model_name).to(device).eval()
+
+        def create_args():
+            tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
+            kwargs = tokenizer("Hello world!", return_tensors="pt")
+            input_ids = kwargs["input_ids"]
+            attention_mask = kwargs["attention_mask"]
+            return input_ids, None, attention_mask
+
+        def create_pytorch_only_extra_kwargs():
+            return {"return_dict": False}
+
+        self._test_fake_tensor_mode_exporter(
+            "huggingface_sshleifer_tiny-gpt2",
+            create_model,
+            create_args,
+            create_pytorch_only_extra_kwargs,
             load_checkpoint_during_init=self.load_checkpoint_during_init,
             export_within_fake_mode=self.export_within_fake_mode,
             model_type=self.model_type,

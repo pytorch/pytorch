@@ -18,6 +18,7 @@
 
 #include <ATen/ops/_addmm_activation.h>
 #include <ATen/ops/_embedding_bag.h>
+#include <ATen/ops/_fft_c2c.h>
 #include <ATen/ops/_scaled_dot_product_efficient_attention.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
 #include <ATen/ops/_scaled_mm.h>
@@ -33,6 +34,7 @@
 #include <ATen/ops/scalar_tensor.h>
 #include <ATen/ops/scatter.h>
 #include <ATen/ops/scatter_reduce.h>
+#include <ATen/ops/view_as_real_ops.h>
 #include <ATen/ops/view_ops.h>
 
 #endif
@@ -372,6 +374,21 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch__embedding_bag(
   });
 }
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__fft_c2c(
+    AtenTensorHandle self,
+    const int64_t* dim_ptr,
+    int64_t dim_size,
+    int64_t normalization,
+    int32_t forward,
+    AtenTensorHandle* ret // returns new reference
+) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto dim = c10::IntArrayRef(dim_ptr, dim_size);
+    *ret = new_tensor_handle(at::_fft_c2c(
+        *tensor_handle_to_tensor_pointer(self), dim, normalization, forward));
+  });
+}
+
 AOTITorchError aoti_torch__scaled_dot_product_flash_attention_v2(
     AtenTensorHandle query,
     AtenTensorHandle key,
@@ -580,11 +597,7 @@ AOTITorchError aoti_torch__scaled_mm(
 AOTITorchError aoti_torch_tensor_copy_(
     AtenTensorHandle src,
     AtenTensorHandle dst) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    at::Tensor* src_tensor = tensor_handle_to_tensor_pointer(src);
-    at::Tensor* dst_tensor = tensor_handle_to_tensor_pointer(dst);
-    dst_tensor->copy_(*src_tensor);
-  });
+  return aoti_torch_copy_(dst, src, /*non_blocking=*/0);
 }
 
 AOTITorchError aoti_torch_assign_tensors(
@@ -632,6 +645,16 @@ AOTITorchError aoti_torch_bmm_out(
     at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
     at::Tensor* mat2_tensor = tensor_handle_to_tensor_pointer(mat2);
     at::bmm_out(*out_tensor, *self_tensor, *mat2_tensor);
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_copy_(
+    AtenTensorHandle self,
+    AtenTensorHandle src,
+    int32_t non_blocking) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    tensor_handle_to_tensor_pointer(self)->copy_(
+        *tensor_handle_to_tensor_pointer(src), non_blocking);
   });
 }
 
@@ -744,6 +767,16 @@ AOTITorchError aoti_torch_index_put_out(
   });
 }
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_view_as_real(
+    AtenTensorHandle self,
+    AtenTensorHandle* ret // returns new reference
+) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *ret = new_tensor_handle(
+        at::_ops::view_as_real::call(*tensor_handle_to_tensor_pointer(self)));
+  });
+}
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_view_dtype(
     AtenTensorHandle self,
     int32_t dtype,
@@ -773,6 +806,17 @@ AOTITorchError aoti_torch_proxy_executor_call_function(
         num_tensors,
         flatten_tensor_args);
   });
+}
+
+void aoti_torch_check(
+    bool cond,
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* msg) {
+  if (C10_UNLIKELY_OR_CONST(!cond)) {
+    ::c10::detail::torchCheckFail(func, file, line, msg);
+  }
 }
 
 AOTITorchError aoti_torch__alloc_from_pool(

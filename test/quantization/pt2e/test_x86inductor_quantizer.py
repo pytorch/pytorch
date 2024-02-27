@@ -14,7 +14,7 @@ from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     QuantizationTestCase,
     skipIfNoX86,
-    skipIfNoDynamoSupport,
+    skipIfNoInductorSupport,
 )
 from torch.testing._internal.common_utils import skipIfTorchDynamo
 from torch.testing._internal.common_quantized import override_quantized_engine
@@ -326,7 +326,7 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         # Calibrate
         m(*example_inputs)
         prepare_model = copy.deepcopy(m)
-        m = convert_pt2e(m, fold_quantize=True)
+        m = convert_pt2e(m)
         convert_model = copy.deepcopy(m)
         pt2_quant_output = m(*example_inputs)
         node_occurrence = {
@@ -340,7 +340,7 @@ class X86InductorQuantTestCase(QuantizationTestCase):
         )
         return export_model, prepare_model, convert_model
 
-@skipIfNoDynamoSupport
+@skipIfNoInductorSupport
 class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
     @skipIfNoX86
     def test_conv2d(self):

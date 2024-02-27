@@ -56,6 +56,7 @@ __global__ void nll_loss2d_forward_no_reduce_kernel(
   int64_t ignore_index
 ) {
   int64_t batch_size = input.size(0);
+  int64_t n_classes = input.size(1);
   int64_t H = input.size(2);
   int64_t W = input.size(3);
 
@@ -69,6 +70,7 @@ __global__ void nll_loss2d_forward_no_reduce_kernel(
       output[b][h][w] = static_cast<scalar_t>(0);
       continue;
     }
+    CUDA_KERNEL_ASSERT(cur_target >= 0 && cur_target < n_classes);
     scalar_t value = input[b][cur_target][h][w];
     scalar_t cur_weight = weight != nullptr ? weight[cur_target] : static_cast<scalar_t>(1);
     output[b][h][w] = -value * cur_weight;
