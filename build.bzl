@@ -316,3 +316,11 @@ GENERATED_AUTOGRAD_CPP = [
     "torch/csrc/lazy/generated/RegisterAutogradLazy.cpp",
     "torch/csrc/lazy/generated/RegisterLazy.cpp",
 ] + _GENERATED_AUTOGRAD_CPP_HEADERS + GENERATED_LAZY_H
+
+GENERATED_AOTI_CPU_CPP = [
+    "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
+]
+
+GENERATED_AOTI_CUDA_CPP = [
+    "torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.cpp",
+]

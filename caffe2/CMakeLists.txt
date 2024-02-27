@@ -368,6 +368,7 @@ if(NOT INTERN_DISABLE_AUTOGRAD AND NOT BUILD_LITE_INTERPRETER)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_4.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_0.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_1.cpp"
+    "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp"
   )
   if(BUILD_LAZY_TS_BACKEND)
     list(APPEND GENERATED_CXX_TORCH
@@ -377,6 +378,10 @@ if(NOT INTERN_DISABLE_AUTOGRAD AND NOT BUILD_LITE_INTERPRETER)
     )
   endif()
 endif()
+
+set(GENERATED_CXX_TORCH_CUDA
+  "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_cuda.cpp"
+  )
 
 set(GENERATED_H_TORCH
   "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.h"
@@ -429,6 +434,10 @@ set(TORCH_GENERATED_CODE
   ${GENERATED_H_PYTHON}
   ${GENERATED_TESTING_PYTHON}
   )
+
+if(USE_CUDA OR USE_ROCM)
+  list(APPEND TORCH_GENERATED_CODE GENERATED_CXX_TORCH_CUDA)
+endif()
 
 set(GEN_PER_OPERATOR_FLAG)
 if(USE_PER_OPERATOR_HEADERS)
@@ -634,6 +643,7 @@ endif()
 
 if(USE_CUDA OR USE_ROCM)
   append_filelist("libtorch_cuda_core_sources" Caffe2_GPU_HIP_JIT_FUSERS_SRCS)
+  append_filelist("libtorch_cuda_core_sources" GENERATED_CXX_TORCH_CUDA)
 endif()
 
 if(USE_CUDA)

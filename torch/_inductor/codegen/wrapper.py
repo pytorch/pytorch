@@ -32,7 +32,6 @@ from torch.fx.node import _get_qualified_name
 from torch.utils._sympy.singleton_int import SingletonInt
 
 from .. import codecache, config, ir
-from ..ir import ReinterpretView
 from ..utils import (
     cache_on_self,
     get_benchmark_name,
@@ -1214,7 +1213,7 @@ class WrapperCodeGen(CodeGen):
             return repr(type(s)(Shim(self.val_to_arg_str(a)) for a in s))
         elif isinstance(s, torch._ops.OpOverload):
             return _get_qualified_name(s)
-        elif isinstance(s, (ir.Buffer, ReinterpretView)):
+        elif isinstance(s, (ir.Buffer, ir.ReinterpretView, ir.TensorBox)):
             return s.codegen_reference()
         else:
             return repr(s)
