@@ -6,6 +6,7 @@ with test_rewrite_assert_with_msg and test_rewrite_assert_without_msg)
 import collections
 import contextlib
 import copy
+import dataclasses
 import functools
 import inspect
 import itertools
@@ -17,7 +18,7 @@ from collections import namedtuple
 from copy import deepcopy
 from enum import Enum
 from functools import wraps
-from typing import List
+from typing import Any, List
 
 import numpy as np
 import torch
@@ -1825,6 +1826,61 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             torch._refs.abs(x)
 
         fn(torch.randn(3))
+
+    def test_dataclass_init_with_default_factory_with_inputs(self):
+        @dataclasses.dataclass
+        class DClass:
+            sharding_contexts: Any = dataclasses.field(default_factory=list)
+            a: int = 1
+
+        def fn(x, inp_list):
+            d = DClass(inp_list)
+            d.sharding_contexts.append(x.sin() + d.a)
+            return d
+
+        x = torch.randn(4)
+        inp_list1 = [1, 2, 3]
+        inp_list2 = [2, 3, 4]
+        inp_list3 = [1, 2]
+        ref1 = fn(x, inp_list1)
+        ref2 = fn(x, inp_list2)
+        ref3 = fn(x, inp_list3)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True)(fn)
+
+        opt_ret1 = opt_fn(x, inp_list1)
+        opt_ret2 = opt_fn(x, inp_list2)
+        opt_ret3 = opt_fn(x, inp_list3)
+        self.assertEqual(ref1.sharding_contexts, opt_ret1.sharding_contexts)
+        self.assertEqual(ref2.sharding_contexts, opt_ret2.sharding_contexts)
+        self.assertEqual(ref3.sharding_contexts, opt_ret3.sharding_contexts)
+        self.assertEqual(cnt.frame_count, 3)
+
+    def test_dataclass_init_with_default_factory_const_arg(self):
+        @dataclasses.dataclass
+        class DClass:
+            sharding_contexts: Any = dataclasses.field(default_factory=list)
+            a: int = 1
+
+        def fn(x):
+            d = DClass([1, 2, 3])
+            d.sharding_contexts.append(x.sin() + d.a)
+            return d
+
+        x = torch.randn(4)
+        ref = fn(x)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True)(fn)
+
+        opt_ret1 = opt_fn(x)
+        opt_ret2 = opt_fn(x)
+        opt_ret3 = opt_fn(x)
+        self.assertEqual(ref.sharding_contexts, opt_ret1.sharding_contexts)
+        self.assertEqual(ref.sharding_contexts, opt_ret2.sharding_contexts)
+        self.assertEqual(ref.sharding_contexts, opt_ret3.sharding_contexts)
+        self.assertEqual(cnt.frame_count, 1)
 
     @unittest.expectedFailure
     # inline_call [('inline in skipfiles: bind ...python3.10/inspect.py', 1)]
