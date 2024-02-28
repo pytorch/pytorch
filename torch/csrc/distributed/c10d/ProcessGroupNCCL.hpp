@@ -726,6 +726,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // return the rank_ of the the very first PG created, aka, default global PG.
   const int& globalRank() const;
 
+  // Returns the global ranks of a PG.
+  const std::vector<uint64_t>& groupRanks() const;
+
  protected:
   // Function that runs as part of a separate thread aside from watchdog
   // thread because we need to check the heartbeat from watchdog thread
