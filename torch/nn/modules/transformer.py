@@ -176,7 +176,7 @@ class Transformer(Module):
             - tgt_key_padding_mask: :math:`(T)` for unbatched input otherwise :math:`(N, T)`.
             - memory_key_padding_mask: :math:`(S)` for unbatched input otherwise :math:`(N, S)`.
 
-            Note: [src/tgt/memory]_mask ensures that position i is allowed to attend the unmasked
+            Note: [src/tgt/memory]_mask ensures that position :math:`i` is allowed to attend the unmasked
             positions. If a BoolTensor is provided, positions with ``True``
             are not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
             is provided, it will be added to the attention weight.
@@ -191,8 +191,8 @@ class Transformer(Module):
             the output sequence length of a transformer is same as the input sequence
             (i.e. target) length of the decoder.
 
-            where S is the source sequence length, T is the target sequence length, N is the
-            batch size, E is the feature number
+            where :math:`S` is the source sequence length, :math:`T` is the target sequence length, :math:`N` is the
+            batch size, :math:`E` is the feature number
 
         Examples:
             >>> # xdoctest: +SKIP
@@ -314,7 +314,7 @@ class TransformerEncoder(Module):
                 compatibility.
 
         Shape:
-            see the docs in Transformer class.
+            see the docs in :class:`~torch.nn.Transformer`.
         """
         src_key_padding_mask = F._canonical_mask(
             mask=src_key_padding_mask,
@@ -464,7 +464,7 @@ class TransformerDecoder(Module):
                 forward and backward compatibility.
 
         Shape:
-            see the docs in Transformer class.
+            see the docs in :class:`~torch.nn.Transformer`.
         """
         output = tgt
 
@@ -622,7 +622,7 @@ class TransformerEncoderLayer(Module):
                 compatibility.
 
         Shape:
-            see the docs in Transformer class.
+            see the docs in :class:`~torch.nn.Transformer`.
         """
         src_key_padding_mask = F._canonical_mask(
             mask=src_key_padding_mask,
@@ -858,7 +858,7 @@ class TransformerDecoderLayer(Module):
                 forward and backward compatibility.
 
         Shape:
-            see the docs in Transformer class.
+            see the docs in :class:`~torch.nn.Transformer`.
         """
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
 
