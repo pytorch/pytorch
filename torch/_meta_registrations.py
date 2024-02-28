@@ -6180,10 +6180,7 @@ def meta_searchsorted(
 
 def _check_for_unsupported_isin_dtype(dtype):
     torch._check(
-        not any(
-            dtype == ud
-            for ud in [torch.bool, torch.bfloat16, torch.complex128, torch.complex64]
-        ),
+        dtype not in [torch.bool, torch.bfloat16, torch.complex128, torch.complex64],
         lambda: f"Unsupported input type encountered for isin(): {dtype}",
     )
 

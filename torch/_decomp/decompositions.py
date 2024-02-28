@@ -4494,7 +4494,7 @@ def isin(elements, test_elements, *, assume_unique=False, invert=False):
 
 
 def isin_default(elements, test_elements, *, invert=False):
-    if elements.shape == torch.Size([]):
+    if elements.numel() == 0:
         return torch.empty_like(elements, dtype=torch.bool)
 
     x = elements.view(*elements.shape, *((1,) * test_elements.ndim))
