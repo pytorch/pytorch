@@ -1213,7 +1213,7 @@ class WrapperCodeGen(CodeGen):
             return repr(type(s)(Shim(self.val_to_arg_str(a)) for a in s))
         elif isinstance(s, torch._ops.OpOverload):
             return _get_qualified_name(s)
-        elif isinstance(s, (ir.Buffer, ir.ReinterpretView, ir.TensorBox)):
+        elif isinstance(s, (ir.Buffer, ir.ReinterpretView)):
             return s.codegen_reference()
         else:
             return repr(s)
