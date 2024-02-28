@@ -1330,8 +1330,8 @@ void _embedding_bag_cpu_out(
     at::Tensor& bag_size,
     at::Tensor* p_max_indices,
     const at::Tensor& weight,
-    const at::Tensor& indices,
-    const at::Tensor& offsets,
+    const at::Tensor& indices_,
+    const at::Tensor& offsets_,
     const bool /* scale_grad_by_freq */,
     const int64_t mode,
     const bool /* sparse */,
@@ -1339,6 +1339,7 @@ void _embedding_bag_cpu_out(
     const bool include_last_offset,
     const c10::optional<int64_t>& padding_idx,
     _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
+  auto [indices, offsets] = promoteIndicesAndOffsets(indices_, offsets_);
   at::native::check_arguments(
       weight, indices, offsets, mode, per_sample_weights, include_last_offset);
 
