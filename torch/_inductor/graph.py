@@ -978,9 +978,11 @@ class GraphLowering(torch.fx.Interpreter):
                 # recreate the same strides, and would fail with view, defer for now.
 
                 if dense and len(strides):
-                    stride_order = list(strides)
-                    if not n.meta["val"].is_contiguous():
-                        stride_order = ir.get_stride_order(strides)
+                    stride_order = (
+                        list(reversed(range(len(strides))))
+                        if n.meta["val"].is_contiguous()
+                        else ir.get_stride_order(strides)
+                    )
                     if (
                         len(result.get_size()) == 4
                         and n in self.nodes_prefer_channels_last
@@ -988,10 +990,7 @@ class GraphLowering(torch.fx.Interpreter):
                         and not is_input_for_as_strided
                     ):
                         stride_order = ir.NHWC_STRIDE_ORDER
-                    if strides != stride_order:
-                        result = ir.ExternKernel.require_stride_order(
-                            result, stride_order
-                        )
+                    result = ir.ExternKernel.require_stride_order(result, stride_order)
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
