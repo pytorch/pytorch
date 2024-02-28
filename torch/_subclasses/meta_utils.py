@@ -150,7 +150,7 @@ class MetaConverter:
         # hold a weak ref to self, otherwise it will be kept alive
         # by the del_ten closure
         self_weak_ref = weakref.ref(self)
-        if is_sparse_any(t) or t.is_mkldnn or is_batchedtensor(t):
+        if t.is_sparse or t.is_mkldnn or is_batchedtensor(t):
             weak_st = None
         else:
             weak_st = StorageWeakRef(t._typed_storage())
@@ -319,25 +319,6 @@ class MetaConverter:
                         with torch.enable_grad():
                             r = r.clone()
                             r._coalesced_(t.is_coalesced())
-                elif is_sparse_compressed(t):
-                    is_leaf = safe_is_leaf(t)
-                    r = callback(
-                        lambda: torch.ops.aten.sparse_compressed_tensor(
-                            t.crow_indices().to(device="meta"),
-                            t.col_indices().to(device="meta"),
-                            t.values().to(device="meta"),
-                            t.shape,
-                            dtype=t.dtype,
-                            layout=t.layout,
-                            device="meta",
-                        )
-                    )
-                    assert safe_is_leaf(r), "the callback you passed in doesn't detach"
-                    if t.requires_grad:
-                        r.requires_grad = True
-                    if t.requires_grad and not is_leaf:
-                        with torch.enable_grad():
-                            r = r.clone()
                 elif t.is_nested and not is_traceable_wrapper_subclass(t):
                     # TODO: Handle this better in Dynamo?
                     # There are checks there now, but this can still be triggered by a dense
@@ -675,8 +656,10 @@ class MetaConverter:
         if isinstance(t, torch.Tensor) or is_traceable_wrapper_subclass(t):
             if t.device.type != "xla" and any(
                 [
+                    t.is_sparse_csr,
+                    t.layout in [torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc],
                     t.is_quantized,
-                    t._is_view() and t._base is not None and is_sparse_any(t._base),
+                    t._is_view() and t._base is not None and t._base.is_sparse,
                     torch._is_functional_tensor(t),
                     t.device.type in ("lazy"),
                     # We need a way to test if a tensor is batched but there

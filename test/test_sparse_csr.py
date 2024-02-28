@@ -553,7 +553,6 @@ class TestSparseCompressed(TestCase):
                 expected.masked_fill_(~output_mask, 0)
             self.assertEqual(strided_output, expected, atol=atol, rtol=rtol)
 
-    @skipIfTorchDynamo("assert fails for unknown reason")
     @skipMeta
     @all_sparse_compressed_layouts()
     @all_sparse_compressed_layouts('layout2')
@@ -994,7 +993,6 @@ def _npref_block_addmm_addmv(c, a, b, alpha, beta):
 
 class TestSparseCSR(TestCase):
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     def test_csr_stride(self):
         a = self.genSparseCSRTensor((3, 3), 3, dtype=torch.float, device=self.device_type, index_dtype=torch.int64)
 
@@ -1004,21 +1002,18 @@ class TestSparseCSR(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Sparse CSR tensors do not have strides"):
             a.stride(-1)
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     def test_csr_storage(self):
         a = self.genSparseCSRTensor((3, 3), 3, dtype=torch.float, device=self.device_type, index_dtype=torch.int64)
 
         with self.assertRaisesRegex(RuntimeError, "Cannot access storage of SparseCsrTensorImpl"):
             a.storage()
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     def test_csr_is_contiguous(self):
         a = self.genSparseCSRTensor((3, 3), 3, dtype=torch.float, device=self.device_type, index_dtype=torch.int64)
 
         with self.assertRaisesRegex(RuntimeError, "Sparse CSR tensors do not have is_contiguous"):
             a.is_contiguous()
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     @onlyCPU
     @largeTensorTest("20GB", "cpu")
     def test_csr_nnz(self):
@@ -1031,12 +1026,10 @@ class TestSparseCSR(TestCase):
             a = torch.sparse_csr_tensor(crow_indices, col_indices, values, (rows, cols))
             self.assertEqual(a._nnz(), nnz)
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     def test_csr_double_to_sparse_csr(self):
         a = self.genSparseCSRTensor((3, 3), 3, dtype=torch.float, device=self.device_type, index_dtype=torch.int64)
         a.to_sparse_csr().to_sparse_csr()
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     @all_sparse_compressed_layouts()
     @parametrize("index_dtype", [torch.int32, torch.int64])
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
@@ -1101,7 +1094,6 @@ class TestSparseCSR(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             sparse.select(-1, 0)
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_resize(self, device, dtype):
@@ -1141,7 +1133,6 @@ class TestSparseCSR(TestCase):
             self.assertEqual(a._nnz(), 5)
             self.assertEqual(a.numel(), numel(a))
 
-    @skipIfTorchDynamo("crow_indices expected sparse row compressed tensor layout but got SparseBsc")
     @skipMeta
     @dtypes(torch.float, torch.bool)
     @all_sparse_compressed_layouts()
@@ -1341,12 +1332,10 @@ class TestSparseCSR(TestCase):
         dense = torch.tensor([[1, 2, 1], [3, 4, 0]], dtype=dtype, device=device).repeat(6, 1).reshape(dense_shape)
         self.assertEqual(sparse.to_dense(), transpose(dense, len(batch_shape)))
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_sparse_csr_to_dense(self, device, dtype):
         self._test_sparse_compressed_to_dense(device, dtype, torch.sparse_csr)
 
-    @skipIfTorchDynamo("Failed running call_method to_sparse_csc")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_sparse_csc_to_dense(self, device, dtype):
         self._test_sparse_compressed_to_dense(device, dtype, torch.sparse_csc)
@@ -1511,7 +1500,6 @@ class TestSparseCSR(TestCase):
                 for op_b, op_out in itertools.product([True, False], repeat=2):
                     run_test(c, a, a_batched, b, op_b, op_out, dtype=dtype, device=device)
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     @onlyCUDA
     @unittest.skipIf(TEST_WITH_ROCM, "Only CUDA 11+ is supported")
     @skipCUDAIfNoSparseGeneric
@@ -1572,7 +1560,6 @@ class TestSparseCSR(TestCase):
         self.assertEqual(actual, out)
         self.assertEqual(actual, expected, lambda msg: f"{msg}\na={a}\nc={c}\nb={b}\nalpha={alpha} beta={beta}")
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     # TODO: block_size 1 is broken
     @parametrize("block_size", [2, 3])
     @parametrize("index_dtype", [torch.int32, torch.int64])
@@ -1687,7 +1674,6 @@ class TestSparseCSR(TestCase):
                                                 device=device,
                                                 ref=make_transposed_addmm_op(ref))
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     @parametrize("block_size", [2, 3])
     @parametrize("index_dtype", [torch.int32, torch.int64])
     @parametrize("noncontiguous", [True, False])
@@ -1716,7 +1702,6 @@ class TestSparseCSR(TestCase):
             c = make_tensor((m * block_size,), dtype=dtype, device=device, noncontiguous=noncontiguous)
             self.run_test_block_addmm_addmv(torch.addmv, c, a, b, dtype=dtype, device=device, ref=ref_block_addmv)
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     @parametrize("matrix_shape", [(3, 3), (5, 7), (11, 9)], name_fn=lambda x: "shape_{}x{}".format(*x))
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @onlyCPU
@@ -1730,7 +1715,6 @@ class TestSparseCSR(TestCase):
         output = torch.addmv(avec, sparse_mat, mvec)
         self.assertEqual(ref_output, output)
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     @parametrize("block_size", [2, 3])
     @parametrize("index_dtype", [torch.int32, torch.int64])
     @parametrize("noncontiguous", [True, False])
@@ -1805,7 +1789,6 @@ class TestSparseCSR(TestCase):
             for (upper, unitriangular, transpose, op_out) in itertools.product([True, False], repeat=4):
                 run_test(a, b, upper, unitriangular, transpose, op_out)
 
-    @skipIfTorchDynamo("Sparse BSR tensors do not have strides")
     @skipCPUIfNoMklSparse
     @unittest.skipIf(TEST_WITH_ROCM, "Only CUDA 11+ is supported")
     @dtypes(torch.double)
@@ -1905,7 +1888,6 @@ class TestSparseCSR(TestCase):
                     test_shape(i, j, k)
         test_shape(4, 4, 4, 0, 0)
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
@@ -1926,7 +1908,6 @@ class TestSparseCSR(TestCase):
             test_shape(7, 8, 9, 20, False, index_dtype)
             test_shape(7, 8, 9, 20, True, index_dtype)
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   *[torch.half] if SM53OrLater and TEST_CUSPARSE_GENERIC else [],
@@ -1958,7 +1939,6 @@ class TestSparseCSR(TestCase):
             test_shape(7, 8, 9, 20, False, index_dtype, (1, 1))
             test_shape(7, 8, 9, 20, True, index_dtype, (1, 1))
 
-    @skipIfTorchDynamo("crow_indices expected sparse row compressed tensor layout but got SparseCsc")
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
@@ -2002,7 +1982,6 @@ class TestSparseCSR(TestCase):
             m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
             _test_addmm_addmv(self, torch.addmm, M, m1, m2, transpose_out=t4, layout=layout, mode="all_sparse")
 
-    @skipIfTorchDynamo("crow_indices expected sparse row compressed tensor layout but got SparseCsc")
     @onlyCPU
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
@@ -2037,7 +2016,6 @@ class TestSparseCSR(TestCase):
             m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
             _test_addmm_addmv(self, torch.addmm, M, m1, m2, transpose_out=t4, layout=layout, mode="dense_result")
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     @parametrize("k", [0, 1, 8])
     @parametrize("n", [0, 1, 10])
     @parametrize("m", [0, 1, 25])
@@ -2063,7 +2041,6 @@ class TestSparseCSR(TestCase):
         self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.addmm(M, m1, m2))
         self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.mm(m1, m2))
 
-    @skipIfTorchDynamo("assert failure for unknown reason")
     @skipCPUIfNoMklSparse
     @dtypes(torch.float)
     def test_addmm_errors(self, device, dtype):
@@ -2104,7 +2081,6 @@ class TestSparseCSR(TestCase):
                 with self.assertRaisesRegex(RuntimeError, re.escape(str(msg))):
                     test(is_sparse=True)
 
-    @skipIfTorchDynamo("assert failure for unknown reason")
     @skipCPUIfNoMklSparse
     @dtypes(torch.float)
     def test_mm_errors(self, device, dtype):
@@ -2136,7 +2112,6 @@ class TestSparseCSR(TestCase):
                 with self.assertRaisesRegex(RuntimeError, re.escape(str(msg))):
                     test(is_sparse=True)
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     @sparse_compressed_nonblock_layouts()
     @dtypes(torch.float, torch.double)
     def test_add(self, device, layout, dtype):
@@ -2182,7 +2157,6 @@ class TestSparseCSR(TestCase):
             _test_spadd_shape(m * n // 2, (*b, m, n))
             _test_spadd_shape(m * n, (*b, m, n))
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     @dtypes(torch.float, torch.double)
     def test_mul(self, device, dtype):
         # TODO: This whole test should be migrated to OpInfos
@@ -2273,7 +2247,6 @@ class TestSparseCSR(TestCase):
                         self.assertEqual(res_in, res_in_dense)
                         self.assertEqual(res_out, res_in)
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     @skipCPUIfNoMklSparse
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add(self, device, dtype):
@@ -2318,7 +2291,6 @@ class TestSparseCSR(TestCase):
             for m, n in itertools.product([3, 5], [3, 5]):
                 run_test(m, n, index_dtype)
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add_errors(self, device, dtype):
         def run_test(index_type):
@@ -2330,7 +2302,6 @@ class TestSparseCSR(TestCase):
         for index_dtype in [torch.int32, torch.int64]:
             run_test(index_dtype)
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     @skipCPUIfNoMklSparse
     @skipCUDAIf(
         not _check_cusparse_triangular_solve_available(),
@@ -2412,7 +2383,6 @@ class TestSparseCSR(TestCase):
                                                                                  itertools.product([True, False], repeat=4)):
             run_test(n, k, upper, unitriangular, transpose, zero)
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     @skipCUDAIf(
         not _check_cusparse_sddmm_available(),
         "cuSparse Generic API SDDMM is not available"
@@ -2467,7 +2437,6 @@ class TestSparseCSR(TestCase):
                 for op_a, op_b in itertools.product([True, False], repeat=2):
                     run_test(c, a, b, op_a, op_b)
 
-    @skipIfTorchDynamo("sparse_compressed_tensor does not support automatic differentiation for outputs with complex dtype")
     @skipCUDAIf(
         not _check_cusparse_sddmm_available(),
         "cuSparse Generic API SDDMM is not available"
@@ -2519,7 +2488,6 @@ class TestSparseCSR(TestCase):
             b = make_tensor((k, n), dtype=dtype, device=device)
             run_test(c, a, b)
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     @onlyCUDA
     @skipCUDAIf(
         not _check_cusparse_sddmm_available(),
@@ -2563,7 +2531,6 @@ class TestSparseCSR(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"Expected mat2 to have strided layout"):
             torch.sparse.sampled_addmm(a_sparse, a, a_sparse)
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     @onlyCPU
     @dtypes(torch.float32, torch.float64, torch.bfloat16)
     @precisionOverride({torch.bfloat16: 0.01})
@@ -2805,7 +2772,6 @@ class TestSparseCSR(TestCase):
             dense_output.backward(dense_covector)
             self.assertEqual(sparse_input.grad, dense_input.grad)
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     @skipCUDAIf(
         not _check_cusparse_sddmm_available(),
         "cuSparse Generic API SDDMM is not available"
@@ -2881,7 +2847,6 @@ class TestSparseCSR(TestCase):
                     else:
                         self.assertEqual(a.grad, dense_a.grad)
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     @skipCPUIfNoMklSparse
     @dtypes(torch.float64)
     def test_autograd_dense_output_addmv(self, device, dtype):
@@ -2950,7 +2915,6 @@ class TestSparseCSR(TestCase):
 
             self.assertEqual(coo_sparse.to_sparse_csr().to_sparse_coo(), coo_sparse)
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_sum(self, device, dtype):
@@ -3143,7 +3107,6 @@ class TestSparseCSR(TestCase):
             return FakeBscMatrix.from_matrix(tensor.cpu().numpy(), blocksize=blocksize).sorted_indices()
         raise NotImplementedError(repr(tensor))
 
-    @skipIfTorchDynamo("crow_indices expected sparse row compressed tensor layout but got SparseBsc")
     @skipMeta
     @all_sparse_compressed_layouts('to_layout')
     @all_sparse_compressed_layouts('from_layout')
@@ -3228,7 +3191,6 @@ class TestSparseCSR(TestCase):
             a = make_tensor(batch_dim + sparse_dims, dtype=torch.float, device=device)
             _to_from_layout(from_layout, to_layout, a)
 
-    @skipIfTorchDynamo("crow_indices expected sparse row compressed tensor layout but got SparseBsc")
     @skipMeta
     @all_sparse_compressed_layouts()
     @batched_nonbatched()
@@ -3423,7 +3385,6 @@ class TestSparseCSR(TestCase):
             with self.assertRaisesRegex(RuntimeError, msg):
                 dense.to_sparse(layout=layout, blocksize=blocksize or None)
 
-    @skipIfTorchDynamo("crow_indices expected sparse row compressed tensor layout but got SparseCsc")
     @skipMeta
     @all_sparse_compressed_layouts()
     @coalescedonoff
@@ -3520,7 +3481,6 @@ class TestSparseCompressedTritonKernels(TestCase):
 
         return d
 
-    @skipIfTorchDynamo("torch._dynamo.exc.TorchRuntimeError: Failed running call_method is_pinned")
     @onlyCUDA
     @skipIfRocm(msg="test is too slow on ROCm stack")
     @dtypes(torch.half, torch.bfloat16, torch.float)
@@ -3555,7 +3515,6 @@ class TestSparseCompressedTritonKernels(TestCase):
         bsr = input.to_sparse_bsr(1)
         self.assertEqual(input.softmax(-1), bsr_softmax(bsr))
 
-    @skipIfTorchDynamo("Sparse BSR tensors do not have strides")
     @parametrize("block_size", [16, 32, 64])
     @parametrize("index_dtype", [torch.int32, torch.int64])
     @onlyCUDA
@@ -3636,7 +3595,6 @@ class TestSparseCompressedTritonKernels(TestCase):
                 )
                 self.assertEqual(res_tri, res_dense)
 
-    @skipIfTorchDynamo("Sparse CSR tensors do not have strides")
     @onlyCUDA
     @dtypes(torch.half)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU or torch._running_with_deploy(),
@@ -3799,7 +3757,6 @@ class TestSparseCompressedTritonKernels(TestCase):
                     res_tri_grid = sampled_addmm(bsr, mat1, mat2, alpha=alpha, beta=beta, max_grid=grid)
                     self.assertEqual(res_tri, res_tri_grid)
 
-    @skipIfTorchDynamo("torch._dynamo.exc.TorchRuntimeError: Failed running call_method is_pinned")
     @onlyCUDA
     @skipIfRocm
     @dtypes(torch.half, torch.bfloat16, torch.float)
@@ -3897,7 +3854,6 @@ class TestSparseCompressedTritonKernels(TestCase):
                     self.assertEqual(result, expected)
         torch.sparse._triton_ops._bsr_scatter_mm_indices_data.cache_clear()
 
-    @skipIfTorchDynamo("assert fails for unknown reason")
     def test_TensorAsKey(self, device):
         from torch.sparse._triton_ops import TensorAsKey
         assertEqualOptions = dict(exact_dtype=True, exact_device=True, exact_layout=True)
@@ -3979,7 +3935,6 @@ class TestSparseCompressedTritonKernels(TestCase):
         # but key is still valid:
         self.assertEqual(d.get(key5), (key5, 567), **assertEqualOptions)
 
-    @skipIfTorchDynamo("Sparse BSR tensors do not have strides")
     @parametrize("op", ['bsr_dense_addmm', 'bsr_dense_mm', 'bsr_dense_linear'])
     @parametrize("blocksize", [16, '16x32', 32])
     @onlyCUDA
