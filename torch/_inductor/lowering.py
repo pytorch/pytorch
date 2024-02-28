@@ -4407,7 +4407,7 @@ def _avg_poolnd(
     context = (
         config.patch(unroll_reductions_threshold=25)
         if dim == 2 and window_size <= 25
-        else contextlib.nullcontext
+        else contextlib.nullcontext()
     )
 
     with context:
