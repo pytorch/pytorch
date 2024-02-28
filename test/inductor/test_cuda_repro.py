@@ -1131,7 +1131,7 @@ class CudaReproTests(TestCase):
         try:
             x_vector = torch.randn(torch.randn([8192, 1024]))
             expected_y, expected_z = toy_model(x_vector, device="cuda")
-            self.assertEqual(expected_y, x.sin())
+            self.assertEqual(expected_y, x_vector.sin())
             self.assertEqual(expected_z, expected_y.cos())
         except Exception as e:
             self.fail(f"failed with exception: {e}")
