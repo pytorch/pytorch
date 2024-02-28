@@ -416,8 +416,7 @@ class WrapperCodeGen(CodeGen):
         self.last_seen_device_guard_index: Optional[int] = None
         self.supports_intermediate_hooks = True
         self.expr_printer = pexpr
-        self.user_defined_kernel_cache: Dict[Tuple[Any, ...], str] = {}
-        self.user_defined_kernel_triton_meta_cache: Dict[Tuple[Any, ...], Any] = {}
+        self.user_defined_kernel_cache: Dict[Tuple[Any, ...], Tuple[str, Any]] = {}
         self.unbacked_symbol_decls: Set[str] = set()  # str of sympy.Symbol
         self.allow_stack_allocation: Optional[bool] = None
         self.stack_allocated_buffers: Dict[BufferName, ir.Buffer] = {}
@@ -978,14 +977,9 @@ class WrapperCodeGen(CodeGen):
         cache_key = tuple(cache_key)
 
         if cache_key in self.user_defined_kernel_cache:
-            return (
-                self.user_defined_kernel_cache[cache_key],
-                self.user_defined_kernel_triton_meta_cache[cache_key],
-            )
+            return self.user_defined_kernel_cache[cache_key]
 
         name = f"{original_name}_{len(self.user_defined_kernel_cache)}"
-        # Add to the cache for the next use
-        self.user_defined_kernel_cache[cache_key] = name
 
         compile_wrapper = IndentedBuffer()
         compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
@@ -1073,7 +1067,10 @@ class WrapperCodeGen(CodeGen):
                 )
             ],
         }
-        self.user_defined_kernel_triton_meta_cache[cache_key] = triton_meta
+
+        # Add to the cache for the next use
+        self.user_defined_kernel_cache[cache_key] = (name, triton_meta)
+
         configs = [
             {
                 "kwargs": config.kwargs,

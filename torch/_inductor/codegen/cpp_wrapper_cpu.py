@@ -487,7 +487,9 @@ class CppWrapperCpu(WrapperCodeGen):
         )
         self.prefix.writeline("  public:")
         declare_kernel = set(self.src_to_kernel.values())
-        declare_kernel.update(self.user_defined_kernel_cache.values())
+        declare_kernel.update(
+            entry[0] for entry in self.user_defined_kernel_cache.values()
+        )
         if V.graph.const_module:
             declare_kernel.update(
                 V.graph.const_module.wrapper_code.src_to_kernel.values()
