@@ -243,6 +243,7 @@ class CppWrapperCuda(CppWrapperCpu):
         triton=True,
         arg_types=None,
         grid_fn: str = "grid",
+        triton_meta=None,
     ):
         if not cuda:
             # Even in CppWrapperCuda, we may see cpp kernels
@@ -267,7 +268,13 @@ class CppWrapperCuda(CppWrapperCpu):
         # args with value 1 are added into equal_to_1 and constants
         # in triton_meta (in the Python codegen) which makes them
         # inlined in the PTX and compiled CUBIN
-        call_args = [arg for arg in call_args if arg != 1]
+        if (
+            triton_meta is not None
+            and "configs" in triton_meta
+            and triton_meta["configs"]
+        ):
+            equal_to_1 = triton_meta["configs"][0].equal_to_1
+            call_args = [arg for i, arg in enumerate(call_args) if i not in equal_to_1]
 
         call_args = self.generate_args_decl(call_args)
         kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"

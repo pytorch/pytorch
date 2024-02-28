@@ -623,7 +623,9 @@ class WrapperCodeGen(CodeGen):
             args.append(f"out={codegen_reference}")
         self.writeline(f"{kernel}({', '.join(args)})")
 
-    def generate_user_defined_triton_kernel(self, kernel_name, grid, configs, args):
+    def generate_user_defined_triton_kernel(
+        self, kernel_name, grid, configs, args, triton_meta
+    ):
         grid, code = user_defined_kernel_grid_fn_code(
             kernel_name, configs, grid, wrapper=self
         )
@@ -1124,7 +1126,7 @@ class WrapperCodeGen(CodeGen):
             compile_wrapper.getvalue(),
             metadata,
         )
-        return name
+        return name, triton_meta
 
     def generate_numel_expr(self, kernel_name: str, tree):
         expr = f"{kernel_name}_{tree.prefix}numel"
@@ -1181,6 +1183,7 @@ class WrapperCodeGen(CodeGen):
         triton=True,
         arg_types=None,
         grid_fn: str = "grid",
+        triton_meta=None,
     ):
         """
         Generates kernel call code.

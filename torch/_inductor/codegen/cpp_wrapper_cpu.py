@@ -78,6 +78,7 @@ class CppWrapperCpu(WrapperCodeGen):
         triton=True,
         arg_types=None,
         grid_fn: str = "grid",
+        triton_meta=None,
     ):
         """
         Generates kernel call code.
@@ -1007,7 +1008,9 @@ class CppWrapperCpu(WrapperCodeGen):
         else:
             self.writeline(self.wrap_kernel_call(kernel, args))
 
-    def generate_user_defined_triton_kernel(self, kernel_name, grid, configs, args):
+    def generate_user_defined_triton_kernel(
+        self, kernel_name, grid, configs, args, triton_meta
+    ):
         assert len(grid) != 0
         if len(grid) == 1:
             grid_decision = grid[0]
@@ -1028,6 +1031,7 @@ class CppWrapperCpu(WrapperCodeGen):
             device_index=V.graph.scheduler.current_device.index,
             cuda=True,
             triton=True,
+            triton_meta=triton_meta,
         )
 
     def generate_scatter_fallback(

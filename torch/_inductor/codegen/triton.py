@@ -1291,6 +1291,7 @@ class TritonKernel(Kernel):
 
         self.simplify_indexing = simplify_indexing
         self.code_hash = None
+        self.triton_meta: Optional[Dict[str, object]] = None
 
     def need_numel_args(self):
         r"""
@@ -2777,6 +2778,8 @@ class TritonKernel(Kernel):
         for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
             triton_meta["constants"][arg_num] = 1  # type: ignore[index]
 
+        self.triton_meta = triton_meta
+
         for tree in self.range_trees:
             if tree.prefix == "r" and self.persistent_reduction:
                 # RBLOCK for persistent_reduction is defined in codegen_static_numels
@@ -2939,6 +2942,7 @@ class TritonKernel(Kernel):
             cuda=True,
             triton=True,
             grid_fn=self._get_grid_fn(),
+            triton_meta=self.triton_meta,
         )
 
         if self.args.workspace_arg is not None:
