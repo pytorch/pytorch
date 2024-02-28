@@ -469,8 +469,8 @@ class GuardBuilder(GuardBuilderBase):
         # If matching equality against list/tuple, we must also check that
         # the internal types match.  (TODO: what about nested lists?)
         if istype(val, (list, tuple)):
-            # NB: LIST_LENGTH takes care of the outer __check_type_id test
-            self.LIST_LENGTH(guard)
+            # NB: SEQUENCE_LENGTH takes care of the outer __check_type_id test
+            self.SEQUENCE_LENGTH(guard)
 
             for idx, elem in enumerate(val):
                 code.append(
@@ -533,7 +533,9 @@ class GuardBuilder(GuardBuilderBase):
     def PYMODULE_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)
 
-    def LIST_LENGTH(self, guard):
+    def SEQUENCE_LENGTH(self, guard):
+        # This guard is used to check lenght of PySequence objects like list,
+        # tuple, collections.deque etc
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
@@ -546,6 +548,9 @@ class GuardBuilder(GuardBuilderBase):
             code.append(f"len({ref}) == {len(value)}")
 
         self._produce_guard_code(guard, code)
+
+    def DICT_LENGTH(self, guard):
+        self.SEQUENCE_LENGTH(guard)
 
     def TUPLE_ITERATOR_LEN(self, guard):
         ref = self.arg_ref(guard)
