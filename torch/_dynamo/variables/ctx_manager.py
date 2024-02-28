@@ -244,9 +244,9 @@ class GradModeVariable(ContextWrappingVariable):
 
 class InferenceModeVariable(ContextWrappingVariable):
     @staticmethod
-    def create(tx, target_values, **kwargs):
+    def create(tx, target_value, **kwargs):
         var = InferenceModeVariable(
-            [target_values], initial_values=torch.is_inference_mode_enabled(), **kwargs
+            [target_value], initial_values=torch.is_inference_mode_enabled(), **kwargs
         )
         return var
 
