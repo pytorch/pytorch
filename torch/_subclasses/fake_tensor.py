@@ -448,6 +448,7 @@ class FakeTensor(torch.Tensor):
     # https://github.com/pytorch/pytorch/blob/main/c10/core/DispatchKey.h#L189
 
 
+    # We don't support named tensors; graph break
     @property
     def names(self):
         raise UnsupportedFakeTensorException("Fake tensors don't support names")
