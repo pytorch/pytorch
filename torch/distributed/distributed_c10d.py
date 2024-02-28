@@ -1237,7 +1237,6 @@ def init_process_group(
         "cpu:gloo,cuda:custom_backend".
 
     """
-    set_pytorch_distributed_envs_from_justknobs()
 
     global _world
 
@@ -1246,6 +1245,8 @@ def init_process_group(
 
     if GroupMember.WORLD is not None:
         raise ValueError("trying to initialize the default process group twice!")
+
+    set_pytorch_distributed_envs_from_justknobs()
 
     assert (store is None) or (
         init_method is None
