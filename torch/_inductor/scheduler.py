@@ -1525,7 +1525,7 @@ class Scheduler:
 
         # make sure input mutation isn't dead-code-eliminated
         for name in self.mutation_renames:
-            if name in V.graph.graph_inputs:
+            if name in V.graph.graph_inputs or name in V.graph.mutated_buffers:
                 add_user(name, OutputNode(StarDep(name)))
                 V.graph.mutated_inputs.add(name)
 
