@@ -5977,7 +5977,7 @@ def fn():
                 first_guard_failure,
             )
         else:
-            self.assertIn("""L['x'].size()[0] < 3""", first_guard_failure)
+            self.assertIn("""2 <= L['x'].size()[0] <= 2""", first_guard_failure)
 
     def test_guard_failure_fn2(self):
         def fn(x, y):

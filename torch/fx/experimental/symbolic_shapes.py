@@ -2857,7 +2857,7 @@ class ShapeEnv:
                         sym_vrs = {x: self.var_to_range.get(x, None) for x in s.free_symbols}
                         if all(vr is not None for vr in sym_vrs.values()):
                             expr_vr = bound_sympy(s, sym_vrs)
-                            if (expr_vr != constraint.vr):
+                            if expr_vr != constraint.vr:
                                 # the expr and constrain ranges don't match
                                 constraint_violated = True
                         else:
@@ -3073,40 +3073,62 @@ class ShapeEnv:
                     issue_guard(guard)
 
         # 3. Every symbol must be within its value range (this handles 0/1
-        # specialization too).  NB: because we never update value ranges
-        # except in case of explicit user annotation, these are not included
-        # in simplified.  However, when we start updating value ranges
-        # these should probably get reported in tests too
-        if not _simplified:
-            for symbol, sources in symbol_to_source.items():
-                r = self.var_to_range.get(symbol)
-                if r is None:
-                    if symbol not in self.var_to_range:
-                        continue
-                    r = self.var_to_range[symbol]
+        # specialization too).
+        for symbol, sources in symbol_to_source.items():
+            r = self.var_to_range.get(symbol)
+            if r is None:
+                if symbol not in self.var_to_range:
+                    continue
+                r = self.var_to_range[symbol]
 
-                assert sources
-                assert symbol.is_integer
-                g_lower, g_upper = self.var_to_guards.get(symbol, (None, None))
-                bounds = []
-                if r.lower != -sympy.oo and g_lower is None:
-                    if any(is_dim(source) for source in sources):
-                        self.dim_constraints.add(sympy.Ge(symbol, r.lower))
+            assert sources
+            assert symbol.is_integer
+            g_lower, g_upper = self.var_to_guards.get(symbol, (None, None))
+            bounds = []
+            if r.lower != -sympy.oo and g_lower is None:
+                if any(is_dim(source) for source in sources):
+                    self.dim_constraints.add(sympy.Ge(symbol, r.lower))
+                # Only print lower bound in simplified mode if it is not the
+                # default
+                if not _simplified or r.lower != self._default_value_range().lower:
                     bounds.append(str(r.lower))
-                bounds.append(source_ref(sources[0]))
-                # NB: This looks like an off-by-one error but it's not: the
-                # upper bound may be sys.maxsize - 1 because we intentionally
-                # exclude sys.maxsize from our bounds to deal with direct
-                # == INT_MAX guards, but it's still dumb to actually test it.
-                # Note that you can be off by a pretty large constant and it
-                # won't matter because sizes in practice will be no where near
-                # the 64-bit limit.
-                if r.upper != sympy.oo and r.upper < sys.maxsize - 1 and g_upper is None:
-                    if any(is_dim(source) for source in sources):
-                        self.dim_constraints.add(sympy.Le(symbol, r.upper))
-                    bounds.append(str(r.upper))
-                if len(bounds) > 1:
-                    exprs.append(" <= ".join(bounds))
+            bounds.append(source_ref(sources[0]))
+            # NB: This looks like an off-by-one error but it's not: the
+            # upper bound may be sys.maxsize - 1 because we intentionally
+            # exclude sys.maxsize from our bounds to deal with direct
+            # == INT_MAX guards, but it's still dumb to actually test it.
+            # Note that you can be off by a pretty large constant and it
+            # won't matter because sizes in practice will be no where near
+            # the 64-bit limit.
+            if r.upper != sympy.oo and r.upper < sys.maxsize - 1 and g_upper is None:
+                if any(is_dim(source) for source in sources):
+                    self.dim_constraints.add(sympy.Le(symbol, r.upper))
+                # nontrivial upper bound is always interesting
+                bounds.append(str(r.upper))
+            if len(bounds) > 1:
+                exprs.append(" <= ".join(bounds))
+
+                # Check constraints
+                constraints = symbol_to_constraints[symbol]
+                for c in constraints:
+                    if isinstance(c, StrictMinMaxConstraint):
+                        # NB: By default, we have a restrictive range
+                        # 2 <= s0 <= sys.maxsize - 1.  But export users generally
+                        # expect to be able to specify nice ranges like [0, oo]
+                        if not (c.vr & self._default_value_range()).issubset(r):
+                            source = sources[0]
+
+                            expr = sympy.And(sympy.Le(r.lower, symbol), sympy.Le(symbol, r.upper))
+                            guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
+                            var_with_range = self._render_range_for_constraint_violation(source, c)
+                            msg = (
+                                f"Not all values of {var_with_range} satisfy the generated guard {guard_expr}"
+                            )
+                            record_constraint_violation(
+                                c.warn_only,
+                                self._debug_name(source),
+                                msg,
+                            )
 
         if constraint_violations:
             warn_msgs = []
