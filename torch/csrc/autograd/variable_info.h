@@ -18,4 +18,4 @@ struct TORCH_API VariableInfo {
   bool is_empty;
 };
 
-}
+} // namespace torch::autograd
