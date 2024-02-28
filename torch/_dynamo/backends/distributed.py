@@ -259,7 +259,14 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             if has_tracing_context:
                 g = FakifyGuard()
 
+            from torch._dynamo.utils import counters
+
+            init = counters["aot_autograd"]["total"]
             compiled_submod_real = self.compile_submod(real_mod, new_args, kwargs)
+
+            # TODO - better way of doing this?
+            # Only aot autograd handles fakifying first call
+            invoked_aot_autograd = init != counters["aot_autograd"]["total"]
 
             # We update the original (outer) graph with a call into the compiled module
             # instead of the uncompiled one.
@@ -272,7 +279,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             with self.fake_mode, mock.patch.object(
                 self.fake_mode, "allow_non_fake_inputs", True
             ):
-                if has_tracing_context:
+                if has_tracing_context and invoked_aot_autograd:
                     return compiled_submod_real(*new_args, **kwargs)
                 else:
                     return curr_submod(*new_args, **kwargs)
