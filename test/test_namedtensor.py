@@ -687,9 +687,9 @@ class TestNamedTensor(TestCase):
             self.assertEqual(op(a, a).names, ('N', 'C'))
             self.assertEqual(op(a, c).names, ('N', 'C'))
 
-            with self.assertRaisesRegex(RuntimeError, "do not match"):
+            with self.assertRaisesRegex(RuntimeError, "do not match|must match the size of"):
                 op(a, d)
-            with self.assertRaisesRegex(RuntimeError, "do not match"):
+            with self.assertRaisesRegex(RuntimeError, "do not match|must match the size of"):
                 op(a, b)
 
         def test_wildcard(op):

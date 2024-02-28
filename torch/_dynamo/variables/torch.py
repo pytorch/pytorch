@@ -620,7 +620,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     torch, torch_sym_op
                 ):
                     fn_ = getattr(torch, torch_sym_op)
-
             if fn_ is torch.tensor:
 
                 def check_any_unspec(x):
@@ -648,6 +647,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     # have to
                     fn_ = torch._refs.tensor
 
+            if "names" in kwargs:
+                unimplemented("Named tensors are not supported")
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
