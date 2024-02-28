@@ -792,6 +792,8 @@ def _default_formatter():
     if fmt is None:
         return TorchLogsFormatter()
     else:
+        if fmt in ("short", "basic"):
+            fmt = logging.BASIC_FORMAT
         return logging.Formatter(fmt)
 
 
