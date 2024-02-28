@@ -1,0 +1,3 @@
+def empty_int_list_test(y: Tensor) -> int:
+  x = annotate(List[int], [])
+  return x[0]
