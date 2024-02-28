@@ -1355,22 +1355,15 @@ class TestSDPAFailureModes(NNTestCase):
             q = make_tensor(size, requires_grad=True)
             k = make_tensor(size, requires_grad=True)
             v = make_tensor(size, requires_grad=True)
-            if 192 < head_dim <= 224:
+            if 192 < head_dim <= 224 or (head_dim > 224 and dropout_p != 0.0):
                 self.assertRaises(
                     RuntimeError,
                     lambda: torch.nn.functional.scaled_dot_product_attention(
-                        q, k, v, None, 0.0, False
-                    ),
-                )
-            elif head_dim > 224 and dropout_p > 0.0:
-                self.assertRaises(
-                    RuntimeError,
-                    lambda: torch.nn.functional.scaled_dot_product_attention(
-                        q, k, v, None, 0.0, False
+                        q, k, v, None, dropout_p, False
                     ),
                 )
             else:
-                flash_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
+                flash_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, dropout_p, False)
 
     @onlyCUDA
     def test_dispatch_fails_no_backend(self, device):
