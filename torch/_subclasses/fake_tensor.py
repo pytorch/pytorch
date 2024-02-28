@@ -447,7 +447,6 @@ class FakeTensor(torch.Tensor):
     # that have dispatch keys which are higher than the "meta" key:
     # https://github.com/pytorch/pytorch/blob/main/c10/core/DispatchKey.h#L189
 
-
     # We don't support named tensors; graph break
     @property
     def names(self):
