@@ -547,7 +547,7 @@ std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);
 }
 
-static void fastCatOutDim0(const Tensor& out, const MaterializedITensorListRef& inputs) {
+static void single_fast_cat_out_dim0(const Tensor& out, const MaterializedITensorListRef& inputs) {
   auto outBytes = out.nbytes();
   char* dataPtr = reinterpret_cast<char*>(out.data_ptr());
   size_t totalBytes = 0;
@@ -561,6 +561,83 @@ static void fastCatOutDim0(const Tensor& out, const MaterializedITensorListRef& 
   TORCH_CHECK(outBytes == totalBytes);
 }
 
+static void parellel_fast_cat_out_dim0(
+    const Tensor& out,
+    const MaterializedITensorListRef& inputs) {
+  // Partition inputs into parallel chunks based on number of elements
+  size_t out_elements = out.numel();
+  TORCH_CHECK(out_elements >= at::internal::GRAIN_SIZE && at::get_num_threads() > 1);
+  size_t total_elements = 0;
+  size_t copy_elements = 0;
+  std::vector<std::pair<size_t, size_t>> input_chunks;
+  size_t start = 0;
+  size_t end = 0;
+  for (const auto i: c10::irange(0, inputs.size())) {
+    const Tensor& input = inputs[i];
+    const size_t input_elements = input.numel();
+    total_elements += input_elements;
+    TORCH_CHECK(out_elements >= total_elements);
+    copy_elements += input_elements;
+    if (copy_elements >= at::internal::GRAIN_SIZE) {
+      end = i + 1;
+      input_chunks.emplace_back(start, end);
+      start = end;
+      copy_elements = 0;
+    }
+  }
+  TORCH_CHECK(out_elements == total_elements);
+  if (start < inputs.size()) {
+    // The remaining elements < GRAIN_SIZE, but still have to be copied
+    input_chunks.emplace_back(start, inputs.size());
+  }
+
+  // Record starting bytes offset
+  size_t out_bytes = out.nbytes();
+  size_t total_bytes = 0;
+  std::vector<size_t> out_bytes_offset;
+  out_bytes_offset.reserve(inputs.size() + 1);
+  out_bytes_offset.emplace_back(0);
+  for (const auto i: c10::irange(0, inputs.size())) {
+    const Tensor& input = inputs[i];
+    const auto input_nbytes = input.nbytes();
+    total_bytes += input_nbytes;
+    TORCH_CHECK(out_bytes >= total_bytes);
+    out_bytes_offset.emplace_back(total_bytes);
+  }
+  TORCH_CHECK(out_bytes == total_bytes);
+
+  char* data_ptr = reinterpret_cast<char*>(out.data_ptr());
+  at::parallel_for(
+      0, input_chunks.size(), 1, [&](int64_t chunk_start, int64_t chunk_end) {
+        // Get the input idx range from the element range
+        for (const auto chunk_idx: c10::irange(chunk_start, chunk_end)) {
+          const size_t input_start = input_chunks[chunk_idx].first;
+          const size_t input_end = input_chunks[chunk_idx].second;
+          for (size_t i = input_start; i < input_end; i++) {
+            const Tensor& input = inputs.at(i);
+            if (i == inputs.size() - 1) {
+              TORCH_CHECK((out_bytes_offset.at(i) + input.nbytes()) == total_bytes);
+            } else {
+              TORCH_CHECK((out_bytes_offset.at(i) + input.nbytes()) <= total_bytes);
+            }
+            if (input.nbytes() > 0) {
+              std::memcpy(
+                  data_ptr + out_bytes_offset.at(i),
+                  input.data_ptr(),
+                  input.nbytes());
+            }
+          }
+        }
+      });
+}
+
+static void fast_cat_out_dim0(const Tensor& out, const MaterializedITensorListRef& inputs) {
+  if (out.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() <= 1) {
+    single_fast_cat_out_dim0(out, inputs);
+    return;
+  }
+  parellel_fast_cat_out_dim0(out, inputs);
+}
 
 TORCH_IMPL_FUNC(cat_out_cpu)
 (const ITensorListRef& tensors,
@@ -582,9 +659,9 @@ TORCH_IMPL_FUNC(cat_out_cpu)
   bool serial_dtype = at::isFloatingType(dtype);
   // fast path for single thread when both inputs and result are contiguous and
   // not empty, and concat dim is 0
-  if (use_serial_kernel && all_contiguous && all_same_dtype && (MemoryFormat::Contiguous == memory_format)) {
+  if (all_contiguous && all_same_dtype && (MemoryFormat::Contiguous == memory_format)) {
     if (dim == 0) {
-      fastCatOutDim0(result, materialized);
+      fast_cat_out_dim0(result, materialized);
       return;
     }
     // TODO: Add fast cat for higher dimensions and support multi-threaded fast cat
