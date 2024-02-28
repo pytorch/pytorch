@@ -3164,7 +3164,7 @@ class TestNestedTensorSubclass(TestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"split\(\): not supported for NestedTensor on dim=0 or dim=1",
+            r"split\(\): not supported for NestedTensor on dim=1",
         ):
             torch.split(nt, 2, 1)
 
@@ -3184,7 +3184,7 @@ class TestNestedTensorSubclass(TestCase):
         )
         with self.assertRaisesRegex(
             RuntimeError,
-            r"split_with_sizes\(\): not supported for NestedTensor on dim=0 or dim=1",
+            r"split_with_sizes\(\): not supported for NestedTensor on dim=1",
         ):
             torch.split(nt, [1, 2], 1)
 
@@ -3329,12 +3329,12 @@ class TestNestedTensorSubclass(TestCase):
 
         # squeeze on batch dim not supported
         with self.assertRaisesRegex(
-                RuntimeError, "squeeze.* not supported for NestedTensor on dim=0 or dim=1"):
+                RuntimeError, "squeeze.* not supported for NestedTensor on dim=0"):
             nt.squeeze(0)
 
         # squeeze on ragged dim not supported
         with self.assertRaisesRegex(
-                RuntimeError, "squeeze.* not supported for NestedTensor on dim=0 or dim=1"):
+                RuntimeError, "squeeze.* not supported for NestedTensor on dim=1"):
             nt.squeeze(1)
 
     def test_binary_pointwise_broadcasting(self, device):
