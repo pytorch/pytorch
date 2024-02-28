@@ -4423,7 +4423,11 @@ def fractional_max_pool2d(x, kernel_size, output_size, random_samples):
     kernel_h, kernel_w = kernel_size
     h_out, w_out = output_size
 
-    # TODO: add logic for fallback to eager at some kernel size
+    breakpoint()
+    if kernel_h * kernel_w >= 25:
+        return fallback_fractional_max_pool2d(
+            x, kernel_size, output_size, random_samples
+        )
 
     gen_offsets_for_dim = functools.partial(
         _fractional_pooling_offsets,
