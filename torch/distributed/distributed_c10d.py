@@ -1136,7 +1136,7 @@ def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) ->
         backend = group._get_backend(torch.device("cpu"))
         if isinstance(backend, ProcessGroupGloo):
             backends.add(backend)
-    elif torch.device("cuda") in devices:
+    if torch.device("cuda") in devices:
         backend = group._get_backend(torch.device("cuda"))
         if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
             backends.add(backend)  # type: ignore[arg-type]
