@@ -84,11 +84,10 @@ if [[ -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]]; then
       # This is required in order to read symlinks on windows
       if [[ "$OSTYPE" == "msys" ]; then
         pushd $PYTORCH_ROOT/.github/ci_commit_pins
-        TRITON_LONGHUSH=$(cat triton.txt)
-        TRITON_SHORTHASH=$(cut -c1-10 $TRITON_LONGHUSH)
+        TRITON_SYMLINK=$(cat triton.txt)
+        TRITON_SHORTHASH=$(cut -c1-10 $TRITON_SYMLINK)
         popd
       fi
-
       TRITON_REQUIREMENT="pytorch-triton==${TRITON_VERSION}+${TRITON_SHORTHASH}; ${TRITON_CONSTRAINT}"
   fi
   export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${PYTORCH_EXTRA_INSTALL_REQUIREMENTS} | ${TRITON_REQUIREMENT}"
