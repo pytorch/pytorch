@@ -15,6 +15,7 @@ from torch._dynamo.source import (
 class CausalLMOutputWithPast:
     value = 5
 
+
 class SourceTests(torch._dynamo.test_case.TestCase):
     def test_is_local(self):
         x_src = LocalSource("x")
@@ -57,7 +58,10 @@ class SourceTests(torch._dynamo.test_case.TestCase):
 
             def forward(self):
                 try:
-                    torch.utils._pytree.SUPPORTED_NODES[CausalLMOutputWithPast].type == int
+                    assert (
+                        torch.utils._pytree.SUPPORTED_NODES[CausalLMOutputWithPast].type
+                        == int
+                    )
                     x = torch.sin(self.x)
                 except Exception:
                     x = torch.cos(self.x)
@@ -66,12 +70,11 @@ class SourceTests(torch._dynamo.test_case.TestCase):
         torch.utils._pytree.register_pytree_node(
             CausalLMOutputWithPast,
             lambda x: ((), None),
-            lambda x, _: CausalLMOutputWithPast()
+            lambda x, _: CausalLMOutputWithPast(),
         )
 
         # breakpoint()
         torch.export.export(Model(), ())
-
 
 
 if __name__ == "__main__":
