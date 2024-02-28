@@ -2724,7 +2724,7 @@ static void check_stack_inputs(TensorList tensors, int64_t dim) {
   }
 }
 
-Tensor chunk_cat(TensorList tensors, int64_t dim, int64_t num_chunks) {
+Tensor _chunk_cat(TensorList tensors, int64_t dim, int64_t num_chunks) {
   TORCH_CHECK(!tensors.empty(),
            "chunk_cat expects a non-empty TensorList");
   auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].dim());

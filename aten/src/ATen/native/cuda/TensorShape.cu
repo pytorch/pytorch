@@ -12,6 +12,8 @@
 #include <ATen/ops/split_with_sizes_copy_native.h>
 #endif
 
+#include <iostream>
+
 namespace at::native {
 
 namespace detail {
@@ -330,12 +332,13 @@ static __device__ __inline__ void copy_chunk_with_pad(
     }
     dst[thread_idx] = val;
   }
-  if(align_end + thread_idx < max_chunk_size) {
+  while(align_end + thread_idx < max_chunk_size) {
     char val = (char) 0;
     if (align_end + thread_idx < actual_chunk_size) {
       val = src[align_end + thread_idx];
     }
     dst[align_end + thread_idx] = val;
+    align_end += num_threads;
   }
 }
 
@@ -575,7 +578,7 @@ void split_with_sizes_copy_out_cuda(
 }
 
 // See [CUDA kernel for chunk_cat_cuda]
-Tensor chunk_cat_cuda(
+Tensor _chunk_cat_cuda(
   TensorList tensors,
   int64_t dim,
   int64_t num_chunks
@@ -632,7 +635,7 @@ Tensor chunk_cat_cuda(
     block_idx_to_start_tensor_bytes.push_back(block_idx_to_start_tensor_bytes.back() + pad_tensor_chunk_size);
   }
   const int64_t trailing_dim = chunk_size / tensors[0].element_size();
-  Tensor out = tensors[0].new_empty({leading_dim * num_chunks * trailing_dim});
+  Tensor out = tensors[0].new_empty(chunk_size * num_chunks * leading_dim / tensors[0].element_size());
   const int64_t num_blocks_per_chunk = start_block_idx_per_tensor_chunk.back();
   const int64_t slice_size = num_chunks * chunk_size;
   auto packed = detail::pack_vecs(
