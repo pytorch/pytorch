@@ -6,7 +6,7 @@
 
 #include <ATen/functorch/BatchRulesHelper.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 typedef std::tuple<Tensor, optional<int64_t>> oneOutput;
 typedef std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>> twoOutputs;
@@ -592,4 +592,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 
   m.impl("vdot", vdot_decomp);
 }
-}}
+} // namespace at::functorch
