@@ -964,12 +964,30 @@ class LazyFbTraceHandler(logging.StreamHandler):
 
             TRACE_LOG_DIR = "/logs"
             open_func = self._builtin_open
-            if (
-                hasattr(torch.version, "git_version")  # is fbcode
-                and torch._utils_internal.justknobs_check("pytorch/trace:enable")
-                and os.path.exists(TRACE_LOG_DIR)
-                and os.access(TRACE_LOG_DIR, os.W_OK)
-            ):
+
+            ok = False
+            import torch.version as torch_version
+
+            if not hasattr(torch_version, "git_version"):
+                log.info("LazyFbTraceHandler: disabled because not fbcode")
+            elif not torch._utils_internal.justknobs_check("pytorch/trace:enable"):
+                log.info(
+                    "LazyFbTraceHandler: disabled because justknobs_check('pytorch/trace:enable') returned False"
+                )
+            elif not os.path.exists(TRACE_LOG_DIR):
+                log.info(
+                    "LazyFbTraceHandler: disabled because %s does not exist",
+                    TRACE_LOG_DIR,
+                )
+            elif not os.access(TRACE_LOG_DIR, os.W_OK):
+                log.info(
+                    "LazyFbTraceHandler: disabled because %s is not writeable",
+                    TRACE_LOG_DIR,
+                )
+            else:
+                ok = True
+
+            if ok:
                 ranksuffix = ""
                 if dist.is_available() and dist.is_initialized():
                     ranksuffix = f"rank_{dist.get_rank()}_"
@@ -980,8 +998,7 @@ class LazyFbTraceHandler(logging.StreamHandler):
                     dir=TRACE_LOG_DIR,
                     delete=False,
                 )
-                log.info("Automatically enabled TORCH_TRACE=%s", self.stream.name)
-
+                log.info("LazyFbTraceHandler: logging to %s", self.stream.name)
             else:
                 # We go poof, remove and no-op
                 trace_log.removeHandler(self)
