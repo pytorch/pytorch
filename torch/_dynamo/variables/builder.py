@@ -420,7 +420,7 @@ class VariableBuilder:
                 # but not completely secure job ensuring a property wasn't changed.
                 self.install_guards(GuardBuilder.BOOL_FALSE)
             else:
-                self.install_guards(GuardBuilder.LIST_LENGTH)
+                self.install_guards(GuardBuilder.DICT_LENGTH)
 
             # Optimisation for the common case strings, ints, etc
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
@@ -496,7 +496,7 @@ class VariableBuilder:
             install_guard(
                 self.get_source().make_guard(GuardBuilder.TYPE_MATCH),
                 keywords_source.make_guard(GuardBuilder.DICT_KEYS),
-                args_source.make_guard(GuardBuilder.LIST_LENGTH),
+                args_source.make_guard(GuardBuilder.SEQUENCE_LENGTH),
             )
             return FunctoolsPartialVariable(func_obj, args, keywords)
         elif is_typing(value):
@@ -535,7 +535,7 @@ class VariableBuilder:
             saved_tensors_source = AttrSource(self.source, "saved_tensors")
             install_guard(
                 self.source.make_guard(GuardBuilder.TYPE_MATCH),
-                saved_tensors_source.make_guard(GuardBuilder.LIST_LENGTH),
+                saved_tensors_source.make_guard(GuardBuilder.SEQUENCE_LENGTH),
             )
             saved_tensors = [
                 VariableBuilder(self.tx, GetItemSource(saved_tensors_source, n))(v)
@@ -767,7 +767,7 @@ class VariableBuilder:
                 source=self.source,
             )
         elif RestrictedListSubclassVariable.is_matching_cls(type(value)):
-            self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.LIST_LENGTH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
             return self.set_source_and_track_mutable(
                 value,
                 RestrictedListSubclassVariable(
@@ -795,7 +795,7 @@ class VariableBuilder:
             return ConstantVariable.create(value=value)
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
-        self.install_guards(GuardBuilder.LIST_LENGTH)
+        self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
         for item in value:
             if item is value:
