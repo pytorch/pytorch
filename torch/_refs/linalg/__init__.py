@@ -101,7 +101,7 @@ def diagonal(
 @out_wrapper(exact_dtype=True)
 def vector_norm(
     x: TensorLikeType,
-    ord: float = 2.0,
+    ord: Union[float, int, torch.SymInt] = 2.0,
     dim: Optional[DimsType] = None,
     keepdim: bool = False,
     *,
@@ -113,7 +113,7 @@ def vector_norm(
     if isinstance(dim, Dim):
         dim = [dim]  # type: ignore[assignment]
 
-    if isinstance(ord, int) or isinstance(ord, torch.SymInt):
+    if isinstance(ord, (int, torch.SymInt)):
         ord = float(ord)
 
     if x.numel() == 0 and (ord < 0.0 or ord == float("inf")):
