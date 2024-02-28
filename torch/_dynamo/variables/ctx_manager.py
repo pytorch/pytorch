@@ -229,7 +229,7 @@ class JvpIncrementNestingCtxManagerVariable(ContextWrappingVariable):
 
 
 class SetFwdGradEnabledContextManager(ContextWrappingVariable):
-    """"""
+    """represents torch.autograd.forward_ad._set_fwd_grad_enabled() to enable/disable fwd grad"""
 
     @staticmethod
     def create(tx, target_values, **kwargs):
@@ -267,7 +267,7 @@ class SetFwdGradEnabledContextManager(ContextWrappingVariable):
 
 
 class DualLevelContextManager(ContextWrappingVariable):
-    """"""
+    """Represents torch.autograd.forward_ad.dual_level ctx manager"""
 
     @staticmethod
     def create(tx, **kwargs):
@@ -278,6 +278,8 @@ class DualLevelContextManager(ContextWrappingVariable):
         )
 
     def enter(self, tx):
+        # A guard is needed here? It is currently only used on jvp and there's
+        # a guard for it already
         self.new_level = torch.autograd.forward_ad.enter_dual_level()
         self.set_cleanup_hook(
             tx, lambda: torch.autograd.forward_ad.exit_dual_level(level=self.new_level)
@@ -302,7 +304,7 @@ class DualLevelContextManager(ContextWrappingVariable):
 
 
 class NoOpContextManager(ContextWrappingVariable):
-    """"""
+    """Represents torch._functorch.eager_transforms.noop ctx manager"""
 
     @staticmethod
     def create(tx, **kwargs):
