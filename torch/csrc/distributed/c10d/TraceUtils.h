@@ -586,9 +586,9 @@ struct NCCLTraceBuffer {
     c10::IValue version_key = "version";
     // Update whenever changing contents or formatting of the dump
     // (minor when adding fields, major when changing existing fields)
-    c10::IValue version_val = "1.2";
+    c10::IValue version_val = "1.3";
     c10::IValue pg_config_key = "pg_config";
-
+    c10::IValue record_id_key = "record_id";
     c10::IValue pg_id_key = "pg_id";
     c10::IValue seq_id_key = "seq_id";
     c10::IValue profiling_name_key = "profiling_name";
@@ -624,6 +624,7 @@ struct NCCLTraceBuffer {
       auto& e = result.at(i);
       auto& tb = stracebacks.tracebacks.at(i);
       auto dict = new_dict();
+      dict.insert(record_id_key, int64_t(e.id_));
       dict.insert(pg_id_key, int64_t(e.pg_id_));
       dict.insert(seq_id_key, int64_t(e.seq_id_));
       dict.insert(profiling_name_key, e.profiling_name_);
