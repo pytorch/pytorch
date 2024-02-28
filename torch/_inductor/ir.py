@@ -4320,21 +4320,6 @@ class MutatingFirstArgExternKernel(ExternKernel):
         return True
 
 
-class AccumulateGrad(MutatingFirstArgExternKernel):
-    def __init__(self, variable, new_grad):
-        super().__init__(
-            None,
-            NoneLayout(variable.get_device()),  # type: ignore[arg-type]
-            self.unwrap_storage([variable, new_grad]),
-        )
-        self.name = V.graph.register_buffer(self)
-        self.python_kernel_name = "inductor_ops.accumulate_grad_"
-        self.cpp_kernel_name = "torch::inductor::accumulate_grad_"
-        mark_node_as_mutating(self, variable)
-        # never reuse gradient buffers since they might be stolen
-        V.graph.never_reuse_buffers.add(new_grad.data.get_name())
-
-
 class ResizeStorageBytes(MutatingFirstArgExternKernel):
     def __init__(self, variable, new_size):
         assert isinstance(new_size, int), "TODO: dynamic shapes"
