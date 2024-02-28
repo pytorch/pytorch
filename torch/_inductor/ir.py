@@ -1749,6 +1749,10 @@ def is_storage_and_layout(x):
 def is_contiguous_storage_and_layout(x):
     try:
         buffer, layout = as_storage_and_layout(x, freeze=False)
+        # pad the stride here so we will NOT claim an tensor as contiguous
+        # if a padding is gonna happen.
+        if isinstance(layout, FlexibleLayout):
+            layout.pad_strides()
         return layout.is_contiguous()
     except NotImplementedError:
         return False
@@ -1768,6 +1772,7 @@ def as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=No
             if want_contiguous:
                 x.data.freeze_layout()
                 assert x.data.layout.is_contiguous()
+                # breakpoint() # TODO
             elif stride_order is not None:
                 x.data.freeze_layout_with_stride_order(stride_order)
             else:
@@ -2534,7 +2539,22 @@ class Layout(IRNode):
         order = [len(order)] + order
         return self.is_stride_ordered(order)
 
+    def pad_strides(self, align=16):
+        """
+        TODO: maybe we should pad high dimension more if the low dimensions
+        have also been padded.
+        """
+        new_stride = []
+        for s in self._stride:
+            if s > 1 and s % align != 0:
+                s = (s + align - 1) // align * align
+            new_stride.append(s)
+        self._stride = new_stride
+
     def as_fixed(self):
+        if config.comprehensive_padding:
+            self.pad_strides()
+        # print(f"{self} to fixed")
         return FixedLayout(
             self.device,
             self.dtype,
@@ -3067,6 +3087,10 @@ class ShapeAsConstantBuffer(IRNode):
 class ComputedBuffer(Buffer):
     data: Loops
 
+    def __post_init__(self):
+        super().__post_init__()
+        # print(f"Create ComputedBuffer for {self.data}")
+
     def get_computed_buffer_name(self):
         """
         Returns self.name if it exists, otherwise returns the name of the data node if that exists.
@@ -3193,7 +3217,9 @@ class ComputedBuffer(Buffer):
             if order:
                 self.freeze_layout_with_fill_order(order)
             else:
+                # self.layout.pad_strides()
                 self.freeze_layout()
+            # print(f"order is {order}, shape {self.layout.size}, strides {self.layout.stride}")
 
     def simplify_and_reorder(self):
         """

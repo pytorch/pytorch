@@ -215,6 +215,9 @@ class GraphLowering(torch.fx.Interpreter):
     ):
         super().__init__(gm)
 
+        if os.environ.get("PRINT_GM") == "1":
+            gm.print_readable()
+
         self.example_inputs = example_inputs
         self.layout_opt = (
             layout_opt
