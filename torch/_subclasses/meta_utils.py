@@ -85,11 +85,11 @@ def assert_metadata_eq(assert_eq, m1, m2, *, skip_symbolic=False):
 
 
 def is_sparse_coo(t):
-    return t.layout is torch.sparse_coo
+    return isinstance(t, torch.Tensor) and t.layout is torch.sparse_coo
 
 
 def is_sparse_compressed(t):
-    return t.layout in {
+    return isinstance(t, torch.Tensor) and t.layout in {
         torch.sparse_csr,
         torch.sparse_csc,
         torch.sparse_bsr,
