@@ -127,22 +127,24 @@ class GuardManager:
             s += self.pretty_print_leaf_guard(prefix + "+- ", guard)
 
         if istype(mgr, DictGuardManager):
-            for kv_mgr in mgr.get_key_value_managers():
+            for kv_mgr in mgr.get_child_managers():
                 s += prefix + "+- " + kv_mgr.__class__.__name__ + "\n"
                 s += self._debug_print(kv_mgr, prefix + "|  ")
         elif istype(mgr, KeyValueDictGuardManager):
-            for idx, child_mgr in enumerate(mgr.get_key_value_managers()):
+            for idx, child_mgr in enumerate(mgr.get_child_managers()):
                 if child_mgr is None:
                     continue
                 suffix = " for key\n" if idx == 0 else "value\n"
                 s += prefix + "+- " + child_mgr.__class__.__name__ + suffix
                 s += self._debug_print(child_mgr, prefix + "|  ")
-
-        # Now handle the general case of GuardManager/RootGuardManager
-        for accessor, child_mgr in zip(mgr.get_accessors(), mgr.get_child_managers()):
-            suffix = " with " + accessor.repr() + "\n"
-            s += prefix + "+- " + child_mgr.__class__.__name__ + suffix
-            s += self._debug_print(child_mgr, prefix + "|  ")
+        else:
+            # Now handle the general case of GuardManager/RootGuardManager
+            for accessor, child_mgr in zip(
+                mgr.get_accessors(), mgr.get_child_managers()
+            ):
+                suffix = " with " + accessor.repr() + "\n"
+                s += prefix + "+- " + child_mgr.__class__.__name__ + suffix
+                s += self._debug_print(child_mgr, prefix + "|  ")
         return s
 
     def __str__(self):
@@ -432,10 +434,15 @@ class GuardBuilder(GuardBuilderBase):
                         # invariant that index is always ConstDictKeySource
                         assert isinstance(base_example_value, dict)
                         index = list(base_example_value.keys()).index(source.index)
-                    return base_guard_manager.get_key_value_manager(
-                        index
-                    ).get_value_manager(example_value)
+                    index_manager = base_guard_manager.get_key_value_manager(index)
 
+                    if not isinstance(source.index, ConstDictKeySource):
+                        # We have to insert a key manager guard here
+                        index_manager.get_key_manager(
+                            source.index
+                        ).add_equals_match_guard(source.index, [f"key=={source.index}"])
+
+                    return index_manager.get_value_manager(example_value)
                 index = source.index
                 if source.index_is_slice:
                     index = source.unpack_slice()
@@ -1415,6 +1422,7 @@ class CheckFunctionManager:
     ):
         guards = output_graph.guards if output_graph else None
         self._weakrefs: Dict[int, ReferenceType[object]] = {}
+        self.guard_manager = None
         if config.enable_cpp_guard_manager:
             self.guard_manager = GuardManager()
         self.output_graph = output_graph
@@ -1485,6 +1493,8 @@ class CheckFunctionManager:
         self.check_fn.id_matched_objs = builder.id_matched_objs
 
         if config.enable_cpp_guard_manager:
+            # print(self.guard_manager)
+            # breakpoint()
             self.guard_manager.id_matched_objs = builder.id_matched_objs
             self.check_fn = self.guard_manager
 
@@ -1511,7 +1521,7 @@ class CheckFunctionManager:
         verbose_code_parts = code_parts[:]
 
         if config.enable_cpp_guard_manager:
-            self.guard_manager.root.add_global_state_guard(verbose_code_parts)
+            self.guard_manager.root.add_global_state_guard(["___check_global_state()"])
 
         def add_code_part(code_part, guard, log_only=False):
             verbose_code_part = get_verbose_code_part(code_part, guard)
@@ -1548,50 +1558,50 @@ class CheckFunctionManager:
         tensor_check_names = builder.tensor_check_names
         check_tensors_fn = None
         check_tensors_verbose_fn = None
-        if tensor_check_names and not config.enable_cpp_guard_manager:
-            assert (
-                not self.output_graph.export
-            ), "Illegal to set tensor_check_names in export."
-            tensor_check_examples = builder.tensor_check_examples
+        assert (
+            not self.output_graph.export
+        ), "Illegal to set tensor_check_names in export."
+        tensor_check_examples = builder.tensor_check_examples
 
-            dynamic_dims_sizes = [
-                convert_to_concrete_values(
-                    self.output_graph.tensor_weakref_to_sizes_strides[t]["size"]
-                )
-                for t in tensor_check_examples
-            ]
-
-            dynamic_dims_strides = [
-                convert_to_concrete_values(
-                    self.output_graph.tensor_weakref_to_sizes_strides[t]["stride"]
-                )
-                for t in tensor_check_examples
-            ]
-
-            tensor_guards = TensorGuards(
-                *tensor_check_examples,
-                dynamic_dims_sizes=dynamic_dims_sizes,
-                dynamic_dims_strides=dynamic_dims_strides,
+        dynamic_dims_sizes = [
+            convert_to_concrete_values(
+                self.output_graph.tensor_weakref_to_sizes_strides[t]["size"]
             )
-            check_tensors_fn = tensor_guards.check
-            check_tensors_verbose_fn = tensor_guards.check_verbose
-            tensor_check_args = ", ".join(
-                tensor_check_names + ["tensor_check_names=tensor_check_names"]
-            )
-            # Do this manually, to un-stagger the guards in log message
-            code_parts.append(f"___check_tensors({tensor_check_args})")
-            verbose_code_parts.append(f"___check_tensors({tensor_check_args})")
-            tensor_check_guards = builder.tensor_check_guards
+            for t in tensor_check_examples
+        ]
 
-            for i, name in enumerate(tensor_check_names):
-                # This is a copy of what guards.cpp checks against
-                # Keep this in sync with TensorCheck constructor
-                t = tensor_check_examples[i]
-                sizes = dynamic_dims_sizes[i]
-                strides = dynamic_dims_strides[i]
-                code_part = get_tensor_guard_code_part(t, name, sizes, strides)
-                add_code_part(code_part, tensor_check_guards[i], log_only=True)
-        elif tensor_check_names and config.enable_cpp_guard_manager:
+        dynamic_dims_strides = [
+            convert_to_concrete_values(
+                self.output_graph.tensor_weakref_to_sizes_strides[t]["stride"]
+            )
+            for t in tensor_check_examples
+        ]
+
+        tensor_guards = TensorGuards(
+            *tensor_check_examples,
+            dynamic_dims_sizes=dynamic_dims_sizes,
+            dynamic_dims_strides=dynamic_dims_strides,
+        )
+        check_tensors_fn = tensor_guards.check
+        check_tensors_verbose_fn = tensor_guards.check_verbose
+        tensor_check_args = ", ".join(
+            tensor_check_names + ["tensor_check_names=tensor_check_names"]
+        )
+        # Do this manually, to un-stagger the guards in log message
+        code_parts.append(f"___check_tensors({tensor_check_args})")
+        verbose_code_parts.append(f"___check_tensors({tensor_check_args})")
+        tensor_check_guards = builder.tensor_check_guards
+
+        for i, name in enumerate(tensor_check_names):
+            # This is a copy of what guards.cpp checks against
+            # Keep this in sync with TensorCheck constructor
+            t = tensor_check_examples[i]
+            sizes = dynamic_dims_sizes[i]
+            strides = dynamic_dims_strides[i]
+            code_part = get_tensor_guard_code_part(t, name, sizes, strides)
+            add_code_part(code_part, tensor_check_guards[i], log_only=True)
+
+        if len(tensor_check_names) > 1 and config.enable_cpp_guard_manager:
             # Install tensor aliasing guard. TENSOR_MATCH guards are already
             # installed for cpp guard manager.
             install_no_tensor_aliasing_guard(
@@ -1782,6 +1792,7 @@ def get_guard_fail_reason(
     if config.enable_cpp_guard_manager:
         guard_manager = guard_fn
         guard_debug_info = guard_manager.check_verbose(f_locals)
+        assert not guard_debug_info.result
         # For test_export_with_map_cond, the check_verbose fail. We need to fix
         # the issue in that test to remove this workaround.
         if not guard_debug_info.result:
