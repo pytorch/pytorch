@@ -37,6 +37,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfSlowGradcheckEnv,
+    skipIfTorchDynamo,
     markDynamoStrictTest,
     xfailIfTorchDynamo,
     subtest,
@@ -3661,7 +3662,7 @@ class TestNestedTensorSubclass(TestCase):
         self.assertTrue(not nt_noncontiguous.is_contiguous(memory_format=torch.contiguous_format))
         self.assertTrue(nt_contiguous_narrow.is_contiguous(memory_format=torch.contiguous_format))
 
-    @xfailIfTorchDynamo
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     @parametrize("func", [torch.empty_like, torch.randn_like],
                  name_fn=lambda f: f.__name__)
     def test_like_shape(self, func):
@@ -3672,7 +3673,7 @@ class TestNestedTensorSubclass(TestCase):
             t_like = func(nt_ub)
             self.assertEqual(nt_ub.shape, t_like.shape)
 
-    @xfailIfTorchDynamo
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     @parametrize("func", [torch.ones_like, torch.zeros_like],
                  name_fn=lambda f: f.__name__)
     def test_like_value(self, func):
