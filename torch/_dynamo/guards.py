@@ -383,9 +383,13 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, [code])
 
     def HASATTR(self, guard: Guard):
-        m = re.match(r"^(.*)[.]([a-zA-Z0-9_]+)$", guard.name)
-        assert m, f"invalid hasattr check {guard.name}"
-        base, attr = m.group(1, 2)
+        assert isinstance(
+            guard.originating_source, AttrSource
+        ), f"invalid source {guard.name}"
+        base_source = guard.originating_source.base
+        base = base_source.name()
+        attr = guard.originating_source.member
+
         ref = self.arg_ref(base)
         val = hasattr(self.get(base), attr)
         code = None
