@@ -475,7 +475,7 @@ class ConstantLR(LRScheduler):
     Args:
         optimizer (Optimizer): Wrapped optimizer.
         factor (float): The number we multiply learning rate until the milestone. Default: 1./3.
-        total_iters (int): The number of steps that the scheduler multiply the learning rate by the factor.
+        total_iters (int): The number of steps that the scheduler multiplies the learning rate by the factor.
             Default: 5.
         last_epoch (int): The index of the last epoch. Default: -1.
         verbose (bool): If ``True``, prints a message to stdout for
