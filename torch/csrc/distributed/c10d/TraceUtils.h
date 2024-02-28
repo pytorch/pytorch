@@ -387,7 +387,7 @@ struct NCCLTraceBuffer {
                 // update state information
     size_t pg_id_;
     size_t seq_id_; // as tracked by the process group
-    const char* profiling_name_;
+    std::string profiling_name_;
 
     std::shared_ptr<torch::CapturedTraceback> traceback_;
     // we borrow pointers to start_ and end_ so we can query the state
@@ -430,7 +430,7 @@ struct NCCLTraceBuffer {
   c10::optional<size_t> record(
       size_t pg_id,
       size_t seq_id,
-      const char* profiling_name,
+      std::string profiling_name,
       const std::vector<at::Tensor>& inputs,
       const std::vector<at::Tensor>& outputs,
       Event* start,
@@ -446,7 +446,7 @@ struct NCCLTraceBuffer {
         id_,
         pg_id,
         seq_id,
-        profiling_name == nullptr ? "" : profiling_name,
+        std::move(profiling_name),
         std::move(traceback),
         std::move(start),
         std::move(end),
@@ -565,10 +565,14 @@ struct NCCLTraceBuffer {
     entry->start_ = entry->end_ = nullptr;
   }
 
-  std::string dump() {
+  std::string dump(
+      const c10::optional<std::unordered_map<
+          std::string,
+          std::unordered_map<std::string, std::string>>>& ncclDumpMap) {
     auto result = dump_entries();
     auto entries = new_list();
     c10::IValue entries_key = "entries";
+    c10::IValue nccl_comm_key = "nccl_comm_state";
     c10::IValue version_key = "version";
     // Update whenever changing contents or formatting of the dump
     // (minor when adding fields, major when changing existing fields)
@@ -661,9 +665,24 @@ struct NCCLTraceBuffer {
       entries.push_back(dict);
     }
 
+    // convert ncclDumpMap into a dictionary
+    auto per_comm_dict = new_dict();
+    if (ncclDumpMap.has_value()) {
+      for (const auto& [ncclId, ncclDump] : ncclDumpMap.value()) {
+        auto inner_dict = new_dict();
+        for (const auto& [key, value] : ncclDump) {
+          inner_dict.insert(key, value);
+        }
+        per_comm_dict.insert(ncclId, inner_dict);
+      }
+    }
+
     auto dict = new_dict();
     dict.insert(entries_key, entries);
     dict.insert(version_key, version_val);
+    if (per_comm_dict.size() > 0) {
+      dict.insert(nccl_comm_key, per_comm_dict);
+    }
 
     return pickle_str(dict);
   }

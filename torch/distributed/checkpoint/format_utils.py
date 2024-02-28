@@ -10,7 +10,6 @@ from torch.distributed.checkpoint._nested_dict import flatten_state_dict
 from torch.distributed.checkpoint._traverse import set_element
 from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
 from torch.distributed.checkpoint.metadata import (
-    ChunkStorageMetadata,
     Metadata,
     STATE_DICT_TYPE,
     STORAGE_TYPES,
@@ -18,6 +17,7 @@ from torch.distributed.checkpoint.metadata import (
     TensorStorageMetadata,
 )
 from torch.distributed.checkpoint.planner import LoadItemType, LoadPlan, LoadPlanner
+from torch.distributed.checkpoint.planner_helpers import _create_chunk_list
 from torch.distributed.checkpoint.state_dict_loader import _load_state_dict
 from torch.distributed.checkpoint.storage import StorageReader
 from torch.futures import Future
@@ -113,6 +113,7 @@ class BroadcastingTorchSaveReader(StorageReader):
         # data is read in on the coordinator rank, and broadcast afterwards
         # this incurrs a communication cost, but it avoids having to load
         # the entire checkpoint on each rank, hopefully preventing OOM issues
+        # TODO: read on each host, instead of only the coordinator
         if self.is_coordinator:
             assert self.checkpoint_id is not None
             torch_state_dict = torch.load(self.checkpoint_id, map_location="cpu")
@@ -202,23 +203,21 @@ class DynamicMetaLoadPlanner(DefaultLoadPlanner):
         metadata: Metadata,
         is_coordinator: bool,
     ) -> None:
-        """Setups of the planner, extnding default behavior by creating the Metadata object from the state dict
-        """
+        """Setups of the planner, extnding default behavior by creating the Metadata object from the state dict"""
         super().set_up_planner(state_dict, metadata, is_coordinator)
 
         state_dict_metadata: Dict[str, STORAGE_TYPES] = {}
-        for key, value in self.state_dict.items():
-            if not torch.is_tensor(value):
+        for key, tensor in self.state_dict.items():
+            if not torch.is_tensor(tensor):
                 raise RuntimeError(
                     f"Non-tensor value identified at {key}. "
                     f"At this time {type(self).__name__} only supports loading Tensors."
                 )
 
-            size = value.size()
             state_dict_metadata[key] = TensorStorageMetadata(
-                TensorProperties(dtype=value.dtype),
-                size,
-                [ChunkStorageMetadata(offsets=torch.Size([0] * len(size)), sizes=size)],
+                TensorProperties(dtype=tensor.dtype),
+                tensor.size(),
+                _create_chunk_list(tensor),
             )
         self.metadata = Metadata(state_dict_metadata=state_dict_metadata)
 
