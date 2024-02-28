@@ -298,14 +298,19 @@ def _offload_state_dict_to_cpu(
     return ret
 
 
-def _create_pin_state_dict(
-    state_dict: Dict[str, Any],
+def _create_cpu_state_dict(
+    state_dict: Dict[str, Any], pin_memory: bool = False, share_memory: bool = False
 ) -> Dict[str, Any]:
     """
-    Given a state_dict, create another state_dict, which has the same structure and
-    elements. But all the tensors in the returned state_dict are empty and
-    memory-pinned (pin_memory==True).
+    Given a state_dict, create another state_dict with the same structure and elements.
+    However, all tensors in the returned state_dict are new tensors on CPU. These
+    tensors can be placed on pin_memory or share_memory based on the provided arguments.
     """
+
+    if pin_memory and share_memory:
+        raise ValueError(
+            "Cannot allocate both memory on both pin_memory and share_memory"
+        )
 
     def tensor_func(
         obj: torch.Tensor,
@@ -315,10 +320,15 @@ def _create_pin_state_dict(
     ) -> torch.Tensor:
         if len(obj.size()) == 0:
             return torch.tensor(0, dtype=obj.dtype)
+
+        if share_memory:
+            return torch.empty(
+                *tuple(companion_obj.size()), dtype=companion_obj.dtype
+            ).share_memory_()
         else:
             return torch.empty(
-                *tuple(companion_obj.size()), dtype=companion_obj.dtype, pin_memory=True
-            )
+                *tuple(companion_obj.size()), dtype=companion_obj.dtype
+            ).pin_memory()
 
     ret = _iterate_state_dict(
         state_dict,
