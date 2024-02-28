@@ -4233,6 +4233,7 @@ class TestSparseMaskedReductions(TestCase):
 class TestSparseMeta(TestCase):
     exact_dtype = True
 
+    @skipIfTorchDynamo("changing sparse tensor dimensionality confuses dynamo")
     def _test_meta_sparse_coo(self, dtype):
         r = torch.empty(4, 4, layout=torch.sparse_coo, device='meta', dtype=dtype)
         self.assertTrue(r.is_meta)

@@ -18,7 +18,12 @@ import torch._logging
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import suggest_memory_format
-from torch._subclasses.meta_utils import assert_eq, assert_metadata_eq, MetaConverter
+from torch._subclasses.meta_utils import (
+    assert_eq,
+    assert_metadata_eq,
+    is_sparse_any,
+    MetaConverter,
+)
 from torch._utils import render_call
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -688,7 +693,7 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
     Extract the TensorMetadata of a tensor.
     """
     memory_format = suggest_memory_format(t)
-    if not t.is_contiguous(memory_format=memory_format):
+    if is_sparse_any(t) or not t.is_contiguous(memory_format=memory_format):
         memory_format = None
 
     return TensorMetadata(
