@@ -666,7 +666,6 @@ Tensor _chunk_cat_cuda(
   TORCH_CHECK(!tensors.empty(),
            "chunk_cat expects a non-empty TensorList");
   dim = at::maybe_wrap_dim(dim, tensors[0].dim());
-  TORCH_CHECK(dim != 0, "split expects at least a 1-dimensional tensor");
   detail::assert_leading_dimension_matches(tensors, (uint64_t)dim);
   bool contiguous = true;
   for (const auto& t : tensors) {
