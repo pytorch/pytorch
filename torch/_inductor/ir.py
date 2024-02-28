@@ -3906,6 +3906,8 @@ class ExternKernel(InputsKernel):
             )
 
     def codegen_args(self):
+        if V.graph.cpp_wrapper:
+            self.collect_arg_kwarg_properties()
         args = []
         for i, x in enumerate(self.inputs):
             if isinstance(x, list):
@@ -3944,8 +3946,8 @@ class ExternKernel(InputsKernel):
 
     def codegen_kwargs(self):
         if V.graph.cpp_wrapper:
-            kwargs = []
             self.collect_arg_kwarg_properties()
+            kwargs = []
             for arg_name in self.ordered_kwargs_for_cpp_kernel:
                 v = self.get_kwargs_value(arg_name)
                 if isinstance(v, sympy.Expr):
@@ -4515,7 +4517,7 @@ class IndexPutFallback(ExternKernel):
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
 
-    def __init__(self, x, indices, values, accumulate):
+    def __init__(self, op_overload, x, indices, values, accumulate):
         self.indices = indices
         valid_indices = [i for i in indices if i is not None]
         tensors = [self.realize_input(x) for x in [x, values, *valid_indices]]
@@ -4530,6 +4532,7 @@ class IndexPutFallback(ExternKernel):
         self.cpp_kernel_name = (
             "aoti_torch_index_put_out" if config.abi_compatible else "at::index_put_out"
         )
+        self.op_overload = op_overload
         mark_node_as_mutating(self, x)
 
 
