@@ -422,19 +422,14 @@ class FSDPParam:
 def unsafe_alloc_storage(tensor: torch.Tensor) -> None:
     # Skip the already-allocated check and assume that `tensor` is the base
     # tensor to save CPU overhead
-    # if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
     tensor.untyped_storage().resize_(tensor.numel() * tensor.itemsize)
-    # else:
-    #     pass
+    # pass
 
 
 def unsafe_free_storage(tensor: torch.Tensor) -> None:
     # Skip the already-freed check to save CPU overhead
-    # if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
     tensor.untyped_storage().resize_(0)
-    # else:
-    #     # NOTE(yf225): we rely on Inductor to do the DCE
-    #     pass
+    # pass
 
 
 # NOTE: These bypass `nn.Module.__setattr__` checks, which incur non-trivial
