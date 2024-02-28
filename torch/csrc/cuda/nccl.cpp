@@ -279,8 +279,9 @@ ArrayRef<ncclComm_t> get_communicators(TensorList inputs) {
   };
   device_list devices = fmap(inputs, get_device);
   auto it = _communicators.find(devices);
-  if (it == _communicators.end())
-    std::tie(it, std::ignore) = _communicators.emplace(devices, devices);
+  if (it == _communicators.end()) {
+    it = _communicators.emplace(devices, devices).first;
+  }
   return it->second.ref();
 }
 
