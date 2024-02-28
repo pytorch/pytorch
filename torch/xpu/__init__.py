@@ -6,8 +6,9 @@ This package is lazily initialized, so you can always import it, and use
 :func:`is_available()` to determine if your system supports XPU.
 """
 import threading
+import traceback
 from functools import lru_cache
-from typing import Any, Dict, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch._C
@@ -16,9 +17,38 @@ from ._utils import _dummy_type, _get_device_index
 from .streams import Event, Stream
 
 _initialized = False
+_tls = threading.local()
 _initialization_lock = threading.Lock()
+_queued_calls: List[
+    Tuple[Callable[[], None], List[str]]
+] = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_xpu_isInBadFork", lambda: False)
 _device_t = Union[_device, str, int, None]
+
+
+class _LazySeedTracker:
+    # Since seeding is memory-less, only track the latest seed.
+    def __init__(self):
+        self.manual_seed_all_cb = None
+        self.manual_seed_cb = None
+        self.call_order = []
+
+    def queue_seed_all(self, cb, traceback):
+        self.manual_seed_all_cb = (cb, traceback)
+        # update seed_all to be latest
+        self.call_order = [self.manual_seed_cb, self.manual_seed_all_cb]
+
+    def queue_seed(self, cb, traceback):
+        self.manual_seed_cb = (cb, traceback)
+        # update seed to be latest
+        self.call_order = [self.manual_seed_all_cb, self.manual_seed_cb]
+
+    def get_calls(self) -> List:
+        return self.call_order
+
+
+_lazy_seed_tracker = _LazySeedTracker()
+default_generators: Tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
 
 def _is_compiled() -> bool:
@@ -65,6 +95,20 @@ def is_initialized():
     return _initialized and not _is_in_bad_fork()
 
 
+def _lazy_call(callable, **kwargs):
+    if is_initialized():
+        callable()
+    else:
+        global _lazy_seed_tracker
+        if kwargs.get("seed_all", False):
+            _lazy_seed_tracker.queue_seed_all(callable, traceback.format_stack())
+        elif kwargs.get("seed", False):
+            _lazy_seed_tracker.queue_seed(callable, traceback.format_stack())
+        else:
+            # Don't store the actual traceback to avoid memory cycle
+            _queued_calls.append((callable, traceback.format_stack()))
+
+
 def init():
     r"""Initialize PyTorch's XPU state.
     This is a Python API about lazy initialization that avoids initializing
@@ -75,8 +119,8 @@ def init():
 
 
 def _lazy_init():
-    global _initialized
-    if is_initialized():
+    global _initialized, _queued_calls
+    if is_initialized() or hasattr(_tls, "is_initializing"):
         return
     with _initialization_lock:
         # This test was was protected via GIL. Double-check whether XPU has
@@ -93,6 +137,26 @@ def _lazy_init():
             raise AssertionError("Torch not compiled with XPU enabled")
         # This function inits XPU backend and detects bad fork processing.
         torch._C._xpu_init()
+        # Some of the queued calls may reentrantly call _lazy_init(); We need to
+        # just return without initializing in that case.
+        _tls.is_initializing = True
+
+        for calls in _lazy_seed_tracker.get_calls():
+            if calls:
+                _queued_calls.append(calls)
+
+        try:
+            for queued_call, orig_traceback in _queued_calls:
+                try:
+                    queued_call()
+                except Exception as e:
+                    msg = (
+                        f"XPU call failed lazily at initialization with error: {str(e)}\n\n"
+                        f"XPU call was originally invoked at:\n\n{''.join(orig_traceback)}"
+                    )
+                    raise Exception(msg) from e
+        finally:
+            delattr(_tls, "is_initializing")
         _initialized = True
 
 
@@ -357,12 +421,63 @@ def empty_cache() -> None:
         torch._C._xpu_emptyCache()
 
 
+def _get_generator(device: torch.device) -> torch._C.Generator:
+    r"""Return the XPU Generator object for the given device.
+
+    Args:
+        device (torch.device): selected device.
+    """
+    idx = device.index
+    if idx is None:
+        idx = current_device()
+    return torch.xpu.default_generators[idx]
+
+
+def _set_rng_state_offset(
+    offset: int, device: Union[int, str, torch.device] = "xpu"
+) -> None:
+    r"""Set the random number generator state offset of the specified GPU.
+
+    Args:
+        offset (int): The desired offset
+        device (torch.device or int, optional): The device to set the RNG state.
+            Default: ``'xpu'`` (i.e., ``torch.device('xpu')``, the current XPU device).
+    """
+    final_device = _get_device(device)
+
+    def cb():
+        default_generator = _get_generator(final_device)
+        default_generator.set_offset(offset)
+
+    _lazy_call(cb)
+
+
+def _get_rng_state_offset(device: Union[int, str, torch.device] = "xpu") -> int:
+    r"""Return the random number generator state offset of the specified GPU.
+
+    Args:
+        device (torch.device or int, optional): The device to return the RNG state offset of.
+            Default: ``'xpu'`` (i.e., ``torch.device('xpu')``, the current XPU device).
+
+    .. warning::
+        This function eagerly initializes XPU.
+    """
+    _lazy_init()
+    final_device = _get_device(device)
+    default_generator = _get_generator(final_device)
+    return default_generator.get_offset()
+
+
+from .random import *  # noqa: F403
+
+
 __all__ = [
     "Event",
     "Stream",
     "StreamContext",
     "current_device",
     "current_stream",
+    "default_generators",
     "device",
     "device_of",
     "device_count",
@@ -370,12 +485,21 @@ __all__ = [
     "get_device_capability",
     "get_device_name",
     "get_device_properties",
+    "get_rng_state",
+    "get_rng_state_all",
     "get_stream",
     "init",
+    "initial_seed",
     "is_available",
     "is_bf16_supported",
     "is_initialized",
+    "manual_seed",
+    "manual_seed_all",
+    "seed",
+    "seed_all",
     "set_device",
+    "set_rng_state",
+    "set_rng_state_all",
     "set_stream",
     "stream",
     "streams",
