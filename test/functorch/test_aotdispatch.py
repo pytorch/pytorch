@@ -1473,8 +1473,15 @@ def forward(self, primals_1, primals_2):
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
-        self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
-        with self.assertRaisesRegex(AssertionError, "attempted to compile the backward with incorrect subclass metadata"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses"
+        ):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses"
+        ):
             self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
 
     # Mutations in the backward are allowed as long as the mutated object does not require grad
@@ -1573,7 +1580,7 @@ def forward(self, primals_1, primals_2):
         def inp_callable1(req_grad):
             base = torch.ones(4, 4, requires_grad=req_grad)
             x = base.add(1)
-            # create two non-contiguous views that share storage, but are actually non-overlapping
+            # create two views that share storage, but are actually non-overlapping
             a = x[0:2]
             b = x[2:4]
             return [base], [a, b]
@@ -4374,7 +4381,6 @@ aot_autograd_failures = {
 
 symbolic_aot_autograd_failures = {
     xfail('combinations', ''),  # aten.masked_select.default
-    xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('index_fill', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kthvalue', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.eigvals', ''),  # aten.linalg_eig.default - couldn't find symbolic meta function/decomposition
@@ -4389,8 +4395,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.fractional_max_pool2d', ''),  # rand() received an invalid combination of arguments - g...
     xfail('nn.functional.fractional_max_pool3d', ''),  # rand() received an invalid combination of arguments - g...
     xfail('nn.functional.group_norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.interpolate', 'linear'),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.interpolate', 'trilinear'),  # Cannot call sizes() on tensor with symbolic sizes/st...
     xfail('nn.functional.nll_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('_segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
