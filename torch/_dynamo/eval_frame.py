@@ -59,11 +59,11 @@ from .backends.registry import CompilerFn, lookup_backend
 from .hooks import Hooks
 
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
-reset_code = torch._C._dynamo.eval_frame.reset_code # noqa: F401
-set_eval_frame = torch._C._dynamo.eval_frame.set_eval_frame # noqa: F401
-set_guard_error_hook = torch._C._dynamo.eval_frame.set_guard_error_hook # noqa: F401
-skip_code = torch._C._dynamo.eval_frame.skip_code # noqa: F401
-unsupported = torch._C._dynamo.eval_frame.unsupported # noqa: F401
+reset_code = torch._C._dynamo.eval_frame.reset_code  # noqa: F401
+set_eval_frame = torch._C._dynamo.eval_frame.set_eval_frame  # noqa: F401
+set_guard_error_hook = torch._C._dynamo.eval_frame.set_guard_error_hook  # noqa: F401
+skip_code = torch._C._dynamo.eval_frame.skip_code  # noqa: F401
+unsupported = torch._C._dynamo.eval_frame.unsupported  # noqa: F401
 
 from . import config, convert_frame, external_utils, trace_rules, utils
 from .code_context import code_context
