@@ -267,12 +267,14 @@ class CondTests(TestCase):
         )
 
     @requires_cuda
-    def test_subgraphs_with_parameters(self):
+    @parametrize("device", ["cpu", "cuda"])
+    @parametrize("dynamic", [False, True])
+    def test_subgraphs_with_parameters(self, device, dynamic):
         # nested Modules with parameters
         class InnerModel1(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.layer = torch.nn.Linear(20, 30, device="cuda")
+                self.layer = torch.nn.Linear(20, 30, device=device)
 
             def forward(self, x):
                 return self.layer(x + 1) * 3.14
@@ -280,8 +282,8 @@ class CondTests(TestCase):
         class InnerModel2(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.layer1 = torch.nn.Linear(20, 10, device="cuda")
-                self.layer2 = torch.nn.Linear(10, 30, device="cuda")
+                self.layer1 = torch.nn.Linear(20, 10, device=device)
+                self.layer2 = torch.nn.Linear(10, 30, device=device)
 
             def forward(self, x):
                 return self.layer2(self.layer1(x - 2)) * 3.14
@@ -298,8 +300,8 @@ class CondTests(TestCase):
         self._run_test(
             model=Model(),
             inputs=(torch.randn(10, 20),),
-            device="cuda",
-            dynamic=True,
+            device=device,
+            dynamic=dynamic,
         )
 
     @requires_cuda
