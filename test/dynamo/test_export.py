@@ -120,7 +120,11 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         for guard in out_guards:
             if guard.source == GuardSource.SHAPE_ENV:
                 hit = True
-                self.assertTrue("L['x'].size()[0] <= 10" in guard.code_list)
+                self.assertExpectedInline(
+                    guard.code_list,
+                    """["L['x'].stride()[0] == L['x'].size()[1]", "L['x'].stride()[1] == 1", "L['x'].storage_offset() == 0", "2 <= L['x'].size()[0] <= 10", "2 <= L['x'].size()[1]"]""",  # noqa: B950
+                )
+                break
 
         self.assertTrue(hit)
 
