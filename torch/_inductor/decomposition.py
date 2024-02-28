@@ -521,7 +521,7 @@ def dequantize_per_tensor_tensor_decomp_impl(
     quant_max: int,
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    return (input.to(torch.float32) - zero_point) * scale
+    return (input.to(torch.float32) - zero_point) * scale.to(torch.float32)
 
 
 @register_decomposition(torch.ops.quantized.embedding_bag_byte_unpack)
@@ -649,7 +649,7 @@ def masked_scatter(self, mask, source):
 
 
 @register_decomposition(quantized_decomposed.choose_qparams.tensor)
-def choose_qparams_tenso_impl(
+def choose_qparams_tensor(
     input: torch.Tensor, quant_min: int, quant_max: int, eps: float, dtype: torch.dtype
 ):
     min_val, max_val = torch.aminmax(input)

@@ -1174,7 +1174,7 @@ class QLinearOnednn final {
       std::string post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
     TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() == 1,
-        "OneDNN int8 linear: act scale/zp size should be 1");
+        "onednn int8 linear: act scale/zp size should be 1");
     return linear_int8_with_onednn_weight(
         act, act_scale.item().toDouble(), act_zero_point.item().toLong(),
         onednn_weight, weight_scales, weight_zero_points,
