@@ -21,6 +21,7 @@ from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, BUILD_WITH_CAFFE2, IS_SANDCASTLE
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK, skipIfNoONEDNN
@@ -905,6 +906,7 @@ class TestQuantizedOps(TestCase):
     """Tests the correctness of the cudnn add and add_relu op
     (Similar to test_qadd_relu_different_qparams, will probably merge in the future)"""
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
     def test_qadd_relu_cudnn(self):
         dtype = torch.qint8
         add_relu = torch.ops.quantized.add_relu
@@ -937,6 +939,7 @@ class TestQuantizedOps(TestCase):
 
     """Tests the correctness of the cudnn add and add_relu op for nhwc format"""
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
     def test_qadd_relu_cudnn_nhwc(self):
         dtype = torch.qint8
         add_relu = torch.ops.quantized.add_relu
@@ -4041,6 +4044,7 @@ class TestQuantizedLinear(TestCase):
            use_channelwise=st.sampled_from([False]))  # channelwise currently not supported for qlinear cudnn
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
     # TODO: check with yang regarding CUDNN flags
     def test_qlinear_cudnn(self, batch_size, input_channels, output_channels, use_bias,
                            use_relu, use_multi_dim_input, use_channelwise):
@@ -5415,6 +5419,7 @@ class TestQuantizedConv(TestCase):
            use_channelwise=st.sampled_from([False]))
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
     def test_qconv2d_cudnn(
             self,
             batch_size,
@@ -5495,6 +5500,7 @@ class TestQuantizedConv(TestCase):
            use_channelwise=st.sampled_from([False]))
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
     def test_qconv2d_relu_cudnn(
             self,
             batch_size,
@@ -6227,6 +6233,7 @@ class TestQuantizedConv(TestCase):
            use_channelwise=st.sampled_from([False]))
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
     def test_qconv1d_cudnn(
         self,
         batch_size,
@@ -6298,6 +6305,7 @@ class TestQuantizedConv(TestCase):
            use_channelwise=st.sampled_from([False]))
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
     def test_qconv1d_relu_cudnn(
         self,
         batch_size,
