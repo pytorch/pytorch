@@ -44,7 +44,8 @@ SEMI_STRUCTURED_SUPPORTED_BACKENDS = []
 _IS_SM8X = False
 if torch.cuda.is_available():
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
-    SEMI_STRUCTURED_SUPPORTED_BACKENDS.append("cutlass")
+    if not IS_WINDOWS:
+        SEMI_STRUCTURED_SUPPORTED_BACKENDS.append("cutlass")
 
     # check if cslt is available for now using this:
     # TODO when we add cusparselt as a backend, we can update this to be use torch.cusparselt.is_available()
