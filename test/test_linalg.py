@@ -1201,6 +1201,7 @@ class TestLinalg(TestCase):
         make_arg = partial(make_tensor, dtype=dtype, device=device)
 
         def run_test_case(input_size, ord, keepdim):
+            torch._dynamo.reset()
             msg = (
                 f'input_size={input_size}, ord={ord}, keepdim={keepdim}, '
                 f'dtype={dtype}')
