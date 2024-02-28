@@ -5,8 +5,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 // This function has two main goals:
 //  1) Use the user-provided jvp function to populate the outputs' forward
@@ -582,5 +581,4 @@ const std::unordered_set<at::TensorImpl*>& AutogradContext::
     get_non_differentiable() const {
   return non_differentiable_;
 }
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

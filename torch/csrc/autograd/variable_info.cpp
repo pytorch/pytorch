@@ -1,9 +1,8 @@
-#include <torch/csrc/autograd/variable_info.h>
+#include <ATen/ops/zeros.h>
 #include <torch/csrc/autograd/variable.h>
-#include "ATen/ops/zeros.h"
+#include <torch/csrc/autograd/variable_info.h>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 VariableInfo::VariableInfo(const Variable& var)
     : layout(var.layout()),
@@ -25,5 +24,4 @@ Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
   }
 }
 
-}
-}
+} // namespace torch::autograd
