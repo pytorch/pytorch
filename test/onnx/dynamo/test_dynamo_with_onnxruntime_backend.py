@@ -717,6 +717,75 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             self.assertTrue(os.path.exists(expected))
             self.assertFalse(os.path.exists(not_expected))
 
+    def test_custom_onnx_transform(self):
+        # This test checks two things.
+        # 1. If a registered ONNX transform is called and recorded a model
+        #    when compiling a model.
+        # 2. If a registered ONNX transform is called and changed the model
+
+        # Part 1
+        recorded_models = []
+
+        def record_onnx_model_transform(onnx_model):
+            # Record the ONNX model seen by the transform.
+            recorded_models.append(onnx_model)
+
+        from torch.onnx import (
+            register_backend_graph_transform,
+            unregister_backend_graph_transform,
+        )
+
+        register_backend_graph_transform(record_onnx_model_transform)
+
+        def example_model(x: torch.Tensor):
+            y = torch.sigmoid(x)
+            z = x + y
+            return z
+
+        compiled_model = torch.compile(
+            example_model,
+            backend="onnxrt",
+            dynamic=True,
+        )
+
+        x = torch.randn(2)
+        assert len(recorded_models) == 0
+        y = compiled_model(x)
+        assert len(recorded_models) == 1
+
+        unregister_backend_graph_transform(record_onnx_model_transform)
+
+        # Part 2
+        def replace_relu_with_sigmoid(onnx_model):
+            for function in onnx_model.functions:
+                for node in function.node:
+                    if node.op_type == "Relu":
+                        node.op_type = "Sigmoid"
+
+        register_backend_graph_transform(replace_relu_with_sigmoid)
+
+        def another_example_model(x: torch.Tensor):
+            y = torch.relu(x)
+            z = x + y
+            return z
+
+        another_compiled = torch.compile(
+            another_example_model,
+            backend="onnxrt",
+            dynamic=True,
+        )
+
+        another_y = another_compiled(x)
+        assert len(recorded_models) == 1
+        # Since we have changed "Relu" to "Sigmoid" in replace_sigmoid_with_relu,
+        # the result should be the same to previous y.
+        torch.testing.assert_close(y, another_y)
+        # another_example_model still uses "Relu", so the result should be different
+        # than y.
+        self.assertFalse(torch.allclose(y, another_example_model(x)))
+
+        unregister_backend_graph_transform(replace_relu_with_sigmoid)
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
