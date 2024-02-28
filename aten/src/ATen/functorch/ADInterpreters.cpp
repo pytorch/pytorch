@@ -3,7 +3,7 @@
 #include <ATen/functorch/TensorWrapper.h>
 #include <bitset>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 constexpr size_t default_bitset_size = 64;
 
@@ -239,4 +239,4 @@ void JvpInterpreterPtr::sendToNextInterpreterImpl(
       grad_special_case);
 }
 
-}} // namespace at::functorch
+} // namespace at::functorch
