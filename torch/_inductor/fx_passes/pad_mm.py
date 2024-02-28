@@ -52,6 +52,80 @@ def check_dtype(a: Tensor, b: Tensor) -> bool:
     return a.is_floating_point() and b.is_floating_point()
 
 
+_LAYOUT_REPLACING_FUNCTIONS = {
+    aten.addmm,
+    aten.mm,
+    aten.bmm,
+    aten.baddbmm,
+    aten.constant_pad_nd,
+    aten.as_strided,
+    aten.argmax,
+    aten.max,
+    aten.argmin,
+    aten.min,
+    aten.align_to,
+    aten.align_as,
+    aten.contiguous,
+    aten.embedding,
+    aten.empty,
+    aten.new_empty,
+    aten.new_empty_strided,
+    aten.new_ones,
+    aten.new_zeros,
+    aten.new_full,
+    aten.empty_permuted,
+    aten.embedding_bag,
+    aten.empty_strided,
+    aten.linspace,
+}
+
+
+def _result_layout_affects_graph_output(match: Match) -> bool:
+    """
+    Heuristic to check if the matched GEMM operation potentially affects the graph output strides.
+    returns True if the matched op's output buffer does not pass through functions which certainly
+    redefine the memory layout before being part of the graph output.
+
+    I call it a heuristic because I don't think it perfectly covers all cases.
+    It tries to err on the side of caution, e.g. it's better to return True
+    even if the match cannot affect output strides than to return False if it can.
+    """
+    graph: torch.fx.Graph = match.ctx.graph
+    output_nodes: List[torch.fx.Node] = [n for n in graph.nodes if n.op == "output"]
+    search_node = match.output_node()
+
+    def recursively_search(n, depth=100000):
+        if depth == 0:
+            raise RuntimeError("Recursion depth exceeded")
+        if n is search_node:
+            return True
+        if isinstance(n, (list, tuple)):
+            return any(recursively_search(subn, depth - 1) for subn in n)
+        if not isinstance(n, torch.fx.Node):
+            return False
+        assert n.op not in {
+            "call_method",
+            "call_module",
+        }, f"The graph is not functionalized. node.op={n.op}"
+        if n.op != "call_function" and n.op != "output":
+            return False
+        if n.target in _LAYOUT_REPLACING_FUNCTIONS:
+            return False
+        if n.args is not None and any(
+            recursively_search(subn, depth - 1) for subn in n.args
+        ):
+            return True
+        if n.kwargs is not None and any(
+            recursively_search(subn, depth - 1) for subn in n.kwargs.values()
+        ):
+            return True
+        return False
+
+    if len(output_nodes) > 0 and any(recursively_search(n) for n in output_nodes):
+        return True
+    return False
+
+
 def should_pad_common(
     mat1: Tensor, mat2: Tensor, input: Optional[Tensor] = None
 ) -> bool:
@@ -108,6 +182,11 @@ def addmm_pattern(
 
 
 def should_pad_addmm(match: Match) -> bool:
+    if (
+        torch._inductor.config.keep_output_stride
+        and _result_layout_affects_graph_output(match)
+    ):
+        return False
     mat1, mat2, input = fetch_fake_tensors(match, ("mat1", "mat2", "input"))
     return should_pad_common(mat1, mat2, input) and should_pad_bench(
         mat1, mat2, torch.ops.aten.addmm, input=input
@@ -359,6 +438,11 @@ def mm_pattern(mat1: Tensor, mat2: Tensor) -> Tensor:
 
 
 def should_pad_mm(match: Match) -> bool:
+    if (
+        torch._inductor.config.keep_output_stride
+        and _result_layout_affects_graph_output(match)
+    ):
+        return False
     mat1, mat2 = fetch_fake_tensors(match, ("mat1", "mat2"))
     return should_pad_common(mat1, mat2) and should_pad_bench(
         mat1, mat2, torch.ops.aten.mm
@@ -398,6 +482,11 @@ def bmm_pattern(mat1: Tensor, mat2: Tensor) -> Tensor:
 
 
 def should_pad_bmm(match: Match) -> bool:
+    if (
+        torch._inductor.config.keep_output_stride
+        and _result_layout_affects_graph_output(match)
+    ):
+        return False
     mat1, mat2 = fetch_fake_tensors(match, ("mat1", "mat2"))
     return should_pad_common(mat1, mat2) and should_pad_bench(
         mat1, mat2, torch.ops.aten.bmm
