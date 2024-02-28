@@ -488,7 +488,7 @@ def forward(self, x_1):
         # This doesn't error
         self.assertTrue(expect_true(i0 == 0))
         # This generates a deferred runtime assert via replacement
-        self.assertEqual(shape_env.replacements[i0_sym], 0)
+        self.assertEqual(shape_env.unbacked_replacements[i0_sym], 0)
         # After expecting true, guards now resolve given the runtime assert
         bool(i0 == 0)
 
@@ -529,14 +529,14 @@ def forward(self, x_1):
         _constrain_range_for_size(i0)
         _constrain_range_for_size(i1)
         self.assertTrue(expect_true(i0 == i1 * 4))
-        self.assertExpectedInline(str(i0), """4*u1""")
+        self.assertExpectedInline(str(i0), """u0""")
 
         i2 = shape_env.create_unbacked_symint()
         i3 = shape_env.create_unbacked_symint()
         _constrain_range_for_size(i2)
         _constrain_range_for_size(i3)
         self.assertTrue(expect_true(i2 * 4 == i3))
-        self.assertExpectedInline(str(i3), """4*u2""")
+        self.assertExpectedInline(str(i3), """u3""")
 
     def test_avoid_unbacked_substitution(self):
         shape_env = ShapeEnv()
