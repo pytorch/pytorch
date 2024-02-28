@@ -968,7 +968,7 @@ class LazyFbTraceHandler(logging.StreamHandler):
             ok = False
             import torch.version as torch_version
 
-            if not hasattr(torch_version, "git_version"):
+            if hasattr(torch_version, "git_version"):
                 log.info("LazyFbTraceHandler: disabled because not fbcode")
             elif not torch._utils_internal.justknobs_check("pytorch/trace:enable"):
                 log.info(
