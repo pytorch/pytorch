@@ -209,9 +209,10 @@ class OptimizedModule(torch.nn.Module):
 
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
-        if isinstance(self._orig_mod.forward, types.MethodType) and trace_rules.check(
+        is_nn_module = isinstance(self._orig_mod, torch.nn.Module)
+        if (isinstance(self._orig_mod.forward, types.MethodType) and trace_rules.check(
             self._orig_mod.forward
-        ):
+        )) or is_nn_module:
             # This may be a torch.nn.* instance in trace_rules.py which
             # won't trigger a frame evaluation workaround to add an extra
             # frame we can capture
