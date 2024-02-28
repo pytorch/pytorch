@@ -1221,7 +1221,16 @@ def _chunk_cat(
     padded_tensors = []
     for tensor in tensors:
         tensor_size = tensor.size()
-        padded_size = tensor_size[:dim] + torch.Size([(tensor_size[dim] + num_chunks - 1) / num_chunks * num_chunks,]) + tensor_size[dim+1:]
+        pad_along_dim = (tensor_size[dim] + num_chunks - 1) // num_chunks * num_chunks
+        padded_size = (
+            tensor_size[:dim]
+            + torch.Size(
+                [
+                    pad_along_dim,
+                ]
+            )
+            + tensor_size[dim + 1 :]
+        )
         if padded_size != tensor_size:
             padded_tensor = tensor.new_zeros(padded_size)
             padded_tensor.narrow(dim, 0, tensor_size[dim]).copy_(tensor)

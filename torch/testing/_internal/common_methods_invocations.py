@@ -17327,7 +17327,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_chunk_cat,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-        ),
+           ),
     OpInfo('hstack',
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,

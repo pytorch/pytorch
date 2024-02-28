@@ -10,9 +10,8 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/split_with_sizes_copy_native.h>
+#include <ATen/ops/_chunk_cat_native.h>
 #endif
-
-#include <iostream>
 
 namespace at::native {
 
@@ -578,17 +577,13 @@ void split_with_sizes_copy_out_cuda(
 }
 
 // See [CUDA kernel for chunk_cat_cuda]
-Tensor _chunk_cat_cuda(
+Tensor _chunk_cat_cuda_contiguous(
   TensorList tensors,
   int64_t dim,
   int64_t num_chunks
 ) {
-  TORCH_CHECK(!tensors.empty(),
-           "chunk_cat expects a non-empty TensorList");
   auto num_tensors = tensors.size();
   const auto device = tensors[0].device();
-  dim = at::maybe_wrap_dim(dim, tensors[0].dim());
-  detail::assert_leading_dimension_matches(tensors, (uint64_t)dim);
   int64_t leading_dim = 1;
   auto first_tensor_sizes = tensors[0].sizes();
   if (dim > 0) {
@@ -612,10 +607,6 @@ Tensor _chunk_cat_cuda(
   for (const auto i : c10::irange(num_tensors)) {
     at::Tensor tensor = tensors[i];
     srcs.push_back(reinterpret_cast<int64_t>(tensor.data_ptr()));
-    TORCH_CHECK(
-      tensor.is_cuda() && tensor.is_non_overlapping_and_dense(),
-      "chunk_cat_cuda() error: invalid input tensor"
-    );
     auto sizes = tensor.sizes();
     const int64_t size_along_dim = sizes[dim];
     int64_t trailing_numel = 1;
@@ -665,6 +656,28 @@ Tensor _chunk_cat_cuda(
   std::vector<int64_t> view_sizes = std::vector<int64_t>(first_tensor_sizes.begin(), first_tensor_sizes.begin()+dim);
   view_sizes.insert(view_sizes.end(), {num_chunks, trailing_dim});
   return out.view(view_sizes);
+}
+
+Tensor _chunk_cat_cuda(
+  TensorList tensors,
+  int64_t dim,
+  int64_t num_chunks
+) {
+  TORCH_CHECK(!tensors.empty(),
+           "chunk_cat expects a non-empty TensorList");
+  dim = at::maybe_wrap_dim(dim, tensors[0].dim());
+  TORCH_CHECK(dim != 0, "split expects at least a 1-dimensional tensor");
+  detail::assert_leading_dimension_matches(tensors, (uint64_t)dim);
+  bool contiguous = true;
+  for (const auto& t : tensors) {
+    contiguous &= t.is_non_overlapping_and_dense();
+    TORCH_CHECK(t.is_cuda(), "chunk_cat_cuda() error: non-cuda input tensors");
+  }
+  if(contiguous) {
+    return _chunk_cat_cuda_contiguous(tensors, dim, num_chunks);
+  } else {
+    return at::native::_chunk_cat(tensors, dim, num_chunks);
+  }
 }
 
 } // namespace at::native
