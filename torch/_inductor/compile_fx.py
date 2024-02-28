@@ -207,47 +207,33 @@ def _unlift_graph(mod, gm, graph_signature):
     return unlifted_gm
 
 
-def _get_subgraphs_names_and_input_nodes(gm):
+def _get_subgraph_names(gm):
     for node in gm.graph.nodes:
         if node.target == torch.ops.higher_order.cond:
             true_subgraph_name = node.args[1].name
             false_subgraph_name = node.args[2].name
-            subgraph_input_nodes = node.args[3]
-            yield true_subgraph_name, subgraph_input_nodes
-            yield false_subgraph_name, subgraph_input_nodes
+            yield true_subgraph_name
+            yield false_subgraph_name
 
 
-def _recursive_fake_tensor_prop(gm, inputs, force_allow_non_fake_inputs=False):
-    fake_tensor_prop(gm, inputs, force_allow_non_fake_inputs)
-    for subgraph_name, input_nodes in _get_subgraphs_names_and_input_nodes(gm):
+def _recursive_pre_grad_passes(gm, example_inputs):
+    for subgraph_name in _get_subgraph_names(gm):
         subgraph = getattr(gm, subgraph_name)
-        subgraph_inputs = [n.meta["val"] for n in input_nodes]
-        _recursive_fake_tensor_prop(
-            subgraph, subgraph_inputs, force_allow_non_fake_inputs
-        )
-
-
-def _recursive_pre_grad_passes(gm, fake_gm, example_inputs):
-    for subgraph_name, input_nodes in _get_subgraphs_names_and_input_nodes(fake_gm):
-        subgraph = getattr(gm, subgraph_name)
-        fake_subgraph = getattr(fake_gm, subgraph_name)
-        subgraph_inputs = [n.meta["val"] for n in input_nodes]
-        new_subgraph = _recursive_pre_grad_passes(
-            subgraph, fake_subgraph, subgraph_inputs
-        )
+        # as we don't have recursive example inputs, passing None here
+        new_subgraph = _recursive_pre_grad_passes(subgraph, example_inputs=None)
         setattr(gm, subgraph_name, new_subgraph)
     return pre_grad_passes(gm, example_inputs)
 
 
 def _recursive_joint_graph_passes(gm):
-    for subgraph_name, _ in _get_subgraphs_names_and_input_nodes(gm):
+    for subgraph_name in _get_subgraph_names(gm):
         subgraph = getattr(gm, subgraph_name)
         _recursive_joint_graph_passes(subgraph)
     joint_graph_passes(gm)
 
 
 def _recursive_post_grad_passes(gm, is_inference: bool = False):
-    for subgraph_name, _ in _get_subgraphs_names_and_input_nodes(gm):
+    for subgraph_name in _get_subgraph_names(gm):
         subgraph = getattr(gm, subgraph_name)
         _recursive_post_grad_passes(subgraph, is_inference)
     post_grad_passes(gm, is_inference)
@@ -1211,10 +1197,6 @@ def compile_fx(
             recursive_compile_fx,
         )
 
-    fake_mode = detect_fake_mode(example_inputs_) or torch._subclasses.FakeTensorMode(
-        allow_non_fake_inputs=True
-    )
-
     if isinstance(model_, torch.fx.GraphModule):
         if isinstance(model_.graph._codegen, _PyTreeCodeGen):
             # this graph is the result of dynamo.export()
@@ -1224,22 +1206,7 @@ def compile_fx(
                 recursive_compile_fx,
             )
 
-        # we need fake_tensor_prop to be applied recursively to the nested subgraphs
-        # (if any), to be able to apply the pre_grad passes recursively to those nested
-        # subgraphs (as the pre_grad passes require example inputs per subgraph). to
-        # this end, we fakify the inputs and the model, recursively do fake_tensor_prop
-        # on the fake model, then iterate over the real and the fake model together to
-        # extract the subgraph inputs from the fake model and while applying the pre_grad
-        # passes to the real model. the rationale of fakifying the model and inputs is
-        # that we don't want any side effects (e.g., input or buffer mutation) to be
-        # applied to the real model during fake_tensor_prop.
-        fake_inputs = pytree.tree_map(
-            lambda t: fake_mode.from_tensor(t) if isinstance(t, torch.Tensor) else t,
-            example_inputs_,
-        )
-        fake_model = torch._dynamo.utils.deepcopy_to_fake_tensor(model_, fake_mode)
-        _recursive_fake_tensor_prop(fake_model, fake_inputs, False)
-        model_ = _recursive_pre_grad_passes(model_, fake_model, example_inputs_)
+        model_ = _recursive_pre_grad_passes(model_, example_inputs_)
         optimus_scuba_log["inductor_pre_grad"] = counters["inductor"]
         signpost_event(
             "optimus",
@@ -1380,6 +1347,9 @@ def compile_fx(
     # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
     # once torchdynamo is merged into pytorch
 
+    fake_mode = detect_fake_mode(example_inputs_) or torch._subclasses.FakeTensorMode(
+        allow_non_fake_inputs=True
+    )
     tracing_context = (
         torch._guards.TracingContext.try_get()
         or torch._guards.TracingContext(fake_mode)
