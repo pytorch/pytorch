@@ -163,7 +163,7 @@ class TracerBase:
             node.meta["seq_nr"] = new_seq_nr
 
         else:
-            node.meta['nn_module_stack'] = {}
+            node.meta['nn_module_stack'] = copy.copy(self.module_stack)
         return node
 
     @compatibility(is_backward_compatible=True)
