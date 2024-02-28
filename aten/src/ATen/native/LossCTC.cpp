@@ -260,7 +260,6 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
   auto gp = grad.permute({1,0,2});
   auto grad_a_global = gp.accessor<scalar_t, 3>();
   auto targets_data = targets.data_ptr<target_t>();
-  auto grad_out_a = grad_out.accessor<scalar_t, 1>();
 
   auto create_fill_iterator = [](const Tensor& tensor, IntArrayRef squash_dims) {
     return TensorIteratorConfig()
@@ -367,7 +366,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
       // now we wrap up the calculation by adding in the remaining items of eq (16)
       // this could be a great target for further vectorization.
       // grad is the output gradient, nll is the loss. Note that the likelihood -nll is the Z of eq (16)
-      scalar_t gr = grad_out_a[b];
+      scalar_t gr = grad_out.accessor<scalar_t, 1>()[b];
       for (const auto t : c10::irange(input_length)) { // or go for the full thing?
         for (const auto c : c10::irange(num_labels)) {
           scalar_t& res = grad_a[t][c];
