@@ -301,7 +301,7 @@ constant_and_index_propagation = True
 always_keep_tensor_constants = False
 
 # assert that indirect indexing does not read / write out of bounds
-assert_indirect_indexing = True
+assert_indirect_indexing = False
 
 # constant folding on the joint graph
 joint_graph_constant_folding = True
