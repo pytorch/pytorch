@@ -3409,6 +3409,17 @@ class CPUReproTests(TestCase):
             ),
         )
 
+    def test_masked_load_int64_vec(self):
+        # https://github.com/pytorch/pytorch/issues/120377
+        def fn(x):
+            return torch.nn.functional.pad(x, (0, 13))
+
+        x = torch.randint(0, 100, (819,), dtype=torch.int64)
+        metrics.reset()
+        self.common(fn, (x,))
+        # TODO: support vectorized int64 masked load
+        assert metrics.generated_cpp_vec_kernel_count == 0
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

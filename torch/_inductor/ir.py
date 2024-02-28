@@ -3873,47 +3873,71 @@ class ExternKernel(InputsKernel):
     def codegen_const_args(self):
         return map(V.graph.wrapper_code.val_to_arg_str, self.constant_args)
 
-    def codegen_args(self):
-        args = []
-        for x in self.inputs:
-            if isinstance(x, list):
-                names = [i.codegen_reference() for i in x]
-                codegen_reference = f'[{", ".join(names)}]'
-                args.append(codegen_reference)
-            else:
-                args.append(x.codegen_reference())
-        args.extend(self.codegen_const_args())
-        return args
-
-    def collect_args_properties(self):
-        if hasattr(self, "args_properties"):
-            return
-
+    def collect_arg_kwarg_properties(self):
         if not self.ordered_kwargs_for_cpp_kernel and isinstance(
             self.op_overload, torch._ops.OpOverload
         ):
             self.ordered_kwargs_for_cpp_kernel = [
                 x.name for x in self.op_overload._schema.arguments if x.kwarg_only
             ]
+        if not hasattr(self, "arg_properties"):
+            self.arg_properties = (
+                [
+                    {
+                        "name": x.name,
+                        "type": x.real_type,
+                        "default_value": x.default_value,
+                    }
+                    for x in self.op_overload._schema.arguments
+                    if not x.kwarg_only
+                ]
+                if isinstance(self.op_overload, torch._ops.OpOverload)
+                else [{} for i in range(len(self.inputs))]
+            )
+        if not hasattr(self, "kwarg_properties"):
+            self.kwarg_properties = (
+                {
+                    x.name: {"type": x.real_type, "default_value": x.default_value}
+                    for x in self.op_overload._schema.arguments
+                    if x.kwarg_only
+                }
+                if isinstance(self.op_overload, torch._ops.OpOverload)
+                else {}
+            )
 
-        self.args_properties = (
-            {
-                x.name: {"type": x.real_type, "default_value": x.default_value}
-                for x in self.op_overload._schema.arguments
-            }
-            if isinstance(self.op_overload, torch._ops.OpOverload)
-            else {}
-        )
+    def codegen_args(self):
+        args = []
+        for i, x in enumerate(self.inputs):
+            if isinstance(x, list):
+                names = [i.codegen_reference() for i in x]
+                codegen_reference = f'[{", ".join(names)}]'
+                args.append(codegen_reference)
+            else:
+                if V.graph.cpp_wrapper:
+                    # cpp wrapper needs the type information to generate the right arg expression,
+                    # e.g. Optional[Tensor]
+                    assert i < len(
+                        self.arg_properties
+                    ), "Invalid indexing into arg_properties"
+                    type_ = self.arg_properties[i].get("type")
+                    args.append(
+                        V.graph.wrapper_code.val_to_cpp_arg_str(  # type: ignore[arg-type]
+                            type_, x, self.is_legacy_abi_kernel()
+                        )
+                    )
+                else:
+                    args.append(x.codegen_reference())
+        args.extend(self.codegen_const_args())
+        return args
 
     def get_kwargs_value(self, arg_name):
         if arg_name in self.kwargs:
             return self.kwargs.get(arg_name)
-
-        assert hasattr(self, "args_properties") and arg_name in self.args_properties, (
-            arg_name + " not in args_properties"
-        )
-        if self.args_properties and self.args_properties.get(arg_name):
-            return self.args_properties.get(arg_name).get("default_value")  # type: ignore[union-attr]
+        assert (
+            hasattr(self, "kwarg_properties") and arg_name in self.kwarg_properties
+        ), (arg_name + " not in kwarg_properties")
+        if self.kwarg_properties and self.kwarg_properties.get(arg_name):
+            return self.kwarg_properties.get(arg_name).get("default_value")  # type: ignore[union-attr]
 
     def is_legacy_abi_kernel(self):
         return False
@@ -3921,15 +3945,15 @@ class ExternKernel(InputsKernel):
     def codegen_kwargs(self):
         if V.graph.cpp_wrapper:
             kwargs = []
-            self.collect_args_properties()
+            self.collect_arg_kwarg_properties()
             for arg_name in self.ordered_kwargs_for_cpp_kernel:
                 v = self.get_kwargs_value(arg_name)
                 if isinstance(v, sympy.Expr):
                     kwargs.append(v)
                 else:
                     type_ = (
-                        self.args_properties.get(arg_name).get("type")  # type: ignore[union-attr]
-                        if arg_name in self.args_properties
+                        self.kwarg_properties.get(arg_name).get("type")  # type: ignore[union-attr]
+                        if arg_name in self.kwarg_properties
                         else None
                     )
                     kwargs.append(
@@ -4051,7 +4075,7 @@ class ExternKernelOut(ExternKernel):
         # We shouldn't need to do this since the information can be retrieved from op_overload._schema.
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
         self.op_overload = op_overload
-        self.collect_args_properties()
+        self.collect_arg_kwarg_properties()
 
     def should_allocate(self):
         return True
@@ -4102,7 +4126,7 @@ class ExternKernelAlloc(ExternKernel):
         # We shouldn't need to do this since the information can be retrieved from op_overload._schema.
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
         self.op_overload = op_overload
-        self.collect_args_properties()
+        self.collect_arg_kwarg_properties()
 
     def should_allocate(self):
         return False
@@ -4348,21 +4372,6 @@ class MutatingFirstArgExternKernel(ExternKernel):
         return True
 
 
-class AccumulateGrad(MutatingFirstArgExternKernel):
-    def __init__(self, variable, new_grad):
-        super().__init__(
-            None,
-            NoneLayout(variable.get_device()),  # type: ignore[arg-type]
-            self.unwrap_storage([variable, new_grad]),
-        )
-        self.name = V.graph.register_buffer(self)
-        self.python_kernel_name = "inductor_ops.accumulate_grad_"
-        self.cpp_kernel_name = "torch::inductor::accumulate_grad_"
-        mark_node_as_mutating(self, variable)
-        # never reuse gradient buffers since they might be stolen
-        V.graph.never_reuse_buffers.add(new_grad.data.get_name())
-
-
 class ResizeStorageBytes(MutatingFirstArgExternKernel):
     def __init__(self, variable, new_size):
         assert isinstance(new_size, int), "TODO: dynamic shapes"
@@ -4473,7 +4482,7 @@ class ScatterFallback(ExternKernel):
         self.cpp_kernel_name = self.get_cpp_kernel()
         self.ordered_kwargs_for_cpp_kernel = ["reduce", "include_self"]
         self.op_overload = kernel
-        self.collect_args_properties()
+        self.collect_arg_kwarg_properties()
         self.name = V.graph.register_buffer(self)
         mark_node_as_mutating(self, x)
 
@@ -4808,23 +4817,6 @@ class FallbackKernel(ExternKernelAlloc):
         )
         return arg_default_value
 
-    # Generate abi-compatible kernel names for shim kernels.
-    # Each individual shim kernel may have its own versioning rule.
-    # However, we don't expect we would end up with too many of such rules.
-    def _get_abi_compatible_kernel(self):
-        if not V.graph.cpp_wrapper:
-            return self.python_kernel_name
-
-        def sdpa_ver_fn():
-            # For sdpa, we need the v2 version since v1 didn't consider optional arg
-            return f"{self.cpp_kernel_name}_v2"
-
-        kernel_to_ver = {"at::_scaled_dot_product_flash_attention": sdpa_ver_fn}
-        ver_fn = kernel_to_ver.get(self.cpp_kernel_name, None)  # type: ignore[arg-type]
-        if ver_fn is not None:
-            return ver_fn()
-        return self.cpp_kernel_name
-
     def codegen_args(self):
         @dataclasses.dataclass
         class Shim:
@@ -4837,7 +4829,13 @@ class FallbackKernel(ExternKernelAlloc):
         args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
         # Now we setup abi_compatible_kernel after self.python_kernel_name
         # and kwargs are adjusted appropriately.
-        self.abi_compatible_kernel = self._get_abi_compatible_kernel()
+        # For sdpa, we need the v2 version since v1 didn't consider optional arg
+        # FIXME: no need to do this after we switch to the torchgen-ed C shim
+        self.abi_compatible_kernel = (
+            f"{self.cpp_kernel_name}_v2"
+            if self.cpp_kernel_name in {"at::_scaled_dot_product_flash_attention"}
+            else self.cpp_kernel_name
+        )
 
         if V.graph.cpp_wrapper and isinstance(self.op_overload, torch._ops.OpOverload):
             args = [

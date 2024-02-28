@@ -76,7 +76,7 @@ def define_targets(rules):
     ] + (["--static_dispatch_backend CPU"] if rules.is_cpu_static_dispatch_build() else []))
 
     gen_aten_outs_cuda = (
-        GENERATED_H_CUDA + GENERATED_CPP_CUDA +
+        GENERATED_H_CUDA + GENERATED_CPP_CUDA + GENERATED_AOTI_CUDA_CPP
         aten_ufunc_generated_cuda_sources()
     )
 
@@ -312,15 +312,8 @@ GENERATED_AUTOGRAD_CPP = [
     "torch/csrc/autograd/generated/TraceType_4.cpp",
     "torch/csrc/autograd/generated/ADInplaceOrViewType_0.cpp",
     "torch/csrc/autograd/generated/ADInplaceOrViewType_1.cpp",
+    "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
     "torch/csrc/lazy/generated/LazyNativeFunctions.cpp",
     "torch/csrc/lazy/generated/RegisterAutogradLazy.cpp",
     "torch/csrc/lazy/generated/RegisterLazy.cpp",
 ] + _GENERATED_AUTOGRAD_CPP_HEADERS + GENERATED_LAZY_H
-
-GENERATED_AOTI_CPU_CPP = [
-    "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
-]
-
-GENERATED_AOTI_CUDA_CPP = [
-    "torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.cpp",
-]

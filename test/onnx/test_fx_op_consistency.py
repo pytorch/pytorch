@@ -904,18 +904,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="Functionalize pass failed",
     ),
     xfail(
-        "nn.functional.interpolate",
-        variant_name="linear",
-        dtypes=(torch.float16, torch.float32,),
-        reason="Mismatched elements with high difference",
-    ),
-    xfail(
-        "nn.functional.interpolate",
-        variant_name="trilinear",
-        dtypes=(torch.float16, torch.float32),
-        reason="Mismatched elements with high difference",
-    ),
-    xfail(
         "nn.functional.local_response_norm",
         dtypes=(torch.int64,),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("avgpool", "int64"),
@@ -1828,6 +1816,17 @@ def _run_test_output_match(
                     atol = 2e-5
                 elif (
                     dtype == torch.float16
+                    and (op.name, op.variant_test_name)
+                    in test_suite.fp16_low_precision_variant_dict
+                ):
+                    rtol = test_suite.fp16_low_precision_variant_dict[
+                        (op.name, op.variant_test_name)
+                    ][0]
+                    atol = test_suite.fp16_low_precision_variant_dict[
+                        (op.name, op.variant_test_name)
+                    ][1]
+                elif (
+                    dtype == torch.float16
                     and op.name in test_suite.fp16_low_precision_dict
                 ):
                     rtol = test_suite.fp16_low_precision_dict[op.name][0]
@@ -1976,6 +1975,11 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "sub": [3e-2, 1e-3],
         "trapezoid": [1e-3, 7e-3],
         "trapz": [1e-3, 7e-3],
+    }
+
+    fp16_low_precision_variant_dict = {
+        ("nn.functional.interpolate", "trilinear"): [3e-2, 3e-3],
+        ("nn.functional.interpolate", "linear"): [3e-2, 3e-3],
     }
 
     @common_device_type.ops(
