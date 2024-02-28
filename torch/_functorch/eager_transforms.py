@@ -323,7 +323,11 @@ def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = N
         # See NOTE [grad and vjp interaction with no_grad]
         with torch.enable_grad():
             primals = _wrap_all_tensors(primals, level)
-            if not argnums:
+            # if argnums is None:
+            # Note for the reviewer: This is extremelly odd but it passes the
+            # assertion "len(self.block_stack) == 1" on symbolic_convert.py
+            # The equivalent "if argnums is None" fails for some reason
+            if not isinstance(argnums, int) and not argnums:
                 diff_primals = _create_differentiable(primals, level)
             else:
                 diff_primals = _slice_argnums(primals, argnums, as_tuple=False)
