@@ -521,8 +521,6 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
         model.to_empty(device=device)
         for param in model.parameters():
             self.assertEqual(param.device, device)
-
-        # Initialize optimizer after `to_empty` since it changes parameters
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
         # Check that `reset_parameters()` on each module initializes values
