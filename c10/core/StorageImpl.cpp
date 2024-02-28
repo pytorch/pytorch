@@ -63,12 +63,16 @@ c10::intrusive_ptr<c10::StorageImpl> make_storage_impl(
   }
 
   // Create a c10::StorageImpl object.
+  if (data_ptr != nullptr) {
+    return c10::make_intrusive<c10::StorageImpl>(
+        use_byte_size,
+        std::move(size_bytes),
+        std::move(data_ptr),
+        allocator,
+        resizable);
+  }
   return c10::make_intrusive<c10::StorageImpl>(
-      use_byte_size,
-      std::move(size_bytes),
-      std::move(data_ptr),
-      allocator,
-      resizable);
+      use_byte_size, std::move(size_bytes), allocator, resizable);
 }
 
 } // namespace c10
