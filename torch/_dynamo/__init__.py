@@ -78,8 +78,6 @@ def reset() -> None:
         _reset_guarded_backend_cache()
         reset_frame_count()
         torch._C._dynamo.compiled_autograd.clear_cache()
-        convert_frame.FRAME_COUNTER = 0
-        convert_frame.FRAME_COMPILE_COUNTER.clear()
 
 
 def reset_code_caches() -> None:

@@ -710,8 +710,12 @@ def meta__scaled_dot_product_efficient(fake_mode, func, *args, **kwargs):
     res = res.transpose(1, 2)
 
     # See Note [Seed and Offset]:
-    seed = convert_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device)
-    offset = convert_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device)
+    seed = convert_tensor(
+        torch.empty((), dtype=torch.long, device="meta"), query.device
+    )
+    offset = convert_tensor(
+        torch.empty((), dtype=torch.long, device="meta"), query.device
+    )
 
     return res, logsum_exp, seed, offset
 
