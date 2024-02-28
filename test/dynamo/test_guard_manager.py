@@ -181,6 +181,23 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(guard(foo))
         self.assertFalse(guard([]))
 
+    def test_no_hasattr_guard(self):
+        class Bar:
+            def __init__(self):
+                self.bar = 2
+
+        bar = Bar()
+
+        class Foo:
+            def __init__(self):
+                self.foo = 2
+
+        foo = Foo()
+
+        guard = guards.NO_HASATTR("foo", ["hasattr(x, 'foo') == False"])
+        self.assertTrue(guard(bar))
+        self.assertFalse(guard(foo))
+
     def test_tensor_aliasing_guard(self):
         guard_manager = RootGuardManager()
 
@@ -412,6 +429,24 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(guard_manager.check(foo))
         self.assertFalse(guard_manager.check([3, 4]))
         self.assertFalse(guard_manager.check("foo"))
+
+    def test_dict_getitem_accessor(self):
+        foo = {
+            "a": 1,
+            "b": 2,
+        }
+
+        guards_manager = RootGuardManager()
+        guards_manager.add_type_match_guard(id_type(foo), ["type(x) == Foo"])
+        guards_manager.dict_getitem_manager("a", 1).add_equals_match_guard(
+            1, ["a == 1"]
+        )
+        guards_manager.dict_getitem_manager("b", 2).add_equals_match_guard(
+            2, ["b == 2"]
+        )
+
+        self.assertTrue(guards_manager.check(foo))
+        self.assertFalse(guards_manager.check({"a": 1, "b": 3}))
 
     def test_globals(self):
         global global_pair, Pair

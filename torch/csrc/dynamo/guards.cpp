@@ -1043,6 +1043,22 @@ class DATA_PTR_MATCH : public LeafGuard {
   void* _data_ptr;
 };
 
+// Checks that an attr is absent in the object. We don't need the opposite
+// HASATTR guard because we can just rely on GetAttrGuardAccessor to act as
+// HASATTR guard.
+class NO_HASATTR : public LeafGuard {
+ public:
+  NO_HASATTR(py::object attr_name, py::object verbose_code_parts)
+      : LeafGuard(verbose_code_parts), _attr_name(attr_name.ptr()) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    return PyObject_HasAttr(value, _attr_name) == 0;
+  }
+
+ private:
+  PyObject* _attr_name;
+};
+
 /**
  * Relational guards compare more than one value. We implement Relational
  * guards by capturing some state in the guard object. For example for tensor
@@ -2181,6 +2197,52 @@ class GetItemGuardAccessor : public GuardAccessor {
 };
 
 /**
+ * Represents dict[name] acccessor. This is ONLY used for f_locals because its a
+ * dict, and DictGuardManager does not support sorting. We differentiate it from
+ * GetItemGuardAccessor because PyDict_GetItem should be fasten the
+ * PyObject_GetItem.
+ */
+class DictGetItemGuardAccessor : public GuardAccessor {
+ public:
+  DictGetItemGuardAccessor(
+      RootGuardManager* root,
+      py::str name,
+      py::handle example_value)
+      : GuardAccessor(root, name, example_value), _attr_name(name.ptr()) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    PyObject* x = PyDict_GetItem(obj, _attr_name); // borrowed ref
+    if (x == nullptr) {
+      PyErr_Clear();
+      return false;
+    }
+    bool result = _guard_manager->check_nopybind(x);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* x = PyDict_GetItem(obj, _attr_name); // borrowed ref
+    if (x == nullptr) {
+      PyErr_Clear();
+      return GuardDebugInfo(false, std::string("KeyError ") + repr(), 0);
+    }
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    return result;
+  }
+
+  std::string repr() const override {
+    return "DictGetItemGuardAccessor(" +
+        py::str(_attr_name).cast<std::string>() + ")";
+  }
+
+ private:
+  PyObject* _attr_name;
+};
+
+/**
  * Represents f_globals acccessor. This sits as a child accessor of the
  * RootGuardManager.
  */
@@ -2520,6 +2582,10 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DATA_PTR_MATCH")
       .def(py::init<py::object, py::list>())
       .def("__call__", &DATA_PTR_MATCH::check);
+  py::class_<NO_HASATTR, LeafGuard, std::shared_ptr<NO_HASATTR>>(
+      py_m, "NO_HASATTR")
+      .def(py::init<py::object, py::list>())
+      .def("__call__", &NO_HASATTR::check);
   py::class_<DYNAMIC_INDICES, LeafGuard, std::shared_ptr<DYNAMIC_INDICES>>(
       py_m, "DYNAMIC_INDICES")
       .def(py::init<bool, py::set, py::list>())
@@ -2559,6 +2625,11 @@ PyObject* torch_c_dynamo_guards_init() {
       GetItemGuardAccessor,
       GuardAccessor,
       std::unique_ptr<GetItemGuardAccessor>>(py_m, "GetItemGuardAccessor");
+  py::class_<
+      DictGetItemGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<DictGetItemGuardAccessor>>(
+      py_m, "DictGetItemGuardAccessor");
   py::class_<
       GlobalsGuardAccessor,
       GuardAccessor,
@@ -2674,6 +2745,14 @@ PyObject* torch_c_dynamo_guards_init() {
                 std::make_shared<DATA_PTR_MATCH>(data_ptr, verbose_code_parts));
           })
       .def(
+          "add_no_hasattr_guard",
+          [](GuardManager& self,
+             py::object attr_name,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(
+                std::make_shared<NO_HASATTR>(attr_name, verbose_code_parts));
+          })
+      .def(
           "add_dynamic_indices_guard",
           [](GuardManager& self,
              bool has_attr,
@@ -2729,6 +2808,12 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "getitem_manager",
           &GuardManager::get_child_manager<GetItemGuardAccessor>,
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "dict_getitem_manager",
+          &GuardManager::get_child_manager<DictGetItemGuardAccessor>,
           py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
