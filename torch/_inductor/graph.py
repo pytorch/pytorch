@@ -969,7 +969,7 @@ class GraphLowering(torch.fx.Interpreter):
                 # Realize so that outputs are correctly aliased
                 result.realize()
 
-            if (is_output or is_input_for_as_strided) and isinstance(
+            if is_input_for_as_strided and isinstance(
                 n.meta["val"], torch.Tensor
             ):
                 strides = n.meta["val"].stride()
