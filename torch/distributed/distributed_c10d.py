@@ -1126,20 +1126,18 @@ def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) ->
         None
     """
     if group is None:
-        pg = _get_default_group()
-    else:
-        pg = group
-    if _rank_not_in_group(pg):
+        group = _get_default_group()
+    if _rank_not_in_group(group):
         raise ValueError("Invalid process group specified")
     assert isinstance(group, ProcessGroup)
     devices = group._device_types
     backends = set()
     if torch.device("cpu") in devices and is_gloo_available():
-        backend = pg._get_backend(torch.device("cpu"))
+        backend = group._get_backend(torch.device("cpu"))
         if isinstance(backend, ProcessGroupGloo):
             backends.add(backend)
     elif torch.device("cuda") in devices:
-        backend = pg._get_backend(torch.device("cuda"))
+        backend = group._get_backend(torch.device("cuda"))
         if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
             backends.add(backend)  # type: ignore[arg-type]
         elif is_gloo_available() and isinstance(backend, ProcessGroupGloo):
