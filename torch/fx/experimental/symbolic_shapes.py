@@ -802,36 +802,95 @@ DimConstraint = Union[StrictMinMaxConstraint, RelaxedUnspecConstraint, None]
 @dataclass(frozen=True)
 class EqualityConstraint(Constraint):
     """
-    Given pairs of sources corresponding to pairs of dynamic dimensions that
-    are specified equal, represent them in a union-find data structure so that
-    we can efficiently check whether two such sources are transitively equal.
+    Represent and decide various kinds of equality constraints between input sources.
+
+    A "source pair" is a pair of input sources for dynamic dimensions that
+    are specified equal. We represent `source_pairs` in a union-find forest
+    so that we can efficiently check whether two such sources are transitively equal.
+
+    A "derived equality" relates an input source to an expression over a root.
+    The root can be another input source, corresponding to some dynamic dimension,
+    or a phantom symbol that does not directly represent any dynamic dimension. We
+    represent `derived_equalities` involving input sources in a transitively-closed map
+    so that we can efficiently check whether an input source is transitively equal to
+    a given expression over another input source.
+    (NOTE: In contrast, it is easy to decide whether an input source is transitively equal
+    to a given expression over a phantom symbol; such expressions are already in canonical
+    form and so the problem reduces to symbolic expression equality.)
     """
     source_pairs: List[Tuple[Source, Source]]
+    derived_equalities: List[Tuple[Source, Union[Source, sympy.Symbol], Callable[[sympy.Expr], sympy.Expr]]]
+    phantom_symbols: List[sympy.Symbol]
 
     def __post_init__(self):
-        object.__setattr__(self, "_parents", {})
+        """Pre-processing to answer queries `is_equal` and `is_derived` below.
+
+        Example: Suppose we are given:
+          source_pairs [a = b, b = c]
+          derived_equalities [d = c + 1, e = d - 1]
+        We first construct a union find with source_pairs:
+          _parents = {a: a, b: a, c: a}
+        Then we compute canonical symbolic expressions, recursively applying derived_equalities
+        until we bottom out:
+          _defs = {d: c + 1, e: (c + 1) - 1 aka c}
+        """
+
+        # self._parents is a map from input sources to input sources where, conceptually,
+        # these are directed edges in a union-find forest
+        _parents: Dict[Source, Source] = {}
+        object.__setattr__(self, "_parents", _parents)
+        # self._defs is a map from input sources to "canonical" symbolic expressions,
+        # i.e., unary expressions with symbols that corresponds to regular Dims (i.e.,
+        # not derived Dims)
+        _defs: Dict[Source, sympy.Expr] = {}
+        object.__setattr__(self, "_defs", _defs)
+
         for source1, source2 in self.source_pairs:
+            # preprocess into a union-find forest
             self._union(self._find(source1), self._find(source2))
+        for source, root, fn in self.derived_equalities:
+            # preprocess into a transitively-closed map
+            # NOTE(avik): we reuse the union-find forest for canonicalizing input sources
+            if isinstance(root, sympy.Symbol):
+                self._defs[self._find(source)] = fn(root)
+            else:
+                self._defs[self._find(source)] = fn(self._rewrite(root))
 
     def _find(self, source):
+        # chase edges to find the root of this equivalence class
         if source in self._parents:
             return self._find(self._parents[source])
         else:
             return source
 
     def _union(self, root1, root2):
+        # merge two equivalence classes by adding an edge from one root to the other
         if root1 != root2:
             self._parents[root1] = root2
 
-    def render(self):
-        buf = ", ".join(
-            f"{source1.name()} == {source2.name()}"
-            for (source1, source2) in self.source_pairs
-        )
-        return "{" + buf + "}"
+    def _rewrite(self, src):
+        # always represent the given source by the root of its equivalence class
+        src = self._find(src)
+        if src in self._defs:
+            # simply look up the definition if it exists
+            # NOTE(avik): This works because definitions are always transitively-closed;
+            # otherwise we would have to do recursive rewriting.
+            return self._defs[src]
+        else:
+            # otherwise, create a symbol representing the source
+            return sympy.Symbol(src.name())
 
     def is_equal(self, source1, source2):
-        return self._find(source1) == self._find(source2)
+        return (
+            # check whether source1 and source2 have the same root
+            self._find(source1) == self._find(source2) or
+            # check whether source1 is derived equal to source2
+            self.is_derived(source1, source2, lambda x: x)
+        )
+
+    def is_derived(self, src, symbol_src, fn):
+        # check whether both src and symbol_src have the same definition
+        return self._rewrite(src) == fn(self._rewrite(symbol_src))
 
 
 def _assert_symbol_context(symbolic_context):
@@ -1452,7 +1511,7 @@ class DimConstraints:
         symbolic_equivalences = self._symbolic_equivalences
         self._symbolic_equivalences = []
         for source, expr in symbolic_equivalences:
-            if disable_equivalences and not isinstance(expr, sympy.Symbol):
+            if disable_equivalences and not self._is_supported_equivalence(expr):
                 for s in expr.free_symbols:
                     self._force_specialization(s)
                     sexpr = self._dcp._print_Symbol(s)
@@ -1462,6 +1521,19 @@ class DimConstraints:
         # remaining symbolic equivalences become dynamic equality constraints
         for source, expr in self._symbolic_equivalences:
             self._dynamic_results.add(f"{self._dcp.print_source(source)} == {self._dcp.doprint(expr)}")
+
+    @classmethod
+    def _is_supported_equivalence(cls, expr):
+        # Currently supported Dim ops are linear expressions with integer coefficients.
+        # So check that expr only contains +, *, ints, and a single occurrence of a symbol.
+        # (See also documentation of dynamic_shapes._DerivedDim.)
+        if isinstance(expr, (sympy.Add, sympy.Mul)):
+            lhs, rhs = expr.args
+            return (
+                (cls._is_supported_equivalence(lhs) and isinstance(rhs, sympy.Integer)) or
+                (isinstance(lhs, sympy.Integer) and cls._is_supported_equivalence(rhs))
+            )
+        return isinstance(expr, sympy.Symbol)
 
     def forced_specializations(self):
         """Returns a dictionary of the names of symbols to their specialized value
@@ -1548,7 +1620,8 @@ class DimConstraints:
                 t = transform(s)
                 if t == s:
                     continue
-                left, op, right = t.split(" ")
+                left, op, right = re.split(r"( == | <= | >= | < | > )", t)
+                op = op.strip()
                 if op == "==" and left == right:
                     continue
                 if right.isdigit():
@@ -1557,7 +1630,7 @@ class DimConstraints:
                     relation_with_digit(right, flip(op), int(left))
                 else:
                     assert op == "=="
-                    results[left]["eq"] = right
+                    results[left]["eq"] = sympy.sympify(right)
 
             buf = ""
             debug_names = set()
@@ -1691,7 +1764,6 @@ class DimConstraints:
             )
             buf += f"\n{indent}]\n```\n"
         return buf
-
 
 
 TLS = threading.local()
@@ -2658,7 +2730,9 @@ class ShapeEnv:
         source_ref=lambda n: n.name(),
         *,
         input_contexts: Optional[DimList[SymbolicContext]] = None,
-        equalities_inputs: Optional[Set[Tuple[Source, Source]]] = None,
+        # Encodes user-specified input shape equations of the form s = s' and s = fn(s').
+        # (See docs on EqualityConstraint for details of the encoding.)
+        equalities_inputs: Optional[EqualityConstraint] = None,
         _simplified=False,
         # Indicates if we should produce guards for known static values.
         ignore_static=True,
@@ -2804,21 +2878,48 @@ class ShapeEnv:
             for i, src in enumerate(sources):
                 source_index[src.name()] = i
 
-            def get_symbol(tensor_dim_src):
+            def get_expression(tensor_dim_src):
                 fake = placeholders[source_index[tensor_dim_src.base.name()]]
                 symint = fake.shape[tensor_dim_src.idx]
                 assert isinstance(symint, torch.SymInt)
                 return symint.node.expr
 
             for src1, src2 in equalities_inputs.source_pairs:
-                s1, s2 = get_symbol(src1), get_symbol(src2)
-                concrete_val = self.evaluate_expr(sympy.Eq(s1, s2))
+                expr1, expr2 = get_expression(src1), get_expression(src2)
+                # Check whether given input shape values satisfy a specified equation s = s'.
+                # - Raise when the equation was violated by the given input shape values.
+                # - Otherwise issue a guard to constrain them.
+                concrete_val = self.evaluate_expr(sympy.Eq(expr1, expr2))
                 if not concrete_val:
                     raise ConstraintViolationError(
-                        f"{src1.name()} = {self.var_to_val[s1]}"
+                        f"{src1.name()} = {expr1.subs(self.var_to_val)}"
                         " is not equal to "
-                        f"{src2.name()} = {self.var_to_val[s2]}"
+                        f"{src2.name()} = {expr2.subs(self.var_to_val)}"
                     )
+
+            for src, root, fn in equalities_inputs.derived_equalities:
+                expr1 = get_expression(src)
+                # recall that root is either a phantom symbol or an input source
+                expr2, debug_name = (
+                    (root, self.var_to_sources[root][0].name()) if isinstance(root, sympy.Symbol)
+                    else (get_expression(root), self._debug_name(root))
+                )
+                expr2_ = fn(expr2)
+                # Check whether given input shape values satisfy a specified equation s = fn(s').
+                # - Raise when the equation was violated by the given input shape values.
+                # - Otherwise issue a guard to constrain them.
+                concrete_val = self.evaluate_expr(sympy.Eq(expr1, expr2_))
+                if not concrete_val:
+                    raise ConstraintViolationError(
+                        f"Expected input {src.name()} to be equal to "
+                        f"{fn(sympy.Symbol(debug_name))}, "
+                        f"where {debug_name} = {expr2.subs(self.var_to_val)}, "
+                        f"but got {expr1.subs(self.var_to_val)}"
+                    )
+
+            for phantom_symbol in equalities_inputs.phantom_symbols:
+                # we created additional phantom symbols that are not input shape dimensions
+                symbol_to_source[phantom_symbol].extend(self.var_to_sources[phantom_symbol])
 
         # How do we know what the value of s0 is?  Fresh variables can only be
         # bound by inputs, so there MUST be some other input which binds the
@@ -2986,19 +3087,37 @@ class ShapeEnv:
                 sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
                 exprs.append(f"{source_ref(source)} == {sexpr}")
                 if (
-                    isinstance(expr, sympy.Symbol) and
-                    expr in symbol_to_constraints and
                     isinstance(source, TensorPropertySource)
                     and source.prop is TensorProperty.SIZE
-                    and equalities_inputs and
-                    not equalities_inputs.is_equal(source, symbol_to_source[expr][0])
+                    and equalities_inputs
+                    and len(expr.free_symbols) == 1
                 ):
-                    msg = (
-                        f"The values of {self._debug_name(source)} = {source.name()} and "
-                        f"{self._debug_name(symbol_to_source[expr][0])} = {symbol_to_source[expr][0].name()} "
-                        "must always be equal."
-                    )
-                    record_constraint_violation(equalities_inputs.warn_only, self._debug_name(source), msg)
+                    symbol = next(iter(expr.free_symbols))
+                    if (
+                        isinstance(expr, sympy.Symbol) and
+                        expr in symbol_to_constraints and
+                        not equalities_inputs.is_equal(source, symbol_to_source[expr][0])
+                    ):
+                        msg = (
+                            f"The values of {self._debug_name(source)} = {source.name()} and "
+                            f"{self._debug_name(symbol_to_source[expr][0])} = {symbol_to_source[expr][0].name()} "
+                            "must always be equal."
+                        )
+                        record_constraint_violation(equalities_inputs.warn_only, self._debug_name(source), msg)
+
+                    if (
+                        not isinstance(expr, sympy.Symbol) and
+                        symbol in symbol_to_constraints and
+                        not equalities_inputs.is_derived(source, symbol_to_source[symbol][0], lambda x: expr.subs(symbol, x))
+                    ):
+                        src = symbol_to_source[symbol][0]
+                        msg = (
+                            f"The values of {self._debug_name(source)} = {source.name()} must always be related to "
+                            f"the values of {self._debug_name(src)} = {src.name()} by "
+                            f"{self._debug_name(source)} = {expr.subs(symbol, sympy.sympify(self._debug_name(src)))}."
+                        )
+                        record_constraint_violation(equalities_inputs.warn_only, self._debug_name(source), msg)
+
                 # NB: Not necessary to report constraint violations here:
                 # constraints are guaranteed to be on symbols (we've already
                 # caught constants and non-atomic expressions), so we only

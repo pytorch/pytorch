@@ -1663,11 +1663,9 @@ def _automatic_dynamic(
                 vr=constraint_range.vr & old_constraint_range.vr,
                 warn_only=False,
             )
-            if old_debug_name is not None:
-                assert debug_name is None or debug_name == old_debug_name
-                new_debug_name = old_debug_name
-            else:
-                new_debug_name = debug_name
+            # It is possible for (non-None) old_debug_name and debug_name to be different
+            # but this will only happen the corresponding Dims can be derived equal.
+            new_debug_name = old_debug_name or debug_name
             dim2constraint[dim] = new_constraint_range, new_debug_name
         else:
             dim2constraint[dim] = constraint_range, debug_name
