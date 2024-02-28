@@ -1743,11 +1743,49 @@ All tensors need to be of the same size.
 
 Arguments:
     tensors (sequence of Tensors): sequence of tensors to concatenate
-    dim (int): dimension to insert. Has to be between 0 and the number
-        of dimensions of concatenated tensors (inclusive)
+    dim (int, optional): dimension to insert. Has to be between 0 and the number
+        of dimensions of concatenated tensors (inclusive). Default: 0
 
 Keyword args:
     {out}
+
+Example::
+
+    >>> x = torch.randn(2, 3)
+    >>> x
+    tensor([[ 0.3367,  0.1288,  0.2345],
+            [ 0.2303, -1.1229, -0.1863]])
+    >>> x = torch.stack((x, x)) # same as torch.stack((x, x), dim=0)
+    >>> x
+    tensor([[[ 0.3367,  0.1288,  0.2345],
+             [ 0.2303, -1.1229, -0.1863]],
+
+            [[ 0.3367,  0.1288,  0.2345],
+             [ 0.2303, -1.1229, -0.1863]]])
+    >>> x.size()
+    torch.Size([2, 2, 3])
+    >>> x = torch.stack((x, x), dim=1)
+    tensor([[[ 0.3367,  0.1288,  0.2345],
+             [ 0.3367,  0.1288,  0.2345]],
+
+            [[ 0.2303, -1.1229, -0.1863],
+             [ 0.2303, -1.1229, -0.1863]]])
+    >>> x = torch.stack((x, x), dim=2)
+    tensor([[[ 0.3367,  0.3367],
+             [ 0.1288,  0.1288],
+             [ 0.2345,  0.2345]],
+
+            [[ 0.2303,  0.2303],
+             [-1.1229, -1.1229],
+             [-0.1863, -0.1863]]])
+    >>> x = torch.stack((x, x), dim=-1)
+    tensor([[[ 0.3367,  0.3367],
+             [ 0.1288,  0.1288],
+             [ 0.2345,  0.2345]],
+
+            [[ 0.2303,  0.2303],
+             [-1.1229, -1.1229],
+             [-0.1863, -0.1863]]])
 """.format(
         **common_args
     ),
@@ -6902,10 +6940,11 @@ add_docstr(
     r"""
 mean(input, *, dtype=None) -> Tensor
 
-Returns the mean value of all elements in the :attr:`input` tensor.
+Returns the mean value of all elements in the :attr:`input` tensor. Input must be floating point or complex.
 
 Args:
-    {input}
+    input (Tensor):
+      the input tensor, either of floating point or complex dtype
 
 Keyword args:
     {dtype}
@@ -13826,7 +13865,7 @@ Keyword args:
                             preferred. It will error if :attr:`side` is set to "left" while this is True.
     side (str, optional): the same as :attr:`right` but preferred. "left" corresponds to False for :attr:`right`
                             and "right" corresponds to True for :attr:`right`. It will error if this is set to
-                            "left" while :attr:`right` is True.
+                            "left" while :attr:`right` is True. Default value is None.
     out (Tensor, optional): the output tensor, must be the same size as :attr:`values` if provided.
     sorter (LongTensor, optional): if provided, a tensor matching the shape of the unsorted
                             :attr:`sorted_sequence` containing a sequence of indices that sort it in the
