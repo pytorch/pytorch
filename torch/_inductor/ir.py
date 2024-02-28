@@ -2545,6 +2545,7 @@ class Layout(IRNode):
         have also been padded.
         """
         new_stride = []
+        assert self._stride is not None
         for s in self._stride:
             if s > 1 and s % align != 0:
                 s = (s + align - 1) // align * align
