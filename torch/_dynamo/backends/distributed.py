@@ -284,8 +284,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
                     out = compiled_submod_real(*new_args, **kwargs)
                     # output should be fake or subclass
                     assert all(
-                        not isinstance(t, torch.Tensor)
-                        or type(t) is not torch.Tensor
+                        (not isinstance(t, torch.Tensor) or type(t) is not torch.Tensor)
                         for t in (out if isinstance(out, (list, tuple)) else [out])
                     )
                     return out
