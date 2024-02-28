@@ -164,6 +164,8 @@ class TracerBase:
 
         elif self.module_stack:
             node.meta['nn_module_stack'] = copy.copy(self.module_stack)
+        elif not node.op in ["placeholder", "output"]:
+            node.meta['nn_module_stack'] = {}
         return node
 
     @compatibility(is_backward_compatible=True)
