@@ -1895,8 +1895,6 @@ symbolic_tensor_failures = {
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
     xfail('unique', ''),  # aten._unique2.default - couldn't find symbolic meta function/decomposition
 
-    # AssertionError: False != True - https://github.com/pytorch/pytorch/issues/113905
-    xfail('dist', ''),
     xfail('norm', ''),
     xfail('linalg.vector_norm', ''),
     xfail('linalg.norm', 'subgradients_at_zero'),
