@@ -240,6 +240,7 @@ def _create_chunk_from_dtensor(tensor: DTensor) -> ChunkStorageMetadata:
         sizes=sizes,
     )
 
+
 def _create_chunk_list(tensor: torch.Tensor) -> List[ChunkStorageMetadata]:
     if isinstance(tensor, DTensor):
         local_chunks = [_create_chunk_from_dtensor(tensor)]
@@ -257,6 +258,7 @@ def _create_chunk_list(tensor: torch.Tensor) -> List[ChunkStorageMetadata]:
 
     return local_chunks
 
+
 def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
     if not isinstance(md, BytesStorageMetadata):
         try:
@@ -265,8 +267,7 @@ def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
             raise ValueError(
                 f"Invalid checkpoint metadata for {fqn}, "
                 + f"expected BytesStorageMetadata but found {type(md)}",
-                ex
-            )
+            ) from ex
 
         return create_read_items_for_chunk_list(fqn, md, local_chunks)
     else:
@@ -279,6 +280,7 @@ def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
                 length=0,
             )
         ]
+
 
 def _init_state_dict(state_dict: STATE_DICT_TYPE) -> None:
     state_dict_assigned_storage = tree_map_only(

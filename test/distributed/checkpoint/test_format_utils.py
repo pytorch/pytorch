@@ -1,11 +1,11 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
+import torch.distributed as dist
+import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 
 import torch.nn.functional as F
-import torch.distributed.checkpoint as dcp
-import torch.distributed as dist
 from torch.distributed._tensor.device_mesh import init_device_mesh
 from torch.distributed.checkpoint.format_utils import (
     BroadcastingTorchSaveReader,
@@ -17,9 +17,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
-    ModelArgs,
     skip_if_lt_x_gpu,
-    Transformer,
     with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
@@ -45,10 +43,10 @@ class SimpleModelUneven(nn.Module):
     def get_input(self):
         return torch.rand(4, 5, device="cuda")
 
+
 class TestFormatUtils(DTensorTestBase):
     @with_temp_dir
     def test_dcp_to_torch_save(self) -> None:
-        # Using a transformer model to simulate a 'complicated enough' state dict w/ nested modules
         model = SimpleModelUneven()
         dcp.save({"model": model}, checkpoint_id=self.temp_dir)
 
