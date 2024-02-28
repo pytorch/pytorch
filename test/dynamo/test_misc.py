@@ -9607,7 +9607,6 @@ fn
             lambda mod: mod[0],
         )
 
-    @unittest.expectedFailure
     def test_linear_module_free(self):
         self._test_compile_model_free(
             lambda: (torch.nn.Linear(100, 100), torch.randn(100, 100)),

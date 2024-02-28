@@ -2525,3 +2525,14 @@ def invalid_removeable_handle():
         pass
 
     return RemovableHandle(Invalid())
+
+
+# Super hacky - returns a proxy object for a nn.Module that references
+# to the original nn.Module, but is a distinct object.
+def nn_module_proxy(mod):
+    if not isinstance(mod, torch.nn.Module):
+        return mod
+    proxy = torch.nn.Module.__new__(torch.nn.Module)
+    proxy.__class__ = mod.__class__
+    proxy.__dict__ = mod.__dict__
+    return proxy

@@ -84,6 +84,7 @@ from .utils import (
     lazy_format_graph_code,
     lazy_format_graph_tabular,
     LazyString,
+    nn_module_proxy,
     same,
 )
 from .variables.base import VariableTracker
@@ -865,7 +866,12 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.cleanup_graph()
         tx.prune_dead_locals()
         stack_values = list(tx.stack)
-        root = FakeRootModule(self.nn_modules)
+        # super hacky - use nn.Module proxies in the constructed GraphModule so that
+        # it does not hold additional strong references to the originals
+        nn_modules_proxies = {
+            name: nn_module_proxy(mod) for name, mod in self.nn_modules.items()
+        }
+        root = FakeRootModule(nn_modules_proxies)
         # Add all the local vars to the "stack" so restore at the end
         restore_vars = []
         val_to_names: Dict[VariableTracker, List[str]] = {}
