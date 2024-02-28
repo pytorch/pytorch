@@ -9,7 +9,6 @@ import torch
 from torch import fx
 from torch._dynamo.output_graph import GraphCompileReason
 from torch._dynamo.utils import deepcopy_to_fake_tensor, detect_fake_mode
-from torch._logging import trace_structured
 from torch.fx.node import Node
 
 # Regular log messages should go through 'log'.
@@ -312,18 +311,6 @@ class DDPOptimizer:
                 debug_str += f"\n---{name} graph---\n{module.graph}\n"
         debug_str += "\n---------------\n"
         ddp_graph_log.debug(debug_str)
-
-        trace_structured(
-            "optimize_ddp_split_graph",
-            payload_fn=lambda: split_gm.print_readable(print_output=False),
-        )
-        for name, module in split_gm.named_modules():
-            if "." not in name and len(name):
-                trace_structured(
-                    "optimize_ddp_split_child",
-                    lambda: {"name": name},
-                    payload_fn=lambda: module.print_readable(print_output=False),
-                )
 
         # 3 (lazy compile): Replace submodules with lazily compiling submodule
         class SubmoduleReplacer(torch.fx.interpreter.Interpreter):
