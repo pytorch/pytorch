@@ -59,7 +59,6 @@ ignored_c_binding_in_graph_function_names = {
     "torch._C._data_address",
     "torch._C._is_cow_tensor",
     "torch._lazy_clone",
-    "torch._test_parallel_materialize",
     "torch._C._storage_address",
     "torch._C._pickle_save",
     "torch.cuda._get_device_properties",
