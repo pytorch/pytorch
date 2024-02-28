@@ -148,6 +148,7 @@ PyObject* THXPModule_setStream_wrap(
           args,
           kwargs,
           "|LLL",
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
           &stream_id,
           &device_index,
@@ -155,7 +156,9 @@ PyObject* THXPModule_setStream_wrap(
   }
 
   auto stream = at::xpu::XPUStream::unpack3(
-      stream_id, device_index, static_cast<c10::DeviceType>(device_type));
+      stream_id,
+      static_cast<c10::DeviceIndex>(device_index),
+      static_cast<c10::DeviceType>(device_type));
 
   auto device = c10::xpu::current_device();
   if (device != stream.device_index()) {
@@ -237,8 +240,8 @@ static void registerXpuDeviceProperties(PyObject* module) {
             std::ostringstream stream;
             stream << "_XpuDeviceProperties(name='" << prop.name
                    << "', platform_name='" << prop.platform_name << "', type='"
-                   << get_device_type(prop)
-                   << ", total_memory=" << prop.global_mem_size / (1024 * 1024)
+                   << get_device_type(prop) << ", total_memory="
+                   << prop.global_mem_size / (1024ull * 1024)
                    << "MB, max_compute_units=" << prop.max_compute_units
                    << ", gpu_eu_count=" << prop.gpu_eu_count
                    << ", gpu_subslice_count=" << gpu_subslice_count(prop)
@@ -278,9 +281,7 @@ static PyObject* THXPModule_initExtension(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,
-// cppcoreguidelines-avoid-non-const-global-variables,
-// cppcoreguidelines-avoid-c-arrays)
+// NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
 static struct PyMethodDef _THXPModule_methods[] = {
     {"_xpu_init", THXPModule_initExtension, METH_NOARGS, nullptr},
     {"_xpu_setDevice", THXPModule_setDevice_wrap, METH_O, nullptr},
