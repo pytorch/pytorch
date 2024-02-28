@@ -3301,7 +3301,7 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(nt._values, torch.cat([x._values for x in chunks], dim=0))
 
         # chunk on ragged dim not supported
-        with self.assertRaisesRegex(RuntimeError, "chunk.* not supported for NestedTensor on dim=0 or dim=1"):
+        with self.assertRaisesRegex(RuntimeError, "chunk.* not supported for NestedTensor on dim=1"):
             nt.chunk(2, dim=1)
 
     def test_squeeze(self, device):
