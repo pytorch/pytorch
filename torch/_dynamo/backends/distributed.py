@@ -4,12 +4,12 @@ import logging
 import traceback
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
-from unittest import mock
 
 import torch
 from torch import fx
 from torch._dynamo.output_graph import GraphCompileReason
 from torch._dynamo.utils import deepcopy_to_fake_tensor, detect_fake_mode
+from torch._logging import trace_structured
 from torch.fx.node import Node
 
 # Regular log messages should go through 'log'.
@@ -327,7 +327,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             # appropriate strides. Then, all of aot autograd's runtime logic is replayed.
             # This gives us the appropriately strided outputs here which will reflect runtime strides.
 
-            class FakifyGuard:
+            class FakeifyFirstAOTInvocationGuard:
                 def __init__(self):
                     self.tc = torch._guards.TracingContext.try_get()
                     assert self.tc
@@ -339,7 +339,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             # For aot_eager and other backends, tracing context is not set
             has_tracing_context = torch._guards.TracingContext.try_get() is not None
             if has_tracing_context:
-                g = FakifyGuard()
+                g = FakeifyFirstAOTInvocationGuard()
 
             from torch._dynamo.utils import counters
 
@@ -358,9 +358,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
 
             # Finally, we have to produce inputs for use compiling the next submodule,
             # and these need to be FakeTensors, so we execute the module under fake_mode
-            with self.fake_mode, mock.patch.object(
-                self.fake_mode, "allow_non_fake_inputs", True
-            ):
+            with self.fake_mode:
                 if has_tracing_context and invoked_aot_autograd:
                     return compiled_submod_real(*new_args, **kwargs)
                 else:
@@ -556,6 +554,18 @@ class DDPOptimizer:
                 debug_str += f"\n---{name} graph---\n{module.graph}\n"
         debug_str += "\n---------------\n"
         ddp_graph_log.debug(debug_str)
+
+        trace_structured(
+            "optimize_ddp_split_graph",
+            payload_fn=lambda: split_gm.print_readable(print_output=False),
+        )
+        for name, module in split_gm.named_modules():
+            if "." not in name and len(name):
+                trace_structured(
+                    "optimize_ddp_split_child",
+                    lambda: {"name": name},
+                    payload_fn=lambda: module.print_readable(print_output=False),
+                )
 
         # NOTE, we want to enable `optimize_ddp_lazy_compile` by default as soon as possible,
         # becuase it will fix stride mismatch errors (see motivation: https://github.com/pytorch/pytorch/pull/114154).
