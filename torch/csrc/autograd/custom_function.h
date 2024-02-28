@@ -182,17 +182,17 @@ struct CppNode : public Node {
 
   void compiled_args(CompiledNodeArgs& args) override {
     // TODO: collect the actual function id by calling the python counter
-    // // args.collect(ctx_.saved_data);
-    // // args.collect(ctx_.non_differentiable_);
-    // // args.collect(ctx_.dirty_inputs_);
-    // args.collect(ctx_.saved_variables_);
-    // // args.collect(ctx_.to_save_);
-    // // args.collect(ctx_.materialize_grads_);
-    // // args.collect(ctx_.grad_fn_);
-    // args.collect(ctx_.has_freed_buffers_);
-    // args.collect(is_variable_input_);
-    // args.collect(input_info_);
-    // args.collect(output_info_);
+    // args.collect(ctx_.saved_data);
+    // args.collect(ctx_.non_differentiable_);
+    // args.collect(ctx_.dirty_inputs_);
+    args.collect(ctx_.saved_variables_);
+    // args.collect(ctx_.to_save_);
+    // args.collect(ctx_.materialize_grads_);
+    // args.collect(ctx_.grad_fn_);
+    args.collect(ctx_.has_freed_buffers_);
+    args.collect(is_variable_input_);
+    args.collect(input_info_);
+    args.collect(output_info_);
   }
 
   variable_list apply_with_saved(
@@ -203,29 +203,29 @@ struct CppNode : public Node {
           std::string("apply_with_saved not implemented for non-traceable node: ") + name());
     }
 
-    // // saved.before(ctx_.saved_data);
-    // // saved.before(ctx_.non_differentiable_);
-    // // saved.before(ctx_.dirty_inputs_);
-    // saved.before(ctx_.saved_variables_);
-    // // saved.before(ctx_.to_save_);
-    // // saved.before(ctx_.materialize_grads_);
-    // // saved.before(ctx_.grad_fn_);
-    // saved.before(ctx_.has_freed_buffers_);
+    // saved.before(ctx_.saved_data);
+    // saved.before(ctx_.non_differentiable_);
+    // saved.before(ctx_.dirty_inputs_);
+    saved.before(ctx_.saved_variables_);
+    // saved.before(ctx_.to_save_);
+    // saved.before(ctx_.materialize_grads_);
+    // saved.before(ctx_.grad_fn_);
+    saved.before(ctx_.has_freed_buffers_);
     // saved.before(is_variable_input_);
-    // saved.before(input_info_);
-    // saved.before(output_info_);
+    saved.before(input_info_);
+    saved.before(output_info_);
     auto results = apply(variable_list(inputs));
-    // // saved.after(ctx_.saved_data);
-    // // saved.after(ctx_.non_differentiable_);
-    // // saved.after(ctx_.dirty_inputs_);
-    // saved.after(ctx_.saved_variables_);
-    // // saved.after(ctx_.to_save_);
-    // // saved.after(ctx_.materialize_grads_);
-    // // saved.after(ctx_.grad_fn_);
-    // saved.after(ctx_.has_freed_buffers_);
+    // saved.after(ctx_.saved_data);
+    // saved.after(ctx_.non_differentiable_);
+    // saved.after(ctx_.dirty_inputs_);
+    saved.after(ctx_.saved_variables_);
+    // saved.after(ctx_.to_save_);
+    // saved.after(ctx_.materialize_grads_);
+    // saved.after(ctx_.grad_fn_);
+    saved.after(ctx_.has_freed_buffers_);
     // saved.after(is_variable_input_);
-    // saved.after(input_info_);
-    // saved.after(output_info_);
+    saved.after(input_info_);
+    saved.after(output_info_);
     return results;
   }
 };
