@@ -301,9 +301,8 @@ class SymInt:
         return str(self.node)
 
     def __hash__(self) -> builtins.int:
-        ret = self.node.nested_int()
-        if ret is not None:
-            return hash(ret)
+        if self.node.is_nested_int():
+            return hash(self.node.nested_int())
         else:
             # We could support constant SymInts as well, but not doing it for now
             raise TypeError("unhashable type: non-nested SymInt")
@@ -1447,7 +1446,7 @@ _storage_classes = {
     TypedStorage
 }
 
-# The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
+# The _tensor_classes set is initialized by the call to initialize_python_bindings.
 _tensor_classes: Set[Type] = set()
 
 # If you edit these imports, please update torch/__init__.py.in as well
