@@ -3688,9 +3688,10 @@ class ShapeEnv:
             # TODO: deal with conjunction/disjunction?
             if len(free) == 1:
                 lhs = free[0]
-                res, rhs = try_solve(expr, lhs)
-                if isinstance(res, (sympy.Lt, sympy.Le, sympy.Gt, sympy.Ge)) and isinstance(rhs, sympy.Integer):
-                    bound = int(rhs)
+                r = try_solve(expr, lhs)
+                if r is not None and isinstance(r[0], (sympy.Lt, sympy.Le, sympy.Gt, sympy.Ge)) and isinstance(r[1], sympy.Integer):
+                    res = r[0]
+                    bound = int(r[1])
                     if isinstance(res, sympy.Lt):
                         # lhs < bound
                         update_vr = [-sympy.oo, bound - 1]
