@@ -312,7 +312,6 @@ GENERATED_AUTOGRAD_CPP = [
     "torch/csrc/autograd/generated/TraceType_4.cpp",
     "torch/csrc/autograd/generated/ADInplaceOrViewType_0.cpp",
     "torch/csrc/autograd/generated/ADInplaceOrViewType_1.cpp",
-    "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
     "torch/csrc/lazy/generated/LazyNativeFunctions.cpp",
     "torch/csrc/lazy/generated/RegisterAutogradLazy.cpp",
     "torch/csrc/lazy/generated/RegisterLazy.cpp",

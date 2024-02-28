@@ -412,6 +412,7 @@ extern "C" {{
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Operators.h>
+#include <ATen/NativeFunctions.h>
 #else
 {includes}
 #endif
