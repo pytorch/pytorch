@@ -1718,7 +1718,9 @@ class BuiltinVariable(VariableTracker):
         return None
 
     def call_is_(self, tx, left, right):
-        # dataclasse.Field generates a piece of code in __init__ of the dataclass to check whether its using the deafult factory or not.
+        # This comparison happens when we inlining into the __init__ method of dataclasses.
+        # It contains a piece of code that check whether the passed in argument is.
+        # the default factory object to to determine a name for the field.
         if (
             left.python_type() is dataclasses._HAS_DEFAULT_FACTORY_CLASS
             or right.python_type() is dataclasses._HAS_DEFAULT_FACTORY_CLASS
@@ -1728,7 +1730,6 @@ class BuiltinVariable(VariableTracker):
             # This might be a bit too cautious but it's safer that we
             # also make sure they're the exact global object defined in python dataclasses.
             return ConstantVariable.create(left.value is right.value)
-
         return self._comparison(tx, left, right)
 
     call_eq = _comparison
