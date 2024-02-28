@@ -114,6 +114,7 @@ CLOSURE_VARS = {
     (lambda a: torch.as_tensor(a) if isinstance(a, (np.generic, np.ndarray)) else a),
     "torch": torch,
     "inspect": inspect,
+    "sys": sys,
 }
 
 if sys.version_info[:2] <= (3, 8):

@@ -1,7 +1,7 @@
 import collections
 import dataclasses
 import enum
-from typing import Any, Optional, Union
+from typing import Any, Optional, Type, Union
 
 from torch._guards import ChainedSource, GuardSource, Source
 
@@ -322,9 +322,9 @@ class GetItemSource(ChainedSource):
         # 3) index is a slice - example 1:4
         # 4) index is a constant - example string, integer
         if isinstance(self.index, Source):
-            if not isinstance(self.index, ConstDictKeySource):
+            if not isinstance(self.index, (ConstDictKeySource, ClassSource)):
                 raise ValueError(
-                    "GetItemSource index must be a constant, enum or ConstDictKeySource"
+                    "GetItemSource index must be a constant, enum, ConstDictKeySource or ClassSource"
                 )
             return f"{self.base.name()}[{self.index.name()}]"
         elif self.index_is_slice:
@@ -483,6 +483,28 @@ class ShapeEnvSource(Source):
 
     def guard_source(self):
         return GuardSource.SHAPE_ENV
+
+
+@dataclasses.dataclass(frozen=True)
+class ClassSource(Source):
+    value: Type[Any]
+
+    # KNOWN ISSUE: this construct doesn't handle locally defined types:
+    # def foo():
+    #   class LocalType:
+    #     pass
+    #   ...
+    #   ClassSource(LocalType) # this won't do the right thing
+
+    def guard_source(self):
+        return GuardSource.GLOBAL
+
+    def name(self):
+        return f"sys.modules[{self.value.__module__!r}].{self.value.__name__}"
+
+    def reconstruct(self, codegen):
+        codegen.append_output(codegen.create_load_python_module(self.value.__module__))
+        codegen.append_output(codegen.create_load_attr(self.value.__name__))
 
 
 def is_from_local_source(source: Source, *, allow_cell_or_freevar=True):

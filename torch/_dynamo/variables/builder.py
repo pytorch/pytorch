@@ -47,6 +47,7 @@ from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..side_effects import SideEffects
 from ..source import (
     AttrSource,
+    ClassSource,
     ConstantSource,
     ConstDictKeySource,
     ConvertIntSource,
@@ -402,7 +403,7 @@ class VariableBuilder:
             result = {
                 ConstantVariable.create(k): UserDefinedObjectVariable(
                     v,
-                    source=GetItemSource(self.get_source(), k),
+                    source=GetItemSource(self.get_source(), ClassSource(k)),
                 )
                 for k, v in value.items()
             }

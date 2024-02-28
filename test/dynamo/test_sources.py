@@ -3,6 +3,7 @@
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
+import torch.nn as nn
 from torch._dynamo.source import (
     AttrSource,
     GlobalSource,
@@ -10,6 +11,9 @@ from torch._dynamo.source import (
     LocalSource,
 )
 
+
+class CausalLMOutputWithPast:
+    value = 5
 
 class SourceTests(torch._dynamo.test_case.TestCase):
     def test_is_local(self):
@@ -44,6 +48,30 @@ class SourceTests(torch._dynamo.test_case.TestCase):
         a = func(e)
         b = torch.compile(func, backend="eager", fullgraph=True)(e)
         self.assertEqual(a, b)
+
+    def test_supported_nodes(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = torch.randn(10, 10)
+
+            def forward(self):
+                try:
+                    torch.utils._pytree.SUPPORTED_NODES[CausalLMOutputWithPast].type == int
+                    x = torch.sin(self.x)
+                except Exception:
+                    x = torch.cos(self.x)
+                return x
+
+        torch.utils._pytree.register_pytree_node(
+            CausalLMOutputWithPast,
+            lambda x: ((), None),
+            lambda x, _: CausalLMOutputWithPast()
+        )
+
+        # breakpoint()
+        torch.export.export(Model(), ())
+
 
 
 if __name__ == "__main__":
