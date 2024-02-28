@@ -1,9 +1,10 @@
 import functools
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import torch
 from torch import Tensor
 from torch._inductor import utils
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 from ...utils._triton import has_triton
 from ..ir import FixedLayout
@@ -12,6 +13,12 @@ from ..pattern_matcher import fwd_only, joint_fwd_bwd, Match, register_replaceme
 from ..utils import use_cutlass_template
 
 aten = torch.ops.aten
+
+
+# This flag is only used for testing purpose.
+# Changing it to True will ignore comparing do_bench times
+# between original pattern and padded one.
+_skip_do_bench_times = False
 
 
 def fetch_fake_tensors(match, kwarg_names) -> List[Tensor]:
@@ -50,16 +57,41 @@ def check_dtype(a: Tensor, b: Tensor) -> bool:
 def should_pad_common(
     mat1: Tensor, mat2: Tensor, input: Optional[Tensor] = None
 ) -> bool:
+    # It's fine we have symbolic shapes or strides as long as they
+    # have hints. Later, we will make sure we only pad non-symbolic dimensions.
+    def valid_shape_and_stride(t: Optional[Tensor]) -> bool:
+        if t is None:
+            return True
+
+        symbolic_cnt = 0
+        for x in t.size():
+            if isinstance(x, int):
+                continue
+            elif utils.is_symbolic(x):
+                if not x.node.has_hint():
+                    return False
+                symbolic_cnt += 1
+            else:
+                return False
+        # filter out cases where all dimentions are symbolic
+        if symbolic_cnt == len(t.size()):
+            return False
+        return all(
+            isinstance(x, int) or (utils.is_symbolic(x) and x.node.has_hint())
+            for x in t.stride()
+        )
+
     return (
         torch._inductor.config.shape_padding
         and check_device(mat1, mat2)
         and check_dtype(mat1, mat2)
-        and not utils.any_is_symbolic(mat1, mat2, input)
+        and all(valid_shape_and_stride(t) for t in (mat1, mat2, input))
     )
 
 
-def get_padded_length(x: int, alignment_size) -> int:
-    if alignment_size == 0 or x % alignment_size == 0:
+def get_padded_length(x: Union[int, torch.SymInt], alignment_size) -> int:
+    # we don't pad x if it is symbolic
+    if isinstance(x, torch.SymInt) or alignment_size == 0 or x % alignment_size == 0:
         return 0
     return int((x // alignment_size + 1) * alignment_size) - x
 
@@ -190,11 +222,15 @@ def pad_addmm(
 def addmm_replace(
     input: Tensor, mat1: Tensor, mat2: Tensor, beta=1.0, alpha=1.0
 ) -> Tensor:
-    k_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
-    n_padded_length = get_padded_length(mat2.shape[1], get_alignment_size(mat2))
-    m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
+    m, n, k = mat1.shape[0], mat2.shape[1], mat1.shape[1]
+    may_use_transpose = torch._inductor.config.shape_pad_use_transpose and not any(
+        isinstance(d, torch.SymInt) for d in (m, n, k)
+    )
+    k_padded_length = get_padded_length(k, get_alignment_size(mat1))
+    n_padded_length = get_padded_length(n, get_alignment_size(mat2))
+    m_padded_length = get_padded_length(m, get_alignment_size(mat1))
     explicit_transpose = 0
-    if torch._inductor.config.shape_pad_use_transpose:
+    if may_use_transpose:
         if m_padded_length == 0 and n_padded_length != 0 and len(input.shape) >= 2:
             explicit_transpose = True
             n_padded_length = 0
@@ -301,8 +337,10 @@ def should_pad_bench(
             n_padded_length = get_padded_length(n, get_alignment_size(mat2))
         else:
             return False
-
-        if torch._inductor.config.shape_pad_use_transpose:
+        may_use_transpose = torch._inductor.config.shape_pad_use_transpose and not any(
+            isinstance(d, torch.SymInt) for d in (m, n, k)
+        )
+        if may_use_transpose:
             if m_padded_length == 0 and n_padded_length != 0:
                 n_padded_length = 0
                 m_padded_length = 0
@@ -316,16 +354,19 @@ def should_pad_bench(
 
         if torch._inductor.config.force_shape_pad:
             return True
-
-        fake_layout = FixedLayout(
-            device=mat1.device,
-            dtype=mat1.dtype,
-            size=[batchsize, m, n],
-            stride=[n * m, n, 1],
-        )
-        if use_cutlass_template(fake_layout):
-            # We cannot use I/O efficient Cutlass templates if the alignment doesn't meet TMA requirements
-            return True
+        try:
+            fake_layout = FixedLayout(
+                device=mat1.device,
+                dtype=mat1.dtype,
+                size=[batchsize, m, n],
+                stride=[n * m, n, 1],
+            )
+            if use_cutlass_template(fake_layout):
+                # We cannot use I/O efficient Cutlass templates if the alignment doesn't meet TMA requirements
+                return True
+        except AssertionError:
+            # dynamic shape not supported by cutlass backend, and cannot be used to construct FixedLayout
+            pass
 
         if not has_triton():
             return False
@@ -341,15 +382,30 @@ def should_pad_bench(
         if cached_pad is not None:
             return cached_pad
 
-        mat1 = torch.randn_like(mat1)
-        mat2 = torch.randn_like(mat2)
+        def realize_symbols(ds):
+            return [d if isinstance(d, int) else d.node.hint for d in ds]
+
+        def realize_tensor(t):
+            if isinstance(t, FakeTensor):
+                size_hints = realize_symbols(t.size())
+                stride_hint = realize_symbols(t.stride())
+                real_size = (
+                    sum((d - 1) * s for d, s in zip(size_hints, stride_hint)) + 1
+                )
+                real_t = torch.randn(real_size, dtype=t.dtype, device=t.device)
+                return torch.as_strided(real_t, size_hints, stride_hint)
+            else:
+                return torch.randn_like(t)
+
+        mat1 = realize_tensor(mat1)
+        mat2 = realize_tensor(mat2)
         if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
             ori_time = do_bench(
                 lambda: op(mat1, mat2),
             )
         else:
             if input is not None:
-                input = torch.randn_like(input)
+                input = realize_tensor(input)
             ori_time = do_bench(
                 lambda: op(input, mat1, mat2),
             )
@@ -398,7 +454,7 @@ def should_pad_bench(
         # Shape padding introduces additional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
         # tradeoff between performance improvement from shape padding and overhead from additional memory ops
         # TODO: Build a learned model which would be better than this heuristic
-        should_pad = ori_time > pad_time * 1.1
+        should_pad = _skip_do_bench_times or ori_time > pad_time * 1.1
         set_cached_should_pad(key, should_pad)
 
         return should_pad
@@ -454,11 +510,15 @@ def pad_mm(
 
 
 def mm_replace(mat1: Tensor, mat2: Tensor) -> Tensor:
-    k_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
+    m, n, k = mat1.shape[0], mat2.shape[1], mat1.shape[1]
+    may_use_transpose = torch._inductor.config.shape_pad_use_transpose and not any(
+        isinstance(d, torch.SymInt) for d in (m, n, k)
+    )
+    k_padded_length = get_padded_length(k, get_alignment_size(mat1))
     explicit_transpose = False
-    m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
-    n_padded_length = get_padded_length(mat2.shape[1], get_alignment_size(mat2))
-    if torch._inductor.config.shape_pad_use_transpose:
+    m_padded_length = get_padded_length(m, get_alignment_size(mat1))
+    n_padded_length = get_padded_length(n, get_alignment_size(mat2))
+    if may_use_transpose:
         if m_padded_length == 0 and n_padded_length != 0:
             explicit_transpose = True
             n_padded_length = 0
@@ -523,11 +583,16 @@ def pad_bmm(
 
 
 def bmm_replace(mat1: Tensor, mat2: Tensor) -> Tensor:
-    k_padded_length = get_padded_length(mat1.shape[2], get_alignment_size(mat1))
-    n_padded_length = get_padded_length(mat2.shape[2], get_alignment_size(mat2))
-    m_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
+    m, n, k = mat1.shape[1], mat2.shape[2], mat1.shape[2]
+    may_use_transpose = torch._inductor.config.shape_pad_use_transpose and not any(
+        isinstance(d, torch.SymInt) for d in (m, n, k)
+    )
+
+    k_padded_length = get_padded_length(k, get_alignment_size(mat1))
+    n_padded_length = get_padded_length(n, get_alignment_size(mat2))
+    m_padded_length = get_padded_length(m, get_alignment_size(mat1))
     explicit_transpose = False
-    if torch._inductor.config.shape_pad_use_transpose:
+    if may_use_transpose:
         if m_padded_length == 0 and n_padded_length != 0:
             explicit_transpose = True
             n_padded_length = 0

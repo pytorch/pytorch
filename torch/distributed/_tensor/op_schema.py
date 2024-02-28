@@ -94,6 +94,18 @@ class PlacementStrategy:
                 f"function output_spec expects a single DTensorSpec but got: {self.output_specs}"
             )
 
+    @cached_property
+    def input_spec(self) -> DTensorSpec:
+        """
+        This function requires that the strategy have exactly one DTensorSpec as the
+        input spec. If the input_specs is a tuple with more than 1 element, we throw an exception.
+        """
+        assert self.input_specs is not None, "input_specs of PlacementStrategy is None!"
+        assert (
+            len(self.input_specs) == 1
+        ), f"expect single input spec in PlacementStrategy, but got: {len(self.input_specs)}"
+        return self.input_specs[0]
+
     def __str__(self) -> str:
         input_specs_str = _pretty_print_spec(self.input_specs)
         output_spec_str = _pretty_print_spec(self.output_specs)
@@ -131,7 +143,15 @@ class OpStrategy(StrategyType):
 
     @property
     def output_mesh_shape(self):
-        return self.strategies[0].output_spec.mesh.shape
+        output_spec = self.strategies[0].output_specs
+        if isinstance(output_spec, DTensorSpec):
+            return output_spec.mesh.shape
+        else:
+            assert isinstance(
+                output_spec, tuple
+            ), "found no DTensorSpec in the OpStrategy!"
+            assert output_spec[0] is not None
+            return output_spec[0].mesh.shape
 
     @property
     def output_ndim(self):
@@ -147,7 +167,8 @@ class TupleStrategy(StrategyType):
     TupleStrategy represents the output strategy of this op is a tuple
     of strategy, i.e. If the output of this op is a tuple of tensors or list of tensors
     with possibly different placement strategies, we should return a TupleStrategy that
-    contains a tuple of OpStrategy.
+    contains a tuple of OpStrategy, where each child represents the sharding strategy
+    of "each element" of the tuple/list of tensors the op returns.
 
     NOTE: if the output of the op is a List[Tensor] and they share the same placement
     strategy, then we should return a single OpStrategy instead of a TupleStrategy
@@ -268,9 +289,10 @@ class OpSchema:
 
         return all(isinstance(e, DTensorSpec) or e is None for e in arg)
 
-    def return_type_tuple_tensors(self) -> bool:
+    def return_type_tuple_tensor_like(self) -> bool:
+        # all dispatch ops could only return Tuple[Tensor] or have None/ints/floats
+        # in the tuple, but the first element must be a Tensor, so this check is enough
         return_types = self.op._schema.returns
-        # all dispatch ops only return Tensor or Tuple[Tensor], so this check if enough
         return len(return_types) > 1 and isinstance(
             return_types[0].type, torch.TensorType
         )

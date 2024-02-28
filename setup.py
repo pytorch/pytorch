@@ -365,7 +365,7 @@ def get_submodule_folders():
     with open(git_modules_path) as f:
         return [
             os.path.join(cwd, line.split("=", 1)[1].strip())
-            for line in f.readlines()
+            for line in f
             if line.strip().startswith("path")
         ]
 
@@ -1166,6 +1166,7 @@ def main():
         "include/ATen/cuda/*.h",
         "include/ATen/cuda/detail/*.cuh",
         "include/ATen/cuda/detail/*.h",
+        "include/ATen/cuda/tunable/*.h",
         "include/ATen/cudnn/*.h",
         "include/ATen/functorch/*.h",
         "include/ATen/ops/*.h",
@@ -1174,6 +1175,7 @@ def main():
         "include/ATen/hip/detail/*.cuh",
         "include/ATen/hip/detail/*.h",
         "include/ATen/hip/impl/*.h",
+        "include/ATen/hip/tunable/*.h",
         "include/ATen/mps/*.h",
         "include/ATen/miopen/*.h",
         "include/ATen/detail/*.h",

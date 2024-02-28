@@ -233,6 +233,10 @@ class AOTInductorModelBase {
     return constants_;
   }
 
+  const int32_t get_device_idx() const {
+    return device_idx_;
+  }
+
   uint8_t* constant_ptr(
       size_t constant_offset,
       size_t bytes_read,

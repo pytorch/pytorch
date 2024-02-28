@@ -4407,6 +4407,15 @@ def forward(self, x, b, y):
         ):
             gm, _ = torch._dynamo.export(fn)(x, b, y)
 
+    def test_dynamo_list_index(self):
+        def fn(x, in_list):
+            return x + in_list.index(2)
+
+        inputs = (torch.ones(2, 2), [1, 2])
+        graph, _ = torch._dynamo.export(fn)(*inputs)
+        out = graph(*inputs)
+        self.assertEqual(out, torch.ones(2, 2) + 1)
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 

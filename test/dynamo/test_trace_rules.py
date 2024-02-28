@@ -56,6 +56,13 @@ ignored_c_binding_in_graph_function_names = {
     "torch._C.set_autocast_xla_enabled",
     "torch.resize_as_",
     "torch.resize_as_sparse_",
+    "torch._C._data_address",
+    "torch._C._is_cow_tensor",
+    "torch._lazy_clone",
+    "torch._test_parallel_materialize",
+    "torch._C._storage_address",
+    "torch._C._pickle_save",
+    "torch.cuda._get_device_properties",
 }
 if torch._C._llvm_enabled():
     ignored_c_binding_in_graph_function_names |= {
@@ -333,7 +340,6 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                     load_object(f),
                     (
                         types.FunctionType,
-                        types.MethodType,
                         types.BuiltinFunctionType,
                         types.MethodDescriptorType,
                         types.WrapperDescriptorType,

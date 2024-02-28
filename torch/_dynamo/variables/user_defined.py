@@ -568,7 +568,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 )
 
             if method is list.__len__ and self.source and not (args or kwargs):
-                install_guard(self.source.make_guard(GuardBuilder.LIST_LENGTH))
+                install_guard(self.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
                 return ConstantVariable(len(self.value))
 
         return super().call_method(tx, name, args, kwargs)
@@ -580,7 +580,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and self._maybe_get_baseclass_method("__len__") is list.__len__
             and self._maybe_get_baseclass_method("__getitem__") is list.__getitem__
         ):
-            install_guard(self.source.make_guard(GuardBuilder.LIST_LENGTH))
+            install_guard(self.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             return [
                 variables.LazyVariableTracker.create(
                     self.value[k],
@@ -727,6 +727,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 unimplemented("UserDefined with non-function __getattr__")
 
         if isinstance(subobj, property):
+            # Rewrite the source being explicit about reading it statically.
+            if self.source:
+                source = AttrSource(self.source, name, get_static=True)
+                source = AttrSource(source, "fget")
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source
             ).call_function(tx, [], {})
@@ -923,12 +927,8 @@ class RemovableHandleVariable(VariableTracker):
     def reconstruct(self, codegen):
         if self.idx == self.REMOVED:
             # Hook has already been removed, return a dummy handle
-            codegen.extend_output(
-                codegen.create_load_import_from(
-                    "torch._dynamo.utils", "invalid_removeable_handle"
-                )
-            )
+            codegen.load_import_from("torch._dynamo.utils", "invalid_removeable_handle")
             codegen.extend_output(create_call_function(0, True))
-            return ()
+            return
         # unreachable due to codegen.add_cache() when the hook is installed
-        return super().reconstruct(codegen)
+        super().reconstruct(codegen)
