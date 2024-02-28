@@ -1802,10 +1802,6 @@ class ShapeEnv:
         self.source_name_to_debug_name: Dict[str, str] = {}
         self.var_to_sources: Dict[sympy.Symbol, List[Source]] = {}
         self.var_to_stack: Dict[sympy.Symbol, CapturedTraceback] = {}
-        # Maps symbolic ints to the guards that refine their lower/upper
-        # bound. If one of them is None, it means that there are no guards
-        # that refine that respective bound.
-        self.var_to_guards: Dict[sympy.Symbol, Tuple[Optional[ShapeGuard], Optional[ShapeGuard]]] = {}
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
         self.replacements: Dict[sympy.Symbol, sympy.Expr] = {}  #
@@ -1947,16 +1943,6 @@ class ShapeEnv:
             elif key == "guards":
                 # Transform the list of ShapeGuard into a list of expressions.
                 return [g.expr for g in value]
-            elif key == "var_to_guards":
-                # Transform the tuple of optional ShapeGuards of each entry into
-                # a tuple of optional expressions.
-                return {
-                    s: (
-                        lb.expr if lb is not None else None,
-                        ub.expr if ub is not None else None,
-                    )
-                    for s, (lb, ub) in value.items()
-                }
             elif key == "deferred_runtime_asserts":
                 # Transform the list of RuntimeAsserts into a list of expressions.
                 return {s: [ra.expr for ra in ras] for s, ras in value.items()}
@@ -2700,7 +2686,7 @@ class ShapeEnv:
             shape_env = replay_shape_env_events(self.events)
             self.check_equal(shape_env)
 
-        assert len(placeholders) == len(sources)
+        assert len(placeholders) == len(sources), f"len({placeholders}) != len({sources})"
         Tensorlike = (torch.Tensor, FakeTensorMeta)
 
         def _create_no_constraints_context(t):
@@ -3061,17 +3047,6 @@ class ShapeEnv:
                 continue
             issue_guard(guard)
 
-        # Then, issue the guards that refine the value range of tracked symbols.
-        # We need to explicitly issue these guards, since they are the ones that
-        # guarantee the symbol's value range. Plus, due to the updated value
-        # range, they may be skipped in the previous step.
-        for symbol, guards in self.var_to_guards.items():
-            if symbol not in symbol_to_source:
-                continue
-            for guard in guards:
-                if guard is not None:
-                    issue_guard(guard)
-
         # 3. Every symbol must be within its value range (this handles 0/1
         # specialization too).
         for symbol, sources in symbol_to_source.items():
@@ -3083,9 +3058,8 @@ class ShapeEnv:
 
             assert sources
             assert symbol.is_integer
-            g_lower, g_upper = self.var_to_guards.get(symbol, (None, None))
             bounds = []
-            if r.lower != -sympy.oo and g_lower is None:
+            if r.lower != -sympy.oo:
                 if any(is_dim(source) for source in sources):
                     self.dim_constraints.add(sympy.Ge(symbol, r.lower))
                 # Only print lower bound in simplified mode if it is not the
@@ -3100,7 +3074,7 @@ class ShapeEnv:
             # Note that you can be off by a pretty large constant and it
             # won't matter because sizes in practice will be no where near
             # the 64-bit limit.
-            if r.upper != sympy.oo and r.upper < sys.maxsize - 1 and g_upper is None:
+            if r.upper != sympy.oo and r.upper < sys.maxsize - 1:
                 if any(is_dim(source) for source in sources):
                     self.dim_constraints.add(sympy.Le(symbol, r.upper))
                 # nontrivial upper bound is always interesting
@@ -3732,6 +3706,7 @@ class ShapeEnv:
                     self.var_to_range[lhs] &= ValueRanges(*update_vr)
                     if old_range != self.var_to_range[lhs]:
                         self.log.info("refined range on %s to %s", lhs, self.var_to_range[lhs])
+                        self._maybe_evaluate_static.cache_clear()
             return
 
         # The rest of this stuff is for equality only
@@ -4169,7 +4144,6 @@ class ShapeEnv:
 
             rhs_vr = bound_sympy(rhs, self.var_to_range)
             _assert_bound_is_rational(rhs, rhs_vr)
-            lower_guard, upper_guard = self.var_to_guards.get(symbol, (None, None))
 
             # Let's suppose that we have a preexisting range for x [0, 100].
             # Now, we issue a guard x > y, where the range for y is [50, 150].
@@ -4184,10 +4158,8 @@ class ShapeEnv:
                 # Strictly greater relations allow us to refine a bit more, since
                 # x < y implies that the lower bound for x is: y + 1.
                 lower = rhs_vr.lower + int(isinstance(r_expr, sympy.Gt))
-                lower_guard = guard
             if upper > rhs_vr.upper and isinstance(r_expr, (sympy.Eq, sympy.Le, sympy.Lt)):
                 upper = rhs_vr.upper - int(isinstance(r_expr, sympy.Lt))
-                upper_guard = guard
 
             # Do nothing if the new value range is no better than what we already have.
             if vr == ValueRanges(lower, upper):
@@ -4195,7 +4167,6 @@ class ShapeEnv:
 
             # Updates the range and the guards corresponding to each bound of the symbol.
             self.var_to_range[symbol] = ValueRanges(lower, upper)
-            self.var_to_guards[symbol] = (lower_guard, upper_guard)
             # Clears the cache, since this update can change the result.
             self._maybe_evaluate_static.cache_clear()
 
