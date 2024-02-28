@@ -1285,6 +1285,11 @@ void initJITBindings(PyObject* module) {
             return node->is_constant();
           })
       .def(
+          "is_nested_int",
+          [](const c10::SymNode& node) {
+            return node->is_nested_int();
+          })
+      .def(
           "is_symbolic",
           [](const c10::SymNode& node) {
             return node->is_symbolic();
