@@ -332,7 +332,6 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             # assert related instructions as we don't need them anymore.
 
             # if we see Tensor as assert statement, no need to call scalar_tensor
-
             if isinstance(value, TensorVariable):
                 self.output.create_proxy(
                     "call_function",
@@ -345,19 +344,15 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if isinstance(value, SymNodeVariable):
                 # if the assertion is normal shape expression.
                 # just install guard and bail out.
-                try:
-                    result = value.evaluate_expr()
-                    if not result:
-                        raise RuntimeError(
-                            """Symbolic expression for assertion is evaluated to False."""
-                            """ Did you make sure the eager version succeed?"""
-                        )
-                    self.jump(inst)
-                    return
-                # if there is unbacked, we also bail out
-                # TODO (tmanlaibaatar) There should be better way to detect this case
-                except exc.UserError:
-                    pass
+                result = torch.fx.experimental.symbolic_shapes.expect_true(
+                    value.sym_num
+                )
+                if not result:
+                    raise unimplemented(
+                        "Assertion failed on symbolic shapes. Did you make sure eager mode succeeds?"
+                    )
+                self.jump(inst)
+                return
 
             scalar_to_tensor_proxy = self.output.create_proxy(
                 "call_function", torch.scalar_tensor, *proxy_args_kwargs((value,), {})
