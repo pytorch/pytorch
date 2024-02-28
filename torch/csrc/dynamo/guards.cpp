@@ -700,6 +700,20 @@ static struct PyModuleDef _module = {
     -1,
     _methods};
 
+std::string get_exception_message() {
+  PyObject *ptype, *pvalue, *ptraceback;
+  PyErr_Fetch(&ptype, &pvalue, &ptraceback);
+
+  PyObject* exc_message_pyobj = PyObject_Str(pvalue);
+  const char* exc_message = PyUnicode_AsUTF8(exc_message_pyobj);
+
+  Py_DECREF(exc_message_pyobj);
+  Py_XDECREF(ptype);
+  Py_XDECREF(pvalue);
+  Py_XDECREF(ptraceback);
+  return std::string(exc_message);
+}
+
 /**
  * Stores relevant guard debug information, e.g., failure str for a LeafGuard
  * failure. The data structure is also accessible in Python.
@@ -840,6 +854,22 @@ class LAMBDA_GUARD : public LeafGuard {
     bool result = PyObject_IsTrue(x);
     Py_DECREF(x);
     return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
+    PyObject* x = PyObject_CallOneArg(_guard_check_fn.ptr(), value); // new ref
+    if (x == nullptr) {
+      // An exception is caught in the lambda function.
+      std::string exc_message = get_exception_message();
+      PyErr_Clear();
+      return GuardDebugInfo(false, exc_message, 0);
+    }
+    bool result = PyObject_IsTrue(x);
+    Py_DECREF(x);
+    if (result) {
+      return GuardDebugInfo(true, 0);
+    }
+    return GuardDebugInfo(false, verbose_code_parts(), 0);
   }
 
  private:
@@ -2472,18 +2502,9 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
     PyObject* x = PyObject_CallOneArg(_accessor_fn.ptr(), obj); // new ref
     if (x == nullptr) {
       // The accessor function failed.
-      PyObject *ptype, *pvalue, *ptraceback;
-      PyErr_Fetch(&ptype, &pvalue, &ptraceback);
-
-      PyObject* exc_message_pyobj = PyObject_Str(pvalue);
-      const char* exc_message = PyUnicode_AsUTF8(exc_message_pyobj);
-
-      Py_DECREF(exc_message_pyobj);
-      Py_XDECREF(ptype);
-      Py_XDECREF(pvalue);
-      Py_XDECREF(ptraceback);
+      std::string exc_message = get_exception_message();
       PyErr_Clear();
-      return GuardDebugInfo(false, std::string(exc_message), 0);
+      return GuardDebugInfo(false, exc_message, 0);
     }
     GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
     Py_DECREF(x);
