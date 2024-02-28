@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import sys
 from unittest.mock import patch
 
 import functorch
@@ -27,7 +28,9 @@ def count_bytes_inductor(gm, example_inputs):
     return compile_fx(gm, example_inputs, inner_compile=count_bytes_inner)
 
 
-if not IS_WINDOWS:
+# We don't support torch.compile() on
+# Windows and Python 3.12+
+if not IS_WINDOWS and sys.version_info < (3, 12):
 
     @torch._dynamo.optimize(count_bytes_inductor)
     def f(x):
@@ -808,8 +811,6 @@ class InplacingTests(TestCase):
             return output
 
         inp = (T(10), T(10))
-        # TODO: Renable after triton version upgrade
-        return
         self.assertExpectedInline(count_numel(f, *inp), """80""")
 
     @requires_cuda
@@ -840,8 +841,6 @@ class InplacingTests(TestCase):
             return output
 
         inp = (T(10), T(10))
-        # TODO: Renable after triton version upgrade
-        return
         self.assertExpectedInline(count_numel(f, *inp), """80""")
 
     @requires_cuda
@@ -856,8 +855,6 @@ class InplacingTests(TestCase):
 
         t = T(10)
         inp = (t, t.view(-1))
-        # TODO: Renable after triton version upgrade
-        return
         self.assertExpectedInline(count_numel(f, *inp), """40""")
 
     def test_inplace_randperm_scatter(self):

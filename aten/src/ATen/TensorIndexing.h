@@ -130,9 +130,7 @@ struct TORCH_API TensorIndex final {
   TensorIndex(int integer) : TensorIndex(SymInt(integer)) {}
 
   // Case 4: Boolean value
-  template <
-      class T,
-      class = typename std::enable_if<std::is_same<bool, T>::value>::type>
+  template <class T, class = std::enable_if_t<std::is_same_v<bool, T>>>
   TensorIndex(T boolean) : boolean_(boolean), type_(TensorIndexType::Boolean) {}
 
   // Case 5: Slice represented in `at::indexing::Slice` form
@@ -219,7 +217,8 @@ static inline Tensor applySlice(
     SymInt length = (self_device == at::kCPU || self_device == at::kCUDA)
         ? (*self_sizes)[dim]
         : self.sym_size(dim);
-    if (!disable_slice_optimization && start == 0 && length == stop &&
+    if (!disable_slice_optimization &&
+        TORCH_GUARD_SIZE_OBLIVIOUS(start.sym_eq(0)) && length == stop &&
         step == 1) {
       return self;
     }
