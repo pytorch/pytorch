@@ -1533,7 +1533,7 @@ class Scheduler:
             name: index for index, name in enumerate(V.graph.graph_inputs.keys())
         }
         V.graph.mutated_input_idxs = [
-            inp_names[name] for name in V.graph.mutated_inputs
+            inp_names[name] for name in V.graph.mutated_inputs if name in inp_names
         ]
 
         # copy users information onto the nodes
