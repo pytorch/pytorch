@@ -4765,30 +4765,6 @@ class FallbackKernel(ExternKernelAlloc):
         )
         return arg_default_value
 
-    # Generate abi-compatible kernel names for shim kernels.
-    # Each individual shim kernel may have its own versioning rule.
-    # However, we don't expect we would end up with too many of such rules.
-    def _get_abi_compatible_kernel(self):
-        if not V.graph.cpp_wrapper:
-            return self.python_kernel_name
-
-        def sdpa_ver_fn():
-            # For sdpa, we need the v2 version only if any optional
-            # kwarg is missing.
-            if any(
-                self.get_kwargs_value(arg_name) is None
-                for arg_name in self.ordered_kwargs_for_cpp_kernel
-            ):
-                return f"{self.cpp_kernel_name}_v2"
-            else:
-                return self.cpp_kernel_name
-
-        kernel_to_ver = {"at::_scaled_dot_product_flash_attention": sdpa_ver_fn}
-        ver_fn = kernel_to_ver.get(self.cpp_kernel_name, None)  # type: ignore[arg-type]
-        if ver_fn is not None:
-            return ver_fn()
-        return self.cpp_kernel_name
-
     def codegen_args(self):
         @dataclasses.dataclass
         class Shim:
@@ -4801,7 +4777,13 @@ class FallbackKernel(ExternKernelAlloc):
         args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
         # Now we setup abi_compatible_kernel after self.python_kernel_name
         # and kwargs are adjusted appropriately.
-        self.abi_compatible_kernel = self._get_abi_compatible_kernel()
+        # For sdpa, we need the v2 version since v1 didn't consider optional arg
+        # FIXME: no need to do this after we switch to the torchgen-ed C shim
+        self.abi_compatible_kernel = (
+            f"{self.cpp_kernel_name}_v2"
+            if self.cpp_kernel_name in {"at::_scaled_dot_product_flash_attention"}
+            else self.cpp_kernel_name
+        )
 
         if V.graph.cpp_wrapper and isinstance(self.op_overload, torch._ops.OpOverload):
             args = [
