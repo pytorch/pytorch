@@ -369,7 +369,7 @@ aliasing_ops_list_return = {
 }
 
 skip_noncontig = {
-    '_batch_norm_with_update',
+    #'_batch_norm_with_update',
 }
 
 
@@ -483,7 +483,7 @@ class TestOperators(TestCase):
         skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
         xfail("native_batch_norm"),          # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
         xfail("_native_batch_norm_legit"),   # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
-        xfail("_batch_norm_with_update"),     # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
+        #xfail("_batch_norm_with_update"),     # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
 
         xfail('nn.functional.scaled_dot_product_attention'),
         xfail('torch.ops.aten._flash_attention_forward'),
@@ -839,7 +839,7 @@ class TestOperators(TestCase):
         xfail("to_sparse"),
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
-        xfail("_batch_norm_with_update"),
+        #xfail("_batch_norm_with_update"),
     }))
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -931,7 +931,7 @@ class TestOperators(TestCase):
         skip('linalg.svdvals'),  # # really annoying thing where it passes correctness check but not has_batch_rule
         skip("native_batch_norm"),
         skip("_native_batch_norm_legit"),
-        skip("_batch_norm_with_update"),
+        #skip("_batch_norm_with_update"),
         xfail('__getitem__', ''),  # dynamic error
         xfail('nanquantile', device_type='cpu'),  # checks q via a .item() call
         xfail('nn.functional.gaussian_nll_loss'),  # checks var for if any value < 0
@@ -1056,7 +1056,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.batch_norm', 'without_cudnn'),
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
-        xfail("_batch_norm_with_update"),
+        #xfail("_batch_norm_with_update"),
 
         # https://github.com/pytorch/pytorch/issues/96560
         # ROCm: NotImplementedError
@@ -1242,7 +1242,7 @@ class TestOperators(TestCase):
         xfail('sparse.mm', 'reduce'),
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
-        xfail("_batch_norm_with_update"),
+        #xfail("_batch_norm_with_update"),
         xfail("native_dropout_backward"),
         xfail("index_fill"),  # aten::_unique hit the vmap fallback which is currently disabled
     }))
@@ -1319,7 +1319,7 @@ class TestOperators(TestCase):
         xfail('sparse.mm', 'reduce'),
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
-        xfail("_batch_norm_with_update"),
+        #xfail("_batch_norm_with_update"),
         xfail('as_strided', 'partial_views'),
     }))
     def test_vjpvmap(self, device, dtype, op):
@@ -1578,7 +1578,7 @@ class TestOperators(TestCase):
         # place, were not batched.
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
-        xfail("_batch_norm_with_update"),
+        #xfail("_batch_norm_with_update"),
         xfail('native_dropout_backward'),
     }))
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
