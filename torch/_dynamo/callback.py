@@ -5,7 +5,7 @@ class CompilationCallbackHandler:
 
     def register_start_callback(self, callback):
         """
-        Register a callback function to be called when the compilation process starts.
+        Register a callback function to be called when the compilation starts.
 
         Args:
         - callback (callable): The callback function to register.
@@ -15,7 +15,7 @@ class CompilationCallbackHandler:
 
     def register_end_callback(self, callback):
         """
-        Register a callback function to be called when the compilation process ends.
+        Register a callback function to be called when the compilation ends.
 
         Args:
         - callback (callable): The callback function to register.
@@ -68,7 +68,7 @@ callback_handler = CompilationCallbackHandler()
 
 def on_compile_start(callback):
     """
-    Decorator to register a callback function for the start of the compilation process.
+    Decorator to register a callback function for the start of the compilation.
     """
     callback_handler.register_start_callback(callback)
     return callback
@@ -76,7 +76,7 @@ def on_compile_start(callback):
 
 def on_compile_end(callback):
     """
-    Decorator to register a callback function for the end of the compilation process.
+    Decorator to register a callback function for the end of the compilation.
     """
     callback_handler.register_end_callback(callback)
     return callback
