@@ -256,7 +256,14 @@ class TransformerEncoder(Module):
 
     __constants__ = ['norm']
 
-    def __init__(self, encoder_layer, num_layers, norm=None, enable_nested_tensor=True, mask_check=True):
+    def __init__(
+        self,
+        encoder_layer: "TransformerEncoderLayer",
+        num_layers: int,
+        norm: Optional[Module] = None,
+        enable_nested_tensor: bool = True,
+        mask_check: bool = True
+    ) -> None:
         super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
         self.layers = _get_clones(encoder_layer, num_layers)
@@ -427,7 +434,12 @@ class TransformerDecoder(Module):
 
     __constants__ = ['norm']
 
-    def __init__(self, decoder_layer, num_layers, norm=None):
+    def __init__(
+        self,
+        decoder_layer: "TransformerDecoderLayer",
+        num_layers: int,
+        norm: Optional[Module] = None
+    ) -> None:
         super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
         self.layers = _get_clones(decoder_layer, num_layers)
