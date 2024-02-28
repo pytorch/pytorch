@@ -307,6 +307,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.dynamo_flat_name_to_original_fqn = self.module.meta.get(
             "dynamo_flat_name_to_original_fqn", {}
         )
+        self.allocated_constant_name = (
+            const_module.allocated_constant_name if const_module is not None else {}
+        )
         self.init_backend_registration()
 
     @staticmethod
@@ -690,11 +693,12 @@ class GraphLowering(torch.fx.Interpreter):
             )
             return name
 
-        name = allocate(name)
+        new_name = allocate(name)
+        self.allocated_constant_name[new_name] = name
 
         return TensorBox.create(
             ir.ConstantBuffer(
-                name,
+                new_name,
                 FixedLayout(data.device, data.dtype, *self.static_sizes_strides(data)),
             )
         )
