@@ -133,6 +133,13 @@ uniform_qconfig_8bit = QConfig(
 qconfig_dict = {"object_type": [(torch.nn.Linear, uniform_qconfig_8bit)]}
 
 
+def closure_adder(val):
+    def inner(x):
+        return torch.sin(x + val)
+
+    return inner
+
+
 class MiscTests(torch._dynamo.test_case.TestCase):
     def test_get_cache_entry(self):
         def f(x):
@@ -466,6 +473,25 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         cleanup_op("mylib::foo")
         del lib
+
+    def test_closure_recompiles(self):
+        cnt = CompileCounter()
+
+        def fn(x, other_fn):
+            return other_fn(x + 1) - 1
+
+        opt = torch.compile(fn, backend=cnt, fullgraph=True)
+
+        x = torch.randn(8)
+        for f in (
+            closure_adder(5),
+            closure_adder(5),
+            closure_adder(torch.randn(8)),
+            closure_adder(torch.randn(8)),
+        ):
+            self.assertEqual(opt(x, f), fn(x, f))
+
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_generate_trivial_abstract_impl(self):
         try:
@@ -9686,6 +9712,58 @@ fn
         del m2
         c5 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c5), 0)
+
+    def test_grad_none(self):
+        def fn(x, y):
+            x.grad = torch.abs(y)
+            x.grad.add_(y)
+            return torch.abs(y)
+
+        y = torch.arange(4).reshape(2, 2).to(torch.float)
+        x = torch.randn(2, 2)
+        x.grad = None
+
+        z = fn(x, y)
+        ref_y = torch.clone(z).detach()
+        ref_x_grad = torch.clone(x.grad).detach()
+
+        y = torch.arange(4).reshape(2, 2).to(torch.float)
+        x = torch.randn(2, 2)
+        x.grad = None
+
+        opt_fn = torch.compile(fn, backend="eager")
+        z = opt_fn(x, y)
+        self.assertEqual(z, ref_y)
+        self.assertEqual(x.grad, ref_x_grad)
+
+    def test_grad_non_none(self):
+        def fn(x, y):
+            x.grad.add_(y)
+            return torch.abs(y)
+
+        y = torch.ones(2, 2)
+        x = torch.randn(2, 2)
+        x.grad = torch.arange(4).reshape(2, 2).to(torch.float)
+
+        z = fn(x, y)
+        ref_y = torch.clone(z).detach()
+        ref_x_grad = torch.clone(x.grad).detach()
+
+        y = torch.ones(2, 2)
+        x = torch.randn(2, 2)
+        x.grad = torch.arange(4).reshape(2, 2).to(torch.float)
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        opt_fn = torch.compile(fn, backend=cnt)
+        z = opt_fn(x, y)
+
+        # Ensure that the generated graph returns only one output. We want the
+        # add_ on the grad to be part of the graph itself, so that inductor can
+        # theoretically move the add_ and resutling copy_ nodes at the right
+        # place to free memory.
+        self.assertEqual(len(list(cnt.graphs[0].graph.nodes)[-1].all_input_nodes), 1)
+        self.assertEqual(z, ref_y)
+        self.assertEqual(x.grad, ref_x_grad)
 
 
 class TestTracer(JitTestCase):
