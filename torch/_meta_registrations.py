@@ -597,6 +597,11 @@ def assert_async_meta(val, assert_msg):
     return
 
 
+@register_meta(aten._print.default)
+def print_meta(s):
+    return
+
+
 @register_meta(aten._make_dep_token.default)
 def make_dep_token(
     *,
@@ -3073,6 +3078,7 @@ def register_meta_foreach(ops):
         aten._foreach_log1p,
         aten._foreach_log2,
         aten._foreach_neg,
+        aten._foreach_norm,
         aten._foreach_reciprocal,
         aten._foreach_round,
         aten._foreach_sigmoid,
@@ -5354,12 +5360,15 @@ def meta__flash_attention_forward(
     return_debug_mask: bool,
     scale: Optional[float] = None,
 ):
-    batch_size = query.size(0)
-    max_seqlen_batch_q = query.size(1)
-    num_heads = query.size(2)
-    head_dim = query.size(3)
-
-    max_seqlen_batch_k = key.size(1)
+    # NB: there are two underlying paths:
+    # 1. normal dense path; expect 4D inputs of shape (batch_size, seqlen, num_heads, head_dim)
+    # 2. varseqlen path; expect 3D inputs of shape (total, num_heads, head_dim) where total
+    #    includes all batch item sequences. cum_seq_q / cum_seq_k contain offsets into total
+    batch_size = query.size(0) if cum_seq_q is None else cum_seq_q.numel() - 1
+    max_seqlen_batch_q = query.size(1) if cum_seq_q is None else max_q
+    max_seqlen_batch_k = key.size(1) if cum_seq_k is None else max_k
+    num_heads = query.size(-2)
+    head_dim = query.size(-1)
 
     # Cuda Path
     attention = torch.empty_like(query)
@@ -5454,7 +5463,13 @@ def meta__efficient_attention_forward(
     res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
 
     logsumexp_batch_dim = cu_seqlens_q.size(0) - 1 if (cu_seqlens_q is not None) else B
-    logsumexp_dim = math.ceil(M / 32) * 32 if compute_log_sumexp else 0
+    actual_max_seqlen_q = M
+    if cu_seqlens_q is not None:
+        assert max_seqlen_q is not None
+        actual_max_seqlen_q = max_seqlen_q
+    logsumexp_dim = (
+        math.ceil(actual_max_seqlen_q / 32) * 32 if compute_log_sumexp else 0
+    )
     logsum_exp = torch.empty(
         (logsumexp_batch_dim, num_heads, logsumexp_dim),
         dtype=torch.float,
