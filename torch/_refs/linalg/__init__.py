@@ -150,6 +150,7 @@ def vector_norm(
         # From here on the computation dtype is important as the reduction is non-trivial
         x = _maybe_convert_to_dtype(x, computation_dtype)  # type: ignore[assignment]
         reduce_sum = partial(torch.sum, dim=dim, keepdim=keepdim)
+
         if not (ord % 2.0 == 0.0 and utils.is_float_dtype(x.dtype)):
             x = torch.abs(x)
         return to_result_dtype(torch.pow(reduce_sum(torch.pow(x, ord)), 1.0 / ord))  # type: ignore[return-value]
