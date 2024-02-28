@@ -4295,7 +4295,9 @@ module_db: List[ModuleInfo] = [
                module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU,
                skips=(
                    # RNNBase overrides `_apply` and adds weakrefs to params
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to', active_if=lambda p: p['swap']),),
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to', active_if=lambda p: p['swap']),
+                   # RNNBase overrides `_apply` and adds weakrefs to params
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to_empty', active_if=lambda p: p['swap']),),
                decorators=rnn_gru_lstm_module_info_decorators
                ),
     ModuleInfo(torch.nn.GRU,
@@ -4304,7 +4306,9 @@ module_db: List[ModuleInfo] = [
                module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU,
                skips=(
                    # RNNBase overrides `_apply` and adds weakrefs to params
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to', active_if=lambda p: p['swap']),),
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to', active_if=lambda p: p['swap']),
+                   # RNNBase overrides `_apply` and adds weakrefs to params
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to_empty', active_if=lambda p: p['swap']),),
                decorators=rnn_gru_lstm_module_info_decorators),
     ModuleInfo(torch.nn.LSTM,
                train_and_eval_differ=True,
@@ -4314,7 +4318,9 @@ module_db: List[ModuleInfo] = [
                    # LSTM with projections is not currently supported with MPS
                    DecorateInfo(skipMPS),
                    # RNNBase overrides `_apply` and adds weakrefs to params
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to', active_if=lambda p: p['swap'])),
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to', active_if=lambda p: p['swap']),
+                   # RNNBase overrides `_apply` and adds weakrefs to params
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to_empty', active_if=lambda p: p['swap']),),
                decorators=rnn_gru_lstm_module_info_decorators),
     ModuleInfo(torch.nn.ReflectionPad1d,
                module_inputs_func=module_inputs_torch_nn_ReflectionPad1d,
