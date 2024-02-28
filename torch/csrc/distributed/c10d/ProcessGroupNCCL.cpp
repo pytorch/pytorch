@@ -2508,7 +2508,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   syncStream(device, ncclEvents_[key], ncclStream);
 
   auto work = initWork(
-      device, rank_, opType, profilingTitle, inputs, outputs, /*record=*/true);
+      device, rank_, opType, nullptr, inputs, outputs, /*record=*/true);
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
@@ -2520,8 +2520,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
-  // Start event should only be recorded before the ncclGroupStart() (which
-  // happens inside AutoNcclGroup guard below)
+  // Start event should only be recorded before the ncclGroupStart()
   if (work->timingEnabled_) {
     work->ncclStartEvent_->record(ncclStream);
   }
@@ -2578,7 +2577,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
     }
   }
 
-  work->ncclEndEvent_->record(ncclStream);
+  // End event should only be recorded after the ncclGroupEnd()
+  if (!coalescing_state_) {
+    work->ncclEndEvent_->record(ncclStream);
+  }
   work->ncclComm_ = ncclComm;
 
   {
@@ -2616,10 +2618,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   // Notify graphs before we check the capture status preemptively
   at::cuda::CUDAGraph::inc_pending_event_queries();
 
-  workEnqueue(work);
-  // TODO(whc) did I delete a relevant codepath here?
-  // at::cuda::CUDAGraph::dec_pending_event_queries();
-  // }
+  if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
+    workEnqueue(work);
+  } else {
+    at::cuda::CUDAGraph::dec_pending_event_queries();
+  }
 
   return work;
 }
