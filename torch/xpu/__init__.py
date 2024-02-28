@@ -13,7 +13,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 import torch._C
 from .. import device as _device
-from ._utils import _dummy_type, _get_device_index
+from .._utils import _dummy_type, _LazySeedTracker
+from ._utils import _get_device_index
 from .streams import Event, Stream
 
 _initialized = False
@@ -24,29 +25,6 @@ _queued_calls: List[
 ] = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_xpu_isInBadFork", lambda: False)
 _device_t = Union[_device, str, int, None]
-
-
-class _LazySeedTracker:
-    # Since seeding is memory-less, only track the latest seed.
-    def __init__(self):
-        self.manual_seed_all_cb = None
-        self.manual_seed_cb = None
-        self.call_order = []
-
-    def queue_seed_all(self, cb, traceback):
-        self.manual_seed_all_cb = (cb, traceback)
-        # update seed_all to be latest
-        self.call_order = [self.manual_seed_cb, self.manual_seed_all_cb]
-
-    def queue_seed(self, cb, traceback):
-        self.manual_seed_cb = (cb, traceback)
-        # update seed to be latest
-        self.call_order = [self.manual_seed_all_cb, self.manual_seed_cb]
-
-    def get_calls(self) -> List:
-        return self.call_order
-
-
 _lazy_seed_tracker = _LazySeedTracker()
 default_generators: Tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
