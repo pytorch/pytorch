@@ -102,6 +102,14 @@ hf_Bart,pass,6
 
 
 
+hf_Bert,pass,6
+
+
+
+hf_Bert_large,pass,6
+
+
+
 hf_BigBird,fail_to_run,3
 
 
