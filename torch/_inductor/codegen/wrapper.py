@@ -1366,7 +1366,7 @@ class WrapperCodeGen(CodeGen):
         if name in self.unbacked_symbol_decls:
             return name
         else:
-            # When in CppWrapperCodeGen, we should only generate the declaration once
+            # When in CppWrapperCpu, we should only generate the declaration once
             self.unbacked_symbol_decls.add(name)
             return self.declare + name
 
