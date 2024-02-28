@@ -82,7 +82,7 @@ if [[ -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]]; then
 
       TRITON_SHORTHASH=$(cut -c1-10 $PYTORCH_ROOT/.github/ci_commit_pins/triton.txt)
       # This is required in order to read symlinks on windows
-      if [[ "$OSTYPE" == "msys" ]; then
+      if [[ "$OSTYPE" == "msys" ]]; then
         pushd $PYTORCH_ROOT/.github/ci_commit_pins
         TRITON_SYMLINK=$(cat triton.txt)
         TRITON_SHORTHASH=$(cut -c1-10 $TRITON_SYMLINK)
