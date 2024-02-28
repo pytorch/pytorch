@@ -94,6 +94,7 @@ manual_torch_name_rule_map = {
     "torch.distributed.get_world_size": TorchInGraphFunctionVariable,
     "torch.distributed._tensor.api.DTensor#from_local": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d._get_group_size_by_name": TorchInGraphFunctionVariable,
+    "torch.distributed.distributed_c10d._resolve_group_name_by_ranks_and_tag": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d._get_group_tag": TorchInGraphFunctionVariable,
     "torch.distributed.distributed_c10d.get_process_group_ranks": TorchInGraphFunctionVariable,
     "torch._utils.is_compiling": TorchInGraphFunctionVariable,
@@ -188,6 +189,8 @@ manual_torch_name_rule_map = {
     "torch._C._functorch._remove_batch_dim": TorchInGraphFunctionVariable,
     "torch._C._functorch.is_batchedtensor": TorchInGraphFunctionVariable,
     "torch._dynamo.mark_static": UserFunctionVariable,
+    "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
+    "torch.cuda._get_device_properties": TorchInGraphFunctionVariable,
 }
 
 
@@ -1603,7 +1606,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cross",
         "torch.crow_indices_copy",
         "torch.ctc_loss",
-        "torch.cuda._get_device_properties",
         "torch.cudnn_affine_grid_generator",
         "torch.cudnn_batch_norm",
         "torch.cudnn_convolution_add_relu",
@@ -1896,6 +1898,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.positive",
         "torch.pow",
         "torch.prelu",
+        "torch._print",
         "torch.prod",
         "torch.promote_types",
         "torch.put",
