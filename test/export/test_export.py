@@ -23,7 +23,7 @@ from torch._export.utils import (
     register_dataclass_as_pytree_node,
 )
 from torch._subclasses import FakeTensorMode
-from torch.export import Constraint, Dim, dynamic_dim, export, unflatten, WrapperModule
+from torch.export import Dim, dynamic_dim, export, unflatten, WrapperModule
 from torch.export._trace import (
     _export,
     _export_to_torch_ir,
@@ -339,7 +339,7 @@ class TestExport(TestCase):
         )
 
         with self.assertRaisesRegex(
-            torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
+            torch._dynamo.exc.UserError,
             "Constraints violated \\(dim\\)!(.*\n)*.*"
             "Not all values of dim.*satisfy the generated guard(.*\n)*.*"
             "Suggested fixes:(.*\n)*.*"
@@ -348,6 +348,364 @@ class TestExport(TestCase):
             torch.export.export(
                 foo, bad_example_inp, dynamic_shapes=dynamic_shapes, strict=False
             )
+
+    def test_derived_dim_basic(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y[1:]
+
+        foo = Foo()
+
+        x, y = torch.randn(5), torch.randn(6)
+        dimx = torch.export.Dim("dimx", min=3, max=6)
+
+        dimy = torch.export.Dim("dimy", min=4, max=7)  # doesn't work
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            (
+                "Constraints violated \\(dimy\\)!(.*\n)*.*"
+                "The values of dimy.*must always be related to the values of dimx.*by.*(.*\n)*.*"
+                "Suggested fixes:(.*\n)*.*"
+                "dimy = dimx \\+ 1"
+            ),
+        ):
+            export(
+                foo,
+                (x, y),
+                dynamic_shapes=({0: dimx}, {0: dimy}),
+            )
+
+        dimy = dimx * 2  # doesn't work
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Expected input.*size.* to be equal to 2\\*dimx, where dimx = 5, but got 6",
+        ):
+            export(
+                foo,
+                (x, y),
+                dynamic_shapes=({0: dimx}, {0: dimy}),
+            )
+
+        dimy = dimx + 1  # works
+        ep = export(
+            foo,
+            (x, y),
+            dynamic_shapes=({0: dimx}, {0: dimy}),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected input.*shape.*to be equal to 5, but got 6",
+        ):
+            ep(torch.randn(4), torch.randn(6))
+
+        self.assertEqual(ep(torch.randn(4), torch.randn(5)).size()[0], 4)
+
+    def test_derived_dim_nested(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y[1::2]
+
+        foo = Foo()
+
+        x, y = torch.randn(5), torch.randn(11)
+        dimx = torch.export.Dim("dimx", min=3, max=6)
+        dimy = dimx * 2 + 1  # works
+        ep = export(
+            foo,
+            (x, y),
+            dynamic_shapes=({0: dimx}, {0: dimy}),
+        )
+        self.assertEqual(ep(torch.randn(4), torch.randn(9)).size()[0], 4)
+
+        class Foo(torch.nn.Module):
+            def forward(self, z, y):
+                return z[1:] + y[1::2]
+
+        foo = Foo()
+
+        z, y = torch.randn(6), torch.randn(11)
+
+        dimz = dimx
+        dimy = dimx * 2 - 1  # works
+        ep = export(
+            foo,
+            (z, y),
+            dynamic_shapes=({0: dimz}, {0: dimy}),
+        )
+        self.assertEqual(ep(torch.randn(5), torch.randn(9)).size()[0], 4)
+
+        dimz = dimx + 1
+        dimy = dimx * 2 - 1  # doesn't work
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Expected input.*size.*to be equal to 2\\*dimx - 1, where dimx = 5, but got 11",
+        ):
+            export(
+                foo,
+                (z, y),
+                dynamic_shapes=({0: dimz}, {0: dimy}),
+            )
+
+        dimy = dimx * 2 + 1  # works
+        ep = export(
+            foo,
+            (z, y),
+            dynamic_shapes=({0: dimz}, {0: dimy}),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected input.*shape.*to be <= 7, but got 8"
+        ):
+            ep(torch.randn(8), torch.randn(15))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected input.*shape.*to be equal to 9, but got 8",
+        ):
+            ep(torch.randn(5), torch.randn(8))
+
+        self.assertEqual(ep(torch.randn(5), torch.randn(9)).size()[0], 4)
+
+    def test_derived_dim_integer(self):
+        class Foo(torch.nn.Module):
+            def forward(self, w):
+                if w.shape[0] % 2 == 0:
+                    return w[::2]
+                else:
+                    return w[1:-1:2]
+
+        foo = Foo()
+
+        w = torch.randn(10)
+        dimx = torch.export.Dim("dimx", min=3, max=6)
+        dimw = dimx * 2 + 1  # doesn't work
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Expected shape.*= 10 of input Tensor to be "
+            "of the form 2\\*dimx \\+ 1, where dimx is an integer",
+        ):
+            export(
+                foo,
+                (w,),
+                dynamic_shapes=({0: dimw},),
+            )
+
+        dimw = dimx * 2  # works
+        ep = export(
+            foo,
+            (w,),
+            dynamic_shapes=({0: dimw},),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected input.*shape.*= 9 to be "
+            "of the form 2\\*s1, where s1 is an integer",
+        ):
+            ep(torch.randn(9))
+
+        self.assertEqual(ep(torch.randn(8)).size()[0], 4)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected input.*shape.*to be <= 12, but got 14",
+        ):
+            ep(torch.randn(14))
+
+    def test_derived_dim_repeat_derived(self):
+        class Foo(torch.nn.Module):
+            def forward(self, u, v):
+                return u[::2] + v[::2]
+
+        foo = Foo()
+
+        u, v = torch.randn(10), torch.randn(10)
+        dimx = torch.export.Dim("dimx", min=3, max=6)
+        dimw = dimx * 2  # works
+        ep = export(
+            foo,
+            (u, v),
+            dynamic_shapes=({0: dimw}, {0: dimw}),
+        )
+        self.assertEqual(ep(torch.randn(8), torch.randn(8)).size()[0], 4)
+
+    def test_derived_dim_out_of_order(self):
+        dimy = torch.export.Dim("dimy", min=5, max=7)
+        dimx = dimy - 1  # out of order, effectively dimy = dimx + 1
+        dimz = dimy + 1  # out of order, effectively dimz = dimx + 2
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x + y[1:] + z[2:]
+
+        foo = Foo()
+
+        u, v, w = torch.randn(5), torch.randn(6), torch.randn(7)
+        ep = export(
+            foo,
+            (u, v, w),
+            dynamic_shapes=({0: dimx}, {0: dimy}, {0: dimz}),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected input.*shape.*to be equal to 8, but got 5",
+        ):
+            ep(torch.randn(6), torch.randn(7), torch.randn(5))
+
+        self.assertEqual(ep(torch.randn(6), torch.randn(7), torch.randn(8)).size()[0], 6)
+
+    def test_derived_dim_out_of_order_repeat_derived(self):
+        dimy = torch.export.Dim("dimy", min=5, max=7)
+        dimx = dimy - 1  # out of order, effectively dimy = dimx + 1
+        dimz = dimy + 1  # out of order, effectively dimz = dimx + 2
+        dimx1 = dimx
+        dimx2 = dimz - 2  # works, effectively = dimx
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, z, x1, x2):
+                return x + y[1:] + z[2:] + x1 + x2
+
+        foo = Foo()
+
+        u, v, w, u1, u2 = (
+            torch.randn(5),
+            torch.randn(6),
+            torch.randn(7),
+            torch.randn(5),
+            torch.randn(5),
+        )
+        ep = export(
+            foo,
+            (u, v, w, u1, u2),
+            dynamic_shapes=({0: dimx}, {0: dimy}, {0: dimz}, {0: dimx1}, {0: dimx2}),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected input.*shape.*to be equal to 6, but got 5",
+        ):
+            ep(
+                torch.randn(6),
+                torch.randn(7),
+                torch.randn(8),
+                torch.randn(6),
+                torch.randn(5),
+            )
+
+        self.assertEqual(
+            ep(
+                torch.randn(6),
+                torch.randn(7),
+                torch.randn(8),
+                torch.randn(6),
+                torch.randn(6),
+            ).size()[0],
+            6,
+        )
+
+        ep = export(
+            foo,
+            (u, v, w, u, u),  # reused inputs
+            dynamic_shapes=({0: dimx}, {0: dimy}, {0: dimz}, {0: dimx1}, {0: dimx2}),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected input.*shape.*to be equal to 6, but got 5",
+        ):
+            ep(
+                torch.randn(6),
+                torch.randn(7),
+                torch.randn(8),
+                torch.randn(6),
+                torch.randn(5),
+            )
+
+        self.assertEqual(
+            ep(
+                torch.randn(6),
+                torch.randn(7),
+                torch.randn(8),
+                torch.randn(6),
+                torch.randn(6),
+            ).size()[0],
+            6,
+        )
+
+    def test_derived_dim_out_of_order_simplified(self):
+        _dimz = torch.export.Dim("_dimz", min=6, max=8)
+        dimy = _dimz - 1
+        dimx = dimy - 1
+        dimz = torch.export.Dim("dimz", min=6, max=8)  # doesn't work, should be = _dimz
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x + y[1:] + z[2:]
+
+        foo = Foo()
+
+        u, v, w = torch.randn(5), torch.randn(6), torch.randn(7)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            (
+                "Constraints violated \\(dimz\\)!(.*\n)*.*"
+                "The values of dimz.*must always be related to the values of _dimz - 2.*by.*(.*\n)*.*"
+                "Suggested fixes:(.*\n)*.*"
+                "dimz = _dimz"
+            ),
+        ):
+            export(
+                foo,
+                (u, v, w),
+                dynamic_shapes=({0: dimx}, {0: dimy}, {0: dimz}),
+            )
+
+        dimz = dimx + 2  # works, effectively = _dimz
+        ep = export(
+            foo,
+            (u, v, w),
+            dynamic_shapes=({0: dimx}, {0: dimy}, {0: dimz}),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected input.*shape.*to be equal to 8, but got 5",
+        ):
+            ep(torch.randn(6), torch.randn(7), torch.randn(5))
+
+        self.assertEqual(ep(torch.randn(6), torch.randn(7), torch.randn(8)).size()[0], 6)
+
+    def test_derived_dim_out_of_order_simplified_repeat_non_derived(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, y1, z):
+                return x + y[1:] + y1[1:] + z[2:]
+
+        foo = Foo()
+
+        u, v, v1, w = torch.randn(5), torch.randn(6), torch.randn(6), torch.randn(7)
+        _dimz = torch.export.Dim("_dimz", min=6, max=8)
+        dimy = _dimz - 1
+        dimx = dimy - 1
+        dimz = dimx + 2  # works, effectively = _dimz
+        ep = export(
+            foo,
+            (u, v, v1, w),
+            dynamic_shapes=({0: dimx}, {0: dimy}, {0: dimy}, {0: dimz}),
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected input.*shape.*to be equal to 7, but got 5",
+        ):
+            ep(
+                torch.randn(6),
+                torch.randn(7),
+                torch.randn(5),
+                torch.randn(8),
+            )
+
+        self.assertEqual(
+            ep(
+                torch.randn(6),
+                torch.randn(7),
+                torch.randn(7),
+                torch.randn(8),
+            ).size()[0],
+            6,
+        )
 
     def test_raise_user_error_when_guard_on_data_dependent_operation(self):
         class M(torch.nn.Module):
@@ -761,7 +1119,10 @@ class TestExport(TestCase):
             a: Tensor
             b: Tensor
 
-        register_dataclass_as_pytree_node(DataClass)
+        register_dataclass_as_pytree_node(
+            DataClass,
+            serialized_type_name="test_export_api_with_dynamic_shapes.DataClass",
+        )
 
         class Foo(torch.nn.Module):
             def forward(self, inputs):
@@ -947,7 +1308,7 @@ class TestExport(TestCase):
         self.assertEqual(
             spec,
             TreeSpec(
-                MyDataClass, (MyDataClass, ["x", "y"], ["z"]), [LeafSpec(), LeafSpec()]
+                MyDataClass, [["x", "y"], ["z"]], [LeafSpec(), LeafSpec()]
             ),
         )
         self.assertEqual(flat, [3, 4])
@@ -980,11 +1341,7 @@ class TestExport(TestCase):
             spec,
             TreeSpec(
                 MyOtherDataClass,
-                (
-                    MyOtherDataClass,
-                    ["x", "y", "z"],
-                    [],
-                ),
+                [["x", "y", "z"], []],
                 [LeafSpec(), LeafSpec(), LeafSpec()],
             ),
         )
@@ -1876,13 +2233,6 @@ def forward(self, arg_0):
         ):
             _ = export(WrapperModule(f), (torch.tensor(6),))
 
-    def test_constraint_directly_construct(self):
-        with self.assertRaisesRegex(
-            TypeError,
-            "Constraint has no public constructor. Please use torch.export.dynamic_dim",
-        ):
-            _ = Constraint()
-
     def test_train_eval_on_exported_preautograd_module(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -1987,7 +2337,10 @@ def forward(self, arg_0):
             f: torch.Tensor
             p: torch.Tensor
 
-        torch._export.utils.register_dataclass_as_pytree_node(Input)
+        torch._export.utils.register_dataclass_as_pytree_node(
+            Input,
+            serialized_type_name="test_preserve_shape_dynamism_for_unused_inputs.Input"
+        )
 
         class Module(torch.nn.Module):
             def forward(self, x: Input):
@@ -2970,12 +3323,16 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         named_buffers = {name: buffer for (name, buffer) in ep.named_buffers()}
         # But they should show up in named_buffers()
         self.assertIn("foo", named_buffers)
+        self.assertIn("foo", ep.constants)
+        self.assertEqual(len(ep.constants), 1)
 
         # Check the same properties of the unlifted module
         mod = ep.module()
         self.assertNotIn("foo", mod.state_dict())
         mod_named_buffers = {name: buffer for (name, buffer) in mod.named_buffers()}
         self.assertIn("foo", mod_named_buffers)
+        self.assertIn("foo", ep.constants)
+        self.assertEqual(len(ep.constants), 1)
         self.assertEqual(mod(inp), m(inp))
 
     def test_nonstrict_retrace_preserves_metadata(self):
@@ -3220,6 +3577,29 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertEqual(res[0], torch.tensor(16))
         self.assertEqual(res[1], None)
 
+    def test_constant_fqn(self):
+        class Nested(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.constant = torch.rand(2, 3)
+                self.parameter = torch.nn.Parameter(torch.rand(2, 3))
+
+            def forward(self, x):
+                return x + self.constant
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.nested = Nested()
+
+            def forward(self, x):
+                return self.nested(x) + self.nested.constant + self.nested.parameter
+
+        m = Mod()
+        ep = export(m, (torch.rand(2, 3),), strict=True)
+        self.assertEqual(ep.constants["nested.constant"], m.nested.constant)
+        self.assertEqual(ep.module()(torch.ones(2, 3)), m(torch.ones(2, 3)))
+
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestExportCustomClass(TorchTestCase):
     def setUp(self):
@@ -3267,7 +3647,7 @@ class TestExportCustomClass(TorchTestCase):
 
         from torch._export.passes.lift_constants_pass import lift_constants_pass
         from torch._export.serde.serialize import serialize, deserialize
-        constants = lift_constants_pass(ep.graph_module, ep.graph_signature)
+        constants = lift_constants_pass(ep.graph_module, ep.graph_signature, {})
         for k, v in constants.items():
             assert k not in ep.constants
             ep._constants[k] = v
