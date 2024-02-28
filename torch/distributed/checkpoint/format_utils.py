@@ -6,6 +6,7 @@ import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed.checkpoint import FileSystemReader
+from torch.distributed.checkpoint.planner_helpers import _create_chunk_list
 from torch.distributed.checkpoint._nested_dict import flatten_state_dict
 from torch.distributed.checkpoint._traverse import set_element
 from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
@@ -207,18 +208,17 @@ class DynamicMetaLoadPlanner(DefaultLoadPlanner):
         super().set_up_planner(state_dict, metadata, is_coordinator)
 
         state_dict_metadata: Dict[str, STORAGE_TYPES] = {}
-        for key, value in self.state_dict.items():
-            if not torch.is_tensor(value):
+        for key, tensor in self.state_dict.items():
+            if not torch.is_tensor(tensor):
                 raise RuntimeError(
                     f"Non-tensor value identified at {key}. "
                     f"At this time {type(self).__name__} only supports loading Tensors."
                 )
 
-            size = value.size()
             state_dict_metadata[key] = TensorStorageMetadata(
-                TensorProperties(dtype=value.dtype),
-                size,
-                [ChunkStorageMetadata(offsets=torch.Size([0] * len(size)), sizes=size)],
+                TensorProperties(dtype=tensor.dtype),
+                tensor.size(),
+                _create_chunk_list(tensor)
             )
         self.metadata = Metadata(state_dict_metadata=state_dict_metadata)
 

@@ -1350,7 +1350,13 @@ def check_compiler_is_gcc(compiler):
 
     env = os.environ.copy()
     env['LC_ALL'] = 'C'  # Don't localize output
-    version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
+    try:
+        version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
+    except Exception as e:
+        try:
+            version_string = subprocess.check_output([compiler, '--version'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
+        except Exception as e:
+            return False
     # Check for 'gcc' or 'g++' for sccache wrapper
     pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
     results = re.findall(pattern, version_string)
@@ -2342,7 +2348,8 @@ def _write_ninja_file(path,
         cuda_compile_rule = ['rule cuda_compile']
         nvcc_gendeps = ''
         # --generate-dependencies-with-compile is not supported by ROCm
-        if torch.version.cuda is not None:
+        # Nvcc flag `--generate-dependencies-with-compile` is not supported by sccache, which may increase build time.
+        if torch.version.cuda is not None and os.getenv('TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES', '0') != '1':
             cuda_compile_rule.append('  depfile = $out.d')
             cuda_compile_rule.append('  deps = gcc')
             # Note: non-system deps with nvcc are only supported

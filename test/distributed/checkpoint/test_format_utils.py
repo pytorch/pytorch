@@ -1,7 +1,11 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
+import torch.nn as nn
+
+import torch.nn.functional as F
 import torch.distributed.checkpoint as dcp
+import torch.distributed as dist
 from torch.distributed._tensor.device_mesh import init_device_mesh
 from torch.distributed.checkpoint.format_utils import (
     BroadcastingTorchSaveReader,
@@ -21,11 +25,31 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
+class SimpleModelUneven(nn.Module):
+    def __init__(self):
+        super().__init__()
+        torch.manual_seed(0)
+        self.net1 = nn.Linear(5, 10)
+        self.relu = nn.ReLU()
+        self.net2 = nn.Linear(10, 15)
+        self.net3 = nn.Linear(15, 30)
+        self.net4 = nn.Linear(30, 5)
+
+    def forward(self, x):
+        x = F.relu(self.net1(x))
+        x = F.relu(self.net2(x))
+        x = F.relu(self.net3(x))
+        x = self.net4(x)
+        return x
+
+    def get_input(self):
+        return torch.rand(4, 5, device="cuda")
+
 class TestFormatUtils(DTensorTestBase):
     @with_temp_dir
     def test_dcp_to_torch_save(self) -> None:
         # Using a transformer model to simulate a 'complicated enough' state dict w/ nested modules
-        model = Transformer(ModelArgs())
+        model = SimpleModelUneven()
         dcp.save({"model": model}, checkpoint_id=self.temp_dir)
 
         torch_path = self.temp_dir + "/model.pt"
@@ -36,14 +60,14 @@ class TestFormatUtils(DTensorTestBase):
 
     @with_temp_dir
     def test_torch_save_to_dcp(self) -> None:
-        model = Transformer(ModelArgs())
+        model = SimpleModelUneven()
         sd = {"model": model.state_dict()}
         torch_path = self.temp_dir + "/model.pt"
         torch.save(sd, torch_path)
 
         torch_save_to_dcp(torch_path, self.temp_dir)
 
-        model = Transformer(ModelArgs())
+        model = SimpleModelUneven().cuda()
         dcp.load({"model": model}, checkpoint_id=self.temp_dir)
 
         self.assertEqual({"model": model.state_dict()}, sd)
@@ -56,15 +80,17 @@ class TestFormatUtils(DTensorTestBase):
         using dcp.load
         """
         # Save a model with torch.save
-        model = Transformer(ModelArgs())
+        model = SimpleModelUneven()
         sd = {"model": model.state_dict()}
 
         torch_fn = self.temp_dir + "/model.pt"
-        torch.save(sd, torch_fn)
+        if dist.get_rank() == 0:
+            torch.save(sd, torch_fn)
+        dist.barrier()
 
         # Load into a sharded model
         device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        model = Transformer(ModelArgs()).cuda()
+        model = SimpleModelUneven().cuda()
         model = FSDP(
             model,
             device_mesh=device_mesh,
