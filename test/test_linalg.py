@@ -1141,6 +1141,7 @@ class TestLinalg(TestCase):
         make_arg = partial(make_tensor, dtype=dtype, device=device)
 
         def run_test_case(input_size, ord, keepdim, to_dtype):
+            torch._dynamo.reset()
             msg = (
                 f'input_size={input_size}, ord={ord}, keepdim={keepdim}, '
                 f'dtype={dtype}, to_dtype={to_dtype}')
@@ -1241,6 +1242,7 @@ class TestLinalg(TestCase):
             return result
 
         def run_test_case(input, ord, dim, keepdim, norm_dtype):
+            torch._dynamo.reset()
             if (input.numel() == 0 and
                 (ord < 0. or ord == inf) and
                (dim is None or input.shape[dim] == 0)):
@@ -1310,6 +1312,7 @@ class TestLinalg(TestCase):
     @dtypes(torch.float, torch.double)
     def test_norm_vector(self, device, dtype):
         def run_test_case(input, p, dim, keepdim):
+            torch._dynamo.reset()
             result = torch.linalg.norm(input, ord, dim, keepdim)
             input_numpy = input.cpu().numpy()
             result_numpy = np.linalg.norm(input_numpy, ord, dim, keepdim)
