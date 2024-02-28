@@ -755,6 +755,7 @@ class WrapperCodeGen(CodeGen):
             elif isinstance(line, ExitScopeLine):
                 past_planning_states.append(planning_states.pop())
         past_planning_states.append(planning_states.pop())
+        assert len(planning_states) == 0
 
         # conservatively use the sum of all allocated buffer sizes
         # in potentially nested scopes as the total allocated size
