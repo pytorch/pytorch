@@ -186,7 +186,8 @@ class ProcessGroupNCCLNoHeartbeatCaught
   }
 
   void forceTryWriteDebugInfo() {
-    std::future<bool> asyncDebugDump = launchAsyncDebugDump();
+    std::future<bool> asyncDebugDump = std::async(
+        std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
     asyncDebugDump.wait();
   }
 
