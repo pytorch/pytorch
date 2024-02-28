@@ -1,0 +1,17 @@
+# automatically load the pytorch_lldb extension.
+#
+# lldb automatically tries to load this file whenever it is executed from the
+# root of the pytorch repo, but by default it is not allowed to do so due to
+# security reasons. If you want to use pytorch_lldb, please add the following
+# line to your ~/.lldbinit (i.e., the .lldbinit file which is in your home
+# directory, NOT this file):
+#    settings set target.load-cwd-lldbinit true
+#    setting set escape-non-printables false
+#
+# Alternatively, you can manually load the pytorch_lldb  commands into your
+# existing lldb session by doing the following:
+#    (lldb) command script import tools/lldb/pytorch_lldb.py
+
+command script import tools/lldb/pytorch_lldb.py
+setting set escape-non-printables false
+type category enable torch
