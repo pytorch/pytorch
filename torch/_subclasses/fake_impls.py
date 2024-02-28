@@ -156,6 +156,9 @@ def constructors(fake_mode, func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
+    if "names" in kwargs:
+        raise NotImplementedError("names kwarg is not supported")
+
     if func in _like_tensor_constructors:
         default_device = new_kwargs["input"].device
         # TODO: file issue

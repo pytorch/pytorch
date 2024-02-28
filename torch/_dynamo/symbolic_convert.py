@@ -1334,8 +1334,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def LOAD_ATTR(self, inst):
         obj = self.pop()
-        if isinstance(obj, TensorVariable) and inst.argval == "names":
-            raise exc.SkipFrame("Named Tensors not supported")
         result = BuiltinVariable(getattr).call_function(
             self, [obj, ConstantVariable.create(inst.argval)], {}
         )
