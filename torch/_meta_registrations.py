@@ -5463,7 +5463,13 @@ def meta__efficient_attention_forward(
     res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
 
     logsumexp_batch_dim = cu_seqlens_q.size(0) - 1 if (cu_seqlens_q is not None) else B
-    logsumexp_dim = math.ceil(M / 32) * 32 if compute_log_sumexp else 0
+    actual_max_seqlen_q = M
+    if cu_seqlens_q is not None:
+        assert max_seqlen_q is not None
+        actual_max_seqlen_q = max_seqlen_q
+    logsumexp_dim = (
+        math.ceil(actual_max_seqlen_q / 32) * 32 if compute_log_sumexp else 0
+    )
     logsum_exp = torch.empty(
         (logsumexp_batch_dim, num_heads, logsumexp_dim),
         dtype=torch.float,
