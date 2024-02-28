@@ -114,7 +114,7 @@ struct VmapPhysicalToLogicalMap;
 struct TORCH_API VmapPhysicalView {
   VmapPhysicalView(Tensor&& tensor, std::bitset<kVmapNumLevels> levels)
       : levels_(levels), tensor_(std::move(tensor)) {
-    TORCH_INTERNAL_ASSERT(!isBatchedTensor(tensor));
+    TORCH_INTERNAL_ASSERT(!isBatchedTensor(tensor_));
   }
 
   Tensor& tensor() {

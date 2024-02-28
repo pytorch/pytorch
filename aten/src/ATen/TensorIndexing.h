@@ -322,7 +322,7 @@ static inline c10::List<c10::optional<Tensor>> typeConvertIndices(
     std::vector<Tensor>&& indices) {
   c10::List<c10::optional<Tensor>> converted_inds;
   converted_inds.reserve(indices.size());
-  for (auto& i : std::move(indices)) {
+  for (auto&& i : std::move(indices)) {
     converted_inds.push_back(std::move(i));
   }
   return converted_inds;
