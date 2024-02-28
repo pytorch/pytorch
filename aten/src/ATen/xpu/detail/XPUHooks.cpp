@@ -27,6 +27,10 @@ int XPUHooks::getGlobalIdxFromDevice(const at::Device& device) const {
   return at::xpu::getGlobalIdxFromDevice(device.index());
 }
 
+Generator XPUHooks::getXPUGenerator(DeviceIndex device_index) const {
+  return make_generator<at::XPUGeneratorImpl>(device_index);
+}
+
 const Generator& XPUHooks::getDefaultXPUGenerator(
     DeviceIndex device_index) const {
   return at::xpu::detail::getDefaultXPUGenerator(device_index);
@@ -38,6 +42,10 @@ Device XPUHooks::getDeviceFromPtr(void* data) const {
 
 int XPUHooks::getNumGPUs() const {
   return at::xpu::device_count();
+}
+
+DeviceIndex XPUHooks::current_device() const {
+  return c10::xpu::current_device();
 }
 
 void XPUHooks::deviceSynchronize(DeviceIndex device_index) const {

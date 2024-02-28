@@ -540,6 +540,7 @@ aten::_test_optional_floatlist
 aten::_test_optional_floatlist.out
 aten::_test_optional_intlist
 aten::_test_optional_intlist.out
+aten::_test_parallel_materialize
 aten::_test_warn_in_autograd
 aten::_test_warn_in_autograd.out
 aten::_thnn_fused_gru_cell
