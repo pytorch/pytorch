@@ -617,6 +617,7 @@ def meta__scaled_dot_product_flash(fake_mode, func, *args, **kwargs):
     max_seqlen_batch_k = key.size(2)
 
     query_t = query.transpose(1, 2)
+    # empty_like already returns a fake tensor so we don't need to convert it
     attention = torch.empty_like(query_t).transpose(1, 2)
     logsumexp = convert_tensor(
         torch.empty(
@@ -735,7 +736,7 @@ def meta__flash_attention_forward(fake_mode, func, *args, **kwargs):
     return_debug_mask = kwargs["return_debug_mask"]
     # unused: value, dropout_p, is_causal, scale
 
-    def wrap_tensor(t, device):
+    def convert_tensor(t, device):
         return FakeTensor(fake_mode, t, device)
 
     # NB: there are two underlying paths:
@@ -749,10 +750,9 @@ def meta__flash_attention_forward(fake_mode, func, *args, **kwargs):
     head_dim = query.size(-1)
 
     # Cuda Path
-    # attention = wrap_tensor(torch.empty_like(query, device="meta"), query.device)
-    # attention = wrap_tensor(torch.empty(query.size(), layout=query.layout, dtype=query.dtype, device="meta"), query.device)
+    # note: empty_like already returns a fake tensor, we don't need to wrap it
     attention = torch.empty_like(query)
-    logsumexp = wrap_tensor(
+    logsumexp = convert_tensor(
         torch.empty(
             (batch_size, num_heads, max_seqlen_batch_q),
             dtype=torch.float,
@@ -768,7 +768,7 @@ def meta__flash_attention_forward(fake_mode, func, *args, **kwargs):
             max_seqlen_k = 128
         elif max_seqlen_batch_k <= 256:
             max_seqlen_k = 256
-        debug_mask = wrap_tensor(
+        debug_mask = convert_tensor(
             torch.empty(
                 (batch_size, num_heads, max_seqlen_batch_q, max_seqlen_k),
                 dtype=query.dtype,
@@ -777,7 +777,7 @@ def meta__flash_attention_forward(fake_mode, func, *args, **kwargs):
             query.device,
         )
     else:
-        debug_mask = wrap_tensor(
+        debug_mask = convert_tensor(
             torch.empty(0, dtype=query.dtype, device="meta"),
             query.device,
         )
@@ -786,8 +786,8 @@ def meta__flash_attention_forward(fake_mode, func, *args, **kwargs):
     return (
         attention,
         logsumexp,
-        wrap_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device),
-        wrap_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device),
+        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device),
+        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device),
         debug_mask,
     )
 
@@ -806,7 +806,7 @@ def meta__efficient_attention_forward(fake_mode, func, *args, **kwargs):
     compute_log_sumexp = kwargs["compute_log_sumexp"]
     # unused: bias, cu_seqlens_k, max_seqlen_k, dropout_p, custom_mask_type, scale, causal_diagonal, seqlen_k
 
-    def wrap_tensor(t, device):
+    def convert_tensor(t, device):
         return FakeTensor(fake_mode, t, device)
 
     B = query.size(0)
@@ -816,7 +816,7 @@ def meta__efficient_attention_forward(fake_mode, func, *args, **kwargs):
     K = query.size(-1)
     Kv = value.size(-1)
 
-    res = wrap_tensor(
+    res = convert_tensor(
         torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device="meta"),
         query.device,
     )
@@ -829,7 +829,7 @@ def meta__efficient_attention_forward(fake_mode, func, *args, **kwargs):
     logsumexp_dim = (
         math.ceil(actual_max_seqlen_q / 32) * 32 if compute_log_sumexp else 0
     )
-    logsum_exp = wrap_tensor(
+    logsum_exp = convert_tensor(
         torch.empty(
             (logsumexp_batch_dim, num_heads, logsumexp_dim),
             dtype=torch.float,
@@ -839,8 +839,12 @@ def meta__efficient_attention_forward(fake_mode, func, *args, **kwargs):
     )
 
     # See Note [Seed and Offset]:
-    seed = wrap_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device)
-    offset = wrap_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device)
+    seed = convert_tensor(
+        torch.empty((), dtype=torch.long, device="meta"), query.device
+    )
+    offset = convert_tensor(
+        torch.empty((), dtype=torch.long, device="meta"), query.device
+    )
 
     return res, logsum_exp, seed, offset, M, N
 
