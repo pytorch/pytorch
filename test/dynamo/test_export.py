@@ -2344,7 +2344,6 @@ def forward(self, x):
         self.assertEqual(dynamo_result, m(inp))
 
     def test_constraint_violation_error_messages(self):
-        """
         class Foo(torch.nn.Module):
             def forward(self, x):
                 if x.shape[0] == x.shape[1] * 2:
@@ -2383,7 +2382,6 @@ def forward(self, x):
             "Not all values.*valid.*inferred to be a constant",
         ):
             torch.export.export(bar, (t,), dynamic_shapes=dynamic_shapes)
-        """
 
         class Qux(torch.nn.Module):
             def forward(self, x):
