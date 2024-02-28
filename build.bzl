@@ -76,7 +76,7 @@ def define_targets(rules):
     ] + (["--static_dispatch_backend CPU"] if rules.is_cpu_static_dispatch_build() else []))
 
     gen_aten_outs_cuda = (
-        GENERATED_H_CUDA + GENERATED_CPP_CUDA + GENERATED_AOTI_CUDA_CPP
+        GENERATED_H_CUDA + GENERATED_CPP_CUDA +
         aten_ufunc_generated_cuda_sources()
     )
 
