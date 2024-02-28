@@ -68,7 +68,6 @@ def create_runtime_wrapper(
     trace_joint: bool,
     keep_input_mutations: bool,
     disable_amp: bool,
-    fakified_first_outputs: Optional[List[Tensor]] = None,
 ):
     if not hasattr(compiled_fn, "_boxed_call"):
         compiled_fn = make_boxed_func(compiled_fn)
@@ -87,15 +86,11 @@ def create_runtime_wrapper(
                     disable_amp=disable_amp,
                 )
         else:
-            nonlocal fakified_first_outputs
-            if fakified_first_outputs is not None:
-                all_outs = fakified_first_outputs
-                fakified_first_outputs = None
             # When we have an inference graph, we run with torch.no_grad.
             # It's possible to get an inference graph with inputs that require grad,
             # in which case we want to make sure autograd is disabled
             # (since e.g., inductor will generate aten.addmm.out calls which autograd will complain on)
-            elif torch.is_grad_enabled():
+            if torch.is_grad_enabled():
                 with torch.no_grad():
                     all_outs = call_func_at_runtime_with_args(
                         compiled_fn,
