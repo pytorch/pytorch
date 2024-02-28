@@ -4423,7 +4423,6 @@ def fractional_max_pool2d(x, kernel_size, output_size, random_samples):
     kernel_h, kernel_w = kernel_size
     h_out, w_out = output_size
 
-    breakpoint()
     if kernel_h * kernel_w >= 25:
         return fallback_fractional_max_pool2d(
             x, kernel_size, output_size, random_samples
@@ -4445,9 +4444,7 @@ def fractional_max_pool2d(x, kernel_size, output_size, random_samples):
         *prefix, bh, bw = idx
 
         h_start_index = ops.indirect_indexing(h_index_fn(prefix, bh), inp_h)
-        h_end_index = h_start_index + kernel_h
         w_start_index = ops.indirect_indexing(w_index_fn(prefix, bw), inp_w)
-        w_end_index = w_start_index + kernel_w
 
         maxval = None
         maxindex = None
