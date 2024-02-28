@@ -288,6 +288,43 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
     def test_mark_static_address_unguarded(self):
         self._test_mark_static_address(guarded=False)
 
+    def test_class_methods(self):
+        class A():
+            @classmethod
+            def my_class_method(cls, arg1):
+                return cls, arg1
+
+            @staticmethod
+            def my_static_method(arg1):
+                return None, arg1
+
+            def my_regular_method(self, arg1):
+                return self, arg1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(a):
+            # We want a function that does not graph break but
+            # does generate custom bytecode
+            v1 = a.my_class_method(1)
+            v2 = A.my_class_method(2)
+            v3 = a.my_static_method(3)
+            v4 = A.my_static_method(4)
+            v5 = a.my_regular_method(5)
+            torch.rand(2)
+            return v1, v2, v3, v4, v5
+
+        a = A()
+        v1, v2, v3, v4, v5 = fn(a)
+        self.assertEqual(cnt.frame_count, 1)
+
+        self.assertEqual(v1, (A, 1))
+        self.assertEqual(v2, (A, 2))
+        self.assertEqual(v3, (None, 3))
+        self.assertEqual(v4, (None, 4))
+        self.assertEqual(v5, (a, 5))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
