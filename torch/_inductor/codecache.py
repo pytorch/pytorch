@@ -722,7 +722,13 @@ class FxGraphCache:
         symints = FxGraphCache._filter_symints(example_inputs)
         disk_compiled_graph.guards_expr = shape_env.produce_guards_expression(symints)
 
+        print(f"Graph constants: {compiled_graph.constants}")
+
         content = pickle.dumps(disk_compiled_graph)
+        print(f"After serializing: {pickle.loads(content).constants}")
+
+        with torch._guards.tracing(None):
+            print(f"With tracing(None): {pickle.loads(pickle.dumps(disk_compiled_graph)).constants}")
 
         subdir = FxGraphCache._get_tmp_dir_for_key(key)
         if not os.path.exists(subdir):
