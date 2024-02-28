@@ -302,6 +302,25 @@ def get_tensor_guard_code_part(value, name, sizes, strides):
     return guard_str
 
 
+def handle_dict_mananger(source, base_guard_manager, base_example_value, example_value):
+    if isinstance(source.index, ConstDictKeySource):
+        index = source.index.index
+    else:
+        # TODO (anijain2305) - Consider DictGetItemSource with
+        # invariant that index is always ConstDictKeySource
+        assert isinstance(base_example_value, dict)
+        index = list(base_example_value.keys()).index(source.index)
+    index_manager = base_guard_manager.get_key_value_manager(index)
+
+    if not isinstance(source.index, ConstDictKeySource):
+        # We have to insert a key manager guard here
+        index_manager.get_key_manager(
+            source.index
+        ).add_equals_match_guard(source.index, [f"key=={source.index}"])
+
+    return index_manager.get_value_manager(example_value)
+
+
 # The ready to eval generated code (possibly multiple parts) for a guard, plus
 # the original guard object that created it for provenance
 @dataclasses.dataclass
@@ -379,6 +398,7 @@ class GuardBuilder(GuardBuilderBase):
         def build(source):
             example_value = None
             base_example_value = None
+            base_guard_manager = None
             if source.name() != "":
                 example_value = self.get(source.name())
 
@@ -427,22 +447,10 @@ class GuardBuilder(GuardBuilderBase):
                 return base_guard_manager.getattr_manager(source.member, example_value)
             elif istype(source, GetItemSource):
                 if isinstance(base_guard_manager, DictGuardManager):
-                    if isinstance(source.index, ConstDictKeySource):
-                        index = source.index.index
-                    else:
-                        # TODO (anijain2305) - Consider DictGetItemSource with
-                        # invariant that index is always ConstDictKeySource
-                        assert isinstance(base_example_value, dict)
-                        index = list(base_example_value.keys()).index(source.index)
-                    index_manager = base_guard_manager.get_key_value_manager(index)
-
-                    if not isinstance(source.index, ConstDictKeySource):
-                        # We have to insert a key manager guard here
-                        index_manager.get_key_manager(
-                            source.index
-                        ).add_equals_match_guard(source.index, [f"key=={source.index}"])
-
-                    return index_manager.get_value_manager(example_value)
+                    # TODO(janimesh) - Consider isolation GetItemSource and
+                    # DictGetItemSource (or maybe use ODictGetItemSource for
+                    # dicts)
+                    return handle_dict_mananger(source, base_guard_manager, base_example_value, example_value)
                 index = source.index
                 if source.index_is_slice:
                     index = source.unpack_slice()
@@ -450,15 +458,8 @@ class GuardBuilder(GuardBuilderBase):
             elif istype(source, ODictGetItemSource):
                 # Necessary to call dict_getitem_manager to call PyDict_GetItem
                 # instead of PyObject_GetItem which can trigger user code.
-                if isinstance(source.index, ConstDictKeySource):
-                    if not isinstance(base_guard_manager, DictGuardManager):
-                        raise AssertionError("DictGuardManager should not be here")
-                    return base_guard_manager.get_key_value_manager(
-                        source.index.index
-                    ).get_value_manager(example_value)
-                return base_guard_manager.dict_getitem_manager(
-                    source.index, example_value
-                )
+                assert isinstance(base_guard_manager, DictGuardManager)
+                return handle_dict_mananger(source, base_guard_manager, base_example_value, example_value)
             elif istype(source, DefaultsSource):
                 if not source.is_kw:
                     return base_guard_manager.getattr_manager(
@@ -1097,7 +1098,7 @@ class GuardBuilder(GuardBuilderBase):
             self.add_python_lambda_leaf_guard_to_root(
                 code_parts,
                 get_verbose_code_parts(code_parts, guard),
-                closure_vars={**SYMPY_INTERP},
+                closure_vars={**SYMPY_INTERP, **CLOSURE_VARS},
             )
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
@@ -1558,48 +1559,49 @@ class CheckFunctionManager:
         tensor_check_names = builder.tensor_check_names
         check_tensors_fn = None
         check_tensors_verbose_fn = None
-        assert (
-            not self.output_graph.export
-        ), "Illegal to set tensor_check_names in export."
-        tensor_check_examples = builder.tensor_check_examples
+        if tensor_check_names:
+            assert (
+                not self.output_graph.export
+            ), "Illegal to set tensor_check_names in export."
+            tensor_check_examples = builder.tensor_check_examples
 
-        dynamic_dims_sizes = [
-            convert_to_concrete_values(
-                self.output_graph.tensor_weakref_to_sizes_strides[t]["size"]
+            dynamic_dims_sizes = [
+                convert_to_concrete_values(
+                    self.output_graph.tensor_weakref_to_sizes_strides[t]["size"]
+                )
+                for t in tensor_check_examples
+            ]
+
+            dynamic_dims_strides = [
+                convert_to_concrete_values(
+                    self.output_graph.tensor_weakref_to_sizes_strides[t]["stride"]
+                )
+                for t in tensor_check_examples
+            ]
+
+            tensor_guards = TensorGuards(
+                *tensor_check_examples,
+                dynamic_dims_sizes=dynamic_dims_sizes,
+                dynamic_dims_strides=dynamic_dims_strides,
             )
-            for t in tensor_check_examples
-        ]
-
-        dynamic_dims_strides = [
-            convert_to_concrete_values(
-                self.output_graph.tensor_weakref_to_sizes_strides[t]["stride"]
+            check_tensors_fn = tensor_guards.check
+            check_tensors_verbose_fn = tensor_guards.check_verbose
+            tensor_check_args = ", ".join(
+                tensor_check_names + ["tensor_check_names=tensor_check_names"]
             )
-            for t in tensor_check_examples
-        ]
+            # Do this manually, to un-stagger the guards in log message
+            code_parts.append(f"___check_tensors({tensor_check_args})")
+            verbose_code_parts.append(f"___check_tensors({tensor_check_args})")
+            tensor_check_guards = builder.tensor_check_guards
 
-        tensor_guards = TensorGuards(
-            *tensor_check_examples,
-            dynamic_dims_sizes=dynamic_dims_sizes,
-            dynamic_dims_strides=dynamic_dims_strides,
-        )
-        check_tensors_fn = tensor_guards.check
-        check_tensors_verbose_fn = tensor_guards.check_verbose
-        tensor_check_args = ", ".join(
-            tensor_check_names + ["tensor_check_names=tensor_check_names"]
-        )
-        # Do this manually, to un-stagger the guards in log message
-        code_parts.append(f"___check_tensors({tensor_check_args})")
-        verbose_code_parts.append(f"___check_tensors({tensor_check_args})")
-        tensor_check_guards = builder.tensor_check_guards
-
-        for i, name in enumerate(tensor_check_names):
-            # This is a copy of what guards.cpp checks against
-            # Keep this in sync with TensorCheck constructor
-            t = tensor_check_examples[i]
-            sizes = dynamic_dims_sizes[i]
-            strides = dynamic_dims_strides[i]
-            code_part = get_tensor_guard_code_part(t, name, sizes, strides)
-            add_code_part(code_part, tensor_check_guards[i], log_only=True)
+            for i, name in enumerate(tensor_check_names):
+                # This is a copy of what guards.cpp checks against
+                # Keep this in sync with TensorCheck constructor
+                t = tensor_check_examples[i]
+                sizes = dynamic_dims_sizes[i]
+                strides = dynamic_dims_strides[i]
+                code_part = get_tensor_guard_code_part(t, name, sizes, strides)
+                add_code_part(code_part, tensor_check_guards[i], log_only=True)
 
         if len(tensor_check_names) > 1 and config.enable_cpp_guard_manager:
             # Install tensor aliasing guard. TENSOR_MATCH guards are already
@@ -1684,6 +1686,12 @@ class CheckFunctionManager:
         # when the CacheEntry is constructed
         guard_fn.cache_entry = None
         guard_fn.extra_state = None
+
+        # TODO(janimesh) - It is unclear to me why do we even need these. Maybe
+        # there is some circular ref because of GraphBuilder and CheckFnManager.
+        # This is exposed only after introducing get_guard_manager helper.
+        builder.tensor_check_examples = []
+        builder.scope = {}
         return guard_fn
 
     def invalidate(self):

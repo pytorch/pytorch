@@ -1444,11 +1444,6 @@ class GuardManager {
     // accessor_key type depends on the GuardAccessorT
     // for example for GetAttrGuardAccessor - py::str name
 
-    // Check that we are not trying to add an accessor for DictGuardManager
-    if (_is_dict_guard_manager()) {
-      throw std::runtime_error("Can not add an accessor to DictGuardManager");
-    }
-
     // Return the manager if the guard accessor exists
     for (const auto& accessor : _accessors) {
       if (accessor->matches_key(accessor_key)) {
@@ -1943,6 +1938,20 @@ class DictGuardManager : public GuardManager {
       return false;
     }
 
+    // Invokes the base class's check_nopybind method. We permit a limited set
+    // of leaf guards and accessors within the DictGuardManager framework.
+    // Integrating certain guards or accessors directly within the
+    // DictGuardManager can be challenging. For instance, `type(dict_object)` as
+    // an accessor is permissible, which otherwise would be hard to integrate
+    // directly into DictGuardManager.  Similarly, incorporating guards such as
+    // DICT_CONTAINS and DICT_VERSION as leaf guards offers a simpler solution
+    // than embedding these functionalities within the DictGuardManager itself.
+    if (!GuardManager::check_nopybind(obj)) {
+      _fail_count += 1;
+      // No need to shuffle the child guards, just return.
+      return false;
+    }
+
     PyObject *key, *value;
     Py_ssize_t pos = 0;
 
@@ -1969,16 +1978,6 @@ class DictGuardManager : public GuardManager {
     return true;
   }
 
-  void skip_adding_guard(py::object a, py::object b) {
-    // The `add_leaf_guard` method in `DictGuardManager` is overridden to block
-    // the addition of leaf guards. However, this is too strict. Python side of
-    // guard management frequently adds TYPE_MATCH and DICT_LENGTH on
-    // DictGuardManager. We could refactor Python side to never call these
-    // guards on dict objects, but that results in messy code. Instead, we just
-    // override these two guards to not go through add_leaf_guard code path and
-    // skip adding guards. This makes the python side easy.
-  }
-
   virtual GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
     if (!PyDict_Check(obj)) {
@@ -1987,6 +1986,19 @@ class DictGuardManager : public GuardManager {
 
     if (PyDict_Size(obj) != _size) {
       return GuardDebugInfo(false, "len(dict) does not match", 0);
+    }
+
+    // Invokes the base class's check_nopybind method. We permit a limited set
+    // of leaf guards and accessors within the DictGuardManager framework.
+    // Integrating certain guards or accessors directly within the
+    // DictGuardManager can be challenging. For instance, `type(dict_object)` as
+    // an accessor is permissible, which otherwise would be hard to integrate
+    // directly into DictGuardManager.  Similarly, incorporating guards such as
+    // DICT_CONTAINS and DICT_VERSION as leaf guards offers a simpler solution
+    // than embedding these functionalities within the DictGuardManager itself.
+    GuardDebugInfo debug_info = GuardManager::check_verbose_nopybind(obj);
+    if (!debug_info.result) {
+      return debug_info;
     }
 
     PyObject *key, *value;
@@ -2014,6 +2026,21 @@ class DictGuardManager : public GuardManager {
       dict_pointer += 1;
     }
     return GuardDebugInfo(true, num_guards_executed);
+  }
+
+
+  void skip_adding_guard(py::object a, py::object b) {
+    // The `add_leaf_guard` method in `DictGuardManager` is overridden to block
+    // the addition of leaf guards. However, this is too strict. Python side of
+    // guard management frequently adds TYPE_MATCH and DICT_LENGTH on
+    // DictGuardManager. We could refactor Python side to never call these
+    // guards on dict objects, but that results in messy code. Instead, we just
+    // override these two guards to not go through add_leaf_guard code path and
+    // skip adding guards. This makes the python side easy.
+  }
+
+  void fail_on_get_child_manager(py::object a, py::object b) {
+    throw std::runtime_error("Can not add an accessor to DictGuardManager");
   }
 
   void add_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) override {
@@ -2994,7 +3021,16 @@ PyObject* torch_c_dynamo_guards_init() {
           &DictGuardManager::get_key_value_manager,
           py::return_value_policy::reference)
       .def("add_type_match_guard", &DictGuardManager::skip_adding_guard)
-      .def("add_length_check_guard", &DictGuardManager::skip_adding_guard);
+      .def("add_length_check_guard", &DictGuardManager::skip_adding_guard)
+      // Only supported accessors are type_manager
+      .def("lambda_manager", &DictGuardManager::fail_on_get_child_manager)
+      .def("getitem_manager", &DictGuardManager::fail_on_get_child_manager)
+      .def("dict_getitem_manager", &DictGuardManager::fail_on_get_child_manager)
+      .def("globals_dict_manager", &DictGuardManager::fail_on_get_child_manager)
+      .def("tuple_iterator_getitem_manager", &DictGuardManager::fail_on_get_child_manager)
+      .def("global_weakref_manager", &DictGuardManager::fail_on_get_child_manager)
+      .def("lambda_manager", &DictGuardManager::fail_on_get_child_manager)
+      .def("getattr_manager", &DictGuardManager::fail_on_get_child_manager);
 
   // Dict key value guard Manager
   py::class_<
