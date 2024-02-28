@@ -568,7 +568,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 )
 
             if method is list.__len__ and self.source and not (args or kwargs):
-                install_guard(self.source.make_guard(GuardBuilder.LIST_LENGTH))
+                install_guard(self.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
                 return ConstantVariable(len(self.value))
 
         return super().call_method(tx, name, args, kwargs)
@@ -580,7 +580,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and self._maybe_get_baseclass_method("__len__") is list.__len__
             and self._maybe_get_baseclass_method("__getitem__") is list.__getitem__
         ):
-            install_guard(self.source.make_guard(GuardBuilder.LIST_LENGTH))
+            install_guard(self.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             return [
                 variables.LazyVariableTracker.create(
                     self.value[k],
