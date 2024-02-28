@@ -1376,7 +1376,7 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(a_ref, a_hat.dequantize(),
                          msg="ops.quantized.max_pool1d results are off")
 
-    # TODO: merge this test with test_max_pool2d 
+    # TODO: merge this test with test_max_pool2d
     """Tests 2D cudnn max pool operation on quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=1, max_side=10),
