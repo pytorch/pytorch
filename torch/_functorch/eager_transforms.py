@@ -344,8 +344,7 @@ def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = N
         # See NOTE [grad and vjp interaction with no_grad]
         with torch.enable_grad():
             primals = _wrap_all_tensors(primals, level)
-            # if argnums is None:
-            # Note for the reviewer: This is extremelly odd but it passes the
+            # Note for the reviewer: This is extremely odd but it passes the
             # assertion "len(self.block_stack) == 1" on symbolic_convert.py
             # The equivalent "if argnums is None" fails for some reason
             if not isinstance(argnums, int) and not argnums:
