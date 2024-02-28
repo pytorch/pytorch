@@ -1496,7 +1496,10 @@ def install_guard(*guards, skip=0):
     """
     from torch._guards import TracingContext
 
+    collect_debug_stack = guards_log.isEnabledFor(
+        logging.DEBUG
+    ) or verbose_guards_log.isEnabledFor(logging.DEBUG)
     add = TracingContext.get().guards_context.dynamo_guards.add
     for guard in guards:
         assert isinstance(guard, Guard)
-        add(guard, skip=skip + 1)
+        add(guard, collect_debug_stack=collect_debug_stack, skip=skip + 1)
