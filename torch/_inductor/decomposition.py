@@ -57,7 +57,6 @@ inductor_decompositions = get_decompositions(
         aten.native_batch_norm,
         aten.native_group_norm,
         aten.native_layer_norm,
-        aten.pixel_shuffle,
         aten._softmax,
         aten.sin_,
         aten.sqrt_,
@@ -104,6 +103,11 @@ def assert_async_msg_decomp(tensor, msg):
 # Following `assert_async_msg_decomp` and implement as non-op.
 @register_decomposition([aten._functional_assert_async.msg])
 def functional_assert_async_msg_decomp(tensor, msg):
+    return
+
+
+@register_decomposition([aten._assert_scalar.default])
+def assert_scalar_decomp(tensor, msg):
     return
 
 

@@ -78,7 +78,7 @@ void spmm_reduce_kernel_impl(
 
   auto other = other_.contiguous();
 
-  // access `crow_indices`, `col_indices` and `values` via TessorAccessor
+  // access `crow_indices`, `col_indices` and `values` via TensorAccessor
   scalar_t* out_data = out.data_ptr<scalar_t>();
   auto csr_data = crow_indices.accessor<index_t, 1>();
   auto col_data = col_indices.accessor<index_t, 1>();
