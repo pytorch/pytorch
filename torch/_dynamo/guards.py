@@ -314,9 +314,9 @@ def handle_dict_mananger(source, base_guard_manager, base_example_value, example
 
     if not isinstance(source.index, ConstDictKeySource):
         # We have to insert a key manager guard here
-        index_manager.get_key_manager(
-            source.index
-        ).add_equals_match_guard(source.index, [f"key=={source.index}"])
+        index_manager.get_key_manager(source.index).add_equals_match_guard(
+            source.index, [f"key=={source.index}"]
+        )
 
     return index_manager.get_value_manager(example_value)
 
@@ -450,7 +450,9 @@ class GuardBuilder(GuardBuilderBase):
                     # TODO(janimesh) - Consider isolation GetItemSource and
                     # DictGetItemSource (or maybe use ODictGetItemSource for
                     # dicts)
-                    return handle_dict_mananger(source, base_guard_manager, base_example_value, example_value)
+                    return handle_dict_mananger(
+                        source, base_guard_manager, base_example_value, example_value
+                    )
                 index = source.index
                 if source.index_is_slice:
                     index = source.unpack_slice()
@@ -459,7 +461,9 @@ class GuardBuilder(GuardBuilderBase):
                 # Necessary to call dict_getitem_manager to call PyDict_GetItem
                 # instead of PyObject_GetItem which can trigger user code.
                 assert isinstance(base_guard_manager, DictGuardManager)
-                return handle_dict_mananger(source, base_guard_manager, base_example_value, example_value)
+                return handle_dict_mananger(
+                    source, base_guard_manager, base_example_value, example_value
+                )
             elif istype(source, DefaultsSource):
                 if not source.is_kw:
                     return base_guard_manager.getattr_manager(
