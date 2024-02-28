@@ -144,9 +144,7 @@ void boxed_tensor_inputs_batch_rule(const c10::OperatorHandle& op, torch::jit::S
   for (const auto idx : c10::irange(0, num_arguments)) {
     const auto& ivalue = arguments[idx];
     if (ivalue.isTensor()) {
-      Tensor tensor_value;
-      optional<int64_t> tensor_bdim;
-      std::tie(tensor_value, tensor_bdim) = unwrapTensorAtLevel(ivalue.toTensor(), cur_level);
+      auto [tensor_value, tensor_bdim] = unwrapTensorAtLevel(ivalue.toTensor(), cur_level);
       tensor_inputs.emplace_back(tensor_value, tensor_bdim);
       tensor_pos.push_back(idx);
     }

@@ -102,10 +102,7 @@ SymBool SymbolicShapeMeta::compute_contiguous() const {
     }                                                           \
     auto n = normalize_sym_sizes_strides(sizes_, strides_);     \
     if (n.has_value()) {                                        \
-      SymNode base;                                             \
-      std::vector<SymNode> size_nodes;                          \
-      std::vector<SymNode> stride_nodes;                        \
-      std::tie(base, size_nodes, stride_nodes) = *n;            \
+      auto [base, size_nodes, stride_nodes] = *n;               \
       return SymBool(base->nodeimpl(size_nodes, stride_nodes)); \
     } else {                                                    \
       c10::SymIntArrayRef sizes(sizes_);                        \

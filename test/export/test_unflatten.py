@@ -21,7 +21,6 @@ from torch.export import (
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
-from torch._export import capture_pre_autograd_graph
 from torch._export.utils import (
     get_buffer,
     get_param,
@@ -210,6 +209,7 @@ class TestUnflatten(TestCase):
             id(getattr(unflattened_module.sub_net, "2")),
         )
 
+    @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
     @skipIfTorchDynamo("Non strict mode is not meant to run with dynamo")
     def test_unflatten_preserve_signature(self):
         class NestedChild(torch.nn.Module):
@@ -584,6 +584,37 @@ class TestUnflatten(TestCase):
         unflattened = unflatten(export_module)
 
         self.compare_outputs(export_module, unflattened, (torch.randn((2, 3)),))
+
+    def test_nested_leaf_non_strict(self):
+        class Leaf(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        class Nested(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.leaf = Leaf()
+
+            def forward(self, x):
+                return self.leaf(x) + 2
+
+        class TopLevel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.nested = Nested()
+
+            def forward(self, x):
+                return self.nested(x) + 3
+
+        ep = torch.export.export(
+            TopLevel(),
+            (torch.randn(3),),
+            strict=False,
+            preserve_module_call_signature=("nested",),
+        )
+
+        torch.export.unflatten(ep)
+
 
 if __name__ == "__main__":
     run_tests()

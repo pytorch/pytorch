@@ -11,7 +11,7 @@
 
 #include <utility>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 template <typename F, F Func, typename... ExtraArgs>
 std::tuple<Tensor,optional<int64_t>> _binary_pointwise_batch_rule(
@@ -60,13 +60,9 @@ struct BinaryRandomPointwiseBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
     auto cur_level = maybe_layer->layerId();
     RandomnessType randomness = maybe_layer->randomness();
 
-    Tensor tensor_value;
-    optional<int64_t> tensor_bdim;
-    std::tie(tensor_value, tensor_bdim) = unwrapTensorAtLevel(tensor, cur_level);
+    auto [tensor_value, tensor_bdim] = unwrapTensorAtLevel(tensor, cur_level);
 
-    Tensor other_value;
-    optional<int64_t> other_bdim;
-    std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+    auto [other_value, other_bdim] = unwrapTensorAtLevel(other, cur_level);
 
     check_randomness(randomness, (tensor_bdim || other_bdim));
     if (randomness == RandomnessType::Different && !tensor_bdim && !other_bdim) {
@@ -520,4 +516,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT2(fill_, Tensor, fill__Tensor_batch_rule);
 }
 
-}}
+} // namespace at::functorch

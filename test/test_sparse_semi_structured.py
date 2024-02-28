@@ -2,6 +2,7 @@
 import itertools
 import random
 import unittest
+import sys
 
 import torch
 from torch import nn
@@ -196,6 +197,7 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
         assert sparse_result.stride() == sparse_compile_result.stride()
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
+    @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
     @unittest.skipIf("cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS, "cusparselt not supported on this machine")
     def test_mlp_contiguous_relu_compile_cusparselt(self):
         """
@@ -205,6 +207,7 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
             SparseSemiStructuredTensorCompileTest._test_mlp_contiguous_relu_compile("cusparselt", dense_input_shape)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
+    @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
     def test_mlp_contiguous_relu_compile_cutlass(self):
         """
         test for CUTLASS meta registrations (_sparse_semi_structured_linear) + torch.compile
@@ -253,7 +256,7 @@ class TestSparseSemiStructured(TestCase):
         if dtype is torch.int8:
             # This should fail
             if backend == "cutlass":
-                with self.assertRaisesRegex(RuntimeError, "two_four_sgemm_cutlass_dispatch_layouts"):
+                with self.assertRaisesRegex(RuntimeError, "two_four_sgemm_dispatch_layouts"):
                     sparse_result = torch.mm(A_sparse, B)
             else:
                 with self.assertRaisesRegex(RuntimeError,
@@ -284,7 +287,7 @@ class TestSparseSemiStructured(TestCase):
             # padding with int8 throws an error because transposing B yields a contiguous output
             # and row-row 2:4 sparse @ dense with NN is not supported by cuSPARSELt or CUTLASS.
             if backend == "cutlass":
-                with self.assertRaisesRegex(RuntimeError, "two_four_sgemm_cutlass_dispatch_layouts"):
+                with self.assertRaisesRegex(RuntimeError, "two_four_sgemm_dispatch_layouts"):
                     sparse_result = torch.mm(A_sparse, B.t())
             else:
                 with self.assertRaisesRegex(RuntimeError,
