@@ -1873,7 +1873,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.block_stack.append(BlockStackEntry(target))
 
         self.push(exit)
-        self.push(ctx.enter(self))
+        self.push(ctx)
 
     def append_prefix_inst(self, inst):
         assert self.accept_prefix_inst
