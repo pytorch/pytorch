@@ -2472,8 +2472,18 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
     PyObject* x = PyObject_CallOneArg(_accessor_fn.ptr(), obj); // new ref
     if (x == nullptr) {
       // The accessor function failed.
+      PyObject *ptype, *pvalue, *ptraceback;
+      PyErr_Fetch(&ptype, &pvalue, &ptraceback);
+
+      PyObject* exc_message_pyobj = PyObject_Str(pvalue);
+      const char* exc_message = PyUnicode_AsUTF8(exc_message_pyobj);
+
+      Py_DECREF(exc_message_pyobj);
+      Py_XDECREF(ptype);
+      Py_XDECREF(pvalue);
+      Py_XDECREF(ptraceback);
       PyErr_Clear();
-      return GuardDebugInfo(false, std::string("Call failed ") + repr(), 0);
+      return GuardDebugInfo(false, std::string(exc_message), 0);
     }
     GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
     Py_DECREF(x);
