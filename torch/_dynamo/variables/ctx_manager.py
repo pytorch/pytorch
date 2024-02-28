@@ -246,7 +246,7 @@ class InferenceModeVariable(ContextWrappingVariable):
     @staticmethod
     def create(tx, target_values, **kwargs):
         var = InferenceModeVariable(
-            target_values, initial_values=torch.is_inference_mode_enabled(), **kwargs
+            [target_values], initial_values=torch.is_inference_mode_enabled(), **kwargs
         )
         return var
 
@@ -274,19 +274,19 @@ class InferenceModeVariable(ContextWrappingVariable):
         )
 
     def enter(self, tx):
-        ctx = torch.autograd.grad_mode._enter_inference_mode(self.target_values)
+        ctx = torch.autograd.grad_mode._enter_inference_mode(*self.target_values)
         self.set_cleanup_hook(
             tx, lambda: torch.autograd.grad_mode._exit_inference_mode(ctx)
         )
         self.state.proxy = tx.output.create_node(
             "call_function",
             torch.autograd.grad_mode._enter_inference_mode,
-            (self.target_values,),
+            (*self.target_values,),
             {},
         )
 
     def module_name(self):
-        return "torch.inference_mode"
+        return "torch"
 
     def fn_name(self):
         return "inference_mode"
