@@ -485,6 +485,15 @@ class ShapeEnvSource(Source):
         return GuardSource.SHAPE_ENV
 
 
+@dataclasses.dataclass(frozen=True)
+class BackwardStateSource(Source):
+    def name(self):
+        return ""
+
+    def guard_source(self):
+        return GuardSource.BACKWARD_STATE
+
+
 def is_from_local_source(source: Source, *, allow_cell_or_freevar=True):
     if isinstance(source, ChainedSource):
         return is_from_local_source(

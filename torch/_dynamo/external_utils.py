@@ -74,3 +74,7 @@ def call_backward(backward_fn, saved_tensors, *args):
 
 def untyped_storage_size(x: torch.Tensor):
     return x.untyped_storage().size()
+
+
+def call_hook_from_backward_state(*args, bw_state, hook_name: str, **kwargs):
+    return getattr(bw_state, hook_name)(*args, **kwargs)
