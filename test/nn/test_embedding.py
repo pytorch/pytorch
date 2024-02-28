@@ -1,4 +1,5 @@
 # Owner(s): ["module: nn"]
+import copy
 import unittest
 import random
 import itertools
@@ -1002,9 +1003,9 @@ class TestEmbeddingNNDeviceType(NNTestCase):
 
         output.backward(grad_output)
         ref_output.backward(grad_output)
-        es_weight_grad = es.weight.grad.data
+        es_weight_grad = copy.deepcopy(es.weight.grad)
         if sparse:
-            es_weight_grad = es.weight.grad.data.to_dense()
+            es_weight_grad = copy.deepcopy(es.weight.grad).to_dense()
 
         # We have more floating point error here because we are dealing with larger numbers
         if backward_prec is None:
