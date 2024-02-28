@@ -2777,9 +2777,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     post(ncclStream);
 
     // End event should only be recorded after the ncclGroupEnd()
-    if (!coalescing_state_) {
-      work->ncclEndEvent_->record(ncclStream);
-    }
+    work->ncclEndEvent_->record(ncclStream);
     work->ncclComm_ = ncclComm;
     work->blockingWait_ = blockingWait_;
     work->opTimeout_ = options_->timeout;
