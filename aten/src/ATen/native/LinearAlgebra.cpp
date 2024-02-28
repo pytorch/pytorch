@@ -1022,7 +1022,7 @@ Tensor multi_dot_impl(TensorList _tensors, c10::optional<Tensor> _out) {
 
     // If the last and last tensors have shapes (a, b) and (b, c) the
     // output has shape (a, c). If either the first or last tensor is 1D
-    // a and/or c dimensions will be implicitely size 1 and will be ommited
+    // a and/or c dimensions will be implicitly size 1 and will be omitted
     // from the output. e.g. for inputs (a, b) x (b) the output has shape (a,).
     at::native::resize_output(out, out_shape);
 
@@ -1809,7 +1809,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
      * vs. other threads, leading to undefined behavior.
      * Thus it is recommended to not use at::parallel_for where lambdas do
      * ops that go through dispatcher.
-     * For now we circument this by InferenceMode guard in order to unlock
+     * For now we circumvent this by InferenceMode guard in order to unlock
      * performance.
      * Longer term we probably want a separate API that explicitly calls out
      * the TLS that it propagates.
@@ -1946,7 +1946,7 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
   // The output gradient g of this operation would have shape [b, m, k]
   // The backward wrt. t2 of bmm would be given by t1.mH @ g, which has shape [b, n, k]
   // Then, the backward of expand is simply `sum(0)`. As such, we are instantiating a tensor
-  // of shape [b, n, k] unnacessarily, which may cause a large memory footprint, and in the
+  // of shape [b, n, k] unnecessarily, which may cause a large memory footprint, and in the
   // worst case, an OOM
   bool t2_requires_grad = tensor1_larger ? tensor2.requires_grad() : tensor1.requires_grad();
   if (t2_requires_grad && !has_out) {
@@ -2602,7 +2602,7 @@ Tensor compute_T18_scale_square(
   auto scs = section_values. template data_ptr<int64_t>();
   auto pts = &scs[section_numel];
 
-  // We now will do the matrix muplication in a batch, with above example:
+  // We now will do the matrix multiplication in a batch, with above example:
   // 1. Multiply all matrices by 0 (`mul_times[0]`) times, then do `slice`
   // to get the remain matrices by acc[1:] (`split_counts[0]`),
   // 2. Multiply remain matrices by 1 times and slice to acc[2:]
@@ -2761,7 +2761,7 @@ Tensor backward_analytic_function_of_a_matrix(
 } // end anon namespace
 
 // Computes the matrix exponential for a given batch of squared matrices.
-// The implementaion is based on:
+// The implementation is based on:
 //
 // Bader, P.; Blanes, S.; Casas, F.
 // Computing the Matrix Exponential with an Optimized Taylor Polynomial Approximation.
@@ -2812,7 +2812,7 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   // Reductions always use `std::abs` to compute the absolute value. In the backward of this
   // function, we need to locate the index that was selected as the largest value. To do so
   // we do self.abs() == result to locate the index of the largest element.
-  // Now, self.abs() may dispatch to a vectorized implementation which gives sliiightly different
+  // Now, self.abs() may dispatch to a vectorized implementation which gives slightly different
   // results to the std::abs(std::complex<T>) implementation.
   // As such, to be able to compute the correct index in the backward, we need to use self.abs()
   // both in the forward and in the backward

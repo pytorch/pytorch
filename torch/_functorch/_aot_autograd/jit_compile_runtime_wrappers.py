@@ -18,7 +18,7 @@ import torch.utils.dlpack
 from torch import Tensor
 from torch._dynamo.utils import lazy_format_graph_code
 from torch._guards import detect_fake_mode, tracing, TracingContext
-from torch._logging import getArtifactLogger
+from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
 from torch.fx.experimental.proxy_tensor import is_sym_node
@@ -43,7 +43,11 @@ from .schemas import (
     TensorAlias,
     ViewAndMutationMeta,
 )
-from .subclass_utils import unwrap_tensor_subclasses, wrap_tensor_subclasses
+from .subclass_utils import (
+    compute_inner_mutated_inp_indices_from_subclass_meta,
+    unwrap_tensor_subclasses,
+    wrap_tensor_subclasses,
+)
 
 from .utils import (
     _get_symint_hints,
@@ -164,6 +168,10 @@ def aot_dispatch_autograd(
         aot_joint_log.info(
             "%s", lazy_format_graph_code("Joint graph", fx_g, aot_config.aot_id)
         )
+        trace_structured(
+            "aot_joint_graph",
+            payload_fn=lambda: fx_g.print_readable(print_output=False),  # type: ignore[union-attr]
+        )
 
     with torch.no_grad():
         inner_meta = (
@@ -173,8 +181,15 @@ def aot_dispatch_autograd(
         )
         with track_graph_compiling(aot_config, "joint"):
             # See Note: [Partitioner handling for Subclasses, Part 1]
+            # See Note: [Recomputing subclass mutation handling]
+            mutated_inp_runtime_indices = (
+                compute_inner_mutated_inp_indices_from_subclass_meta(
+                    fw_metadata, inner_meta
+                )
+            )
+            num_mutated_inp_runtime_indices = len(mutated_inp_runtime_indices)
             num_inner_fwd_outputs = (
-                inner_meta.num_mutated_inp_runtime_indices
+                num_mutated_inp_runtime_indices
                 + inner_meta.num_outputs
                 + inner_meta.num_intermediate_bases
                 + inner_meta.num_outputs_rng_offset
@@ -275,6 +290,14 @@ def aot_dispatch_autograd(
             aot_graphs_log.info(
                 "%s",
                 lazy_format_graph_code("Backward graph", bw_module, aot_config.aot_id),
+            )
+            trace_structured(
+                "aot_forward_graph",
+                payload_fn=lambda: fw_module.print_readable(print_output=False),
+            )
+            trace_structured(
+                "aot_backward_graph",
+                payload_fn=lambda: bw_module.print_readable(print_output=False),
             )
 
         with track_graph_compiling(aot_config, "forward"):

@@ -23,7 +23,7 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_fsdp import FSDPTestMultiThread, MLP
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, wrapSwapTensorsTest
 
 
 class TestFullyShardDeviceTensor(FSDPTestMultiThread):
@@ -453,27 +453,38 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
 
 
 class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
+    """
+    Set ``torch.__future__.set_swap_module_params_on_conversion(True)`` using
+    ``@wrapSwapTensorsTest(True)`` until ``_apply`` swaps wrapper subclasses by
+    default in the future.
+    """
+
     @property
     def world_size(self) -> int:
         return 4
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @wrapSwapTensorsTest(True)
     def test_meta_device_1d_init(self):
         default_pg = torch.distributed.distributed_c10d._get_default_group()
         device_type = "cuda" if torch.cuda.is_available() else "cpu"
         mesh = init_device_mesh(device_type, mesh_shape=(default_pg.size(),))
-        with torch.device("meta"):
-            model = nn.Sequential(MLP(8, with_buffer=True), MLP(8))
+
+        # Test both even sharding (8) and uneven sharding (3)
+        for mlp_dim in (8, 3):
+            with torch.device("meta"):
+                model = nn.Sequential(MLP(mlp_dim, with_buffer=True), MLP(mlp_dim))
+                for param in model.parameters():
+                    self.assertEqual(param.device, torch.device("meta"))
+                fully_shard(model[0], mesh=mesh)
+                fully_shard(model[1], mesh=mesh)
+                fully_shard(model, mesh=mesh)
             for param in model.parameters():
                 self.assertEqual(param.device, torch.device("meta"))
-            fully_shard(model[0], mesh=mesh)
-            fully_shard(model[1], mesh=mesh)
-            fully_shard(model, mesh=mesh)
-        for param in model.parameters():
-            self.assertEqual(param.device, torch.device("meta"))
-        self._test_to_empty_and_reset_parameters(model, mesh)
+            self._test_to_empty_and_reset_parameters(model, mesh, mlp_dim)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @wrapSwapTensorsTest(True)
     def test_meta_device_2d_init(self):
         assert self.world_size >= 4, f"{self.world_size}"
         dp_size = 2
@@ -481,25 +492,30 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
             "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
         )
         dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
-        with torch.device("meta"):
-            model = MLP(8, with_buffer=True)
-            for param in model.parameters():
-                self.assertEqual(param.device, torch.device("meta"))
-            parallelize_module(
-                model,
-                tp_mesh,
-                {"in_proj": ColwiseParallel(), "out_proj": RowwiseParallel()},
-            )
-            for param in model.parameters():
-                self.assertEqual(param.device, torch.device("meta"))
-            fully_shard(model.in_proj, mesh=dp_mesh)
-            fully_shard(model.out_proj, mesh=dp_mesh)
-            fully_shard(model, mesh=dp_mesh)
-        for param in model.parameters():
-            self.assertEqual(param.device, torch.device("meta"))
-        self._test_to_empty_and_reset_parameters(model, global_mesh)
 
-    def _test_to_empty_and_reset_parameters(self, model: nn.Module, mesh: DeviceMesh):
+        # Test both even sharding (8) and uneven sharding (3)
+        for mlp_dim in (8, 3):
+            with torch.device("meta"):
+                model = MLP(mlp_dim, with_buffer=True)
+                for param in model.parameters():
+                    self.assertEqual(param.device, torch.device("meta"))
+                parallelize_module(
+                    model,
+                    tp_mesh,
+                    {"in_proj": ColwiseParallel(), "out_proj": RowwiseParallel()},
+                )
+                for param in model.parameters():
+                    self.assertEqual(param.device, torch.device("meta"))
+                fully_shard(model.in_proj, mesh=dp_mesh)
+                fully_shard(model.out_proj, mesh=dp_mesh)
+                fully_shard(model, mesh=dp_mesh)
+            for param in model.parameters():
+                self.assertEqual(param.device, torch.device("meta"))
+            self._test_to_empty_and_reset_parameters(model, global_mesh, mlp_dim)
+
+    def _test_to_empty_and_reset_parameters(
+        self, model: nn.Module, mesh: DeviceMesh, mlp_dim: int
+    ):
         # Check that we can materialize it on GPU with empty values
         device = torch.device("cuda", torch.cuda.current_device())
         model.to_empty(device=device)
@@ -520,12 +536,13 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
                 module.reset_parameters()
         for param in model.parameters():
             local_tensor = param.to_local()
-            self.assertNotEqual(local_tensor, torch.ones_like(local_tensor) * const)
+            if local_tensor.numel() > 0:
+                self.assertNotEqual(local_tensor, torch.ones_like(local_tensor) * const)
         for buffer in model.buffers():
             self.assertNotEqual(buffer, torch.ones_like(buffer) * const)
 
         # Check that we can run an iteration without erroring
-        inp = torch.randn((4, 8), device="cuda")
+        inp = torch.randn((4, mlp_dim), device="cuda")
         model(inp).sum().backward()
         optim.step()
 

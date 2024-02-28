@@ -18,7 +18,7 @@ from .common import IndentedBuffer
 from .wrapper import pexpr, WrapperCodeGen
 
 
-class CppWrapperCodeGen(WrapperCodeGen):
+class CppWrapperCpu(WrapperCodeGen):
     """
     Generates cpp wrapper for running on CPU and calls cpp kernels
     """
@@ -238,7 +238,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 from .cpp import DTYPE_TO_CPP
 
                 input_cpp_types = ", ".join(
-                    f"{CppWrapperCodeGen.get_input_cpp_type(x)}"
+                    f"{CppWrapperCpu.get_input_cpp_type(x)}"
                     for x in V.graph.graph_inputs.values()
                 )
 
@@ -1418,6 +1418,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
         # output pointers, so we skip its codegen here.
         if not config.abi_compatible:
             super().codegen_multi_output(name, value)
+
+    def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
+        raise NotImplementedError("Control flow NYI in C++ wrapper codegen.")
+
+    def codegen_conditional(self, conditional):
+        raise NotImplementedError("Control flow NYI in C++ wrapper codegen.")
 
     def generate_extern_kernel_args_decl_if_needed(
         self, op_overload, raw_args, output_args
