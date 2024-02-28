@@ -160,6 +160,7 @@ function install_torchvision() {
 
 function install_tlparse() {
   pip_install --user "tlparse==0.3.5"
+  PATH="$(python -m site --user-base)/bin:$PATH"
 }
 
 function install_torchrec_and_fbgemm() {
