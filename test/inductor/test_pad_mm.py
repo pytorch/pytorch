@@ -1,6 +1,4 @@
 # Owner(s): ["module: inductor"]
-
-
 import unittest
 from unittest.mock import patch
 
@@ -30,7 +28,13 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 class PadMMTest(TestCase):
-    @inductor_config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @inductor_config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+        force_shape_pad=True,
+        shape_padding=True,
+        keep_output_stride=False,
+    )
     def test_pad_mm_dyn_m(self):
         M = 40
         K1 = 581
@@ -61,7 +65,13 @@ class PadMMTest(TestCase):
             FileCheck().check(f"K = {aligned_k}").run(code)
         self.assertEqual(res1, res2)
 
-    @inductor_config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @inductor_config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+        force_shape_pad=True,
+        shape_padding=True,
+        keep_output_stride=False,
+    )
     def test_cat_pad_mm_dyn_m(self):
         M1 = 128
         M2 = 40
@@ -96,7 +106,13 @@ class PadMMTest(TestCase):
             FileCheck().check(f"K = {aligned_k}").run(code)
         self.assertEqual(res1, res2)
 
-    @inductor_config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @inductor_config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+        force_shape_pad=True,
+        shape_padding=True,
+        keep_output_stride=False,
+    )
     def test_pad_mm_dyn_n(self):
         M = 20
         K = 81
@@ -123,7 +139,13 @@ class PadMMTest(TestCase):
             FileCheck().check(f"K = {aligned_k}").run(code)
         self.assertEqual(res1, res2)
 
-    @inductor_config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @inductor_config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+        force_shape_pad=True,
+        shape_padding=True,
+        keep_output_stride=False,
+    )
     def test_pad_mm_dyn_k(self):
         M = 21
         K = 80
@@ -178,7 +200,13 @@ class PadMMTest(TestCase):
             res2, (code,) = run_and_get_code(compiled_fn, a, b)
         self.assertEqual(res1, res2)
 
-    @inductor_config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @inductor_config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+        force_shape_pad=True,
+        shape_padding=True,
+        keep_output_stride=False,
+    )
     def test_pad_bmm_dyn_b(self):
         B = 10
         M = 128
@@ -210,9 +238,9 @@ class PadMMTest(TestCase):
     @inductor_config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
-        shape_pad_use_transpose=False,
         force_shape_pad=True,
         shape_padding=True,
+        keep_output_stride=False,
     )
     def test_pad_bmm_dyn_k(self):
         B = 10
@@ -247,6 +275,7 @@ class PadMMTest(TestCase):
         max_autotune_gemm_backends="TRITON",
         force_shape_pad=True,
         shape_padding=True,
+        keep_output_stride=False,
     )
     def test_pad_bmm_dyn_bm(self):
         B = 10
@@ -263,7 +292,6 @@ class PadMMTest(TestCase):
 
         fn = Model().cuda()
         a = torch.randn(B, M, K, device="cuda", dtype=torch.float32)
-
         b = torch.randn(B, K, N, device="cuda", dtype=torch.float32)
         aligned_n = get_padded_length(N, get_alignment_size(b)) + N
         torch._dynamo.mark_dynamic(a, 0)
@@ -281,9 +309,9 @@ class PadMMTest(TestCase):
     @inductor_config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
-        shape_pad_use_transpose=False,
         force_shape_pad=True,
         shape_padding=True,
+        keep_output_stride=False,
     )
     def test_pad_addmm_dyn_m(self):
         M = 128
@@ -313,7 +341,13 @@ class PadMMTest(TestCase):
             FileCheck().check(f"K = {aligned_k}").run(code)
         self.assertEqual(res1, res2)
 
-    @inductor_config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @inductor_config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+        keep_output_stride=False,
+        force_shape_pad=True,
+        shape_padding=True,
+    )
     def test_pad_addmm_dyn_mn(self):
         M = 128
         K = 33
@@ -358,11 +392,20 @@ class PadMMTest(TestCase):
         "m,n,k", [(1, 1, 1), (16, 32, 64), (17, 33, 65), (16, 15, 8), (15, 32, 16)]
     )
     @parametrize("shape_pad_use_transpose", (False, True))
-    def test_pad_nobatch(self, m=6, n=9, k=11, shape_pad_use_transpose: bool = True):
+    @parametrize("keep_output_stride", (False, True))
+    def test_pad_nobatch(
+        self,
+        m=6,
+        n=9,
+        k=11,
+        shape_pad_use_transpose: bool = True,
+        keep_output_stride=False,
+    ):
         with config.patch(
             {
                 "shape_pad_use_transpose": shape_pad_use_transpose,
                 "force_shape_pad": True,
+                "keep_output_stride": keep_output_stride,
             }
         ):
             mat1 = torch.ones((m, k), device="cuda", dtype=torch.float16)
@@ -408,7 +451,13 @@ class PadMMTest(TestCase):
             assert torch.allclose(
                 addmm_compiled_result, addmm_expected_result
             ), "Compiled ADDMM results are not identical"
-            self._check_tensor_alignment(addmm_compiled_result, expected_alignment)
+
+            if not keep_output_stride:
+                self._check_tensor_alignment(addmm_compiled_result, expected_alignment)
+            else:
+                assert (
+                    addmm_compiled_result.stride() == addmm_expected_result.stride()
+                ), "config.keep_output_stride is being violated by shape padding"
 
             orig_mm = call_mm
             called_checked = False
@@ -437,7 +486,13 @@ class PadMMTest(TestCase):
             assert torch.allclose(
                 mm_compiled_result, mm_expected_result
             ), "Compiled MM results are not identical"
-            self._check_tensor_alignment(mm_compiled_result, expected_alignment)
+
+            if not keep_output_stride:
+                self._check_tensor_alignment(mm_compiled_result, expected_alignment)
+            else:
+                assert (
+                    mm_compiled_result.stride() == mm_expected_result.stride()
+                ), "config.keep_output_stride is being violated by shape padding"
 
     @parametrize(
         "m,n,k,batch_size",
@@ -450,13 +505,21 @@ class PadMMTest(TestCase):
         ],
     )
     @parametrize("shape_pad_use_transpose", (False, True))
+    @parametrize("keep_output_stride", (False, True))
     def test_pad_batch(
-        self, m=6, n=9, k=11, batch_size=3, shape_pad_use_transpose: bool = True
+        self,
+        m=6,
+        n=9,
+        k=11,
+        batch_size=3,
+        shape_pad_use_transpose: bool = True,
+        keep_output_stride=False,
     ):
         with config.patch(
             {
                 "shape_pad_use_transpose": shape_pad_use_transpose,
                 "force_shape_pad": True,
+                "keep_output_stride": keep_output_stride,
             }
         ):
             mat1 = torch.ones((batch_size, m, k), device="cuda", dtype=torch.float16)
@@ -496,7 +559,13 @@ class PadMMTest(TestCase):
             assert torch.allclose(
                 bmm_compiled_result, bmm_expected_result
             ), "Compiled BMM results are not identical"
-            self._check_tensor_alignment(bmm_compiled_result, expected_alignment)
+
+            if not keep_output_stride:
+                self._check_tensor_alignment(bmm_compiled_result, expected_alignment)
+            else:
+                assert (
+                    bmm_compiled_result.stride() == bmm_expected_result.stride()
+                ), "config.keep_output_stride is being violated by shape padding"
 
 
 if __name__ == "__main__":
