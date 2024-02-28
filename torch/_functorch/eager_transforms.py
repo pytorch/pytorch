@@ -1005,7 +1005,10 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
                 flat_duals = tuple(fwAD.make_dual(p, t)
                                    for p, t in zip(flat_primals, flat_tangents))
                 duals = tree_unflatten(flat_duals, primals_spec)
-                if argnums:
+                # Note for the reviewer: This is extremely odd but it passes the
+                # assertion "len(self.block_stack) == 1" on symbolic_convert.py
+                # The equivalent "if argnums is not None" fails for some reason
+                if isinstance(argnums, int):
                     primals = _wrap_all_tensors(primals, level)
                     duals = _replace_args(primals, duals, argnums)
                 result_duals = func(*duals)

@@ -2429,6 +2429,38 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
             munge_exc(record.getMessage()),
         )
 
+    @xfailIfTorchDynamo
+    @config.patch(capture_func_transforms=True)
+    @make_logging_test(recompiles=True)
+    def test_jvp_guard_fail(self, records):
+        jvp = torch.func.jvp
+        vmap = torch.func.vmap
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            return jvp(torch.sin, (x,), (x,))
+
+        x = torch.randn(3, 4)
+        fn(x)
+        self.assertEqual(len(records), 0)
+
+        # calling again should not invalidate the graph
+        fn(x)
+        self.assertEqual(len(records), 0)
+
+        # call jvp should retrigger compilation
+        x = torch.randn(3, 4, 5)
+        jvp(vmap(fn), (x,), (x,))
+
+        self.assertGreater(len(records), 0)
+        record = self.getRecord(records, "pyfunctorch")
+        self.assertIn(
+            """\
+    triggered by the following guard failure(s):
+    - torch._functorch.pyfunctorch.compare_functorch_state([])""",
+            munge_exc(record.getMessage()),
+        )
+
     @config.patch(capture_func_transforms=True)
     @make_logging_test(recompiles=True)
     def test_vmap_guard_ok(self, records):
@@ -3889,7 +3921,6 @@ class GraphModule(torch.nn.Module):
         actual = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(x)
         self.assertEqual(actual, expected)
 
-    @unittest.expectedFailure
     @config.patch(capture_func_transforms=True)
     def test_jvp_freevar_python_scalar(self):
         counters.clear()
