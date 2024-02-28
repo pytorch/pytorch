@@ -1666,6 +1666,7 @@ void ProcessGroupNCCL::runHookLoop() {
                 work.workStartTime_ - std::chrono::steady_clock::now());
         onCompletionHook_(std::make_shared<WorkInfo>(
             work.retrieveOpType(), // OpType
+            work.getSequencenumber(), // seq
             timeStarted, // timeStarted
             std::chrono::system_clock::now(), // timeFinished
             std::chrono::duration<float, std::milli>(
