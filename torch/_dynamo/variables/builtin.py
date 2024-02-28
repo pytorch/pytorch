@@ -1719,7 +1719,7 @@ class BuiltinVariable(VariableTracker):
 
     def call_is_(self, tx, left, right):
         # This comparison happens when we inlining into the __init__ method of dataclasses.
-        # It contains a piece of code that check whether the passed in argument is.
+        # It contains a piece of code that check whether the argument is
         # the default factory object to to determine a name for the field.
         if (
             left.python_type() is dataclasses._HAS_DEFAULT_FACTORY_CLASS
