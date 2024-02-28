@@ -2197,6 +2197,52 @@ class GetItemGuardAccessor : public GuardAccessor {
 };
 
 /**
+ * Represents dict[name] acccessor. This is ONLY used for f_locals because its a
+ * dict, and DictGuardManager does not support sorting. We differentiate it from
+ * GetItemGuardAccessor because PyDict_GetItem should be fasten the
+ * PyObject_GetItem.
+ */
+class DictGetItemGuardAccessor : public GuardAccessor {
+ public:
+  DictGetItemGuardAccessor(
+      RootGuardManager* root,
+      py::str name,
+      py::handle example_value)
+      : GuardAccessor(root, name, example_value), _attr_name(name.ptr()) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    PyObject* x = PyDict_GetItem(obj, _attr_name); // borrowed ref
+    if (x == nullptr) {
+      PyErr_Clear();
+      return false;
+    }
+    bool result = _guard_manager->check_nopybind(x);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* x = PyDict_GetItem(obj, _attr_name); // borrowed ref
+    if (x == nullptr) {
+      PyErr_Clear();
+      return GuardDebugInfo(false, std::string("KeyError ") + repr(), 0);
+    }
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    return result;
+  }
+
+  std::string repr() const override {
+    return "DictGetItemGuardAccessor(" +
+        py::str(_attr_name).cast<std::string>() + ")";
+  }
+
+ private:
+  PyObject* _attr_name;
+};
+
+/**
  * Represents f_globals acccessor. This sits as a child accessor of the
  * RootGuardManager.
  */
@@ -2580,6 +2626,11 @@ PyObject* torch_c_dynamo_guards_init() {
       GuardAccessor,
       std::unique_ptr<GetItemGuardAccessor>>(py_m, "GetItemGuardAccessor");
   py::class_<
+      DictGetItemGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<DictGetItemGuardAccessor>>(
+      py_m, "DictGetItemGuardAccessor");
+  py::class_<
       GlobalsGuardAccessor,
       GuardAccessor,
       std::unique_ptr<GlobalsGuardAccessor>>(py_m, "GlobalsGuardAccessor");
@@ -2757,6 +2808,12 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "getitem_manager",
           &GuardManager::get_child_manager<GetItemGuardAccessor>,
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "dict_getitem_manager",
+          &GuardManager::get_child_manager<DictGetItemGuardAccessor>,
           py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers

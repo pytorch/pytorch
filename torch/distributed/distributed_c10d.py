@@ -54,7 +54,7 @@ __all__ = [
     'all_to_all_single', 'barrier', 'batch_isend_irecv', 'broadcast',
     'broadcast_object_list', 'destroy_process_group',
     'gather', 'gather_object', 'get_backend_config', 'get_backend', 'get_rank',
-    'get_world_size', 'group', 'init_process_group', 'irecv',
+    'get_world_size', 'get_pg_count', 'group', 'init_process_group', 'irecv',
     'is_gloo_available', 'is_initialized', 'is_mpi_available', 'is_backend_available',
     'is_nccl_available', 'is_torchelastic_launched', 'is_ucc_available',
     'isend', 'monitored_barrier', 'new_group', 'new_subgroups',
@@ -1071,6 +1071,39 @@ def get_backend(group: Optional[ProcessGroup] = None) -> Backend:
         raise ValueError("Invalid process group specified")
     pg_store = _world.pg_map[pg] if pg in _world.pg_map else None
     return Backend(not_none(pg_store)[0])
+
+def _get_pg_config(group: Optional[ProcessGroup] = None) -> Dict[str, Any]:
+    """
+    Return the pg configuration of the given process group.
+
+    """
+    if group is None:
+        pg = _get_default_group()
+    else:
+        pg = group
+    return {
+        "pg_name": _get_process_group_name(pg),
+        "backend_config": get_backend_config(pg),
+        "pg_size": _get_group_size(pg),
+        "ranks": get_process_group_ranks(pg),
+    }
+
+def _get_all_pg_configs() -> List[Dict[str, Any]]:
+    """
+    Return the pg configuration of all the process groups.
+
+    """
+    config_info: List[Dict[str, Any]] = []
+    for pg in _world.pg_map.keys():
+        config_info.append(_get_pg_config(pg))
+    return config_info
+
+def get_pg_count() -> int:
+    """
+    Return the number of process groups.
+
+    """
+    return _world.group_count
 
 def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) -> None:
     """
