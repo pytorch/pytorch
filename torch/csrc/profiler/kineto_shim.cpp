@@ -26,6 +26,8 @@ const std::set<libkineto::ActivityType> kCpuTypes{
     libkineto::ActivityType::CUDA_RUNTIME,
     libkineto::ActivityType::CUDA_DRIVER,
     libkineto::ActivityType::PYTHON_FUNCTION,
+    libkineto::ActivityType::PRIVATEUSE1_RUNTIME,
+    libkineto::ActivityType::PRIVATEUSE1_DRIVER,
 };
 
 const std::set<libkineto::ActivityType> kCudaTypes = {
@@ -49,13 +51,13 @@ const std::set<libkineto::ActivityType> kMtiaTypes = {
     libkineto::ActivityType::MTIA_RUNTIME,
 };
 const std::set<libkineto::ActivityType> kPrivateUse1Types = {
-    libkineto::ActivityType::PRIVATEUSE1_USER_ANNOTATION,
+    libkineto::ActivityType::GPU_MEMCPY,
+    libkineto::ActivityType::GPU_MEMSET,
+    libkineto::ActivityType::GPU_USER_ANNOTATION,
+    libkineto::ActivityType::CONCURRENT_KERNEL,
+    // PRIVATEUSE1_RUNTIME appears in both kCpuTypes and kPrivateUse1Types.
     libkineto::ActivityType::PRIVATEUSE1_RUNTIME,
     libkineto::ActivityType::PRIVATEUSE1_DRIVER,
-    libkineto::ActivityType::PRIVATEUSE1_MEMCPY,
-    libkineto::ActivityType::PRIVATEUSE1_MEMSET,
-    libkineto::ActivityType::PRIVATEUSE1_CONCURRENT_KERNEL,
-    libkineto::ActivityType::PRIVATEUSE1_SYNC,
 };
 } // namespace
 #endif // USE_KINETO
@@ -338,6 +340,8 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     gpu_device = c10::DeviceType::CUDA;
   else if (at::hasXPU())
     gpu_device = c10::DeviceType::XPU;
+  else if (c10::get_privateuse1_backend() != "privateuseone")
+    gpu_device = c10::DeviceType::PrivateUse1;
   // fallthrough
   switch (activity_type) {
     case libkineto::ActivityType::GPU_MEMCPY:
@@ -366,12 +370,6 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::PRIVATEUSE1_RUNTIME:
     case libkineto::ActivityType::PRIVATEUSE1_DRIVER:
       return c10::DeviceType::CPU;
-    case libkineto::ActivityType::PRIVATEUSE1_USER_ANNOTATION:
-    case libkineto::ActivityType::PRIVATEUSE1_MEMCPY:
-    case libkineto::ActivityType::PRIVATEUSE1_MEMSET:
-    case libkineto::ActivityType::PRIVATEUSE1_CONCURRENT_KERNEL:
-    case libkineto::ActivityType::PRIVATEUSE1_SYNC:
-      return c10::DeviceType::PrivateUse1;
     default: {
       TORCH_WARN(
           "Unknown activity type (",
