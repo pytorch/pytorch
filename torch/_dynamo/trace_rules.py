@@ -211,6 +211,7 @@ manual_torch_name_rule_map = {
     "torch._dynamo.mark_static": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
     "torch.cuda._get_device_properties": TorchInGraphFunctionVariable,
+    "torch.utils.hooks.BackwardHook": TorchInGraphFunctionVariable,
 }
 
 
@@ -3197,6 +3198,7 @@ MOD_INLINELIST = {
     "torch.utils._contextlib",
     "torch.utils._foreach_utils",
     "torch.utils._pytree",
+    "torch.utils.hooks",
     "torch._tensor",
     "torch._higher_order_ops.strict_mode",
     "torch._higher_order_ops.while_loop",
