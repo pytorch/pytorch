@@ -384,7 +384,7 @@ def create_functionalized_fn(
 
             # Return both the tokens and the outputs
             # See Note [Side-Effectful Tokens in AOTAutograd]
-            f_outs = tuple(*functional_tensor_mode._tokens.values(), *f_outs)
+            f_outs = (*functional_tensor_mode._tokens.values(), *f_outs)
 
         if trace_joint:
             # We support a limited amount of mutation of graph inputs during the backward pass.
