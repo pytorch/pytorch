@@ -14,7 +14,7 @@ inputs:
     required: false
     default: ""
   is-arc:
-    description: Check that we upload the artifact from the LF bucket.
+    description: Check that we upload the artifact from the PyTorch Foundation bucket.
     type: boolean
     required: false
     default: false
@@ -23,25 +23,25 @@ runs:
   using: composite
   steps:
     - name: Download PyTorch Build Artifacts from S3
-      if: ${{ !inputs.use-gha && !inputs.is-arc}}
+      if: ${{ !inputs.use-gha && inputs.is-arc == 'false' }}
       uses: seemethere/download-artifact-s3@v4
       with:
         name: ${{ inputs.name }}
         s3-bucket: ${{ inputs.s3-bucket }}
 
     - name: Download PyTorch Build Artifacts from GHA
-      if: ${{ inputs.use-gha && !inputs.is-arc }}
+      if: ${{ inputs.use-gha && inputs.is-arc == 'false' }}
       uses: actions/download-artifact@v3
       with:
         name: ${{ inputs.name }}
 
     - name: Download artifacts from LF
-      if: ${{ inputs.is-arc }}
+      if: ${{ inputs.is-arc == 'true' }}
       shell: bash
       env:
-        REPO="${{ github.repository }}"
-        RUN_ID="${{ github.run_id }}"
-        NAME="{{ input.name }}"
+        REPO: ${{ github.repository }}
+        RUN_ID: ${{ github.run_id }}
+        NAME: ${{ input.name }}
       run: |
         curl -o artifacts.zip https://pytorch-ci-artifacts.s3.amazonaws.com/$REPO/$RUN_ID/$NAME/artifacts.zip
 
