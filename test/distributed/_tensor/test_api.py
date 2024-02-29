@@ -185,10 +185,10 @@ class DTensorAPITest(DTensorTestBase):
         module_to_replicate = MyModel(20, 1, device=self.device_type)
 
         # mark input sharding on dim 0
-        def input_fn(inputs, device_mesh):
+        def input_fn(mod, inputs, device_mesh):
             return DTensor.from_local(inputs[0], device_mesh, [Shard(0)])
 
-        def output_fn(outputs, device_mesh):
+        def output_fn(mod, outputs, device_mesh):
             assert isinstance(outputs, DTensor)
             return outputs.to_local()
 
@@ -207,7 +207,7 @@ class DTensorAPITest(DTensorTestBase):
         # full replicate (even on inputs)
         model = MyModel(10, 10, device=self.device_type)
 
-        def replicate_input_fn(inputs, device_mesh):
+        def replicate_input_fn(mod, inputs, device_mesh):
             return DTensor.from_local(inputs[0], device_mesh, [Replicate()])
 
         replica_model = distribute_module(

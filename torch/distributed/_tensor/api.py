@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import warnings
-from typing import Callable, cast, Optional, Sequence, Tuple
+from typing import Any, Callable, cast, Optional, Sequence, Tuple
 
 import torch
 
@@ -643,8 +643,8 @@ def distribute_module(
     module: nn.Module,
     device_mesh: Optional[DeviceMesh] = None,
     partition_fn: Optional[Callable[[str, nn.Module, DeviceMesh], None]] = None,
-    input_fn: Optional[Callable[..., None]] = None,
-    output_fn: Optional[Callable[..., None]] = None,
+    input_fn: Optional[Callable[[nn.Module, Any, DeviceMesh], None]] = None,
+    output_fn: Optional[Callable[[nn.Module, Any, DeviceMesh], None]] = None,
 ) -> nn.Module:
     """
     This function converts all module parameters to :class:`DTensor` parameters
@@ -704,11 +704,11 @@ def distribute_module(
 
     # register input_fn as module forward pre hook
     if input_fn is not None:
-        module.register_forward_pre_hook(lambda _, inputs: input_fn(inputs, device_mesh))  # type: ignore[misc]
-    # register input_fn as module forward hook
+        module.register_forward_pre_hook(lambda mod, inputs: input_fn(mod, inputs, device_mesh))  # type: ignore[misc]
+    # register output_fn as module forward hook
     if output_fn is not None:
         module.register_forward_hook(
-            lambda mod, inputs, outputs: output_fn(outputs, device_mesh)  # type: ignore[misc]
+            lambda mod, inputs, outputs: output_fn(mod, outputs, device_mesh)  # type: ignore[misc]
         )
 
     return module
