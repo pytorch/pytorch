@@ -1204,7 +1204,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       // 1. The local rank is the first to observe a timeout.shouldDump_ will be
       // set to true.
       // 2. other ranks detected the timeout and signal the local rank to dump
-      // In addtion, monitor threads will dump if watchdog threads has not
+      // In addtion, monitor threads will dump if watchdog threads has no
       // heartbeat.
       if (shouldDump_.load()) {
         errorMsg = c10::str(
@@ -1217,7 +1217,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
             lastCompletedSeq_,
             ".");
         exitMsg = c10::str(
-            "ProcessGroupNCCL's watchdog detected a collective timeout locally. ",
+            "ProcessGroupNCCL's watchdog detected a collective timeout from the local rank. ",
             "This is most likely caused by incorrect usages of collectives, e.g., wrong ",
             "sizes used across ranks, the order of collectives is not same for all ranks ",
             "or the scheduled collective, for some reason, didn't run. Additionally, ",
@@ -1245,7 +1245,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
               lastCompletedSeq_,
               ".");
           exitMsg = c10::str(
-              "ProcessGroupNCCL's watchdog detected a collective timeout and notified current rank. ",
+              "ProcessGroupNCCL's watchdog detected a collective timeout on some other rank and notified current rank. ",
               "This is most likely caused by incorrect usages of collectives, e.g., wrong ",
               "sizes used across ranks, the order of collectives is not same for all ranks ",
               "or the scheduled collective, for some reason, didn't run. Additionally, ",

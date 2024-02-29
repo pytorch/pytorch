@@ -859,11 +859,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether there are hooks pending to be fired
   std::atomic<bool> hasPendingHooks_;
 
-  // This is the signal from watchdog threads to indicate whether monitor thread
-  // should dump making it static so that it is accessiable from all the PGs.
-  // With this flag, monitor thread would dump debug info under any one of the 3
-  // conditions: 1: this flag is set to true by the watchdog thread when it
-  // detects a timeout of pipe dump signal 2: timeout signal is received from
+  // This is the signal from watchdog threads to indicate whether the monitor
+  // thread should dump. Making it static so that it is accessiable from all the
+  // PGs. With this flag, monitor thread would dump debug info under any one of
+  // the 3 conditions: 1: this flag is set to true by the watchdog thread when
+  // it detects a timeout of pipe dump signal 2: timeout signal is received from
   // other ranks through tcpstore 3: no heartbeat of watchdog Note that only the
   // monitor thread from PG0 should dump the debug info and only once
   static std::atomic<bool> shouldDump_;
