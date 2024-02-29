@@ -1294,7 +1294,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
                 self.assertExpectedInline(
                     "\n".join(ranges),
                     """\
-s0: [2, 9223372036854775806]
+s0: [2, 9223372036854775805]
 s2: [2, 9223372036854775806]
 s3: [3, 9223372036854775806]
 s4: [2, 9223372036854775806]""",
