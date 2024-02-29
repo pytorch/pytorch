@@ -269,6 +269,8 @@ class SetFwdGradEnabledContextManager(ContextWrappingVariable):
 class DualLevelContextManager(ContextWrappingVariable):
     """Represents torch.autograd.forward_ad.dual_level ctx manager"""
 
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.DUAL_LEVEL)
+
     @staticmethod
     def create(tx, **kwargs):
         return DualLevelContextManager(
@@ -278,8 +280,7 @@ class DualLevelContextManager(ContextWrappingVariable):
         )
 
     def enter(self, tx):
-        # A guard is needed here? It is currently only used on jvp and there's
-        # a guard for it already
+        install_guard(self._guards_singleton)
         self.new_level = torch.autograd.forward_ad.enter_dual_level()
         self.set_cleanup_hook(
             tx, lambda: torch.autograd.forward_ad.exit_dual_level(level=self.new_level)
@@ -300,24 +301,6 @@ class DualLevelContextManager(ContextWrappingVariable):
             (self.new_level,),
             {},
         )
-        return variables.ConstantVariable.create(None)
-
-
-class NoOpContextManager(ContextWrappingVariable):
-    """Represents torch._functorch.eager_transforms.noop ctx manager"""
-
-    @staticmethod
-    def create(tx, **kwargs):
-        return NoOpContextManager(
-            target_values=None,
-            initial_values=None,
-            **kwargs,
-        )
-
-    def enter(self, tx):
-        return variables.ConstantVariable.create(None)
-
-    def exit(self, tx, *args):
         return variables.ConstantVariable.create(None)
 
 
