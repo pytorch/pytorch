@@ -4,6 +4,7 @@
 
 #include <c10/core/Device.h>
 #include <c10/xpu/XPUFunctions.h>
+#include <c10/xpu/XPUStream.h>
 
 #include <oneapi/dnnl/dnnl.hpp>
 #include <oneapi/dnnl/dnnl_sycl.hpp>
@@ -45,9 +46,10 @@ struct GpuEngineManager {
     int device_count = (int)c10::xpu::device_count();
     TORCH_INTERNAL_ASSERT(device_count > 0);
     for (int i = 0; i < device_count; i++) {
-      engine_pool.push_back(
-          std::make_shared<dnnl::engine>(dnnl::sycl_interop::make_engine(
-              dpcppGetRawDevice(i), dpcppGetDeviceContext(i))));
+        engine_pool.push_back(
+            std::make_shared<dnnl::engine>(dnnl::sycl_interop::make_engine(
+              c10::xpu::get_raw_device(i), c10::xpu::get_device_context()
+            )));
     }
   }
   ~GpuEngineManager() {}
@@ -60,17 +62,12 @@ struct GpuEngineManager {
 struct GpuStreamManager {
   static GpuStreamManager& Instance(); // Singleton
 
-  dnnl::stream& get_stream() {
-    int device_index = current_device();
+  dnnl::stream get_stream() {
+    c10::DeviceIndex device_index = c10::xpu::current_device();
     TORCH_INTERNAL_ASSERT(device_index < c10::xpu::device_count());
-    int queue_id = getCurrentDPCPPStream(device_index).queue_index();
-    if (stream_pool[device_index][queue_id] == nullptr) {
-      stream_pool[device_index][queue_id] =
-          std::make_shared<dnnl::stream>(dnnl::sycl_interop::make_stream(
-              GpuEngineManager::Instance().get_engine({kXPU, device_index}),
-              dpcppGetRawQueue(device_index, queue_id)));
-    }
-    return *(stream_pool[device_index][queue_id].get());
+    return dnnl::sycl_interop::make_stream(
+        GpuEngineManager::Instance().get_engine({c10::kXPU, device_index}),
+        c10::xpu::getCurrentXPUStream(device_index).queue());
   }
 
   GpuStreamManager(GpuStreamManager const&) = delete;
@@ -78,23 +75,9 @@ struct GpuStreamManager {
 
  protected:
   GpuStreamManager() {
-    int deviceCount = c10::xpu::device_count();
-    TORCH_INTERNAL_ASSERT(deviceCount > 0);
-    stream_pool.clear();
-    stream_pool.resize(deviceCount);
-    for (DeviceIndex dev = 0; dev < deviceCount; dev++) {
-      for (QueueIndex qid = 0; qid < kQueuesPerPool; qid++) {
-        stream_pool[dev][qid] = nullptr;
-      }
-    }
   }
   ~GpuStreamManager() {}
 
- private:
-
-  // For each device, we have kQueuesPerPool(32) reserved queues.
-  std::vector<std::array<std::shared_ptr<dnnl::stream>, kQueuesPerPool>>
-      stream_pool;
 
 };
 
