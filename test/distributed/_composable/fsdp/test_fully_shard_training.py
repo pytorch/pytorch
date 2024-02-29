@@ -185,7 +185,7 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             self.assertEqual(param, ref_param)
 
 
-class TestFullyShardPureBfloat16(FSDPTest):
+class TestFullyShardCastAfterInit(FSDPTestMultiThread):
     @property
     def world_size(self) -> int:
         return 2
