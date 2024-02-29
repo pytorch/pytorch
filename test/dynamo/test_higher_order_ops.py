@@ -2836,7 +2836,7 @@ class GraphModule(torch.nn.Module):
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad = torch._functorch.eager_transforms._tensor_requires_grad(diff_args)
+        _set_tensor_requires_grad = torch._functorch.eager_transforms._set_tensor_requires_grad(diff_args)
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
 
@@ -2905,7 +2905,7 @@ class GraphModule(torch.nn.Module):
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad = torch._functorch.eager_transforms._tensor_requires_grad(diff_args)
+        _set_tensor_requires_grad = torch._functorch.eager_transforms._set_tensor_requires_grad(diff_args)
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
 
@@ -2963,7 +2963,7 @@ class GraphModule(torch.nn.Module):
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad = torch._functorch.eager_transforms._tensor_requires_grad(diff_args)
+        _set_tensor_requires_grad = torch._functorch.eager_transforms._set_tensor_requires_grad(diff_args)
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
 
@@ -3021,7 +3021,7 @@ class GraphModule(torch.nn.Module):
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad = torch._functorch.eager_transforms._tensor_requires_grad(diff_args)
+        _set_tensor_requires_grad = torch._functorch.eager_transforms._set_tensor_requires_grad(diff_args)
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
 
@@ -3076,7 +3076,7 @@ class GraphModule(torch.nn.Module):
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad = torch._functorch.eager_transforms._tensor_requires_grad(diff_args)
+        _set_tensor_requires_grad = torch._functorch.eager_transforms._set_tensor_requires_grad(diff_args)
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
 
@@ -3135,7 +3135,7 @@ class GraphModule(torch.nn.Module):
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad = torch._functorch.eager_transforms._tensor_requires_grad(diff_args)
+        _set_tensor_requires_grad = torch._functorch.eager_transforms._set_tensor_requires_grad(diff_args)
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
 
@@ -3205,12 +3205,12 @@ class GraphModule(torch.nn.Module):
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad = torch._functorch.eager_transforms._tensor_requires_grad(child_4)
+        _set_tensor_requires_grad = torch._functorch.eager_transforms._set_tensor_requires_grad(child_4)
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
         set_inplace_requires_grad_allowed_2 = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad_1 = torch._functorch.eager_transforms._tensor_requires_grad(child_5)
+        _set_tensor_requires_grad_1 = torch._functorch.eager_transforms._set_tensor_requires_grad(child_5)
 
         set_inplace_requires_grad_allowed_3 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
 
@@ -3251,12 +3251,12 @@ class GraphModule(torch.nn.Module):
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad = torch._functorch.eager_transforms._tensor_requires_grad(child_4)
+        _set_tensor_requires_grad = torch._functorch.eager_transforms._set_tensor_requires_grad(child_4)
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
         set_inplace_requires_grad_allowed_2 = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad_1 = torch._functorch.eager_transforms._tensor_requires_grad(child_5)
+        _set_tensor_requires_grad_1 = torch._functorch.eager_transforms._set_tensor_requires_grad(child_5)
 
         set_inplace_requires_grad_allowed_3 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
 
@@ -3313,7 +3313,7 @@ class GraphModule(torch.nn.Module):
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad = torch._functorch.eager_transforms._tensor_requires_grad(child_1)
+        _set_tensor_requires_grad = torch._functorch.eager_transforms._set_tensor_requires_grad(child_1)
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
         _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
@@ -3323,7 +3323,7 @@ class GraphModule(torch.nn.Module):
 
         set_inplace_requires_grad_allowed_2 = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad_1 = torch._functorch.eager_transforms._tensor_requires_grad(diff_args_1)
+        _set_tensor_requires_grad_1 = torch._functorch.eager_transforms._set_tensor_requires_grad(diff_args_1)
 
         set_inplace_requires_grad_allowed_3 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
 
@@ -3442,7 +3442,7 @@ class GraphModule(torch.nn.Module):
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad = torch._functorch.eager_transforms._tensor_requires_grad(diff_args)
+        _set_tensor_requires_grad = torch._functorch.eager_transforms._set_tensor_requires_grad(diff_args)
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
 
