@@ -698,8 +698,11 @@ class GuardBuilder(GuardBuilderBase):
 
         if config.enable_cpp_guard_manager:
             # TODO(anijain2305) - Consider this moving this guard to C++
-            self.add_python_lambda_leaf_guard_to_root(
-                code, get_verbose_code_parts(code, guard)
+            def fn(x):
+                return torch._functorch.pyfunctorch.compare_functorch_state(states)
+            self.guard_manager.root.add_lambda_guard(
+                fn,
+                get_verbose_code_parts(code, guard)
             )
 
     def EQUALS_MATCH(self, guard: Guard):
@@ -773,10 +776,11 @@ class GuardBuilder(GuardBuilderBase):
             return
 
         if config.enable_cpp_guard_manager:
-            code = f"{ref} == {val!r}"
+            code = [f"{ref} == {val!r}"]
             self.get_guard_manager(guard).add_equals_match_guard(
                 val, get_verbose_code_parts(code, guard)
             )
+            self._produce_guard_code(guard, code)
             return
 
         code = list()

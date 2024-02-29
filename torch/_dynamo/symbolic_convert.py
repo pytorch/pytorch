@@ -1094,7 +1094,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             # module’s __dict__ attribute. Since this is an implementation
             # detail, it may not be used by alternate implementations of Python.
             accessor = GetItemSource
-            # TODO(janimesh) - Something fishy going on - self.f_globals is
+            # TODO(anijain2305) - Something fishy going on - self.f_globals is
             # different from self.output.global_scope
             if not isinstance(self.output.global_scope["__builtins__"], dict):
                 accessor = AttrSource
