@@ -102,6 +102,17 @@ struct DeviceStats {
   // COUNT: total number of oversize blocks requiring malloc
   Stat oversize_segments;
 
+  // COUNT: total number of synchronize_and_free_events() calls
+  int64_t num_sync_all_streams = 0;
+
+  // COUNT: total number of CUDA allocation calls. This includes both cuMemMap
+  // and cudaMalloc.
+  int64_t num_device_alloc = 0;
+
+  // COUNT: total number of CUDA free calls. This includes both cuMemUnmap
+  // and cudaFree.
+  int64_t num_device_free = 0;
+
   // SIZE: maximum block size that is allowed to be split.
   int64_t max_split_size = 0;
 };
