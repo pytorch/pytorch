@@ -56,33 +56,36 @@ if is_available():
         _make_nccl_premul_sum,
     )
 
+    class _DistributedPdb(pdb.Pdb):
+        """
+        Supports using PDB from inside a multiprocessing child process.
+
+        Usage:
+        _DistributedPdb().set_trace()
+        """
+        def interaction(self, *args, **kwargs):
+            _stdin = sys.stdin
+            try:
+                sys.stdin = open('/dev/stdin')
+                pdb.Pdb.interaction(self, *args, **kwargs)
+            finally:
+                sys.stdin = _stdin
+
     def breakpoint(rank: int = 0):
         """
         Set a breakpoint, but only on a single rank.  All other ranks will wait for you to be
-        done with the breakpoint before continuing.  This calls ``breakpoint()`` under the
-        hood, so you can customize it using the normal facilities, e.g., ``PYTHONBREAKPOINT``
-        environment variable.
+        done with the breakpoint before continuing.
 
         Args:
             rank (int): Which rank to break on.  Default: ``0``
         """
         if get_rank() == rank:
-            # This will be the case when your subprocess was created by
-            # multiprocessing.Process, see
-            # https://stackoverflow.com/questions/30134297/python-multiprocessing-stdin-input
-            old_stdin = None
-            if isinstance(sys.stdin, io.TextIOWrapper):
-                old_stdin = sys.stdin
-                sys.stdin = open(0)
-            try:
-                breakpoint(header=(
-                    "\n!!! ATTENTION !!!\n\n"
-                    f"Type 'up' to get to the frame that called dist.breakpoint(rank={rank})\n"
-                ))  # type: ignore[call-arg]
-            finally:
-                if old_stdin is not None:
-                    sys.stdin.close()
-                    sys.stdin = old_stdin
+            pdb = _DistributedPdb()
+            pdb.message(
+                "\n!!! ATTENTION !!!\n\n"
+                f"Type 'up' to get to the frame that called dist.breakpoint(rank={rank})\n"
+            )
+            pdb.set_trace()
         barrier()
 
     if sys.platform != "win32":

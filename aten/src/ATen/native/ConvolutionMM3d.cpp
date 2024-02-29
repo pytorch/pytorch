@@ -23,8 +23,7 @@
 
 constexpr int64_t CONV3D_GRAIN_SALT = 20;
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -803,5 +802,4 @@ Tensor slow_conv3d(
   return at::slow_conv3d_forward(self, weight, kernel_size, bias, stride, padding);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

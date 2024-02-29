@@ -20,6 +20,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       at::ScalarType dType,
       std::vector<int64_t> inSplitSizes,
       std::vector<int64_t> outSplitSizes,
+      int globalRankStart,
+      int globalRankStride,
       int worldSize);
 
   ~ParamCommsDebugInfo() override = default;
@@ -30,6 +32,14 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
 
   int getWorldSize() const {
     return worldSize_;
+  }
+
+  int getGlobalRankStart() const {
+    return globalRankStart_;
+  }
+
+  int getGlobalRankStride() const {
+    return globalRankStride_;
   }
 
   const std::string getColumnName() const {
@@ -65,6 +75,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
   at::ScalarType dType_ = at::kByte;
   std::vector<int64_t> inputSplitSizes_;
   std::vector<int64_t> outputSplitSizes_;
+  int globalRankStart_;
+  int globalRankStride_;
 };
 
 #define RECORD_PARAM_COMMS(                                                    \
@@ -77,6 +89,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
     dType,                                                                     \
     inSplitSizes,                                                              \
     outSplitSizes,                                                             \
+    globalRankStart,                                                           \
+    globalRankStride,                                                          \
     worldSize)                                                                 \
   auto paramCommsInfo = std::make_shared<torch::ParamCommsDebugInfo>(          \
       rank,                                                                    \
@@ -86,6 +100,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       dType,                                                                   \
       inSplitSizes,                                                            \
       outSplitSizes,                                                           \
+      globalRankStart,                                                         \
+      globalRankStride,                                                        \
       worldSize);                                                              \
   c10::DebugInfoGuard g(c10::DebugInfoKind::PARAM_COMMS_INFO, paramCommsInfo); \
   std::initializer_list<const c10::IValue> paramList = {                       \
@@ -95,6 +111,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       colName,                                                                 \
       inSplitSizes,                                                            \
       outSplitSizes,                                                           \
+      globalRankStart,                                                         \
+      globalRankStride,                                                        \
       worldSize};                                                              \
   c10::ArrayRef<const c10::IValue> paramInputs(paramList);                     \
   RECORD_FUNCTION(at::kParamCommsCallName, paramInputs);
@@ -111,6 +129,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
     dType,                                                                     \
     inSplitSizes,                                                              \
     outSplitSizes,                                                             \
+    globalRankStart,                                                           \
+    globalRankStride,                                                          \
     worldSize)                                                                 \
   auto paramCommsInfo = std::make_shared<torch::ParamCommsDebugInfo>(          \
       rank,                                                                    \
@@ -120,6 +140,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       dType,                                                                   \
       inSplitSizes,                                                            \
       outSplitSizes,                                                           \
+      globalRankStart,                                                         \
+      globalRankStride,                                                        \
       worldSize);                                                              \
   c10::DebugInfoGuard g(c10::DebugInfoKind::PARAM_COMMS_INFO, paramCommsInfo); \
   std::initializer_list<const c10::IValue> paramList = {                       \
@@ -130,6 +152,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
       colName,                                                                 \
       inSplitSizes,                                                            \
       outSplitSizes,                                                           \
+      globalRankStart,                                                         \
+      globalRankStride,                                                        \
       worldSize};                                                              \
   c10::ArrayRef<const c10::IValue> paramInputs(paramList);                     \
   RECORD_FUNCTION_WITH_INPUTS_OUTPUTS(                                         \

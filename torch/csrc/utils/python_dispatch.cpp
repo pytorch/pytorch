@@ -5,8 +5,8 @@
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+#include <ATen/core/NestedIntSymNodeImpl.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
-#include <ATen/core/SingletonSymNodeImpl.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
 #include <ATen/functorch/BatchedTensorImpl.h>
@@ -20,7 +20,6 @@
 #include <c10/util/flat_hash_map.h>
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
-#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_raii.h>
 
@@ -172,7 +171,14 @@ class PythonKernelHolder : public c10::OperatorKernel {
 
     auto arguments = torch::jit::pop(*stack, op.schema().arguments().size());
     py::gil_scoped_acquire g;
+    // Jan 2024: We're slated to get rid of multipy, so stop forcing hermetic
+    // mode unconditionally in all situations when you're using multipy.
+    // Eventually just delete this entirely.  (Note that you may break multipy
+    // anyway this way with dispatcher registered functions that require
+    // hermetic to be off.)
+#if defined(USE_DEPLOY)
     EnableHermeticPyObject g2;
+#endif
     auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
     auto obj = py::reinterpret_steal<py::object>(PyObject_Call(
         func_.ptr(getPyInterpreter()),
@@ -241,6 +247,14 @@ void initDispatchBindings(PyObject* module) {
 
   // TODO: figure out how to do chaining
   py::class_<torch::Library>(m, "_DispatchModule")
+      .def(
+          "reset",
+          [](const py::object& self) {
+            TORCH_INTERNAL_ASSERT(isMainPyInterpreter());
+            self.cast<torch::Library&>().reset();
+            return;
+          },
+          "")
       // Some of these APIs are only for testing and do not work in multipy
       // environment
       .def(
@@ -809,19 +823,9 @@ void initDispatchBindings(PyObject* module) {
         include_set.has(c10::DispatchKey::FuncTorchDynamicLayerBackMode));
   });
 
-  m.def(
-      "_get_singleton_int",
-      [](int64_t data,
-         int64_t coeff,
-         const at::Tensor& values,
-         int64_t sum_offsets) {
-        return c10::SymInt(
-            c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(
-                data, coeff, values, sum_offsets)));
-      });
-
-  m.def("_set_global_singleton_dummy", [](const at::Tensor& dummy) {
-    return at::set_global_singleton_dummy(dummy);
+  m.def("_get_nested_int", [](int64_t data, int64_t coeff) {
+    return c10::SymInt(c10::SymNode(
+        c10::make_intrusive<c10::NestedIntSymNodeImpl>(data, coeff)));
   });
 
   m.def("_get_constant_bool_symnode", [](int64_t data) {

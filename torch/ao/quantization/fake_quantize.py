@@ -274,7 +274,7 @@ class FixedQParamsFakeQuantize(FakeQuantize):
     # TODO: rename observer to observer_ctr
     def __init__(self, observer):
         super().__init__(observer=observer)
-        assert type(self.activation_post_process) == FixedQParamsObserver,\
+        assert type(self.activation_post_process) == FixedQParamsObserver, \
             f"{self.__class__.__name__}'s observer must be a {FixedQParamsObserver.__name__}"
         self._observer_ctr = observer
         self.scale = self.activation_post_process.scale
@@ -322,7 +322,7 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
         **observer_kwargs: Any
     ) -> None:
         super().__init__(observer, quant_min, quant_max, **observer_kwargs)
-        assert isinstance(self.activation_post_process, (MovingAverageMinMaxObserver, MovingAveragePerChannelMinMaxObserver)),\
+        assert isinstance(self.activation_post_process, (MovingAverageMinMaxObserver, MovingAveragePerChannelMinMaxObserver)), \
             "Fused observer+fake_quant module only works with MovingAverageMinMaxObserver"
         self.register_buffer("fake_quant_enabled", torch.tensor([1], dtype=torch.long))
         self.register_buffer("observer_enabled", torch.tensor([1], dtype=torch.long))

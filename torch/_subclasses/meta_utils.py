@@ -5,9 +5,16 @@ from typing import ContextManager, List, Optional, Tuple, TYPE_CHECKING
 
 import torch
 from torch._C._functorch import (
+    _add_batch_dim,
     _unwrap_functional_tensor,
     _wrap_functional_tensor,
     current_level,
+    get_unwrapped,
+    is_batchedtensor,
+    is_functorch_wrapped_tensor,
+    is_gradtrackingtensor,
+    maybe_get_bdim,
+    maybe_get_level,
     peek_interpreter_stack,
     TransformType,
 )
@@ -128,7 +135,7 @@ class MetaConverter:
         # hold a weak ref to self, otherwise it will be kept alive
         # by the del_ten closure
         self_weak_ref = weakref.ref(self)
-        if t.is_sparse or t.is_mkldnn:
+        if t.is_sparse or t.is_mkldnn or is_functorch_wrapped_tensor(t):
             weak_st = None
         else:
             weak_st = StorageWeakRef(t._typed_storage())
@@ -297,6 +304,15 @@ class MetaConverter:
                         with torch.enable_grad():
                             r = r.clone()
                             r._coalesced_(t.is_coalesced())
+                elif t.is_nested and not is_traceable_wrapper_subclass(t):
+                    # TODO: Handle this better in Dynamo?
+                    # There are checks there now, but this can still be triggered by a dense
+                    # tensor graph input that is a view of a strided NT.
+                    from torch._dynamo.exc import unimplemented
+
+                    unimplemented(
+                        "strided nested tensors are not supported by meta conversion"
+                    )
                 elif t.is_mkldnn:
                     is_leaf = safe_is_leaf(t)
                     sizes, strides, _storage_offset = sym_sizes_strides_storage_offset(
@@ -313,6 +329,50 @@ class MetaConverter:
                     if t.requires_grad and not is_leaf:
                         with torch.enable_grad():
                             r = r.clone()
+                elif is_functorch_wrapped_tensor(t):
+                    if t._is_view():
+                        from torch._dynamo.exc import unimplemented
+
+                        unimplemented(
+                            "view functorch tensors are not supported by meta conversion"
+                        )
+
+                    # Wraps a functorch tensor class (BatchedTensor, GradTrackingTensor)
+                    # in a FakeTensor
+                    def _to_fake_tensor(t):
+                        if is_batchedtensor(t):
+                            ft = _to_fake_tensor(get_unwrapped(t))
+                            lvl = maybe_get_level(t)
+                            bdim = maybe_get_bdim(t)
+                            r = _add_batch_dim(ft, bdim, lvl)
+                        elif is_gradtrackingtensor(t):
+                            disable_functorch = torch._C._DisableFuncTorch
+                            with disable_functorch():
+                                ft = _to_fake_tensor(get_unwrapped(t))
+                            lvl = torch._C._functorch.maybe_get_level(t)
+                            r = torch._C._functorch._wrap_for_grad(ft, lvl)
+
+                            is_leaf = safe_is_leaf(t)
+                            if t.requires_grad and safe_is_leaf(r):
+                                r.requires_grad = True
+                            elif t.requires_grad and not is_leaf:
+                                with torch.enable_grad():
+                                    r = r.clone()
+                        else:
+                            sizes = t.size()
+                            strides = t.stride()
+                            r = callback(
+                                lambda: torch.empty_strided(
+                                    sizes,
+                                    strides,
+                                    dtype=t.dtype,
+                                    device="meta",
+                                )
+                            )
+                        return r
+
+                    r = _to_fake_tensor(t)
+
                 elif t._is_view():
                     # Construct views in two steps: recursively meta-fy their
                     # base, and then create view(s) off that.  NB: doing it
@@ -499,6 +559,7 @@ class MetaConverter:
                                 device="meta",
                             )
                         )
+
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     if t.requires_grad:
                         r.requires_grad = t.requires_grad
@@ -511,7 +572,9 @@ class MetaConverter:
                                 r = r.clone(memory_format=torch.preserve_format)
 
                     # Graph-Break for wrapped tensors
-                    if torch._C._functorch.is_functorch_wrapped_tensor(t):
+                    if not (
+                        is_batchedtensor(t) or is_gradtrackingtensor(t)
+                    ) and torch._C._functorch.is_functorch_wrapped_tensor(t):
                         return NotImplemented
 
                     s = t.untyped_storage()
@@ -661,13 +724,16 @@ class MetaConverter:
                 return NotImplemented
             else:
                 self.hit += 1
-                r = self.meta_tensor(
-                    t,
-                    shape_env=shape_env,
-                    callback=callback,
-                    source=source,
-                    symbolic_context=symbolic_context,
-                )
+
+                disable_functorch = torch._C._DisableFuncTorch
+                with disable_functorch():
+                    r = self.meta_tensor(
+                        t,
+                        shape_env=shape_env,
+                        callback=callback,
+                        source=source,
+                        symbolic_context=symbolic_context,
+                    )
                 if type(t) is torch.nn.Parameter:
                     # NB: Cannot directly use Parameter constructor
                     # because that would force a detach, not desirable

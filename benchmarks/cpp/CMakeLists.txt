@@ -1,2 +1,0 @@
-add_executable(convolution_bench convolution.cpp)
-target_link_libraries(convolution_bench PRIVATE torch_library benchmark)

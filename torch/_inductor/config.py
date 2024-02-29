@@ -1,6 +1,6 @@
 import os  # noqa: C101
 import sys
-from typing import Any, Dict, TYPE_CHECKING
+from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
 import torch
 
@@ -25,7 +25,12 @@ verbose_progress = False
 fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
 
 # use cpp wrapper instead of python wrapper
-cpp_wrapper = False
+cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
+
+# codegen cpp wrapper code in an ABI compatible mode
+abi_compatible = (
+    os.environ.get("TORCHINDUCTOR_ABI_COMPATIBLE", "1" if is_fbcode() else "0") == "1"
+)
 
 # dead code elimination
 dce = False
@@ -81,13 +86,13 @@ pattern_matcher = True
 #
 # torch._inductor.config.post_grad_custom_pre_pass = my_custom_pre_pass
 # torch._inductor.config.post_grad_custom_post_pass = my_custom_post_pass
-post_grad_custom_pre_pass = None
-post_grad_custom_post_pass = None
+post_grad_custom_pre_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
+post_grad_custom_post_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
 
 # Registers a custom pregrad pass. Note that the pre-grad IR is 1.
 # non-functional, 2. non-normalized, and 3. prone to change. Ideally we should
 # use post-grad passes.
-pre_grad_custom_pass = None
+pre_grad_custom_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
 
 # Optimize away split cat patterns (Experimental)
 split_cat_fx_passes = True
@@ -133,6 +138,18 @@ force_fuse_int_mm_with_mul = False
 # enable torch._inductor.kernel.mm.tuned_mixed_mm fused kernel.
 # Autotune will compare perf with normal cast->then->mm option
 use_mixed_mm = False
+
+# enable runtime numeric check for pre/post grad fx passes
+# floating point provides limited accuracy (about 7 decimal digits for single precision
+# floating point numbers,about 16 decimal digits for double precision floating point numbers)
+# according to PyTorch documentation.
+# https://pytorch.org/docs/stable/notes/numerical_accuracy.html#batched-computations-or-slice-computations
+fx_passes_numeric_check: Dict[str, Any] = {
+    "pre_grad": False,
+    "precision": 1e-4,
+    "num_iterations": 1,
+    "requires_optimizer": True,
+}
 
 # for pattern torch.mm(a, b.to(dtype)) with cuda tensors, always use
 # torch._inductor.kernel.mm.tuned_mixed_mm's fused kernel.
@@ -213,8 +230,11 @@ coordinate_descent_search_radius = int(
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS", "1")
 )
 
-layout_optimization = os.environ.get("TORCHINDUCTOR_LAYOUT_OPTIMIZATION", "1") == "1"
-
+# Disabled by default on ROCm, opt-in if model utilises NHWC convolutions
+layout_opt_default = "1" if not torch.version.hip else "0"
+layout_optimization = (
+    os.environ.get("TORCHINDUCTOR_LAYOUT_OPTIMIZATION", layout_opt_default) == "1"
+)
 
 force_layout_optimization = os.environ.get("TORCHINDUCTOR_FORCE_LAYOUT_OPT", "0") == "1"
 
@@ -232,7 +252,7 @@ warn_mix_layout = os.environ.get("TORCHINDUCTOR_WARN_MIX_LAYOUT") == "1"
 # For fanouts, rematerialization can lead to exponential blowup. So, have
 # smaller threshold
 realize_reads_threshold = 4
-realize_bytes_threshold = 2000
+realize_opcount_threshold = 30
 
 # Threshold to prevent excessive accumulation of ops in one buffer during lowering
 realize_acc_reads_threshold = 8
@@ -256,7 +276,7 @@ enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", ""
 max_fusion_size = 64
 
 # max number of inputs to generate cat as a pointwise op with masked laods
-max_pointwise_cat_inputs = 4
+max_pointwise_cat_inputs = 8
 
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
@@ -388,6 +408,20 @@ freezing_discard_parameters: bool = False
 # should be run with this flag both on and off to make sure we have coverage.
 allow_stack_allocation: bool = True
 
+# Enables an alternate DSO interface (the "minimal ArrayRef interface") intended
+# to maximize performance for use cases that it can accommodate at the expense of
+# generality. In brief:
+# - inputs and outputs are ArrayRefTensor<T> (note that strides are required, but the
+#   tensor must be contiguous)
+# - constant handling is unchanged because it is not a per-inference-iteration bottleneck
+#
+# When the DSO is generated in this mode, the usual interface will also be supported,
+# but performance for that interface may be degraded.
+use_minimal_arrayref_interface: bool = False
+
+# decompose some memory bound matmul/bmm to mul
+decompose_mem_bound_mm: bool = False
+
 
 # config specific to codegen/cpp.py
 class cpp:
@@ -404,7 +438,7 @@ class cpp:
     # performance degradation.
     dynamic_threads = False
 
-    simdlen = None
+    simdlen: Optional[int] = None
     min_chunk_size = 4096
     cxx = (
         None,  # download gcc12 from conda-forge if conda is installed
@@ -412,7 +446,7 @@ class cpp:
         # "g++-11",
         # "g++-10",
         # "clang++",
-        os.environ.get("CXX", "g++"),
+        os.environ.get("CXX", "clang++" if sys.platform == "darwin" else "g++"),
         # "g++.par",
     )
     # Allow kernel performance profiling via PyTorch profiler
@@ -424,12 +458,12 @@ class cpp:
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.
     # Valid values: "compile_error", "runtime_error", "accuracy"
-    inject_relu_bug_TESTING_ONLY = None
-    inject_log1p_bug_TESTING_ONLY = None
+    inject_relu_bug_TESTING_ONLY: Optional[str] = None
+    inject_log1p_bug_TESTING_ONLY: Optional[str] = None
 
     # If None, autodetect whether or not AVX512/AVX2 can be used.  Otherwise,
     # force usage as specified, without testing.
-    vec_isa_ok = None
+    vec_isa_ok: Optional[bool] = None
 
     # similar to config.triton.descriptive_names
     descriptive_names = "original_aten"
@@ -443,6 +477,9 @@ class cpp:
 
     # Use funsafe-math-optimizations when compiling
     enable_unsafe_math_opt_flag = False
+
+    # Use ffp-contract when compiling
+    enable_floating_point_contract_flag = False
 
 
 # config specific to codegen/triton.py
@@ -506,12 +543,30 @@ class triton:
         os.environ.get("TORCHINDUCTOR_PERSISTENT_REDUCTIONS", "1") == "1"
     )
 
+    # 0/False: disable
+    # 1/True: enable, use tuning to pick between different subkernels
+    # 2: enable, force using persistent reduction (for debugging)
+    # 3: enable, force using non-persistent reduction (for debugging)
+    multi_kernel = int(os.environ.get("TORCHINDUCTOR_MULTI_KERNEL", "0"))
+
     # hint to Triton when arguments are divisible by 16
     divisible_by_16 = True
 
     # theses are not enforced, but they are used by asserts in triton_heuristics.py
     # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
-    max_block = {"X": 2048, "Y": 1024, "Z": 1024}
+
+    # Max RBLOCK will be large for multi-kernel since we do more aggressive
+    # persistent reduction.
+    max_block = {
+        "X": 2048,
+        "Y": 1024,
+        "Z": 1024,
+        "R": 4096 * (16 if multi_kernel else 1),
+    }
+
+    # Minimum RBLOCK to be used for a TritonSplitScanKernel
+    # NOTE: This also indirectly controls the size of workspace buffer required
+    min_split_scan_rblock = 256
 
     # Store the generated cubin files for cpp wrapper code to load
     store_cubin = False
@@ -529,10 +584,13 @@ class triton:
     # We should revisit this once we understand more of the source of register spills.
     spill_threshold: int = 16
 
+    # Generate code containing the newer tl.make_block_ptr() API for loads/store
+    use_block_ptr = False
+
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.
     # Valid values: "compile_error", "runtime_error", "accuracy"
-    inject_relu_bug_TESTING_ONLY = None
+    inject_relu_bug_TESTING_ONLY: Optional[str] = None
 
 
 class aot_inductor:
@@ -546,26 +604,26 @@ class aot_inductor:
 
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
 
-    # Wether to codegen abi compatible model.so
-    abi_compatible = is_fbcode()
-
     # Serialized tree spec for flattening inputs
     serialized_in_spec = ""
 
     # Serialized tree spec for flattening outputs
     serialized_out_spec = ""
 
+    # flag to decide whether to create a submodule for constant graph.
+    use_runtime_constant_folding: bool = False
+
 
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
     # e.g. "70", "75", "80", "90", etc.
     # When arch is None, Inductor uses torch.cuda.get_device_capability(0).
-    arch = None
+    arch: Optional[str] = None
 
     # CUDA version to use for CUDA template kernel compilation.
     # e.g. "11.4", "12.1", etc.
     # When version is None, Inductor uses torch.version.cuda.
-    version = None
+    version: Optional[str] = None
 
     # Optimization level for the host compiler.
     compile_opt_level = "-O1"
@@ -594,7 +652,7 @@ class cuda:
     # Configures the maximum number of CUTLASS configs to profile in max_autotune.
     # By default it's None, so that all CUTLASS configs are tuned.
     # This is mainly used to reduce test time in CI.
-    cutlass_max_profiling_configs = None
+    cutlass_max_profiling_configs: Optional[int] = None
 
     # Path to CUDA NVCC.
     # NVCC search order:
@@ -602,7 +660,7 @@ class cuda:
     # 2）CUDACXX environment variable
     # 3）CUDA_HOME environment variable
     # 4) default system search PATH.
-    cuda_cxx = None
+    cuda_cxx: Optional[str] = None
 
     # If set to True, it will ensure that only GEMM ops capable of
     # epilogue fusion via CUTLASS Epilogue Visitor Trees ( EVT )
@@ -617,7 +675,7 @@ class trace:
 
     # Save debug information to a temporary directory
     # If not specified, a temp directory will be created by system
-    debug_dir = None
+    debug_dir: Optional[str] = None
 
     # Save python logger call >=logging.DEBUG
     debug_log = False
@@ -661,7 +719,7 @@ class trace:
 
     # Upload the .tar.gz file
     # Needs to be overriden based on specific environment needs
-    upload_tar = None
+    upload_tar: Optional[Callable[[str], None]] = None
 
 
 _save_config_ignore = {

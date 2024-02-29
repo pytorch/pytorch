@@ -1,13 +1,12 @@
 # Owner(s): ["module: onnx"]
 from __future__ import annotations
 
-import io
-
 import tempfile
 
 from typing import Mapping, Tuple
 
 import onnx
+import onnx.inliner
 import pytorch_test_common
 import torch
 import transformers  # type: ignore[import]
@@ -256,8 +255,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 namespace="aten", op_name="add", overload="Tensor"
             )
         )
-        # TODO: Replace this example with a torch custom op when overload is supported
-        # Currently, torch only supports custom op with namespace and op_name
+
         aten_add_Tensor = registration.OpName.from_name_parts(
             namespace="aten", op_name="add", overload="Tensor"
         )
@@ -363,11 +361,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             node: onnx.NodeProto,
             value_infos: Mapping[str, onnx.ValueInfoProto],
             local_functions: Mapping[Tuple[str, str], onnx.FunctionProto],
-            prefix: str = "",
+            function_id: str = "",
         ):
             for output in node.output:
-                output_prefix = f"{prefix}/{output}" if prefix else output
-                self.assertIn(output_prefix, value_infos)
+                name = f"{function_id}/{output}" if function_id else output
+                self.assertIn(name, value_infos)
             if node.domain.startswith("pkg.onnxscript.torch_lib"):
                 # No shape info available for values inside torchlib functions.
                 return
@@ -375,11 +373,9 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 function := local_functions.get((node.domain, node.op_type))
             ) is not None:
                 for node in function.node:
-                    node_prefix = (
-                        f"{prefix}/{function.name}" if prefix else function.name
-                    )
+                    function_id = f"{function.domain}::{function.name}"
                     _assert_node_outputs_has_value_info(
-                        node, value_infos, local_functions, node_prefix
+                        node, value_infos, local_functions, function_id
                     )
 
         type_infos = {vi.name: vi for vi in model_proto.graph.value_info}
@@ -528,69 +524,17 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                     fake_model, real_x, export_options=export_options
                 )
 
-    # NOTE: To all transformer models, config is preferred to pre-trained model for testing because:
-    # 1. Pre-trained model is too big for CI
-    # 2. Pre-trained model is has uint8/bool issue: https://github.com/huggingface/transformers/issues/21013
-    def test_fake_tensor_mode_huggingface_gpt2(self):
-        config = transformers.GPT2Config(
-            vocab_size=8096, n_positions=256, n_embd=256, n_layer=2, n_head=2
-        )
-        batch, seq = 4, 256
-
-        with torch.onnx.enable_fake_mode() as fake_context:
-            model = transformers.GPT2Model(config).eval()
-            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
-            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
-            position_ids = torch.arange(0, seq, dtype=torch.long)
-            position_ids = position_ids.unsqueeze(0).view(-1, seq)
-
-            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
-            onnx_program = torch.onnx.dynamo_export(
-                model,
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                position_ids=position_ids,
-                export_options=export_options,
-            )
-            onnx.checker.check_model(onnx_program.model_proto)
-            onnx.shape_inference.infer_shapes(onnx_program.model_proto)
-
-    def test_fake_tensor_mode_huggingface_open_llama(self):
-        config = transformers.OpenLlamaConfig(
-            vocab_size=8096, hidden_size=256, num_hidden_layers=2, num_attention_heads=2
-        )
-        batch, seq = 4, 256
-
-        with torch.onnx.enable_fake_mode() as fake_context:
-            model = transformers.OpenLlamaModel(config).eval()
-            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
-            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
-            position_ids = torch.arange(0, seq, dtype=torch.long)
-            position_ids = position_ids.unsqueeze(0).view(-1, seq)
-
-            export_options = torch.onnx.ExportOptions(fake_context=fake_context)
-            onnx_program = torch.onnx.dynamo_export(
-                model,
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                position_ids=position_ids,
-                export_options=export_options,
-            )
-            onnx.checker.check_model(onnx_program.model_proto)
-            onnx.shape_inference.infer_shapes(onnx_program.model_proto)
-
     @pytorch_test_common.xfail(
-        "This is addressed in main branch of transformers."
-        "https://github.com/huggingface/transformers/pull/24941"
+        error_message="Dynamic control flow is not supported at the moment."
     )
-    def test_fake_tensor_mode_huggingface_databricks_dolly_v2_3b(self):
-        config = transformers.GPTNeoXConfig(
+    def test_fake_tensor_mode_huggingface_llama(self):
+        config = transformers.LlamaConfig(
             vocab_size=8096, hidden_size=256, num_hidden_layers=2, num_attention_heads=2
         )
         batch, seq = 4, 256
 
         with torch.onnx.enable_fake_mode() as fake_context:
-            model = transformers.GPTNeoXModel(config).eval()
+            model = transformers.LlamaModel(config).eval()
             input_ids = torch.randint(0, config.vocab_size, (batch, seq))
             attention_mask = torch.ones(batch, seq, dtype=torch.bool)
             position_ids = torch.arange(0, seq, dtype=torch.long)
@@ -608,9 +552,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx.shape_inference.infer_shapes(onnx_program.model_proto)
 
     @pytorch_test_common.xfail(
-        "Not decorated with xfail because CI doesn't have enough memory to run and then fail."
-        "AssertionError: Mutating module attribute seq_len_cached during export."
-        "self.seq_len_cached = seq_len"
+        error_message="Dynamic control flow is not supported at the moment."
     )
     def test_fake_tensor_mode_huggingface_tiiuae_falcon(self):
         config = transformers.FalconConfig()
@@ -669,23 +611,29 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return self.normal.sample(x.shape)
 
         x = torch.randn(2, 3)
-        exported_program = torch.export.export(Model(), args=(x,))
-        _ = torch.onnx.dynamo_export(
-            exported_program,
-            x,
+        with torch.no_grad():
+            exported_program = torch.export.export(Model(), args=(x,))
+            _ = torch.onnx.dynamo_export(
+                exported_program,
+                x,
+            )
+
+    def test_aten_div_no_opmath_type_promotion(self):
+        class Model(torch.nn.Module):
+            def forward(self, input):
+                return input / 2
+
+        model = Model()
+        input = torch.randn(3, 5, requires_grad=True, dtype=torch.float16)
+
+        model_proto = torch.onnx.dynamo_export(model, input).model_proto
+        model_proto = onnx.inliner.inline_local_functions(model_proto)
+        div_node = next(
+            node for node in model_proto.graph.node if node.op_type == "Div"
         )
-
-    def test_aten_linalg_vector_norm_with_reducel2(self):
-        class Net(nn.Module):
-            def forward(self, x):
-                x = F.normalize(x)
-                return x
-
-        f = io.BytesIO()
-        torch.onnx.export(Net(), (torch.randn(1, 2, 2),), f)
-        onnx_model = onnx.load_from_string(f.getvalue())
-        onnx_nodes = [n.op_type for n in onnx_model.graph.node]
-        self.assertTrue("ReduceL2" in onnx_nodes)
+        # The input of Div node should be the input of the model,
+        # with no Cast node in between.
+        self.assertEqual(div_node.input[0], model_proto.graph.input[0].name)
 
     def test_exported_program_as_input_with_model_signature(self):
         class Model(torch.nn.Module):

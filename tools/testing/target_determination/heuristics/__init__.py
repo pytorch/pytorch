@@ -29,6 +29,6 @@ HEURISTICS: List[HeuristicInterface] = [
     EditedByPR(),
     HistoricalClassFailurCorrelation(trial_mode=True),
     CorrelatedWithHistoricalFailures(),
-    HistorialEditedFiles(trial_mode=True),
-    Profiling(trial_mode=True),
+    HistorialEditedFiles(),
+    Profiling(),
 ]

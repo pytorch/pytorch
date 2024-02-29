@@ -1,6 +1,7 @@
 #pragma once
 #include <c10/util/ArrayRef.h>
 #include <c10/util/DimVector.h>
+#include <algorithm>
 
 namespace c10 {
 

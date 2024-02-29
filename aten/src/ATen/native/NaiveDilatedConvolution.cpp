@@ -20,8 +20,7 @@
 #include <ATen/ops/slow_conv_dilated3d_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 // hyper-volume to column, CPU
@@ -745,5 +744,4 @@ static std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated3d_backward_cpu(
 REGISTER_ALL_CPU_DISPATCH(slow_conv_dilated2d_backward_stub, &slow_conv_dilated2d_backward_cpu);
 REGISTER_ALL_CPU_DISPATCH(slow_conv_dilated3d_backward_stub, &slow_conv_dilated3d_backward_cpu);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

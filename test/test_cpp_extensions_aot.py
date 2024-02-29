@@ -37,6 +37,7 @@ except ImportError as e:
     ) from e
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionAOT(common.TestCase):
     """Tests ahead-of-time cpp extensions
 
@@ -150,6 +151,7 @@ class TestCppExtensionAOT(common.TestCase):
         self.assertEqual(test, ref)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPybindTypeCasters(common.TestCase):
     """Pybind tests for ahead-of-time cpp extensions
 
@@ -243,6 +245,7 @@ class TestPybindTypeCasters(common.TestCase):
                 self.check_union(funcs)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestORTTensor(common.TestCase):
     def test_unregistered(self):
         a = torch.arange(0, 10, device='cpu')
@@ -294,6 +297,7 @@ class TestORTTensor(common.TestCase):
         self.assertEqual(grad[0].shape, input.shape)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestRNGExtension(common.TestCase):
 
     def setUp(self):
@@ -330,6 +334,7 @@ class TestRNGExtension(common.TestCase):
         self.assertEqual(rng_extension.getInstanceCount(), 0)
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 @unittest.skipIf(not TEST_CUDA, "CUDA not found")
 class TestTorchLibrary(common.TestCase):
 

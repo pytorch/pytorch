@@ -38,8 +38,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -542,4 +541,4 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& in
   return at::native::ctc_loss(log_probs, targets, il, tl, BLANK, reduction, zero_infinity);
 }
 
-} } // at::native
+} // at::native

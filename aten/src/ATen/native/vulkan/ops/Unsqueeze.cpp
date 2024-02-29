@@ -16,8 +16,8 @@ struct Block final {
 
 Tensor unsqueeze(const at::Tensor& self, int64_t dim) {
   TORCH_CHECK(
-      self.dim() >= 1 || self.dim() <= 3,
-      "Vulkan unsqueeze supports 1d, 2d, 3d tensors as input!");
+      self.dim() <= 3,
+      "Vulkan unsqueeze only supports up to 3d tensors as input!");
   TORCH_CHECK(
       dim >= -self.dim() - 1 && dim <= self.dim(),
       "Vulkan unsqueeze dimension out of range expected to be in range of [",
@@ -35,7 +35,7 @@ Tensor unsqueeze(const at::Tensor& self, int64_t dim) {
   const vTensor& v_input = convert(input);
 
   // Create the output texture. For unsqueeze, add a dimension.
-  std::vector<int64_t> output_size = self.sizes().vec();
+  std::vector<int64_t> output_size = v_input.sizes();
   if (dim < 0) {
     dim += (self.dim() + 1);
   }
@@ -44,7 +44,7 @@ Tensor unsqueeze(const at::Tensor& self, int64_t dim) {
   vTensor v_output{
       context,
       output_size,
-      self.scalar_type(),
+      convert_dtype(self.scalar_type()),
   };
 
   // Required to determine how to insert memory barriers in the command buffer

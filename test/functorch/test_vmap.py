@@ -25,6 +25,7 @@ from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_utils import (
     parametrize,
     instantiate_parametrized_tests,
+    IS_WINDOWS,
     subtest,
     skipIfRocm,
     TEST_WITH_TORCHDYNAMO,
@@ -52,6 +53,7 @@ from common_utils import (
 )
 import types
 import os
+import sys
 from collections import namedtuple
 import contextlib
 
@@ -63,6 +65,7 @@ from torch._functorch.make_functional import functional_init_with_buffers
 from torch.testing._internal.autograd_function_db import autograd_function_db
 from torch._functorch.vmap import restore_vmap
 from torch.utils import _pytree as pytree
+from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 
 FALLBACK_REGEX = 'There is a performance drop'
 
@@ -977,7 +980,6 @@ class TestVmapAPI(TestCase):
         jacobian = vmap(vjp_mul)(batched_v)
         self.assertEqual(jacobian, torch.diagflat(y))
 
-    @xfailIfTorchDynamo
     def test_functools_partial(self):
         x = torch.randn(3)
         y = torch.randn(2, 3)
@@ -1724,7 +1726,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
             x = torch.randn(B0, 0, 3)
             vmap(lambda x: x.as_strided([3], [1]))(x)
 
-    @xfailIfTorchDynamo
     def test_nll_loss(self):
         test = self._vmap_test
         op = F.nll_loss
@@ -1742,7 +1743,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(functools.partial(op, reduction='sum'), (y, t), in_dims=(0, None))
         test(functools.partial(op, reduction='none'), (y, t), in_dims=(0, None))
 
-    @xfailIfTorchDynamo
     def test_adaptive_avg_pool2d(self):
         test = self._vmap_test
         op = functools.partial(F.adaptive_avg_pool2d, output_size=(3, 3))
@@ -2154,6 +2154,9 @@ class TestVmapOperators(Namespace.TestVmapBase):
         self.assertEqual(vmap(foo)(float_tensor), torch.tensor([1, 1, 1]))
         self.assertEqual(vmap(foo)(long_tensor), torch.tensor([0, 0, 0]))
 
+    @unittest.skipIf(IS_WINDOWS,
+                     reason="Windows not yet supported for torch.compile")
+    @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
     def test_is_contiguous(self):
         def foo(x):
             if x.is_contiguous():
@@ -2209,6 +2212,16 @@ class TestVmapOperators(Namespace.TestVmapBase):
             vmap(functools.partial(baz, memory_format=torch.channels_last))(tensor)
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(functools.partial(baz, memory_format=torch.channels_last_3d))(tensor)
+
+        for mf in (torch.channels_last, torch.channels_last_3d):
+            @torch.compile(backend="eager", fullgraph=True)
+            def f(x):
+                if x.is_contiguous(memory_format=mf):
+                    return x.sin()
+                return x.cos()
+
+            with self.assertRaisesRegex(RuntimeError, msg):
+                vmap(f)(torch.randn(3, 3))
 
     def test_unsqueeze(self):
         op = torch.unsqueeze
@@ -2544,7 +2557,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(lambda x: op(x, (2, 3)), (torch.rand(B0, 1, 1),))
         test(lambda x: op(x, (2, 3)), (torch.rand(1, B0, 1),), in_dims=1)
 
-    @skipIfTorchDynamo
+    @skipIfTorchDynamo()
     def test_slogdet(self):
         test = functools.partial(self._vmap_test, check_propagates_grad=False)
         B0 = 7
@@ -2643,6 +2656,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(vmap(lambda t: op(t, [4, 8, 9, 34, 29], 1), in_dims=2)),
              (torch.rand(B1, 2, B0, 64, B2),), in_dims=2)
 
+    @skipIfTorchDynamo("really slow")
     def test_split(self):
         test = self._vmap_view_test
         op = torch.split
@@ -2839,7 +2853,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
         res = vmap(foo)(x)
         self.assertEqual(res, x.conj())
 
-    @xfailIfTorchDynamo
     def test_mode_key(self):
         def vmap_f(x):
             return x + torch.randn(())
@@ -3161,7 +3174,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._test_arithmetic(torch.div, device)
         self._test_arithmetic(lambda x, y: x / y, device)
 
-    @xfailIfTorchDynamo
     def test_binary_cross_entropy(self, device):
         x = F.sigmoid(torch.randn(3, 2, device=device, requires_grad=True))
         target = torch.rand(3, 2, device=device)
@@ -3171,7 +3183,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._batched_grad_test(op, (x,), {})
         self._batched_grad_grad_test(op, (x,), {})
 
-    @xfailIfTorchDynamo
     def test_log_softmax(self, device):
         op = functools.partial(torch.log_softmax, dim=-1)
         x = torch.randn(3, 2, device=device, requires_grad=True)
@@ -3397,6 +3408,7 @@ def discover_variants(opinfo):
 
 # TODO: enable this when we get a bit closer to getting torch.vmap x torch.compile working.
 # @markDynamoStrictTest
+@unMarkDynamoStrictTest
 class TestVmapOperatorsOpInfo(TestCase):
 
     def vmap_outplace_test(self, func, args, kwargs, in_dims, check_shape_only=False,
@@ -3855,7 +3867,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             self.opinfo_vmap_test(device, torch.float, op, check_has_batch_rule=True,
                                   postprocess_fn=compute_A)
 
-    @skipIfTorchDynamo
+    @skipIfTorchDynamo()
     def test_slogdet(self, device):
         # There's no OpInfo for this
         def test():
@@ -5087,11 +5099,12 @@ class TestRandomness(TestCase):
 
 @markDynamoStrictTest
 class TestTransformFailure(TestCase):
-    @skipIfTorchDynamo
+    @skipIfTorchDynamo()
     @parametrize('transform', ['vmap', 'grad', 'grad_and_value', 'vjp', 'jvp', 'jacrev', 'jacfwd'])
     def test_fails_with_autograd_function(self, device, transform):
+        failed_build_envs = ('linux-focal-py3.8-clang10', 'linux-focal-py3.11-clang10')
         if (device == 'cpu' and transform in ['grad', 'vmap'] and
-                TEST_WITH_TORCHDYNAMO and os.getenv('BUILD_ENVIRONMENT', '') == 'linux-focal-py3.8-clang10'):
+                TEST_WITH_TORCHDYNAMO and os.getenv('BUILD_ENVIRONMENT', '') in failed_build_envs):
             raise unittest.SkipTest("Unexpected successes on focal with dynamo," +
                                     " see https://github.com/pytorch/pytorch/issues/107173")
 
@@ -5259,7 +5272,6 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
             torch.randn(*size) for size in ret_sizes
         ], device=other.device)
 
-    @xfailIfTorchDynamo
     @allowVmapFallbackUsage
     def test_fallback_unary(self, device):
         def f(x):
@@ -5268,7 +5280,6 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
         nt = self._create_nt([4, None, 3], device=device)
         self._vmap_test(f, (nt,))
 
-    @xfailIfTorchDynamo
     @allowVmapFallbackUsage
     def test_fallback_binary(self, device):
         def f(x, y):
@@ -5278,7 +5289,6 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
         y = self._create_nt([5, 3, None], device=device)
         self._vmap_test(f, (x, y))
 
-    @xfailIfTorchDynamo
     @allowVmapFallbackUsage
     def test_fallback_binary_nt_and_unbatched_dense(self, device):
         def f(x, y):
@@ -5288,7 +5298,6 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
         y = torch.randn(3, 4, device=device)
         self._vmap_test(f, (x, y), in_dims=(0, None))
 
-    @xfailIfTorchDynamo
     @allowVmapFallbackUsage
     def test_fallback_binary_nt_and_batched_dense(self, device):
         def f(x, y):
@@ -5298,7 +5307,6 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
         y = torch.randn(5, 3, 4, device=device)
         self._vmap_test(f, (x, y))
 
-    @xfailIfTorchDynamo
     def test_nt_acts_as_dense_in_vmap(self, device):
         def f(x):
             assert not x.is_nested
@@ -5307,7 +5315,6 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
         x = self._create_nt([5, None, 3], device=device)
         self._vmap_test(f, (x,))
 
-    @xfailIfTorchDynamo
     def test_cat_batching_rule(self, device):
         def f(x, y, dim):
             return torch.cat([x, y], dim=dim)
@@ -5350,7 +5357,6 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
                 RuntimeError, "Nested tensors can only be vmapped over dim=0"):
             vmap(f, in_dims=2)(x)
 
-    @xfailIfTorchDynamo
     def test_nt_with_nonzero_out_dim_raises(self, device):
         def f(x):
             return x
@@ -5360,8 +5366,6 @@ class TestVmapNestedTensor(Namespace.TestVmapBase):
                 RuntimeError, "Nested tensors can only be vmapped over dim=0"):
             vmap(f, out_dims=2)(x)
 
-    @xfailIfTorchDynamo
-    @allowVmapFallbackUsage
     def test_fallback_with_nt_and_batched_dense_with_nonzero_bdim_raises(self, device):
         def f(x, y):
             return x @ y

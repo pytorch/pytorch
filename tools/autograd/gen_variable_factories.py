@@ -9,8 +9,7 @@ import torchgen.api.python as python
 from torchgen.api import cpp
 
 from torchgen.api.types import CppSignatureGroup
-from torchgen.code_template import CodeTemplate
-from torchgen.context import with_native_function, with_native_function_and
+from torchgen.context import with_native_function
 from torchgen.gen import parse_native_yaml
 from torchgen.model import NativeFunction, TensorOptionsArguments, Variant
 from torchgen.utils import FileManager, mapMaybe
@@ -43,10 +42,6 @@ def gen_variable_factories(
     native_functions = parse_native_yaml(
         native_yaml_path, tags_yaml_path
     ).native_functions
-
-    def _process_function(fn: NativeFunction) -> Optional[str]:
-        return process_function(fn, native_functions)
-
     factory_functions = [fn for fn in native_functions if is_factory_function(fn)]
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     fm.write_with_template(
@@ -58,9 +53,7 @@ def gen_variable_factories(
             "ops_headers": [
                 f"#include <ATen/ops/{fn.root_name}.h>" for fn in factory_functions
             ],
-            "function_definitions": list(
-                mapMaybe(_process_function, factory_functions)
-            ),
+            "function_definitions": list(mapMaybe(process_function, factory_functions)),
         },
     )
 
@@ -75,32 +68,8 @@ def is_factory_function(f: NativeFunction) -> bool:
     return has_tensor_options or name.endswith("_like")
 
 
-FACTORY_FUNCTION_DEFINITION = CodeTemplate(
-    """\
-inline at::Tensor ${sig_name}(${formals}) {
-  at::AutoDispatchBelowADInplaceOrView guard;
-  ${try_call_w_dummy_stmt}
-  ${call_and_return_stmt}
-}
-"""
-)
-
-
-TRY_CALL_WITH_DUMMY = CodeTemplate(
-    """\
-auto ret = c10::try_call_with_dummy([=](at::Tensor dummy) {
-  ${ck_mem_fmt_stmt}
-  ${call_and_return_stmt}
-}, size);
-if (ret.has_value()) {
-  return ret.value();
-}
-"""
-)
-
-
-@with_native_function_and
-def process_function(f: NativeFunction, all_fns: List[NativeFunction]) -> Optional[str]:
+@with_native_function
+def process_function(f: NativeFunction) -> Optional[str]:
     name = cpp.name(f.func)
     has_tensor_options = python.has_tensor_options(f)
     is_factory = has_tensor_options or name.endswith("_like")
@@ -108,40 +77,15 @@ def process_function(f: NativeFunction, all_fns: List[NativeFunction]) -> Option
     if Variant.function not in f.variants or not is_factory:
         return None
 
-    # Note [ NestedTensor Factory Function Codegen ]
-    #
-    # Look for the corresponding new_* function, e.g. zeros -> new_zeros
-    # If it exists, insert additional logic for the symint signature to
-    # call the new_* function via try_call_with_dummy. This is used for
-    # dispatching to the python dispatch for NT when the sizes for factory
-    # functions contains a singleton int.
-    #
-    # Also see Note [ NestedTensor factory functions ]
-    new_fn = None
-    for fn in all_fns:
-        name_split = fn.func.name.name.base.split("new_")
-        if len(name_split) == 2 and name_split[-1] == f.func.name.name.base:
-            new_fn = fn
-            break
-    if new_fn is not None:
-        new_fn_cpp_sigs = CppSignatureGroup.from_native_function(new_fn, method=True)
-        # We only care about the symint signature here
-        assert new_fn_cpp_sigs.symint_signature is not None
-        new_fn_sig = new_fn_cpp_sigs.symint_signature
-
     cpp_sigs = CppSignatureGroup.from_native_function(f, method=False)
     sigs = [cpp_sigs.signature]
     if cpp_sigs.symint_signature is not None:
         sigs.append(cpp_sigs.symint_signature)
     r = ""
-
-    for i, sig in enumerate(sigs):
+    for sig in sigs:
         formals: List[str] = []
-        exprs_w_mem_fmt: List[str] = []
-        exprs_wo_mem_fmt: List[str] = []
-        req_grad_expr = "false"
-        ck_mem_fmt_stmt = ""
-
+        exprs: List[str] = []
+        requires_grad = "false"
         for arg in sig.arguments():
             qualified_type = fully_qualified_type(arg.type)
             if arg.default:
@@ -154,53 +98,18 @@ def process_function(f: NativeFunction, all_fns: List[NativeFunction]) -> Option
                 # it is ignored anyways (and we actually have an assertion that it isn't set
                 # which would fail otherwise). We handle requires_grad explicitly here
                 # instead of passing it through to the kernel.
-                options_wo_req_grad = (
+                exprs.append(
                     f"at::TensorOptions({arg.name}).requires_grad(c10::nullopt)"
                 )
-                exprs_w_mem_fmt.append(options_wo_req_grad)
-                exprs_wo_mem_fmt.append(options_wo_req_grad)
                 # Manually set the requires_grad bit on the result tensor.
-                req_grad_expr = f"{arg.name}.requires_grad()"
+                requires_grad = f"{arg.name}.requires_grad()"
             else:
-                # new_like functions don't accept memory_format argument (not sure
-                # if intentional), but we need to generate two versions of the function
-                # call.
-                if not arg.name == "memory_format":
-                    # skip memory_format argument
-                    exprs_wo_mem_fmt.append(arg.name)
-                else:
-                    ck_mem_fmt_stmt = "TORCH_CHECK(memory_format == c10::nullopt);"
-                exprs_w_mem_fmt.append(arg.name)
+                exprs.append(arg.name)
 
-        def get_call_and_ret_stmt(name: str, exprs: List[str]) -> str:
-            return f"return autograd::make_variable({name}({', '.join(exprs)}), /*requires_grad=*/{req_grad_expr});"
-
-        try_call_w_dummy_stmt = ""
-        if new_fn is not None and i == 1:
-            # See Note [ NestedTensor Factory Function Codegen ]
-            # If we have a new_* function and we are currently processing the
-            # symint signature, try to call it via try_call_with_dummy.
-            # The symint signature is always the second one.
-            try_call_w_dummy_stmt = TRY_CALL_WITH_DUMMY.substitute(
-                ck_mem_fmt_stmt=ck_mem_fmt_stmt,
-                call_and_return_stmt=get_call_and_ret_stmt(
-                    "dummy." + new_fn_sig.name(), exprs_wo_mem_fmt
-                ),
-            )
-        r += FACTORY_FUNCTION_DEFINITION.substitute(
-            sig_name=sig.name(),
-            formals=", ".join(formals),
-            try_call_w_dummy_stmt=try_call_w_dummy_stmt,
-            call_and_return_stmt=get_call_and_ret_stmt(
-                "at::" + sig.name(), exprs_w_mem_fmt
-            ),
-        )
+        r += f"""\
+inline at::Tensor {sig.name()}({', '.join(formals)}) {{
+  at::AutoDispatchBelowADInplaceOrView guard;
+  return autograd::make_variable(at::{sig.name()}({', '.join(exprs)}), /*requires_grad=*/{requires_grad});
+}}
+"""
     return r
-
-
-if __name__ == "__main__":
-    out = "torch/csrc/autograd/generated"
-    native_yaml_path = "aten/src/ATen/native/native_functions.yaml"
-    tags_yaml_path = "aten/src/ATen/native/tags.yaml"
-    template_path = "tools/autograd/templates"
-    gen_variable_factories(out, native_yaml_path, tags_yaml_path, template_path)

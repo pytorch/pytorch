@@ -42,7 +42,6 @@ misc-*,
 -misc-non-private-member-variables-in-classes,
 -misc-confusable-identifiers,
 modernize-*,
--modernize-concat-nested-namespaces,
 -modernize-macro-to-enum,
 -modernize-return-braced-init-list,
 -modernize-use-auto,
@@ -52,6 +51,13 @@ modernize-*,
 -modernize-use-nodiscard,
 performance-*,
 readability-container-size-empty,
+readability-delete-null-pointer,
+readability-duplicate-include
+readability-misplaced-array-index,
+readability-redundant-function-ptr-dereference,
+readability-redundant-smartptr-get,
+readability-simplify-subscript-expr,
+readability-string-compare,
 '
 HeaderFilterRegex: '^(aten/|c10/|torch/).*$'
 AnalyzeTemporaryDtors: false

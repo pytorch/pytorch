@@ -105,7 +105,7 @@ class _Orthogonal(Module):
             Q = self.base @ Q
         if transposed:
             Q = Q.mT
-        return Q
+        return Q  # type: ignore[possibly-undefined]
 
     @torch.autograd.no_grad()
     def right_inverse(self, Q: torch.Tensor) -> torch.Tensor:
