@@ -620,6 +620,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     torch, torch_sym_op
                 ):
                     fn_ = getattr(torch, torch_sym_op)
+
             if fn_ is torch.tensor:
 
                 def check_any_unspec(x):
