@@ -205,10 +205,10 @@ class BlockPtrOptions:
             if (
                 self.block_shape[i] != "1"
                 and not V.graph.sizevars.statically_known_equals(self.strides[i], 0)  # type: ignore[arg-type]
-                and not V.graph.sizevars.statically_known_multiple_of(
-                    self.shape[i],
-                    config.triton.max_block[self.block_shape[i][0]],  # type: ignore[arg-type]
-                )
+                # and not V.graph.sizevars.statically_known_multiple_of(
+                #     self.shape[i],
+                #     config.triton.max_block[self.block_shape[i][0]],  # type: ignore[arg-type]
+                # )
                 and not (V.kernel.no_x_dim and self.block_shape[i] == "XBLOCK")
             ):
                 check.append(i)
@@ -1726,13 +1726,13 @@ class TritonKernel(Kernel):
             # (We use the fact that BLOCK is required by triton to be a power of 2)
             if tree.prefix.upper() not in config.triton.max_block:
                 continue
-            max_block = config.triton.max_block[tree.prefix.upper()]
-            # Optional optimization: if block divides numel exactly, we will
-            # never need to do a masked load to handle stragglers at the end.
-            # It's faster to avoid masking at all.  But it is sound to always
-            # mask.
-            if V.graph.sizevars.statically_known_multiple_of(tree.numel, max_block):  # type: ignore[arg-type]
-                mask_vars.discard(f"{tree.prefix}mask")
+            # max_block = config.triton.max_block[tree.prefix.upper()]
+            # # Optional optimization: if block divides numel exactly, we will
+            # # never need to do a masked load to handle stragglers at the end.
+            # # It's faster to avoid masking at all.  But it is sound to always
+            # # mask.
+            # if V.graph.sizevars.statically_known_multiple_of(tree.numel, max_block):  # type: ignore[arg-type]
+            #     mask_vars.discard(f"{tree.prefix}mask")
 
     def var_ranges(self):
         return dict(
