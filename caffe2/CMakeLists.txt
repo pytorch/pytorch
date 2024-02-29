@@ -1082,6 +1082,23 @@ if(USE_XPU)
   torch_compile_options(torch_xpu)  # see cmake/public/utils.cmake
   target_compile_options_if_supported(torch_xpu "-Wno-deprecated-copy")  # see cmake/public/utils.cmake
   target_compile_definitions(torch_xpu PRIVATE USE_XPU)
+
+  # ATen XPU implementation
+  set(TORCH_XPU_OPS_PYTORCH_INCLUDE_DIRS
+      ${TORCH_SRC_DIR}/csrc/api
+      ${TORCH_SRC_DIR}/csrc/api/include
+      ${Caffe2_CPU_INCLUDE}
+      ${Caffe2_XPU_INCLUDE})
+  set(TORCH_XPU_OPS_PYTORCH_DEPS ATEN_CPU_FILES_GEN_TARGET)
+  add_subdirectory(${TORCH_ROOT}/third_party/torch-xpu-ops
+      ${CMAKE_BINARY_DIR}/caffe2/aten_xpu)
+  if(NOT TARGET torch_xpu_ops)
+    message(WARNING "Failed to include ATen XPU implementation target")
+  else()
+    target_link_libraries(torch_xpu PRIVATE torch_xpu_ops)
+    target_link_libraries(torch_xpu PRIVATE
+      "-Wl,--whole-archive,\"$<TARGET_FILE:torch_xpu_ops>\" -Wl,--no-whole-archive")
+  endif()
 endif()
 
 if(NOT MSVC AND USE_XNNPACK)
