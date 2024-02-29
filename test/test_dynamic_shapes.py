@@ -130,15 +130,18 @@ class FakeSymbolicTensor(torch.Tensor):
         raise RuntimeError(f"operator {func_overload} not supported")
 
 
-def create_symbolic_tensor(name, arg, shape_env):
+def create_symbolic_tensor(name, arg, shape_env, source=None, dynamic_dims=None):
     from torch._dynamo.source import ConstantSource
 
+    if source is None:
+        source = ConstantSource(name)
     constraint_dims = [None] * arg.dim()
-    dynamic_dims = [DimDynamic.DUCK] * arg.dim()
+    if dynamic_dims is None:
+        dynamic_dims = [DimDynamic.DUCK] * arg.dim()
     sym_shapes, sym_strides, sym_storage_offset = \
         shape_env.create_symbolic_sizes_strides_storage_offset(
             arg,
-            source=ConstantSource(name),
+            source=source,
             symbolic_context=StatelessSymbolicContext(
                 dynamic_sizes=dynamic_dims,
                 constraint_sizes=constraint_dims
@@ -677,6 +680,51 @@ class f(torch.nn.Module):
 
         # No guards should be generated
         self.assertEqual(len(shape_env.guards), 0)
+
+    def test_ephemeral_source_simplification(self):
+        from torch._dynamo.source import EphemeralSource
+
+        for x_first_in_check in [False, True]:
+            shape_env = ShapeEnv()
+            shape = (5, 10)
+            dynamic_dims = [DimDynamic.DYNAMIC for _ in shape]
+            x = create_symbolic_tensor(
+                "x",
+                torch.randn(*shape),
+                shape_env,
+                source=EphemeralSource(),
+                dynamic_dims=dynamic_dims,
+            )
+            y = create_symbolic_tensor(
+                "y",
+                torch.randn(*shape),
+                shape_env,
+                dynamic_dims=dynamic_dims,
+            )
+
+            def _get_ephemeral_source_symbols(t):
+                return [
+                    s.node._expr for s in (*t.shape, *t.stride(), t.storage_offset())
+                    if isinstance(s, torch.SymInt) and s.node._expr in shape_env.var_to_sources
+                    and any(
+                        source.is_ephemeral() for source in shape_env.var_to_sources[s.node._expr]
+                    )
+                ]
+
+            # these checks should simplify out the ephemeral symbols, regardless of the
+            # ordering x == y or y == x
+            if x_first_in_check:
+                torch._check(x.size() == y.size())
+                torch._check(x.stride() == y.stride())
+                torch._check(x.storage_offset() == y.storage_offset())
+            else:
+                torch._check(y.size() == x.size())
+                torch._check(y.stride() == x.stride())
+                torch._check(y.storage_offset() == x.storage_offset())
+
+            self.assertTrue(
+                all(sym in shape_env.replacements for sym in _get_ephemeral_source_symbols(x))
+            )
 
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
