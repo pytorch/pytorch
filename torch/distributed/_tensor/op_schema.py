@@ -94,6 +94,18 @@ class PlacementStrategy:
                 f"function output_spec expects a single DTensorSpec but got: {self.output_specs}"
             )
 
+    @cached_property
+    def input_spec(self) -> DTensorSpec:
+        """
+        This function requires that the strategy have exactly one DTensorSpec as the
+        input spec. If the input_specs is a tuple with more than 1 element, we throw an exception.
+        """
+        assert self.input_specs is not None, "input_specs of PlacementStrategy is None!"
+        assert (
+            len(self.input_specs) == 1
+        ), f"expect single input spec in PlacementStrategy, but got: {len(self.input_specs)}"
+        return self.input_specs[0]
+
     def __str__(self) -> str:
         input_specs_str = _pretty_print_spec(self.input_specs)
         output_spec_str = _pretty_print_spec(self.output_specs)
@@ -155,7 +167,8 @@ class TupleStrategy(StrategyType):
     TupleStrategy represents the output strategy of this op is a tuple
     of strategy, i.e. If the output of this op is a tuple of tensors or list of tensors
     with possibly different placement strategies, we should return a TupleStrategy that
-    contains a tuple of OpStrategy.
+    contains a tuple of OpStrategy, where each child represents the sharding strategy
+    of "each element" of the tuple/list of tensors the op returns.
 
     NOTE: if the output of the op is a List[Tensor] and they share the same placement
     strategy, then we should return a single OpStrategy instead of a TupleStrategy
