@@ -954,8 +954,10 @@ class DeviceCachingAllocator {
     context_recorder_.store(record_history ? context_recorder : nullptr);
     alloc_trace_max_entries_ = std::max(size_t(1), alloc_trace_max_entries);
     record_context_ = enabled ? when : RecordContext::NEVER;
-    alloc_trace_next = 0;
-    alloc_trace->clear();
+    if (!enabled) {
+      alloc_trace_next = 0;
+      alloc_trace->clear();
+    }
   }
 
   bool isHistoryEnabled() {
