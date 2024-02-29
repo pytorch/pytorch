@@ -462,7 +462,6 @@ class DispatchKeySet final {
         return 2;
       case DispatchKey::SparseCPU:
         return 3;
-        // TODO: add SparseCsrCPU?
       case DispatchKey::BackendSelect:
         return 4;
       case DispatchKey::ADInplaceOrView:
