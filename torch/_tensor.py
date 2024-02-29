@@ -404,6 +404,7 @@ class Tensor(torch._C.TensorBase):
                 torch.bits1x8,
                 torch.bits2x4,
                 torch.bits4x2,
+                torch.complex32,
             ]
             if self.dtype in v3_dtypes:
                 rebuild_func = torch._utils._rebuild_tensor_v3
