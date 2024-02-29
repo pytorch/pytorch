@@ -41,7 +41,7 @@ runs:
       env:
         REPO: ${{ github.repository }}
         RUN_ID: ${{ github.run_id }}
-        NAME: ${{ input.name }}
+        NAME: ${{ inputs.name }}
       run: |
         curl -o artifacts.zip https://pytorch-ci-artifacts.s3.amazonaws.com/$REPO/$RUN_ID/$NAME/artifacts.zip
 
