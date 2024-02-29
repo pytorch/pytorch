@@ -938,6 +938,7 @@ class SubclassSymbolicContext(StatefulSymbolicContext):
     inner_contexts: Dict[str, SymbolicContext] = None
 
     def __post_init__(self):
+        super().__post_init__()
         if self.inner_contexts is None:
             self.inner_contexts = {}
 
@@ -3668,8 +3669,20 @@ class ShapeEnv:
         # In case of really gnarly expression, we don't blow up
         if len(free) > 5:
             return
-        # NB: prioritize unbacked symints for solving by ordering them last
-        free = sorted(free, key=lambda x: (self.size_hint(x, allow_none=True) or sys.maxsize, x.name), reverse=True)  # type: ignore[attr-defined]
+
+        # NB: prioritize unbacked symints for solving by ordering them last.
+        # Prefer to simplify out symbols created later (i.e. simplify out s4 over s3).
+        # Prefer to simplify out symbols with ephemeral sources.
+        def _smart_symbol_sort(x):
+            has_ephemeral_source = (
+                x in self.var_to_sources and any(s.is_ephemeral() for s in self.var_to_sources[x])
+            )
+            size = self.size_hint(x, allow_none=True) or sys.maxsize
+            name = x.name
+            # 1 puts ephemeral sources first when sorting in reverse
+            return (1 if has_ephemeral_source else 0, size, name)
+
+        free = sorted(free, key=_smart_symbol_sort, reverse=True)  # type: ignore[attr-defined]
         lhs = expr.lhs
         rhs = expr.rhs
         if not expr.has(Mod):

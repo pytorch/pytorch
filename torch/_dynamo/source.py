@@ -173,6 +173,25 @@ class ParamBufferSource(AttrSource):
         return _GUARD_SOURCE_NN_MODULE[self.base.guard_source()]
 
 
+# This source is intended to be used in places where a source is needed but it is expected
+# that the symbol will be simplified out later on. Guarding on this is an error.
+@dataclasses.dataclass(frozen=True)
+class EphemeralSource(Source):
+    desc: Optional[str] = None
+
+    def guard_source(self):
+        return GuardSource.EPHEMERAL
+
+    def name(self):
+        return f"<ephemeral{': ' + self.desc if self.desc is not None else ''}>"
+
+    def make_guard(self):
+        raise NotImplementedError()
+
+    def is_ephemeral(self):
+        return True
+
+
 class TensorProperty(enum.Enum):
     SIZE = 0
     STRIDE = 1

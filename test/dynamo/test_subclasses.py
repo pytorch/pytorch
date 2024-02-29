@@ -1305,10 +1305,9 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         yield x.values()
 
         # Subclass -> Dense -> Subclass -> Dense
-        # TODO: Fix this case!! Or at least error nicely
-        # x = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[0].clone()
-        # offsets2 = x.offsets().clone().detach()
-        # yield nested_view_from_values_offsets(x.values(), offsets2).values()
+        x = self._get_jagged_tensor(((2, 3, 4), 3), None, requires_grad=True)[0].clone()
+        offsets2 = x.offsets().clone().detach()
+        yield nested_view_from_values_offsets(x.values(), offsets2).values()
 
         # Dense -> Subclass -> Dense -> Subclass
         values = torch.randn(10, 5)

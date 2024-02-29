@@ -86,6 +86,7 @@ class GuardSource(enum.Enum):
     SHAPE_ENV = 6
     LOCAL_FSDP_MODULE = 7
     GLOBAL_FSDP_MODULE = 8
+    EPHEMERAL = 9
 
     def is_fsdp_module(self) -> bool:
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
@@ -770,6 +771,9 @@ class Source:
     def is_dict_key(self):
         return False
 
+    def is_ephemeral(self):
+        return False
+
     def reconstruct(self, codegen):
         raise NotImplementedError()
 
@@ -796,6 +800,9 @@ class ChainedSource(Source):
     def is_dict_key(self):
         # Recurse until you either hit a ConstDictKey or a Source
         return self.base.is_dict_key()
+
+    def is_ephemeral(self):
+        return self.base.is_ephemeral()
 
 
 def detect_fake_mode(inputs: Any = None):
