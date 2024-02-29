@@ -307,6 +307,46 @@ class MetaConverter:
                 outer_stride=outer_stride,
             )
 
+        # Metafies the given tensor with fully dynamic dims and the given source.
+        def all_dynamic_meta_tensor(t, source, shape_env=shape_env, callback=callback):
+            from torch.fx.experimental.symbolic_shapes import (
+                DimDynamic,
+                SubclassSymbolicContext,
+                SymbolicContext,
+            )
+
+            t_symbolic_context: SymbolicContext
+            t_dynamic_sizes = [DimDynamic.DYNAMIC] * t.dim()
+            if is_traceable_wrapper_subclass(t):
+                inner_contexts = {}
+                attrs, _ = t.__tensor_flatten__()
+                for attr in attrs:
+                    assert isinstance(attr, str)
+                    inner = getattr(t, attr)
+                    inner_contexts[attr] = StatelessSymbolicContext(
+                        dynamic_sizes=[DimDynamic.DYNAMIC] * inner.dim(),
+                        constraint_sizes=[None] * inner.dim(),
+                    )
+                t_symbolic_context = SubclassSymbolicContext(
+                    dynamic_sizes=t_dynamic_sizes,
+                    constraint_sizes=[None] * t.dim(),
+                    inner_contexts=inner_contexts,
+                    tensor_source=source,
+                )
+            else:
+                t_symbolic_context = StatelessSymbolicContext(
+                    dynamic_sizes=t_dynamic_sizes,
+                    constraint_sizes=[None] * t.dim(),
+                )
+
+            return self.meta_tensor(
+                t,
+                shape_env,
+                callback,
+                source=source,
+                symbolic_context=t_symbolic_context,
+            )
+
         # Returns a fake-ified version of an input view tensor t, given an already fake-ified
         # base. At a high level, we want two things:
         #   1. fake_t should have the same view relationship to the given fake base as the
@@ -349,35 +389,29 @@ class MetaConverter:
                 # It's likely there is no view func available.
                 return base.as_strided(sizes, strides, storage_offset)
 
+            from torch._dynamo.source import EphemeralSource
+
             def symint_visitor_fn(s):
                 if shape_env is None:
                     return s
 
-                from torch._dynamo.source import ConstantSource
-
-                # NB: The source is meaningless; the symbol here is expected to be simplified out.
-                sym_source = ConstantSource("view_func")
+                # NB: The symbol here is expected to be simplified out.
+                sym_source = EphemeralSource("symint_visitor_fn")
                 symbol = shape_env.create_symbol(s, sym_source)
                 return shape_env.create_symintnode(symbol, hint=s, source=sym_source)
 
-            # Assume the only closed-over tensors encountered -that matter- will be inner tensors
-            # of the final view if it's a subclass.
-            #
-            # Examples:
-            #   * Dense -> NJT view: NJT has (values, offsets) components; we want a view of
-            #     values with the offsets closed over. As the offsets component is needed
-            #     to describe the output view, it's important that it's fakeified.
-            #   * Dense -> NJT1 -> Dense -> NJT2 view: The Dense -> NJT2 part of this view
-            #     is the same as the previous example; a fakeified form of NJT2's offsets
-            #     is required for the output view. On the contrary, the NJT1 -> Dense view
-            #     part makes NJT1's offsets irrelevant to the fakeified NJT2 view and thus we
-            #     don't need to fakeify it.
             real_to_fake_mapping = {}
             if is_traceable_wrapper_subclass(t):
                 # Fake-ify t naively here; this is only done so we can get fake-ified inner
                 # tensors with the correct relationships to the outer sizes / strides for use
                 # in view replay. It's done beforehand here because it's not easy to do when
                 # visiting tensors one-by-one during view replay.
+                #
+                # Example:
+                #   Consider a Dense -> NJT view. NJT has (values, offsets) components and we
+                #   want a view of values with the offsets closed over. As the offsets component
+                #   is needed to describe the output view, it's important that it's fakeified
+                #   correctly.
                 fake_t = empty_create_subclass(
                     t, outer_size=sizes, outer_stride=strides
                 )
@@ -386,10 +420,16 @@ class MetaConverter:
                     real_to_fake_mapping[getattr(t, attr)] = getattr(fake_t, attr)
 
             def tensor_visitor_fn(t):
-                # NB: If we don't have a corresponding fake-ified closed-over tensor,
-                # just return the real one. The assumption here is that this won't matter,
-                # as stated above (only inner tensors of the final view are relevant).
-                return real_to_fake_mapping.get(t, t)
+                # Fake inner tensors of view subclasses will come from the mapping built above.
+                fake_t = real_to_fake_mapping.get(t, None)
+                if fake_t is not None:
+                    return fake_t
+
+                # For other closed-over tensor state, fake-ify it as all dynamic with an
+                # ephemeral source. This avoids invalid specialization during view replay.
+                return all_dynamic_meta_tensor(
+                    t, source=EphemeralSource("tensor_visitor_fn")
+                )
 
             # Replay the view, swapping out any non-symbolic SymInts or real tensors
             # for symbolic SymInts or fake tensors.
