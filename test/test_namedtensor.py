@@ -1080,7 +1080,7 @@ class TestNamedTensor(TestCase):
     def test_flatten_index_error(self):
         tensor = torch.randn(1, 2)
         with self.assertRaisesRegex(IndexError,
-                                    "IndexError: Dimension out of range (expected to be in range of [-2, 1], but got 2)"):
+                                    "Dimension out of range (expected to be in range of [-2, 1], but got 2)"):
             tensor.flatten(0, 2)
         with self.assertRaisesRegex(IndexError,
                                     "IndexError: Dimension out of range (expected to be in range of [-2, 1], but got 2)"):
