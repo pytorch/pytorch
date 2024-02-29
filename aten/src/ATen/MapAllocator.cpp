@@ -63,7 +63,6 @@ constexpr const char* unknown_eventname = "eventname not specified";
 
 MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags, size_t size)
   : filename_(filename.empty() ? unknown_filename : filename)
-  , flags_(0) // to be filled later
   , size_(0) // to be filled later
 #ifdef _WIN32
   , handle_(INVALID_HANDLE_VALUE) // to be filled later
@@ -72,7 +71,6 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
 #else
   , fd_(fd)
 #endif
-  , base_ptr_(nullptr)
 {
 
   if (!(flags & ALLOCATOR_MAPPED_SHARED) && !(flags & ALLOCATOR_MAPPED_SHAREDMEM)) {
@@ -272,7 +270,7 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
       fd = fd_;
     }
 
-    struct stat file_stat;
+    struct stat file_stat{};
     if (fstat(fd, &file_stat) == -1) {
       int last_err = errno;
       if (!(flags_ & ALLOCATOR_MAPPED_FROMFD)) {

@@ -26,6 +26,7 @@ from sympy.printing.printer import Printer
 import torch
 import torch.fx
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
+from torch.utils import _pytree as pytree
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import config, metrics
@@ -1441,13 +1442,14 @@ class Kernel(CodeGen):
                             fx_node, ValueRanges.unknown()
                         )
 
-                    csevar = self.cse.generate(
-                        self.compute,
-                        getattr(parent_handler, name)(*args, **kwargs),  # type: ignore[has-type]
-                        bounds=buf_bounds,
-                    )
-                    csevar.update_on_args(name, args, kwargs)
-                    return csevar
+                    value = getattr(parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
+
+                    def do_cse(v):
+                        csevar = self.cse.generate(self.compute, v, bounds=buf_bounds)
+                        csevar.update_on_args(name, args, kwargs)
+                        return csevar
+
+                    return pytree.tree_map(do_cse, value)
 
                 return inner
 
