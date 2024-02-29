@@ -5141,12 +5141,9 @@ def cummax(x, axis=None):
         )
     )
 
-    def inner_fn_idx(idx):
-        return ops.constant(0, dtype=torch.int64)
-
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
-    kwargs["inner_fns"] = (x.make_loader(), inner_fn_idx)
+    kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
     values, indices = ir.Scan.create(
         **kwargs, combine_fn=combine_fn, inits=(min_value, 0)
     )
@@ -5174,12 +5171,9 @@ def cummin(x, axis=None):
         )
     )
 
-    def inner_fn_idx(idx):
-        return ops.constant(0, dtype=torch.int64)
-
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
-    kwargs["inner_fns"] = (x.make_loader(), inner_fn_idx)
+    kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
     values, indices = ir.Scan.create(
         **kwargs, combine_fn=combine_fn, inits=(max_value, 0)
     )
