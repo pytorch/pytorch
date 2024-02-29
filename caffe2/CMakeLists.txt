@@ -1120,6 +1120,7 @@ if(USE_XPU)
       git -C "${TORCH_ROOT}/third_party/torch-xpu-ops" pull)
   endif()
 
+  set(TORCH_XPU_OPS_PYTORCH_DEPS ATEN_CPU_FILES_GEN_TARGET)
   add_subdirectory(${TORCH_ROOT}/third_party/torch-xpu-ops
       ${CMAKE_BINARY_DIR}/caffe2/aten_xpu)
   if(NOT TARGET torch_xpu_ops)
