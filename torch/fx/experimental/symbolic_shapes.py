@@ -1928,7 +1928,7 @@ class ShapeEnv:
         self.specialize_zero_one = specialize_zero_one
         self.duck_shape = duck_shape
         self.log = log
-        self.log.info("create_env")
+        self.log.debug("create_env")
         self.frozen = False
         self.dim_constraints: Optional[DimConstraints] = None
         self.counter = collections.Counter()
