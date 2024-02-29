@@ -301,10 +301,19 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             def my_regular_method(self, arg1):
                 return self, arg1
 
+        class B(A):
+            def my_class_method(self, arg1):
+                return super().my_class_method(arg1)
+
+        class C(A):
+            @classmethod
+            def my_class_method(cls, arg1):
+                return super().my_class_method(arg1)
+
         cnt = torch._dynamo.testing.CompileCounter()
 
         @torch.compile(backend=cnt)
-        def fn(a):
+        def fn(a, b, c):
             # We want a function that does not graph break but
             # does generate custom bytecode
             v1 = a.my_class_method(1)
@@ -312,18 +321,25 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             v3 = a.my_static_method(3)
             v4 = A.my_static_method(4)
             v5 = a.my_regular_method(5)
+            v6 = b.my_class_method(6)
+            v7 = c.my_class_method(7)
+            v8 = C.my_class_method(8)
             torch.rand(2)
-            return v1, v2, v3, v4, v5
+            return v1, v2, v3, v4, v5, v6, v7, v8
 
-        a = A()
-        v1, v2, v3, v4, v5 = fn(a)
-        self.assertEqual(cnt.frame_count, 1)
+        a, b, c = A(), B(), C()
+        v1, v2, v3, v4, v5, v6, v7, v8 = fn(a, b, c)
 
         self.assertEqual(v1, (A, 1))
         self.assertEqual(v2, (A, 2))
         self.assertEqual(v3, (None, 3))
         self.assertEqual(v4, (None, 4))
         self.assertEqual(v5, (a, 5))
+        self.assertEqual(v6, (B, 6))
+        self.assertEqual(v7, (C, 7))
+        self.assertEqual(v8, (C, 8))
+        
+        self.assertEqual(cnt.frame_count, 1)
 
 
 if __name__ == "__main__":
