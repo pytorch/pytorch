@@ -359,7 +359,7 @@ inline c10::optional<TypePtr> unifyOrInitializeType(
 
 using InferredType = c10::InferredType;
 
-InferredType tryToInferContainerType(py::handle input);
+InferredType tryToInferContainerType(py::handle input, bool primitiveTypeOnly);
 
 // Try to infer the type of a Python object
 // The type cannot be inferred if:
@@ -496,17 +496,39 @@ inline InferredType tryToInferType(py::handle input) {
   }
 
   // Try container types
-  return tryToInferContainerType(input);
+  return tryToInferContainerType(input, false);
 }
 
-inline InferredType tryToInferContainerType(py::handle input) {
+//
+inline InferredType tryToInferPrimitiveType(py::handle input) {
+  if (input.is_none()) {
+    return InferredType(NoneType::get());
+  }
+
+  // Only primitive data type
+  if (py::isinstance<py::bool_>(input)) {
+    return InferredType(BoolType::get());
+    // NOLINTNEXTLINE(bugprone-branch-clone)
+  } else if (py::isinstance<py::int_>(input)) {
+    return InferredType(IntType::get());
+  } else if (py::isinstance<py::float_>(input)) {
+    return InferredType(FloatType::get());
+  } else if (PyComplex_CheckExact(input.ptr())) {
+    return InferredType(ComplexType::get());
+  }
+
+  // Try container types
+  return tryToInferContainerType(input, true);
+}
+
+inline InferredType tryToInferContainerType(py::handle input, bool primitiveTypeOnly = false) {
   if (six::isTuple(input)) {
     py::tuple tuple = py::cast<py::tuple>(input);
     std::vector<TypePtr> element_types;
     element_types.reserve(tuple.size());
 
     for (py::handle elem : tuple) {
-      auto type_match = tryToInferType(elem);
+      auto type_match = primitiveTypeOnly ? tryToInferPrimitiveType(elem) : tryToInferType(elem);
       if (type_match.success()) {
         element_types.push_back(type_match.type());
       } else {
@@ -528,7 +550,7 @@ inline InferredType tryToInferContainerType(py::handle input) {
 
     for (auto entry : dict) {
       // Try to infer the key type and unify it with the existing one
-      auto entry_key_type_match = tryToInferType(entry.first);
+      auto entry_key_type_match = primitiveTypeOnly ? tryToInferPrimitiveType(entry.first) : tryToInferType(entry.first);
       if (!entry_key_type_match.success()) {
         return entry_key_type_match.reason();
       }
@@ -543,7 +565,7 @@ inline InferredType tryToInferContainerType(py::handle input) {
       }
 
       // Try to infer the value type and unify it with the existing one
-      auto entry_value_type_match = tryToInferType(entry.second);
+      auto entry_value_type_match = primitiveTypeOnly ? tryToInferPrimitiveType(entry.second) : tryToInferType(entry.second);
       if (!entry_value_type_match.success()) {
         return entry_value_type_match.reason();
       }
@@ -571,7 +593,7 @@ inline InferredType tryToInferContainerType(py::handle input) {
 
     TypePtr element_type = nullptr;
     for (auto elem : list) {
-      auto element_type_match = tryToInferType(elem);
+      auto element_type_match = primitiveTypeOnly ? tryToInferPrimitiveType(elem) : tryToInferType(elem);
       if (!element_type_match.success()) {
         return InferredType(c10::str(
             "Could not infer type of list element: ",
