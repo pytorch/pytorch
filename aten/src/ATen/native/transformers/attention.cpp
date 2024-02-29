@@ -608,7 +608,7 @@ at::Tensor post_process_flash_output(
 //     key (Tensor): Key tensor; shape (N, ..., S, E)
 //     value (Tensor): Value tensor; shape (N, ..., S, E)
 //     attn_mask (optional Tensor): Attention mask; shape must be broadcastable to the shape of attention weights,
-//     which is :math:`(N,..., L, S)`.
+//     which is (N,..., L, S)
 //     Two types of masks are supported.
 //       A boolean mask where a value of True indicates that the element *should* take part in attention.
 //       A float mask of the same type as query, key, value that is added to the attention score.
