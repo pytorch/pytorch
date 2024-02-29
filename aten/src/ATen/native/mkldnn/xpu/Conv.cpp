@@ -398,10 +398,7 @@ Tensor _convolution_out(
       3 == ndim || 4 == ndim || 5 == ndim,
       "convolution only supports 3D, 4D, 5D tensor");
   // get computation format for Conv/TransposedConv
-  auto memory_layout_for_conv =
-      get_memory_layout_for_conv(input_r, weight_r, transposed_);
-  bool is_channels_last_suggested =
-      memory_layout_for_conv == MEMORY_LAYOUT_FOR_CONV::ChannelsLast;
+  bool is_channels_last_suggested = use_channels_last_for_conv(input_r, weight_r, transposed_);
 
   Tensor input = input_r, weight = weight_r;
   // PyTorch does not support ChannelsLast1D case,
@@ -604,10 +601,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
       "so far only support float, bfloat16 and double convolution backward in XPU backend, your data type is ",
       grad_output.scalar_type());
 
-  auto memory_layout_for_conv =
-      get_memory_layout_for_conv(input, weight, transposed);
-  bool is_channels_last_suggested =
-      memory_layout_for_conv == MEMORY_LAYOUT_FOR_CONV::ChannelsLast;
+  bool is_channels_last_suggested = use_channels_last_for_conv(input, weight, transposed);
 
   Tensor grad_output_, input_, weight_;
   IntArrayRef stride_, padding_, dilation_, output_padding_;
