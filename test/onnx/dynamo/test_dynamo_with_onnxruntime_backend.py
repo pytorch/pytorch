@@ -19,6 +19,12 @@ from torch.onnx import (
     _OrtBackendOptions as OrtBackendOptions,
     ExportOptions,
 )
+from torch.onnx._internal.fusion import (
+    apply_all_fusions,
+    FusionPattern,
+    push_pattern,
+)
+
 
 from torch.testing._internal import common_utils
 
@@ -645,6 +651,82 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                 * number_of_captured_graphs,
             )
             self._assert_dynamic_input_and_output_shapes_in_all_onnx_models(local_ort)
+
+    def test_fusion(self):
+        def toy_model(x: torch.Tensor):
+            y = x.relu()
+            z = y.relu()
+            w = z.sigmoid()
+            y1 = w.relu()
+            z1 = y1.relu()
+            w1 = z1.sigmoid()
+            return w1
+
+        def pattern_model(x: torch.Tensor):
+            y = x.relu()
+            z = y.relu()
+            return z
+
+            torch.onnx.dynamo_export(func, x, y, z)
+
+        onnx_model = dynamo_export(
+            toy_model,
+            torch.randn(
+                (
+                    2,
+                    3,
+                ),
+                dtype=torch.float32,
+            ),
+        )
+
+        onnx_model = dynamo_export(
+            toy_model,
+            torch.randn(
+                (
+                    2,
+                    3,
+                ),
+                dtype=torch.float32,
+            ),
+        ).model_proto
+
+        pattern_model = torch.onnx.dynamo_export(
+            pattern_model,
+            torch.randn(
+                (
+                    2,
+                    3,
+                ),
+                dtype=torch.float32,
+            ),
+        ).model_proto
+
+        push_pattern(
+            FusionPattern(
+                pattern=pattern_model.graph,
+                fused_op_type="Relu",
+                fused_op_kwargs={},
+                fused_op_domain="",
+                fused_op_version=18,
+            )
+        )
+
+        # There should be no Relu before fusion.
+        self.assertTrue(
+            all(node.op_type != "Relu" for node in onnx_model.graph.node)
+        )
+
+        # Every aten_relu -> aten_relu should be fused into one Relu.
+        fused = apply_all_fusions(onnx_model)
+
+        expected_relu_count = 2
+        actual_relu_count = sum(
+            1 for node in fused.graph.node if node.op_type == "Relu"
+        )
+        # Two Relu because the every two consecutive Relu are fused into one.
+        self.assertEqual(actual_relu_count, 2)
+
 
     @parameterized.expand(
         [

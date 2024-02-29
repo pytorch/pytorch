@@ -1,7 +1,7 @@
 import copy
 import itertools
 import os
-from typing import Dict, List, Set
+from typing import Any, Dict, List, Set
 
 import onnx
 
@@ -109,7 +109,9 @@ def search_for_pattern(
         }
 
         fail = False
-        pattern_to_main_value_bindings = {}
+        # {"main_graph_X", "pattern_graph_X"} means that "main_graph_X" in `main_graph`
+        # is bound/matched to "pattern_graph_X" in `pattern_graph`.
+        pattern_to_main_value_bindings: Dict[str, str] = {}
 
         def try_bind_values(bindings, node, pattern_node):
             # TODO: examine type and shape bindings for graph inputs and outputs
@@ -239,7 +241,7 @@ def search_for_pattern(
 
 
 def search_for_patterns(main_graph, pattern_graph):
-    skipped_main_node_names = set()
+    skipped_main_node_names: Set[str] = set()
     matches = []
 
     (
@@ -310,9 +312,33 @@ def fuse(
     graph.value_info.extend(value_infos)
 
 
-def apply_fusion(model, pattern_graph, fusion_node_type, fusion_node_attributes):
+def apply_fusion(
+    model: "onnx.ModelProto",
+    pattern_graph: "onnx.GraphProto",
+    fusion_node_type: str,
+    fusion_node_attributes: Dict[str, Any],
+    fusion_node_domain: str,
+    fusion_node_version: int,
+):
     matches = search_for_patterns(model.graph, pattern_graph)
+
+    if len(matches) > 0 and all(
+        opset.domain != fusion_node_domain for opset in model.opset_import
+    ):
+        print_message(
+            f"Add opset with domain={fusion_node_domain} and version={fusion_node_version} to model"
+        )
+        opset = model.opset_import.add()
+        opset.domain = fusion_node_domain
+        opset.version = fusion_node_version
+
     for pattern_to_main_node_bindings, pattern_to_main_value_bindings in matches:
+        nodes_to_fuse = ", ".join(pattern_to_main_node_bindings.values())
+        print_message(
+            "Node matches (pattern node name -> node name in model graph to fuse) to fuse: "
+        )
+        for pattern_node, main_node in pattern_to_main_node_bindings.items():
+            print_message(f"{pattern_node} -> {main_node}")
         if (
             pattern_to_main_node_bindings is None
             or pattern_to_main_value_bindings is None
@@ -335,7 +361,7 @@ def apply_fusion(model, pattern_graph, fusion_node_type, fusion_node_attributes)
                     for value_info in pattern_graph.output
                 ],
                 name=pattern_to_main_node_bindings[pattern_graph.node[-1].name],
-                domain="com.microsoft",
+                domain=fusion_node_domain,
                 **fusion_node_attributes,
             ),
             pattern_to_main_node_bindings,
@@ -343,30 +369,66 @@ def apply_fusion(model, pattern_graph, fusion_node_type, fusion_node_attributes)
         )
 
 
+class FusionPattern:
+    def __init__(
+        self,
+        pattern: "onnx.GraphProto",
+        # Fused operator type. e.g., "SoftmaxGrad" or "Gemm".
+        fused_op_type: str,
+        # Fused operator attributes. e.g., {"transA": 0, "transB": 1}.
+        fused_op_kwargs: Dict[str, Any],
+        # Operator domain. e.g., "com.microsoft" or "ai.onnx".
+        fused_op_domain: str,
+        # Operator version. e.g., 1 or 12.
+        fused_op_version: int,
+    ):
+        self.pattern: "onnx.GraphProto" = pattern
+        self.fused_op_type: str = fused_op_type
+        self.fused_op_kwargs: Dict[str, Any] = fused_op_kwargs
+        self.fused_op_domain: str = fused_op_domain
+        self.fused_op_version: int = fused_op_version
+
+
+_FUSION_PATTERNS: List[FusionPattern] = []
+
+
+def push_pattern(pattern: FusionPattern):
+    _FUSION_PATTERNS.append(pattern)
+
+
+def pop_pattern():
+    _FUSION_PATTERNS.pop()
+
+
 try:
     import onnxscript
     from onnxscript import FLOAT, opset18
 
-    _REGISTER_PREDEFINED_FUSION = True
+    aten_opset = onnxscript.values.Opset(domain="pkg.onnxscript.torch_lib", version=1)
+
+    @onnxscript.script(default_opset=opset18)
+    def softmax_backward(dY: FLOAT, Y: FLOAT) -> FLOAT:
+        dYY = aten_opset.aten_mul(dY, Y)
+        sum = aten_opset._aten_sum_dim_onnx(dYY, -1)
+        scaled = aten_opset.aten_mul(Y, sum)
+        dX = aten_opset.aten_sub(dYY, scaled)
+        return dX
+
+    softmax_backward_model = softmax_backward.to_model_proto(
+        input_types=[FLOAT["S", "H"], FLOAT["S", "H"]], output_types=[FLOAT["S", "H"]]
+    )
+
+    _FUSION_PATTERNS.append(
+        FusionPattern(
+            pattern=softmax_backward_model.graph,
+            fused_op_type="SoftmaxGrad",
+            fused_op_kwargs={"axis": -1},
+            fused_op_domain="com.microsoft",
+            fused_op_version=1,
+        )
+    )
 except ImportError:
-    _REGISTER_PREDEFINED_FUSION = False
-
-
-aten_opset = onnxscript.values.Opset(domain="pkg.onnxscript.torch_lib", version=1)
-
-
-@onnxscript.script(default_opset=opset18)
-def softmax_backward(dY: FLOAT, Y: FLOAT):
-    dYY = aten_opset.aten_mul(dY, Y)
-    sum = aten_opset._aten_sum_dim_onnx(dYY, -1)
-    scaled = aten_opset.aten_mul(Y, sum)
-    dX = aten_opset.aten_sub(dYY, scaled)
-    return dX
-
-
-softmax_backward_model = softmax_backward.to_model_proto(
-    input_types=[FLOAT["S", "H"], FLOAT["S", "H"]], output_types=[FLOAT["S", "H"]]
-)
+    pass
 
 
 def apply_all_fusions(onnx_model):
@@ -374,12 +436,14 @@ def apply_all_fusions(onnx_model):
 
     fused_onnx_model = copy.deepcopy(onnx_model)
     # Apply fusion for SoftmaxBackward in-place (i.e., the input graph is changed)
-    apply_fusion(
-        fused_onnx_model, softmax_backward_model.graph, "SoftmaxGrad", {"axis": -1}
-    )
-
-    opset = fused_onnx_model.opset_import.add()
-    opset.domain = "com.microsoft"
-    opset.version = 1
+    for pattern in _FUSION_PATTERNS:
+        apply_fusion(
+            fused_onnx_model,
+            pattern.pattern,
+            pattern.fused_op_type,
+            pattern.fused_op_kwargs,
+            pattern.fused_op_domain,
+            pattern.fused_op_version,
+        )
 
     return fused_onnx_model
