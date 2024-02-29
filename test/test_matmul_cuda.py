@@ -247,15 +247,19 @@ class TestFP8MatmulCuda(TestCase):
     @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
     def test_float8_basics(self, device) -> None:
         self._test_tautological_mm(device, e4m3_type, e4m3_type, size=16)
-        self._test_tautological_mm(device, e4m3_type, e5m2_type, size=32)
-        self._test_tautological_mm(device, e5m2_type, e4m3_type, size=48)
+        # hipblaslt does not yet support mixed e4m3_type input
+        if torch.version.hip is None:
+            self._test_tautological_mm(device, e4m3_type, e5m2_type, size=32)
+            self._test_tautological_mm(device, e5m2_type, e4m3_type, size=48)
         # According to https://docs.nvidia.com/cuda/cublas/#id99 8F_E5M2 MM is unsupported
         with self.assertRaises(RuntimeError):
             self._test_tautological_mm(device, e5m2_type, e5m2_type)
 
         self._test_tautological_mm(device, size=64, out_dtype=torch.float16)
         self._test_tautological_mm(device, size=96, out_dtype=torch.float32)
-        self._test_tautological_mm(device, size=80, out_dtype=torch.bfloat16)
+        # hipblaslt does not yet support bfloat16 output
+        if torch.version.hip is None:
+            self._test_tautological_mm(device, size=80, out_dtype=torch.bfloat16)
         with self.assertRaises(RuntimeError):
             self._test_tautological_mm(device, out_dtype=e5m2_type)
 
@@ -263,7 +267,9 @@ class TestFP8MatmulCuda(TestCase):
     def test_float8_scale(self, device) -> None:
         size = (16, 16)
         x = torch.full(size, .5, device=device, dtype=e4m3_type)
-        y = torch.full(size, .5, device=device, dtype=e5m2_type).t()
+        # hipblaslt does not yet support mixed e4m3_type input
+        y_type = e4m3_type if torch.version.hip else e5m2_type
+        y = torch.full(size, .5, device=device, dtype=y_type).t()
         scale_a = torch.tensor(1.5, device=device)
         scale_b = torch.tensor(0.66, device=device)
         out_fp8, amax_fp8 = torch._scaled_mm(x, y)
@@ -279,7 +285,9 @@ class TestFP8MatmulCuda(TestCase):
         bias = torch.full((m,), 4.0, device=device, dtype=torch.half)
         out_fp8, amax_fp8 = torch._scaled_mm(x, y)
         outb_fp8, amaxb_fp8 = torch._scaled_mm(x, y, bias=bias)
-        self.assertEqual((amaxb_fp8 - amax_fp8).item(), 4.0)
+        # this fails on ROCm currently because hipblaslt doesn't have amax op
+        if torch.version.hip is None:
+            self.assertEqual((amaxb_fp8 - amax_fp8).item(), 4.0)
 
     @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
     @parametrize("bias", [True, False])
@@ -328,7 +336,9 @@ class TestFP8MatmulCuda(TestCase):
     def test_float8_scale_fast_accum(self, device) -> None:
         size = (16, 16)
         x = torch.full(size, .5, device=device, dtype=e4m3_type)
-        y = torch.full(size, .5, device=device, dtype=e5m2_type).t()
+        # hipblaslt does not yet support mixed e4m3_type input
+        y_type = e4m3_type if torch.version.hip else e5m2_type
+        y = torch.full(size, .5, device=device, dtype=y_type).t()
         scale_a = torch.tensor(1.5, device=device)
         scale_b = torch.tensor(0.66, device=device)
         out_fp8, amax_fp8 = torch._scaled_mm(x, y, use_fast_accum=True)
