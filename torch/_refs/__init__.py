@@ -299,6 +299,7 @@ __all__ = [
     "tril_indices",
     #
     # Tensor Creation
+    #
     "arange",
     "cauchy",
     "empty",
@@ -6332,19 +6333,15 @@ def _infer_scalar_type(obj):
 # Analogous to recursive_store
 # xref: recursive_store in torch/csrc/utils/tensor_new.cpp
 def _recursive_build(scalarType, obj):
-    base_case = (
-        isinstance(obj, Number)
-        or isinstance(obj, Tensor) and obj.ndim <= 1
-    )
+    # can obj be None?
+    base_case = isinstance(obj, Number) or isinstance(obj, Tensor) and obj.ndim <= 1
     if base_case:
         if isinstance(obj, Tensor):
             obj = obj.item()
         return torch.scalar_tensor(obj, dtype=scalarType)
 
     seq = obj
-    return torch.stack(
-        [_recursive_build(scalarType, item) for item in seq]
-    )
+    return torch.stack([_recursive_build(scalarType, item) for item in seq])
 
 
 # xref: internal_new_from_data in torch/csrc/utils/tensor_new.cpp
