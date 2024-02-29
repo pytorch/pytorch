@@ -123,7 +123,6 @@ class FSDPParamGroup:
         # accumulation); all-reducing without reduce-scatter is disallowed
         self.reduce_scatter_grads: bool = True
         self.all_reduce_grads: bool = True
-        self._init_grad_divide_factors()
 
         # - CUDA events for stream synchronization
         # Holds the all-gather output buffer, sync objects, and metadata
@@ -165,18 +164,24 @@ class FSDPParamGroup:
         data_parallel_world_size *= self.mesh_info.shard_mesh_size
         if isinstance(self.mesh_info, HSDPMeshInfo):
             data_parallel_world_size *= self.mesh_info.replicate_mesh_size
+        if self._reduce_dtype == torch.float32:
+            # Only divide after reduction since fp32 has sufficient precision
+            self._grad_predivide_factor: float = 1.0
+            self._grad_postdivide_factor: float = data_parallel_world_size
+            return
         factor: int = 1
         while (
             data_parallel_world_size % factor == 0
             and data_parallel_world_size / factor > factor
         ):
             factor *= 2
-        self._grad_predivide_factor: float = float(factor)
-        self._grad_postdivide_factor: float = (
+        self._grad_predivide_factor = float(factor)
+        self._grad_postdivide_factor = (
             data_parallel_world_size / self._grad_predivide_factor
         )
 
     def lazy_init(self):
+        self._init_grad_divide_factors()
         self._register_state_dict_hooks()
 
     # Runtime #
