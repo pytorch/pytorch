@@ -331,7 +331,7 @@ def vector_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     keepdim = args_schema[3] if len(args_schema) > 3 else False
     dims = _infer_reduction_dims(dim, input_strategy.output_ndim)
     reduce_dims = list(range(input_strategy.output_ndim)) if dims is None else dims
-    out = common_reduction_strategy(
+    return common_reduction_strategy(
         mesh,
         input_strategy,
         reduce_dims,
@@ -339,7 +339,6 @@ def vector_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
         reduction_linear=True,
         reduction_op=NormReduction(norm_type),
     )
-    return out
 
 
 @register_op_strategy(
