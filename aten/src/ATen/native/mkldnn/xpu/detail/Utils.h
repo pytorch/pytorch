@@ -9,14 +9,10 @@
 #include <oneapi/dnnl/dnnl.hpp>
 #include <oneapi/dnnl/dnnl_sycl.hpp>
 
-#define XPU_ONEDNN_EXEC(prim, stream, ...)                             \
-  {                                                                    \
-    auto q = dnnl::sycl_interop::get_queue((stream));                  \
-    XPU_EXT_SUBMIT(                                                    \
-        (q),                                                           \
-        "onednn_kernel",                                               \
-        dnnl::sycl_interop::execute((prim), (stream), ##__VA_ARGS__)); \
-  }
+#define XPU_ONEDNN_EXEC(prim, stream, ...)                               \
+{                                                                        \
+  auto e = dnnl::sycl_interop::execute((prim), (stream), ##__VA_ARGS__); \
+}
 
 namespace at {
 namespace native::xpu {
