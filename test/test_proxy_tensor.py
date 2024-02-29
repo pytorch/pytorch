@@ -1731,7 +1731,8 @@ def forward(self, x_1):
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn((15, 20)))
         self.assertExpectedInline(show_guards(tensor), """\
 L['a'].size()[1] > L['a'].size()[0]
-13 <= L['a'].size()[0]""")
+13 <= L['a'].size()[0]
+14 <= L['a'].size()[1]""")
 
     def test_guard_lowerbound_range_refinement_multivariate(self):
         def f(a):
