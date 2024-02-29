@@ -3628,8 +3628,11 @@ class ShapeEnv:
             if a not in replacements or tgt != replacements[a]:
                 self.log.warning("Specializing %s to %s", self.var_to_sources[a][0].name(), tgt)
                 self.log.debug("SPECIALIZATION", stack_info=True)
-        log.info("set_replacement %s = %s (%s) %s", a, tgt, msg, tgt_bound)
-        replacements[a] = tgt
+
+        if a not in replacements or tgt != replacements[a]:
+            log.info("set_replacement %s = %s (%s) %s", a, tgt, msg, tgt_bound)
+            replacements[a] = tgt
+
         self._update_version_counter()
 
         # When specializing 'a == tgt', the equality should be also conveyed to
