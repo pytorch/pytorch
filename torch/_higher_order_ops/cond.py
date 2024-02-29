@@ -103,7 +103,7 @@ def cond(pred, true_fn, false_fn, operands):
 
     """
 
-    if torch._dynamo.is_compiling():
+    if torch.compiler.is_dynamo_compiling():
         return cond_op(pred, true_fn, false_fn, operands)
 
     def _validate_input(pred, true_fn, false_fn, operands):
