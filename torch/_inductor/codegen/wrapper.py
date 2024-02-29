@@ -631,8 +631,9 @@ class WrapperCodeGen(CodeGen):
             kernel_name, configs, grid, wrapper=self
         )
         # Must happen after free symbols are already codegened
-        with self.prefix.indent():
-            self.prefix.splice(code)
+        # Emit the grid wrapper function right before the call
+        for line in code.split("\n"):
+            self.writeline(line)
 
         stream_name = self.write_get_raw_stream(
             V.graph.scheduler.current_device.index, V.graph
