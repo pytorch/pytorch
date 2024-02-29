@@ -114,6 +114,7 @@ class TritonTemplateKernel(TritonKernel):
         self.suffix_args = suffix_args
         self.epilogue_fn = epilogue_fn
         self.render_hooks = dict()
+        self.triton_meta: Optional[Dict[str, object]] = None
 
     def need_numel_args(self):
         return False
@@ -145,6 +146,9 @@ class TritonTemplateKernel(TritonKernel):
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
+        for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
+            triton_meta["constants"][arg_num] = 1  # type: ignore[index]
+        self.triton_meta = triton_meta
 
         inductor_meta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
@@ -405,6 +409,7 @@ class TritonTemplateKernel(TritonKernel):
                 call_args,
                 device_index=V.graph.scheduler.current_device.index,
                 grid=grid,
+                triton_meta=self.triton_meta,
             )
         else:
             stream_name = wrapper.write_get_raw_stream(
@@ -562,6 +567,7 @@ class TritonTemplate(KernelTemplate):
             extra_args=extra_args,
             num_stages=num_stages,
             num_warps=num_warps,
+            matrix_instr_nonkdim=kwargs.get("matrix_instr_nonkdim", 0),
             input_tensor_meta=TensorMeta.from_irnodes(input_nodes),
             output_tensor_meta=TensorMeta.from_irnodes(layout),
         )
