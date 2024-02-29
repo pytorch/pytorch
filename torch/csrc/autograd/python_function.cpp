@@ -911,7 +911,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
       PyObject* needs_grad = tensor.requires_grad() ? Py_True : Py_False;
       Py_INCREF(needs_grad);
       PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, needs_grad);
-      unpacked.record_function_inputs.push_back(tensor);
+      unpacked.record_function_inputs.emplace_back(tensor);
     }
     Py_INCREF(arg);
     PyTuple_SET_ITEM(unpacked.input_tuple.get(), i, arg);
