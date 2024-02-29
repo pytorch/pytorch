@@ -4100,7 +4100,7 @@ class UserDefinedTritonKernel(ExternKernel):
         kernel, configs = self.get_kernel_and_configs()
 
         # Definition of kernel
-        new_name = wrapper.define_user_defined_triton_kernel(
+        new_name, triton_meta = wrapper.define_user_defined_triton_kernel(
             kernel, configs, self.kwargs
         )
 
@@ -4118,6 +4118,7 @@ class UserDefinedTritonKernel(ExternKernel):
             self.grid,
             configs,
             args,
+            triton_meta,
         )
 
     def should_allocate(self):
@@ -4318,21 +4319,6 @@ class MutatingFirstArgExternKernel(ExternKernel):
 
     def has_side_effects(self):
         return True
-
-
-class AccumulateGrad(MutatingFirstArgExternKernel):
-    def __init__(self, variable, new_grad):
-        super().__init__(
-            None,
-            NoneLayout(variable.get_device()),  # type: ignore[arg-type]
-            self.unwrap_storage([variable, new_grad]),
-        )
-        self.name = V.graph.register_buffer(self)
-        self.python_kernel_name = "inductor_ops.accumulate_grad_"
-        self.cpp_kernel_name = "torch::inductor::accumulate_grad_"
-        mark_node_as_mutating(self, variable)
-        # never reuse gradient buffers since they might be stolen
-        V.graph.never_reuse_buffers.add(new_grad.data.get_name())
 
 
 class ResizeStorageBytes(MutatingFirstArgExternKernel):
