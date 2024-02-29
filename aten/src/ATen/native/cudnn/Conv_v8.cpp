@@ -950,9 +950,12 @@ bool try_configs_fused(
       benchmark_cache_fused.update(key, plan);
       return true;
     } catch (cudnn_frontend::cudnnException& e) {
+      TORCH_WARN("Plan failed with a cudnnException: ", e.what());
     } catch (CuDNNError& e) {
+      TORCH_WARN("Plan failed with a CuDNNError: ", e.what());
     } catch (c10::OutOfMemoryError& e) {
       (void)cudaGetLastError(); // clear CUDA error
+      TORCH_WARN("Plan failed with an OutOfMemoryError: ", e.what());
     }
   }
   return false;
