@@ -405,12 +405,19 @@ extern "C" {{
 
 """
     else:
+        device = dispatch_key.lower()
         return f"""
 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
-#include <torch/csrc/inductor/aoti_torch/generated/c_shim_{dispatch_key.lower()}.h>
+#include <torch/csrc/inductor/aoti_torch/generated/c_shim_{device}.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/{str(dispatch_key)}Functions.h>
+#include <ATen/CompositeExplicitAutogradFunctions.h>
+#include <ATen/CompositeExplicitAutogradNonFunctionalFunctions.h>
+#else
 {includes}
+#endif
 
 using namespace torch::aot_inductor;
 

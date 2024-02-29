@@ -32,6 +32,7 @@ def libtorch_generated_sources(gencode_pattern):
         "torch/csrc/autograd/generated/TraceType_4.cpp",
         "torch/csrc/autograd/generated/ADInplaceOrViewType_0.cpp",
         "torch/csrc/autograd/generated/ADInplaceOrViewType_1.cpp",
+        "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
     ]]
 
 # copied from https://github.com/pytorch/pytorch/blob/f99a693cd9ff7a9b5fdc71357dac66b8192786d3/aten/src/ATen/core/CMakeLists.txt
@@ -467,7 +468,6 @@ lazy_tensor_core_python_sources = [
 inductor_core_resources = [
     "torch/csrc/inductor/aoti_runner/model_container_runner.cpp",
     "torch/csrc/inductor/aoti_runner/model_container_runner_cpu.cpp",
-    "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
     "torch/csrc/inductor/aoti_torch/shim_common.cpp",
     "torch/csrc/inductor/aoti_torch/tensor_converter.cpp",
     "torch/csrc/inductor/inductor_ops.cpp",
@@ -656,7 +656,6 @@ libtorch_cuda_core_sources = [
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/memory_snapshot.cpp",
     "torch/csrc/inductor/aoti_runner/model_container_runner_cuda.cpp",
-    "torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.cpp",
     "torch/csrc/inductor/aoti_torch/shim_cuda.cpp",
     "torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp",
     "torch/csrc/profiler/stubs/cuda.cpp",
@@ -686,9 +685,15 @@ libtorch_cuda_distributed_extra_sources = [
 
 libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + libtorch_cuda_distributed_extra_sources
 
-libtorch_cuda_sources = libtorch_cuda_core_sources + libtorch_cuda_distributed_sources + [
-    "torch/csrc/cuda/nccl.cpp",
-]
+def libtorch_cuda_generated_sources(gencode_pattern):
+    return [gencode_pattern.format(name) for name in [
+        "torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.cpp",
+    ]]
+
+def libtorch_cuda_sources(gencode_pattern = ":generate-code[{}]"):
+    return (libtorch_cuda_generated_sources(gencode_pattern) + libtorch_cuda_core_sources + libtorch_cuda_distributed_sources + [
+        "torch/csrc/cuda/nccl.cpp",
+    ])
 
 torch_cpp_srcs = [
     "torch/csrc/api/src/cuda.cpp",  # this just forwards stuff, no real CUDA

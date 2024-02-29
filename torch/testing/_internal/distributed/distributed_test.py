@@ -40,6 +40,7 @@ from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.distributed.distributed_c10d import (
     get_world_size,
     _get_default_group,
+    _get_pg_config,
 )
 from torch.distributed.utils import (
     _verify_param_shape_across_processes,
@@ -1203,11 +1204,13 @@ class DistributedTest:
             averager = hierarchicalSGD.HierarchicalModelAverager(
                 period_group_size_dict=period_group_size_dict, warmup_steps=warmup_steps
             )
+            self.assertEqual(dist.get_pg_count(), len(period_group_size_dict))
+
             subgroup1 = averager.period_process_group_dict[subgroup_avg_period1]
             subgroup2 = averager.period_process_group_dict[subgroup_avg_period2]
+            real_group_ranks_res1 = _get_pg_config(subgroup1)['ranks']
+            real_group_ranks_res2 = _get_pg_config(subgroup2)['ranks']
 
-            real_group_ranks_res1 = dist.get_process_group_ranks(subgroup1)
-            real_group_ranks_res2 = dist.get_process_group_ranks(subgroup2)
             expect_group_ranks_res1 = (
                 rank // subgroup_size1 * subgroup_size1
                 + np.array(list(range(subgroup_size1)))
