@@ -5,6 +5,7 @@
 
 // TODO: delete this
 #if AT_ROCM_ENABLED()
+class Tensor;
 size_t _get_cudnn_batch_norm_reserve_space_size(
     const Tensor& input_t,
     bool training) {
