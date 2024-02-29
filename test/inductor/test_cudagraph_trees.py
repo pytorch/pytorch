@@ -1426,7 +1426,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
         @torch._dynamo.config.patch("capture_scalar_outputs", True)
-        @unittest.expectedFailure
         def test_incompatible_cudagraph_ops_item(self):
             @torch.compile(mode="reduce-overhead")
             def foo(x):
