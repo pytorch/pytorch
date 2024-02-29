@@ -347,6 +347,7 @@ static __global__ void hybridCubeMeshAllReduceKernel(
     P2pState** p2pStates,
     at::BFloat16** buffers,
     int hcmInfo[4],
+    size_t bufferSize,
     size_t rank) {
   const size_t numelPerThread = kBytesPerThread / sizeof(at::BFloat16);
   const size_t offset =
@@ -368,8 +369,8 @@ static __global__ void hybridCubeMeshAllReduceKernel(
       buffers[hcmInfo[1]],
       buffers[hcmInfo[2]],
   };
-  at::BFloat16* localRelay = buffers[rank] + kMaxIntraNodeSize / 2;
-  at::BFloat16* remoteRelay = buffers[relayRank] + kMaxIntraNodeSize / 2;
+  at::BFloat16* localRelay = buffers[rank] + bufferSize / 2;
+  at::BFloat16* remoteRelay = buffers[relayRank] + bufferSize / 2;
 
   for (size_t i = offset; i < N_aligned; i += stride) {
     bf16x8 vals[4];
@@ -493,7 +494,7 @@ at::Tensor IntraNodeComm::oneShotAllReduce(
 
   size_t numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
   size_t N_aligned = alignUp(input.numel(), numelPerWarp);
-  TORCH_CHECK(N_aligned <= kMaxIntraNodeSize / input.element_size());
+  TORCH_CHECK(N_aligned <= bufferSize_ / input.element_size());
 
   dim3 blocks, threads;
   getLaunchConfig(N_aligned, input.element_size(), blocks, threads);
@@ -547,7 +548,7 @@ at::Tensor IntraNodeComm::twoShotAllReduce(
   size_t numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
   size_t N_aligned = alignUp(input.numel(), worldSize_ * numelPerWarp);
   size_t N_per_rank = N_aligned / worldSize_;
-  TORCH_CHECK(N_aligned <= kMaxIntraNodeSize / input.element_size());
+  TORCH_CHECK(N_aligned <= bufferSize_ / input.element_size());
 
   dim3 blocks, threads;
   getLaunchConfig(N_per_rank, input.element_size(), blocks, threads);
@@ -601,7 +602,7 @@ at::Tensor IntraNodeComm::hybridCubeMeshAllReduce(
 
   size_t numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
   size_t N_aligned = alignUp(input.numel(), numelPerWarp);
-  TORCH_CHECK(N_aligned <= kMaxIntraNodeSize / input.element_size());
+  TORCH_CHECK(N_aligned * 2 <= bufferSize_ / input.element_size());
 
   dim3 blocks, threads;
   getLaunchConfig(N_aligned, input.element_size(), blocks, threads);
@@ -622,6 +623,7 @@ at::Tensor IntraNodeComm::hybridCubeMeshAllReduce(
       reinterpret_cast<P2pState**>(p2pStatesDev_),                         \
       reinterpret_cast<at::BFloat16**>(buffersDev_),                       \
       static_cast<int*>(topoInfo_),                                        \
+      bufferSize_,                                                         \
       rank_);                                                              \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -636,25 +638,33 @@ at::Tensor IntraNodeComm::hybridCubeMeshAllReduce(
 
 AllReduceAlgo IntraNodeComm::selectAllReduceAlgo(const at::Tensor& input) {
   // Only support bf16 for now
-  if (input.dtype() != at::kBFloat16 ||
-      static_cast<size_t>(input.numel() * input.element_size()) >
-          kMaxIntraNodeSize) {
+  if (input.dtype() != at::kBFloat16) {
     return AllReduceAlgo::NONE;
   }
-  const auto numel = input.numel();
-  const auto numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
+  const auto inputSize = input.numel() * input.element_size();
+  const auto bytesPerWarp = kBytesPerThread * kWarpSize;
+
   if (topology_ == Topology::HYBRID_CUBE_MESH) {
     TORCH_CHECK(
         worldSize_ == 8, "hyperCubeAllReduce only supports exactly 8 GPUs");
-    if (alignUp(numel, numelPerWarp) <= kHcmThreshBytes) {
+    const auto hcmInputSize = alignUp(inputSize, bytesPerWarp);
+    const auto hcmBufferSizeReq = hcmInputSize * 2;
+    if (hcmInputSize <= kHcmThreshBytes && hcmBufferSizeReq <= bufferSize_) {
       return AllReduceAlgo::HCM;
     }
   }
   if (topology_ == Topology::FULLY_CONNECTED) {
-    if (alignUp(numel, numelPerWarp) <= kOneShotThreshBytes) {
+    const auto oneShotInputSize = alignUp(inputSize, bytesPerWarp);
+    const auto oneShotBufferSizeReq = oneShotInputSize;
+    if (oneShotInputSize <= kOneShotThreshBytes &&
+        oneShotBufferSizeReq <= bufferSize_) {
       return AllReduceAlgo::ONE_SHOT;
     }
-    if (alignUp(numel, numelPerWarp * worldSize_) <= kTwoShotThreshBytes) {
+
+    const auto twoShotInputSize = alignUp(inputSize, bytesPerWarp * worldSize_);
+    const auto twoShotBufferSizeReq = twoShotInputSize;
+    if (twoShotInputSize <= kTwoShotThreshBytes &&
+        twoShotBufferSizeReq <= bufferSize_) {
       return AllReduceAlgo::TWO_SHOT;
     }
   }

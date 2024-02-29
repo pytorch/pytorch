@@ -212,7 +212,8 @@ IntraNodeComm::IntraNodeComm(
     void* buffersDev,
     void* topoInfo,
     size_t rank,
-    size_t worldSize)
+    size_t worldSize,
+    size_t bufferSize)
     : topology_(topology),
       p2pStates_(p2pStates),
       buffers_(buffers),
@@ -220,7 +221,8 @@ IntraNodeComm::IntraNodeComm(
       buffersDev_(buffersDev),
       topoInfo_(topoInfo),
       rank_(rank),
-      worldSize_(worldSize) {}
+      worldSize_(worldSize),
+      bufferSize_(bufferSize) {}
 
 IntraNodeComm::~IntraNodeComm() {
   // Intentionally releasing resources without synchronizing devices. The
@@ -288,7 +290,8 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
     c10::intrusive_ptr<c10d::Store> store,
     const std::string& prefix,
     size_t rank,
-    size_t worldSize) {
+    size_t worldSize,
+    size_t bufferSize) {
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   if (!isIntraNodeCommSupported() ||
       !getCvarBool(ENABLE_INTRA_NODE_COMM, false) || worldSize < 2 ||
@@ -352,7 +355,7 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
 
   // Allocate buffer
   void* buffer = nullptr;
-  AT_CUDA_CHECK(cudaMalloc(&buffer, kMaxIntraNodeSize * 2));
+  AT_CUDA_CHECK(cudaMalloc(&buffer, bufferSize));
 
   // Second handshake: exchange topology and CUDA IPC handles
   struct IpcInfo {
@@ -425,7 +428,8 @@ c10::intrusive_ptr<IntraNodeComm> IntraNodeComm::rendezvous(
       buffersDev,
       topoInfo,
       rank,
-      worldSize);
+      worldSize,
+      bufferSize);
 #else
   return nullptr;
 #endif
