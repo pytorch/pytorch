@@ -79,7 +79,6 @@ Tensor linear_pointwise_binary(
 
   Tensor _input =
       input_t.dim() <= 2 ? input_t : input_t.contiguous();
-  bool is_fused = false;
   auto linear_wrapper = LinearConverter();
   Tensor result;
   return linear_wrapper.call(result, input_t, weight_t, bias_opt, attr);
