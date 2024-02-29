@@ -1,6 +1,7 @@
 import torch
 from . import convert_frame, eval_frame, resume_execution
 from .backends.registry import list_backends, lookup_backend, register_backend
+from .callback import callback_handler, on_compile_end, on_compile_start
 from .code_context import code_context
 from .convert_frame import replay
 from .decorators import (
@@ -80,6 +81,7 @@ def reset() -> None:
         torch._C._dynamo.compiled_autograd.clear_cache()
         convert_frame.FRAME_COUNTER = 0
         convert_frame.FRAME_COMPILE_COUNTER.clear()
+        callback_handler.clear()
 
 
 def reset_code_caches() -> None:
