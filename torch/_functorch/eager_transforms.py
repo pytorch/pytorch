@@ -830,11 +830,6 @@ def _slice_argnums(args, argnums, as_tuple=True):
     return tuple(args[i] for i in argnums)
 
 
-@contextlib.contextmanager
-def noop():
-    yield
-
-
 def assert_flat_tuple_of_tensors(elts: Any, api: str, argname: str) -> None:
     if not isinstance(elts, tuple):
         raise RuntimeError(
@@ -1000,7 +995,7 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
     with jvp_increment_nesting() as level:
         with fwAD._set_fwd_grad_enabled(True):
             JVP_NESTING = torch._C._functorch.count_jvp_interpreters()
-            ctx = fwAD.dual_level if JVP_NESTING == 1 else noop
+            ctx = fwAD.dual_level if JVP_NESTING == 1 else contextlib.nullcontext
             with ctx():
                 flat_duals = tuple(fwAD.make_dual(p, t)
                                    for p, t in zip(flat_primals, flat_tangents))

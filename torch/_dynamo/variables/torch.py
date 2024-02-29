@@ -56,7 +56,6 @@ supported_ctx_manager_classes = {
     torch._functorch.vmap.vmap_increment_nesting,
     torch._functorch.eager_transforms.grad_increment_nesting,
     torch._functorch.eager_transforms.jvp_increment_nesting,
-    torch._functorch.eager_transforms.noop,
     torch.autograd.forward_ad._set_fwd_grad_enabled,
     torch.autograd.forward_ad.dual_level,
     torch._functorch.eager_transforms.enable_inplace_requires_grad,
@@ -187,7 +186,6 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             GradModeVariable,
             InferenceModeVariable,
             JvpIncrementNestingCtxManagerVariable,
-            NoOpContextManager,
             SetFwdGradEnabledContextManager,
             StreamVariable,
             VmapIncrementNestingCtxManagerVariable,
@@ -264,9 +262,6 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         elif self.value is torch.autograd.forward_ad.dual_level:
             assert len(args) == 0
             return DualLevelContextManager.create(tx)
-        elif self.value is torch._functorch.eager_transforms.noop:
-            assert len(args) == 0
-            return NoOpContextManager.create(tx)
         elif self.value is torch._functorch.eager_transforms.grad_increment_nesting:
             assert len(args) == 0
             return GradIncrementNestingCtxManagerVariable.create(tx)

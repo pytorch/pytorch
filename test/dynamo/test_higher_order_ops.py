@@ -2429,6 +2429,38 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
             munge_exc(record.getMessage()),
         )
 
+    @make_logging_test(recompiles=True)
+    def test_dual_level_guard(self, records):
+        fwAD = torch.autograd.forward_ad
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(foo, tangent):
+            with fwAD.dual_level():
+                dual = fwAD.make_dual(foo, tangent[1:])
+                return dual
+
+        foo = torch.rand(2)
+        tangent = torch.rand(3)
+        fn(foo, tangent)
+        self.assertEqual(len(records), 0)
+
+        # calling again should not invalidate the graph
+        fn(foo, tangent)
+        self.assertEqual(len(records), 0)
+
+        # assertRaises is only here because Nested forward mode AD is not supported
+        with self.assertRaises(torch._dynamo.exc.InternalTorchDynamoError):
+            with fwAD.dual_level():
+                fn(foo, tangent)
+        self.assertGreater(len(records), 0)
+        record = self.getRecord(records, "forward_ad")
+        self.assertIn(
+            """\
+    triggered by the following guard failure(s):
+    - torch.autograd.forward_ad._current_level == -1""",
+            munge_exc(record.getMessage()),
+        )
+
     @xfailIfTorchDynamo
     @config.patch(capture_func_transforms=True)
     @make_logging_test(recompiles=True)
@@ -2453,13 +2485,22 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         jvp(vmap(fn), (x,), (x,))
 
         self.assertGreater(len(records), 0)
-        record = self.getRecord(records, "pyfunctorch")
-        self.assertIn(
-            """\
+        if self.hasRecord(records, "pyfunctorch"):
+            record = self.getRecord(records, "pyfunctorch")
+            self.assertIn(
+                """\
     triggered by the following guard failure(s):
     - torch._functorch.pyfunctorch.compare_functorch_state([])""",
-            munge_exc(record.getMessage()),
-        )
+                munge_exc(record.getMessage()),
+            )
+        elif self.hasRecord(records, "forward_ad"):
+            record = self.getRecord(records, "forward_ad")
+            self.assertIn(
+                """\
+    triggered by the following guard failure(s):
+    - torch.autograd.forward_ad._current_level == -1""",
+                munge_exc(record.getMessage()),
+            )
 
     @config.patch(capture_func_transforms=True)
     @make_logging_test(recompiles=True)
@@ -3583,8 +3624,6 @@ class GraphModule(torch.nn.Module):
         sin = _make_dual.sin();  _make_dual = None
         dual = sin.sum();  sin = None
 
-        eq = dual == None
-
         _unpack_dual = torch._unpack_dual(dual, level = 0);  dual = None
         child_2 = _unpack_dual[0]
         child_3 = _unpack_dual[1];  _unpack_dual = None
@@ -3647,8 +3686,6 @@ class GraphModule(torch.nn.Module):
         dual = sin.sum();  sin = None
 
         aux_1 = torch._C._functorch._unwrap_for_grad(aux, 1);  aux = None
-
-        eq = dual == None
 
         _unpack_dual = torch._unpack_dual(dual, level = 0);  dual = None
         child_2 = _unpack_dual[0]
@@ -3721,8 +3758,6 @@ class GraphModule(torch.nn.Module):
 
         aux_1 = torch._C._functorch._unwrap_for_grad(aux, 1);  aux = None
 
-        eq = dual == None
-
         _unpack_dual = torch._unpack_dual(dual, level = 0);  dual = None
         child_4 = _unpack_dual[0]
         child_5 = _unpack_dual[1];  _unpack_dual = None
@@ -3785,8 +3820,6 @@ class GraphModule(torch.nn.Module):
 
         sin = _make_dual.sin();  _make_dual = None
         dual = sin.sum();  sin = None
-
-        eq = dual == None
 
         _unpack_dual = torch._unpack_dual(dual, level = 0);  dual = None
         child_2 = _unpack_dual[0]
@@ -3864,8 +3897,6 @@ class GraphModule(torch.nn.Module):
 
         sin = _make_dual.sin();  _make_dual = None
         dual = sin.sum();  sin = None
-
-        eq = dual == None
 
         _unpack_dual = torch._unpack_dual(dual, level = 0);  dual = None
         child_2 = _unpack_dual[0]
