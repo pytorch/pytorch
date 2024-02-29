@@ -50,7 +50,6 @@
 #include <ATen/ops/scalar_tensor.h>
 #include <ATen/ops/scaled_dot_product_attention.h>
 #include <ATen/ops/split_native.h>
-#include <ATen/ops/narrow_native.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -65,7 +64,6 @@
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
-#include <ATen/native/nested/NestedTensorUtils.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 
@@ -560,7 +558,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
     // strides from packed projection for nested tensors when seq_len is 1 will be
     // and will trigger a contiguous call in the kernel, so we prevent this
     bool no_seq_len_1_nested = query.is_nested() ? check_for_seq_len_1_nested_tensor(kernel_params, false) : true;
-    // The API for transfomer_encoder is a mask of shape (Batch_Size, Seq_len_q)
+    // The API for transformer_encoder is a mask of shape (Batch_Size, Seq_len_q)
     // For mem-eff attention this will cause the expand call to error
     // For now I am going to turn of that path not have to deal with all the annoying
     // Mask type shape grossness
@@ -852,6 +850,7 @@ _flash_attention_forward(
   // of the tensor. This is useful for kv cache scenarios but for now
   // we will not support in this PR.
   c10::optional<Tensor> seqused_k = c10::nullopt;
+  c10::optional<Tensor> alibi_slopes = c10::nullopt;
 
   // We are going to have two paths:
   // 1. The standard MHA path for dense tensors
@@ -880,6 +879,7 @@ _flash_attention_forward(
             cumulative_sequence_length_q.value(),
             cumulative_sequence_length_k.value(),
             seqused_k, /*seqused_k*/
+            alibi_slopes, /*alibi_slopes*/
             max_seqlen_batch_q,
             max_seqlen_batch_k,
             dropout_p,
@@ -905,6 +905,7 @@ _flash_attention_forward(
             key,
             value,
             out,
+            alibi_slopes,
             dropout_p,
             softmax_scale,
             is_causal,

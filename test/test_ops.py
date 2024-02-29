@@ -1790,7 +1790,7 @@ def check_inplace_view(func, input, rs, input_size, input_strides):
 
 # A mode that when enabled runs correctness checks to ensure
 # that operators have expected tags based on their input and
-# ouput tensor properties
+# output tensor properties
 class TestTagsMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if isinstance(args[0], torch.Tensor):
@@ -1978,7 +1978,12 @@ class TestRefsOpsInfo(TestCase):
         '_refs.imag',
         '_refs.reshape_as',
         '_refs.view_as',
-        '_refs.view_as_complex'  # TorchInductor does not support complex at the moment.
+        '_refs.view_as_complex',  # TorchInductor does not support complex at the moment.
+        # the decompositions for these ops are slightly different
+        # because of out handling
+        '_refs.var_mean',
+        '_refs.std_mean',
+        '_refs.native_layer_norm',
     }
 
     @parametrize("op", ref_ops_names)
@@ -2157,6 +2162,7 @@ class TestFakeTensor(TestCase):
                 ):
                     if not isinstance(fake_out, torch.Tensor):
                         self.assertTrue(not isinstance(real_out, torch.Tensor))
+                        self.assertEqual(fake_out, real_out)
                         continue
 
                     self.assertTrue(isinstance(fake_out, FakeTensor))

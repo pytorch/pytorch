@@ -4,6 +4,21 @@ import torch
 import torch.nn.functional as F
 
 
+__all__ = [
+    "model_is_exported",
+]
+
+
+def model_is_exported(m: torch.nn.Module) -> bool:
+    """
+    Return True if the `torch.nn.Module` was exported, False otherwise
+    (e.g. if the model was FX symbolically traced or not traced at all).
+    """
+    return isinstance(m, torch.fx.GraphModule) and any(
+        "val" in n.meta for n in m.graph.nodes
+    )
+
+
 def _replace_dropout(m: torch.fx.GraphModule, train_to_eval: bool):
     """
     Switch dropout patterns in the model between train and eval modes.
@@ -117,6 +132,7 @@ def _replace_batchnorm(m: torch.fx.GraphModule, train_to_eval: bool):
     m.recompile()
 
 
+# TODO: expose these under this namespace?
 def _move_exported_model_to_eval(model: torch.fx.GraphModule):
     """
     Move an exported GraphModule to eval mode.

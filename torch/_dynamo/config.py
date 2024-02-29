@@ -392,8 +392,7 @@ _autograd_backward_strict_mode_banned_ops.extend(
 
 # Enables caching of dispatches to fake tensors.
 fake_tensor_cache_enabled = (
-    os.environ.get("TORCH_FAKE_TENSOR_DISPATCH_CACHE", "0" if is_fbcode() else "1")
-    == "1"
+    os.environ.get("TORCH_FAKE_TENSOR_DISPATCH_CACHE", "1") == "1"
 )
 
 # Enables cross checking between the fake tensor cache and dispatch.
@@ -404,6 +403,11 @@ fake_tensor_cache_crosscheck_enabled = (
 # support `context_fn` in torch.utils.checkpoint.checkpoint API under torch.compile().
 # WARNING: this is an experimental flag and is subject to change.
 _experimental_support_context_fn_in_torch_utils_checkpoint = False
+
+# Approximate maximum number of nodes to unroll loops into. A value of 0 will
+# unroll fully but could result in very large graphs that take an inordinate
+# amount of time to process.
+max_loop_unroll_nodes = int(os.environ.get("TORCHDYNAMO_MAX_LOOP_UNROLL_NODES", 5000))
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
