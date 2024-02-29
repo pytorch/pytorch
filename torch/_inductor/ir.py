@@ -1583,7 +1583,11 @@ class Scan(Loops):
     combine_fn: Callable[..., Any]
     reindex: Callable[[List[Expr], List[Expr]], List[Expr]]
     reduction_hint: ReductionHint
-    init: int
+    output_index: int
+    # output_index indexes the following three tuples
+    inits: Tuple[Union[int, float], ...]
+    dtypes: Tuple[torch.dtype, ...]
+    inner_fns: Tuple[Callable[..., Any], ...]
 
     # HACK we mimick reduction
 
@@ -1603,9 +1607,9 @@ class Scan(Loops):
 
     def store_reduction(self, output_name, indexer, vars, scan_vars):
         idx = self.reindex(vars, scan_vars)
-        value = self.inner_fn(idx)
-        (result,) = ops.scan((self.dtype,), self.combine_fn, (value,), (self.init,))
-        return ops.store(output_name, indexer(idx), result)
+        values = [inner_fn(idx) for inner_fn in self.inner_fns]
+        result = ops.scan(self.dtypes, self.combine_fn, values, self.inits)
+        return ops.store(output_name, indexer(idx), result[self.output_index])
 
     def get_reduction_type(self):
         # return self.scan_op
@@ -1639,72 +1643,90 @@ class Scan(Loops):
     def create(
         cls,
         device: torch.device,
-        dtype: torch.dtype,
-        inner_fn: Callable[[List[Expr]], Any],
+        dtypes: Tuple[torch.dtype, ...],
+        inner_fns: Tuple[Callable[[List[Expr]], Any], ...],
         size: List[Expr],
         axis: int,
         combine_fn: Callable[..., Any],
-        init: Any,
+        inits: Tuple[Union[int, float], ...],
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         **kwargs,
-    ) -> Optional["TensorBox"]:
+    ) -> List[Optional["TensorBox"]]:
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
 
         if device.type != "cuda":
             # TODO: CPU support
-            return None
+            return [None] * len(dtypes)
 
         sizevars = V.graph.sizevars
         scan_numel = sizevars.simplify(sympy_product(scan_ranges))
 
+        assert len(dtypes) == len(inits) == len(inner_fns)
+
         # Scan with a single element is just a copy
         if sizevars.is_expr_static_and_true(sympy.Le(scan_numel, 1)):  # type: ignore[arg-type]
-            return Pointwise.create(
-                device=device,
-                dtype=dtype,
-                inner_fn=inner_fn,
-                ranges=size,
-            )
+            return [
+                Pointwise.create(
+                    device=device,
+                    dtype=dtypes[output_index],
+                    inner_fn=inner_fns[output_index],
+                    ranges=size,
+                )
+                for output_index in range(len(dtypes))
+            ]
 
         reduction_hint, num_splits = cls.num_splits(
             device=device,
-            dtype=dtype,
-            inner_fn=inner_fn,
+            dtype=dtypes[0],
+            inner_fn=inner_fns[0],
             axis=axis,
             pointwise_ranges=pointwise_ranges,
             scan_ranges=scan_ranges,
             combine_fn=combine_fn,
             scan_numel=scan_numel,
         )
-        scan_type = cls if cls != Scan else (Scan if num_splits <= 1 else SplitScan)
+        scan_type = Scan if num_splits <= 1 else SplitScan
 
         if num_splits > 1 and torch.version.hip is not None:
             # Fallback for split-scan on ROCm
-            return None
+            return [None] * len(dtypes)
+
+        if num_splits > 1 and len(dtypes) > 1:
+            # Fallback for split-scans for multiple inputs
+            return [None] * len(dtypes)
 
         def reindex(index, scan_index):
             assert len(scan_index) == len(scan_ranges)
             assert len(index) == len(pointwise_ranges)
             return [*index[:axis], *scan_index, *index[axis:]]
 
-        result = TensorBox.create(
-            scan_type(
-                device=device,
-                dtype=dtype,
-                inner_fn=inner_fn,
-                size=size,
-                ranges=pointwise_ranges,
-                scan_ranges=scan_ranges,
-                combine_fn=combine_fn,
-                reindex=reindex,
-                init=init,
-                reduction_hint=reduction_hint,
-                **kwargs,
+        results = [
+            TensorBox.create(
+                scan_type(
+                    device=device,
+                    dtype=dtypes[output_index],
+                    dtypes=dtypes,
+                    inner_fn=inner_fns[output_index],
+                    inner_fns=inner_fns,
+                    size=size,
+                    ranges=pointwise_ranges,
+                    scan_ranges=scan_ranges,
+                    combine_fn=combine_fn,
+                    reindex=reindex,
+                    inits=inits,
+                    reduction_hint=reduction_hint,
+                    output_index=output_index,
+                    **kwargs,
+                )
             )
-        )
-        result.realize()
-        return result
+            for output_index in range(len(dtypes))
+        ]
+
+        for result in results:
+            result.realize()
+
+        return results
 
     @classmethod
     def num_splits(
@@ -1738,83 +1760,6 @@ class Scan(Loops):
 @dataclasses.dataclass
 class SplitScan(Scan):
     pass
-
-
-@dataclasses.dataclass
-class ArgScan(Scan):
-    ioutput: int
-    src_dtype: torch.dtype
-
-    def store_reduction(self, output_name, indexer, vars, scan_vars):
-        idx = self.reindex(vars, scan_vars)
-        value = self.inner_fn(idx)
-        rindex = self._index(self.scan_ranges, "r")[0]
-        result = ops.scan(
-            (self.src_dtype, torch.int64),
-            self.combine_fn,
-            (value, "rindex"),
-            (self.init, 0),
-        )[self.ioutput]
-        return ops.store(output_name, indexer(idx), result)
-
-    @classmethod
-    def create_argscan(
-        cls,
-        device: torch.device,
-        dtype: torch.dtype,
-        inner_fn: Callable[[List[Expr]], Any],
-        size: List[Expr],
-        axis: int,
-        combine_fn: Callable[..., Any],
-        init: Any,
-        reduction_hint: ReductionHint = ReductionHint.DEFAULT,
-        **kwargs,
-    ) -> Tuple[Optional["TensorBox"], Optional["TensorBox"]]:
-        pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
-        scan_ranges = [size[axis]]
-
-        sizevars = V.graph.sizevars
-        scan_numel = sizevars.simplify(sympy_product(scan_ranges))
-
-        # Scan with a single element is just a copy
-        if sizevars.is_expr_static_and_true(sympy.Le(scan_numel, 1)):  # type: ignore[arg-type]
-
-            def inner_fn_idx(idx):
-                return ops.constant(0, dtype=torch.int64)
-
-            value = Pointwise.create(
-                device=device,
-                dtype=dtype,
-                inner_fn=inner_fn,
-                ranges=size,
-            )
-            index = Pointwise.create(
-                device=device,
-                dtype=dtype,
-                inner_fn=inner_fn_idx,
-                ranges=size,
-            )
-            return value, index
-
-        dtypes = (dtype, torch.int64)
-
-        values, indices = (
-            super(ArgScan, cls).create(
-                device=device,
-                dtype=dtypes[ioutput],
-                src_dtype=dtype,
-                inner_fn=inner_fn,
-                size=size,
-                axis=axis,
-                combine_fn=combine_fn,
-                init=init,
-                reduction_hint=reduction_hint,
-                ioutput=ioutput,
-            )
-            for ioutput in (0, 1)
-        )
-
-        return values, indices
 
 
 def is_storage_and_layout(x):

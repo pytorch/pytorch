@@ -2323,11 +2323,12 @@ class TritonKernel(Kernel):
             )
 
     def _lift_helper(self, fn, num_args) -> str:
-        # Lift IR function into a triton function in the global namespace
+        # Lift IR function for scan operations into a triton function
+        # in the global namespace
         helper = IndentedBuffer()
         helper.writeline("@triton.jit")
-        args = [f"arg{n}" for n in range(num_args)]
-        signature = ", ".join(args)
+        args = [tuple(f"arg{i}_{n}" for n in range(num_args)) for i in range(2)]
+        signature = ", ".join(itertools.chain.from_iterable(args))
         helper.writeline(f"def {{name}}({signature}):")
 
         cse = CSE(prefix="", suffix="")
@@ -2345,9 +2346,7 @@ class TritonKernel(Kernel):
 
         with helper.indent(), V.set_ops_handler(CSEProxy()):
             outputs = fn(*args)
-            if isinstance(outputs, tuple):
-                outputs = ", ".join(str(output) for output in outputs)
-                outputs = f"({outputs})"
+            outputs = ", ".join(str(output) for output in outputs)
             helper.writeline(f"return {outputs}")
 
         return self.helper_functions.add(helper.getvalue())
@@ -2368,10 +2367,10 @@ class TritonKernel(Kernel):
         reduction_range_prefix = self.range_trees[-1].prefix
 
         masked_values = []
+        broadcasted_values = []
         accumulators = []
-        partials_reduce = []
 
-        combine_helper_fn = self._lift_helper(combine_fn, 2 * len(values))
+        combine_helper_fn = self._lift_helper(combine_fn, len(values))
         dim = self.triton_tensor_ndim() - 1
 
         for value, init, dtype in zip(values, inits, dtypes):
@@ -2394,6 +2393,7 @@ class TritonKernel(Kernel):
                 self.compute,
                 f"tl.broadcast_to({value}.to({triton_compute_type(dtype)}), {self.dense_size_str()})",
             )
+            broadcasted_values.append(value)
 
             default = triton_constant(init)
             default_tensor = self.cse.generate(
@@ -2418,41 +2418,41 @@ class TritonKernel(Kernel):
                 )
 
                 masked_value = where_cond(value)
-                partial_reduce = self.cse.generate(
-                    self.compute,
-                    self.reduction_resize(
-                        f"tl.reduce({value}, {dim}, {combine_helper_fn})"
-                    ),
-                )
 
                 masked_values.append(masked_value)
                 accumulators.append(accumulator)
-                partials_reduce.append(partial_reduce)
 
-        result_vars = [self.cse.newvar() for _ in range(len(values))]
-        result_vars_str = ", ".join([str(result_var) for result_var in result_vars])
-        if len(masked_values) == 1:
-            masked_values_str = str(masked_values[0])
-        else:
-            masked_values_str = ", ".join(
-                [str(masked_value) for masked_value in masked_values]
+        def csv(values):
+            return " ".join(f"{value}," for value in values)
+
+        def cse_multiple(line, n, masks):
+            cache_keys = [f"{line}, {i}, {masks}" for i in range(n)]
+            if all(cache_key in self.cse.cache for cache_key in cache_keys):
+                return [self.cse.cache[cache_key] for cache_key in cache_keys]
+            result_vars = [self.cse.newvar() for _ in range(n)]
+            self.compute.writeline(
+                f"{csv(result_vars)} = {line}",
             )
-            masked_values_str = f"({masked_values_str})"
-        self.compute.writeline(
-            f"{result_vars_str} = tl.associative_scan({masked_values_str}, {dim}, {combine_helper_fn})",
+            for result_var, cache_key in zip(result_vars, cache_keys):
+                if masks:
+                    result_var.mask_vars = masks  # type: ignore[attr-defined]
+                self.cse.cache[cache_key] = result_var
+            return result_vars
+
+        result_vars = cse_multiple(
+            f"tl.associative_scan(({csv(masked_values)}), {dim}, {combine_helper_fn})",
+            len(values),
+            masks,
         )
 
         if not self.persistent_reduction:
-
-            def _combine_fn(values1, values2):
-                result = combine_fn(*itertools.chain(*zip(values1, values2)))
-                if isinstance(result, (tuple, list)):
-                    return result
-                else:
-                    return (result,)
-
-            accs_next = _combine_fn(accumulators, partials_reduce)
-            new_result_vars = _combine_fn(accumulators, result_vars)
+            partial_reduce = cse_multiple(
+                f"tl.reduce(({csv(broadcasted_values)}), {dim}, {combine_helper_fn}, keep_dims=True)",
+                len(values),
+                None,
+            )
+            accs_next = combine_fn(accumulators, partial_reduce)
+            new_result_vars = combine_fn(accumulators, result_vars)
             result_vars = [
                 self.cse.generate(self.compute, var) for var in new_result_vars
             ]

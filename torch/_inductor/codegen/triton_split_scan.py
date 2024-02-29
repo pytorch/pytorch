@@ -88,7 +88,7 @@ class TritonSplitScanKernel(TritonKernel):
         (value,) = values
         (init,) = inits
 
-        compute_type = triton_compute_type(dtype)
+        compute_type = triton_compute_type(dtypes)
         compute_type_triton = getattr(tl, compute_type[3:])
 
         element_nbits = compute_type_triton.primitive_bitwidth
@@ -131,7 +131,7 @@ class TritonSplitScanKernel(TritonKernel):
         else:
             masked_value = value
 
-        combine_helper_fn = self._lift_helper(combine_fn, 2)
+        combine_helper_fn = self._lift_helper(combine_fn, 1)
         dim = self.triton_tensor_ndim() - 1
         assert dim == 0, ""
 
