@@ -88,10 +88,12 @@ jobs:
           set -eux
 
           sudo apt-get update
-          sudo apt-get install -y git curl unzip build-essential dnsutils python3-pip zip
+          sudo apt-get install -y git curl unzip build-essential dnsutils python3-pip zip dnsutils
 
           python3 -m pip --version
           docker --version
+
+          nslookup raw.githubusercontent.com
         shell: bash
 
       # [pytorch repo ref]
