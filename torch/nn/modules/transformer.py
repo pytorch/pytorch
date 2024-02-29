@@ -132,13 +132,6 @@ class Transformer(Module):
                 memory_is_causal: bool = False) -> Tensor:
         r"""Take in and process masked source/target sequences.
 
-        .. note::
-
-            If a boolean tensor is provided for any of the [src/tgt/memory]_mask arguments, positions with a ``True`` value are
-            not allowed to participate in the attention,
-            which is the opposite of the definition for :attr:`attn_mask`
-            in :func:`torch.nn.functional.scaled_dot_product_attention`.
-
         Args:
             src: the sequence to the encoder (required).
             tgt: the sequence to the decoder (required).
@@ -263,14 +256,7 @@ class TransformerEncoder(Module):
 
     __constants__ = ['norm']
 
-    def __init__(
-        self,
-        encoder_layer: "TransformerEncoderLayer",
-        num_layers: int,
-        norm: Optional[Module] = None,
-        enable_nested_tensor: bool = True,
-        mask_check: bool = True
-    ) -> None:
+    def __init__(self, encoder_layer, num_layers, norm=None, enable_nested_tensor=True, mask_check=True):
         super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
         self.layers = _get_clones(encoder_layer, num_layers)
@@ -441,12 +427,7 @@ class TransformerDecoder(Module):
 
     __constants__ = ['norm']
 
-    def __init__(
-        self,
-        decoder_layer: "TransformerDecoderLayer",
-        num_layers: int,
-        norm: Optional[Module] = None
-    ) -> None:
+    def __init__(self, decoder_layer, num_layers, norm=None):
         super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
         self.layers = _get_clones(decoder_layer, num_layers)

@@ -1,4 +1,4 @@
-# Owner(s): ["module: inductor"]
+# Owner(s): ["module: dynamo"]
 # flake8: noqa: E731
 # Skip do not assign a lambda expression, use a def
 from unittest.mock import patch

@@ -11,8 +11,10 @@
 #include <omp.h>
 #endif
 
+namespace at {
+
 #ifdef _OPENMP
-namespace at::internal {
+namespace internal {
 template <typename F>
 inline void invoke_parallel(
     int64_t begin,
@@ -50,5 +52,7 @@ inline void invoke_parallel(
     std::rethrow_exception(eptr);
   }
 }
-} // namespace at::internal
+} // namespace internal
 #endif // _OPENMP
+
+} // namespace at
