@@ -51,7 +51,7 @@ class Event:
             return data
         if isinstance(data, str):
             data_dict = json.loads(data)
-        data_dict["source"] = EventSource[data_dict["source"]]
+        data_dict["source"] = EventSource[data_dict["source"]]  # type: ignore[possibly-undefined]
         return Event(**data_dict)
 
     def serialize(self) -> str:
@@ -105,7 +105,7 @@ class RdzvEvent:
             return data
         if isinstance(data, str):
             data_dict = json.loads(data)
-        data_dict["node_state"] = NodeState[data_dict["node_state"]]
+        data_dict["node_state"] = NodeState[data_dict["node_state"]]  # type: ignore[possibly-undefined]
         return RdzvEvent(**data_dict)
 
     def serialize(self) -> str:

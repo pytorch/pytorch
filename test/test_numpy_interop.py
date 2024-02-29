@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # Owner(s): ["module: numpy"]
 
 import torch

@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 """ Define analogs of numpy dtypes supported by pytorch.
 Define the scalar types and supported dtypes and numpy <--> torch dtype mappings.
 """

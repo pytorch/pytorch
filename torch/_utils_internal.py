@@ -1,3 +1,4 @@
+import functools
 import logging
 import os
 import sys
@@ -82,8 +83,23 @@ def log_compilation_event(metrics):
     log.info("%s", metrics)
 
 
-def print_graph(graph, msg: str):
+def upload_graph(graph):
     pass
+
+
+def set_pytorch_distributed_envs_from_justknobs():
+    pass
+
+
+def log_export_usage(**kwargs):
+    pass
+
+
+@functools.lru_cache(None)
+def max_clock_rate():
+    from triton.testing import nvsmi
+
+    return nvsmi(["clocks.max.sm"])[0]
 
 
 TEST_MASTER_ADDR = "127.0.0.1"

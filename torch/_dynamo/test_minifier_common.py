@@ -43,12 +43,12 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls._exit_stack.enter_context(
+        cls._exit_stack.enter_context(  # type: ignore[attr-defined]
             torch._dynamo.config.patch(debug_dir_root=cls.DEBUG_DIR)
         )
         # These configurations make new process startup slower.  Disable them
         # for the minification tests to speed them up.
-        cls._exit_stack.enter_context(
+        cls._exit_stack.enter_context(  # type: ignore[attr-defined]
             torch._inductor.config.patch(
                 {
                     # https://github.com/pytorch/pytorch/issues/100376
@@ -67,7 +67,7 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
             shutil.rmtree(cls.DEBUG_DIR)
         else:
             print(f"test_minifier_common tmpdir kept at: {cls.DEBUG_DIR}")
-        cls._exit_stack.close()
+        cls._exit_stack.close()  # type: ignore[attr-defined]
 
     def _gen_codegen_fn_patch_code(self, device, bug_type):
         assert bug_type in ("compile_error", "runtime_error", "accuracy")
@@ -118,7 +118,7 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
                 finally:
                     log.removeHandler(log_handler)
                     if cwd is not None:
-                        os.chdir(prev_cwd)
+                        os.chdir(prev_cwd)  # type: ignore[possibly-undefined]
                     # Make sure we don't leave buggy compiled frames lying
                     # around
                     torch._dynamo.reset()

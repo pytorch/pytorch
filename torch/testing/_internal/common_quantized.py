@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 r"""Importing this file includes common utility methods for checking quantized
 tensors and modules.
 """

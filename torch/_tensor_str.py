@@ -610,7 +610,7 @@ def _str_intern(inp, *, tensor_contents=None):
         # no-grad mode. See: https://github.com/pytorch/pytorch/issues/99968
         grad_fn_name = "Invalid"
 
-    if grad_fn_name is None and grad_fn is not None:
+    if grad_fn_name is None and grad_fn is not None:  # type: ignore[possibly-undefined]
         grad_fn_name = type(grad_fn).__name__
         if grad_fn_name == "CppFunction":
             grad_fn_name = grad_fn.name().rsplit("::", 1)[-1]
@@ -627,7 +627,7 @@ def _str_intern(inp, *, tensor_contents=None):
         suffixes.append(f"tangent={tangent}")
 
     string_repr = _add_suffixes(
-        prefix + tensor_str, suffixes, indent, force_newline=self.is_sparse
+        prefix + tensor_str, suffixes, indent, force_newline=self.is_sparse  # type: ignore[possibly-undefined]
     )
 
     # Check if this instance is flagged as a parameter and change the repr accordingly.

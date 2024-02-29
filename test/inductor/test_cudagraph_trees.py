@@ -43,7 +43,7 @@ importlib.import_module("filelock")
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 aten = torch.ops.aten
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_multigpu = functools.partial(
     unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
 )
@@ -246,6 +246,28 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             FileCheck().check(
                 "skipping cudagraphs due to mutaton on input. Found from"
             ).check("torch.logical_xor").run(captured_output[0])
+
+        @requires_multigpu()
+        def test_multiple_devices_msg(self):
+            @torch.compile()
+            def foo(x, y):
+                return (x + 1, y + 2)
+
+            with capture_stderr() as captured_output:
+                foo(torch.ones([10], device="cuda"), torch.ones([20]))
+
+            FileCheck().check("skipping cudagraphs due to cpu device.").check(
+                "y + 2"
+            ).run(captured_output[0])
+
+            with capture_stderr() as captured_output:
+                foo(
+                    torch.ones([10], device="cuda:0"), torch.ones([10], device="cuda:1")
+                )
+
+            FileCheck().check("skipping cudagraphs due to multiple devices").run(
+                captured_output[0]
+            )
 
         def test_mutation(self):
             @torch.compile()
