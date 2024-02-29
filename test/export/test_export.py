@@ -3404,6 +3404,37 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             # under a new FakeTensorMode.
             ep = torch.export.export(m, (inp,))
 
+    def test_compiling_state(self):
+        class TestModule1(torch.nn.Module):
+            def forward(self, x):
+                if torch._dynamo.is_compiling():
+                    return x * 2
+                else:
+                    return x * 3
+
+        class TestModule2(torch.nn.Module):
+            def forward(self, x):
+                if torch._utils.is_compiling():
+                    return x * 2
+                else:
+                    return x * 3
+
+        class TestModule3(torch.nn.Module):
+            def forward(self, x):
+                if torch.compiler.is_compiling():
+                    return x * 2
+                else:
+                    return x * 3
+
+        for m in [TestModule1(), TestModule2(), TestModule3()]:
+            input = torch.randn(5)
+            ep_strict = export(m, (input,), strict=True)
+            ep_non_strict = export(m, (input,), strict=False)
+
+            self.assertTrue(torch.allclose(input * 3, m(input)))
+            self.assertTrue(torch.allclose(input * 2, ep_strict(input)))
+            self.assertTrue(torch.allclose(input * 2, ep_non_strict(input)))
+
     def test_user_input_and_buffer_mutation(self):
         class MyModule(torch.nn.Module):
             def __init__(self):

@@ -1390,10 +1390,11 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_set_nccl_pg_timeout(self):
+    @parametrize("backend", [None, "nccl"])
+    def test_set_nccl_pg_timeout(self, backend):
         store = c10d.FileStore(self.file_name, self.world_size)
         opts = dict(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size, timeout=timedelta(seconds=123)
+            backend=backend, store=store, rank=self.rank, world_size=self.world_size, timeout=timedelta(seconds=123)
         )
         dist.init_process_group(**opts)
         pg = dist.distributed_c10d._get_default_group()
@@ -4493,6 +4494,7 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
             # rank 0 will crash before it passes the sync, but rank1 will exit quickly and cleanly
             torch.cuda.synchronize()
 
+instantiate_parametrized_tests(ProcessGroupNCCLTest)
 instantiate_parametrized_tests(NCCLTraceTestDumpOnTimeout)
 instantiate_parametrized_tests(NCCLTraceTest)
 
