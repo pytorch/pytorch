@@ -379,9 +379,9 @@ class TestMaxAutotune(TestCase):
         # CUTLASS only supports row-major/column-major combination of
         # layouts for this operation, thus the transpose of tensor b
         # (on the other side, Triton at the moment doesn't support
-        # this combination, so the test is run for CUTLASS back-end
-        # only).  Also, for CUTLASS alignment requirements, number of
-        # columns in both tensors has to be divisible by 16.
+        # this combination, so it's excluded from the test).  Also,
+        # for CUTLASS alignment requirements, number of columns in
+        # both tensors has to be divisible by 16.
         a = torch.randint(0, 5, (100, 16), dtype=torch.int8).cuda()
         b = torch.randint(0, 5, (32, 16), dtype=torch.int8).cuda().T
 
