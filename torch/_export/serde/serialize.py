@@ -2385,6 +2385,8 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
                     pass
                 else:
                     raise AssertionError(f"Unknown sym_int type: {s}")
+            elif arg.type in ("as_none", "as_int", "as_float", "as_string"):
+                return
             else:
                 raise AssertionError(f"Unknown input type: {arg}")
         elif spec.type == "loss_output":
