@@ -1620,7 +1620,7 @@ torch_sources = {
 cc_library(
     name = "torch",
     srcs = if_cuda(glob(
-        libtorch_cuda_sources(),
+        libtorch_cuda_sources,
         exclude = [
             "torch/csrc/cuda/python_nccl.cpp",
             "torch/csrc/cuda/nccl.cpp",
