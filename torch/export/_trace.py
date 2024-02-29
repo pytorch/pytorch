@@ -322,7 +322,6 @@ def _export_to_torch_ir(
     if _log_export_usage:
         log_export_usage(event="export.private_api", flags={"_export_to_torch_ir"})
 
-    constraints = constraints or []
     kwargs = kwargs or {}
 
     if not isinstance(args, tuple):
