@@ -1084,7 +1084,7 @@ if(USE_XPU)
   target_compile_definitions(torch_xpu PRIVATE USE_XPU)
 
   # ATen XPU implementation
-  set(TORCH_XPU_OPS_PYTORCH_INCLUDE_DIRS
+  set(TORCH_XPU_OPS_INCLUDE_DIRS
       ${TORCH_SRC_DIR}/csrc/api
       ${TORCH_SRC_DIR}/csrc/api/include
       ${Caffe2_CPU_INCLUDE}
