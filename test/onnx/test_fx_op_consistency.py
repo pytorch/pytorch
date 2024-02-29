@@ -1541,7 +1541,9 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "nn.functional.instance_norm",
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
-        reason="fixme: Assertion error: result mismatch",
+        matcher=lambda sample: sample.kwargs.get("running_mean") is not None
+        or sample.input.dtype in (torch.float16,),
+        reason="fixme: KeyError: 'self___kwargs__running_mean'",
     ),
     xfail(
         "nn.functional.max_pool3d",
