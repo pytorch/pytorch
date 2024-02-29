@@ -366,7 +366,7 @@ kernel_name_max_ops = 10
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
 shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "1") == "1"
 
-# TODO I'll probably remove this one. Adding it to ease testing in development phase.
+# Control if we will do padding for pointwise/reductions
 comprehensive_padding = (
     os.environ.get("TORCHINDUCTOR_COMPREHENSIVE_PADDING", "1") == "1"
 )

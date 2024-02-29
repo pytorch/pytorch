@@ -54,6 +54,15 @@ def forward_and_backward_pass(m, inputs):
     }
 )
 class PaddingTest(TestCase):
+    def common_numeric_check(self, f, *args):
+        opt_f = torch.compile(f)
+        ref = f(*args)
+        act = opt_f(*args)
+        tol = 1e-3
+        self.assertTrue(
+            torch.allclose(ref, act, atol=tol, rtol=tol), f"ref:\n{ref}\nact:\n{act}"
+        )
+
     def test_mm_perf(self):
         def naive_mm(a, b):
             return a @ b
@@ -128,6 +137,48 @@ class PaddingTest(TestCase):
             print(
                 f"Latency for good shape v.s. bad shape: {latency_good_shape:.3f}ms v.s. {latency_bad_shape:.3f}ms"
             )
+
+    @config.patch(pattern_matcher=False)
+    def test_attention(self):
+        batch_size, seq_len, num_heads, hidden_size = 1, 4, 1, 16
+        inv_scale = (num_heads / hidden_size) ** 0.5
+
+        class Attention(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.query = nn.Linear(hidden_size, hidden_size)
+                self.key = nn.Linear(hidden_size, hidden_size)
+                self.value = nn.Linear(hidden_size, hidden_size)
+
+            @staticmethod
+            def reshape(x):
+                return x.view(batch_size, seq_len, num_heads, -1).permute(0, 2, 1, 3)
+
+            @staticmethod
+            def cancel_reshape(x):
+                return x.permute(0, 2, 1, 3).view(batch_size, seq_len, hidden_size)
+
+            def forward(self, x):
+                query, key, value = self.query(x), self.key(x), self.value(x)
+                weights = (
+                    torch.matmul(
+                        self.reshape(query), self.reshape(key).permute(0, 1, 3, 2)
+                    )
+                    * inv_scale
+                ).softmax(dim=-1)
+                return self.cancel_reshape(torch.matmul(weights, self.reshape(value)))
+
+        attn = Attention()
+        x = torch.randn(batch_size, seq_len, hidden_size)
+
+        self.common_numeric_check(attn, x)
+
+    def test_view(self):
+        def f(x):
+            return x.view(3, 3, 3)
+
+        x = torch.randn(3, 9)
+        self.common_numeric_check(f, x)
 
 
 if __name__ == "__main__":
