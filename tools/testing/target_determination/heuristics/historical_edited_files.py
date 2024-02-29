@@ -32,4 +32,4 @@ class HistorialEditedFiles(HeuristicInterface):
         )
         test_ratings = {TestRun(k): v for (k, v) in test_ratings.items() if k in tests}
 
-        return TestPrioritizations(tests, normalize_ratings(test_ratings, 1))
+        return TestPrioritizations(tests, normalize_ratings(test_ratings, 0.25))

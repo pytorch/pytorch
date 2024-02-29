@@ -29,9 +29,7 @@ if torch._running_with_deploy():
 
 else:
     try:
-        from torch._dynamo.external_utils import (
-            is_compiling as is_torchdynamo_compiling,
-        )
+        from torch.compiler import is_dynamo_compiling as is_torchdynamo_compiling
     except Exception:
         warnings.warn(
             "Unable to import torchdynamo util `is_torchdynamo_compiling`, so won't support torchdynamo correctly"
@@ -1041,7 +1039,7 @@ def all_gather_inplace(
 
     output = all_gather_tensor(tensor, 0, group, tag)
 
-    # Use aten.slice as instead of aten.split because the latter causes
+    # Use aten.slice instead of aten.split because the latter causes
     # tensor.shape(0) to be unnecessarily baked in when it's a SymInt.
     output_splits = []
     offset = 0
