@@ -1896,9 +1896,6 @@ symbolic_tensor_failures = {
     xfail('unique', ''),  # aten._unique2.default - couldn't find symbolic meta function/decomposition
 
     xfail('norm', ''),
-    xfail('linalg.vector_norm', ''),
-    xfail('linalg.norm', 'subgradients_at_zero'),
-    xfail('renorm', ''),
 
     xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
 
@@ -1925,10 +1922,6 @@ symbolic_tensor_segfaults = {
 }
 
 symbolic_tensor_failures.update(symbolic_tensor_segfaults)
-
-outplace_symbolic_tensor_failures = {
-    xfail('linalg.norm', ''),
-}
 
 inplace_symbolic_tensor_failures = {
     # bugs
@@ -2027,7 +2020,7 @@ class TestProxyTensorOpInfo(TestCase):
 
     @ops(op_db + custom_op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive',
-             make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | outplace_symbolic_tensor_failures)
+             make_fx_failures | fake_tensor_failures | symbolic_tensor_failures )
     def test_make_fx_symbolic_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "symbolic")
 
