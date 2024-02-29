@@ -1448,6 +1448,14 @@ class GuardManager {
   }
 
   virtual void add_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) {
+    // TODO(anijain2305) - Currently we can have redundant guards in the guard
+    // manager. For example, one can have two EQUAL_MATCH guard from two
+    // different lines of python code but for the same object. We might need a
+    // small optimization here to skip adding specific type of guards if they
+    // are already present (like EQUALS_MATCH, ID_MATCH etc).
+    // One such example is this
+    // TORCH_LOGS="guards,recompiles" PYTORCH_TEST_WITH_DYNAMO=1 python
+    // test/test_torch.py -k test_grad_scaling_penalty_cpu
     _leaf_guards.emplace_back(std::move(leaf_guard));
   }
 
@@ -1612,11 +1620,6 @@ class GuardManager {
   // Keeps a count of how many times this guard manager check function returns
   // False. This is used for sorting optimization.
   int64_t _fail_count{0};
-
- private:
-  virtual bool _is_dict_guard_manager() {
-    return false;
-  }
 
  private:
   // Root of the guard manager, this is the used to install the relational
@@ -1886,25 +1889,13 @@ class KeyValueDictGuardManager : public GuardManager {
         "KeyValueDictGuardManager does not support a leaf_guard");
   }
 
-  // Debug helper - Nobody should call this. Call child_managers to directly get
-  // the key and value managers.
-  std::vector<GuardAccessor*> get_accessors() const override {
-    throw std::runtime_error(
-        "KeyValueDictGuardManager does not have accessors");
-  }
-
   // Debug helper - Returning raw pointers because we can't return unique_ptr
   // and pybind does not accept a unique_ptr reference return type.
-  virtual std::vector<GuardManager*> get_child_managers() override {
+  std::vector<GuardManager*> get_key_value_managers() {
     std::vector<GuardManager*> ret;
     ret.push_back(_key_manager.get());
     ret.push_back(_value_manager.get());
     return ret;
-  }
-
- private:
-  bool _is_dict_guard_manager() override {
-    return true;
   }
 
  private:
@@ -1929,6 +1920,7 @@ class DictGuardManager : public GuardManager {
   DictGuardManager(RootGuardManager* root, py::handle example_value)
       : GuardManager(root),
         _size(PyDict_Size(example_value.ptr())),
+        _expected_type(Py_TYPE(example_value.ptr())),
         _is_exact_dict_type(PyDict_CheckExact(example_value.ptr())) {}
 
   /**
@@ -1954,7 +1946,7 @@ class DictGuardManager : public GuardManager {
   virtual bool check_nopybind(PyObject* obj) override { // borrowed ref
     // TODO(janimesh) - Implement a fast-path using dict versions.
 
-    if (!PyDict_Check(obj)) {
+    if (Py_TYPE(obj) != _expected_type) {
       _fail_count += 1;
       return false;
     }
@@ -2003,8 +1995,8 @@ class DictGuardManager : public GuardManager {
 
   virtual GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
-    if (!PyDict_Check(obj)) {
-      return GuardDebugInfo(false, "not a dict", 0);
+    if (Py_TYPE(obj) != _expected_type) {
+      return GuardDebugInfo(false, "TYPE_MISMATCH(DictGuardManager)", 0);
     }
 
     if (PyDict_Size(obj) != _size) {
@@ -2077,16 +2069,9 @@ class DictGuardManager : public GuardManager {
     GuardManager::add_leaf_guard(std::move(leaf_guard));
   }
 
-  // Debug helper - Nobody should call this. Call child_managers to directly get
-  // the key and value managers.
-  std::vector<GuardAccessor*> get_accessors() const override {
-    throw std::runtime_error(
-        "KeyValueDictGuardManager does not have accessors");
-  }
-
   // Debug helper - Returning raw pointers because we can't return unique_ptr
   // and pybind does not accept a unique_ptr reference return type.
-  virtual std::vector<GuardManager*> get_child_managers() override {
+  std::vector<GuardManager*> get_index_managers() {
     std::vector<GuardManager*> ret;
     for (auto index : _indices) {
       ret.push_back(_key_value_managers[index].get());
@@ -2099,12 +2084,10 @@ class DictGuardManager : public GuardManager {
   }
 
  private:
-  bool _is_dict_guard_manager() override {
-    return true;
-  }
-
- private:
   Py_ssize_t _size;
+  // DictGuardManager supports both exact dict type and non-exact dict type.
+  // Therefore, we have to compare the type to early exit.
+  PyTypeObject* _expected_type;
   bool _is_exact_dict_type; // Useful to check getattr_manager validity.
   std::vector<Py_ssize_t> _indices;
   std::unordered_map<Py_ssize_t, std::unique_ptr<KeyValueDictGuardManager>>
@@ -3047,9 +3030,17 @@ PyObject* torch_c_dynamo_guards_init() {
   // Dict Guard Manager
   py::class_<DictGuardManager, GuardManager, std::unique_ptr<DictGuardManager>>(
       py_m, "DictGuardManager")
+      // return by reference because GuardManager has the ownership of leaf
+      // guards
       .def(
           "get_key_value_manager",
           &DictGuardManager::get_key_value_manager,
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of leaf
+      // guards
+      .def(
+          "get_index_managers",
+          &DictGuardManager::get_index_managers,
           py::return_value_policy::reference)
       // Skipped leaf guards
       .def("add_type_match_guard", &DictGuardManager::skip_adding_guard)
@@ -3106,6 +3097,10 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "get_value_manager",
           &KeyValueDictGuardManager::get_value_manager,
+          py::return_value_policy::reference)
+      .def(
+          "get_key_value_managers",
+          &KeyValueDictGuardManager::get_key_value_managers,
           py::return_value_policy::reference);
 
   py_m.def("install_tensor_aliasing_guard", install_tensor_aliasing_guard);
