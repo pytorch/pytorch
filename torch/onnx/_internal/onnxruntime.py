@@ -64,35 +64,7 @@ __all__ = [
     "OrtExecutionProvider",
     "OrtBackendOptions",
     "OrtBackend",
-    "register_backend_graph_transform",
-    "unregister_backend_graph_transform",
 ]
-
-
-# Functions sequentially applies to the ONNX model before it is fed to ONNXRuntime's
-# InferenceSession.
-_GRAPH_TRANSFORMS: List[Callable[["onnx.ModelProto"], "onnx.ModelProto"]] = []  # type: ignore[name-defined]
-
-
-def register_backend_graph_transform(
-    transform: Callable[["onnx.ModelProto"], None]  # type: ignore[name-defined]
-) -> None:
-    """Register a transform to modify ONNX model before it is fed to ONNXRuntime's InferenceSession.
-
-    Added transforms are
-     1. applied in the order they are registered.
-     2. shared across all instances of OrtBackend.
-    """
-    _GRAPH_TRANSFORMS.append(transform)
-
-
-def unregister_backend_graph_transform(
-    transform: Callable[["onnx.ModelProto"], None]  # type: ignore[name-defined]
-) -> None:
-    """Remove all occurances of the given transform from the list of registered transforms."""
-    for i, t in enumerate(reversed(_GRAPH_TRANSFORMS)):
-        if t == transform:
-            _GRAPH_TRANSFORMS.pop(len(_GRAPH_TRANSFORMS) - 1 - i)
 
 
 def is_onnxrt_backend_supported() -> bool:
@@ -733,6 +705,12 @@ class OrtBackendOptions:
     ort_session_options: Optional["onnxruntime.SessionOptions"] = None
     """Options for the ``onnxruntime.InferenceSession`` used by the ``OrtBackend``."""
 
+    pre_ort_model_transforms: Optional[  # type: ignore[name-defined]
+        Sequence[Callable[["onnx.ModelProto"], None]]
+    ] = None
+    """A list of graph transforms to be applied to the ONNX model before it
+    is fed to ONNXRuntime's InferenceSession."""
+
 
 @compatibility(is_backward_compatible=False)
 class OrtBackend:
@@ -951,8 +929,9 @@ class OrtBackend:
             # Modify ONNX model using pre-registered graph transforms.
             # They are in-place modifications for avoiding unnecessary
             # copy of ONNX initializers.
-            for transform in _GRAPH_TRANSFORMS:
-                transform(onnx_model)
+            if self._options.pre_ort_model_transforms:
+                for transform in self._options.pre_ort_model_transforms:
+                    transform(onnx_model)
 
             onnx_model_bytes = onnx_model.SerializeToString()
             if os.environ.get("ONNXRT_DUMP_PATH", None):
@@ -1153,6 +1132,7 @@ class OrtBackend:
                 or a.default_execution_providers != b.default_execution_providers
                 or a.preallocate_output != b.preallocate_output
                 or a.use_aot_autograd != b.use_aot_autograd
+                or a.pre_ort_model_transforms != b.pre_ort_model_transforms
             ):
                 return False
 
