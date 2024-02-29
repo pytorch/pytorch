@@ -88,7 +88,7 @@ class TritonSplitScanKernel(TritonKernel):
         (value,) = values
         (init,) = inits
 
-        compute_type = triton_compute_type(dtypes)
+        compute_type = triton_compute_type(dtype)
         compute_type_triton = getattr(tl, compute_type[3:])
 
         element_nbits = compute_type_triton.primitive_bitwidth
