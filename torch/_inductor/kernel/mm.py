@@ -95,7 +95,9 @@ mm_template = TritonTemplate(
 aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
 
 
-aten_addmm = ExternKernelChoice(torch.addmm, "at::addmm_out")
+aten_addmm = ExternKernelChoice(
+    torch.addmm, "at::addmm_out", op_overload=aten.addmm.default
+)
 
 aten__int_mm = ExternKernelChoice(torch._int_mm, "at::_int_mm")
 
@@ -186,7 +188,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 aten_addmm.bind(
                     (inp, mat1, mat2),
                     layout,
-                    op_overload=aten.addmm.default,
                     alpha=alpha,
                     beta=beta,
                 )
@@ -201,7 +202,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             aten_addmm.bind(
                 (inp_expanded, mat1, mat2),
                 layout,
-                op_overload=aten.addmm.default,
                 alpha=alpha,
                 beta=beta,
             )
