@@ -8,7 +8,7 @@ from unittest.mock import patch
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
-from torch._inductor import config
+from torch._inductor import config, metrics
 from torch._inductor.codecache import (
     AsyncCompile,
     FxGraphCachePickler,
@@ -122,7 +122,7 @@ class TestFxGraphCache(TestCase):
 
         compiled_fn = torch.compile(fn, dynamic=dynamic)
 
-        # A first call shold miss in the cache.
+        # A first call should miss in the cache.
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
@@ -266,6 +266,34 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(res1, res2)
 
     @config.patch({"fx_graph_cache": True})
+    def test_generated_kernel_count(self):
+        """
+        Test that we bump the generated_kernel_count metric on a cache hit.
+        """
+
+        def fn(x, y):
+            return (x * y + y,)
+
+        a = torch.rand(5, 5)
+        b = torch.rand(5, 5)
+
+        compiled_fn = torch.compile(fn)
+
+        metrics.reset()
+        self.assertEqual(metrics.generated_kernel_count, 0)
+
+        # Verify the "miss" case.
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        self.assertEqual(metrics.generated_kernel_count, 1)
+
+        # Verify the "hit" case
+        torch._dynamo.reset()
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        self.assertEqual(metrics.generated_kernel_count, 2)
+
+    @config.patch({"fx_graph_cache": True})
     def test_cache_clear(self):
         """
         Test clearing the cache.
@@ -279,7 +307,7 @@ class TestFxGraphCache(TestCase):
 
         compiled_fn = torch.compile(fn)
 
-        # A first call shold miss in the cache.
+        # A first call should miss in the cache.
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)

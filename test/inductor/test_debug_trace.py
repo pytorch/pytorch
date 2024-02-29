@@ -26,7 +26,7 @@ def filesize(filename: pathlib.Path):
     return os.stat(filename).st_size
 
 
-@config.patch({"trace.enabled": True, "fx_graph_cache": False})
+@config.patch("trace.enabled", True)
 class TestDebugTrace(test_torchinductor.TestCase):
     def test_debug_trace(self):
         @torch.compile

@@ -62,10 +62,6 @@ TestCase = test_torchinductor.TestCase
 aten = torch.ops.aten
 check_model = test_torchinductor.check_model
 
-# Many tests inspect the generated_cpp_vec_kernel_count and FX graph caching
-# will affect that metric if there are any cache hits.
-config.fx_graph_cache = False
-
 
 @contextlib.contextmanager
 def set_num_threads(num_threads):
@@ -2951,7 +2947,7 @@ class CPUReproTests(TestCase):
                     batch_size, seq_len, self.num_heads, self.head_size
                 ).permute(0, 2, 1, 3)
                 attention_weights = (
-                    torch.matmul(query, key).div(self.inv_scale).softmax(dim=-1)
+                    torch.matmul(query, key).mul(self.inv_scale).softmax(dim=-1)
                 )
                 output = torch.matmul(attention_weights, value)
                 return output

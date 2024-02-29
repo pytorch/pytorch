@@ -65,6 +65,8 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.two_tensor import TwoTensor
 
 
+torch._inductor.config.fx_graph_cache = True
+
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
 

@@ -1835,6 +1835,7 @@ The hook must have the following signature:
 >>> def hook(work_info: torch._C._distributed_c10d.WorkInfo) -> None:
 >>>     # custom code
 >>>     # work_info.op_type: type of collective of this work
+>>>     # work_info.seq: sequence number of collective of this work
 >>>     # work_info.time_started: system time when user code called this collective
 >>>     # work_info.time_finished: system time when the watchdog thread detected
 >>>     #     completion of this work. Note that, there can be delays between the
@@ -2538,6 +2539,7 @@ Example::
   py::class_<::c10d::WorkInfo, std::shared_ptr<::c10d::WorkInfo>>(
       module, "WorkInfo")
       .def_readonly("op_type", &::c10d::WorkInfo::opType)
+      .def_readonly("seq", &::c10d::WorkInfo::seq)
       .def_readonly("time_started", &::c10d::WorkInfo::timeStarted)
       .def_readonly("time_finished", &::c10d::WorkInfo::timeFinished)
       .def_readonly("active_duration", &::c10d::WorkInfo::activeDuration);

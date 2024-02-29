@@ -613,9 +613,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
-        @torch._inductor.config.patch(
-            {"triton.skip_cudagraph_warmup": True, "fx_graph_cache": False}
-        )
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_tensor_dies_between_checkpoint(self):
             def foo(args):
                 x = args[0]
@@ -956,9 +954,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 node = self.curr_node()
                 self.assertEqual(len(list(node.path_live_weakrefs())), 1)
 
-        @torch._inductor.config.patch(
-            {"triton.skip_cudagraph_warmup": True, "fx_graph_cache": False}
-        )
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_aliased_output_checkpoint(self):
             def foo(args):
                 x = args[0]
@@ -1055,9 +1051,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             del out_ref
             self.assertEqual(len(list(node.path_live_weakrefs())), 0)
 
-        @torch._inductor.config.patch(
-            {"triton.skip_cudagraph_warmup": True, "fx_graph_cache": False}
-        )
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_tensor_no_longer_in_pool(self):
             def foo(args):
                 x = args[0]
@@ -1090,9 +1084,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(self.num_checkpoints(), 1)
             self.assertEqual(self.get_root_children(), [2])
 
-        @torch._inductor.config.patch(
-            {"triton.skip_cudagraph_warmup": True, "fx_graph_cache": False}
-        )
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_checkpoint_shared_output_storage_deallocation(self):
             def foo(args):
                 x = args[0]
@@ -1128,9 +1120,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             del x2
             self.assertEqual(all_live_block_count(), 0)
 
-        @torch._inductor.config.patch(
-            {"triton.skip_cudagraph_warmup": True, "fx_graph_cache": False}
-        )
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_cleanup(self):
             def test_closure():
                 @torch.compile
@@ -1150,9 +1140,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             # del out2
             self.assertTrue(self.get_manager() is None)
 
-        @torch._inductor.config.patch(
-            {"triton.skip_cudagraph_warmup": True, "fx_graph_cache": False}
-        )
+        @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_forward_backward(self):
             @torch.compile
             def foo(x):

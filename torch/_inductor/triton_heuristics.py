@@ -394,9 +394,10 @@ class CachingAutotuner(KernelInterface):
             if hasattr(binary, "num_warps")
             else binary.metadata.num_warps
         )
-        scope["shared"] = (
+        binary_shared = (
             binary.shared if hasattr(binary, "shared") else binary.metadata.shared
         )
+        scope["shared"] = binary_shared
 
         exec(
             f"""
@@ -422,7 +423,7 @@ class CachingAutotuner(KernelInterface):
         launcher.config = cfg
         launcher.n_regs = getattr(binary, "n_regs", None)
         launcher.n_spills = getattr(binary, "n_spills", None)
-        launcher.shared = getattr(binary, "shared", None)
+        launcher.shared = binary_shared
         launcher.store_cubin = config.triton.store_cubin
         # store this global variable to avoid the high overhead of reading it when calling run
         if launcher.store_cubin:

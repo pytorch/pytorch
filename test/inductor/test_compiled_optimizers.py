@@ -287,7 +287,6 @@ def make_test(
 
 def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
     @requires_cuda
-    @config.patch({"fx_graph_cache": False})
     def test_fn(self):
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
