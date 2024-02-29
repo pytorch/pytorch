@@ -359,10 +359,11 @@ def jagged_from_tensor_and_lengths(
 
 
 # NB: A dummy arg is required so that NestedTensor.__torch_dispatch__() is invoked
-# for _nested_view_from_values_offsets(). Sizes don't matter here, so they're kept simple.
+# for _nested_view_from_values_offsets(). Sizes don't matter much, but they shouldn't be
+# 0/1 because the dummy can be fake-ified and we want to avoid specializing.
 # This arg is otherwise unused.
 _nt_view_dummy = NestedTensor(
-    values=torch.randn(1, 1, device="meta"), offsets=torch.randn(1, device="meta")
+    values=torch.randn(3, 3, device="meta"), offsets=torch.randn(2, device="meta")
 )
 
 
