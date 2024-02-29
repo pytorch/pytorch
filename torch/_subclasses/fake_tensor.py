@@ -433,6 +433,9 @@ class FakeTensor(torch.Tensor):
         else:
             return self.fake_device
 
+    def data_ptr(self):
+        raise RuntimeError("FakeTensor has no data")
+
     # Note: [Fake Tensor Dispatch Keys]
     # In order to model the behavior of device-specific autocast
     # and autograd logic, we update the dispatch keys of FakeTensors

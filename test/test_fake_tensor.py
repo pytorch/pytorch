@@ -1602,6 +1602,12 @@ class FakeTensorDispatchCache(TestCase):
             self.assertTrue(y._is_zerotensor())
             self.assertBypasses("dispatch_key_set mismatch", 2)
 
+    def test_data_ptr(self):
+        with FakeTensorMode():
+            x = torch.randn(4, 3)
+            with self.assertRaisesRegex(RuntimeError, "FakeTensor has no data"):
+                x.data_ptr()
+
     def test_inference_mode(self):
         """
         Test that caching handles inference mode correctly.
