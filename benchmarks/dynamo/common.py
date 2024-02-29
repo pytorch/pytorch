@@ -739,9 +739,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             headers.append(k)
             row.append(v)
     if (
-        torch.distributed.is_available()
-        and torch.distributed.is_initialized()
-        and torch.distributed.get_rank() == 0
+        not torch.distributed.is_available()  # no distributed is built
+        or not torch.distributed.is_initialized()  # single gpu
+        or torch.distributed.get_rank() == 0  # distributed + rank0
     ):
         output_csv(
             output_filename,
@@ -3487,6 +3487,8 @@ def run(runner, args, original_dir=None):
             "Wav2Vec2ForCTC",
             "Wav2Vec2ForPreTraining",
             "sam",
+            "resnet50_quantized_qat",
+            "mobilenet_v2_quantized_qat",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)

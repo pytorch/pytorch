@@ -189,6 +189,10 @@
 
 - func: _assert_tensor_metadata(Tensor a, SymInt[]? size=None, SymInt[]? stride=None, ScalarType? dtype=None) -> ()
 
+- func: _print(str s) -> ()
+  dispatch:
+    CompositeExplicitAutograd: _print
+
 - func: sym_constrain_range(Scalar size, *, int? min=None, int? max=None) -> ()
   dispatch:
     CompositeExplicitAutograd: sym_constrain_range
@@ -12397,6 +12401,7 @@
   dispatch:
     CPU: upsample_linear1d_out_cpu
     CUDA: upsample_linear1d_out_cuda
+    MPS: upsample_linear1d_out_mps
 
 - func: upsample_linear1d(Tensor self, SymInt[1] output_size, bool align_corners, float? scales=None) -> Tensor
   python_module: nn
@@ -12408,6 +12413,7 @@
   dispatch:
     CPU: upsample_linear1d_backward_out_cpu
     CUDA: upsample_linear1d_backward_out_cuda
+    MPS: upsample_linear1d_backward_out_mps
 
 - func: upsample_linear1d_backward(Tensor grad_output, SymInt[1] output_size, SymInt[3] input_size, bool align_corners, float? scales=None) -> Tensor
   python_module: nn
@@ -14113,6 +14119,12 @@
 ## Functions that are only for testing
 # It is undocumented and should not be used outside of tests.
 - func: _test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=1) -> Tensor
+
+# Note: for testing COW materialization within `at::parallel_for` loop function
+- func: _test_parallel_materialize(Tensor self, int num_parallel, bool skip_first=False) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _test_parallel_materialize
 
 # Note: this function is only for testing.
 - func: _test_optional_intlist(Tensor values, int[]? addends) -> Tensor
