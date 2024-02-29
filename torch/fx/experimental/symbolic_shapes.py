@@ -3323,10 +3323,12 @@ class ShapeEnv:
                 continue
             subst = {}
             for ra in self.deferred_runtime_asserts.get(s, ()):
+                # NB: simplify here is load bearing, as it ensures that we
+                # apply replacements from unbacked_replacements
                 if compute_hint:
-                    e = canonicalize_bool_expr(ra.expr.xreplace(self.var_to_val))
+                    e = canonicalize_bool_expr(self.simplify(ra.expr).xreplace(self.var_to_val))
                 else:
-                    e = ra.expr
+                    e = self.simplify(ra.expr)
                 # e is already canonical
                 subst[e] = sympy.true
                 subst[canonicalize_bool_expr(sympy.Not(e))] = sympy.false
