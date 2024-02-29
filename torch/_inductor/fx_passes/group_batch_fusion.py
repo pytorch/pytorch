@@ -959,7 +959,7 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
                 else:
                     counters["inductor"]["unknown_group_batch_fusion"] += 1
 
-                log.info(
+                log.debug(
                     f"{rule.__class__.__name__}: key = {key}; subset size = {len(list(subset))}"  # noqa: G004
                 )
 
