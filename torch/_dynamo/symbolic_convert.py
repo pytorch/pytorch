@@ -1158,6 +1158,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                     for loc in new_locals
                 ]
                 for name, v in zip(self.f_code.co_varnames, args):
+                    if (
+                        isinstance(v, ConstantVariable)
+                        and v.as_python_constant()
+                        is RangeHigherOrderVariable.NOT_SET_SENTINEL
+                    ):
+                        continue
                     self.symbolic_locals[name] = v
 
                 # Skip the rest of the loop completely, now that we transformed it.

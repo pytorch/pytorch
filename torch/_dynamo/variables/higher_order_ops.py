@@ -1284,6 +1284,8 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
     store_target: int
 
+    NOT_SET_SENTINEL = None
+
     def __init__(self, value: "RangeIteratorVariable", **kwargs):
         from ..source import GlobalSource
 
@@ -1299,6 +1301,8 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         loop_body_instructions: List["Instruction"],
         symbolic_locals: Dict[str, VariableTracker],
     ):
+        from . import ConstantVariable
+
         if (
             loop_items := len(value.items)
         ) < torch._dynamo.config.for_loop_medium_size_boundary:
@@ -1318,7 +1322,11 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "Control flow too complex for loop higher order op."
             )
         varnames = host_code_object.co_varnames
-        args = [symbolic_locals.get(k) for k in varnames]
+        args = [
+            symbolic_locals.get(k)
+            or ConstantVariable.create(RangeHigherOrderVariable.NOT_SET_SENTINEL)
+            for k in varnames
+        ]
         # STORE_FAST always follows a FOR_ITER as CPython needs to store the next(iter) into the local
         # E.g. in `for i in range(10)`, there is a `STORE_FAST i``
         assert loop_body_instructions[0].opname == "STORE_FAST"
