@@ -86,6 +86,11 @@ from torch.testing._internal.jit_utils import JitTestCase
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 T = typing.TypeVar("T")
 
+global_list = [1, 2, 3]
+global_var = torch.randn(3)
+global_var_aliase_a = global_var
+global_var_aliase_b = global_var
+
 
 # Specializes a test to run only if translation validation is set.
 def onlyIfTranslationValidation(fn: typing.Callable) -> typing.Callable:
@@ -9764,6 +9769,72 @@ fn
         self.assertEqual(len(list(cnt.graphs[0].graph.nodes)[-1].all_input_nodes), 1)
         self.assertEqual(z, ref_y)
         self.assertEqual(x.grad, ref_x_grad)
+
+    def test_compile_aliased_global_vars(self):
+        def f():
+            return global_var_aliase_a + global_var_aliase_b
+
+        ref = f()
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        opt_fn = torch.compile(f, backend=cnt, fullgraph=True)
+        res1 = opt_fn()
+        res2 = opt_fn()
+        res3 = opt_fn()
+        self.assertEqual(ref, res1)
+        self.assertEqual(ref, res2)
+        self.assertEqual(ref, res2)
+        # We have three re-compilations because global_var_aliase_a and global_var_aliase_b
+        # aliase each other and this fail the tensor_check, where no input aliasing is allowed.
+        self.assertEqual(cnt.frame_count, 3)
+
+        ref_frame_count = cnt.frame_count
+        import contextlib
+
+        @contextlib.contextmanager
+        def _replace_global_var_a(new_val):
+            global global_var_aliase_a
+            try:
+                old_val = global_var_aliase_a
+                global_var_aliase_a = new_val
+                yield
+            finally:
+                global_var_aliase_a = old_val
+
+        with _replace_global_var_a(torch.rand_like(global_var_aliase_a)):
+            ref = f()
+            res3 = opt_fn()
+            self.assertEqual(ref, res3)
+        with _replace_global_var_a(torch.rand_like(global_var_aliase_a)):
+            ref = f()
+            res4 = opt_fn()
+            self.assertEqual(ref, res4)
+        with _replace_global_var_a(torch.rand_like(global_var_aliase_a)):
+            ref = f()
+            res5 = opt_fn()
+            self.assertEqual(ref, res5)
+
+        # Since a and b no longer aliase with each other due to the replacement, dynamo doesn't do re-compilation
+        self.assertEqual(cnt.frame_count, ref_frame_count)
+
+    def test_compile_local_aliase_global(self):
+        def f(lst, x):
+            return x + global_list[-1] + lst[-1]
+
+        local_alias = global_list
+        x = torch.ones(1)
+        ref = f(local_alias, x)
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        opt_fn = torch.compile(f, backend=cnt, fullgraph=True)
+        res1 = opt_fn(local_alias, x)
+        self.assertEqual(cnt.frame_count, 1)
+        res2 = opt_fn(list(reversed(global_list)), x)
+        self.assertEqual(cnt.frame_count, 2)
+        res3 = opt_fn([1, 2], x)
+        self.assertEqual(cnt.frame_count, 3)
+        res4 = opt_fn([1, 2, 3, 2], x)
+        self.assertEqual(cnt.frame_count, 4)
 
 
 class TestTracer(JitTestCase):

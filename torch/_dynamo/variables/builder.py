@@ -258,10 +258,15 @@ class VariableBuilder:
     def __call__(self, value):
         if value in self.tx.output.side_effects:
             side_effect_result = self.tx.output.side_effects[value]
-            dup_guard = make_dupe_guard(self.source, side_effect_result.source)
-            if dup_guard:
-                self.install_guards(dup_guard)
-            return side_effect_result
+            from torch._dynamo.source import is_from_local_source
+
+            if is_from_local_source(side_effect_result.source) and is_from_local_source(
+                self.source
+            ):
+                dup_guard = make_dupe_guard(self.source, side_effect_result.source)
+                if dup_guard:
+                    self.install_guards(dup_guard)
+                return side_effect_result
         vt = self._wrap(value)
         vt.source = self.source
         if self._can_lift_attrs_to_inputs(vt):
@@ -956,7 +961,10 @@ class VariableBuilder:
 
         # We cannot already be tracking the tensor, which implies
         # it would have already been wrapped
-        assert value not in self.tx.output.side_effects
+        from torch._dynamo.source import is_from_local_source
+
+        if is_from_local_source(source):
+            assert value not in self.tx.output.side_effects
 
         if (
             source.guard_source().is_nn_module()
