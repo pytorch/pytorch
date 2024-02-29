@@ -243,7 +243,7 @@ class _KinetoProfile:
             "rank": dist.get_rank(),
             "world_size": dist.get_world_size(),
             "pg_count": dist.get_pg_count(),
-            "pg_config": dist.get_pg_config(),
+            "pg_config": dist.distributed_c10d._get_all_pg_configs(),
         }
 
     def _memory_profile(self) -> MemoryProfile:

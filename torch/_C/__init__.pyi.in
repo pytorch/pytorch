@@ -56,7 +56,7 @@ from torch._prims_common import DeviceLikeType
 
 # This module is defined in torch/csrc/Module.cpp
 
-from . import _functorch, _lazy, _lazy_ts_backend, _nn, _onnx, _VariableFunctions, _cpu, _aoti
+from . import _functorch, _lazy, _lazy_ts_backend, _nn, _onnx, _VariableFunctions, _cpu, _aoti, _verbose
 
 K = TypeVar("K")
 T = TypeVar("T")
@@ -1088,6 +1088,8 @@ def _set_sdp_use_mem_efficient(
 ) -> None: ...  # THPModule_setSDPUseMemEfficient
 def _get_math_sdp_enabled() -> _bool: ...  # THPModule_userEnabledMathSDP
 def _set_sdp_use_math(arg: _bool) -> None: ...  # THPModule_setSDPUseMath
+def _get_cudnn_sdp_enabled() -> _bool: ...  # THPModule_userEnabledMathSDP
+def _set_sdp_use_cudnn(arg: _bool) -> None: ...  # THPModule_setSDPUseMath
 def _get_mkldnn_enabled() -> _bool: ...  # THPModule_userEnabledMkldnn
 def _set_mkldnn_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledMkldnn
 def _get_cudnn_benchmark() -> _bool: ...  # THPModule_benchmarkCuDNN
@@ -1211,6 +1213,7 @@ _has_mps: _bool
 has_lapack: _bool
 _has_cuda: _bool
 _has_magma: _bool
+_has_xpu: _bool
 _has_mkldnn: _bool
 _has_cudnn: _bool
 has_spectral: _bool
@@ -1530,7 +1533,7 @@ def _are_functorch_transforms_active() -> _bool: ...
 # Define in torch/csrc/autograd/init.cpp
 def _set_python_dispatcher(dispatcher: object) -> None: ...
 
-def _get_singleton_int(id: _int, coeff: _int) -> SymInt: ...
+def _get_nested_int(id: _int, coeff: _int) -> SymInt: ...
 
 def _get_constant_bool_symnode(val: _bool) -> Any: ...
 
@@ -1787,6 +1790,7 @@ class _SDPBackend(Enum):
     MATH = 0
     FLASH_ATTENTION = 1
     EFFICIENT_ATTENTION = 2
+    CUDNN_ATTENTION = 3
 
 def _can_use_flash_attention(params: _SDPAParams, debug: _bool) -> _bool: ...
 def _can_use_mem_efficient_attention(params: _SDPAParams, debug: _bool) -> _bool: ...
@@ -1872,6 +1876,65 @@ class _CUDAGraph:
 
 def _cuda_isCurrentStreamCapturing() -> _bool: ...
 def _graph_pool_handle() -> Tuple[_int, _int]: ...
+
+# Defined in torch/csrc/xpu/Module.cpp
+def _xpu_setDevice(device: _int) -> None: ...
+def _xpu_exchangeDevice(device: _int) -> _int: ...
+def _xpu_maybeExchangeDevice(device: _int) -> _int: ...
+def _xpu_getDevice() -> _int: ...
+def _xpu_getDeviceCount() -> _int: ...
+def _xpu_init() -> None: ...
+def _xpu_setStream(stream_id: _int, device_index: _int, device_type: _int) -> None: ...
+def _xpu_getCurrentStream(device: _int) -> Tuple: ...
+def _xpu_getCurrentRawStream(device: _int) -> _int: ...
+def _xpu_synchronize(device: _int) -> None: ...
+def _xpu_emptyCache() -> None: ...
+
+class _XpuDeviceProperties:
+    name: str
+    platform_name: str
+    total_memory: _int
+    max_compute_units: _int
+    gpu_eu_count: _int
+    gpu_subslice_count: _int
+    max_work_group_size: _int
+    max_num_sub_groups: _int
+    sub_group_sizes: List[_int]
+    type: str
+
+# Defined in torch/csrc/xpu/Stream.cpp
+class _XpuStreamBase(Stream):
+    stream_id: _int
+    device_index: _int
+    device_type: _int
+
+    device: _device
+    sycl_queue: _int
+    priority: _int
+
+    def __new__(
+        cls,
+        priority: _int = 0,
+        stream_id: _int = 0,
+        device_index: _int = 0,
+        device_type: _int = 0,
+    ) -> _XpuStreamBase: ...
+    def query(self) -> _bool: ...
+    def synchronize(self) -> None: ...
+    @staticmethod
+    def priority_range() -> Tuple: ...
+
+# Defined in torch/csrc/xpu/Event.cpp
+class _XpuEventBase:
+    device: _device
+    sycl_event: _int
+
+    def __new__(cls, enable_timing: _bool = False) -> _XpuEventBase: ...
+    def record(self, stream: _XpuEventBase) -> None: ...
+    def wait(self, stream: _XpuStreamBase) -> None: ...
+    def query(self) -> _bool: ...
+    def elapsed_time(self, other: _XpuEventBase) -> _float: ...
+    def synchronize(self) -> None: ...
 
 # Defined in torch/csrc/DataLoader.cpp
 def _set_worker_signal_handlers(
@@ -2113,3 +2176,4 @@ def _save_jit_module_to_bytes(m: ScriptModule,  extra_files: Dict[str, Any]) -> 
 def _get_module_info_from_flatbuffer(data: bytes): ...
 def _jit_resolve_packet(op_name: str, *args, **kwargs) -> str: ...
 def _swap_tensor_impl(t1: Tensor, t2: Tensor): ...
+def _save_pickle(obj: Any) -> bytes: ...

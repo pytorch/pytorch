@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import DFIterDataPipe, IterDataPipe
@@ -416,7 +416,7 @@ class CaptureDataFrameWithDataPipeOps(CaptureDataFrame):
 
 @functional_datapipe('trace_as_dataframe')
 class DataFrameTracer(CaptureDataFrameWithDataPipeOps, IterDataPipe):  # type: ignore[misc]
-    source_datapipe = None
+    source_datapipe: Optional[Any] = None
 
     # TODO(VitalyFedyunin): Must implement all special functions of datapipes
 
