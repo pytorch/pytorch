@@ -919,10 +919,6 @@ def _export(
                         if entry in meta:
                             params_buffers_to_node_meta[arg.target][entry] = meta[entry]
 
-    # Don't copy over nn_module_stack metadata for params/buffers nodes
-    for metadata in params_buffers_to_node_meta.values():
-        metadata.pop("nn_module_stack", None)
-
     # Fix the graph output signature to be tuple if scalar
     out_spec = orig_out_spec = gm_torch_level._out_spec
     assert out_spec is not None
@@ -957,6 +953,10 @@ def _export(
     gm = ep_non_strict.gm
     export_graph_signature = ep_non_strict.sig
     constants = ep_non_strict.constants
+
+    # Don't copy over nn_module_stack metadata for params/buffers nodes
+    for metadata in params_buffers_to_node_meta.values():
+        metadata.pop("nn_module_stack", None)
 
     # After aot_export, set the param/buffer metadata back into placeholders
     # Technically, users can still construct this data from param names
