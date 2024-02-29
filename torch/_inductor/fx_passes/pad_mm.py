@@ -83,55 +83,76 @@ _LAYOUT_REPLACING_FUNCTIONS = {
     aten.embedding_bag,
     aten.empty_strided,
     aten.linspace,
+    aten.convolution,
+    aten.conv1d,
+    aten.conv2d,
+    aten.conv3d,
 }
 
 
-def _result_layout_affects_graph_output(match: Match) -> bool:
+def _result_layout_affects_graph_output(
+    match: Match, max_depth=30, max_iters=200
+) -> bool:
     """
     Heuristic to check if the matched GEMM operation potentially affects the graph output strides.
     returns True if the matched op's output buffer does not pass through functions which certainly
     redefine the memory layout before being part of the graph output.
 
-    I call it a heuristic because I don't think it perfectly covers all cases.
-    It tries to err on the side of caution, e.g. it's better to return True
+    I call it a heuristic because it's a truncated search and doesn't cover all possible
+    cases. It tries to err on the side of caution, e.g. it's better to return True
     even if the match cannot affect output strides than to return False if it can.
     """
+    import collections
+
     if match.ctx is not None:
         assert isinstance(match.ctx, MatchContext)
         graph: torch.fx.Graph = match.ctx.graph
         output_nodes: List[torch.fx.Node] = [n for n in graph.nodes if n.op == "output"]
-        search_node = match.output_node()
+        search_node: torch.fx.Node = match.output_node()
     else:
         return True
 
-    def recursively_search(n, depth=100000):
-        if depth == 0:
-            raise RuntimeError("Recursion depth exceeded")
-        if n is search_node:
-            return True
-        if isinstance(n, (list, tuple)):
-            return any(recursively_search(subn, depth - 1) for subn in n)
-        if not isinstance(n, torch.fx.Node):
-            return False
-        assert n.op not in {
-            "call_method",
-            "call_module",
-        }, f"The graph is not functionalized. node.op={n.op}"
-        if n.op != "call_function" and n.op != "output":
-            return False
-        if n.target in _LAYOUT_REPLACING_FUNCTIONS:
-            return False
-        if n.args is not None and any(
-            recursively_search(subn, depth - 1) for subn in n.args
-        ):
-            return True
-        if n.kwargs is not None and any(
-            recursively_search(subn, depth - 1) for subn in n.kwargs.values()
-        ):
-            return True
+    assert search_node is not None
+    assert graph is not None
+
+    def bfs_search_node(search_node, output_nodes, max_depth, max_iters):
+        seen: set[torch.fx.Node] = set()
+        visit_queue = collections.deque((onode, 0) for onode in output_nodes)
+        i = 0
+        while len(visit_queue) > 0:
+            i += 1
+            if i > max_iters:
+                return True
+            n, depth = visit_queue.popleft()
+            if n is search_node:
+                return True
+            if n in seen:
+                continue
+            if depth >= max_depth:
+                return True
+            seen.add(n)
+            if isinstance(n, (list, tuple)):
+                visit_queue.extend((subn, depth + 1) for subn in n)
+                continue
+            if not isinstance(n, torch.fx.Node):
+                continue
+            assert n.op not in {
+                "call_method",
+                "call_module",
+            }, f"The graph is not functionalized. node.op={n.op}"
+            if n.op != "call_function" and n.op != "output":
+                continue
+            if n.target in _LAYOUT_REPLACING_FUNCTIONS:
+                continue
+            if n.args is not None:
+                visit_queue.extend((subn, depth + 1) for subn in n.args)
+            if n.kwargs is not None:
+                visit_queue.extend((subn, depth + 1) for subn in n.kwargs.values())
         return False
 
-    if len(output_nodes) > 0 and any(recursively_search(n) for n in output_nodes):
+    if len(output_nodes) > 0 and bfs_search_node(
+        search_node, output_nodes, max_depth=max_depth, max_iters=max_iters
+    ):
         return True
     return False
 
