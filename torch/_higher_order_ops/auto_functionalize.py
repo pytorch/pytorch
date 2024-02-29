@@ -108,7 +108,7 @@ def can_auto_functionalize(op: torch._ops.OperatorBase) -> bool:
 @auto_functionalized.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_dense(
     _mutable_op: torch._ops.OpOverload,
-    _only_clone_tensors: Optional[Tuple[str, ...]] = None,
+    _only_clone_these_tensors: Optional[Tuple[str, ...]] = None,
     **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     new_kwargs = dict(**kwargs)
@@ -116,7 +116,7 @@ def auto_functionalized_dense(
 
     _mutable_args_names = get_mutable_arg_names(_mutable_op)
     for name in _mutable_args_names:
-        if _only_clone_tensors is not None and name not in _only_clone_tensors:
+        if _only_clone_these_tensors is not None and name not in _only_clone_these_tensors:
             new_kwargs[name] = kwargs[name]
         else:
             new_kwargs[name] = (

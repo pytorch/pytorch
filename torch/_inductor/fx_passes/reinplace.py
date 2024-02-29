@@ -492,7 +492,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             # Stash the metadata. There is a pass later on where we decompose
             # auto_functionalized into clones + a mutable op; this metadata
             # tells the decomp to only clone the following inputs
-            node.meta["only_clone_tensors"] = tensors_to_clone
+            node.meta["only_clone_these_tensors"] = tensors_to_clone
         elif node.target in inplaceable_triton_ops:
             # inplaceable_triton_ops take an additional argument called
             # tensors_to_clone which contain a list of tensors to clone
