@@ -496,6 +496,9 @@ def split_module(
             tuple(base_mod_env[name] for name in partition.inputs),
         )
 
+        # Assign nn_module_stack based on first node in partition
+        output_val.meta["nn_module_stack"] = orig_mod_env[partition.node_names[0]].meta.get("nn_module_stack", {})
+
         num_outputs = len(partition.outputs)
         if num_outputs > 1:
             # Unpack multiple return values from submodule

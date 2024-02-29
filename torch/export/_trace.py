@@ -438,19 +438,19 @@ def _export_non_strict(
     if isinstance(mod, torch.fx.GraphModule) and hasattr(mod, "meta"):
         gm.meta.update(mod.meta)
 
-    # Remove nn_module_stack metadata from all placeholders/inputs nodes
-    # These may have multiple paths of references, so nn_module_stack may not be well-defined.
-    for mod in gm.modules():
-        for node in mod.graph.nodes:
-            if node.op in ["placeholder", "output"]:
-                node.meta.pop("nn_module_stack", None)
-
     if pre_dispatch:
         from torch._export.passes.replace_set_grad_with_hop_pass import (
             replace_set_grad_with_hop_pass,
         )
 
         gm = replace_set_grad_with_hop_pass(gm)
+
+    # Remove nn_module_stack metadata from all placeholders/inputs nodes
+    # These may have multiple paths of references, so nn_module_stack may not be well-defined.
+    for mod in gm.modules():
+        for node in mod.graph.nodes:
+            if node.op in ["placeholder", "output"]:
+                node.meta.pop("nn_module_stack", None)
 
     # NOTE: aot_export adds symint metadata for placeholders with int values;
     # since these become specialized, we replace such metadata with the original values

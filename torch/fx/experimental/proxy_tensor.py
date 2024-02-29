@@ -985,7 +985,7 @@ class _ModuleStackTracer(PythonKeyTracer):
         since parent classes might not want to track module_stack metadata
         '''
         node = super().create_node(*args, **kwargs)
-        if not "nn_module_stack" in node.meta and not node.op in ["placeholder", "output"]:
+        if "nn_module_stack" not in node.meta and node.op not in ["placeholder", "output"]:
             node.meta["nn_module_stack"] = self.module_stack
         return node
 
