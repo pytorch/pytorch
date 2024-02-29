@@ -77,7 +77,10 @@ class TestClipGradNormMultiThread(FSDPTest):
             comm_mode = CommDebugMode()
             with comm_mode:
                 total_norm = torch.nn.utils.clip_grad_norm_(
-                    model.parameters(), max_norm=max_norm, norm_type=norm_type
+                    model.parameters(),
+                    max_norm=max_norm,
+                    norm_type=norm_type,
+                    foreach=True,
                 )
             self.assertEqual(ref_total_norm, total_norm)
             self.assertEqual(comm_mode.get_total_counts(), 1)  # one all-reduce

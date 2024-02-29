@@ -165,9 +165,14 @@ class OpDispatcher:
             if output_sharding.needs_redistribute:
                 # compute locally with redistribute first if needed
                 assert output_sharding.schema_suggestions is not None
-                self.redistribute_local_args(
-                    op_info, output_sharding.schema_suggestions[0]
-                )
+                try:
+                    self.redistribute_local_args(
+                        op_info, output_sharding.schema_suggestions[0]
+                    )
+                except Exception as e:
+                    if torch.distributed.get_rank() == 0:
+                        print(f"op_info: {op_info.schema}")
+                    raise e
 
             local_tensor_args = (
                 pytree.tree_unflatten(
@@ -342,7 +347,9 @@ class OpDispatcher:
                 kwargs_schema[k] = v
                 local_kwargs[k] = v
 
-        assert mesh is not None, f"found no DeviceMesh from dtensor args for {op_call}!"
+        assert (
+            mesh is not None
+        ), f"found no DeviceMesh from dtensor args for {op_call}!\nargs: {args}\nkwargs: {kwargs}"
         op_info = OpInfo(
             mesh,
             OpSchema(
