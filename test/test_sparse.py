@@ -4429,7 +4429,6 @@ class TestSparseMeta(TestCase):
                 self.assertEqual(f_values.dtype, values.dtype)
                 self.assertEqual(f_values.device, values.device)
 
-            print(f'{f=}')
 
 class _SparseDataset(torch.utils.data.Dataset):
     # An utility class used in TestSparseAny.test_dataloader method.
