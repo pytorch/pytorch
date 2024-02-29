@@ -42,6 +42,11 @@ on:
         required: false
         type: string
         default: "gha-artifacts"
+      is-arc:
+        description: Check that we upload the artifact from the LF bucket.
+        type: boolean
+        required: false
+        default: false
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -123,6 +128,7 @@ jobs:
         with:
           name: ${{ inputs.build-environment }}
           s3-bucket: ${{ inputs.s3-bucket }}
+          is-arc: ${{ inputs.is-arc }}
 
       - name: Download TD artifacts
         continue-on-error: true
