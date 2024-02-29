@@ -4,6 +4,7 @@ import torch
 import torch._export
 import torch._inductor
 import torch.fx._pytree as fx_pytree
+from torch.export import WrapperModule
 
 from torch.testing._internal.common_utils import IS_FBCODE
 
@@ -20,6 +21,8 @@ class AOTIRunnerUtil:
         dynamic_shapes=None,
         disable_constraint_solver=False,
     ):
+        if not isinstance(model, torch.nn.Module):
+            model = WrapperModule(model)
         # The exact API is subject to change
         so_path = torch._export.aot_compile(
             model,

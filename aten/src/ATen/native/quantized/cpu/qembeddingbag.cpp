@@ -491,7 +491,7 @@ at::Tensor& embedding_bag_byte_impl(
               /*offsets_or_lengths=*/offsets_data + start_idx,
               /*weights=*/
               per_sample_weights_
-                  ? per_sample_weights_.value().data_ptr<float>() +
+                  ? per_sample_weights_.value().const_data_ptr<float>() +
                       offsets_data[start_idx]
                   : nullptr,
               /*out=*/output_data + start_idx * D);

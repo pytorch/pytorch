@@ -16,7 +16,6 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA
 from torch.testing._internal.common_utils import slowTest, suppress_warnings
-from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -305,7 +304,7 @@ class TestModels(JitTestCase):
         self._test_reinforcement_learning(self, device='cuda', test_export_import=False)
 
     @staticmethod
-    def _test_snli(self, device, check_export_import=True, quantized=False):
+    def _test_snli(self, device, check_export_import=True):
         class Bottle(nn.Module):
 
             def forward(self, input):
@@ -392,26 +391,12 @@ class TestModels(JitTestCase):
         premise = torch.LongTensor(48, 64).random_(0, 100).to(device)
         hypothesis = torch.LongTensor(24, 64).random_(0, 100).to(device)
 
-        if quantized:
-            snli = SNLIClassifier(Config()).cpu()
-            torch.jit.quantized.quantize_linear_modules(snli)
-            # we don't do export/import checks because we would need to call
-            # _pack/_unpack
-            self.checkTrace(snli, (premise, hypothesis), inputs_require_grads=False,
-                            export_import=False)
-        else:
-            self.checkTrace(SNLIClassifier(Config()).to(device), (premise, hypothesis),
-                            inputs_require_grads=False, export_import=check_export_import)
+        self.checkTrace(SNLIClassifier(Config()).to(device), (premise, hypothesis),
+                        inputs_require_grads=False, export_import=check_export_import)
 
     @slowTest
     def test_snli(self):
         self._test_snli(self, device='cpu')
-
-    @skipIfNoFBGEMM
-    # Suppression: this exercises a deprecated API
-    @suppress_warnings
-    def test_snli_quantized(self):
-        self._test_snli(self, device='cpu', quantized=True)
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_snli_cuda(self):
@@ -504,7 +489,7 @@ class TestModels(JitTestCase):
                             export_import=False)
 
     @staticmethod
-    def _test_vae(self, device, check_export_import=True, quantized=False):
+    def _test_vae(self, device, check_export_import=True):
         class VAE(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -536,28 +521,13 @@ class TestModels(JitTestCase):
                 z = self.reparameterize(mu, logvar)
                 return self.decode(z), mu, logvar
 
-        if quantized:
-            vae = VAE().to(device).eval()
-            torch.jit.quantized.quantize_linear_modules(vae)
-            # We don't do export/import checks because we would need to call
-            # _unpack and _pack
-            self.checkTrace(vae, (torch.rand(128, 1, 28, 28, device=device),),
-                            export_import=False, allow_unused=True,
-                            inputs_require_grads=False)
-        else:
-            with enable_profiling_mode_for_profiling_tests():
-                # eval() is present because randn_like makes this nondeterministic
-                self.checkTrace(VAE().to(device).eval(), (torch.rand(128, 1, 28, 28, device=device),),
-                                export_import=check_export_import)
+        with enable_profiling_mode_for_profiling_tests():
+            # eval() is present because randn_like makes this nondeterministic
+            self.checkTrace(VAE().to(device).eval(), (torch.rand(128, 1, 28, 28, device=device),),
+                            export_import=check_export_import)
 
     def test_vae(self):
         self._test_vae(self, device='cpu')
-
-    @skipIfNoFBGEMM
-    # Suppression: this exercises a deprecated API
-    @suppress_warnings
-    def test_vae_quantized(self):
-        self._test_vae(self, device='cpu', quantized=True)
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_vae_cuda(self):

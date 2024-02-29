@@ -1,8 +1,7 @@
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/util/CallOnce.h>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 std::atomic<const PyInterpreter*> GPUTrace::gpuTraceState{nullptr};
 
@@ -16,5 +15,4 @@ void GPUTrace::set_trace(const PyInterpreter* trace) {
   });
 }
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

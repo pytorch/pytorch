@@ -43,16 +43,6 @@ def clone_me(x):
     return x.detach().clone().requires_grad_(x.requires_grad)
 
 
-def skip_if_pytest(fn):
-    @functools.wraps(fn)
-    def wrapped(*args, **kwargs):
-        if "PYTEST_CURRENT_TEST" in os.environ:
-            raise unittest.SkipTest("does not work under pytest")
-        return fn(*args, **kwargs)
-
-    return wrapped
-
-
 def named_parameters_for_optimized_module(mod):
     assert isinstance(mod, eval_frame.OptimizedModule)
     return mod._orig_mod.named_parameters
@@ -155,7 +145,9 @@ def debug_dump(name, code: types.CodeType, extra="") -> None:
         )
 
 
-def debug_insert_nops(frame, cache_size, hooks, _) -> Optional[GuardedCode]:
+def debug_insert_nops(
+    frame, cache_size, hooks, _, *, skip: int = 0
+) -> Optional[GuardedCode]:
     """used to debug jump updates"""
 
     def insert_nops(instructions, code_options):

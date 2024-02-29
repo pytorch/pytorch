@@ -1,4 +1,5 @@
 import gc
+from typing import Optional
 
 import torch
 from torch.utils import _pytree
@@ -141,7 +142,7 @@ class graph:
         https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
     """  # noqa: B950
 
-    default_capture_stream = None
+    default_capture_stream: Optional["torch.cuda.Stream"] = None
 
     def __init__(
         self,
@@ -324,7 +325,7 @@ def make_graphed_callables(
                     only_inputs=True,
                     allow_unused=allow_unused_input,
                 )
-            del outputs, grad_inputs
+            del outputs, grad_inputs  # type: ignore[possibly-undefined]
     torch.cuda.synchronize()
 
     # All captures here share a mempool. To avoid replays corrupting each other's memory,

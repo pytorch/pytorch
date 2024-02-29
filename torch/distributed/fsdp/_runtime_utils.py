@@ -105,38 +105,6 @@ def _is_fsdp_root(state: _FSDPState, module: nn.Module) -> bool:
 
 
 @no_type_check
-def _validate_and_get_hybrid_shard_state(root_module: nn.Module) -> None:
-    """
-    Precondition: ``root_module`` is a ``FullyShardedDataParallel`` instance.
-
-    This checks that all instances using a hybrid sharding strategy have the
-    same intra- and inter-node process groups.
-    """
-    intra_node_pgs: Set[dist.ProcessGroup] = set()
-    inter_node_pgs: Set[dist.ProcessGroup] = set()
-    for fsdp_state in traversal_utils._get_fsdp_states(root_module):
-        # TODO: Change this to handle's sharding strategy if we deprecate
-        # `ShardingStrategy` internally.
-        # https://github.com/pytorch/pytorch/issues/90857
-        if fsdp_state.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
-            intra_node_pgs.add(fsdp_state.process_group)
-            inter_node_pgs.add(fsdp_state._inter_node_pg)
-    if len(intra_node_pgs) == 0 and len(inter_node_pgs) == 0:
-        # No instances use a hybrid sharding strategy
-        return
-    error_prefix = "At least one instance uses a hybrid sharding strategy but has no "
-    if len(intra_node_pgs) > 0 and len(inter_node_pgs) == 0:
-        raise AssertionError(error_prefix + "inter-node process group set")
-    if len(intra_node_pgs) == 0 and len(inter_node_pgs) > 0:
-        raise AssertionError(error_prefix + "intra-node process group set")
-    error_prefix = "Some instances use a hybrid sharding strategy, but "
-    if len(intra_node_pgs) != 1:
-        raise ValueError(error_prefix + "intra-node process groups do not match")
-    if len(inter_node_pgs) != 1:
-        raise ValueError(error_prefix + "inter-node process groups do not match")
-
-
-@no_type_check
 def _lazy_init(
     state: _FSDPState,
     root_module: nn.Module,
@@ -208,7 +176,6 @@ def _share_state_and_init_handle_attrs(
     handle = root_state._handle
     if handle:
         handle.init_flat_param_attributes()
-    _validate_and_get_hybrid_shard_state(root_module)
     attr_name_to_values: Dict[str, Set[Any]] = {}
     for attr_name in HOMOGENEOUS_ATTR_NAMES:
         attr_name_to_values[attr_name] = set()
@@ -788,6 +755,22 @@ def _post_backward_hook(
             _no_dispatch_record_stream(
                 autograd_computed_grad, state._post_backward_stream
             )
+
+
+def _post_backward_reshard_only_hook(
+    state: _FSDPState,
+    handle: FlatParamHandle,
+    *unused: Any,
+) -> None:
+    with torch.profiler.record_function(
+        "FullyShardedDataParallel._post_backward_hook_reshard_only"
+    ):
+        # `_pre_backward_hook` may not get executed
+        # if forward output does not require grad
+        # overwrite IDLE state for post-backward prefetching
+        state.training_state = TrainingState.FORWARD_BACKWARD
+        handle._training_state = HandleTrainingState.BACKWARD_POST
+        _post_backward_reshard(state, handle)
 
 
 def _post_backward_reshard(
@@ -1504,7 +1487,7 @@ def _register_post_backward_reshard_only_hook(
         ]
     assert inp_tensors is not None  # mypy
     hook_handle = register_multi_grad_hook(
-        inp_tensors, functools.partial(_post_backward_reshard, state, handle)
+        inp_tensors, functools.partial(_post_backward_reshard_only_hook, state, handle)
     )
     if torch.distributed._functional_collectives.is_torchdynamo_compiling():
         flat_param._post_backward_hook_handle = hook_handle  # type: ignore[attr-defined, assignment]
