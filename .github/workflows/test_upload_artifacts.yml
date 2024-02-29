@@ -13,7 +13,8 @@ jobs:
   upload-step:
     name: upload-step
     runs-on:
-      group: arc-lf-linux.2xlarge.arc-rootless.canary
+#      group: arc-lf-linux.2xlarge.arc-rootless.canary
+      group: arc-lf-linux.2xlarge.arc.canary
     permissions:
       id-token: write
       contents: read
