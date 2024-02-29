@@ -11,7 +11,6 @@ using c10::Dict;
 using c10::IValue;
 using torch::jit::Pickler;
 
-using c10::cuda::CUDACachingAllocator::BlockInfo;
 using c10::cuda::CUDACachingAllocator::SegmentInfo;
 
 namespace {
@@ -72,6 +71,7 @@ std::vector<IValue> ivalue_symbolize(
   }
 
   std::vector<IValue> result;
+  result.reserve(to_symbolize.size());
   for (const auto& sc : to_symbolize) {
     result.push_back(py_unique_frames.at(cached_frames.at(sc)));
   }
