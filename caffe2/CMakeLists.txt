@@ -1089,6 +1089,11 @@ if(USE_XPU)
       ${TORCH_SRC_DIR}/csrc/api/include
       ${Caffe2_CPU_INCLUDE}
       ${Caffe2_XPU_INCLUDE})
+  # Pass the target as a dependency so that ATen headers generation
+  # could be followed by torch-xpu-ops build.
+  # 1. Sources in torch-xpu-ops depend on generated ATen headers.
+  # 2. Using add_custom_command in torch-xpu-ops to define sycl device sources
+  #    compilation. add_custom_command requires an explicit dependency.
   set(TORCH_XPU_OPS_PYTORCH_DEPS ATEN_CPU_FILES_GEN_TARGET)
   add_subdirectory(${TORCH_ROOT}/third_party/torch-xpu-ops
       ${CMAKE_BINARY_DIR}/caffe2/aten_xpu)
