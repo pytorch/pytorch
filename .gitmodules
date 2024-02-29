@@ -149,3 +149,6 @@
 [submodule "third_party/mimalloc"]
 	path = third_party/mimalloc
 	url = https://github.com/microsoft/mimalloc.git
+[submodule "third_party/torch-xpu-ops"]
+	path = third_party/torch-xpu-ops
+	url = https://github.com/intel/torch-xpu-ops.git
