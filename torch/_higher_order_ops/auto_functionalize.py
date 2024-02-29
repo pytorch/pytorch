@@ -116,7 +116,10 @@ def auto_functionalized_dense(
 
     _mutable_args_names = get_mutable_arg_names(_mutable_op)
     for name in _mutable_args_names:
-        if _only_clone_these_tensors is not None and name not in _only_clone_these_tensors:
+        if (
+            _only_clone_these_tensors is not None
+            and name not in _only_clone_these_tensors
+        ):
             new_kwargs[name] = kwargs[name]
         else:
             new_kwargs[name] = (

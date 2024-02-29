@@ -663,7 +663,9 @@ def decompose_auto_functionalized(graph):
     def replacement(match: Match, *args, **kwargs):
         from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
 
-        only_clone_these_tensors = tuple(match.nodes[0].meta.get("only_clone_these_tensors", []))
+        only_clone_these_tensors = tuple(
+            match.nodes[0].meta.get("only_clone_these_tensors", [])
+        )
 
         flat_args, spec = pytree.tree_flatten((args, kwargs))
 
