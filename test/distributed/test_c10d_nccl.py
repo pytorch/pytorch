@@ -3021,6 +3021,32 @@ class WorkHookTest(MultiProcessTestCase):
         self.assertEqual(num_hook_fired[OpType.ALLGATHER], 2)
         self.assertTrue(all(duration > 0 for duration in durations[OpType.ALLGATHER]))
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_on_completion_hook_seq(self):
+        pg = self._get_process_group()
+        num_hook_fired = 0
+        seq: int = -1
+        work: int = 0
+
+        def hook(work_info: torch._C._distributed_c10d.WorkInfo):
+            nonlocal num_hook_fired, seq
+            num_hook_fired += 1
+            seq = work_info.seq
+
+        pg._register_on_completion_hook(hook)
+        tensor = torch.ones([2, 3]).cuda(self.rank) * self.rank
+        work_count = 3
+        for i in range(work_count):
+            work += 1
+            pg.broadcast([tensor]).wait()
+
+        # N.B.: destroy_process_group is necessary to wait for
+        # all pending works to finish.
+        c10d.destroy_process_group(pg)
+
+        self.assertEqual(num_hook_fired, work_count)
+        self.assertEqual(work, seq)
 
 class NcclErrorHandlingTest(MultiProcessTestCase):
     def setUp(self):
@@ -4065,7 +4091,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         ver = t['version']
-        self.assertEqual(ver, "1.1")
+        self.assertEqual(ver, "1.2")
+        pg_config = t['pg_config']
+        self.assertEqual(len(pg_config), 1)
+        self.assertEqual(len(pg_config[0]), self.world_size)
         t = t['entries']
         self.assertEqual(len(t), 2)
         last = t[-1]
@@ -4343,6 +4372,8 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
     def test_timeout_dumps_on_stuck_ranks(self):
         # need rank0 to crash quicker after detecting timeout
         os.environ['TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC'] = '1'
+        # restore this env var to its prior default in case another test changed it
+        os.environ['TORCH_NCCL_COORD_CHECK_MILSEC'] = '1000'
 
         if self.rank == self.MAIN_PROCESS_RANK:
             # wait for both rank0 and 1 to crash before looking for both ranks' output
