@@ -833,7 +833,7 @@ def assert_flat_tuple_of_tensors(elts: Any, api: str, argname: str) -> None:
 
 
 def assert_non_empty_tensor_output(output: List[Any], api: str) -> None:
-    if output == [None] or len(output) < 1:
+    if (len(output) == 1 and output[0] is None) or len(output) < 1:
         raise RuntimeError(
             f'{api}: Expected f to be a function that has non-empty output (got output = {output})'
         )
