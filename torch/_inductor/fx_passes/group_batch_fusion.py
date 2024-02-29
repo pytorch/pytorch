@@ -59,6 +59,15 @@ default_graph_search_options = {
 graph_search_options = default_graph_search_options
 
 
+def update_stack_example_value(stack_node, metadata, dim=0):
+    """
+    Update the example value of the node in the graph to enable followup split cat opt.
+    """
+    if stack_node is not None and hasattr(stack_node, "meta"):
+        example_value = torch.stack(metadata, dim=dim)
+        stack_node.meta["example_value"] = example_value
+
+
 class GroupBatchFusionBase:
     def __init__(self, **kwargs):
         self.graph_search_options = kwargs.pop(
@@ -495,19 +504,31 @@ class PreGradBatchLinearFusion(BatchFusion):
         batch_inputs = []
         batch_weights = []
         batch_biases = []
+        batch_inputs_metadata = []
+        batch_weights_metadata = []
+        batch_biases_metadata = []
         for node in subset:
             batch_nodes.append(node)
-            batch_inputs.append(get_arg_value(node, 0, "input"))
-            batch_weights.append(get_arg_value(node, 1, "weight"))
-            batch_biases.append(get_arg_value(node, 2, "bias"))
+            input = get_arg_value(node, 0, "input")
+            batch_inputs.append(input)
+            batch_inputs_metadata.append(input.meta["example_value"])
+            weight = get_arg_value(node, 1, "weight")
+            batch_weights.append(weight)
+            batch_weights_metadata.append(weight.meta["example_value"])
+            bias = get_arg_value(node, 2, "bias")
+            batch_biases.append(bias)
+            if bias is not None and hasattr(bias, "meta"):
+                batch_biases_metadata.append(bias.meta["example_value"])
 
         with graph.inserting_before(subset[0]):
             stack_inputs = graph.call_function(
                 torch.stack, args=(batch_inputs,), kwargs={"dim": 0}
             )
+            update_stack_example_value(stack_inputs, batch_inputs_metadata)
             stack_weights = graph.call_function(
                 torch.stack, args=(batch_weights,), kwargs={"dim": 0}
             )
+            update_stack_example_value(stack_weights, batch_weights_metadata)
             transpose_weight = graph.call_function(
                 torch.transpose, args=(stack_weights, 1, 2)
             )
@@ -520,6 +541,7 @@ class PreGradBatchLinearFusion(BatchFusion):
                 stack_biases = graph.call_function(
                     torch.stack, args=(batch_biases,), kwargs={"dim": 0}
                 )
+                update_stack_example_value(stack_biases, batch_biases_metadata)
                 unsqueeze_biases = graph.call_function(
                     torch.unsqueeze, args=(stack_biases, 1)
                 )
@@ -575,12 +597,23 @@ class BatchLayernormFusion(BatchFusion):
         group_biases = []
         group_epss = []
         group_nodes = []
+        group_inputs_metadata = []
+        group_biases_metadata = []
+        group_weights_metadata = []
         for node in subset:
             group_nodes.append(node)
-            group_inputs.append(get_arg_value(node, 0, "input"))
+            input = get_arg_value(node, 0, "input")
+            group_inputs.append(input)
+            group_inputs_metadata.append(input.meta["example_value"])
             group_shapes.append(get_arg_value(node, 1, "normalized_shape"))
-            group_weights.append(get_arg_value(node, 2, "weight"))
-            group_biases.append(get_arg_value(node, 3, "bias"))
+            weight = get_arg_value(node, 2, "weight")
+            group_weights.append(weight)
+            if weight is not None and hasattr(weight, "meta"):
+                group_weights_metadata.append(weight.meta["example_value"])
+            bias = get_arg_value(node, 3, "bias")
+            group_biases.append(bias)
+            if bias is not None and hasattr(bias, "meta"):
+                group_biases_metadata.append(bias.meta["example_value"])
             eps = get_arg_value(node, 4, "eps")
             if eps is None:
                 eps = 1e-5
@@ -601,16 +634,19 @@ class BatchLayernormFusion(BatchFusion):
             stack_input = graph.call_function(
                 torch.stack, args=(group_inputs,), kwargs={"dim": stack_dim}
             )
+            update_stack_example_value(stack_input, group_inputs_metadata, stack_dim)
             if group_weights is not None:
                 stack_weight = graph.call_function(
                     torch.stack, args=(group_weights,), kwargs={"dim": 0}
                 )
+                update_stack_example_value(stack_weight, group_weights_metadata)
             else:
                 stack_weight = None
             if group_biases is not None:
                 stack_bias = graph.call_function(
                     torch.stack, args=(group_biases,), kwargs={"dim": 0}
                 )
+                update_stack_example_value(stack_bias, group_biases_metadata)
             else:
                 stack_bias = None
 
@@ -678,15 +714,19 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
     def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
         batch_nodes = []
         batch_inputs = []
+        batch_inputs_metadata = []
 
         for node in subset:
             batch_nodes.append(node)
-            batch_inputs.append(get_arg_value(node, 0, "input"))
+            input = get_arg_value(node, 0, "input")
+            batch_inputs.append(input)
+            batch_inputs_metadata.append(input.meta["example_value"])
 
         with graph.inserting_before(subset[0]):
             stack_inputs = graph.call_function(
                 torch.stack, args=(batch_inputs,), kwargs={"dim": 0}
             )
+            update_stack_example_value(stack_inputs, batch_inputs_metadata)
             if self.op == torch.nn.functional.relu:
                 batch_op = graph.call_function(
                     self.op,
@@ -919,7 +959,7 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
                 else:
                     counters["inductor"]["unknown_group_batch_fusion"] += 1
 
-                log.info(
+                log.debug(
                     f"{rule.__class__.__name__}: key = {key}; subset size = {len(list(subset))}"  # noqa: G004
                 )
 
