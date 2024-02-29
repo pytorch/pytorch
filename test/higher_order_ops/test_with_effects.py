@@ -53,7 +53,7 @@ class TestWithEffects(TestCase):
             gm.code
         )
 
-        # With functionalization, it should appear wrapped with tokenize()
+        # With functionalization, it should appear wrapped with with_effects()
         gm, gs = aot_export_module(M(), inputs, trace_joint=False)
         self.assertExpectedInline(
             str(gm.code).strip(),
@@ -64,11 +64,12 @@ def forward(self, arg0_1, arg1_1):
     add = torch.ops.aten.add.Tensor(arg1_1, arg1_1);  arg1_1 = None
     with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops.aten._print.default, 'moo');  getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
-    return [getitem_2, add]""",
+    return (getitem_2, add)""",
         )
         self.assertEqual(len(gs.input_tokens), 1)
         self.assertEqual(len(gs.output_tokens), 1)
 
+    @unittest.expectedFailure  # Will enable this once we enable tokens in export
     def test_torchbind_custom_op(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -84,13 +85,11 @@ def forward(self, arg0_1, arg1_1):
         self.assertExpectedInline(
             str(gm.code).strip(),
             """\
-def forward(self, arg0_1, arg1_1):
+def forward(self, arg0_1):
     _tensor_constant0 = self._tensor_constant0
-    with_effects = torch._higher_order_ops.effects.with_effects(arg0_1, torch.ops._TorchScriptTesting.takes_foo.default, _tensor_constant0, arg1_1);  arg0_1 = _tensor_constant0 = None
-    getitem = with_effects[0]
-    getitem_1 = with_effects[1];  with_effects = None
-    add = torch.ops.aten.add.Tensor(arg1_1, getitem_1);  arg1_1 = getitem_1 = None
-    return [getitem, add]""",  # noqa: B950
+    takes_foo = torch.ops._TorchScriptTesting.takes_foo.default(_tensor_constant0, arg0_1);  _tensor_constant0 = None
+    add = torch.ops.aten.add.Tensor(arg0_1, takes_foo);  arg0_1 = takes_foo = None
+    return (add,)""",  # noqa: B950
         )
         self.assertEqual(len(gs.input_tokens), 1)
         self.assertEqual(len(gs.output_tokens), 1)
@@ -111,7 +110,7 @@ def forward(self, arg0_1, arg1_1):
 
         inputs = (torch.randn(3),)
 
-        # With functionalization, it should appear wrapped with tokenize()
+        # With functionalization, it should appear wrapped with with_effects()
         gm, gs = aot_export_module(M(), inputs, trace_joint=False)
         self.assertExpectedInline(
             str(gm.code).strip(),
@@ -124,7 +123,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     add_2 = torch.ops.aten.add.Tensor(add_1, arg2_1);  arg2_1 = None
     with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops.aten._print.default, 'moo');  getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
-    return [getitem_2, add_1, add_2]""",
+    return (getitem_2, add_1, add_2)""",
         )
         self.assertEqual(len(gs.input_tokens), 1)
         self.assertEqual(len(gs.output_tokens), 1)
@@ -145,7 +144,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         inputs = (torch.randn(3),)
 
-        # With functionalization, it should appear wrapped with tokenize()
+        # With functionalization, it should appear wrapped with with_effects()
         gm, gs = aot_export_module(M(), inputs, trace_joint=False)
         self.assertEqual(len(gs.input_tokens), 1)
         self.assertEqual(len(gs.output_tokens), 1)
@@ -184,6 +183,18 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         inputs = (torch.randn(2, 3),)
 
         res = torch.compile(f, backend="inductor")(*inputs)
+        self.assertTrue(torch.allclose(res, f(*inputs)))
+
+    def test_compile_aot_eager_requires_grad(self):
+        def f(x):
+            torch.ops.aten._print("moo")
+            res = x + x
+            torch.ops.aten._print("moo")
+            return res
+
+        inputs = (torch.randn(2, 3, requires_grad=True),)
+
+        res = torch.compile(f, backend="aot_eager")(*inputs)
         self.assertTrue(torch.allclose(res, f(*inputs)))
 
 

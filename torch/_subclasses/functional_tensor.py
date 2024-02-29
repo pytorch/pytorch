@@ -211,7 +211,7 @@ class FunctionalTensor(torch.Tensor):
 
 
 class FunctionalTensorMode(TorchDispatchMode):
-    def __init__(self, pre_dispatch=False, export=False, _tracing=True):
+    def __init__(self, pre_dispatch=False, export=False, _allow_token_discovery=True):
         self.export = export
         self.is_on_stack = False
         self.enter_stack = []
@@ -226,15 +226,12 @@ class FunctionalTensorMode(TorchDispatchMode):
 
         # Functionalization runs twice in AOTAutograd, once in
         # `run_functionalized_fw_and_collect_metadata` to collect metadata to
-        # see which tensors need to be functionalized and how many tokens we
-        # need, and another time in `make_fx` which does the actual tracing to
-        # replace ops with their functional variants and handling side-effectful
-        # ops. We need to distinguish these two tracing modes for handling
-        # side-effectful ops. In the first functionalization pass, where
-        # tracing=False, we will count the number of tokens needed. In the
-        # second functionalization pass, when tracing=True, we will insert
-        # tokens into the graph.
-        self._tracing = _tracing
+        # see which tensors need to be functionalized and discover how many
+        # tokens we need, and another time in `make_fx` which does the actual
+        # tracing to replace ops with their functional variants and handling
+        # side-effectful ops. In the second stage there should be no token
+        # discovery. This flag distinguishes between the two stages.
+        self._allow_token_discovery = _allow_token_discovery
 
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):
@@ -329,10 +326,7 @@ class FunctionalTensorMode(TorchDispatchMode):
                 return FunctionalTensor(x)
             return x
 
-        any_functional_inputs = False
-
         def unwrap(x):
-            any_functional_inputs = True
             return x.elem
 
         from torch._higher_order_ops.auto_functionalize import (
@@ -353,7 +347,9 @@ class FunctionalTensorMode(TorchDispatchMode):
             assert not torch._C._dispatch_has_kernel_for_dispatch_key(
                 func.name(), torch._C.DispatchKey.Functionalize
             )
-            return handle_effects(self._tracing, self._tokens, func, args, kwargs)
+            return handle_effects(
+                self._allow_token_discovery, self._tokens, func, args, kwargs
+            )
 
         args_unwrapped, kwargs_unwrapped = pytree.tree_map_only(
             FunctionalTensor, unwrap, (args, kwargs)

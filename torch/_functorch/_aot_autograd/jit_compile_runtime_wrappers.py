@@ -18,7 +18,7 @@ import torch.utils.dlpack
 from torch import Tensor
 from torch._dynamo.utils import lazy_format_graph_code
 from torch._guards import detect_fake_mode, tracing, TracingContext
-from torch._logging import getArtifactLogger
+from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
 from torch.fx.experimental.proxy_tensor import is_sym_node
@@ -168,6 +168,10 @@ def aot_dispatch_autograd(
         aot_joint_log.info(
             "%s", lazy_format_graph_code("Joint graph", fx_g, aot_config.aot_id)
         )
+        trace_structured(
+            "aot_joint_graph",
+            payload_fn=lambda: fx_g.print_readable(print_output=False),  # type: ignore[union-attr]
+        )
 
     with torch.no_grad():
         inner_meta = (
@@ -189,6 +193,9 @@ def aot_dispatch_autograd(
                 + inner_meta.num_outputs
                 + inner_meta.num_intermediate_bases
                 + inner_meta.num_outputs_rng_offset
+                + len(
+                    fw_metadata.tokens
+                )  # See Note [Side-Effectful Tokens in AOTAutograd]
             )
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
@@ -286,6 +293,14 @@ def aot_dispatch_autograd(
             aot_graphs_log.info(
                 "%s",
                 lazy_format_graph_code("Backward graph", bw_module, aot_config.aot_id),
+            )
+            trace_structured(
+                "aot_forward_graph",
+                payload_fn=lambda: fw_module.print_readable(print_output=False),
+            )
+            trace_structured(
+                "aot_backward_graph",
+                payload_fn=lambda: bw_module.print_readable(print_output=False),
             )
 
         with track_graph_compiling(aot_config, "forward"):
@@ -434,9 +449,11 @@ def aot_dispatch_autograd(
                 args = (*args, seed, offset)
             # There is a pretty complicated calling convention around what the compiled fw returns.
             # The full list of outputs and their relative order is:
-            # (*mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
+            # (*tokens, *mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
             # - Note that in the synthetic bases case, mutated_inputs will correspond to an updated version
             #   of the original view, and not the synthetic base
+            # - See Note [Side-Effectful Tokens in AOTAutograd] for more
+            #   information on tokens
             fw_outs = call_func_at_runtime_with_args(
                 CompiledFunction.compiled_fw,
                 args,
@@ -450,6 +467,7 @@ def aot_dispatch_autograd(
             num_mutated_runtime_inps = (
                 CompiledFunction.metadata.num_mutated_inp_runtime_indices
             )
+            num_tokens = len(CompiledFunction.metadata.tokens)
             num_forward_returns = CompiledFunction.metadata.num_forward_returns
             num_forward = CompiledFunction.metadata.num_forward
 
@@ -474,7 +492,7 @@ def aot_dispatch_autograd(
             ), str([type(x) for x in symint_outs])
             ctx.symints = symint_outs
 
-            raw_returns = fw_outs[0:num_forward_returns]
+            raw_returns = fw_outs[0 : num_forward_returns + num_tokens]
 
             # Wrap all autograd.Function.forward() outputs that are aliases
             # so that autograd.Function doesn't treat them as tensors

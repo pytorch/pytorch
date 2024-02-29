@@ -13,11 +13,13 @@ from torch.fx.experimental.proxy_tensor import (
 )
 
 
-SIDE_EFFECTFUL_OPS = {torch.ops.aten._print.default}
-
-
 class _EffectType(Enum):
     ORDERED = "Ordered"
+
+
+SIDE_EFFECTS: Dict[torch._ops.OpOverload, _EffectType] = {
+    torch.ops.aten._print.default: _EffectType.ORDERED,
+}
 
 
 class WithEffects(HigherOrderOperator):
@@ -63,19 +65,21 @@ def has_aliasing(op: torch._ops.OpOverload):
 
 def has_effects(op, args, kwargs) -> bool:
     return (
-        isinstance(op, torch._ops.OpOverload) and
-        not has_aliasing(op) and
-        get_effect_key(op, args, kwargs) is not None
+        isinstance(op, torch._ops.OpOverload)
+        and not has_aliasing(op)
+        and get_effect_key(op, args, kwargs) is not None
     )
 
 
 def get_effect_key(op, args, kwargs) -> Optional[_EffectType]:
-    if op in SIDE_EFFECTFUL_OPS:
-        return _EffectType.ORDERED
+    if op in SIDE_EFFECTS:
+        return SIDE_EFFECTS[op]
 
-    for arg in args:
-        if isinstance(arg, torch.ScriptObject):
-            return _EffectType.ORDERED
+    # TODO(angelayi): Enable this when enabling tokens with export -- this will
+    # break some existing export tests right now
+    # for arg in args:
+    #     if isinstance(arg, torch.ScriptObject):
+    #         return _EffectType.ORDERED
 
     return None
 
@@ -140,7 +144,7 @@ with_effects.fallthrough(DispatchKey.AutogradCUDA)
 
 
 def handle_effects(
-    tracing: bool,
+    allow_token_discovery: bool,
     tokens: Dict[_EffectType, torch.Tensor],
     op: torch._ops.OpOverload,
     args: Tuple[Any, ...],
@@ -148,10 +152,11 @@ def handle_effects(
 ) -> Any:
     """
     Args:
-        tracing: Whether or not we are currently tracing. If we are not tracing,
-        we will create tokens for every effect seen that does not already have a
-        token. If we ware tracing, then the `tokens` dict should already be
-        populated, and we will query tokens from there.
+        allow_token_discovery: Whether or not we are discovering tokens. If this
+        is true, we will create a token for every side effect type seen that
+        does not have a token assigned yet.  If this is false, the tokens
+        should've all been created ahead of time, so we will error if there is
+        no token mapping to every effect type.
 
         tokens: Map of effect type to tokens. This is to chain operators of the
         same effects together so that they do not get reordered in later
@@ -164,7 +169,7 @@ def handle_effects(
     key = get_effect_key(op, args, kwargs)
     assert key is not None
     if key not in tokens:
-        assert not tracing, f"Could not find a token for effect {key}"
+        assert not allow_token_discovery, f"Could not find a token for effect {key}"
         tokens[key] = torch.tensor([])
     token = tokens[key]
 
