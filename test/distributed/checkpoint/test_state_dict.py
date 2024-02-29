@@ -3,7 +3,7 @@
 import copy
 import sys
 from itertools import chain
-from typing import Callable, Tuple
+from typing import Callable, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -27,6 +27,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.optim import Optimizer
 from torch.testing._internal.common_dist_composable import (
     CompositeParamModel,
     UnitModule,
@@ -190,6 +191,14 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
         self._test_save_load(init_model_optim)
 
+    def _test_fsdp2(
+        self,
+        *,
+        reshard_after_forward: Union[bool, int],
+        optim: Optimizer,
+        compile_model: bool,
+    )
+
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_fsdp(self) -> None:
@@ -212,6 +221,18 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             use_dtensor=False,
             wrapping=tuple(),
             compile_model=True,
+        )
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp2(self) -> None:
+        self.run_subtests(
+            {
+                "reshard_after_forward": [True, False],
+                "optim": [torch.optim.Adam, torch.optim.AdamW],
+                "compile_model": [False, True],
+            },
+            self._test_fsdp2,
         )
 
     def _test_ddp(self, use_composable: bool) -> None:
