@@ -113,9 +113,6 @@ def vector_norm(
     if isinstance(dim, Dim):
         dim = [dim]  # type: ignore[assignment]
 
-    if isinstance(ord, (int, torch.SymInt)):
-        ord = float(ord)
-
     if x.numel() == 0 and (ord < 0.0 or ord == float("inf")):
         torch._check(
             dim is not None and len(dim) != 0,
@@ -151,7 +148,8 @@ def vector_norm(
         x = _maybe_convert_to_dtype(x, computation_dtype)  # type: ignore[assignment]
         reduce_sum = partial(torch.sum, dim=dim, keepdim=keepdim)
 
-        if not (ord % 2.0 == 0.0 and utils.is_float_dtype(x.dtype)):
+        is_ord_even = ord % 2 == 0 if isinstance(ord, (int, torch.SymInt)) else ord % 2.0 == 0
+        if not (is_ord_even and utils.is_float_dtype(x.dtype)):
             x = torch.abs(x)
         return to_result_dtype(torch.pow(reduce_sum(torch.pow(x, ord)), 1.0 / ord))  # type: ignore[return-value]
 
