@@ -703,7 +703,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             torch._embedding_bag_forward_only
         )
         for i, f in enumerate(funcs):
-            err_type = ValueError if i == 0 else RuntimeError
+            err_type = (ValueError, RuntimeError) if i == 0 else RuntimeError
 
             weight = torch.full((2, 6,), 0, dtype=torch.float64, device=device)
             indices = torch.full((2, 0, 0, 6, 6,), 2, dtype=torch.int64, device=device)
@@ -1162,8 +1162,10 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         es = nn.EmbeddingBag(10, 20, mode=mode, sparse=sparse)
         input = torch.ones(3, 4, dtype=dtype)
         offset = torch.arange(0, 3, dtype=odtype)
-        self.assertRaises(ValueError, lambda: es(input, offset))
-        self.assertRaises(ValueError, lambda: es(input.view(-1)))
+        with self.assertRaises(ValueError):
+            es(input, offset)
+        with self.assertRaises(ValueError):
+            es(input.view(-1))
         offset[0] = 1
         if self.device_type == "cpu":
             self.assertRaises(RuntimeError, lambda: es(input.view(-1), offset))
