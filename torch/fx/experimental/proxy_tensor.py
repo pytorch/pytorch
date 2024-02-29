@@ -33,6 +33,7 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 
+from ._backward_state import BackwardState
 from .sym_node import SymNode
 from ._sym_dispatch_mode import SymDispatchMode
 from torch.fx import Proxy
@@ -42,6 +43,7 @@ from torch.utils.weak import WeakTensorKeyDictionary, WeakIdKeyDictionary, _Weak
 from torch._ops import unset_mode_pre_dispatch, _set_mode_pre_dispatch, _get_dispatch_mode_pre_dispatch
 
 __all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "py_sym_types", "get_innermost_proxy_mode"]
+
 aten = torch.ops.aten
 prim = torch.ops.prim
 
@@ -139,6 +141,8 @@ def extract_val(val):
         return val
     elif isinstance(val, torch.ScriptObject):
         return val
+    elif isinstance(val, BackwardState):
+        return val
     elif isinstance(val, (list, tuple)):
         return val.__class__([extract_val(x) for x in val])
     elif isinstance(val, torch.Tensor):
@@ -232,6 +236,9 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
             # example use case: triton_kernel_wrapper takes arguments as kwargs
             for key, val in e.items():
                 wrap_with_proxy(val, proxy[key], None)
+        elif isinstance(e, BackwardState):
+            set_meta(proxy, e)
+            e.proxy = proxy
         else:
             # intentionally pass on primitives
             pass
