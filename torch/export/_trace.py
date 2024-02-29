@@ -419,12 +419,22 @@ def _export_non_strict(
     grad_safe_guard = (
         AutogradStateOpsFailSafeguard() if is_grad_enabled else nullcontext()
     )
+
+    @contextmanager
+    def _compiling_state_context():
+        old_value = torch.compiler._is_compiling_flag
+        try:
+            torch.compiler._is_compiling_flag = True
+            yield
+        finally:
+            torch.compiler._is_compiling_flag = old_value
+
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
     with torch.nn.utils.stateless._reparametrize_module(
         mod, fake_params_buffers
-    ), grad_safe_guard, _ignore_backend_decomps():  # type: ignore[attr-defined]
+    ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
         gm, graph_signature = transform(aot_export_module)(
             mod,
             fake_args,
@@ -762,7 +772,7 @@ def _export(
             fake_mode,
             fake_args,
             fake_kwargs,
-            src_equalities,
+            equalities_inputs,
             original_signature,
         ) = make_fake_inputs(f, args, kwargs, constraints)
 
@@ -778,9 +788,16 @@ def _export(
             pre_dispatch=pre_dispatch,
             transform=_tuplify_outputs,
         )
-        range_constraints, equality_constraints = make_constraints(
-            fake_mode, src_equalities, original_signature, ep_non_strict.gm
-        )
+        try:
+            range_constraints = make_constraints(
+                fake_mode,
+                equalities_inputs,
+                original_signature,
+                ep_non_strict.gm,
+            )
+        except (ConstraintViolationError, ValueRangeError) as e:
+            raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: TRY200
+
         assert out_spec is not None
 
         gm = ep_non_strict.gm
@@ -975,6 +992,7 @@ def _export(
         len(export_graph_signature.input_specs),
     )
     range_constraints = _process_constraints(
+        dynamo_fake_mode,
         gm,
         num_lifted,
         flat_args,
