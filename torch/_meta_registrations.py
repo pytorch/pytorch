@@ -2150,8 +2150,10 @@ def meta_conv(
         output_padding if is_transposed else None,
     )
 
-    if input_tensor.size(1) == 0:
-        shape_out[1] = 0
+    input_channels_dim = 1
+    output_channels_dim = 1
+    if input_tensor.size(input_channels_dim) == 0:
+        shape_out[output_channels_dim] = 0
 
     out = input_tensor.new_empty(shape_out)
     out = out.to(memory_format=pick_memory_format())  # type: ignore[call-overload]
