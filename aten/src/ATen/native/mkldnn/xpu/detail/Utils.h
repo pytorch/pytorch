@@ -361,10 +361,6 @@ static inline bool binary_valid(
   return false;
 }
 
-enum MEMORY_LAYOUT_FOR_CONV {
-  ChannelsFirst = 0, // using channels_first for conv computation.
-  ChannelsLast = 1, /// using channels_last for conv computation.
-};
 
 inline bool is_channels_last(at::MemoryFormat fmt){
   return (at::MemoryFormat::ChannelsLast3d == fmt) || (at::MemoryFormat::ChannelsLast3d == fmt);
@@ -374,24 +370,24 @@ inline bool is_smf_channels_last(const Tensor& t){
   return is_channels_last(t.suggest_memory_format());
 }
 
-static inline int get_memory_layout_for_conv(
+static inline bool use_channels_last_for_conv(
     const at::Tensor& src,
     const at::Tensor& weight,
-    bool is_transpose) {
+    bool is_transpose){
+
   if (!src.defined() || src.is_sparse()) {
     // suggest channels_first
-    return MEMORY_LAYOUT_FOR_CONV::ChannelsFirst;
+    return false;
   }
 
   auto suggest_channels_last_format =
       (is_smf_channels_last(src) || is_smf_channels_last(weight));
   if (suggest_channels_last_format) {
     // suggest channels_last
-    return MEMORY_LAYOUT_FOR_CONV::ChannelsLast;
+    return true;
   }
 
-  // suggest channels_last
-  return MEMORY_LAYOUT_FOR_CONV::ChannelsFirst;
+  return false;
 }
 
 static inline std::vector<int64_t> compatible_groups_deconv_strides(
