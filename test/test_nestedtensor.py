@@ -3056,8 +3056,8 @@ class TestNestedTensorSubclass(TestCase):
                                     "directly calling torch.ops.aten.size"):
             torch.ops.aten.size.default(nt)
 
-        registry = torch.nested._internal.nested_tensor.NestedIntRegistry()
-        nested_int = registry.maybe_create(offsets)
+        nt_state = torch.nested._internal.nested_tensor.NestedTensorState()
+        nested_int = nt_state.create_nested_int(offsets)
         self.assertEqual(nt.size(), (3, nested_int, 3))
         self.assertEqual(nt.shape, (3, nested_int, 3))
         self.assertEqual(nt.dim(), 3)

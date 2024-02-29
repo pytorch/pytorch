@@ -8,8 +8,9 @@ namespace {
 bool _eq(const char* op, c10::SymNodeImpl* lhs, c10::SymNodeImpl* rhs) {
   TORCH_INTERNAL_ASSERT(lhs->is_nested_int());
   c10::optional<int64_t> c = rhs->nested_int();
+  auto& union_find = get_nested_int_union_find();
   return (
-      c.has_value() && lhs->nested_int() == *c &&
+      c.has_value() && union_find.find(*lhs->nested_int()) == union_find.find(*c) &&
       lhs->nested_int_coeff() == rhs->nested_int_coeff());
 }
 bool _ge(const char* op, c10::SymNodeImpl* lhs, c10::SymNodeImpl* rhs) {
@@ -80,6 +81,37 @@ c10::SymNode NestedIntSymNodeImpl::mul(const c10::SymNode& other) {
 at::Tensor get_nested_int_vec(const c10::SymNodeImpl* node) {
   TORCH_INTERNAL_ASSERT(node->is_nested_int());
   return at::Tensor(c10::intrusive_ptr<c10::TensorImpl>::reclaim_copy(node->nested_int_vec()));
+}
+
+NestedIntUnionFind& get_nested_int_union_find() {
+  static NestedIntUnionFind nested_int_union_find;
+  return nested_int_union_find;
+}
+
+void NestedIntUnionFind::merge(int64_t src, int64_t tgt) {
+  if (map_.find(src) == map_.end()) {
+    map_[src] = src;
+  }
+  if (map_.find(tgt) == map_.end()) {
+    map_[tgt] = tgt;
+  }
+  map_[map_[src]] = map_[map_[tgt]];
+}
+
+int64_t NestedIntUnionFind::find(int64_t vec) {
+  if (map_.find(vec) == map_.end()) {
+    map_[vec] = vec;
+    return vec;
+  }
+  int64_t orig = vec;
+  int64_t prev = vec;
+  int64_t curr = map_[vec];
+  while (prev != curr) {
+    prev = curr;
+    curr = map_[curr];
+  }
+  map_[orig] = curr;
+  return curr;
 }
 
 } // namespace c10

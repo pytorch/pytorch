@@ -45,6 +45,10 @@ class FunctionalTensor(torch.Tensor):
         torch._C.DispatchKey.ZeroTensor
     )
 
+    # # TODO: write something here
+    # _nested_int_memo: Optional[torch.SymInt]
+    # _nested_int_memo_vc: Optional[int]
+
     # These are all aten ops that correspond to metadata queries.
     # We want FunctionalTensor to be able to handle them directly.
     metadata_fns = [
@@ -118,6 +122,8 @@ class FunctionalTensor(torch.Tensor):
             False,  # dispatch_layout
             extra_dispatch_keys,  # _extra_dispatch_keys
         )
+        out._nested_int_memo = None  # type: ignore[attr-defined]
+        out._nested_int_memo_vc = None  # type: ignore[attr-defined]
         out.elem = elem
         return out
 
@@ -168,6 +174,27 @@ class FunctionalTensor(torch.Tensor):
 
     def __repr__(self):
         return f"FunctionalTensor({repr(self.elem)})"
+
+
+    # What am I going to do here?
+    def create_nested_int(self, creation_fn, use_cache=True):
+        # TODO: how do I know whether we are an intermediate tensor or not?
+        # Version counter based tracking isn't 100% sound but it's close
+        # enough
+        if self._nested_int_memo_vc != self._version:
+            self._nested_int_memo = None
+            self._nested_int_memo_vc = self._version
+
+        # if use_cache is not None:
+        #     # this is for coeff, we could cache for coeff too, but
+        #     # coeff can be symbolic and SymInt are not hashable
+        #     return creation_fn()
+
+        if self._nested_int_memo is None:
+            self._nested_int_memo = creation_fn()
+
+        return self._nested_int_memo
+
 
     @staticmethod
     def to_functional(x):

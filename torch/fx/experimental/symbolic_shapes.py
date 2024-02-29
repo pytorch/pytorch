@@ -2403,16 +2403,17 @@ class ShapeEnv:
                 )
 
                 def ctor(i, v):
-                    return SymInt(
-                        SymNode(sym, self, int, hint, fx_node=fx_node,
-                                nested_int=i, nested_int_vec=v)
+                    def inner_create():
+                        return SymInt(
+                            SymNode(sym, self, int, hint, fx_node=fx_node,
+                                    nested_int_vec=v)
+                        )
+                    return v.create_nested_int(
+                        inner_create,
+                        use_cache=hint.node.nested_int_coeff() == 1,
                     )
-                registry = torch.nested._internal.nested_tensor.get_nested_int_registry()
-                out = registry.maybe_create(
-                    fake_vec,
-                    ctor_fn=ctor,
-                    has_coeff=hint.node.nested_int_coeff() != 1,
-                )
+                nt_state = torch.nested._internal.nested_tensor.get_nt_state()
+                out = nt_state.create_nested_int(fake_vec, ctor_fn=ctor)
             else:
                 out = SymInt(SymNode(sym, self, int, hint, fx_node=fx_node))
         return out

@@ -84,7 +84,7 @@ class SymNode:
         # Only populated when is_nested_int() is true
         from torch.fx.experimental.symbolic_shapes import is_nested_int
         if is_nested_int(hint):
-            assert nested_int is not None
+            # assert nested_int is not None
             assert nested_int_vec is not None
         self._nested_int: Optional[int] = nested_int
         self._nested_int_vec: Optional[torch.Tensor] = nested_int_vec

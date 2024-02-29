@@ -10,217 +10,163 @@ import weakref
 def _get_nested_int(equiv_set, vec):
     return torch._C._get_nested_int(equiv_set, coeff=1, vec=vec)
 
-class NestedIntRegistry():
-    # Class to manage the association between 1d tensors (vec) and nested ints.
-    # Use this class to (1) obtain nested int from vec (2) read/write metadata
-    # associated with vecs/nested ints
-    #
-    # Pass a vec to maybe_create to create a new nested int. Multiple nested int
-    # can be associated with a vec. vec are then grouped into equivalence sets
-    # so that comparisons between the vec's nested ints can be made by comparing
-    # their equiv set. Morally two vec are in the same equiv set if and only if
-    # they have the same data, e.g., vec.cpu() and vec.cuda() belong to the same
-    # equiv set even though they are on different devices because they have the
-    # same data.
-    #
-    # The first vec and nested int associated with a equiv set becomes the
-    # "canonical" vec and nested int for that equiv set respectively. This is
-    # purely an implementation detail, e.g. whether a given NT's offsets is
-    # canonical or not has no bearing on behavior. In fact, one should consider
-    # all nested ints (given that coeff=1) and vec that are associated with the
-    # same equiv set to be fungible when dealing with the registry.
-    #
-    # One consequence of having canonical vec is that vec pointed to by
-    # nt.shape[ragged_dim].node.nested_int_vec() is not necessarily the same
-    # Tensor as NT's ragged_source. This shouldn't matter though as per the
-    # above.
-    #
-    # Example:
-    # --------
-    # In the diagram below, arrows represent the direction of ownership. j0_0
-    # and j0_1 are in the same equiv set, but are different instances. vec0 and
-    # j0_0 are the canonical vec and nested int for equiv_set0.
-    #
-    #  symint       vec         equiv_set       cached metadata
-    # --------------------------------------------------------------------------
-    #  2*j0 -----\                        /---- weak vec0, weak j0_0
-    #             v                      | /--> id: int = 0
-    #  j0_0 ------> vec0 -----> equiv_set0 ---> sum_vec: Optional[SymInt]
-    #  j0_1 ------^         /-^            \--> vec_{cuda,cpu}: Optional[Tensor]
-    #                      /
-    #               vec1--/               /---- weak vec2, weak j1_0
-    #                                    | /--> id: int = 1
-    #  j1_0 ------> vec2 -----> equiv_set1 ---> ...
-    #
-    # Details on canonical vec and nested int lifetimes:
-    # --------------------------------------------------
-    # Throughout the lifetime of a equiv set, the canonical vec may change.
-    # If we detect that the canonical vec is no longer alive, the next time
-    # someone asks us for a nested int for a vec in that equiv set we will make
-    # that vec the canonical vec. The canonical vec may be on cpu or cuda.
-    #
-    # If canonical vec and nested int are alive, nested int's vec must be the
-    # canonical vec. This implies that if canonical is not alive, then the
-    # nested int is also not alive. It is possible for canonical to be alive,
-    # but for nested int to be dead. This happens when the nested int is only
-    # alive in cpp, but its corresponding python object has died.
-    #
-    # When you have tracing subclass tensors as vec
-    # ---------------------------------------------
-    # During tracing, we may be dealing with vec which are subclasses used
-    # for tracing, e.g. FakeTensor and FunctionalTensor. Though these tensors
-    # don't actually need equiv set for the purpose of checking equality, we
-    # the concepts of equiv sets are still useful so that we can reuse the logic
-    # in eager to access the cpu and cuda variants from one another. Note that
-    # that since each equiv set has its own cache, FakeTensor must be in a
-    # different equiv set from real tensor.
-    #
-    def __init__(self):
-        self._equiv_set_counter = 0
-        self._equiv_sets = WeakTensorKeyDictionary()
-        self._version_counters = WeakTensorKeyDictionary()
+# Only to be used in NestedTensorState
+# union find needs to exist in both python and cpp.
+class UnionFind:
+    _vecs = WeakTensorKeyDictionary() # vec -> vec used for union find
+
+    # Union find in python
+    def merge(self, src, tgt):
+        # grab the canonical vec for vec1, and the canonical vec for vec2
+        # what do we do if they are not in the set?
+        if src not in self._vecs:
+            self._vecs[src] = src
+        if tgt not in self._vecs:
+            self._vecs[tgt] = tgt
+        # Arbitrarily choose vec1's canonical as the canonical for both
+        self._vecs[self._vecs[src]] = self._vecs[self._vecs[tgt]]
+
+    def get_canonical_vec(self, vec):
+        if vec not in self._vecs:
+            self._vecs[vec] = vec
+            return vec
+        orig = vec
+        prev = vec
+        curr = self._vecs[vec]
+        while prev is not curr:
+            prev = curr
+            curr = self._vecs[curr]
+        self._vecs[orig] = curr
+        return curr
+
+class DefaultWeakTensorKeyDictionary():
+    # If getitem is called on a key that is not in the dictionary, the dictionary
+    # will create a new entry for the key and return the default value.
+    def __init__(self, default_cls):
+        self._data = WeakTensorKeyDictionary()
+        self._default_cls = default_cls
+
+    def __getitem__(self, key):
+        if key not in self._data:
+            self._data[key] = self._default_cls()
+        return self._data[key]
+
+    def __setitem__(self, key, value):
+        self._data[key] = value
+
+    def items(self):
+        return self._data.items()
+
+# Only to be used in NestedTensorState
+class TensorCounter:
+    # This class is NOT equiv set aware, simply assigns a unique id to each tensor
+    # object. This is all the state you need for nested int creation.
+    _incrementing_id = 0
+    # TODO: id to vec would belong here, but not sure why we need it?
+    _global_nested_int_ids = WeakTensorKeyDictionary()
+
+    def get_id(self, vec):
+        if vec not in self._global_nested_int_ids:
+            self._global_nested_int_ids[vec] = self._incrementing_id
+            self._incrementing_id += 1
+        return self._global_nested_int_ids[vec]
 
     def contains_vec(self, vec):
-        return vec in self._equiv_sets
+        return vec in self._global_nested_int_ids
 
-    def assert_contains_vec(self, vec):
-        assert self.contains_vec(vec), (
-            "Expected vec to have been registered. "
-        )
+class NestedTensorState:
+    # Class that encapsulates all the state needed for NestedTensor
+    def __init__(self):
+        self._tensor_counter = TensorCounter()
+        # The union find data structure in python ensures that the canonical vec
+        # stays alive as long as any vec in its equiv set is alive.
+        self._union_find = UnionFind()
+        # the following data structures only allow canonical vec as keys
+        # once a merge happens, one of the keys becomes invalid,
+        # the value of the non-canonical key is invalidated
+        self._INVALID = object()
+        self._metadata = DefaultWeakTensorKeyDictionary(dict)
+        self._weak_tensors = DefaultWeakTensorKeyDictionary(set)
 
-    def check_version_counter(self, vec):
-        # Check that vec has not been mutated
-        assert self._version_counters[vec] == vec._version, (
-            "Detected that vec has been mutated. This is not allowed. "
-        )
+    def merge(self, src, tgt):
+        print("merge", id(src), id(tgt))
+        if src is tgt:
+            return
+        # merge union find in python and cpp (TODO: can we avoid having both?)
+        canonical_src = self._union_find.get_canonical_vec(src)
+        canonical_tgt = self._union_find.get_canonical_vec(tgt)
 
-    def maybe_create(self, vec, *, ctor_fn=None, equiv_set_from=None, has_coeff=False):
-        # Given vec, return an associated nested int.
-        #
-        # Parameters:
-        #     ctor_fn (Callable[[int, Tensor], SymInt]): If not None, use a custom
-        #        constructor to create the nested int. A equiv set is "custom"
-        #        if its canonical int was created using a custom ctor_fn (This
-        #        is useful during compile). The custom-ness of a equiv set is
-        #        immutable. This is because (1) unlike ordinary equiv set,
-        #        canonical nested int of a custom equiv set cannot be changed
-        #        i.e., if the nested int of a custom equiv set dies, don't
-        #        allow re-creation, and (2) during recreation of canonical nested
-        #        int, ctor_fn cannot be used, so a non-custom equiv set cannot
-        #        become custom once created.
-        #     equiv_set_from (Tensor): If not None, add vec to the equiv set of
-        #        the equiv set corresponding to the vec specified by this arg.
-        #        The user is responsible for ensuring that vec and equiv_set_from
-        #        are compatible, i.e., they have the same data.
-        #     has_coeff (bool): If True, a new nested int will be created even
-        #        if vec is already in an equiv set. Note that we don't actually
-        #        allow coeff to passed to this function. The ctor_fn is expected
-        #        to handle this. Also note that this is not how nested ints with
-        #        coeff are typically created. Ordinarily, nested ints with coeff
-        #        are created by operations on existing nested ints.
-        #
-        # Returns:
-        #     SymInt: The nested int associated with vec.
-        mb_equiv_set = self._equiv_sets.get(vec)
+        self._union_find.merge(src, tgt)
+        src_id = self._tensor_counter.get_id(src)
+        tgt_id = self._tensor_counter.get_id(tgt)
+        torch._C._get_nested_int_union_find().merge(src_id, tgt_id)
 
-        if mb_equiv_set is not None:
-            self.check_version_counter(vec)
-            ret = mb_equiv_set["canonical_nested_int"]()
-            mb_vec = mb_equiv_set["canonical_vec"]()
-            assert equiv_set_from is None, (
-                "Expected equiv_set_from to be None if vec already has equiv_set"
-            )
-            if ret is None:
-                # (1) vec is already has equiv set, but canonical nested int has
-                #     died, create a new nested int and add it to the equiv set.
-                #
-                #     We need this logic because PyObject preservation does not
-                #     exist for SymInts, so e.g. if shape is saved for
-                #     backward, the SymInt in Python will be collected unless
-                #     kept alive elsewhere.
-                assert ctor_fn is None
-                assert not mb_equiv_set["with_ctor_fn"]
-                if mb_vec is None:
-                    # if canonical vec has also died. Promote vec to canonical vec
-                    mb_equiv_set["canonical_vec"] = weakref.ref(vec)
-                ret = _get_nested_int(mb_equiv_set["id"], mb_equiv_set["canonical_vec"]())
-                mb_equiv_set["canonical_nested_int"] = weakref.ref(ret)
-            else:
-                # (2) vec is already has equiv set, and canonical nested int is alive
-                assert mb_vec is not None, (
-                    "Expected vec to be alive if nested int is alive"
-                )
-                if ctor_fn is not None:
-                    assert mb_equiv_set["with_ctor_fn"], (
-                    "Expected ctor_fn not to be passed for vec with existing non-custom equiv set"
-                )
-                if not has_coeff:
-                    # (2a) if we do not want coeff, just return canonical nested int
-                    return ret
-                else:
-                    # (2b) If we want coeff, we don't want to return the canonical
-                    #      nested int (which must have coeff=1).
-                    assert ctor_fn is not None
-                    ret = ctor_fn(mb_equiv_set["id"], mb_vec)
-        else:
-            assert not has_coeff, "The first nested int in an equiv set must not have a coeff"
-            if equiv_set_from is None:
-                # (3) vec does not have a equiv set, and user didn't specify
-                #     that vec should belong to an existing one -> add a new vec
-                #     to a new equiv set
-                equiv_set_id = self._equiv_set_counter
-                self._equiv_set_counter += 1
-                _ctor_fn = ctor_fn if ctor_fn is not None else _get_nested_int
-                ret = _ctor_fn(equiv_set_id, vec)
-                self._equiv_sets[vec] = {
-                    "id": equiv_set_id,
-                    "canonical_nested_int": weakref.ref(ret),
-                    "canonical_vec": weakref.ref(vec),
-                    "with_ctor_fn": ctor_fn is not None,
-                }
-                self._version_counters[vec] = vec._version
-            else:
-                # (4) vec does not have equiv set, user specified that vec
-                #     should belong to an existing one -> add vec to the equiv set
-                assert ctor_fn is None
-                equiv_set = self._equiv_sets[equiv_set_from]
-                ret = equiv_set["canonical_nested_int"]()
-                assert ret is not None
-                self._equiv_sets[vec] = equiv_set
-                self._version_counters[vec] = vec._version
-            self._equiv_sets[vec]["weak_all_vecs"] = self._equiv_sets[vec].get("weak_all_vecs", []) + [weakref.ref(vec)]
+        self._metadata[canonical_src].update(self._metadata[canonical_tgt])
+        self._metadata[canonical_tgt] = self._metadata[canonical_src]
+        print("marking as invalid", id(canonical_src))
+        self._metadata[canonical_src] = self._INVALID
+
+        self._weak_tensors[canonical_tgt].update(self._weak_tensors[canonical_src])
+        self._weak_tensors[canonical_src] = self._INVALID
+
+    def get_metadata(self, vec):
+        print("get_metadata", id(vec))
+        canonical_vec = self._union_find.get_canonical_vec(vec)
+        print("canonical_vec", id(canonical_vec))
+        ret = self._metadata[canonical_vec]
+        # I am asking for the metadata a vec that is no longer canonical
+        assert ret is not self._INVALID
         return ret
 
-    def get_all_equiv_vecs(self, vec):
+    def get_equivalent_vecs(self, vec):
+        print("get_equivalent_vecs", id(vec))
+        canonical_vec = self._union_find.get_canonical_vec(vec)
         # Returns all vecs that are alive in the same equiv set as vec
-        self.assert_contains_vec(vec)
-        self.check_version_counter(vec)
-        equiv_set = self._equiv_sets[vec]
-        for weak_vec in equiv_set["weak_all_vecs"]:
+        # check that canonical vec is actually in the set?
+        for weak_vec in self._weak_tensors[canonical_vec]:
             vec = weak_vec()
             if vec is not None:
                 yield vec
 
-    def maybe_set_metadata(self, vec, key, value):
-        self.assert_contains_vec(vec)
-        self.check_version_counter(vec)
-        equiv_set = self._equiv_sets[vec]
-        if key not in equiv_set:
-            equiv_set[key] = value
+    def create_nested_int(self, vec, ctor_fn=None):
+        print("create_nested_int", id(vec))
+        # the issue is that if I have a FakeTensor that doesn't necessarily imply
+        # that I need symbolic nested int, it is fine if I use the same obj anyway ig
+        if (isinstance(vec, torch._subclasses.fake_tensor.FakeTensor) or
+            isinstance(vec, torch._subclasses.functional_tensor.FunctionalTensor)) and ctor_fn is None:
+            print("fake but ctor is None")
+            return vec.create_nested_int(_get_nested_int, use_cache=True)
+        # Parameters:
+        #     ctor_fn (Callable[[int, Tensor], SymInt]): If not None, use a custom
+        #        constructor to create the nested int.
+        _ctor_fn = ctor_fn if ctor_fn is not None else _get_nested_int
+        return _ctor_fn(self._tensor_counter.get_id(vec), vec)
 
-    def get_metadata(self, vec, key):
-        self.assert_contains_vec(vec)
-        self.check_version_counter(vec)
-        equiv_set = self._equiv_sets[vec]
-        return equiv_set[key]
+    def validate_invariants(self):
+        # for testing only
+        for vec, val in self._metadata.items():
+            assert (self._union_find.get_canonical_vec(vec) is vec) == (val is self._INVALID)
+        for vec, val in self._weak_tensors.items():
+            assert (self._union_find.get_canonical_vec(vec) is vec) == (val is self._INVALID)
 
-_nested_int_registry: Optional[NestedIntRegistry] = None
+    def print_metadata(self):
+        for vec, val in self._metadata.items():
+            print(f"vec: {id(vec)}, val: {val}")
 
-def get_nested_int_registry() -> NestedIntRegistry:
-    global _nested_int_registry
-    if _nested_int_registry is None:
-        _nested_int_registry = NestedIntRegistry()
-    return _nested_int_registry
+
+_nt_state: Optional[NestedTensorState] = None
+
+def get_nt_state() -> NestedTensorState:
+    global _nt_state
+    if _nt_state is None:
+        _nt_state = NestedTensorState()
+    return _nt_state
+
+
+def trust_me_assert_equal(vec1, vec2, _nt_state=None):
+    nt_state = get_nt_state() if _nt_state is None else _nt_state
+    nt_state.merge(vec1, vec2)
+
 
 # SDPA metadata; max / min seqlens are needed for e.g. flash
 def _get_sdpa_extreme_seqlen(func, tensor):
@@ -281,7 +227,7 @@ class NestedTensor(torch.Tensor):
         )
         return r
 
-    def __init__(self, values, offsets, *, lengths=None, _nested_int=None, **kwargs):
+    def __init__(self, values, offsets, *, lengths=None, **kwargs):
         super().__init__()
         # Only support jagged for now.
         assert offsets is not None
@@ -291,12 +237,15 @@ class NestedTensor(torch.Tensor):
         # Query cache for the symint associated with offsets or lengths
         # (create a new one if needed).
         ragged_source = offsets if lengths is None else lengths
-        registry = get_nested_int_registry()
-        if _nested_int is None:
-            ragged_size = registry.maybe_create(ragged_source)
-        else:
-            ragged_size = _nested_int
-        registry.maybe_set_metadata(ragged_source, "sum_vec", values.shape[0])
+
+        nt_state = get_nt_state()
+        ragged_size = nt_state.create_nested_int(ragged_source)
+        # print(ragged_size, ragged_source)
+        nt_state.print_metadata()
+        # nt_state.validate_invariants()
+        metadata = nt_state.get_metadata(ragged_source)
+        metadata["sum_vec"] = values.shape[0]
+
         self._ragged_idx = kwargs.get("_ragged_idx", 1)
         B = offsets.shape[0] - 1
         Ds = values.shape[: self._ragged_idx - 1] + values.shape[self._ragged_idx :]
@@ -439,23 +388,36 @@ class NestedTensor(torch.Tensor):
         #   same equiv set.
         #
         # Today it seems that this assumption holds for the below known cases:
-        # Fakification, AOTAutograd's construction of grad_outputs,
-        # Functionalization, and AOTAutograd's runtime wrapper.
-        registry = get_nested_int_registry()
+        # (TODO: expand on this part)
+        # - functional -> fake
+        # - runtime wrapper
+        # - fakification
+        # - grad_output aliasing
+        nt_state = get_nt_state()
 
-        if not registry.contains_vec(vec):
+        if (isinstance(vec, torch._subclasses.fake_tensor.FakeTensor) or
+                isinstance(vec, torch._subclasses.functional_tensor.FunctionalTensor)):
             old_nested_int = outer_size[ragged_idx]
 
             def ctor_fn(i, v):
-                # During compilation, new symbolic nested int must be created via
-                # operations on existing ones, so that guard sources are propagated
-                # and the new symint is properly tracked by proxies. We reach here in
-                # three cases, each is handled slightly differently:
-                return torch.SymInt(old_nested_int.node.clone_nested_int_with_new_vec(i, v))
+                # TODO: functional tensor unwraps?
+                def creation_fn():
+                    return torch.SymInt(
+                        # TODO: update clone to no longer take id
+                        old_nested_int.node.clone_nested_int_with_new_vec(i, v)
+                    )
+                ret = v.create_nested_int(
+                    creation_fn,
+                    use_cache=old_nested_int.node._hint.node.nested_int_coeff() == 1,
+                )
+                print("ctor_fn return: ", ret, v)
+                return ret
+
             old_vec = old_nested_int.node.nested_int_vec()
-            same_equiv_set = type(vec) == type(old_vec)
-            kwargs = {"equiv_set_from": old_vec} if same_equiv_set else {"ctor_fn": ctor_fn}
-            nested_int = registry.maybe_create(vec, **kwargs)
+            nt_state.create_nested_int(vec, ctor_fn=ctor_fn)
+
+            if type(vec) == type(old_vec):
+                trust_me_assert_equal(vec, old_vec)
 
         return NestedTensor(
             values,
@@ -464,10 +426,6 @@ class NestedTensor(torch.Tensor):
             requires_grad=meta["requires_grad"],
             _ragged_idx=ragged_idx,
             _metadata_cache=meta["metadata_cache"],
-            # Pass in explicitly instead of relying on getting it from the
-            # registry later because we are responsible for keeping alive what
-            # maybe_create returns.
-            _nested_int=nested_int,
         )
 
     @classmethod
