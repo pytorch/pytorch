@@ -75,7 +75,7 @@ DescriptorSet Context::submit_compute_prologue(
 void Context::submit_compute_epilogue(
     CommandBuffer& command_buffer,
     const DescriptorSet& descriptors,
-    const PipelineBarrier& pipeline_barrier,
+    PipelineBarrier& pipeline_barrier,
     const utils::uvec3& global_workgroup_size) {
   command_buffer.bind_descriptors(descriptors.get_bind_handle());
   command_buffer.insert_barrier(pipeline_barrier);
