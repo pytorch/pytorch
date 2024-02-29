@@ -154,17 +154,14 @@ static void deconvolution(
     int64_t groups,
     Attr& attr) {
   auto engine =
-      GpuEngineManager::Instance().get_engine({kXPU, current_device()});
+      GpuEngineManager::Instance().get_engine({c10::kXPU, c10::xpu::current_device()});
   auto stream = GpuStreamManager::Instance().get_stream();
 
-  auto memory_layout_for_conv =
-      get_memory_layout_for_conv(src, wgh, /*is_transposed=*/true);
+  bool is_channels_last_suggested = use_channels_last_for_conv(src, wgh, /*is_transposed=*/true);
 
   // create usr_md for tensors, and md for conv primitive
   dnnl::memory::desc src_md, wgh_md, dst_md;
 
-  bool is_channels_last_suggested =
-        memory_layout_for_conv == MEMORY_LAYOUT_FOR_CONV::ChannelsLast;
   std::tie(src_md, wgh_md, dst_md) =
       deconv_get_plain_md(src, wgh, dst, groups, is_channels_last_suggested);
 
@@ -181,8 +178,7 @@ static void deconvolution(
 
   // construct primitive attr
   dnnl::primitive_attr pattr;
-  dnnl::post_ops po;
-  attr.extract_post_ops(po, dst);
+  dnnl::post_ops po = attr.extract_post_ops(dst);
   pattr.set_post_ops(po);
 
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
@@ -218,16 +214,16 @@ static void deconvolution(
     args.insert({DNNL_ARG_BIAS, bia_m});
   }
   if (attr.with_binary())
-    attr.construct_post_binary(deconv_fwd_pd, po, args);
+    attr.construct_post_binary(deconv_fwd_pd, args);
 
   size_t scratchpad_size = deconv_fwd_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::empty(
-      {scratchpad_size}, src.options().dtype(at::kByte), c10::nullopt);
+      {static_cast<int64_t>(scratchpad_size)}, src.options().dtype(at::kByte), c10::nullopt);
   auto scratchpad_m = xpu_onednn_memory(
       deconv_fwd_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});
 
-  auto deconv_fwd = deconvolution_forward(deconv_fwd_pd);
+  auto deconv_fwd = dnnl::deconvolution_forward(deconv_fwd_pd);
   XPU_ONEDNN_EXEC(deconv_fwd, stream, args);
 
 }
@@ -242,15 +238,13 @@ static void deconvolution_backward_data(
     int64_t groups,
     bool bias_defined) {
   auto engine =
-      GpuEngineManager::Instance().get_engine({kXPU, current_device()});
+      GpuEngineManager::Instance().get_engine({c10::kXPU, c10::xpu::current_device()});
   auto stream = GpuStreamManager::Instance().get_stream();
 
-  auto memory_layout_for_conv =
-      get_memory_layout_for_conv(diff_dst, weight, /*is_transposed=*/true);
+  bool is_channels_last_suggested =
+      use_channels_last_for_conv(diff_dst, weight, /*is_transposed=*/true);
   // create memory desc
   dnnl::memory::desc src_md, wgh_md, dst_md;
-  bool is_channels_last_suggested =
-      memory_layout_for_conv == MEMORY_LAYOUT_FOR_CONV::ChannelsLast;
   std::tie(src_md, wgh_md, dst_md) =
       deconv_get_plain_md(
           diff_src, weight, diff_dst, groups, is_channels_last_suggested);
@@ -267,7 +261,7 @@ static void deconvolution_backward_data(
   dnnl::memory::dims _stride = stride.vec();
   dnnl::memory::dims _padding = padding.vec();
   dnnl::memory::dims _dilation = deconv_compatible_dilation(dilation);
-  auto deconv_fwd_pd = deconvolution_forward::primitive_desc(
+  auto deconv_fwd_pd = dnnl::deconvolution_forward::primitive_desc(
       engine,
       dnnl::prop_kind::forward,
       dnnl::algorithm::deconvolution_direct,
@@ -297,15 +291,15 @@ static void deconvolution_backward_data(
   // create memory
   dnnl::memory diff_dst_m, wei_m, diff_src_m;
 
-  diff_src_m = xpu_onednn_memory(src_usr_md, engine, diff_src.data_ptr());
-  wei_m = xpu_onednn_memory(wgh_usr_md, engine, weight.data_ptr());
-  diff_dst_m = xpu_onednn_memory(dst_usr_md, engine, diff_dst.data_ptr());
+  diff_src_m = xpu_onednn_memory(src_md, engine, diff_src.data_ptr());
+  wei_m = xpu_onednn_memory(wgh_md, engine, weight.data_ptr());
+  diff_dst_m = xpu_onednn_memory(dst_md, engine, diff_dst.data_ptr());
 
   // insert args
   std::unordered_map<int, dnnl::memory> args;
   size_t scratchpad_size = deconv_backward_data_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::empty(
-      {scratchpad_size}, diff_dst.options().dtype(at::kByte), c10::nullopt);
+      {static_cast<int64_t>(scratchpad_size)}, diff_dst.options().dtype(at::kByte), c10::nullopt);
   auto scratchpad_memory = xpu_onednn_memory(
       deconv_backward_data_pd.scratchpad_desc(),
       engine,
@@ -331,16 +325,14 @@ static void deconvolution_backward_weights(
     IntArrayRef dilation,
     int64_t groups) {
   auto engine =
-      GpuEngineManager::Instance().get_engine({kXPU, current_device()});
+      GpuEngineManager::Instance().get_engine({c10::kXPU, c10::xpu::current_device()});
   auto stream = GpuStreamManager::Instance().get_stream();
 
-  auto memory_layout_for_conv =
-      get_memory_layout_for_conv(src, diff_dst, /*is_transposed=*/true);
+  bool is_channels_last_suggested = 
+      use_channels_last_for_conv(src, diff_dst, /*is_transposed=*/true);
 
   // create memory desc
   dnnl::memory::desc src_md, wgh_md, dst_md;
-  bool is_channels_last_suggested =
-      memory_layout_for_conv == MEMORY_LAYOUT_FOR_CONV::ChannelsLast;
   std::tie(src_md, wgh_md, dst_md) = deconv_get_plain_md(
           src, diff_wgh, diff_dst, groups, is_channels_last_suggested);
   
@@ -388,9 +380,9 @@ static void deconvolution_backward_weights(
   // create bwd dnnl::memory
   dnnl::memory src_m, diff_dst_m, diff_wgh_m;
 
-  src_m = xpu_onednn_memory(src_usr_md, engine, src.data_ptr());
-  diff_dst_m = xpu_onednn_memory(dst_usr_md, engine, diff_dst.data_ptr());
-  diff_wgh_m = xpu_onednn_memory(wgh_usr_md, engine, diff_wgh.data_ptr());
+  src_m = xpu_onednn_memory(src_md, engine, src.data_ptr());
+  diff_dst_m = xpu_onednn_memory(dst_md, engine, diff_dst.data_ptr());
+  diff_wgh_m = xpu_onednn_memory(wgh_md, engine, diff_wgh.data_ptr());
 
   // insert args
   std::unordered_map<int, dnnl::memory> args;
@@ -404,9 +396,9 @@ static void deconvolution_backward_weights(
     args.insert({DNNL_ARG_DIFF_BIAS, diff_bia_m});
   }
 
-  int scratchpad_size = deconv_bwd_w_pd.scratchpad_desc().get_size();
+  size_t scratchpad_size = deconv_bwd_w_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::empty(
-      {scratchpad_size}, src.options().dtype(at::kByte), c10::nullopt);
+      {static_cast<int64_t>(scratchpad_size)}, src.options().dtype(at::kByte), c10::nullopt);
   auto scratchpad_m = xpu_onednn_memory(
       deconv_bwd_w_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});
