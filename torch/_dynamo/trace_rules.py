@@ -2754,7 +2754,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.typename",
         "torch.unique_consecutive",
         "torch.use_deterministic_algorithms",
-        "torch.testing._internal.hypothesis_utils",
     ],
     TorchInGraphFunctionVariable,
 )
@@ -3186,6 +3185,7 @@ MOD_INLINELIST = {
     "torch.random",
     "torch.sparse",
     "torch.testing",
+    "torch.testing._internal.hypothesis_utils",
     "torch.utils._content_store",
     "torch.utils._contextlib",
     "torch.utils._foreach_utils",
