@@ -18,7 +18,7 @@ import torch.utils.dlpack
 from torch import Tensor
 from torch._dynamo.utils import lazy_format_graph_code
 from torch._guards import detect_fake_mode, tracing, TracingContext
-from torch._logging import getArtifactLogger, trace_structured
+from torch._logging import getArtifactLogger
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
 from torch.fx.experimental.proxy_tensor import is_sym_node
@@ -168,10 +168,6 @@ def aot_dispatch_autograd(
         aot_joint_log.info(
             "%s", lazy_format_graph_code("Joint graph", fx_g, aot_config.aot_id)
         )
-        trace_structured(
-            "aot_joint_graph",
-            payload_fn=lambda: fx_g.print_readable(print_output=False),  # type: ignore[union-attr]
-        )
 
     with torch.no_grad():
         inner_meta = (
@@ -290,14 +286,6 @@ def aot_dispatch_autograd(
             aot_graphs_log.info(
                 "%s",
                 lazy_format_graph_code("Backward graph", bw_module, aot_config.aot_id),
-            )
-            trace_structured(
-                "aot_forward_graph",
-                payload_fn=lambda: fw_module.print_readable(print_output=False),
-            )
-            trace_structured(
-                "aot_backward_graph",
-                payload_fn=lambda: bw_module.print_readable(print_output=False),
             )
 
         with track_graph_compiling(aot_config, "forward"):
