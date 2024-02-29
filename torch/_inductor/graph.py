@@ -16,9 +16,8 @@ import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
-from torch._logging import LazyString, trace_structured
+from torch._logging import LazyString
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import has_free_symbols, ShapeEnv, SymTypes
 from torch.utils._mode_utils import no_dispatch
@@ -237,7 +236,6 @@ class GraphLowering(torch.fx.Interpreter):
             self.reuse_shape_env = True
         self._shape_env = shape_env
         self.sizevars = SizeVarAllocator(shape_env)
-        self.graph_input_names: List[str] = []
         self.graph_inputs: Dict[str, TensorBox] = {}
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
         self.device_types: Set[str] = (
@@ -308,9 +306,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.orig_gm: torch.fx.GraphModule = gm.__copy__()
         self.dynamo_flat_name_to_original_fqn = self.module.meta.get(
             "dynamo_flat_name_to_original_fqn", {}
-        )
-        self.allocated_constant_name = (
-            const_module.allocated_constant_name if const_module is not None else {}
         )
         self.init_backend_registration()
 
@@ -695,12 +690,11 @@ class GraphLowering(torch.fx.Interpreter):
             )
             return name
 
-        new_name = allocate(name)
-        self.allocated_constant_name[new_name] = name
+        name = allocate(name)
 
         return TensorBox.create(
             ir.ConstantBuffer(
-                new_name,
+                name,
                 FixedLayout(data.device, data.dtype, *self.static_sizes_strides(data)),
             )
         )
@@ -720,7 +714,6 @@ class GraphLowering(torch.fx.Interpreter):
 
     def placeholder(self, target: str, args, kwargs):
         example = super().placeholder(target, args, kwargs)
-        self.graph_input_names.append(target)
         if isinstance(example, SymTypes):
             expr = example.node.expr
             self.graph_inputs[target] = expr
@@ -729,10 +722,6 @@ class GraphLowering(torch.fx.Interpreter):
             expr = sympy.sympify(example)
             self.graph_inputs[target] = expr
             return expr
-        if isinstance(example, BackwardState):
-            # Ignored arg, must be unused
-            # Alternately we could filter this out in AotAutograd
-            return None
         assert isinstance(example, torch.Tensor), example
         # todo(chilli): We can remove the last check once we turn buffers into
         # static shape tensors. That's a hack to workaround Inductor believing
@@ -1253,11 +1242,6 @@ class GraphLowering(torch.fx.Interpreter):
         log_module_code(mod.__file__)
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.debug("Output code: \n%s", code)
-        trace_structured(
-            "inductor_output_code",
-            lambda: {"filename": mod.__file__},
-            payload_fn=lambda: code,
-        )
         output_code_log.info("Output code written to: %s", mod.__file__)
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)

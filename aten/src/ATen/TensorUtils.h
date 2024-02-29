@@ -66,9 +66,7 @@ using CheckedFrom = const char*;
 // not TensorGeometryArg, because the Tensor to TensorGeometry
 // conversion will blow up if you have undefined tensors.
 
-TORCH_API std::ostream& operator<<(
-    std::ostream& out,
-    const TensorGeometryArg& t);
+TORCH_API std::ostream& operator<<(std::ostream& out, TensorGeometryArg t);
 TORCH_API void checkDim(
     CheckedFrom c,
     const Tensor& tensor,
@@ -105,7 +103,7 @@ TORCH_API void checkSize_symint(
     CheckedFrom c,
     const TensorGeometryArg& t,
     int64_t dim,
-    const c10::SymInt& size);
+    c10::SymInt size);
 TORCH_API void checkNumel(
     CheckedFrom c,
     const TensorGeometryArg& t,

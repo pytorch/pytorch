@@ -46,30 +46,30 @@ std::string get_parallel_info() {
   std::ostringstream ss;
 
   ss << "ATen/Parallel:\n\tat::get_num_threads() : "
-     << at::get_num_threads() << '\n';
+     << at::get_num_threads() << std::endl;
   ss << "\tat::get_num_interop_threads() : "
-     << at::get_num_interop_threads() << '\n';
+     << at::get_num_interop_threads() << std::endl;
 
-  ss << at::get_openmp_version() << '\n';
+  ss << at::get_openmp_version() << std::endl;
 #ifdef _OPENMP
-  ss << "\tomp_get_max_threads() : " << omp_get_max_threads() << '\n';
+  ss << "\tomp_get_max_threads() : " << omp_get_max_threads() << std::endl;
 #endif
 
-  ss << at::get_mkl_version() << '\n';
+  ss << at::get_mkl_version() << std::endl;
 #if AT_MKL_ENABLED()
-  ss << "\tmkl_get_max_threads() : " << mkl_get_max_threads() << '\n';
+  ss << "\tmkl_get_max_threads() : " << mkl_get_max_threads() << std::endl;
 #endif
 
-  ss << at::get_mkldnn_version() << '\n';
+  ss << at::get_mkldnn_version() << std::endl;
 
   ss << "std::thread::hardware_concurrency() : "
-     << std::thread::hardware_concurrency() << '\n';
+     << std::thread::hardware_concurrency() << std::endl;
 
-  ss << "Environment variables:" << '\n';
+  ss << "Environment variables:" << std::endl;
   ss << "\tOMP_NUM_THREADS : "
-     << get_env_var("OMP_NUM_THREADS", "[not set]") << '\n';
+     << get_env_var("OMP_NUM_THREADS", "[not set]") << std::endl;
   ss << "\tMKL_NUM_THREADS : "
-     << get_env_var("MKL_NUM_THREADS", "[not set]") << '\n';
+     << get_env_var("MKL_NUM_THREADS", "[not set]") << std::endl;
 
   ss << "ATen parallel backend: ";
   #if AT_PARALLEL_OPENMP
@@ -82,7 +82,7 @@ std::string get_parallel_info() {
   #ifdef C10_MOBILE
   ss << " [mobile]";
   #endif
-  ss << '\n';
+  ss << std::endl;
 
   #if AT_EXPERIMENTAL_SINGLE_THREAD_POOL
   ss << "Experimental: single thread pool" << std::endl;

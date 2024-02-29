@@ -7,8 +7,6 @@ from .ctx_manager import (
     ContextWrappingVariable,
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
-    GradIncrementNestingCtxManagerVariable,
-    GradInplaceRequiresGradCtxManagerVariable,
     GradModeVariable,
     InferenceModeVariable,
     StreamContextVariable,
@@ -31,7 +29,7 @@ from .functions import (
     UserMethodVariable,
 )
 from .higher_order_ops import (
-    FunctorchHigherOrderVariable,
+    FunctorchVmapHigherOrderVariable,
     TorchHigherOrderOperatorVariable,
 )
 from .iter import (

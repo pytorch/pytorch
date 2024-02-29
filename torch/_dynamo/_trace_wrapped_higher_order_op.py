@@ -1,14 +1,11 @@
-import torch
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import autograd_not_implemented
 
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
-from torch.fx.experimental._backward_state import BackwardState
 
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils._python_dispatch import _get_current_dispatch_mode
-from torch.utils._pytree import tree_map_only
 
 
 __all__ = ["trace_wrapped"]
@@ -44,12 +41,10 @@ __all__ = ["trace_wrapped"]
 # compiled autograd do we inline into the function.
 
 
-def trace_wrapped(*args, **kwargs):
-    with torch.no_grad():
-        return _trace_wrapped_op(*args, **kwargs)
+def trace_wrapped(*args, fn):
+    return _trace_wrapped_op(*args, fn=fn)
 
 
-# TODO(jansel): need to ensure this does not get DCEed
 _trace_wrapped_op = HigherOrderOperator("trace_wrapped")
 
 
@@ -61,51 +56,54 @@ def _assert_meta(grad, size, stride, dtype):
 
 
 @_trace_wrapped_op.py_impl(ProxyTorchDispatchMode)
-def inner_trace(mode, *args, bw_state=None, **kwargs):
-    def self_invoke(*args, **dyn_kwargs):
-        with torch.no_grad():
-            return _trace_wrapped_op(*args, **dyn_kwargs, **kwargs)
+def inner_trace(mode, *args, fn):
+    import torch
 
-    def unwrap_proxies(x):
-        if isinstance(x, torch.Tensor):
-            return mode.tracer.unwrap_proxy(x)
-        if isinstance(x, (list, tuple)):
-            return type(x)(map(unwrap_proxies, x))
-        if x is None:
-            return None
-        raise AssertionError(f"unhandled type: {type(x)}")
+    assert len(args) == 1
+    grad = args[0]
+    assert isinstance(grad, torch.Tensor)
 
-    proxy_kwargs = {}
-    if bw_state is not None:
-        assert isinstance(bw_state, BackwardState) and bw_state.proxy is not None
-        proxy_kwargs["bw_state"] = bw_state.proxy
+    def self_invoke(*args):
+        return _trace_wrapped_op(*args, fn=fn)
+
+    proxy_args = (mode.tracer.unwrap_proxy(grad),)
+    out_proxy = mode.tracer.create_proxy(
+        "call_function", self_invoke, proxy_args, {}, name="trace_wrapped"
+    )
+    grad = torch.zeros_like(grad)
+    grad = track_tensor_tree(grad, out_proxy, constant=None, tracer=mode.tracer)
+
+    # We have a little shortcut here, wherein we DO NOT yet run a meta func, and so
+    # we take on an assumption that input and output meta matches. As such, we must introduce
+    # a runtime assert
+    proxy_args = (
+        mode.tracer.unwrap_proxy(grad),
+        grad.size(),
+        grad.stride(),
+        grad.dtype,
+    )
     out_proxy = mode.tracer.create_proxy(
         "call_function",
-        self_invoke,
-        unwrap_proxies(args),
-        proxy_kwargs,
-        name="trace_wrapped",
+        _assert_meta,
+        proxy_args,
+        {},
+        name="assert",
     )
-
-    if args[0] is None:
-        grad = args[1]  # module backward hooks
-    else:
-        grad = args[0]  # other backward hooks
-    grad = tree_map_only(torch.Tensor, torch.empty_like, grad)
-    track_tensor_tree(grad, out_proxy, constant=None, tracer=mode.tracer)
+    grad = torch.empty_like(grad)
+    grad = track_tensor_tree(grad, out_proxy, constant=None, tracer=mode.tracer)
     return grad
 
 
 @_trace_wrapped_op.py_impl(FakeTensorMode)
-def inner_fake(*args, **kwargs):
+def inner_fake(*args, fn):
     raise RuntimeError("This op should never be invoked here")
 
 
 @_trace_wrapped_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def _trace_wrapped_op_dense(*args, fn, **kwargs):
+def _trace_wrapped_op_dense(*args, fn):
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
-    return fn(*args, **kwargs)
+    return fn(*args)
 
 
 _trace_wrapped_op.py_impl(DispatchKey.Autograd)(
@@ -114,7 +112,7 @@ _trace_wrapped_op.py_impl(DispatchKey.Autograd)(
 
 
 @_trace_wrapped_op.py_functionalize_impl
-def _trace_wrapped_functionalized(ctx, *args, **kwargs):
+def _trace_wrapped_functionalized(ctx, *args, fn):
     unwrapped_args = ctx.unwrap_tensors(args)
     with ctx.redispatch_to_next():
-        return ctx.wrap_tensors(_trace_wrapped_op(*unwrapped_args, **kwargs))
+        return ctx.wrap_tensors(_trace_wrapped_op(*unwrapped_args, fn=fn))

@@ -1180,16 +1180,13 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 return TupleVariable([TupleVariable(items), aux])
 
 
-class FunctorchHigherOrderVariable(UserFunctionVariable):
+class FunctorchVmapHigherOrderVariable(UserFunctionVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         if not torch._dynamo.config.capture_func_transforms:
-            name = self.get_name()
-            assert name in ("grad_impl", "vmap_impl")
-            fn = name.split("_")[0]
             unimplemented(
-                f"torch.func.{fn} capture is disabled, "
+                "torch.func.vmap capture is disabled, "
                 "it can be turned on by setting "
                 "`torch._dynamo.config.capture_func_transforms=True`"
             )
@@ -1443,19 +1440,18 @@ class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
-    """
-    Handles torch._dynamo._trace_wrapped_higher_order_op.inner_trace
-    by unwrapping the higher order op and inlining through it.  This op
-    is created by dynamo to survive through AotAutograd, then unwrapped
-    here in the call to dynamo from compiled autograd.
-    """
-
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        kwargs = dict(kwargs)
-        fn = kwargs.pop("fn")
-        return fn.call_function(tx, args, kwargs)
+        from . import TensorVariable
+
+        assert "fn" in kwargs
+        fn = kwargs["fn"]
+        assert len(args) == 1
+        grad = args[0]
+        assert isinstance(grad, TensorVariable)
+
+        return fn.call_function(tx, args, {})
 
 
 class AutogradFunctionApplyVariable(VariableTracker):

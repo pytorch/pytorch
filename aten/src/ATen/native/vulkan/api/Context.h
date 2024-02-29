@@ -177,13 +177,13 @@ class Context final {
   void submit_compute_epilogue(
       CommandBuffer&,
       const DescriptorSet&,
-      PipelineBarrier&,
+      const PipelineBarrier&,
       const utils::uvec3&);
 
  public:
   template <class S, class D>
   bool submit_copy(
-      PipelineBarrier&,
+      const PipelineBarrier&,
       const S&,
       const D&,
       const api::utils::uvec3&,
@@ -194,7 +194,7 @@ class Context final {
   template <typename... Arguments>
   bool submit_compute_job(
       const ShaderInfo&,
-      PipelineBarrier&,
+      const PipelineBarrier&,
       const utils::uvec3&,
       const utils::uvec3&,
       VkFence fence_handle,
@@ -389,7 +389,7 @@ inline void record_copy<VulkanBuffer, VulkanImage>(
  */
 template <class S, class D>
 inline bool Context::submit_copy(
-    PipelineBarrier& pipeline_barrier,
+    const PipelineBarrier& pipeline_barrier,
     const S& source,
     const D& destination,
     const api::utils::uvec3& copy_range,
@@ -456,7 +456,7 @@ inline bool Context::submit_copy(
 template <typename... Arguments>
 inline bool Context::submit_compute_job(
     const ShaderInfo& shader,
-    PipelineBarrier& pipeline_barrier,
+    const PipelineBarrier& pipeline_barrier,
     const utils::uvec3& global_work_group,
     const utils::uvec3& local_work_group_size,
     VkFence fence_handle,

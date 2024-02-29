@@ -733,7 +733,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 60 * 1000 /*60 Sec*/);
   coordCheckIntervalMilSec_ = getCvarInt(TORCH_NCCL_COORD_CHECK_MILSEC, 1000);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
-  NCCLTraceBuffer::get()->record_pg_ranks(uid_, groupRanks());
   enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
   // store_ usually is wrapped with PrefixStore and the prefix is different
   // across different ProcessGroupNCCL(PG) instances. We need to get the
@@ -1473,15 +1472,6 @@ const int& ProcessGroupNCCL::globalRank() const {
   return globalRank;
 }
 
-const std::vector<uint64_t>& ProcessGroupNCCL::groupRanks() const {
-  if (options_->global_ranks_in_group.empty() && uid_ == 0) {
-    static std::vector<uint64_t> globalRanks(size_);
-    std::iota(globalRanks.begin(), globalRanks.end(), 0);
-    return globalRanks;
-  }
-  return options_->global_ranks_in_group;
-}
-
 void ProcessGroupNCCL::watchdogHandler() {
   bool done = false;
   lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
@@ -1676,7 +1666,6 @@ void ProcessGroupNCCL::runHookLoop() {
                 work.workStartTime_ - std::chrono::steady_clock::now());
         onCompletionHook_(std::make_shared<WorkInfo>(
             work.retrieveOpType(), // OpType
-            work.getSequencenumber(), // seq
             timeStarted, // timeStarted
             std::chrono::system_clock::now(), // timeFinished
             std::chrono::duration<float, std::milli>(
