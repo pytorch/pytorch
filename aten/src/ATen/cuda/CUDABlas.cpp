@@ -190,8 +190,7 @@ static size_t _parseChosenWorkspaceSize() {
 #else
   size_t workspace_size = 4096;
   cudaDeviceProp* p = at::cuda::getDeviceProperties(c10::cuda::current_device());
-  const int computeCapability = p->major * 10 + p->minor;
-  if (computeCapability >= 90) {
+  if (p->major >= 9) {
     workspace_size = 32768;
   }
 #endif
