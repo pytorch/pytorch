@@ -1195,7 +1195,7 @@ bool Node::hasSideEffects() const {
       return true;
   }
 
-  auto op = kind_.is_prim() ? maybeOperator() : &getOperator();
+  auto op = maybeOperator();
   if (!op) {
     TORCH_INTERNAL_ASSERT(
         kind_.is_prim(),
