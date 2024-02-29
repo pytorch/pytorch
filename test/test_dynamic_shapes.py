@@ -488,7 +488,7 @@ def forward(self, x_1):
         # This doesn't error
         self.assertTrue(expect_true(i0 == 0))
         # This generates a deferred runtime assert via replacement
-        self.assertEqual(shape_env.unbacked_replacements[i0_sym], 0)
+        self.assertEqual(shape_env.replacements[i0_sym], 0)
         # After expecting true, guards now resolve given the runtime assert
         bool(i0 == 0)
 

@@ -1805,20 +1805,9 @@ class ShapeEnv:
         # bound. If one of them is None, it means that there are no guards
         # that refine that respective bound.
         self.var_to_guards: Dict[sympy.Symbol, Tuple[Optional[ShapeGuard], Optional[ShapeGuard]]] = {}
-        # Maps from symbols to expressions representing them.
-        # Populated from equality guards (i.e. a.shape[0] == b.shape[0]).
-        # This NEVER includes replacements from unbacked symints, which
-        # need to be handled specially, see https://github.com/pytorch/pytorch/issues/119689
-        self.replacements: Dict[sympy.Symbol, sympy.Expr] = {}
-        # Maps from unbacked symbols to expressions representing them.
-        # In general, we want to apply these substitutions when we are
-        # determining if something is statically known to be true/false,
-        # but we don't want to eagerly apply the replacement (as we do
-        # for self.replacements) because we need to know if a given
-        # IR node allocated an unbacked SymInt (every unbacked SymInt
-        # is special and unique, even if later we add a runtime assert
-        # that forces them to be equal to something else.)
-        self.unbacked_replacements: Dict[sympy.Symbol, sympy.Expr] = {}
+        # Maps from sympy ints to expressions representing them
+        # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
+        self.replacements: Dict[sympy.Symbol, sympy.Expr] = {}  #
         # Set holds a % b expressions that evaluate to 0.
         self.divisible: Set[sympy.Expr] = set()
         # Set that holds "size-like" symbols.  When we perform
@@ -2137,7 +2126,7 @@ class ShapeEnv:
         Defines the current "state" of the guards we've accumulated in this ShapeEnv.
         Determines when we need to invalidate our cache
         """
-        return (len(self.replacements), len(self.unbacked_replacements), len(self.divisible), self.num_deferred_runtime_asserts)
+        return (len(self.replacements), len(self.divisible), self.num_deferred_runtime_asserts)
 
     def _update_version_counter(self):
         # The shape environment is queried orders of magnitude more often than
@@ -3325,10 +3314,9 @@ class ShapeEnv:
             for ra in self.deferred_runtime_asserts.get(s, ()):
                 # NB: simplify here is load bearing, as it ensures that we
                 # apply replacements from unbacked_replacements
+                e = self.simplify(ra.expr)
                 if compute_hint:
-                    e = canonicalize_bool_expr(self.simplify(ra.expr).xreplace(self.var_to_val))
-                else:
-                    e = self.simplify(ra.expr)
+                    e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
                 # e is already canonical
                 subst[e] = sympy.true
                 subst[canonicalize_bool_expr(sympy.Not(e))] = sympy.false
@@ -3407,7 +3395,13 @@ class ShapeEnv:
     def replace(self, expr: "sympy.Expr", *, resolve_unbacked=True) -> "sympy.Expr":
         """Apply symbol replacements to any symbols in the given expression
         """
-        replacements = {s: self._find(cast(sympy.Symbol, s), resolve_unbacked=resolve_unbacked) for s in expr.free_symbols}
+        # When resolve_unbacked is False, do not put unbacked SymInts in the
+        # replacement dict because we want to keep them preserved
+        replacements = {
+            s: self._find(cast(sympy.Symbol, s))
+            for s in expr.free_symbols
+            if resolve_unbacked or not self.is_unbacked_symint(s)
+        }
         # NB: do NOT apply unbacked replacements here yet
         return safe_expand(expr.xreplace(replacements))
 
@@ -3616,8 +3610,6 @@ class ShapeEnv:
                                    "[%s not subset of %s (size-oblivious conditions)]", a, tgt, msg, tgt_bound_so, src_bound_so)
                     return
 
-        replacements = self.unbacked_replacements if self.is_unbacked_symint(a) else self.replacements
-
         if config.print_specializations and isinstance(tgt, (sympy.Integer, sympy.Float)):
             # specializing to a constant, which is likely unexpected
 
@@ -3625,11 +3617,11 @@ class ShapeEnv:
             # when adding a to self.replacements, and again when simplifying an expression containing a.
             # Thus to avoid duplication, checking whether a is in self.replacements isn't enough; if it is,
             # it must not already map to `tgt`. Fortunately this check is cheap because `tgt` is a constant.
-            if a not in replacements or tgt != replacements[a]:
+            if a not in self.replacements or tgt != self.replacements[a]:
                 self.log.warning("Specializing %s to %s", self.var_to_sources[a][0].name(), tgt)
                 self.log.debug("SPECIALIZATION", stack_info=True)
         log.info("set_replacement %s = %s (%s) %s", a, tgt, msg, tgt_bound)
-        replacements[a] = tgt
+        self.replacements[a] = tgt
         self._update_version_counter()
 
         # When specializing 'a == tgt', the equality should be also conveyed to
@@ -3642,7 +3634,7 @@ class ShapeEnv:
 
     @_lru_cache
     @record_shapeenv_event()
-    def _find(self, a: "sympy.Symbol", *, resolve_unbacked: bool = True) -> "sympy.Expr":
+    def _find(self, a: "sympy.Symbol") -> "sympy.Expr":
         """
         Implements a DSU-like algorithm to find the variable that represents a
         Also handles transitive non-identity replacements.
@@ -3650,19 +3642,12 @@ class ShapeEnv:
         a: b + c
         c: d
         """
-        def doit(replacements):
-            res = replacements[a]
-            cur_replace = {s: self._find(s, resolve_unbacked=resolve_unbacked) for s in res.free_symbols}
-            self._set_replacement(a, replacements[a].xreplace(cur_replace), "find")
-            return replacements[a]
-
-        if a in self.replacements:
-            return doit(self.replacements)
-
-        if resolve_unbacked and a in self.unbacked_replacements:
-            return doit(self.unbacked_replacements)
-
-        return a
+        if a not in self.replacements:
+            return a
+        res = self.replacements[a]
+        cur_replace = {s: self._find(s) for s in res.free_symbols}
+        self._set_replacement(a, self.replacements[a].xreplace(cur_replace), "find")
+        return self.replacements[a]
 
     @lru_cache(256)
     def _maybe_guard_eq(self, expr: Union["sympy.Eq", "sympy.Ne"], concrete_bool: bool) -> None:
