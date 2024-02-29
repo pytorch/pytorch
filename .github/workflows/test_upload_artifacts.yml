@@ -39,7 +39,7 @@ jobs:
           s3-bucket: pytorch-ci-artifacts
 
   download-step:
-#    needs: upload-step
+    needs: upload-step
     runs-on: linux.2xlarge
     steps:
 #    - name: Download artifact
@@ -70,7 +70,7 @@ jobs:
 
     - name: Test
       run: |
-        ls -la
+        ls -la test.txt
 
 
 
