@@ -1505,6 +1505,7 @@ class RangeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     @staticmethod
     def make_symint(tx, i):
         import sympy
+
         const_proxy = tx.output.create_proxy(
             "call_function", (lambda a: a), *proxy_args_kwargs([i], {})
         )
