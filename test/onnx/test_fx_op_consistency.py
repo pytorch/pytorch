@@ -142,11 +142,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         dtypes=onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Pow", "int"),
     ),
-    skip(
-        "_native_batch_norm_legit",
-        dtypes=(torch.float16,),
-        reason="fixme: Assertion error: result mismatch and type error",
-    ),
+    #skip(
+    #    "_native_batch_norm_legit",
+    #    dtypes=(torch.float16,),
+    #    reason="fixme: Assertion error: result mismatch and type error",
+    #),
     #skip(
     #    "_batch_norm_with_update",
     #    dtypes=(torch.float16,),
@@ -1352,11 +1352,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
 # fmt: on
 
 SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
-    skip(
-        "_native_batch_norm_legit",
-        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
-        reason="https://github.com/pytorch/pytorch/issues/115106",
-    ),
+    #skip(
+    #    "_native_batch_norm_legit",
+    #    model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+    #    reason="https://github.com/pytorch/pytorch/issues/115106",
+    #),
     #skip(
     #    "_batch_norm_with_update",
     #    model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,

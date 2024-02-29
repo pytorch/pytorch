@@ -482,7 +482,7 @@ class TestOperators(TestCase):
         skip('nn.functional.max_unpool2d'),  # fails everywhere except on windows
         skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
         xfail("native_batch_norm"),          # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
-        xfail("_native_batch_norm_legit"),   # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
+        #xfail("_native_batch_norm_legit"),   # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
         #xfail("_batch_norm_with_update"),     # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
 
         xfail('nn.functional.scaled_dot_product_attention'),
@@ -838,7 +838,7 @@ class TestOperators(TestCase):
         # view doesn't work on sparse
         xfail("to_sparse"),
         xfail("native_batch_norm"),
-        xfail("_native_batch_norm_legit"),
+        #xfail("_native_batch_norm_legit"),
         #xfail("_batch_norm_with_update"),
     }))
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
@@ -930,7 +930,7 @@ class TestOperators(TestCase):
         # All of the following are bugs and need to be fixed
         skip('linalg.svdvals'),  # # really annoying thing where it passes correctness check but not has_batch_rule
         skip("native_batch_norm"),
-        skip("_native_batch_norm_legit"),
+        #skip("_native_batch_norm_legit"),
         #skip("_batch_norm_with_update"),
         xfail('__getitem__', ''),  # dynamic error
         xfail('nanquantile', device_type='cpu'),  # checks q via a .item() call
@@ -1055,7 +1055,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.batch_norm'),
         xfail('nn.functional.batch_norm', 'without_cudnn'),
         xfail("native_batch_norm"),
-        xfail("_native_batch_norm_legit"),
+        #xfail("_native_batch_norm_legit"),
         #xfail("_batch_norm_with_update"),
 
         # https://github.com/pytorch/pytorch/issues/96560
@@ -1241,7 +1241,7 @@ class TestOperators(TestCase):
         xfail('sparse.sampled_addmm', ''),
         xfail('sparse.mm', 'reduce'),
         xfail("native_batch_norm"),
-        xfail("_native_batch_norm_legit"),
+        #xfail("_native_batch_norm_legit"),
         #xfail("_batch_norm_with_update"),
         xfail("native_dropout_backward"),
         xfail("index_fill"),  # aten::_unique hit the vmap fallback which is currently disabled
@@ -1318,7 +1318,7 @@ class TestOperators(TestCase):
         xfail('sparse.sampled_addmm', ''),
         xfail('sparse.mm', 'reduce'),
         xfail("native_batch_norm"),
-        xfail("_native_batch_norm_legit"),
+        #xfail("_native_batch_norm_legit"),
         #xfail("_batch_norm_with_update"),
         xfail('as_strided', 'partial_views'),
     }))
@@ -1577,7 +1577,7 @@ class TestOperators(TestCase):
         # input while the running_mean or running_var, which will be updated in
         # place, were not batched.
         xfail("native_batch_norm"),
-        xfail("_native_batch_norm_legit"),
+        #xfail("_native_batch_norm_legit"),
         #xfail("_batch_norm_with_update"),
         xfail('native_dropout_backward'),
     }))
