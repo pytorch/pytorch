@@ -567,7 +567,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // return true if abort is successful, otherwise false
   bool abort(c10::optional<std::string> abortReason = c10::nullopt);
 
-  void shutdown();
+  void shutdown(c10::optional<std::string> reason = c10::nullopt);
 
   void eagerConnectSingleDevice(at::Device device) override;
 
