@@ -4316,6 +4316,82 @@ def meta_max_pool2d_with_indices(
     )
 
 
+@register_meta(aten.fractional_max_pool2d.default)
+def meta_fractional_max_pool2d(self_, kernel_size, output_size, random_samples):
+    torch._check(
+        self_.ndim in (3, 4),
+        lambda: f"fractional_max_pool2d: Expected 3D or 4D tensor, but got: {self_._ndim}",
+    )
+    ndim = self_.ndim
+
+    for i in range(3):
+        d = i + (ndim - 3)
+        torch._check(
+            self_.size(d) > 0,
+            f"fractional_max_pool2d: Expected input to have non-zero "
+            f" size for non-batch dimenions, but got {self_.size()} with dimension {d} empty",
+        )
+
+    # the check and message are out of sync, but this matches the structured meta
+    torch._check(
+        len(kernel_size) == 2,
+        lambda: "fractional_max_pool2d: kernel_size must"
+        "either be a single int or tuple of Ints",
+    )
+    torch._check(
+        len(output_size) == 2,
+        lambda: "fractional_max_pool2d: output_size must "
+        "either be a single int or tuple of Ints",
+    )
+
+    nPlane = self_.size(-3)
+    inH = self_.size(-2)
+    inW = self_.size(-1)
+    if ndim == 4:
+        nBatch = self_.size(0)
+        samples_shape = [nBatch, nPlane, 2]
+    else:
+        nBatch = 1
+        samples_shape = [nPlane, 2]
+
+    torch._check(
+        all(ss == random_samples.size(i) for i, ss in enumerate(samples_shape)),
+        lambda: f"fractional_max_pool2d: Expected random samples with size "
+        f"{samples_shape}, but got {random_samples.size()}",
+    )
+
+    torch._check(
+        output_size[0] + kernel_size[0] - 1 <= inH,
+        lambda: f"fractional_max_pool2d: kernel height {kernel_size[0]} is too large relative to input height {inH}",
+    )
+    torch._check(
+        output_size[1] + kernel_size[1] - 1 <= inW,
+        lambda: f"fractional_max_pool2d: kernel width {kernel_size[1]} is too large relative to input width {inW}",
+    )
+
+    if self_.dim() == 4:
+        size = [nBatch, nPlane, output_size[0], output_size[1]]
+    else:
+        size = [nPlane, output_size[0], output_size[1]]
+
+    memory_format = utils.suggest_memory_format(self_)
+
+    return (
+        torch.empty(
+            size,
+            dtype=self_.dtype,
+            device=self_.device,
+            memory_format=memory_format,
+        ),
+        torch.empty(
+            size,
+            dtype=torch.int64,
+            device=self_.device,
+            memory_format=memory_format,
+        ),
+    )
+
+
 @register_meta(aten.max_unpool2d)
 @out_wrapper()
 def meta_max_unpool2d(self_, indices, output_size):

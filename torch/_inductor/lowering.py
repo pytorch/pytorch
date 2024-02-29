@@ -4408,8 +4408,7 @@ def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim):
             ops.index_expr(i, torch.int64),
             ops.sub(ops.index_expr(out_sz, torch.int64), ops.constant(1, torch.int64)),
         )
-
-        return ops.where(mask, seq_i, in_sz - kernel_sz)
+        return ops.where(mask, seq_i, ops.index_expr(in_sz - kernel_sz, torch.int64))
 
     return load
 
@@ -4418,8 +4417,6 @@ def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim):
 def fractional_max_pool2d(x, kernel_size, output_size, random_samples):
     x.realize_hint()
     *batch, inp_h, inp_w = x.get_size()
-    inp_h = V.graph.sizevars.evaluate_static_shape(inp_h)
-    inp_w = V.graph.sizevars.evaluate_static_shape(inp_w)
     kernel_h, kernel_w = kernel_size
     h_out, w_out = output_size
 
