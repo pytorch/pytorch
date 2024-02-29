@@ -2665,8 +2665,6 @@ class GraphModule(torch.nn.Module):
         sin = child_1.sin();  child_1 = None
         primal_out = sin.sum();  sin = None
 
-        eq = primal_out == None
-
         out = torch._C._functorch._unwrap_for_grad(primal_out, 1);  primal_out = None
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting()
@@ -2829,8 +2827,6 @@ class GraphModule(torch.nn.Module):
         primal_out = sin.sum();  sin = None
 
         _ = torch._C._functorch._unwrap_for_grad(aux, 1);  aux = None
-
-        eq = primal_out == None
 
         out = torch._C._functorch._unwrap_for_grad(primal_out, 1);  primal_out = None
 
