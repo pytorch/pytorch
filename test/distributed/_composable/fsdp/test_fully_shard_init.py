@@ -467,8 +467,7 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
     @wrapSwapTensorsTest(True)
     def test_meta_device_1d_init(self):
         default_pg = torch.distributed.distributed_c10d._get_default_group()
-        device_type = "cuda" if torch.cuda.is_available() else "cpu"
-        mesh = init_device_mesh(device_type, mesh_shape=(default_pg.size(),))
+        mesh = init_device_mesh("cuda", mesh_shape=(default_pg.size(),))
 
         # Test both even sharding (8) and uneven sharding (3)
         for mlp_dim in (8, 3):
@@ -543,6 +542,27 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
         inp = torch.randn((4, mlp_dim), device="cuda")
         model(inp).sum().backward()
         optim.step()
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_invalid_meta_device_init(self):
+        default_pg = torch.distributed.distributed_c10d._get_default_group()
+        mesh = init_device_mesh("cuda", mesh_shape=(default_pg.size(),))
+        mlp_dim = 8
+        with torch.device("meta"):
+            model = nn.Sequential(MLP(mlp_dim, with_buffer=True), MLP(mlp_dim))
+            for param in model.parameters():
+                self.assertEqual(param.device, torch.device("meta"))
+            fully_shard(model[0], mesh=mesh)
+            fully_shard(model[1], mesh=mesh)
+            fully_shard(model, mesh=mesh)
+        inp = torch.randn((4, mlp_dim), device="cuda")
+        error_regex = (
+            "FSDP parameters should be materialized from meta device before training, "
+            "but the following were still on meta device: "
+            r"\['0.in_proj.weight', '0.in_proj.bias', '0.out_proj.weight', '0.out_proj.bias'\]"
+        )
+        with self.assertRaisesRegex(RuntimeError, error_regex):
+            model(inp)
 
 
 if __name__ == "__main__":
