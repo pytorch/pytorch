@@ -53,6 +53,18 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
   at::Tensor allReduce(const at::Tensor& input, AllReduceAlgo algo);
 
  private:
+  at::Tensor oneShotAllReduce(
+      const at::Tensor& input,
+      at::cuda::CUDAStream& stream);
+
+  at::Tensor twoShotAllReduce(
+      const at::Tensor& input,
+      at::cuda::CUDAStream& stream);
+
+  at::Tensor hybridCubeMeshAllReduce(
+      const at::Tensor& input,
+      at::cuda::CUDAStream& stream);
+
   Topology topology_;
   std::array<void*, kMaxDevices> p2pStates_;
   std::array<void*, kMaxDevices> buffers_;

@@ -486,16 +486,10 @@ void* initTopoInfo(Topology topology, NvlMesh nvlMesh, size_t rank) {
   return topoInfo;
 }
 
-at::Tensor oneShotAllReduce(
+at::Tensor IntraNodeComm::oneShotAllReduce(
     const at::Tensor& input,
-    std::array<void*, kMaxDevices> p2pStates,
-    std::array<void*, kMaxDevices> buffers,
-    void* p2pStatesDev,
-    void* buffersDev,
-    size_t rank,
-    size_t worldSize,
     at::cuda::CUDAStream& stream) {
-  checkInput(input, rank);
+  checkInput(input, rank_);
 
   size_t numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
   size_t N_aligned = alignUp(input.numel(), numelPerWarp);
@@ -506,23 +500,23 @@ at::Tensor oneShotAllReduce(
 
   at::cuda::OptionalCUDAGuard guard(input.get_device());
   AT_CUDA_CHECK(cudaMemcpyAsync(
-      buffers[rank],
+      buffers_[rank_],
       input.data_ptr(),
       input.numel() * input.element_size(),
       cudaMemcpyDeviceToDevice,
       stream));
 
-#define X(kWorldSize, kAligned)                           \
-  if (worldSize == kWorldSize) {                          \
-    oneShotAllReduceKernel<kWorldSize, kAligned>          \
-        <<<blocks, threads, 0, stream>>>(                 \
-            input.data_ptr<at::BFloat16>(),               \
-            input.numel(),                                \
-            N_aligned,                                    \
-            reinterpret_cast<P2pState**>(p2pStatesDev),   \
-            reinterpret_cast<at::BFloat16**>(buffersDev), \
-            rank);                                        \
-    C10_CUDA_KERNEL_LAUNCH_CHECK();                       \
+#define X(kWorldSize, kAligned)                            \
+  if (worldSize_ == kWorldSize) {                          \
+    oneShotAllReduceKernel<kWorldSize, kAligned>           \
+        <<<blocks, threads, 0, stream>>>(                  \
+            input.data_ptr<at::BFloat16>(),                \
+            input.numel(),                                 \
+            N_aligned,                                     \
+            reinterpret_cast<P2pState**>(p2pStatesDev_),   \
+            reinterpret_cast<at::BFloat16**>(buffersDev_), \
+            rank_);                                        \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                        \
   }
 
 #define DISPATCH_ALL_WORLD_SIZES(kAligned) \
@@ -545,20 +539,14 @@ at::Tensor oneShotAllReduce(
   return input;
 }
 
-at::Tensor twoShotAllReduce(
+at::Tensor IntraNodeComm::twoShotAllReduce(
     const at::Tensor& input,
-    std::array<void*, kMaxDevices> p2pStates,
-    std::array<void*, kMaxDevices> buffers,
-    void* p2pStatesDev,
-    void* buffersDev,
-    size_t rank,
-    size_t worldSize,
     at::cuda::CUDAStream& stream) {
-  checkInput(input, rank);
+  checkInput(input, rank_);
 
   size_t numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
-  size_t N_aligned = alignUp(input.numel(), worldSize * numelPerWarp);
-  size_t N_per_rank = N_aligned / worldSize;
+  size_t N_aligned = alignUp(input.numel(), worldSize_ * numelPerWarp);
+  size_t N_per_rank = N_aligned / worldSize_;
   TORCH_CHECK(N_aligned <= kMaxIntraNodeSize / input.element_size());
 
   dim3 blocks, threads;
@@ -570,20 +558,20 @@ at::Tensor twoShotAllReduce(
 
   at::cuda::OptionalCUDAGuard guard(input.get_device());
   AT_CUDA_CHECK(cudaMemcpyAsync(
-      buffers[rank],
+      buffers_[rank_],
       input.data_ptr(),
       input.numel() * input.element_size(),
       cudaMemcpyDeviceToDevice,
       stream));
 
 #define X(kWorldSize)                                                   \
-  if (worldSize == kWorldSize) {                                        \
+  if (worldSize_ == kWorldSize) {                                       \
     twoShotAllReduceKernel<kWorldSize><<<blocks, threads, 0, stream>>>( \
         output.data_ptr<at::BFloat16>(),                                \
         N_aligned,                                                      \
-        reinterpret_cast<P2pState**>(p2pStatesDev),                     \
-        reinterpret_cast<at::BFloat16**>(buffersDev),                   \
-        rank);                                                          \
+        reinterpret_cast<P2pState**>(p2pStatesDev_),                    \
+        reinterpret_cast<at::BFloat16**>(buffersDev_),                  \
+        rank_);                                                         \
     C10_CUDA_KERNEL_LAUNCH_CHECK();                                     \
   }
   X(2);
@@ -606,17 +594,10 @@ at::Tensor twoShotAllReduce(
   return input;
 }
 
-at::Tensor hybridCubeMeshAllReduce(
+at::Tensor IntraNodeComm::hybridCubeMeshAllReduce(
     const at::Tensor& input,
-    std::array<void*, kMaxDevices> p2pStates,
-    std::array<void*, kMaxDevices> buffers,
-    void* p2pStatesDev,
-    void* buffersDev,
-    int hcmInfo[4],
-    size_t rank,
-    size_t worldSize,
     at::cuda::CUDAStream& stream) {
-  checkInput(input, rank);
+  checkInput(input, rank_);
 
   size_t numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
   size_t N_aligned = alignUp(input.numel(), numelPerWarp);
@@ -627,7 +608,7 @@ at::Tensor hybridCubeMeshAllReduce(
 
   at::cuda::OptionalCUDAGuard guard(input.get_device());
   AT_CUDA_CHECK(cudaMemcpyAsync(
-      buffers[rank],
+      buffers_[rank_],
       input.data_ptr(),
       input.numel() * input.element_size(),
       cudaMemcpyDeviceToDevice,
@@ -638,10 +619,10 @@ at::Tensor hybridCubeMeshAllReduce(
       input.data_ptr<at::BFloat16>(),                                      \
       input.numel(),                                                       \
       N_aligned,                                                           \
-      reinterpret_cast<P2pState**>(p2pStatesDev),                          \
-      reinterpret_cast<at::BFloat16**>(buffersDev),                        \
-      hcmInfo,                                                             \
-      rank);                                                               \
+      reinterpret_cast<P2pState**>(p2pStatesDev_),                         \
+      reinterpret_cast<at::BFloat16**>(buffersDev_),                       \
+      static_cast<int*>(topoInfo_),                                        \
+      rank_);                                                              \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   if (N_aligned == static_cast<size_t>(input.numel())) {
@@ -653,10 +634,7 @@ at::Tensor hybridCubeMeshAllReduce(
   return input;
 }
 
-AllReduceAlgo selectAllReduceAlgo(
-    const at::Tensor& input,
-    Topology topology,
-    size_t worldSize) {
+AllReduceAlgo IntraNodeComm::selectAllReduceAlgo(const at::Tensor& input) {
   // Only support bf16 for now
   if (input.dtype() != at::kBFloat16 ||
       static_cast<size_t>(input.numel() * input.element_size()) >
@@ -665,70 +643,49 @@ AllReduceAlgo selectAllReduceAlgo(
   }
   const auto numel = input.numel();
   const auto numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
-  if (topology == Topology::HYBRID_CUBE_MESH) {
+  if (topology_ == Topology::HYBRID_CUBE_MESH) {
     TORCH_CHECK(
-        worldSize == 8, "hyperCubeAllReduce only supports exactly 8 GPUs");
+        worldSize_ == 8, "hyperCubeAllReduce only supports exactly 8 GPUs");
     if (alignUp(numel, numelPerWarp) <= kHcmThreshBytes) {
       return AllReduceAlgo::HCM;
     }
   }
-  if (topology == Topology::FULLY_CONNECTED) {
+  if (topology_ == Topology::FULLY_CONNECTED) {
     if (alignUp(numel, numelPerWarp) <= kOneShotThreshBytes) {
       return AllReduceAlgo::ONE_SHOT;
     }
-    if (alignUp(numel, numelPerWarp * worldSize) <= kTwoShotThreshBytes) {
+    if (alignUp(numel, numelPerWarp * worldSize_) <= kTwoShotThreshBytes) {
       return AllReduceAlgo::TWO_SHOT;
     }
   }
   return AllReduceAlgo::NONE;
 }
 
-at::Tensor allReduce(
+static int64_t usageCounter = 0;
+
+at::Tensor IntraNodeComm::allReduce(
     const at::Tensor& input,
-    std::array<void*, kMaxDevices> p2pStates,
-    std::array<void*, kMaxDevices> buffers,
-    void* p2pStatesDev,
-    void* buffersDev,
-    void* topoInfo,
-    size_t rank,
-    size_t worldSize,
-    AllReduceAlgo algo,
-    at::cuda::CUDAStream& stream) {
+    AllReduceAlgo algo) {
+  // Report usage for testing purposes.
+  // We don't care about overflowing.
+  ++usageCounter;
+  auto stream = at::cuda::getCurrentCUDAStream();
+  c10::cuda::CUDACachingAllocator::recordStream(
+      input.storage().data_ptr(), stream);
   switch (algo) {
     case AllReduceAlgo::ONE_SHOT:
-      return oneShotAllReduce(
-          input,
-          p2pStates,
-          buffers,
-          p2pStatesDev,
-          buffersDev,
-          rank,
-          worldSize,
-          stream);
+      return oneShotAllReduce(input, stream);
     case AllReduceAlgo::TWO_SHOT:
-      return twoShotAllReduce(
-          input,
-          p2pStates,
-          buffers,
-          p2pStatesDev,
-          buffersDev,
-          rank,
-          worldSize,
-          stream);
+      return twoShotAllReduce(input, stream);
     case AllReduceAlgo::HCM:
-      return hybridCubeMeshAllReduce(
-          input,
-          p2pStates,
-          buffers,
-          p2pStatesDev,
-          buffersDev,
-          (int*)topoInfo,
-          rank,
-          worldSize,
-          stream);
+      return hybridCubeMeshAllReduce(input, stream);
     default:
       C10_THROW_ERROR(ValueError, "IntraNodeComm: invalid algo");
   }
+}
+
+int64_t getIntraNodeCommUsageCounter() {
+  return usageCounter;
 }
 
 } // namespace intra_node_comm
