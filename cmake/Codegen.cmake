@@ -330,6 +330,10 @@ if(INTERN_BUILD_ATEN_OPS)
           # See https://github.com/pytorch/pytorch/issues/38855
           set(EXTRA_FLAGS "${EXTRA_FLAGS} -Wno-uninitialized")
         endif()
+        if(("${NAME}" STREQUAL "native/cpu/GridSamplerKernel.cpp") AND ("${CPU_CAPABILITY}" STREQUAL "ZVECTOR"))
+          # Workaround for currently investigated issue for gcc >= 12
+          set(EXTRA_FLAGS "${EXTRA_FLAGS} -fno-strict-aliasing")
+        endif()
         if("${NAME}" STREQUAL "native/quantized/cpu/kernels/QuantizedOpKernels.cpp")
           # See https://github.com/pytorch/pytorch/issues/38854
           set(EXTRA_FLAGS "${EXTRA_FLAGS} -Wno-deprecated-copy")
