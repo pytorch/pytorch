@@ -529,6 +529,9 @@ class CUDATestBase(DeviceTypeTestBase):
         # Acquires the current device as the primary (test) device
         cls.primary_device = f'cuda:{torch.cuda.current_device()}'
 
+class XPUTestBase(DeviceTypeTestBase):
+    device_type = 'xpu'
+
 # See Note [Lazy Tensor tests in device agnostic testing]
 lazy_ts_backend_init = False
 class LazyTestBase(DeviceTypeTestBase):
@@ -612,6 +615,8 @@ def get_device_type_test_bases():
         test_bases.append(CPUTestBase)
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
+        if torch.xpu.is_available():
+            test_bases.append(XPUTestBase)
         device_type = torch._C._get_privateuse1_backend_name()
         device_mod = getattr(torch, device_type, None)
         if hasattr(device_mod, "is_available") and device_mod.is_available():
