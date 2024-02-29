@@ -3,6 +3,7 @@
 #include <c10/core/Backend.h>
 #include <c10/util/Exception.h>
 
+#include <cstdint>
 #include <ostream>
 
 namespace c10 {
@@ -34,6 +35,7 @@ inline Layout layout_from_backend(Backend backend) {
     case Backend::SparseHIP:
     case Backend::SparseVE:
     case Backend::SparseXPU:
+    case Backend::SparsePrivateUse1:
       return Layout::Sparse;
     case Backend::MkldnnCPU:
       return Layout::Mkldnn;

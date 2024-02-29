@@ -130,12 +130,7 @@
 #include <utility>
 #include <vector>
 
-namespace at {
-namespace native {
-
-} // namespace native
-
-namespace meta {
+namespace at::meta {
 
 static ScalarType infer_dtype_from_optional(
     const Tensor& self,
@@ -178,7 +173,7 @@ static void check_result_is_bytebool(const char* name, const Tensor& self, const
 
 // Note [all, any : uint8 compatibility]:
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// For NumPy comptability, `all` and `any` return
+// For NumPy compatibility, `all` and `any` return
 // Tensor of dtype `bool`. However for compatibility reason,
 // for `uint8`, they return Tensor of same dtype `uint8`.
 // Reference: https://github.com/pytorch/pytorch/pull/47878#issuecomment-747108561
@@ -402,9 +397,9 @@ TORCH_META_FUNC(amin)
   resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
 
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(aminmax_stub);
 DEFINE_DISPATCH(aminmax_allreduce_stub);
@@ -429,10 +424,6 @@ TORCH_IMPL_FUNC(aminmax_out)
     aminmax_allreduce_stub(self.device().type(), self.contiguous(), mutable_min, mutable_max);
   }
 }
-
-} // namespace native
-
-namespace native {
 
 DEFINE_DISPATCH(sum_stub);
 DEFINE_DISPATCH(nansum_stub);
@@ -519,7 +510,7 @@ static Tensor reversed_cumsum(const Tensor& w, int64_t dim) {
 Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, const Tensor& output) {
   /*
     We show here how to derive an O(n) gradient formula for
-    abitrary inputs. It follows via a basic application of the
+    arbitrary inputs. It follows via a basic application of the
     chain rule together with a number of observations for different
     cases. We assume that x is an n-dimensional vector and y = cumprod(x).
     In the actual implementation we will need to play a bit with masks
@@ -536,7 +527,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     The term dF / dy_j is just grad_output[j] (assuming again
     everything is one-dimensional).
 
-    The term (dy_j / dx_k) is easilly seen to be
+    The term (dy_j / dx_k) is easily seen to be
 
     if j >= k
       dy_j / dx_k = prod_{1 <= i <= j, i != k} x_i
@@ -598,7 +589,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
 
     dy_j / dx_z1 = prod(x[:z1]) * (grad_output[z1] + sum(grad_output[z1+1:z2] * cumprod(x[z1+1:z2])))
 
-    When the imputs are complex, this is map is holomorphic. As such, to compute
+    When the inputs are complex, this is map is holomorphic. As such, to compute
     its backwards is just the conjugate of the usual backwards. This simplifies to
     conjugating the input. We may also reuse the output as, since the map is holomorphic,
     cumprod(input.conj()) = cumprod(input).conj()
@@ -1009,7 +1000,12 @@ static void pre_check_gradient(const Tensor& self, c10::optional<int64_t> spacin
   // Helper for gradient function to make sure input data satisfies prerequisites
   TORCH_CHECK(self.scalar_type() != ScalarType::Byte, "torch.gradient does not support uint8 input.");
   if (spacing_size.has_value() && !dim.has_value()) {
-    TORCH_CHECK(spacing_size.value() == 1 || spacing_size.value() == self.dim(), "torch.gradient expected spacing to be unspecified, a scalar or a list of length ", self.dim(), " but got a list of length ", spacing_size.value());
+    // NOTE: If spacing was given as a scalar, the callers of this function
+    // create a spacing vector of the expected size, and this check passes
+    TORCH_CHECK(spacing_size.value() == self.dim(),
+      "torch.gradient expected spacing to be unspecified, a scalar, or a list ",
+      "of length equal to 'self.dim() = ", self.dim(), "', since dim argument ",
+      "was not given, but got a list of length ", spacing_size.value());
   }
   if (spacing_size.has_value() && dim.has_value()) {
     TORCH_CHECK(spacing_size.value() == static_cast<int64_t>(dim.value().size()),
@@ -1254,7 +1250,7 @@ Tensor trace_cpu(const Tensor& self) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX(self.scalar_type(), "trace", [&] {
     using accscalar_t = at::acc_type<scalar_t, false>;
     accscalar_t sum = 0;
-    const auto* t_data = self.data_ptr<scalar_t>();
+    const auto* t_data = self.const_data_ptr<scalar_t>();
 
     int64_t t_stride_0, t_stride_1, t_diag_size;
 
@@ -1642,16 +1638,16 @@ Tensor any_dims_default(const Tensor &self, OptionalIntArrayRef dim, bool keepdi
 
 Tensor& all_dims_out_default(
     const Tensor &self, OptionalIntArrayRef dim, bool keepdim, Tensor &result) {
-  TORCH_CHECK(self.device() == result.device(), "all: Output must be on the same device as input");
-  auto tmp = self.all(dim, keepdim);
+  TORCH_CHECK(self.device() == result.device(), "all.dims: output must be on the same device as input");
+  auto tmp = all_dims_default(self, dim, keepdim);
   at::native::resize_output(result, tmp.sizes());
   return result.copy_(tmp);
 }
 
 Tensor& any_dims_out_default(
     const Tensor &self, OptionalIntArrayRef dim, bool keepdim, Tensor &result) {
-  TORCH_CHECK(self.device() == result.device(), "any: Output must be on the same device as input");
-  auto tmp = self.any(dim, keepdim);
+  TORCH_CHECK(self.device() == result.device(), "any.dims: output must be on the same device as input");
+  auto tmp = any_dims_default(self, dim, keepdim);
   at::native::resize_output(result, tmp.sizes());
   return result.copy_(tmp);
 }
@@ -1730,7 +1726,7 @@ static double std_var_all_cpu(const Tensor& self, double correction, bool take_s
 
   auto mean = self.mean().item<double>();
   auto iter = TensorIteratorConfig()
-      .add_input(self)
+      .add_const_input(self)
       .build();
 
   auto reduction = [&](int64_t begin, int64_t end, double thread_sum) {
@@ -2201,7 +2197,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
       return true;
     }
     std::atomic<bool> result{true};
-    auto iter = TensorIteratorConfig().add_input(self).build();
+    auto iter = TensorIteratorConfig().add_const_input(self).build();
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "equal_notnan_cpu", [&] {
       iter.for_each([&](char** data, const int64_t *strides, int64_t dim_size) {
         if (!result) {
@@ -2222,8 +2218,8 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
 
   std::atomic<bool> result{true};
   auto iter = TensorIteratorConfig()
-    .add_input(self)
-    .add_input(other)
+    .add_const_input(self)
+    .add_const_input(other)
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
     .build();
@@ -2327,5 +2323,4 @@ Tensor sum_sparse_compressed(
   return at::_sparse_csr_sum(self, *dim, keepdim, dtype);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -46,7 +46,7 @@ def patches(fn):
 class TestSelectAlgorithm(TestCase):
     @expectedFailureDynamicWrapper
     @patches
-    def test_linear_relu(self):
+    def test_linear_relu_cuda(self):
         @torch.compile
         def foo(input, weight, bias):
             return F.relu(F.linear(input, weight, bias))
@@ -63,7 +63,7 @@ class TestSelectAlgorithm(TestCase):
 
     @expectedFailureDynamicWrapper
     @patches
-    def test_addmm(self):
+    def test_addmm_cuda(self):
         @torch.compile
         def foo(input, weight, bias):
             return torch.addmm(bias, input, weight)
@@ -187,7 +187,7 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
-    def test_mm_plus_mm2(self):
+    def test_mm_plus_mm2_cuda(self):
         @torch.compile
         def foo(a, b, c, d):
             return (a @ b) + (c @ d)

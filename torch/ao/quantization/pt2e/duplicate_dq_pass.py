@@ -1,7 +1,7 @@
 import logging
+import operator
 
 import torch
-from torch._export.pass_base import _ExportPassBase
 
 from torch.ao.quantization.pt2e.utils import (
     _filter_sym_size_users,
@@ -9,13 +9,19 @@ from torch.ao.quantization.pt2e.utils import (
 )
 
 from torch.fx.node import map_arg
-from torch.fx.passes.infra.pass_base import PassResult
+from torch.fx.passes.infra.pass_base import PassBase, PassResult
 
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
 
 __all__ = ["DuplicateDQPass"]
+
+_QUANTIZE_OPS = [
+    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+    torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
+    torch.ops.quantized_decomposed.quantize_per_channel.default,
+]
 
 _DEQUANTIZE_OPS = [
     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
@@ -45,13 +51,31 @@ def _maybe_duplicate_dq(
         user.kwargs = new_kwargs
 
 
-class DuplicateDQPass(_ExportPassBase):
+class DuplicateDQPass(PassBase):
     def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
         for node in graph_module.graph.nodes:
             if node.op == "call_function" and node.target in _DEQUANTIZE_OPS:
                 dq_users = _filter_sym_size_users(node)
                 if len(dq_users) <= 1:
                     continue
+                # Do not duplicate dq for dynamic quantization
+                # Pattern: choose_qparam - getitem - q - dq
+                q_node = node.args[0]
+                if q_node.op == "call_function" and q_node.target in _QUANTIZE_OPS:
+                    getitem_node = q_node.args[1]
+                    if (
+                        isinstance(getitem_node, torch.fx.node.Node)
+                        and getitem_node.op == "call_function"
+                        and getitem_node.target == operator.getitem
+                    ):
+                        choose_qparam_node = getitem_node.args[0]
+                        if (
+                            isinstance(choose_qparam_node, torch.fx.node.Node)
+                            and choose_qparam_node.op == "call_function"
+                            and choose_qparam_node.target
+                            == torch.ops.quantized_decomposed.choose_qparams.tensor
+                        ):
+                            continue
                 for user in dq_users:
                     _maybe_duplicate_dq(graph_module, node, user)
         graph_module.graph.eliminate_dead_code()

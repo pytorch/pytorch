@@ -15,7 +15,7 @@ __all__ = ["hook_with_zero_step", "hook_with_zero_step_interleaved"]
 # method, and ZeRO requires a functional optimizer to overlap with DDP
 # Passing a `None` instead of an actual gradient indicates to the optimizer
 # to not update the corresponding parameter
-_NO_PARAM_UPDATE = None
+_NO_PARAM_UPDATE: None = None
 
 
 def _perform_local_step(
@@ -24,7 +24,7 @@ def _perform_local_step(
     rank: int,
 ):
     r"""
-    Performs a local optimizer step using the gradients provided by ``bucket``.
+    Perform a local optimizer step using the gradients provided by ``bucket``.
 
     Arguments:
         bucket (dist.GradBucket): the bucket providing the gradients.
@@ -98,10 +98,10 @@ def _save_ddp_bucket_info(
     zero: ZeroRedundancyOptimizer,
 ):
     r"""
-    Saves :class:`DistributedDataParallel` gradient bucket information for the
-    :class:`ZeroRedundancyOptimizer` instance ``zero`` to use when overlapping.
+    Save :class:`DistributedDataParallel` gradient bucket information for :class:`ZeroRedundancyOptimizer` instance ``zero``.
+
     In particular, this function is meant to be called upon seeing each
-    gradient bucket, meaning it does not save or compute any global
+    gradient bucket to use when overlapping, meaning it does not save or compute any global
     information.
 
     Arguments:
@@ -130,8 +130,9 @@ def _hook_with_zero_step_setup(
     bucket: dist.GradBucket,
 ):
     r"""
-    Encapsulates the setup logic for :func:`hook_with_zero_step` and
-    :func:`hook_with_zero_step_interleaved`, meaning the logic to run in the
+    Encapsulate the setup logic for :func:`hook_with_zero_step` and :func:`hook_with_zero_step_interleaved`.
+
+    This means the logic to run in the
     hook before the backward pass and optimizer step can actually be
     overlapped. This is factored out since it is common to both
     :func:`hook_with_zero_step` and :func:`hook_with_zero_step_interleaved`.
@@ -172,16 +173,14 @@ def hook_with_zero_step(
     shard_buckets: bool = False,
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     r"""
-    Modifies the given ``hook`` to overlap the :class:`ZeroRedundancyOptimizer`
-    optimizer step with the :class:`DistributedDataParallel` backward pass,
-    where the optimizer step computation begins after the last gradient bucket
-    computation has finished.
+    Modify ``hook`` to overlap :class:`ZeroRedundancyOptimizer` optimizer step with :class:`DistributedDataParallel` backward pass.
 
     This approach overlaps the optimizer computation and communication with the
     backward communication. In particular, the backward computation proceeds
     contiguously, and the optimizer computation follows, overlapping with
     outstanding backward communication (i.e. all-reduces) and possibly other
     optimizer communication (i.e. broadcasts).
+    The optimizer step computation begins after the last gradient bucket computation has finished.
 
     This approach may be preferred over :meth:`hook_with_zero_step_interleaved`
     if communication is relatively slow compared to computation.
@@ -244,11 +243,11 @@ def hook_with_zero_step(
         bucket: dist.GradBucket,
     ) -> torch.futures.Future[torch.Tensor]:
         r"""
-        Returns a :class:`Future` that gives a gradient bucket tensor and
-        performs the equivalent of a :class:`ZeroRedundancyOptimizer`
-        :meth:`step` if ``bucket`` is the last gradient bucket.
+        Return :class:`Future` that runs the optimizer step if this corresponds to the last gradient bucket.
 
-        The function performs additional computation on the iteration that
+        Perform equivalent of :class:`ZeroRedundancyOptimizer` :meth:`step` if ``bucket`` is last gradient bucket.
+        The function gives a gradient bucket tensor and
+        performs additional computation on the iteration that
         the :class:`DistributedDataParallel` buckets are rebuilt to collect
         information used to implement the modified hook.
 
@@ -331,10 +330,7 @@ def hook_with_zero_step_interleaved(
     shard_buckets: bool = False,
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     r"""
-    Modifies the given ``hook`` to overlap the :class:`ZeroRedundancyOptimizer`
-    optimizer step with the :class:`DistributedDataParallel` backward pass,
-    where the optimizer step computation interleaves with the backward
-    computation.
+    Modify ``hook`` to overlap :class:`ZeroRedundancyOptimizer` optimizer step with :class:`DistributedDataParallel` backward pass
 
     This approach overlaps the optimizer computation and communication with the
     backward computation and communication. In particular, once a bucket's
@@ -404,9 +400,11 @@ def hook_with_zero_step_interleaved(
         bucket: dist.GradBucket,
     ) -> torch.futures.Future[torch.Tensor]:
         r"""
-        Returns a :class:`Future` that gives a gradient bucket tensor and
-        performs a partial :class:`ZeroRedundancyOptimizer` :meth:`step` using
-        the gradients in that bucket.
+        Return :class:`Future` that gives gradient bucket tensor and performs partial :class:`ZeroRedundancyOptimizer` :meth:`step`.
+
+        This function uses the gradients in gradient in given bucket to perform a partial
+        :class:`ZeroRedundancyOptimizer` :meth:`step`
+
         Arguments:
             state: any state for the hook.
             bucket (dist.GradBucket): the :class:`DistributedDataParallel`
@@ -419,9 +417,7 @@ def hook_with_zero_step_interleaved(
 
         def zero_step(fut: torch.futures.Future) -> torch.Tensor:
             r"""
-            Performs a partial :class:`ZeroRedundancyOptimizer` :meth:`step`
-            using the gradients in the given :class:`DistributedDataParallel`
-            gradient bucket.
+            Perform partial :class:`ZeroRedundancyOptimizer` :meth:`step` using gradients in the :class:`DistributedDataParallel`.
 
             Returns:
                 A :class:`torch.Tensor` representing the contents of the

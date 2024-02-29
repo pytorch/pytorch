@@ -151,7 +151,7 @@ bool CUDAHooks::isPinnedPtr(const void* data) const {
     return false;
   }
 #endif
-#if !defined(USE_ROCM)
+#if !defined(USE_ROCM) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
   return attr.type == cudaMemoryTypeHost;
 #else
   return attr.memoryType == cudaMemoryTypeHost;
@@ -227,7 +227,7 @@ const at::cuda::NVRTC& CUDAHooks::nvrtc() const {
 }
 
 DeviceIndex current_device() {
-  int device;
+  c10::DeviceIndex device = 0;
   cudaError_t err = c10::cuda::GetDevice(&device);
   if (err == cudaSuccess) {
     return device;

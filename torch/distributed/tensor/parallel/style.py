@@ -31,7 +31,7 @@ class ParallelStyle(ABC):
 
 class ColwiseParallel(ParallelStyle):
     """
-    Partition a compatible nn.Module in a row-wise fashion. Currently supports nn.Linear and nn.Embedding.
+    Partition a compatible nn.Module in a column-wise fashion. Currently supports nn.Linear and nn.Embedding.
     Users can compose it together with RowwiseParallel to achieve the sharding of more complicated modules.
     (i.e. MLP, Attention)
 
@@ -43,23 +43,27 @@ class ColwiseParallel(ParallelStyle):
             The DTensor layout of the output for the nn.Module, this is used to ensure the output of the nn.Module
             with the user desired layout. If not specified, the output tensor is sharded on the last dimension.
         use_local_output (bool, optional):
-            Whether to use local :class:`torch.Tensor` instead of `DTensor` for the module output, default: True.
+            Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module output, default: True.
     Returns:
-        A ParallelStyle object that represents Colwise sharding of the nn.Module.
+        A :class:`ParallelStyle` object that represents Colwise sharding of the nn.Module.
 
     Example::
         >>> # xdoctest: +SKIP(failing)
         >>> from torch.distributed.tensor.parallel import parallelize_module, ColwiseParallel
+        >>> from torch.distributed.device_mesh import init_device_mesh
         >>> ...
-        >>> # By default, the input of the "w1" Linear will be annotated to Replicated DTensor
+        >>> m = Model(...)  # m is a nn.Module that contains a "w1" nn.Linear submodule
+        >>> tp_mesh = init_device_mesh("cuda", (8,))
+        >>>
+        >>> # By default, the input of the "w1" Linear will be converted to Replicated DTensor
         >>> # and the output of "w1" will return :class:`torch.Tensor` that shards on the last dim.
-        >>>>
-        >>> parallelize_module(
-        >>>     module=block, # this can be a submodule or module
-        >>>     ...,
-        >>>     parallelize_plan={"w1": ColwiseParallel()},
-        >>> )
+        >>>
+        >>> sharded_mod = parallelize_module(m, tp_mesh, {"w1": ColwiseParallel()})
         >>> ...
+
+    .. note:: By default ``ColwiseParallel`` output is sharded on the last dimension if the ``output_layouts`` not
+        specified, if there're operators that require specific tensor shape (i.e. before the paired ``RowwiseParallel``),
+        keep in mind that if the output is sharded the operator might need to be adjusted to the sharded size.
     """
 
     def __init__(
@@ -68,7 +72,7 @@ class ColwiseParallel(ParallelStyle):
         input_layouts: Optional[Placement] = None,
         output_layouts: Optional[Placement] = None,
         use_local_output: bool = True
-    ) -> None:
+    ):
         super().__init__()
         self.input_layouts = (input_layouts or Replicate(), )
         self.output_layouts = (output_layouts or Shard(-1), )
@@ -92,28 +96,23 @@ class ColwiseParallel(ParallelStyle):
             input_tensor = input_tensor.redistribute(placements=desired_input_layouts)
         return input_tensor
 
-    def _partition_fn(self, name, module, device_mesh):
-        if isinstance(module, nn.Linear):
-            # colwise shard weight/bias to Shard(0), weight be Shard(0)
-            # means Colwise as Linear is input * weight^T + bias, where
-            # weight would become Shard(1)
-            for name, param in module.named_parameters():
-                dist_param = nn.Parameter(
-                    distribute_tensor(param, device_mesh, [Shard(0)])
-                )
-                module.register_parameter(name, dist_param)
-        elif isinstance(module, nn.Embedding):
-            # colwise shard embedding.weight is straight forward as Shard(1)
-            for name, param in module.named_parameters():
-                dist_param = nn.Parameter(
-                    distribute_tensor(param, device_mesh, [Shard(1)])
-                )
-                module.register_parameter(name, dist_param)
-        else:
-            raise NotImplementedError(
-                "ColwiseParallel only supports nn.Linear"
-                f"and nn.Embedding for now, but found {type(module)}!"
+    def _partition_linear_fn(self, name, module, device_mesh):
+        # colwise shard weight/bias to Shard(0), weight be Shard(0)
+        # means Colwise as Linear is input * weight^T + bias, where
+        # weight would become Shard(1)
+        for name, param in module.named_parameters():
+            dist_param = nn.Parameter(
+                distribute_tensor(param, device_mesh, [Shard(0)])
             )
+            module.register_parameter(name, dist_param)
+
+    def _partition_embedding_fn(self, name, module, device_mesh):
+        # colwise shard embedding.weight is straight forward as Shard(1)
+        for name, param in module.named_parameters():
+            dist_param = nn.Parameter(
+                distribute_tensor(param, device_mesh, [Shard(1)])
+            )
+            module.register_parameter(name, dist_param)
 
     @staticmethod
     def _prepare_output_fn(output_layouts, use_local_output, outputs, device_mesh):
@@ -123,10 +122,17 @@ class ColwiseParallel(ParallelStyle):
         return outputs.to_local() if use_local_output else outputs
 
     def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+        if isinstance(module, nn.Linear):
+            partition_fn = self._partition_linear_fn
+        elif isinstance(module, nn.Embedding):
+            partition_fn = self._partition_embedding_fn
+        else:
+            raise NotImplementedError("ColwiseParallel currently only support nn.Linear and nn.Embedding!")
+
         return distribute_module(
             module,
             device_mesh,
-            self._partition_fn,
+            partition_fn,
             partial(self._prepare_input_fn, self.input_layouts, self.desired_input_layouts),
             partial(self._prepare_output_fn, self.output_layouts, self.use_local_output),
         )
@@ -134,7 +140,7 @@ class ColwiseParallel(ParallelStyle):
 
 class RowwiseParallel(ParallelStyle):
     """
-    Partition a compatible nn.Module in a row-wise fashion. Currently supports nn.Linear only.
+    Partition a compatible nn.Module in a row-wise fashion. Currently supports nn.Linear and nn.Embedding.
     Users can compose it with ColwiseParallel to achieve the sharding of more complicated modules.
     (i.e. MLP, Attention)
 
@@ -146,22 +152,22 @@ class RowwiseParallel(ParallelStyle):
             The DTensor layout of the output for the nn.Module, this is used to ensure the output of the nn.Module
             with the user desired layout. If not specified, the output tensor is replicated.
         use_local_output (bool, optional):
-            Whether to use local :class:`torch.Tensor` instead of `DTensor` for the module output, default: True.
+            Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module output, default: True.
     Returns:
-        A ParallelStyle object that represents Rowwise sharding of the nn.Module.
+        A :class:`ParallelStyle` object that represents Rowwise sharding of the nn.Module.
 
     Example::
         >>> # xdoctest: +SKIP(failing)
         >>> from torch.distributed.tensor.parallel import parallelize_module, RowwiseParallel
+        >>> from torch.distributed.device_mesh import init_device_mesh
         >>> ...
-        >>> # By default, the input of the "w2" Linear will be annotated to DTensor that shards on the last dim
+        >>> m = Model(...)  # m is a nn.Module that contains a "w2" nn.Linear submodule
+        >>> tp_mesh = init_device_mesh("cuda", (8,))
+        >>>
+        >>> # By default, the input of the "w2" Linear will be converted to DTensor that shards on the last dim
         >>> # and the output of "w2" will return a replicated :class:`torch.Tensor`.
         >>>
-        >>> parallelize_module(
-        >>>     module=block, # this can be a submodule or module
-        >>>     ...,
-        >>>     parallelize_plan={"w2": RowwiseParallel()},
-        >>> )
+        >>> sharded_mod = parallelize_module(m, tp_mesh, {"w2": RowwiseParallel()}),
         >>> ...
     """
 
@@ -171,14 +177,10 @@ class RowwiseParallel(ParallelStyle):
         input_layouts: Optional[Placement] = None,
         output_layouts: Optional[Placement] = None,
         use_local_output: bool = True
-    ) -> None:
+    ):
         super().__init__()
         self.input_layouts = (input_layouts or Shard(-1), )
         self.output_layouts = (output_layouts or Replicate(), )
-        # rowwise linear runtime sharding:
-        # 1. shard input on last dim
-        # 2. partial output, to replicate -> allreduce, to shard -> reduce_scatter
-        self.desired_input_layouts = (Shard(-1), )
         self.use_local_output = use_local_output
 
     @staticmethod
@@ -191,32 +193,51 @@ class RowwiseParallel(ParallelStyle):
             input_tensor = input_tensor.redistribute(placements=desired_input_layouts)
         return input_tensor
 
-    def _partition_fn(self, name, module, device_mesh):
-        if isinstance(module, nn.Linear):
-            # Rowwise shard weight to Shard(1), bias to Replicate(), weight be Shard(1)
-            # means Rowwise as Linear is input * weight^T + bias, where
-            # weight would become Shard(0)
-            module.register_parameter("weight", nn.Parameter(
-                distribute_tensor(module.weight, device_mesh, [Shard(1)])
+    def _partition_linear_fn(self, name, module, device_mesh):
+        # Rowwise shard weight to Shard(1), bias to Replicate(), weight be Shard(1)
+        # means Rowwise as nn.Linear is input * weight^T + bias, where
+        # weight would become Shard(0)
+        module.register_parameter("weight", nn.Parameter(
+            distribute_tensor(module.weight, device_mesh, [Shard(1)])
+        ))
+        if module.bias is not None:
+            module.register_parameter("bias", nn.Parameter(
+                distribute_tensor(module.bias, device_mesh, [Replicate()])
             ))
-            if module.bias is not None:
-                module.register_parameter("bias", nn.Parameter(
-                    distribute_tensor(module.bias, device_mesh, [Replicate()])
-                ))
-        else:
-            raise NotImplementedError("RowwiseParallel currently only support nn.Linear!")
+
+    def _partition_embedding_fn(self, name, module, device_mesh):
+        # rowwise shard embedding.weight is Shard(0)
+        for name, param in module.named_parameters():
+            dist_param = nn.Parameter(
+                distribute_tensor(param, device_mesh, [Shard(0)])
+            )
+            module.register_parameter(name, dist_param)
 
     @staticmethod
     def _prepare_output_fn(output_layouts, use_local_output, outputs, device_mesh):
+        # Rowwise sharding produces partial output, depending on output layouts:
+        # 1. to replicate -> allreduce
+        # 2. to shard -> reduce_scatter
         outputs = outputs.redistribute(placements=output_layouts)
         # back to local tensor if use_local_output is True
         return outputs.to_local() if use_local_output else outputs
 
     def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+        if isinstance(module, nn.Linear):
+            partition_fn = self._partition_linear_fn
+            # rowwise linear runtime sharding requires input tensor shard on last dim
+            self.desired_input_layouts: Tuple[Placement, ...] = (Shard(-1), )
+        elif isinstance(module, nn.Embedding):
+            partition_fn = self._partition_embedding_fn
+            # rowwise embedding runtime sharding requires input tensor replicated
+            self.desired_input_layouts = (Replicate(), )
+        else:
+            raise NotImplementedError("RowwiseParallel currently only support nn.Linear and nn.Embedding!")
+
         return distribute_module(
             module,
             device_mesh,
-            self._partition_fn,
+            partition_fn,
             partial(self._prepare_input_fn, self.input_layouts, self.desired_input_layouts),
             partial(self._prepare_output_fn, self.output_layouts, self.use_local_output),
         )
@@ -225,30 +246,34 @@ class RowwiseParallel(ParallelStyle):
 class PrepareModuleInput(ParallelStyle):
     """
     Configure the nn.Module's inputs to convert the input tensors of the nn.Module to DTensors at runtime according to
-    input_layouts, and perform layout redistribution according to the desired_input_layouts.
+    ``input_layouts``, and perform layout redistribution according to the ``desired_input_layouts``.
 
     Keyword Args:
         input_layouts (Union[Placement, Tuple[Placement]]):
             The DTensor layouts of input tensors for the nn.Module, this is used to convert the input tensors to
-            DTensors. If some inputs are not torch.Tensor or no need to convert to DTensors, `None` need to be specified
+            DTensors. If some inputs are not torch.Tensor or no need to convert to DTensors, ``None`` need to be specified
             as a placeholder.
         desired_input_layouts (Union[Placement, Tuple[Placement]]):
             The desired DTensor layout of input tensors for the nn.Module, this is used to ensure the inputs of the nn.Module
-            have the desired DTensor layouts. This argument needs to have the same length with `input_layouts`.
+            have the desired DTensor layouts. This argument needs to have the same length with ``input_layouts``.
         use_local_output (bool, optional):
-            Whether to use local :class:`torch.Tensor` instead of `DTensor` for the module inputs, default: False.
+            Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module inputs, default: False.
     Returns:
-        A ParallelStyle object that prepares the sharding layouts of the nn.Module's inputs.
+        A :class:`ParallelStyle` object that prepares the sharding layouts of the nn.Module's inputs.
 
     Example::
         >>> # xdoctest: +SKIP(failing)
         >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleInput
+        >>> from torch.distributed.device_mesh import init_device_mesh
         >>> ...
+        >>> block = TransformerBlock(...)  # block is a nn.Module that contains an "attn" Attention submodule
+        >>> tp_mesh = init_device_mesh("cuda", (8,))
+        >>>
         >>> # According to the style specified below, the first input of attn will be annotated to Sharded DTensor
         >>> # and then redistributed to Replicated DTensor.
         >>> parallelize_module(
-        >>>     module=block, # this can be a submodule or module
-        >>>     ...,
+        >>>     block, # this can be a submodule or module
+        >>>     tp_mesh,
         >>>     parallelize_plan={
         >>>         "attn": PrepareModuleInput(
         >>>             input_layouts=(Shard(0), None, None, ...),
@@ -276,10 +301,14 @@ class PrepareModuleInput(ParallelStyle):
         prepared_inputs = []
         if not isinstance(inputs, tuple):
             inputs = (inputs,)
+        if len(inputs) != len(self.input_layouts):
+            raise ValueError("module inputs and input_layouts should have same length!")
+
         for inp, input_layout, desired_layout in zip(inputs, self.input_layouts, self.desired_input_layouts):
             if input_layout is not None:
                 if isinstance(inp, DTensor):
-                    assert inp.placements[0] == input_layout
+                    # TODO: re-enable the check once we fix the compile path
+                    # assert inp.placements[0] == input_layout
                     dt_inp = inp
                 else:
                     dt_inp = DTensor.from_local(inp, device_mesh, (input_layout,), run_check=False)
@@ -298,36 +327,38 @@ class PrepareModuleInput(ParallelStyle):
 class PrepareModuleOutput(ParallelStyle):
     """
     Configure the nn.Module's outputs to convert the output tensors of the nn.Module to DTensors at runtime according to
-    output_layouts, and perform layout redistribution according to the desired_output_layouts.
+    ``output_layouts``, and perform layout redistribution according to the ``desired_output_layouts``.
 
     Keyword Args:
         output_layouts (Union[Placement, Tuple[Placement]]):
             The DTensor layouts of output tensors for the nn.Module, this is used to convert the output tensors to
-            DTensors if they are `torch.Tensor`. If some outputs are not torch.Tensor or no need to convert to DTensors,
-            `None` need to be specified as a placeholder.
+            DTensors if they are :class:`torch.Tensor`. If some outputs are not torch.Tensor or no need to convert to DTensors,
+            ``None`` need to be specified as a placeholder.
         desired_output_layouts (Union[Placement, Tuple[Placement]]):
             The desired DTensor layouts of output tensors for the nn.Module, this is used to ensure the outputs of the nn.Module
             have the desired DTensor layouts.
         use_local_output (bool, optional):
-            Whether to use local :class:`torch.Tensor` instead of `DTensor` for the module outputs, default: False.
+            Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module outputs, default: False.
     Returns:
         A ParallelStyle object that prepares the sharding layouts of the nn.Module's outputs.
 
     Example::
         >>> # xdoctest: +SKIP(failing)
         >>> from torch.distributed.tensor.parallel import parallelize_module, PrepareModuleOutput
+        >>> from torch.distributed.device_mesh import init_device_mesh
         >>> ...
-        >>> # According to the style specified below, the first input of attn will be annotated to Sharded DTensor
-        >>> # and then redistributed to Replicated DTensor.
+        >>> block = TransformerBlock(...)  # block is a nn.Module that contains an "attn" Attention submodule
+        >>> tp_mesh = init_device_mesh("cuda", (8,))
+        >>>
+        >>> # According to the style specified below, the output of the TransformerBlock will be converted to Replicated DTensor
+        >>> # and then redistributed to Sharded DTensor.
         >>> parallelize_module(
-        >>>     module=block, # this can be a submodule or module
-        >>>     ...,
-        >>>     parallelize_plan={
-        >>>         "submodule": PrepareModuleOutput(
-        >>>             output_layouts=Replicate(),
-        >>>             desired_output_layouts=Shard(0)
-        >>>         ),
-        >>>     }
+        >>>     block, # this can be a submodule or module
+        >>>     tp_mesh,
+        >>>     parallelize_plan = PrepareModuleOutput(
+        >>>         output_layouts=Replicate(),
+        >>>         desired_output_layouts=Shard(0)
+        >>>     )
         >>> )
     """
     def __init__(
@@ -341,15 +372,20 @@ class PrepareModuleOutput(ParallelStyle):
         self.desired_output_layouts = \
             (desired_output_layouts,) if isinstance(desired_output_layouts, Placement) else desired_output_layouts
         self.use_local_output = use_local_output
+        assert len(self.output_layouts) == len(self.desired_output_layouts), \
+            "output_layouts and desired_output_layouts should have same length!"
 
     def _prepare_out_fn(self, outputs, device_mesh):
         prepared_outputs = []
         if not isinstance(outputs, tuple):
             outputs = (outputs,)
+        if len(outputs) != len(self.output_layouts):
+            raise ValueError("module outputs and output_layouts should have same length!")
         for out, out_layout, desired_out_layout in zip(outputs, self.output_layouts, self.desired_output_layouts):
             if out_layout is not None:
                 if isinstance(out, DTensor):
-                    assert out.placements[0] == out_layout
+                    # TODO: re-enable the check once we fix the compile path
+                    # assert out.placements[0] == out_layout
                     dt_out = out
                 else:
                     dt_out = DTensor.from_local(out, device_mesh, (out_layout,), run_check=False)

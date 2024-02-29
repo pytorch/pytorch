@@ -3,15 +3,22 @@
 #include <c10/core/Backend.h>
 #include <c10/core/DefaultDtype.h>
 #include <c10/core/Device.h>
+#include <c10/core/DeviceType.h>
+#include <c10/core/DispatchKey.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
+#include <cstdint>
 #include <iosfwd>
+#include <string>
+#include <type_traits>
 #include <utility>
 
 namespace c10 {
@@ -284,7 +291,7 @@ struct C10_API TensorOptions {
   }
 
   /// Returns the device index of the `TensorOptions`.
-  int32_t device_index() const noexcept {
+  c10::DeviceIndex device_index() const noexcept {
     return device().index();
   }
 
@@ -583,9 +590,8 @@ inline TensorOptions device(Device device) {
 
 /// Convenience function that returns a `TensorOptions` object with the
 /// `device` set to CUDA and the `device_index` set to the given one.
-inline TensorOptions device_index(int16_t device_index) {
-  return TensorOptions().device_index(
-      static_cast<c10::DeviceIndex>(device_index));
+inline TensorOptions device_index(c10::DeviceIndex device_index) {
+  return TensorOptions().device_index(device_index);
 }
 
 /// Convenience function that returns a `TensorOptions` object with the

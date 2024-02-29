@@ -4,12 +4,12 @@ import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 
-from torch.distributed._tensor import DTensor
-from torch.distributed._tensor.placement_types import Shard
-from torch.distributed.checkpoint._state_dict_utils import (
+from torch.distributed._state_dict_utils import (
     _gather_state_dict,
     _offload_state_dict_to_cpu,
 )
+from torch.distributed._tensor import DTensor
+from torch.distributed._tensor.placement_types import Shard
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,

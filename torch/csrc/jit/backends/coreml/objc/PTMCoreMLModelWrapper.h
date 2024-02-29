@@ -35,7 +35,7 @@ class MLModelWrapper : public CustomClassHolder {
   }
 };
 
-}
-}
-}
-}
+} // namespace coreml
+} // namespace mobile
+} // namespace jit
+} // namespace torch

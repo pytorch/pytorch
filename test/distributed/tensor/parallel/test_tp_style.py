@@ -68,6 +68,27 @@ class TensorParallelStyleTest(DTensorTestBase):
             self.assertEqual(comm_mode.get_total_counts(), 2)
 
     @with_comms
+    def test_colwise_parallel_embedding(self):
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        comm_mode = CommDebugMode()
+        tensor = torch.arange(8, device=self.device_type).reshape(4, 2)
+        model = nn.Embedding(16, 16, device=self.device_type)
+
+        default_col_parallel = ColwiseParallel()
+        with comm_mode:
+            colwise_mod = parallelize_module(deepcopy(model), mesh, default_col_parallel)
+            out = colwise_mod(tensor)
+            # ensure output shard on the last dim
+            self.assertEqual(out.shape, (4, 2, 16 // self.world_size))
+            # ensure no communication happened in fwd
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+            out.sum().backward()
+            # no comm in bwd
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    @with_comms
     def test_rowwise_parallel_style(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
@@ -105,6 +126,28 @@ class TensorParallelStyleTest(DTensorTestBase):
             self.assertEqual(comm_mode.get_total_counts(), 2)
 
     @with_comms
+    def test_rowwise_parallel_embedding(self):
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        comm_mode = CommDebugMode()
+        tensor = torch.arange(8, device=self.device_type).reshape(4, 2)
+        model = nn.Embedding(16, 16, device=self.device_type)
+
+        with comm_mode:
+            rowwise_mod = parallelize_module(deepcopy(model), mesh, RowwiseParallel(input_layouts=Replicate()))
+            out = rowwise_mod(tensor)
+            # ensure output shard on the last dim
+            self.assertEqual(out.shape, (4, 2, 16))
+            # ensure allreduce communication happened in fwd
+            self.assertEqual(comm_mode.get_total_counts(), 1)
+            self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_reduce], 1)
+
+            out.sum().backward()
+            # no comm in bwd
+            self.assertEqual(comm_mode.get_total_counts(), 1)
+
+
+    @with_comms
     def test_prepare_module_input(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
@@ -129,6 +172,20 @@ class TensorParallelStyleTest(DTensorTestBase):
 
             def forward(self, x, y):
                 return self.linear(x) + y
+
+        # Raise assertion error if input_layouts and desired_input_layouts do not have same length.
+        test_mod = TestModule().to(self.device_type)
+        with self.assertRaisesRegex(AssertionError, "input_layouts and desired_input_layouts should have same length!"):
+            prepare_inps_dimension_mismatch = PrepareModuleInput(input_layouts=Shard(0), desired_input_layouts=(Replicate(), None))
+        # Raise assertion error if module inputs and input_layouts do not have same length.
+        prepare_inps_short_dimension = PrepareModuleInput(input_layouts=Shard(0), desired_input_layouts=Replicate())
+        parallelize_module(test_mod.linear, mesh, ColwiseParallel())
+        parallelize_module(test_mod, mesh, prepare_inps_short_dimension)
+        with self.assertRaisesRegex(ValueError, "module inputs and input_layouts should have same length!"):
+            output = test_mod(
+                torch.randn(2, 8, device=self.device_type),
+                torch.ones(self.world_size * 2, 8 // self.world_size, device=self.device_type)
+            )
 
         test_mod = TestModule().to(self.device_type)
         prepare_inps = PrepareModuleInput(input_layouts=(Shard(0), None), desired_input_layouts=(Replicate(), None))

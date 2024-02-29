@@ -86,6 +86,7 @@ class GuardSource(enum.Enum):
     SHAPE_ENV = 6
     LOCAL_FSDP_MODULE = 7
     GLOBAL_FSDP_MODULE = 8
+    BACKWARD_STATE = 9
 
     def is_fsdp_module(self) -> bool:
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
@@ -159,9 +160,9 @@ class Guard:
     obj_weakref: Optional[object] = None
     guarded_class_weakref: Optional[type] = None
 
-    stack = None
-    user_stack = None
-    _hash = None
+    stack: Optional[CapturedTraceback] = None
+    user_stack: Optional[traceback.StackSummary] = None
+    _hash: Optional[int] = None
 
     def __hash__(self):
         if self._hash is None:
@@ -336,25 +337,23 @@ class Checkpointable(ABC, Generic[T]):
         ...
 
 
-"""
-The GuardCheckpointState - it is the T of Checkpointable[T] for GuardsContext
-"""
-
-
 class GuardsCheckpointState:
+    """
+    The GuardCheckpointState - it is the T of Checkpointable[T] for GuardsContext
+    """
+
     dynamo_guards: Set[Guard] = set()
 
     def __init__(self, dynamo_guards):
         self.dynamo_guards = dynamo_guards
 
-    """
-    Produces a delta against another GuardsCheckpointState.
-
-    Returns None if no delta is found, otherwise, return a set() of mismatched
-    Guard type objects.
-    """
-
     def diff(self, other):
+        """
+        Produces a delta against another GuardsCheckpointState.
+
+        Returns None if no delta is found, otherwise, return a set() of mismatched
+        Guard type objects.
+        """
         r = self.dynamo_guards.difference(other.dynamo_guards)
         if len(r) == 0:
             return None
@@ -370,14 +369,13 @@ class ModuleContextCheckpointState:
     def __init__(self, nn_modules):
         self.nn_modules = nn_modules
 
-    """
-    Produces a delta against another ModuleContextCheckpointState.
-
-    Returns None if no delta is found, otherwise, return a set() of mismatched
-    module key names.
-    """
-
     def diff(self, other):
+        """
+        Produces a delta against another ModuleContextCheckpointState.
+
+        Returns None if no delta is found, otherwise, return a set() of mismatched
+        module key names.
+        """
         r = set(self.nn_modules.keys()).difference(set(other.nn_modules.keys()))
         if len(r) == 0:
             return None
@@ -405,14 +403,13 @@ class GlobalContextCheckpointState:
     def __init__(self, global_states):
         self.global_state = global_states
 
-    """
-    Produces a delta against another GlobalContextCheckpointState.
-
-    Returns None if no delta is found, otherwise, return a set() of mismatched
-    global key names.
-    """
-
     def diff(self, other):
+        """
+        Produces a delta against another GlobalContextCheckpointState.
+
+        Returns None if no delta is found, otherwise, return a set() of mismatched
+        global key names.
+        """
         r = set(self.global_state.keys()).difference(set(other.global_state.keys()))
         if len(r) == 0:
             return None
@@ -485,13 +482,14 @@ class GuardsSet:
     def __bool__(self):
         return bool(self.inner)
 
-    def add(self, guard: Guard, *, skip=0):
+    def add(self, guard: Guard, *, collect_debug_stack=True, skip=0):
         if guard in self.inner:
             return
-        if guard.stack is None:
-            guard.stack = CapturedTraceback.extract(skip=1 + skip)
-        if guard.user_stack is None:
-            guard.user_stack = TracingContext.extract_stack()
+        if collect_debug_stack:
+            if guard.stack is None:
+                guard.stack = CapturedTraceback.extract(skip=1 + skip)
+            if guard.user_stack is None:
+                guard.user_stack = TracingContext.extract_stack()
         self.inner.add(guard)
 
     def update(self, *others: Set[Guard]):
@@ -622,6 +620,11 @@ class TracingContext:
         # See note [Tensor Fakification and Symbol Caching]
         self.tensor_to_context = WeakTensorKeyDictionary()
 
+    def clear(self):
+        # Look at the note in output_graph.py in function `save_global_state`
+        # for the context on clearing global context.
+        self.global_context.global_state = {}
+
     @staticmethod
     @contextmanager
     def patch(**kwargs):
@@ -644,9 +647,9 @@ class TracingContext:
         self = TracingContext.try_get()
         if self is None:
             return traceback.StackSummary()
-        stack = list(self.frame_summary_stack)
+        stack = self.frame_summary_stack
         if self.loc_in_frame is not None:
-            stack.append(self.loc_in_frame)
+            stack = stack + [self.loc_in_frame]
         return traceback.StackSummary.from_list(stack)
 
     # Call this when you want to call into some code that isn't necessarily
@@ -765,6 +768,9 @@ def tracing(context: Optional[TracingContext]):
 # TODO(voz): Consider a toplevel torch/_source.py
 @dataclasses.dataclass(frozen=True)
 class Source:
+    def is_dict_key(self):
+        return False
+
     def reconstruct(self, codegen):
         raise NotImplementedError()
 
@@ -787,6 +793,10 @@ class Source:
 @dataclasses.dataclass(frozen=True)
 class ChainedSource(Source):
     base: Source
+
+    def is_dict_key(self):
+        # Recurse until you either hit a ConstDictKey or a Source
+        return self.base.is_dict_key()
 
 
 def detect_fake_mode(inputs: Any = None):

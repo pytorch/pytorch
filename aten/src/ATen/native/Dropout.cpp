@@ -20,8 +20,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -100,7 +99,7 @@ ALIAS_SPECIALIZATION(_feature_dropout,       true,  false)
 ALIAS_SPECIALIZATION(_alpha_dropout,         false, true )
 ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 
-} // anomymous namepsace
+} // anonymous namespace
 
 std::tuple<Tensor,Tensor>
 native_dropout_cpu(const Tensor& input, double p, c10::optional<bool> train) {
@@ -173,5 +172,4 @@ Tensor& feature_alpha_dropout_(Tensor& input, double p, bool train) {
   return _feature_alpha_dropout<true>(input, p, train);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

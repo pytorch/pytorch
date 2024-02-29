@@ -9,7 +9,17 @@ DLDataType getDLDataType(const Tensor& t) {
   dtype.lanes = 1;
   dtype.bits = t.element_size() * 8;
   switch (t.scalar_type()) {
+    case ScalarType::UInt1:
+    case ScalarType::UInt2:
+    case ScalarType::UInt3:
+    case ScalarType::UInt4:
+    case ScalarType::UInt5:
+    case ScalarType::UInt6:
+    case ScalarType::UInt7:
     case ScalarType::Byte:
+    case ScalarType::UInt16:
+    case ScalarType::UInt32:
+    case ScalarType::UInt64:
       dtype.code = DLDataTypeCode::kDLUInt;
       break;
     case ScalarType::Char:
@@ -101,8 +111,9 @@ static DLDevice getDLDevice(const Tensor& tensor, const int64_t& device_id) {
       ctx.device_type = DLDeviceType::kDLROCM;
       break;
     case DeviceType::XPU:
-      ctx = at::detail::getXPUHooks().getDLPackDeviceFromATenDevice(
-          ctx, tensor.device(), tensor.data_ptr());
+      ctx.device_type = DLDeviceType::kDLOneAPI;
+      ctx.device_id =
+          at::detail::getXPUHooks().getGlobalIdxFromDevice(tensor.device());
       break;
     default:
       TORCH_CHECK(false, "Cannot pack tensors on " + tensor.device().str());
@@ -129,7 +140,7 @@ static Device getATenDevice(const DLDevice& ctx, void* data) {
       return at::Device(DeviceType::HIP, ctx.device_id);
 #endif
     case DLDeviceType::kDLOneAPI:
-      return at::detail::getXPUHooks().getATenDeviceFromDLPackDevice(ctx, data);
+      return at::detail::getXPUHooks().getDeviceFromPtr(data);
     default:
       TORCH_CHECK(
           false, "Unsupported device_type: " + c10::to_string(ctx.device_type));
@@ -137,13 +148,22 @@ static Device getATenDevice(const DLDevice& ctx, void* data) {
 }
 
 ScalarType toScalarType(const DLDataType& dtype) {
-  ScalarType stype;
+  ScalarType stype = ScalarType::Undefined;
   TORCH_CHECK(dtype.lanes == 1, "ATen does not support lanes != 1");
   switch (dtype.code) {
     case DLDataTypeCode::kDLUInt:
       switch (dtype.bits) {
         case 8:
           stype = ScalarType::Byte;
+          break;
+        case 16:
+          stype = ScalarType::UInt16;
+          break;
+        case 32:
+          stype = ScalarType::UInt32;
+          break;
+        case 64:
+          stype = ScalarType::UInt64;
           break;
         default:
           TORCH_CHECK(
@@ -222,8 +242,7 @@ ScalarType toScalarType(const DLDataType& dtype) {
       }
       break;
     default:
-      TORCH_CHECK(
-          false, "Unsupported code " + c10::to_string(dtype.code));
+      TORCH_CHECK(false, "Unsupported code " + c10::to_string(dtype.code));
   }
   return stype;
 }
@@ -245,7 +264,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   // gh-83069
   auto shape = src.sizes();
   auto strides = src.strides().vec();
-  for (int i=0; i<src.dim(); i++) {
+  for (int i = 0; i < src.dim(); i++) {
     if (shape[i] < 2) {
       strides[i] = 1;
     }
@@ -293,7 +312,7 @@ Tensor fromDLPack(
     return at::from_blob(
         src->dl_tensor.data,
         IntArrayRef(src->dl_tensor.shape, src->dl_tensor.ndim),
-        deleter,
+        std::move(deleter),
         at::device(device).dtype(stype),
         {device});
   }
@@ -303,6 +322,6 @@ Tensor fromDLPack(
       IntArrayRef(src->dl_tensor.strides, src->dl_tensor.ndim),
       deleter,
       at::device(device).dtype(stype),
-      { device });
+      {device});
 }
 } // namespace at

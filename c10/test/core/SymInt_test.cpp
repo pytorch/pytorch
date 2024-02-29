@@ -22,4 +22,13 @@ TEST(SymIntTest, CheckRange) {
   EXPECT_FALSE(SymInt::check_range(INT64_MIN));
 }
 
+TEST(SymIntTest, Overflows) {
+  const auto x = SymInt(INT64_MAX);
+  EXPECT_NE(-(x + 1), 0);
+
+  const auto y = SymInt(INT64_MIN);
+  EXPECT_NE(-y, 0);
+  EXPECT_NE(0 - y, 0);
+}
+
 #endif

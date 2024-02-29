@@ -1,22 +1,19 @@
-import copy
 import math
 import operator
 import traceback
-from collections import OrderedDict
 from functools import partial
-from typing import Any, Callable, Dict, List, NamedTuple, Set, Tuple
+from typing import Callable, Dict, List, NamedTuple, Set
 
 import sympy
 
 import torch
 import torch.fx
-from torch.fx.experimental.symbolic_shapes import SymInt
-from torch._export.pass_base import _ExportPassBase, ProxyValue, PassResult
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse, ProxyValue, PassResult
 from torch.utils._sympy.value_ranges import ValueRanges
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
 
-__all__ = ["_AddRuntimeAssertionsForConstraintsPass", "InputDim"]
+__all__ = ["InputDim"]
 
 
 class InputDim(NamedTuple):
@@ -44,15 +41,13 @@ def _convert_range_to_int(range: ValueRanges):
     return min_val, max_val
 
 
-class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
+class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBaseDeprecatedDoNotUse):
     def __init__(
         self,
         range_constraints: Dict[sympy.Symbol, ValueRanges],
-        equality_constraints: List[Tuple[InputDim, InputDim]],
     ):
         super().__init__()
         self.range_constraints: Dict[sympy.Symbol, ValueRanges] = range_constraints
-        self.equality_constraints: List[Tuple[InputDim, InputDim]] = equality_constraints
         self._asserts_generated_unbacked_symbols: Set[sympy.Symbol] = set()
         self.counter = 0
 
@@ -98,12 +93,14 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
             call_backs: List[Callable] = []
             messages: List[str] = []
             if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-                symbol = val.node._expr
-                if isinstance(symbol, sympy.Symbol) and symbol.name.startswith("i"):
+                symbol = val.node.expr
+                if symbol in self.existing_inline_assertions:
+                    return call_backs, messages
+                if isinstance(symbol, sympy.Symbol) and free_unbacked_symbols(symbol):
                     if symbol in self._asserts_generated_unbacked_symbols:
                         return call_backs, messages
                     # We only care about unbacked symints for these inline
-                    # constraints, which are prefixed with 'i'
+                    # constraints, which are prefixed with 'u'
                     constraint = self.range_constraints[symbol]
                     min_val, max_val = _convert_range_to_int(constraint)
                     assert_msg = f" is outside of inline constraint [{min_val}, {max_val}]."
@@ -112,6 +109,7 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
                     )
                     messages.append(assert_msg)
                     self._asserts_generated_unbacked_symbols.add(symbol)
+
             elif isinstance(val, torch.Tensor):
                 for i, sym in enumerate(val.shape):
                     cbs, msgs = add_assertions(sym)
@@ -130,12 +128,17 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
                         call_backs.append(partial(sym_size_cb, dim=i))
                         messages.append(f".shape[{i}]" + msg)
             return call_backs, messages
+
         callbacks, messages = add_assertions(val)
         for cb, msg in zip(callbacks, messages):
             cb(proxy=ret, assert_msg=f"{ret.node}" + msg)
         return ret
 
     def call(self, graph_module):
+        self.existing_inline_assertions = _get_existing_inline_assertions(
+            graph_module, self.range_constraints
+        )
+
         # Add runtime asserts for inline constraints
         val = super().call(graph_module)
 
@@ -152,161 +155,77 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBase):
         return PassResult(val.graph_module, val.modified)
 
 
-class _AddRuntimeAssertionsForConstraintsPass(_AddRuntimeAssertionsForInlineConstraintsPass):
-    def __init__(
-        self,
-        range_constraints: Dict[sympy.Symbol, ValueRanges],
-        equality_constraints: List[Tuple[InputDim, InputDim]],
-    ):
-        super().__init__(range_constraints, equality_constraints)
+def _get_existing_inline_assertions(
+    graph_module: torch.fx.GraphModule,
+    range_constraints: Dict[sympy.Symbol, ValueRanges],
+) -> Dict[sympy.Symbol, ValueRanges]:
+    existing_inline_assertions: Dict[sympy.Symbol, ValueRanges] = {}
 
-    def call(self, graph_module: torch.fx.GraphModule) -> PassResult:
-        graph_module = copy.deepcopy(graph_module)
-        graph = graph_module.graph
+    for module in graph_module.modules():
+        if not isinstance(module, torch.fx.GraphModule):
+            continue
 
-        insert_loc = None
-        for node in graph.nodes:
-            if node.op != "placeholder":
-                continue
-            insert_loc = node
-        if insert_loc is None:
-            return super().call(graph_module)
-
-        # Add runtime asserts for input shape constraints. We do this after all
-        # placeholder nodes so that we can handle both (unary) predicates and
-        # (binary) relations.
-        inputdim_to_node: Dict[InputDim, torch.fx.Node] = OrderedDict()
-        for node in graph.nodes:
-            if node.op != "placeholder":
+        # Find all the existing inline assertions. They will look something like:
+        # %_local_scalar_dense = call_function[target=torch.ops.aten._local_scalar_dense.default](args = (%arg1_1,), kwargs = {})
+        # %ge = call_function[target=operator.ge](args = (%_local_scalar_dense, 0), kwargs = {})
+        # %scalar_tensor = call_function[target=torch.ops.aten.scalar_tensor.default](args = (%ge,), kwargs = {})
+        # %_assert_async = call_function[target=torch.ops.aten._assert_async.msg](args = (%scalar_tensor, "..."), kwargs = {})
+        for node in module.graph.nodes:
+            if node.target != torch.ops.aten._assert_async.msg:
                 continue
 
+            scalar_tensor_arg = node.args[0]
+            if not (
+                scalar_tensor_arg.op == "call_function" and
+                scalar_tensor_arg.target == torch.ops.aten.scalar_tensor.default
+            ):
+                continue
+
+            compare_arg = scalar_tensor_arg.args[0]
+            if not (
+                compare_arg.op == "call_function" and
+                compare_arg.target in (operator.le, operator.ge) and
+                len(compare_arg.args) == 2
+            ):
+                continue
+
+            compare_op = compare_arg.target
+            maybe_symint_arg, compare_int = compare_arg.args
+
+            # x >= 0 will sometimes be canonicalized to -x <= 0, so in some
+            # cases the operation before the comparison is to multiply by -1. We
+            # can undo the canonicalization here
             if (
-                "val" not in node.meta or node.meta["val"] is None
+                maybe_symint_arg.op == "call_function" and
+                maybe_symint_arg.target == operator.mul and
+                maybe_symint_arg.args[0] == -1
+            ):
+                maybe_symint_arg = maybe_symint_arg.args[1]
+                compare_op = operator.ge
+                compare_int = -1 * compare_int
+
+            if not (
+                "val" in maybe_symint_arg.meta and
+                isinstance(maybe_symint_arg.meta["val"], torch.SymInt)
             ):
                 continue
 
-            if not isinstance(node.meta["val"], FakeTensor):
-                # it has to be a prim value
-                self._insert_prim_assert_inplace(graph, node, node.meta["val"])
-            else:
-                fake_tensor_shape = node.meta["val"].shape
-                for dim, shape in enumerate(fake_tensor_shape):
-                    with graph.inserting_after(insert_loc):
-                        dim_node = graph.call_function(
-                            torch.ops.aten.sym_size.int, (node, dim)
-                        )
-                    input_dim = InputDim(node.name, dim)
-                    inputdim_to_node[input_dim] = dim_node
-                    insert_loc = dim_node
+            symint = maybe_symint_arg.meta["val"].node.expr
+            if not isinstance(symint, sympy.Symbol):
+                continue
 
-                    if isinstance(shape, SymInt):
-                        # If the shape is dynamic, add range assertions
-                        symbol = shape.node._expr
-                        if symbol in self.range_constraints:
-                            self._insert_range_assert_inplace(
-                                graph, input_dim, dim_node, self.range_constraints[symbol]
-                            )
-                    else:
-                        # If no dynamism is specified, we assume all dimensions #
-                        # are specialized
-                        assert isinstance(shape, int)
-                        self._insert_specialized_shape_assert_inplace(
-                            graph, input_dim, dim_node, shape,
-                        )
+            if symint not in range_constraints:
+                raise RuntimeError(f"Unable to find symint {symint} in {range_constraints}")
 
-        # Add runtime assertions on equality constraints on the inputs
-        if len(inputdim_to_node) > 0:
-            with graph.inserting_after(
-                list(inputdim_to_node.values())[-1]
-            ):
-                self._insert_equality_assert_inplace(graph, inputdim_to_node)
+            found_range = existing_inline_assertions.get(symint, ValueRanges(-math.inf, math.inf))
 
-        return super().call(graph_module)
-
-    def _insert_specialized_shape_assert_inplace(
-        self, graph: torch.fx.Graph, input_dim: InputDim, dim_node: torch.fx.Node, shape: int,
-    ):
-        assert_msg = f"Input {input_dim.input_name}.shape[{input_dim.dim}] is specialized at {shape}"
-        with graph.inserting_after(dim_node):
-            eq_node = graph.call_function(operator.eq, (dim_node, shape))
-        with graph.inserting_after(eq_node):
-            tensor_eq_node = graph.call_function(torch.ops.aten.scalar_tensor.default, (eq_node,))
-        with graph.inserting_after(tensor_eq_node):
-            _ = graph.call_function(torch.ops.aten._assert_async.msg, (tensor_eq_node, assert_msg))
-
-    def _insert_prim_assert_inplace(self, graph, node: torch.fx.Node, value: Any):
-        assert_msg = (
-            f"Input {node.name} is specialized to be {value} at tracing time,"
-            f"it is not supported to pass in a different value at run time."
-        )
-        with graph.inserting_after(node):
-            eq_node = graph.call_function(operator.eq, (node, value))
-        with graph.inserting_after(eq_node):
-            tensor_eq_node = graph.call_function(torch.ops.aten.scalar_tensor.default, (eq_node,))
-        with graph.inserting_after(tensor_eq_node):
-            _ = graph.call_function(torch.ops.aten._assert_async.msg, (tensor_eq_node, assert_msg))
-
-    def _insert_range_assert_inplace(
-        self, graph: torch.fx.Graph, input_dim: InputDim, dim_node: torch.fx.Node, range: ValueRanges
-    ):
-        """
-        Add runtime asserts for user-specified range constraints for
-        each placeholder's dynamic dimension.
-        """
-
-        min_val, max_val = _convert_range_to_int(range)
-        assert_msg = (
-            f"Input {input_dim.input_name}.shape[{input_dim.dim}] is "
-            f"outside of specified dynamic range [{min_val}, {max_val}]"
-        )
-        # TODO (tmanlaibaatar) we are making an assumption that graph generated for
-        # input dim N >=2 generalizes to N < 2. Ideally we should check that:
-        # 1. if we can generalize to N < 2, not add any assertion saying N >= 2
-        # 2. If we can't generalize to N < 2, add an assertion saying N >= 2
-        # Above can be achieved via a separate pass.
-        with graph.inserting_after(dim_node):
-            if min_val > 2:
-                self._insert_assert_async_inplace(
-                    graph, operator.ge, (dim_node, min_val), assert_msg,
+            if compare_arg.target == operator.le:
+                existing_inline_assertions[symint] = ValueRanges(
+                    lower=found_range.lower, upper=compare_int
+                )
+            elif compare_arg.target == operator.ge:
+                existing_inline_assertions[symint] = ValueRanges(
+                    lower=compare_int, upper=found_range.upper
                 )
 
-            if max_val < math.inf:
-                self._insert_assert_async_inplace(
-                    graph, operator.le, (dim_node, max_val), assert_msg,
-                )
-
-    def _insert_equality_assert_inplace(
-        self,
-        graph: torch.fx.Graph,
-        inputdim_to_node: Dict[InputDim, torch.fx.Node],
-    ):
-        for input_dim, other_input_dim in self.equality_constraints:
-            dim_node = inputdim_to_node[input_dim]
-            assert_msg = (
-                f"Input {input_dim.input_name}.shape[{input_dim.dim}] is "
-                f"not equal to input {other_input_dim.input_name}.shape[{other_input_dim.dim}]"
-            )
-
-            other_dim_node = inputdim_to_node[other_input_dim]
-            self._insert_assert_async_inplace(
-                graph,
-                operator.eq,
-                (dim_node, other_dim_node),
-                assert_msg
-            )
-
-    def _insert_assert_async_inplace(self, graph, operator, args, assert_msg):
-        """
-        Inserts assert_async call_function nodes in the graph. This function is
-        called before we run the interpreter-based pass and does an inplace
-        insertion.
-        """
-        cmp_node = graph.call_function(operator, args)
-        with graph.inserting_after(cmp_node):
-            cmp_tensor_node = graph.call_function(
-                torch.ops.aten.scalar_tensor.default, (cmp_node,)
-            )
-        with graph.inserting_after(cmp_tensor_node):
-            _ = graph.call_function(
-                torch.ops.aten._assert_async.msg, (cmp_tensor_node, assert_msg)
-            )
+    return existing_inline_assertions

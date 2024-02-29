@@ -1,10 +1,13 @@
 # Owner(s): ["oncall: distributed"]
 
+import time
 from enum import auto, Enum
+from functools import partial
 
 import torch
 import torch.distributed as dist
 import torch.distributed.checkpoint as DCP
+import torch.distributed.checkpoint.state_dict_saver as saver
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._tensor.device_mesh import init_device_mesh
@@ -21,12 +24,13 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.nn.parallel import DistributedDataParallel
+
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
 )
-
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_if_lt_x_gpu,
@@ -75,6 +79,7 @@ class ModelType(Enum):
     FSDP = auto()
     HSDP = auto()
     FSDP_TP = auto()
+    DDP = auto()
     NONE = auto()  # no parallelization
 
 
@@ -90,8 +95,12 @@ def _train(model, optim, train_steps=1):
     return loss
 
 
-class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
-    def _create_model(self, compile, model_type):
+class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
+    @property
+    def backend(self):
+        return "cpu:gloo,cuda:nccl"
+
+    def _create_model(self, compile, model_type, state_dict_options=None):
         dummy_model = TestDummyModel().cuda()
 
         assert model_type in ModelType, f"{model_type} is not supported."
@@ -122,6 +131,9 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
             }
             model = parallelize_module(dummy_model, tp_mesh, parallelize_plan)
             model = FSDP(model, device_mesh=dp_mesh, use_orig_params=True)
+        elif model_type == ModelType.DDP:
+            model = DistributedDataParallel(dummy_model)
+            model.get_input = partial(TestDummyModel.get_input, model)
         else:
             model = dummy_model
 
@@ -132,8 +144,10 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
 
         optim = self._optim(model)
         if model_type is not ModelType.NONE:
-            _patch_model_state_dict(model)
-            _patch_optimizer_state_dict(model, optimizers=optim)
+            _patch_model_state_dict(model, options=state_dict_options)
+            _patch_optimizer_state_dict(
+                model, optimizers=optim, options=state_dict_options
+            )
 
         return model, optim
 
@@ -144,11 +158,20 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
     @skip_if_lt_x_gpu(4)
     @with_temp_dir
     @parametrize("compile", [True, False])
-    # TODO: Previously PariwiseParallel does not shard properly, passing ModelType.FSDP_TP test where it
+    # TODO: Previously PairwiseParallel does not shard properly, passing ModelType.FSDP_TP test where it
     # should have failed. Disabling the failed test temporarily to unblock the deprecation of PairwiseParallel.
     # @parametrize("model_type", [ModelType.FSDP, ModelType.HSDP, ModelType.FSDP_TP])
-    @parametrize("model_type", [ModelType.FSDP, ModelType.HSDP])
+    @parametrize("model_type", [ModelType.FSDP, ModelType.HSDP, ModelType.DDP])
     def test_e2e(self, compile, model_type):
+        self._run_e2e_test(compile, model_type)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @with_temp_dir
+    def test_e2e_async(self):
+        self._run_e2e_test(compile=False, model_type=ModelType.FSDP, async_op=True)
+
+    def _run_e2e_test(self, compile, model_type, async_op=False):
         model, optim = self._create_model(compile, ModelType.NONE)
         _train(model, optim, train_steps=2)
 
@@ -156,25 +179,36 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
         _train(dist_model, dist_optim, train_steps=2)
 
         original_stateful_obj = TestStatefulObj()  # tests arbitrary saving/loading
+        sd = {
+            "model": dist_model,
+            "optimizer": dist_optim,
+            "s": original_stateful_obj,
+        }
 
-        checkpointer = DCP.FileSystemCheckpointer(self.temp_dir)
-        checkpointer.save(
-            state_dict={
-                "model": dist_model,
-                "optimizer": dist_optim,
-                "s": original_stateful_obj,
-            }
-        )
+        if async_op:
+            f = saver._async_save(sd, checkpoint_id=self.temp_dir)
+            t = time.monotonic()
+            while not f.done():
+                time.sleep(1)
+                print(f"still waiting... {time.monotonic() - t}")
+
+            f.result()
+        else:
+            DCP.save(sd, checkpoint_id=self.temp_dir)
 
         loaded_stateful_obj = TestStatefulObj()
         dist_model, dist_optim = self._create_model(compile, model_type)
 
-        checkpointer.load(
+        loaded_stateful_obj = TestStatefulObj()
+        dist_model, dist_optim = self._create_model(compile, model_type)
+
+        DCP.load(
             state_dict={
                 "model": dist_model,
                 "optimizer": dist_optim,
                 "s": loaded_stateful_obj,
-            }
+            },
+            checkpoint_id=self.temp_dir,
         )
 
         self.assertEqual(original_stateful_obj, loaded_stateful_obj)
@@ -239,10 +273,29 @@ class TestE2ELoadAndSave(DTensorTestBase, VerifyStateDictMixin):
                 "A": Foo(),
             }
 
-        DCP.save(sd, DCP.FileSystemWriter(self.temp_dir))
-        DCP.load(sd, DCP.FileSystemReader(self.temp_dir))
+        DCP.save(sd, checkpoint_id=self.temp_dir)
+        DCP.load(sd, checkpoint_id=self.temp_dir)
+
+    @with_temp_dir
+    def test_no_dist(self):
+        DCP.save({}, checkpoint_id=self.temp_dir, no_dist=True)
+        DCP.load({}, checkpoint_id=self.temp_dir, no_dist=True)
 
 
-instantiate_parametrized_tests(TestE2ELoadAndSave)
+class TestNoCPU(DTensorTestBase):
+    @property
+    def backend(self):
+        return "nccl"
+
+    @with_comms
+    def test_no_cpu(self):
+        with self.assertRaisesRegex(
+            AssertionError, r"A CPU backend must be enabled for async save;.*?"
+        ):
+            f = saver._async_save({})
+            f.result()
+
+
+instantiate_parametrized_tests(TestE2ESaveAndLoad)
 if __name__ == "__main__":
     run_tests()

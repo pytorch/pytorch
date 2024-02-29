@@ -28,8 +28,6 @@
 #include <c10/util/irange.h>
 
 #include <c10/core/Layout.h>
-#include <tuple>
-#include <vector>
 
 using namespace at;
 using namespace torch::autograd::utils;
@@ -91,10 +89,12 @@ static inline int64_t count_specified_dimensions(PyObject* index) {
 }
 
 [[noreturn]] static inline void invalid_index(PyObject* obj) {
-  throw IndexError(
+  TORCH_CHECK_INDEX(
+      false,
       "only integers, slices (`:`), ellipsis (`...`), None and long or byte "
-      "Variables are valid indices (got %s)",
-      Py_TYPE(obj)->tp_name);
+      "Variables are valid indices (got ",
+      Py_TYPE(obj)->tp_name,
+      ")");
 }
 
 static inline Variable sequenceToVariable(

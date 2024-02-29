@@ -18,6 +18,7 @@ Tensors
     set_default_dtype
     get_default_dtype
     set_default_device
+    get_default_device
     set_default_tensor_type
     numel
     set_printoptions
@@ -273,9 +274,9 @@ Examples::
 
     no_grad
     enable_grad
-    set_grad_enabled
+    autograd.grad_mode.set_grad_enabled
     is_grad_enabled
-    inference_mode
+    autograd.grad_mode.inference_mode
     is_inference_mode_enabled
 
 Math operations

@@ -5,6 +5,7 @@ import platform
 from unittest import skipIf as skipif
 import torch
 
+from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
     TestGradients, run_tests, skipIfTorchInductor, IS_MACOS, TestCase)
 from torch.testing._internal.common_methods_invocations import op_db
@@ -21,6 +22,7 @@ if IS_MACOS:
 _gradcheck_ops = partial(ops, dtypes=OpDTypes.supported,
                          allowed_dtypes=[torch.double, torch.cdouble])
 
+@unMarkDynamoStrictTest
 class TestFwdGradients(TestGradients):
     # Test that forward-over-reverse gradgrad is computed correctly
     @_gradcheck_ops(op_db)

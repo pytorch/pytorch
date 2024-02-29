@@ -61,7 +61,7 @@ struct DimTConv2DKernel {
  * these functions.
  */
 template <uint32_t N>
-uint32_t dim_at(const IntArrayRef sizes) {
+uint32_t dim_at(const std::vector<int64_t>& sizes) {
   const uint32_t dims = sizes.size();
   return dims < N ? 1 : api::utils::safe_downcast<uint32_t>(sizes[dims - N]);
 }
