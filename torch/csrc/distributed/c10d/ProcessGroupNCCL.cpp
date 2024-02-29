@@ -1080,9 +1080,8 @@ void ProcessGroupNCCL::shutdown(c10::optional<std::string> reason) {
   // lauch abort asynchrounously and wait for it to complete or timeout
   LOG(INFO) << logPrefix()
             << "Launching ProcessGroupNCCL abort asynchrounously.";
-  std::future<bool> fut = std::async(std::launch::async, [this, &reason]() {
-    return this->abort(reason);
-  });
+  std::future<bool> fut = std::async(
+      std::launch::async, [this, &reason]() { return this->abort(reason); });
 
   waitForFutureOrTimeout(fut, options_->timeout, "ProcessGroup abort", true);
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL aborts successfully.";
