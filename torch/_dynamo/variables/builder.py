@@ -1099,7 +1099,13 @@ class VariableBuilder:
 
         readonly = not value.flags.writeable
         if readonly:
-            value.flags.writeable = True
+            try:
+                value.flags.writeable = True
+            except ValueError:
+                # One can not easily make nditer elements writable,
+                # but warning is not the end of the world
+                assert isinstance(value.base, np.nditer)
+                pass
 
         try:
             tensor_value = _util._try_convert_to_tensor(value)
