@@ -656,7 +656,6 @@ class FakeTensor(torch.Tensor):
         return out
 
     def create_nested_int(self, creation_fn, use_cache=True):
-        print("fake tensor create nested int")
         # TODO: how do I know whether we are an intermediate tensor or not?
         # Version counter based tracking isn't 100% sound but it's close
         # enough
@@ -670,10 +669,7 @@ class FakeTensor(torch.Tensor):
             return creation_fn()
 
         if self._nested_int_memo is None:
-            print("memo is None！")
             self._nested_int_memo = creation_fn()
-        else:
-            print("memo: ", self._nested_int_memo)
 
         return self._nested_int_memo
 
