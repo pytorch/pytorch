@@ -459,7 +459,8 @@ class GraphModuleSerializer:
         if stack_trace := node.meta.get("stack_trace"):
             ret["stack_trace"] = stack_trace
 
-        if nn_module_stack := node.meta.get("nn_module_stack"):
+        if "nn_module_stack" in node.meta:
+            nn_module_stack = node.meta["nn_module_stack"]
             def export_nn_module_stack(val):
                 assert isinstance(val, tuple) and len(val) == 2
                 path, ty = val
@@ -1744,14 +1745,17 @@ class GraphModuleDeserializer:
                     target = getattr(target, name)
             return target
 
-        if nn_module_stack_str := metadata.get("nn_module_stack"):
+        if "nn_module_stack" in metadata:
+            nn_module_stack_str = metadata["nn_module_stack"]
             # Originally serialized to "key,orig_path,type_str"
             def import_nn_module_stack(key, path, ty):
                 return key, (path, ty)
-            nn_module_stack = dict(
-                import_nn_module_stack(*item.split(","))
-                for item in nn_module_stack_str.split(ST_DELIMITER)
-            )
+            nn_module_stack = {}
+            if nn_module_stack_str:
+                nn_module_stack = dict(
+                    import_nn_module_stack(*item.split(","))
+                    for item in nn_module_stack_str.split(ST_DELIMITER)
+                )
             ret["nn_module_stack"] = nn_module_stack
 
         if source_fn_st_str := metadata.get("source_fn_stack"):
