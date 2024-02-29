@@ -1861,21 +1861,25 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
   }
 };
 
-torch::Tensor custom_op_with_autograd(torch::Tensor x) {
+torch::Tensor custom_op_backed_by_autograd_fn(torch::Tensor x) {
   return CustomOpAutogradFunction::apply(x);
+}
+
+TORCH_LIBRARY(myops, m) {
+    m.def("custom_op_backed_by_autograd_fn", &custom_op_backed_by_autograd_fn);
 }
         """
 
         module = torch.utils.cpp_extension.load_inline(
             name="custom_op_backed_by_autograd_function_inline_jit_extension",
             cpp_sources=cpp_source,
-            functions="custom_op_with_autograd",
+            functions="custom_op_backed_by_autograd_fn",
             verbose=True,
         )
 
         x = torch.ones(2, 2, requires_grad=True)
         temp = x.clone().detach()
-        out = module.custom_op_with_autograd(x)
+        out = module.custom_op_backed_by_autograd_fn(x)
         loss = out.sum()
         loss.backward()
         self.assertEqual(x.grad, temp)
