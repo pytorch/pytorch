@@ -17,9 +17,9 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
-    skip_if_lt_x_gpu,
     with_comms,
 )
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
@@ -65,7 +65,7 @@ class TestFormatUtils(DTensorTestBase):
 
         torch_save_to_dcp(torch_path, self.temp_dir)
 
-        model = SimpleModelUneven().cuda()
+        model = SimpleModelUneven()
         dcp.load({"model": model}, checkpoint_id=self.temp_dir)
 
         self.assertEqual({"model": model.state_dict()}, sd)
