@@ -1096,10 +1096,8 @@ if(USE_XPU)
     message(WARNING "Failed to include ATen XPU implementation target")
   else()
     target_link_libraries(torch_xpu PRIVATE torch_xpu_ops)
-    target_link_options(torch_xpu PRIVATE
-      "LINKER:-Wl,--whole-archive"
-      "$<TARGET_FILE:torch_xpu_ops>"
-      "LINKER:-Wl,--no-whole-archive")
+    target_link_libraries(torch_xpu PRIVATE
+      "-Wl,--whole-archive,\"$<TARGET_FILE:torch_xpu_ops>\" -Wl,--no-whole-archive")
   endif()
 endif()
 
