@@ -173,6 +173,7 @@ def capture_pre_autograd_graph(
             decomposition_table=decomp_table,
             pre_dispatch=True,
             aten_graph=True,
+            _log_export_usage=False,
         )(
             *args,
             **kwargs,
