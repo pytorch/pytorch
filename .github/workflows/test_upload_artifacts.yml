@@ -42,12 +42,6 @@ jobs:
     needs: upload-step
     runs-on: linux.2xlarge
     steps:
-#    - name: Download artifact
-#      uses: DanilBaibak/download-artifact-s3@main
-#      with:
-#        name: test-run
-#        s3-bucket: pytorch-ci-artifacts
-
 #    - name: Install AWS CLI v2
 #      shell: bash
 #      run: |
@@ -71,6 +65,15 @@ jobs:
     - name: Test
       run: |
         ls -la test.txt
+
+    - name: Download artifact
+      uses: seemethere/download-artifact-s3@v4
+      env:
+        AWS_ACCESS_KEY_ID: 1
+        AWS_SECRET_ACCESS_KEY: 1
+      with:
+        name: test-run
+        s3-bucket: pytorch-ci-artifacts
 
 
 
