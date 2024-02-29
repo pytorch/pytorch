@@ -1007,7 +1007,11 @@ def forward(self, x_1, output_1):
 
     @requires_cuda
     @skipIfRocm
-    def test_triton_kernel_different_shapes(self):
+    @common_utils.parametrize("size", [4, 16])
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_triton_kernel_different_shapes(self, size, dynamic):
+        from torch._inductor.utils import run_and_get_code
+
         def f(x, y, xx, yy):
             n_elements = x.numel()
             output_1 = torch.zeros_like(x)
@@ -1021,14 +1025,26 @@ def forward(self, x_1, output_1):
 
             return output_1, output_2
 
-        x = torch.rand(4, device="cuda")
-        y = torch.rand(4, device="cuda")
-        xx = torch.rand(4, 4, device="cuda")
-        yy = torch.rand(4, 4, device="cuda")
+        x = torch.rand(size, device="cuda")
+        y = torch.rand(size, device="cuda")
+        xx = torch.rand(size, size, device="cuda")
+        yy = torch.rand(size, size, device="cuda")
         args = [x, y, xx, yy]
 
         eager_out = f(*args)
-        compiled_out = torch.compile(f, fullgraph=True, backend="inductor")(*args)
+        compiled_out, (code,) = run_and_get_code(
+            torch.compile(f, fullgraph=True, dynamic=dynamic, backend="inductor"), *args
+        )
+        if size == 4 and not dynamic:
+            # Produce 2 kernels due to divisibility
+            self.assertTrue("add_kernel_0.run" in code)
+            self.assertTrue("add_kernel_1.run" in code)
+        else:
+            # size == 16 or dynamic
+            # Only one kernel
+            self.assertTrue("add_kernel_0.run" in code)
+            self.assertTrue("add_kernel_1.run" not in code)
+
         self.assertEqual(compiled_out, eager_out)
 
 
