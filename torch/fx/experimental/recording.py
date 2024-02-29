@@ -1,14 +1,10 @@
 import functools
 import itertools
-import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
-
-
-log = logging.getLogger(__name__)
 
 
 __all__ = [
@@ -254,10 +250,9 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                 event = ShapeEnvEvent(
                     fn, list(args), kwargs, tracked_fakes, name=fn.__name__
                 )
-                # Play the event on this ShapeEnv.
-                r = event.run(self)
                 self.events.append(event)
-                return r
+                # Play the event on this ShapeEnv.
+                return event.run(self)
 
         return wrapper
 
@@ -284,8 +279,7 @@ def replay_shape_env_events(events):
             # change after each event is replayed.
             event.run(shape_env)
         except Exception as e:
-            log.error("failed when running event: %s", event)
-            raise
+            raise RuntimeError(f"failed when running event: {event}") from e
 
     return shape_env
 
