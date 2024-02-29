@@ -301,9 +301,8 @@ class SymInt:
         return str(self.node)
 
     def __hash__(self) -> builtins.int:
-        ret = self.node.nested_int()
-        if ret is not None:
-            return hash(ret)
+        if self.node.is_nested_int():
+            return hash(self.node.nested_int())
         else:
             # We could support constant SymInts as well, but not doing it for now
             raise TypeError("unhashable type: non-nested SymInt")
@@ -1447,7 +1446,7 @@ _storage_classes = {
     TypedStorage
 }
 
-# The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
+# The _tensor_classes set is initialized by the call to initialize_python_bindings.
 _tensor_classes: Set[Type] = set()
 
 # If you edit these imports, please update torch/__init__.py.in as well
@@ -2015,39 +2014,17 @@ def _constrain_as_size(symbol, min: Optional[builtins.int] = None, max: Optional
     which then need to be used as tensor constructors. Providing these assertions to PyTorch can help resolve
       GuardOnDataDependentSymNode errors upon export, since we cannot guard on unbacked SymInts.
 
-    This function has unusual semantics which distinguish it from constrain_as_value.
-    Specifically, at compile-time, we will unsoundly assume that the resulting int is always >= 2.
-    As a result, max value you pass in should always be greater than 2.
-    This makes it easier to use the unbacked int in size contexts, as we will often attempt to guard on a size being zero/one
-    (e.g., when computing the contiguity of a tensor, or testing if broadcasting can occur),
-    which will not work on unbacked SymInts. Assuming that the int is >= 2 allows us to
-    report False to these tests. Although this is technically unsound,
-    in practice we observe that if your program works for all sizes >= 2,
-    it probably works for zero and one too. The reason specifically assume size is >= 2 is because
-    lot of PyTorch code is specialized for 0 and 1 which could result in not general graphs.
-    At runtime, we only assert that the user provided min/max values are respected.
+    This function has unusual semantics which distinguish it from
+    constrain_as_value.  Specifically, in some circumstances in framework
+    code, we will treat this int as >= 2 (when we do a size-oblivious guard).
+    This makes it easier to This makes it easier to use the unbacked int in
+    size contexts, as we will often attempt to guard on a size being zero/one
+    (e.g., when computing the contiguity of a tensor, or testing if
+    broadcasting can occur), which will not work on unbacked SymInts.
+    However, if we conservatively assume that the size is not zero/one, we will
+    end up with a graph that will still work even if the size is zero/one.
 
-    To demonstrate in a scenario, suppose you do
-    ```
-    # Case 1
-    # This will assume symbol is between [2, inf) at compile time, but [0, inf) at runtime
-    constrain_as_size(symbol, min=0)
-
-    # Case 2
-    # This will assume symbol is between [2, N] at compile time, but [0, N] at runtime
-    constrain_as_size(symbol, min=0, max=N)
-
-    # Case 3
-    # This is not valid case as max is <= 2
-    constrain_as_size(symbol, min=0, max=1)
-
-    # Case 4
-    # This will assume symbol is between [2, inf) at compile time, AND [2, inf) at runtime
-    constrain_as_size(symbol, min=2)
-
-    # Case 5
-    # This will assume symbol is between [2, inf) at compile time, but [1, inf) at runtime
-    constrain_as_size(symbol, min=1)
+    For more details, see https://docs.google.com/document/d/1HSuTTVvYH1pTew89Rtpeu84Ht3nQEFTYhAX3Ypa_xJs/edit
     ```
     """
     torch.sym_constrain_range_for_size(symbol, min=min, max=max)
