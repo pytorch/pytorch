@@ -1003,7 +1003,32 @@ def forward(self, x_1, output_1):
         else:
             self.assertTrue("equal_to_1=(3,)" in sources[0])
             self.assertTrue("ids_of_folded_args=(3,)" in sources[0])
+        self.assertEqual(compiled_out, eager_out)
 
+    @requires_cuda
+    @skipIfRocm
+    def test_triton_kernel_different_shapes(self):
+        def f(x, y, xx, yy):
+            n_elements = x.numel()
+            output_1 = torch.zeros_like(x)
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](x, y, output_1, n_elements, BLOCK_SIZE=4)
+
+            n_elements = xx.numel()
+            output_2 = torch.zeros_like(xx)
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](xx, yy, output_2, n_elements, BLOCK_SIZE=4)
+
+            return output_1, output_2
+
+        x = torch.rand(4, device="cuda")
+        y = torch.rand(4, device="cuda")
+        xx = torch.rand(4, 4, device="cuda")
+        yy = torch.rand(4, 4, device="cuda")
+        args = [x, y, xx, yy]
+
+        eager_out = f(*args)
+        compiled_out = torch.compile(f, fullgraph=True, backend="inductor")(*args)
         self.assertEqual(compiled_out, eager_out)
 
 
