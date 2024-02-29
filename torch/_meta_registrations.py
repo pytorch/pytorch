@@ -5961,6 +5961,31 @@ def meta_searchsorted(
         return torch.empty((), dtype=dtype, device=sorted_sequence.device)
 
 
+def _check_for_unsupported_isin_dtype(dtype):
+    torch._check(
+        dtype not in [torch.bool, torch.bfloat16, torch.complex128, torch.complex64],
+        lambda: f"Unsupported input type encountered for isin(): {dtype}",
+    )
+
+
+@register_meta(aten.isin)
+@out_wrapper()
+def meta_isin(elements, test_elements, *, assume_unique=False, invert=False):
+    torch._check(
+        isinstance(elements, Tensor) or isinstance(test_elements, Tensor),
+        lambda: "At least one of elements and test_elements must be a Tensor.",
+    )
+    if not isinstance(elements, Tensor):
+        elements = torch.tensor(elements, device=test_elements.device)
+
+    if not isinstance(test_elements, Tensor):
+        test_elements = torch.tensor(test_elements, device=elements.device)
+
+    _check_for_unsupported_isin_dtype(elements.dtype)
+    _check_for_unsupported_isin_dtype(test_elements.dtype)
+    return torch.empty_like(elements, dtype=torch.bool)
+
+
 @register_meta(aten.polygamma)
 @out_wrapper()
 def meta_polygamma(n: int, self: Tensor) -> Tensor:
