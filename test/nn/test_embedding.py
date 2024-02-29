@@ -1162,14 +1162,14 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         es = nn.EmbeddingBag(10, 20, mode=mode, sparse=sparse)
         input = torch.ones(3, 4, dtype=dtype)
         offset = torch.arange(0, 3, dtype=odtype)
-        self.assertRaises(ValueError, lambda: es(input, offset))
-        self.assertRaises(ValueError, lambda: es(input.view(-1)))
+        torch._dynamo.disable(self.assertRaises)(ValueError, lambda: es(input, offset))
+        torch._dynamo.disable(self.assertRaises)(ValueError, lambda: es(input.view(-1)))
         offset[0] = 1
         if self.device_type == "cpu":
-            self.assertRaises(RuntimeError, lambda: es(input.view(-1), offset))
+            torch._dynamo.disable(self.assertRaises)(RuntimeError, lambda: es(input.view(-1), offset))
             offset[0] = 0
             offset[-1] = 100
-            self.assertRaises(RuntimeError, lambda: es(input.view(-1), offset))
+            torch._dynamo.disable(self.assertRaises)(RuntimeError, lambda: es(input.view(-1), offset))
 
     @skipMeta
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
