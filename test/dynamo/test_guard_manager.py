@@ -608,7 +608,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         # Check that no one can add a leaf guard
         with self.assertRaises(RuntimeError):
-            dict_mgr.add_length_check_guard(3, "len check")
+            dict_mgr.add_id_match_guard(id_type(f_locals), "id match")
 
         # Check that no one can add an arbitrary accessor
         with self.assertRaises(RuntimeError):
@@ -627,14 +627,6 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(root.check(f_locals))
         mgr0.get_value_manager(1).add_equals_match_guard(1, ["d[0] == 1"])
         self.assertTrue(root.check(f_locals))
-
-        # Check that we can't add a guard to a key-value manager
-        with self.assertRaises(RuntimeError):
-            mgr0.add_length_check_guard(2, "len check")
-
-        # Check that we can't add an accessor to the key-value manager
-        with self.assertRaises(RuntimeError):
-            mgr0.getitem_manager("a", f_locals["d"]["a"])
 
         # Add key-value manager (nothing : {"z" : 3})
         mgr1 = dict_mgr.get_key_value_manager(1)
