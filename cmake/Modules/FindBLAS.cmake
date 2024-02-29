@@ -20,7 +20,7 @@ SET(BLAS_INCLUDE_DIR)
 SET(BLAS_INFO)
 SET(BLAS_F2C)
 
-SET(WITH_BLAS "" CACHE STRING "Blas type [accelerate/acml/atlas/blis/generic/goto/mkl/open/veclib]")
+SET(WITH_BLAS "" CACHE STRING "Blas type [accelerate/acml/atlas/blis/generic/goto/mkl/open/veclib/apl]")
 
 # Old FindBlas
 INCLUDE(CheckCSourceRuns)
@@ -305,6 +305,58 @@ if((NOT BLAS_LIBRARIES)
   "${GENERIC_BLAS}")
   if (BLAS_LIBRARIES)
     set(BLAS_INFO "generic")
+  endif(BLAS_LIBRARIES)
+endif()
+
+if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "apl")))
+  check_fortran_libraries(
+  BLAS_LIBRARIES
+  BLAS
+  sgemm
+  ""
+  "apl")
+  if(BLAS_LIBRARIES)
+    set(BLAS_INFO "apl")
+  endif(BLAS_LIBRARIES)
+endif()
+
+if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "apl")))
+  check_fortran_libraries(
+  BLAS_LIBRARIES
+  BLAS
+  sgemm
+  ""
+  "apl;pthread;m")
+  if(BLAS_LIBRARIES)
+    set(BLAS_INFO "apl")
+  endif(BLAS_LIBRARIES)
+endif()
+
+if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "apl")))
+  check_fortran_libraries(
+  BLAS_LIBRARIES
+  BLAS
+  sgemm
+  ""
+  "apl;pthread;m;gomp")
+  if(BLAS_LIBRARIES)
+    set(BLAS_INFO "apl")
+  endif(BLAS_LIBRARIES)
+endif()
+
+if((NOT BLAS_LIBRARIES) AND (WIN32)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "apl")))
+  check_fortran_libraries(
+  BLAS_LIBRARIES
+  BLAS
+  sgemm
+  ""
+  "apl")
+  if(BLAS_LIBRARIES)
+    set(BLAS_INFO "apl")
   endif(BLAS_LIBRARIES)
 endif()
 
