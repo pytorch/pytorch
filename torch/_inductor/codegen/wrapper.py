@@ -223,12 +223,12 @@ class WrapperLine:
     pass
 
 
-class IndentLine(WrapperLine):
+class EnterScopeLine(WrapperLine):
     def codegen(self, code: IndentedBuffer) -> None:
         code.do_indent()
 
 
-class UnindentLine(WrapperLine):
+class ExitScopeLine(WrapperLine):
     def codegen(self, code: IndentedBuffer) -> None:
         code.do_unindent()
 
@@ -546,9 +546,10 @@ class WrapperCodeGen(CodeGen):
         with self.prefix.indent():
             if config.triton.debug_sync_graph:
                 self.prefix.writeline(V.graph.device_ops.synchronize())
-            inp_len = len(V.graph.graph_inputs.keys())
-            if inp_len != 0:
-                lhs = f"{', '.join(V.graph.graph_inputs.keys())}{'' if inp_len != 1 else ','}"
+            if V.graph.graph_inputs:
+                lhs = ", ".join(V.graph.graph_input_names)
+                if len(V.graph.graph_input_names) == 1:
+                    lhs += ","
                 self.prefix.writeline(f"{lhs} = args")
                 self.prefix.writeline("args.clear()")
 
@@ -744,16 +745,29 @@ class WrapperCodeGen(CodeGen):
             self.lines.pop()
 
         # codegen allocations in two passes
-        planning_state = MemoryPlanningState()
+        planning_states = [MemoryPlanningState()]
+        past_planning_states = []
         for i in range(len(self.lines)):
             line = self.lines[i]
             if isinstance(line, MemoryPlanningLine):
-                self.lines[i] = line.plan(planning_state)
+                self.lines[i] = line.plan(planning_states[-1])
+            elif isinstance(line, EnterScopeLine):
+                planning_states.append(MemoryPlanningState())
+            elif isinstance(line, ExitScopeLine):
+                past_planning_states.append(planning_states.pop())
+        past_planning_states.append(planning_states.pop())
+        assert len(planning_states) == 0
+
+        # conservatively use the sum of all allocated buffer sizes
+        # in potentially nested scopes as the total allocated size
+        total_allocated_buffer_size = sum(
+            s.total_allocated_buffer_size for s in past_planning_states
+        )
 
         self.allow_stack_allocation = (
             self.allow_stack_allocation is not False
             and config.allow_stack_allocation
-            and planning_state.total_allocated_buffer_size <= MAX_STACK_ALLOCATION_SIZE
+            and total_allocated_buffer_size <= MAX_STACK_ALLOCATION_SIZE
         )
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
@@ -1395,13 +1409,13 @@ class WrapperCodeGen(CodeGen):
         # TODO(aakhundov): make this work for C++ wrapper codegen (and ABI mode)
         self.writeline(f"{name} = [None] * {len(conditional.outputs)}")
         self.writeline(f"if {conditional.predicate.codegen_reference()}.item():")
-        self.writeline(IndentLine())
+        self.writeline(EnterScopeLine())
         self.codegen_subgraph(conditional.true_subgraph, outer_inputs, outer_outputs)
-        self.writeline(UnindentLine())
+        self.writeline(ExitScopeLine())
         self.writeline("else:")
-        self.writeline(IndentLine())
+        self.writeline(EnterScopeLine())
         self.codegen_subgraph(conditional.false_subgraph, outer_inputs, outer_outputs)
-        self.writeline(UnindentLine())
+        self.writeline(ExitScopeLine())
 
     @staticmethod
     def statically_known_int_or_none(x):
