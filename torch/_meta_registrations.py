@@ -4349,10 +4349,10 @@ def meta_fractional_max_pool2d(self_, kernel_size, output_size, random_samples):
     inW = self_.size(-1)
     if ndim == 4:
         nBatch = self_.size(0)
-        samples_shape = [nBatch, nPlane, 2]
     else:
         nBatch = 1
-        samples_shape = [nPlane, 2]
+    
+    samples_shape = [nBatch, nPlane, 2]
 
     torch._check(
         all(ss == random_samples.size(i) for i, ss in enumerate(samples_shape)),
