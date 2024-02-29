@@ -580,6 +580,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
                 [],
                 True,
                 qconfig_mapping,
+                with_aot=True,
             )
 
     def test_dynamic_linear_int4_weight(self):

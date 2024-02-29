@@ -256,6 +256,7 @@ def choose_qparams_tensor(
        dtype (torch.dtype): dtype for target quantized Tensor
 
     Returns:
+       =================> Documentation says return float
        scale (float): quantization parameter for the target quantized Tensor
        zero_point (int): quantization parameter for the target quantized Tensor
     """
@@ -266,8 +267,10 @@ def choose_qparams_tensor(
 
     min_val, max_val = torch.aminmax(input)
 
-    return determine_qparams(
+    # scale from determine_qparams returns double
+    scale, zp = determine_qparams(
         min_val, max_val, qmin, qmax, dtype, torch.Tensor([eps]), has_customized_qrange=False)
+    return scale, zp
 
 quantized_decomposed_lib.define(
     "choose_qparams_symmetric.tensor(Tensor input, int quant_min, int quant_max, "
@@ -319,9 +322,12 @@ def choose_qparams_tensor_meta(
         eps: float,
         dtype: torch.dtype
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    if input.dtype != torch.float32:
+        breakpoint()
     assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
     assert quant_min < quant_max, f"Expecting quant_min to be smaller than quant_max but received min: \
         {quant_min} max: {quant_max}"
+    # This takes float32 input but emits double
     return torch.empty(1, dtype=torch.double, device=input.device), torch.empty(1, dtype=torch.int64, device=input.device)
 
 @impl(quantized_decomposed_lib, "choose_qparams_symmetric.tensor", "Meta")
@@ -332,6 +338,7 @@ def choose_qparams_symmetric_tensor_meta(
         eps: float,
         dtype: torch.dtype
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    # This takes float32 input but emits double
     return torch.empty(1, dtype=torch.double, device=input.device), torch.empty(1, dtype=torch.int64, device=input.device)
 
 # Helper function used to implement per-channel quantization against any axis

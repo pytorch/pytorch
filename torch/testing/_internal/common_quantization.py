@@ -1178,6 +1178,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         fx_qconfig_mapping=None,
         export_with_dynamic_shape=False,
         is_qat=False,
+        with_aot=False,
     ):
         # resetting dynamo cache
         torch._dynamo.reset()
@@ -1210,6 +1211,17 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         self.checkGraphModuleNodes(
             m, expected_node_occurrence=node_occurrence, expected_node_list=node_list
         )
+
+        if with_aot:
+            with torch.no_grad():
+                q_model = copy.deepcopy(m)
+                aot_inputs = copy.deepcopy(example_inputs)
+
+                so_path = torch._export.aot_compile(m, example_inputs)
+                aot_model = torch._export.aot_load(so_path, "cpu")
+                aot_output = aot_model(*aot_inputs)
+                self.assertEqual(aot_output, pt2_quant_output)
+
         if check_against_fx_quant:
             qconfig_mapping = fx_qconfig_mapping
             backend_config = get_executorch_backend_config()

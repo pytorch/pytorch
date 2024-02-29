@@ -547,6 +547,7 @@ def determine_qparams(
         zero_points: Zero points tensor of shape (#channels,)
     """
     if not check_min_max_valid(min_val, max_val):
+        # This returns float & int!
         return torch.tensor([1.0], device=min_val.device.type), torch.tensor([0], device=min_val.device.type)
 
     min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
@@ -600,6 +601,7 @@ def determine_qparams(
                 [float(zero_point)], dtype=zero_point.dtype, device=device
             )
 
+    # This returns double and int64!
     return scale.to(torch.double), zero_point.to(torch.int64)
 
 def _get_num_pos_args(f: Callable) -> int:
