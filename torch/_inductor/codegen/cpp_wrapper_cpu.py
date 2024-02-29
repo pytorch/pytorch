@@ -1689,7 +1689,9 @@ class CppWrapperCpu(WrapperCodeGen):
             return f"{val}LL" if sys.platform == "darwin" else f"{val}L"
         elif isinstance(val, str):
             return f'"{val}"'
-        elif isinstance(val, (ir.Buffer, ir.ReinterpretView, ir.TensorBox)):
+        elif isinstance(
+            val, (ir.Buffer, ir.ReinterpretView, ir.StorageBox, ir.TensorBox)
+        ):
             return val.codegen_reference()
         elif isinstance(val, torch.device):
             return self.codegen_device(val)

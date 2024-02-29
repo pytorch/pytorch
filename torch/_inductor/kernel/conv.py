@@ -203,6 +203,7 @@ aten_convolution = ExternKernelChoice(
     torch.convolution,
     "at::convolution",
     has_out_variant=False,
+    op_overload=aten.convolution.default,
 )
 
 
@@ -391,7 +392,6 @@ def convolution(
         weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)
 
     ordered_kwargs_for_cpp_kernel = [
-        "bias",
         "stride",
         "padding",
         "dilation",
@@ -399,19 +399,21 @@ def convolution(
         "output_padding",
         "groups",
     ]
-    if bias is not None:
+    if bias is None:
+        args = [x, weight]
+        kwargs["bias"] = None  # type: ignore[typeddict-unknown-key]
+        ordered_kwargs_for_cpp_kernel.insert(0, "bias")
+    else:
+        args = [x, weight, bias]
         bias.realize()
         bias.freeze_layout()
         V.graph.sizevars.evaluate_static_shapes(bias.get_size())
-    args = [x, weight]
-
     choices = [
         aten_convolution.bind(
             args,
             layout,
             ordered_kwargs_for_cpp_kernel,
-            aten.convolution.default,
-            **{"bias": bias, **kwargs},
+            **kwargs,
         )
     ]
 
