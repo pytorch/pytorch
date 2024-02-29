@@ -864,6 +864,11 @@ class GuardBuilder(GuardBuilderBase):
 
         self._produce_guard_code(guard, code)
 
+        if config.enable_cpp_guard_manager:
+            self.get_guard_manager(guard).add_length_check_guard(
+                len(value), get_verbose_code_parts(code, guard)
+            )
+
     def DICT_LENGTH(self, guard):
         self.SEQUENCE_LENGTH(guard)
 
@@ -1494,7 +1499,8 @@ class CheckFunctionManager:
         self.check_fn.id_matched_objs = builder.id_matched_objs
 
         if config.enable_cpp_guard_manager:
-            # print(self.guard_manager)
+            if guards_log.isEnabledFor(logging.DEBUG):
+                print(self.guard_manager)
             # breakpoint()
             self.guard_manager.id_matched_objs = builder.id_matched_objs
             self.check_fn = self.guard_manager
