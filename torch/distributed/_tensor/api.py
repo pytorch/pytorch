@@ -298,9 +298,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         placements = [
             Replicate() if isinstance(p, _Partial) else p for p in self.placements
         ]
-        return self.redistribute(
-            device_mesh=self.device_mesh, placements=placements
-        )
+        return self.redistribute(device_mesh=self.device_mesh, placements=placements)
 
     def __coerce_same_metadata_as_tangent__(self, metadata_tensor):
         return self.redistribute(
