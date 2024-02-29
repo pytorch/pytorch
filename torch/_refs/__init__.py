@@ -299,8 +299,6 @@ __all__ = [
     "tril_indices",
     #
     # Tensor Creation
-    #
-    "tensor",
     "arange",
     "cauchy",
     "empty",
