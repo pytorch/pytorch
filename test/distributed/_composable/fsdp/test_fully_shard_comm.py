@@ -96,6 +96,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             self.device,
             MixedPrecisionPolicy(),
         )
+        fsdp_param_group.lazy_init()
         return fsdp_param_group
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
