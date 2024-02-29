@@ -979,6 +979,16 @@ class _ModuleStackTracer(PythonKeyTracer):
     def is_leaf_module(self, m, module_qualified_name):
         return False
 
+    def create_node(self, *args, **kwargs):
+        '''
+        Add nn_module_stack metadata here instead of TracerBase,
+        since parent classes might not want to track module_stack metadata
+        '''
+        node = super().create_node(*args, **kwargs)
+        if not "nn_module_stack" in node.meta and not node.op in ["placeholder", "output"]:
+            node.meta["nn_module_stack"] = self.module_stack
+        return node
+
 
 def make_fx(f,
             decomposition_table=None,
