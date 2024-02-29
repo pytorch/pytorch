@@ -10,6 +10,7 @@ from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed._tensor import DTensor, Placement, Replicate, Shard
 from torch.distributed._tensor.device_mesh import _mesh_resources
 from torch.distributed._tensor.placement_types import DTensorSpec
+
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import (
     _chunk_with_empty,
@@ -244,17 +245,34 @@ class FSDPParam:
         )
 
     def _init_extensions(self) -> None:
-        inner_tensor = self._inner_tensor
-        has_pre_all_gather = hasattr(inner_tensor, "fsdp_pre_all_gather")
-        has_post_all_gather = hasattr(inner_tensor, "fsdp_post_all_gather")
-        if has_pre_all_gather != has_post_all_gather:
-            raise AssertionError(
-                f"Pre and post-all-gather should be defined together if defined: {inner_tensor}"
-            )
-        self._use_all_gather_extensions = has_pre_all_gather
-        if self._use_all_gather_extensions:
+        module, param_name = self._module_info.module, self._module_info.param_name
+        fsdp_extensions = {}
+        if hasattr(module, "fsdp_extensions"):
+            if not callable(module.fsdp_extensions):
+                raise AssertionError(
+                    f"Expects fsdp_extensions to be callable but got {module.fsdp_extensions}"
+                )
+            fsdp_extensions = module.fsdp_extensions()
+            if not isinstance(fsdp_extensions, dict):
+                raise ValueError(
+                    "Expects fsdp_extensions to return a dict mapping parameter name "
+                    f"to FSDPTensorExtension but got {fsdp_extensions}"
+                )
+        if (extensions := fsdp_extensions.get(param_name)) is not None:
+            self._fsdp_pre_all_gather = extensions.fsdp_pre_all_gather
+            self._fsdp_post_all_gather = extensions.fsdp_post_all_gather
+            if not callable(self._fsdp_pre_all_gather) or not callable(
+                self._fsdp_post_all_gather
+            ):
+                raise ValueError(
+                    "Expects fsdp_pre_all_gather and fsdp_post_all_gather to be "
+                    f"callables but got {self._fsdp_pre_all_gather} and {self._fsdp_post_all_gather}"
+                )
             self._all_gather_metadata: Optional[Any] = None
             self._unsharded_inner_tensors: List[torch.Tensor] = []
+        else:
+            self._fsdp_pre_all_gather = None
+            self._fsdp_post_all_gather = None
 
     def init_all_gather_outputs(
         self,
@@ -272,12 +290,12 @@ class FSDPParam:
 
     def init_unsharded_param(self):
         if hasattr(self, "_unsharded_param"):
-            if not self._use_all_gather_extensions:
+            if not self._fsdp_post_all_gather:
                 return  # already initialized
             for tensor in self._unsharded_inner_tensors:
                 if (storage := tensor.untyped_storage()).size() == 0:
                     storage.resize_(tensor.numel() * tensor.itemsize)
-            self._inner_tensor.fsdp_post_all_gather(  # type: ignore[attr-defined]
+            self._fsdp_post_all_gather(
                 tuple(self.all_gather_outputs),
                 self._all_gather_metadata,
                 self.param_dtype or self.orig_dtype,
@@ -285,12 +303,12 @@ class FSDPParam:
             )
             self._all_gather_metadata = None
             return
-        if self._use_all_gather_extensions:
+        if self._fsdp_post_all_gather:
             param_dtype = self.param_dtype or self.orig_dtype
             (
                 unsharded_tensor,
                 self._unsharded_inner_tensors,
-            ) = self._inner_tensor.fsdp_post_all_gather(  # type: ignore[attr-defined]
+            ) = self._fsdp_post_all_gather(
                 self.all_gather_outputs,
                 self._all_gather_metadata,
                 param_dtype,
@@ -418,7 +436,7 @@ class FSDPParam:
             unsafe_alloc_storage(tensor)
 
     def free_all_gather_outputs(self) -> None:
-        if not self._use_all_gather_extensions:
+        if not self._fsdp_pre_all_gather:
             # Do not free since all-gather output and unsharded parameter alias
             return
         inner_tensor_ptrs = {
@@ -433,7 +451,7 @@ class FSDPParam:
             storage.resize_(0)
 
     def free_unsharded_param(self) -> None:
-        if not self._use_all_gather_extensions:
+        if not self._fsdp_pre_all_gather:
             for tensor in self.all_gather_outputs:
                 unsafe_free_storage(tensor)
             return
@@ -445,9 +463,11 @@ class FSDPParam:
         self._assert_in_states(ShardedState.SHARDED, ShardedState.SHARDED_POST_FORWARD)
         if self.sharded_state == ShardedState.SHARDED:
             sharded_param_data = self._sharded_param_data
-            if self._use_all_gather_extensions:
-                fsdp_pre_all_gather = self._inner_tensor.fsdp_pre_all_gather  # type: ignore[attr-defined]
-                all_gather_inputs, self._all_gather_metadata = fsdp_pre_all_gather()
+            if self._fsdp_pre_all_gather:
+                (
+                    all_gather_inputs,
+                    self._all_gather_metadata,
+                ) = self._fsdp_pre_all_gather(self._inner_tensor)
                 return [t.view(-1) for t in all_gather_inputs]
             return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
