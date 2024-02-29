@@ -50,7 +50,6 @@
 #include <ATen/ops/scalar_tensor.h>
 #include <ATen/ops/scaled_dot_product_attention.h>
 #include <ATen/ops/split_native.h>
-#include <ATen/ops/narrow_native.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -65,7 +64,6 @@
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
-#include <ATen/native/nested/NestedTensorUtils.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 
@@ -852,6 +850,7 @@ _flash_attention_forward(
   // of the tensor. This is useful for kv cache scenarios but for now
   // we will not support in this PR.
   c10::optional<Tensor> seqused_k = c10::nullopt;
+  c10::optional<Tensor> alibi_slopes = c10::nullopt;
 
   // We are going to have two paths:
   // 1. The standard MHA path for dense tensors
@@ -880,6 +879,7 @@ _flash_attention_forward(
             cumulative_sequence_length_q.value(),
             cumulative_sequence_length_k.value(),
             seqused_k, /*seqused_k*/
+            alibi_slopes, /*alibi_slopes*/
             max_seqlen_batch_q,
             max_seqlen_batch_k,
             dropout_p,
@@ -905,6 +905,7 @@ _flash_attention_forward(
             key,
             value,
             out,
+            alibi_slopes,
             dropout_p,
             softmax_scale,
             is_causal,
