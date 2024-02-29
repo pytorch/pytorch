@@ -1120,25 +1120,28 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                  [1, 2],
                  [3, 4]], device=device, dtype=wdtype)
         output = es(input, offsets)
-        output.backward(grad_output_with_empty)
-
-        es_weight_grad = es.weight.grad.data
-        if sparse:
-            es_weight_grad = es.weight.grad.to_dense()
         self.assertEqual(output, expected_output_with_empty)
-        self.assertEqual(es_weight_grad, expected_grad_weight, atol=dtype2prec_DONTUSE[wdtype], rtol=0)
+
+        if test_backward:
+            output.backward(grad_output_with_empty)
+            es_weight_grad = es.weight.grad.data
+            if sparse:
+                es_weight_grad = es.weight.grad.to_dense()
+            self.assertEqual(es_weight_grad, expected_grad_weight, atol=dtype2prec_DONTUSE[wdtype], rtol=0)
 
         # check same example except as 2D (2 x 3)
         input = input.view(2, -1)
         es.zero_grad()
         output = es(input)
-        output.backward(grad_output)
-
-        es_weight_grad = es.weight.grad
-        if sparse:
-            es_weight_grad = es.weight.grad.to_dense()
         self.assertEqual(output, expected_output)
-        self.assertEqual(es_weight_grad, expected_grad_weight, atol=dtype2prec_DONTUSE[wdtype], rtol=0)
+
+        if test_backward:
+            output.backward(grad_output)
+
+            es_weight_grad = es.weight.grad
+            if sparse:
+                es_weight_grad = es.weight.grad.to_dense()
+            self.assertEqual(es_weight_grad, expected_grad_weight, atol=dtype2prec_DONTUSE[wdtype], rtol=0)
 
         # test all empty bags
         es.zero_grad()
@@ -1159,17 +1162,24 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 self._test_EmbeddingBag_vs_Embedding(*p, max_norm=max_norm, **kwargs)
 
         # check that giving illegal input combos raises error
-        es = nn.EmbeddingBag(10, 20, mode=mode, sparse=sparse)
-        input = torch.ones(3, 4, dtype=dtype)
-        offset = torch.arange(0, 3, dtype=odtype)
-        self.assertRaises(ValueError, lambda: es(input, offset))
-        self.assertRaises(ValueError, lambda: es(input.view(-1)))
-        offset[0] = 1
-        if self.device_type == "cpu":
-            self.assertRaises(RuntimeError, lambda: es(input.view(-1), offset))
-            offset[0] = 0
-            offset[-1] = 100
-            self.assertRaises(RuntimeError, lambda: es(input.view(-1), offset))
+        # Note we disable Dynamo as it doesn't currently support exceptions well.
+        @torch._dynamo.disable
+        def check_illegal():
+            es = nn.EmbeddingBag(10, 20, mode=mode, sparse=sparse)
+            input = torch.ones(3, 4, dtype=dtype)
+            offset = torch.arange(0, 3, dtype=odtype)
+
+            # torch._dynamo.disallow_in_graph(self.assertRaises)
+            self.assertRaises(ValueError, lambda: es(input, offset))
+            self.assertRaises(ValueError, lambda: es(input.view(-1)))
+            offset[0] = 1
+            if self.device_type == "cpu":
+                self.assertRaises(RuntimeError, lambda: es(input.view(-1), offset))
+                offset[0] = 0
+                offset[-1] = 100
+                self.assertRaises(RuntimeError, lambda: es(input.view(-1), offset))
+
+        check_illegal()
 
     @skipMeta
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
@@ -1193,24 +1203,29 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 # same as for dense.
                 test_backward = dtypes[2] is not torch.float and dtypes[2] is not torch.float16
 
-            self._test_EmbeddingBag(
-                device,
-                'sum',
-                True,
-                wdtype=dtypes[2],
-                dtype=dtypes[0],
-                odtype=dtypes[1],
-                test_backward=test_backward,
-            )
-            self._test_EmbeddingBag(
-                device,
-                'mean',
-                True,
-                wdtype=dtypes[2],
-                dtype=dtypes[0],
-                odtype=dtypes[1],
-                test_backward=test_backward,
-            )
+            # Sparse tensors don't currently work with Dynamo, so disable for now.
+            @torch._dynamo.disable
+            def run_sparse():
+                self._test_EmbeddingBag(
+                    device,
+                    'sum',
+                    True,
+                    wdtype=dtypes[2],
+                    dtype=dtypes[0],
+                    odtype=dtypes[1],
+                    test_backward=test_backward,
+                )
+                self._test_EmbeddingBag(
+                    device,
+                    'mean',
+                    True,
+                    wdtype=dtypes[2],
+                    dtype=dtypes[0],
+                    odtype=dtypes[1],
+                    test_backward=test_backward,
+                )
+
+            run_sparse()
 
     @skipMeta
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
