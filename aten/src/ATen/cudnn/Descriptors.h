@@ -302,11 +302,9 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
       if (input_type == CUDNN_DATA_HALF) {
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_TENSOR_OP_MATH);
       }
-#endif
       else if (input_type == CUDNN_DATA_FLOAT && !allow_tf32) {
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_FMA_MATH);
       }
-#ifndef USE_CUDNN_RNN_V8_API
       else {
         // Technically, as the default it's not necessary to explicitly
         // set this.
