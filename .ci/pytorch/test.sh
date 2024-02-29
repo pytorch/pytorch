@@ -163,6 +163,8 @@ if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   export PATH="$HOME/.local/bin:$PATH"
 fi
 
+install_tlparse
+
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
 # if you're not careful.  Check this if you made some changes and the
 # ASAN test is not working
@@ -982,7 +984,8 @@ test_bazel() {
 
     tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
   else
-    tools/bazel test --test_output=errors \
+    # Increase the test timeout to 480 like CPU tests because modules_test frequently timeout
+    tools/bazel test --test_timeout=480 --test_output=errors \
       //:any_test \
       //:autograd_test \
       //:dataloader_test \

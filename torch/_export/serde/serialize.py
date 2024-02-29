@@ -1200,6 +1200,14 @@ class GraphModuleDeserializer:
                 sym = self.symbol_name_to_symbol[val.expr_str]
             else:
                 sym = sympy.sympify(val.expr_str, locals=self.symbol_name_to_symbol)
+                # NOTE(avik): Assumptions on symbols are not explicitly serialized.
+                # This seems dangerous: it might cause unknown differences in shape env behavior
+                # on deserialization? Probably deserves a follow-up.
+
+                # Here we force symbols corresponding to SymInts to be at least integers.
+                # Otherwise some expressions that the shape env would otherwise evaluate to False,
+                # e.g., 2*s = 9, can have rational solutions, e.g., 9/2.
+                sym = sym.subs({s: sympy.Symbol(s.name, integer=True) for s in sym.free_symbols})
                 if isinstance(sym, sympy.Symbol):
                     self.symbol_name_to_symbol[val.expr_str] = sym
 
@@ -1210,6 +1218,23 @@ class GraphModuleDeserializer:
                             compiler_min=vr.lower,  # type: ignore[arg-type]
                             compiler_max=vr.upper,  # type: ignore[arg-type]
                         )
+                else:
+                    # Placeholders, in particular, can have shapes as symbolic expressions.
+                    # We need to populate the shape env with the range constraints of their
+                    # free symbols, otherwise evaluating such expressions will error.
+                    self.symbol_name_to_symbol[val.expr_str] = sym
+                    free_symbols = sym.free_symbols
+                    for s in free_symbols:
+                        if s.name not in self.symbol_name_to_symbol:
+                            self.symbol_name_to_symbol[s.name] = s
+                        if vr := self.symbol_name_to_range.get(s.name):
+                            symbolic_shapes._constrain_symbol_range(
+                                self.shape_env,
+                                s,
+                                compiler_min=vr.lower,  # type: ignore[arg-type]
+                                compiler_max=vr.upper,  # type: ignore[arg-type]
+                            )
+
 
             if val.hint is None:
                 hint = None
@@ -2360,6 +2385,8 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
                     pass
                 else:
                     raise AssertionError(f"Unknown sym_int type: {s}")
+            elif arg.type in ("as_none", "as_int", "as_float", "as_string"):
+                return
             else:
                 raise AssertionError(f"Unknown input type: {arg}")
         elif spec.type == "loss_output":
