@@ -2154,7 +2154,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.eager_transforms._chunked_standard_basis_for_",
         "torch._functorch.eager_transforms._construct_standard_basis_for",
         "torch._functorch.eager_transforms._vjp_treespec_compare",
-        "torch._functorch.eager_transforms._tensor_requires_grad",
+        "torch._functorch.eager_transforms._set_tensor_requires_grad",
         "torch._functorch.eager_transforms._is_differentiable",
         "torch._functorch.eager_transforms._jvp_with_argnums",
         "torch._functorch.eager_transforms._maybe_unwrap_functional_tensor",
