@@ -93,7 +93,7 @@ class _AddRuntimeAssertionsForInlineConstraintsPass(_ExportPassBaseDeprecatedDoN
             call_backs: List[Callable] = []
             messages: List[str] = []
             if isinstance(val, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-                symbol = val.node._expr
+                symbol = val.node.expr
                 if symbol in self.existing_inline_assertions:
                     return call_backs, messages
                 if isinstance(symbol, sympy.Symbol) and free_unbacked_symbols(symbol):
@@ -210,7 +210,7 @@ def _get_existing_inline_assertions(
             ):
                 continue
 
-            symint = maybe_symint_arg.meta["val"].node._expr
+            symint = maybe_symint_arg.meta["val"].node.expr
             if not isinstance(symint, sympy.Symbol):
                 continue
 

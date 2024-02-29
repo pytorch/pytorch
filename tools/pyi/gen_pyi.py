@@ -11,7 +11,7 @@ from warnings import warn
 from torchgen.api.python import (
     PythonSignatureGroup,
     PythonSignatureNativeFunctionPair,
-    returns_named_tuple_pyi,
+    returns_structseq_pyi,
 )
 from torchgen.gen import parse_native_yaml, parse_tags_yaml
 
@@ -418,7 +418,7 @@ def gen_nn_functional(fm: FileManager) -> None:
             "softplus": [
                 "def softplus({}) -> Tensor: ...".format(
                     ", ".join(
-                        ["input: Tensor", "beta: int = ...", "threshold: int = ..."]
+                        ["input: Tensor", "beta: float = ...", "threshold: float = ..."]
                     )
                 )
             ],
@@ -647,7 +647,7 @@ def gen_pyi(
     # also needs to update the other file.
 
     # Dictionary for NamedTuple definitions
-    namedtuples: Dict[str, str] = {}
+    structseqs: Dict[str, str] = {}
 
     # Generate type signatures for top-level functions
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -710,7 +710,6 @@ def gen_pyi(
                             "dtype: _dtype",
                             "count: int = -1",
                             "offset: int = 0",
-                            "device: Optional[DeviceLikeType] = None",
                             "requires_grad: _bool = False",
                         ]
                     )
@@ -974,15 +973,20 @@ def gen_pyi(
             ],
         }
     )
-    for binop in ["mul", "true_divide", "floor_divide"]:
+    for binop in ["true_divide", "floor_divide"]:
         unsorted_function_hints[binop].append(
             f"def {binop}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
             "*, out: Optional[Tensor] = None) -> Tensor: ..."
         )
+    for binop in ["mul"]:
+        unsorted_function_hints[binop].append(
+            f"def {binop}(input: Union[Tensor, Number, _complex], other: Union[Tensor, Number, _complex], "
+            "*, out: Optional[Tensor] = None) -> Tensor: ..."
+        )
     for binop in ["add", "sub"]:
         unsorted_function_hints[binop].append(
-            f"def {binop}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
-            "*, alpha: Optional[Number] = 1, out: Optional[Tensor] = None) -> Tensor: ..."
+            f"def {binop}(input: Union[Tensor, Number, _complex], other: Union[Tensor, Number, _complex], "
+            "*, alpha: Optional[Union[Number, _complex]] = 1, out: Optional[Tensor] = None) -> Tensor: ..."
         )
 
     native_functions = parse_native_yaml(
@@ -998,14 +1002,14 @@ def gen_pyi(
         name = group.signature.name
         unsorted_function_hints[name] += generate_type_hints(group)
 
-        named_tuple = returns_named_tuple_pyi(group.signature)
-        if named_tuple is not None and not group.signature.deprecated:
-            # deprecated namedtuples are currently not included for torch functions
-            tuple_name, tuple_def = named_tuple
-            if tuple_name in namedtuples:
-                assert namedtuples[tuple_name] == tuple_def
+        structseq = returns_structseq_pyi(group.signature)
+        if structseq is not None and not group.signature.deprecated:
+            # deprecated structseqs are currently not included for torch functions
+            tuple_name, tuple_def = structseq
+            if tuple_name in structseqs:
+                assert structseqs[tuple_name] == tuple_def
             else:
-                namedtuples[tuple_name] = tuple_def
+                structseqs[tuple_name] = tuple_def
 
     def replace_special_case(hint: str) -> str:
         # NB: Keep this in sync with enum in aten/src/ATen/core/Reduction.h
@@ -1106,9 +1110,13 @@ def gen_pyi(
                             "self",
                             "device: Optional[Union[_device, _int, str]] = None",
                             "non_blocking: _bool = False",
+                            "memory_format: torch.memory_format = torch.preserve_format",
                         ]
                     )
                 )
+            ],
+            "cpu": [
+                "def cpu(self, memory_format: torch.memory_format = torch.preserve_format) -> Tensor: ..."
             ],
             "numpy": ["def numpy(self, *, force: _bool = False) -> Any: ..."],
             "apply_": ["def apply_(self, callable: Callable) -> Tensor: ..."],
@@ -1180,7 +1188,7 @@ def gen_pyi(
             ],
         }
     )
-    for binop in ["mul", "true_divide", "floor_divide"]:
+    for binop in ["true_divide", "floor_divide"]:
         for inplace in [False, True]:
             out_suffix = ", *, out: Optional[Tensor] = None"
             if inplace:
@@ -1190,6 +1198,16 @@ def gen_pyi(
                 f"def {binop}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat]{out_suffix})"
                 " -> Tensor: ..."
             )
+    for binop in ["mul"]:
+        for inplace in [False, True]:
+            out_suffix = ", *, out: Optional[Tensor] = None"
+            if inplace:
+                binop += "_"
+                out_suffix = ""
+            unsorted_tensor_method_hints[binop].append(
+                f"def {binop}(self, other: Union[Tensor, Number, _complex, torch.SymInt, torch.SymFloat]{out_suffix})"
+                " -> Tensor: ..."
+            )
     for binop in ["add", "sub"]:
         for inplace in [False, True]:
             out_suffix = ", out: Optional[Tensor] = None"
@@ -1197,14 +1215,13 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                f"def {binop}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat], "
-                f"*, alpha: Optional[Number] = 1{out_suffix})"
+                f"def {binop}(self, other: Union[Tensor, Number, _complex, torch.SymInt, torch.SymFloat], "
+                f"*, alpha: Optional[Union[Number, _complex]] = 1{out_suffix})"
                 " -> Tensor: ..."
             )
     simple_conversions = [
         "byte",
         "char",
-        "cpu",
         "double",
         "float",
         "half",
@@ -1234,14 +1251,14 @@ def gen_pyi(
         name = group.signature.name
         unsorted_tensor_method_hints[name] += generate_type_hints(group)
 
-        named_tuple = returns_named_tuple_pyi(group.signature)
-        if named_tuple is not None and not group.signature.deprecated:
-            # deprecated namedtuples are currently not included for torch functions
-            tuple_name, tuple_def = named_tuple
-            if tuple_name in namedtuples:
-                assert namedtuples[tuple_name] == tuple_def
+        structseq = returns_structseq_pyi(group.signature)
+        if structseq is not None and not group.signature.deprecated:
+            # deprecated structseqs are currently not included for torch functions
+            tuple_name, tuple_def = structseq
+            if tuple_name in structseqs:
+                assert structseqs[tuple_name] == tuple_def
             else:
-                namedtuples[tuple_name] = tuple_def
+                structseqs[tuple_name] = tuple_def
 
     for op in all_ops:
         name = f"__{op}__"
@@ -1258,10 +1275,10 @@ def gen_pyi(
 
     # TODO: Missing type hints for nn
 
-    # Generate namedtuple definitions
+    # Generate structseq definitions
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    namedtuple_defs = [f"{defn}\n" for defn in namedtuples.values()]
+    structseq_defs = [f"{defn}\n" for defn in structseqs.values()]
 
     # Generate type signatures for legacy classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1341,7 +1358,7 @@ def gen_pyi(
     hinted_function_names = [
         name for name, hint in unsorted_function_hints.items() if hint
     ]
-    all_symbols = sorted(list(namedtuples.keys()) + hinted_function_names)
+    all_symbols = sorted(list(structseqs.keys()) + hinted_function_names)
     all_directive = pformat(all_symbols, width=100, compact=True).split("\n")
     all_directive[0] = f"__all__ = {all_directive[0]}"
 
@@ -1364,7 +1381,7 @@ def gen_pyi(
     # ~~~~~~~~~~~~~~~~~~
 
     env = {
-        "namedtuple_defs": namedtuple_defs,
+        "structseq_defs": structseq_defs,
         "function_hints": function_hints,
         "tensor_method_hints": tensor_method_hints,
         "legacy_class_hints": legacy_class_hints,

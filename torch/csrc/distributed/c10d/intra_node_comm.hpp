@@ -10,8 +10,7 @@ namespace c10d {
 namespace intra_node_comm {
 
 constexpr size_t kMaxDevices = 8;
-// TODO(yifu): make this tunable
-constexpr size_t kMaxIntraNodeSize = 2ull * 100 * 1024 * 1024;
+constexpr size_t kDefaultBufferSize = 10 * 1024 * 1024;
 
 using NvlMesh = std::array<std::array<size_t, kMaxDevices>, kMaxDevices>;
 using HybridCubeMesh = std::array<std::array<int, 4>, kMaxDevices>;
@@ -30,7 +29,8 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
       void* buffersDev,
       void* topoInfo,
       size_t rank,
-      size_t worldSize);
+      size_t worldSize,
+      size_t bufferSize);
 
   ~IntraNodeComm();
 
@@ -43,10 +43,11 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
       c10::intrusive_ptr<c10d::Store> store,
       const std::string& prefix,
       size_t rank,
-      size_t worldSize);
+      size_t worldSize,
+      size_t bufferSize = kDefaultBufferSize);
 
-  size_t intraNodeBufferSize() {
-    return kMaxIntraNodeSize * 2;
+  size_t getBufferSize() {
+    return bufferSize_;
   }
 
   /**
@@ -76,6 +77,18 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
   TORCH_API void get(size_t rank, at::Tensor tensor, int64_t offset = 0);
 
  private:
+  at::Tensor oneShotAllReduce(
+      const at::Tensor& input,
+      at::cuda::CUDAStream& stream);
+
+  at::Tensor twoShotAllReduce(
+      const at::Tensor& input,
+      at::cuda::CUDAStream& stream);
+
+  at::Tensor hybridCubeMeshAllReduce(
+      const at::Tensor& input,
+      at::cuda::CUDAStream& stream);
+
   Topology topology_;
   std::array<void*, kMaxDevices> p2pStates_;
   std::array<void*, kMaxDevices> buffers_;
@@ -84,6 +97,7 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
   void* topoInfo_;
   size_t rank_;
   size_t worldSize_;
+  size_t bufferSize_;
 };
 
 /**

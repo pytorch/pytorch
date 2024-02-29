@@ -492,7 +492,7 @@ class ConstantLR(LRScheduler):
         >>> # lr = 0.025   if epoch == 2
         >>> # lr = 0.025   if epoch == 3
         >>> # lr = 0.05    if epoch >= 4
-        >>> scheduler = ConstantLR(self.opt, factor=0.5, total_iters=4)
+        >>> scheduler = ConstantLR(optimizer, factor=0.5, total_iters=4)
         >>> for epoch in range(100):
         >>>     train(...)
         >>>     validate(...)
@@ -556,7 +556,7 @@ class LinearLR(LRScheduler):
         >>> # lr = 0.0375   if epoch == 2
         >>> # lr = 0.04375  if epoch == 3
         >>> # lr = 0.05    if epoch >= 4
-        >>> scheduler = LinearLR(self.opt, start_factor=0.5, total_iters=4)
+        >>> scheduler = LinearLR(optimizer, start_factor=0.5, total_iters=4)
         >>> for epoch in range(100):
         >>>     train(...)
         >>>     validate(...)
@@ -656,9 +656,9 @@ class SequentialLR(LRScheduler):
         >>> # lr = 0.9     if epoch == 2
         >>> # lr = 0.81    if epoch == 3
         >>> # lr = 0.729   if epoch == 4
-        >>> scheduler1 = ConstantLR(self.opt, factor=0.1, total_iters=2)
-        >>> scheduler2 = ExponentialLR(self.opt, gamma=0.9)
-        >>> scheduler = SequentialLR(self.opt, schedulers=[scheduler1, scheduler2], milestones=[2])
+        >>> scheduler1 = ConstantLR(optimizer, factor=0.1, total_iters=2)
+        >>> scheduler2 = ExponentialLR(optimizer, gamma=0.9)
+        >>> scheduler = SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[2])
         >>> for epoch in range(100):
         >>>     train(...)
         >>>     validate(...)
@@ -769,7 +769,7 @@ class PolynomialLR(LRScheduler):
         >>> # lr = 0.00050   if epoch == 2
         >>> # lr = 0.00025   if epoch == 3
         >>> # lr = 0.0       if epoch >= 4
-        >>> scheduler = PolynomialLR(self.opt, total_iters=4, power=1.0)
+        >>> scheduler = PolynomialLR(optimizer, total_iters=4, power=1.0)
         >>> for epoch in range(100):
         >>>     train(...)
         >>>     validate(...)
@@ -893,8 +893,8 @@ class ChainedScheduler(LRScheduler):
         >>> # lr = 0.729    if epoch == 2
         >>> # lr = 0.6561   if epoch == 3
         >>> # lr = 0.59049  if epoch >= 4
-        >>> scheduler1 = ConstantLR(self.opt, factor=0.1, total_iters=2)
-        >>> scheduler2 = ExponentialLR(self.opt, gamma=0.9)
+        >>> scheduler1 = ConstantLR(optimizer, factor=0.1, total_iters=2)
+        >>> scheduler2 = ExponentialLR(optimizer, gamma=0.9)
         >>> scheduler = ChainedScheduler([scheduler1, scheduler2])
         >>> for epoch in range(100):
         >>>     train(...)
@@ -965,11 +965,17 @@ class ReduceLROnPlateau(LRScheduler):
             quantity monitored has stopped increasing. Default: 'min'.
         factor (float): Factor by which the learning rate will be
             reduced. new_lr = lr * factor. Default: 0.1.
-        patience (int): Number of epochs with no improvement after
-            which learning rate will be reduced. For example, if
-            `patience = 2`, then we will ignore the first 2 epochs
-            with no improvement, and will only decrease the LR after the
-            3rd epoch if the loss still hasn't improved then.
+        patience (int): The number of allowed epochs with no improvement after
+            which the learning rate will be reduced.
+            For example, consider the case of having no patience (`patience = 0`).
+            In the first epoch, a baseline is established and is always considered good as there's no previous baseline.
+            In the second epoch, if the performance is worse than the baseline,
+            we have what is considered an intolerable epoch.
+            Since the count of intolerable epochs (1) is greater than the patience level (0),
+            the learning rate is reduced at the end of this epoch.
+            From the third epoch onwards, the learning rate continues to be reduced at the end of each epoch
+            if the performance is worse than the baseline. If the performance improves or remains the same,
+            the learning rate is not adjusted.
             Default: 10.
         threshold (float): Threshold for measuring the new optimum,
             to only focus on significant changes. Default: 1e-4.
@@ -1037,6 +1043,7 @@ class ReduceLROnPlateau(LRScheduler):
         self.mode_worse = None  # the worse value for the chosen mode
         self.eps = eps
         self.last_epoch = 0
+        self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
         self._init_is_better(mode=mode, threshold=threshold,
                              threshold_mode=threshold_mode)
         self._reset()
@@ -1268,15 +1275,20 @@ class CyclicLR(LRScheduler):
 
         self.cycle_momentum = cycle_momentum
         if cycle_momentum:
-            if 'momentum' not in optimizer.defaults:
-                raise ValueError('optimizer must support momentum with `cycle_momentum` option enabled')
+            if 'momentum' not in optimizer.defaults and 'betas' not in optimizer.defaults:
+                raise ValueError('optimizer must support momentum or beta1 with `cycle_momentum` option enabled')
 
-            base_momentums = self._format_param('base_momentum', optimizer, base_momentum)
-            if last_epoch == -1:
-                for momentum, group in zip(base_momentums, optimizer.param_groups):
-                    group['momentum'] = momentum
-            self.base_momentums = [group['momentum'] for group in optimizer.param_groups]
+            self.use_beta1 = 'betas' in self.optimizer.defaults
+            self.base_momentums = self._format_param('base_momentum', optimizer, base_momentum)
             self.max_momentums = self._format_param('max_momentum', optimizer, max_momentum)
+            if last_epoch == -1:
+                for m_momentum, b_momentum, group in zip(self.max_momentums, self.base_momentums, optimizer.param_groups):
+                    if self.use_beta1:
+                        group['betas'] = (m_momentum, *group['betas'][1:])
+                    else:
+                        group['momentum'] = m_momentum
+                    group['max_momentum'] = m_momentum
+                    group['base_momentum'] = b_momentum
 
         super().__init__(optimizer, last_epoch, verbose)
         self.base_lrs = base_lrs
@@ -1359,7 +1371,10 @@ class CyclicLR(LRScheduler):
                     momentum = max_momentum - base_height * self.scale_fn(self.last_epoch)
                 momentums.append(momentum)
             for param_group, momentum in zip(self.optimizer.param_groups, momentums):
-                param_group['momentum'] = momentum
+                if self.use_beta1:
+                    param_group['betas'] = (momentum, *param_group['betas'][1:])
+                else:
+                    param_group['momentum'] = momentum
 
         return lrs
 
@@ -1721,7 +1736,7 @@ class OneCycleLR(LRScheduler):
         self.cycle_momentum = cycle_momentum
         if self.cycle_momentum:
             if 'momentum' not in self.optimizer.defaults and 'betas' not in self.optimizer.defaults:
-                raise ValueError('optimizer must support momentum with `cycle_momentum` option enabled')
+                raise ValueError('optimizer must support momentum or beta1 with `cycle_momentum` option enabled')
             self.use_beta1 = 'betas' in self.optimizer.defaults
             max_momentums = self._format_param('max_momentum', optimizer, max_momentum)
             base_momentums = self._format_param('base_momentum', optimizer, base_momentum)

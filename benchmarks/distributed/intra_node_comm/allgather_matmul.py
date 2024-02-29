@@ -99,7 +99,13 @@ def main():
     os.environ["ENABLE_INTRA_NODE_COMM"] = "1"
 
     global comm, internal_stream, internal_event
-    comm = c10d._IntraNodeComm.rendezvous(store, "", rank, world_size)
+    comm = c10d._IntraNodeComm.rendezvous(
+        store=store,
+        prefix="",
+        rank=rank,
+        world_size=world_size,
+        buffer_size=M * K * 2,
+    )
     internal_stream = torch.cuda.Stream()
     internal_event = torch.cuda.Event()
 
