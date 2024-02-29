@@ -1435,7 +1435,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(foo(torch.tensor(6.0, device="cuda")), 6.0)
 
         @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
-        @unittest.expectedFailure
         def test_incompatible_cudagraph_ops_nonzero(self):
             @torch.compile(mode="reduce-overhead")
             def foo(x):
