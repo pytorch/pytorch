@@ -982,7 +982,7 @@ class _ModuleStackTracer(PythonKeyTracer):
     def create_node(self, *args, **kwargs):
         '''
         Add nn_module_stack metadata here instead of TracerBase,
-        since parent classes might not want to track module_stack metadata
+        since calls to make_fx() might not want to record module stack metadata
         '''
         node = super().create_node(*args, **kwargs)
         if "nn_module_stack" not in node.meta and node.op not in ["placeholder", "output"]:

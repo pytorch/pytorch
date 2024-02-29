@@ -445,8 +445,7 @@ def _export_non_strict(
 
         gm = replace_set_grad_with_hop_pass(gm)
 
-    # Remove nn_module_stack metadata from all placeholders/inputs nodes
-    # These may have multiple paths of references, so nn_module_stack may not be well-defined.
+    # Remove nn_module_stack metadata from all placeholders/inputs nodes.
     for mod in gm.modules():
         for node in mod.graph.nodes:
             if node.op in ["placeholder", "output"]:
@@ -920,6 +919,10 @@ def _export(
                         if entry in meta:
                             params_buffers_to_node_meta[arg.target][entry] = meta[entry]
 
+    # Don't copy over nn_module_stack metadata for params/buffers nodes
+    for metadata in params_buffers_to_node_meta.values():
+        metadata.pop("nn_module_stack", None)
+
     # Fix the graph output signature to be tuple if scalar
     out_spec = orig_out_spec = gm_torch_level._out_spec
     assert out_spec is not None
@@ -954,10 +957,6 @@ def _export(
     gm = ep_non_strict.gm
     export_graph_signature = ep_non_strict.sig
     constants = ep_non_strict.constants
-
-    # Don't copy over nn_module_stack metadata for params/buffers nodes from Dynamo-exported graph
-    for metadata in params_buffers_to_node_meta.values():
-        metadata.pop("nn_module_stack", None)
 
     # After aot_export, set the param/buffer metadata back into placeholders
     # Technically, users can still construct this data from param names

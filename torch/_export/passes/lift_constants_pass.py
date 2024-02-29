@@ -181,8 +181,7 @@ def lift_constants_pass(
                 for k, v in node.meta.items():
                     const_placeholder_node.meta[k] = v
 
-                # Remove nn_module_stack from lifted placeholder node once FQN has been used
-                # This is not done in torch/export/_trace.py since the constant here is on a get_attr node
+                # Once the FQN has been used, remove nn_module_stack.
                 const_placeholder_node.meta.pop("nn_module_stack")
 
                 input_spec_arg: ArgumentSpec

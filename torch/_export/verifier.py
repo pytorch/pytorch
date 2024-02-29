@@ -31,6 +31,35 @@ def _check_has_fake_tensor(node: torch.fx.Node) -> None:
     return _check_val(node)
 
 
+def check_nn_module_stack(graph_module: torch.fx.GraphModule) -> None:
+    '''
+    Perform nn_module_stack checks on the graph.
+    Current constraints:
+        For the top level graph:
+        - populated for 'call_method', 'call_function', 'get_attr', 'call_module'
+        - None for 'placeholder', 'output'
+        For submodule graphs:
+        - None for 'placeholder', output'
+
+    TODO(pianpwk): extend this check to get_attr & call_module nodes.
+    TODO(pianpwk): make this a consistent node-level check once nn_module_stack is populated for cond submodules.
+    '''
+    # Check top-level graph for all nodes, submodule graphs for placeholder & output nodes
+    for i, mod in enumerate(graph_module.modules()):
+        for node in mod.graph.nodes:
+            if node.op in ['call_method', 'call_function', 'get_attr', 'call_module']:
+                if i == 0:
+                    if node.meta.get('nn_module_stack', None) is None:
+                        raise SpecViolationError(
+                            f"Node {node} of type {node.op} is missing nn_module_stack metadata"
+                        )
+            else:
+                if node.meta.get('nn_module_stack', None):
+                    raise SpecViolationError(
+                        f"Node {node} of type {node.op} contains nn_module_stack metadata, this should be None"
+                    )
+
+
 def _check_val(node: torch.fx.Node) -> None:
     def _check_correct_val(val):
         if val is None:
@@ -190,35 +219,6 @@ class Verifier(metaclass=_VerifierMeta):
                     )
             self.check_valid_op(op)
 
-        def _check_nn_module_stack(graph_module: torch.fx.GraphModule) -> None:
-            '''
-            Perform nn_module_stack checks on the graph.
-            Current constraints:
-                For the top level graph:
-                - populated for 'call_method', 'call_function'
-                - None for 'placeholder', 'output'
-                - unenforced for 'get_attr', 'call_module' (current issues with graph splitting and deserializing)
-                For submodule graphs:
-                - None for 'placeholder', output'
-
-            TODO(pianpwk): extend this check to get_attr & call_module nodes.
-            TODO(pianpwk): make this a consistent node-level check once nn_module_stack is populated for cond submodules.
-            '''
-            # Check top-level graph for all nodes, submodule graphs for placeholder & output nodes
-            for i, mod in enumerate(graph_module.modules()):
-                for node in mod.graph.nodes:
-                    if node.op in ['call_method', 'call_function']:
-                        if i == 0:
-                            if node.meta.get('nn_module_stack', None) is None:
-                                raise SpecViolationError(
-                                    f"Node {node} of type {node.op} is missing nn_module_stack metadata"
-                                )
-                    elif node.op in ["placeholder", "output"]:
-                        if node.meta.get('nn_module_stack', None):
-                            raise SpecViolationError(
-                                f"Node {node} of type {node.op} contains nn_module_stack metadata, this should be None"
-                            )
-
         for mod in gm.modules():
             if not isinstance(mod, torch.fx.GraphModule):
                 continue
@@ -276,12 +276,6 @@ class Verifier(metaclass=_VerifierMeta):
                 # TODO(zhxchen17)
                 # elif node.op == "output":
                 #     _check_flattened_outputs()
-
-        # Ideally we would perform this check at the node level, only looking at the node op type,
-        # but currently cond submodules have an issue where nn_module_stack metadata is not populated.
-        # For now, we perform strict checks for the top level graph, and looser checks for submodules.
-        # TODO(pianpwk): remove this check once we fix the nn_module_stack metadata issue
-        _check_nn_module_stack(gm)
 
         self.check_additional(gm)
 
