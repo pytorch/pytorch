@@ -209,17 +209,19 @@ class OptimizedModule(torch.nn.Module):
 
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
-        is_nn_module = isinstance(self._orig_mod, torch.nn.Module)
-        if (isinstance(self._orig_mod.forward, types.MethodType) and trace_rules.check(
+        if isinstance(self._orig_mod.forward, types.MethodType) and trace_rules.check(
             self._orig_mod.forward
-        )) or is_nn_module:
+        ):
             # This may be a torch.nn.* instance in trace_rules.py which
             # won't trigger a frame evaluation workaround to add an extra
             # frame we can capture
             self.forward = self.dynamo_ctx(external_utils.wrap_inline(self._orig_mod))
         else:
-            # Invoke hooks outside of dynamo then pickup the inner frame
-            self.forward = self.dynamo_ctx(self._orig_mod.__call__)
+            # # Invoke hooks outside of dynamo then pickup the inner frame
+            # def myforward(*args, **kwargs):
+            #     return self.dynamo_ctx(self._orig_mod.__call__)(*args, **kwargs)
+            # self.forward = myforward
+            self.forward = self.dynamo_ctx(external_utils.wrap_inline(self._orig_mod))
 
         if hasattr(self._orig_mod, "_initialize_hook"):
             self._forward = self.forward
@@ -565,7 +567,7 @@ def _optimize_catch_errors(
     compiler_config=None,
 ):
     return OptimizeContext(
-        convert_frame.catch_errors_wrapper(compile_fn, hooks),
+        callback=convert_frame.catch_errors_wrapper(compile_fn, hooks),
         backend_ctx_ctor=backend_ctx_ctor,
         first_ctx=True,
         export=export,
