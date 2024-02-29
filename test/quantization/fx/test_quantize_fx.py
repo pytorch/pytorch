@@ -8718,7 +8718,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 continue
                 # fp16 dynamic quant is not supported for qnnpack
 
-            eager_qconfig_dict = {x : qconfig for x in module_types}
+            eager_qconfig_dict = dict.fromkeys(module_types, qconfig)
             model_eager = quantize_dynamic(model_eager, qconfig_spec=eager_qconfig_dict)
 
             graph_qconfig_dict = {

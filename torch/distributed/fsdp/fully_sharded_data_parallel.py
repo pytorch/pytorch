@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import contextlib
 import copy
 import functools
@@ -470,7 +472,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 "ignored_states": self._ignored_params,
                 "device_mesh": device_mesh,
             }
-            if sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+            if sharding_strategy in HYBRID_SHARDING_STRATEGIES and device_mesh is None:
                 # Share root process groups with children to maintain
                 # the invariant that all FSDP modules will have the same
                 # process groups.
@@ -1806,7 +1808,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             >>> )
             >>> model.load_state_dict(state_dict)
             >>> optim_state_dict = FSDP.optim_state_dict_to_load(
-            >>>     optim_state_dict, model, optim
+            >>>     model, optim, optim_state_dict
             >>> )
             >>> optim.load_state_dict(optim_state_dict)
 

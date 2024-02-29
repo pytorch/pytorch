@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import collections
 import collections.abc
 import math

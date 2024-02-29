@@ -464,6 +464,7 @@ class TestOperators(TestCase):
             self.assertEqual(result, expected)
             self.assertEqual(result_noncontig, expected)
 
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_jvp', set({
         # Composite ops that do bad things. Need to be fixed in PyTorch core.
@@ -595,6 +596,7 @@ class TestOperators(TestCase):
         self.assertEqual(noncontig_primal_outs, expected_primal_outs)
         self.assertEqual(noncontig_tangent_outs, expected_tangent_outs)
 
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
         xfail('sparse.sampled_addmm', ''),

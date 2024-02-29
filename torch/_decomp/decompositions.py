@@ -1153,16 +1153,6 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
     return result
 
 
-@register_decomposition(aten.rsub.Tensor)
-def rsub_Tensor(self: Tensor, other: Tensor, alpha: float = 1) -> Tensor:
-    return torch.sub(other, self, alpha=alpha)
-
-
-@register_decomposition(aten.rsub.Scalar)
-def rsub_Scalar(self: Tensor, other: float, alpha: float = 1) -> Tensor:
-    return torch.sub(other, self, alpha=alpha)
-
-
 @register_decomposition(aten.embedding)
 @out_wrapper()
 def embedding(
@@ -1226,6 +1216,13 @@ def prod(x: List[int]):
 def split_with_sizes(
     self: Tensor, split_sizes: List[int], dim: int = 0
 ) -> List[Tensor]:
+    # NB: Perform the check_is_size tests first so that the
+    # sum test does not try to do a replacement
+    for i in range(len(split_sizes)):
+        torch._check_is_size(
+            split_sizes[i],
+            lambda: "split_with_sizes expects split_sizes have only non-negative entries",
+        )
     torch._check_with(
         ValueError,
         sum(split_sizes) == self.shape[dim],
@@ -1240,16 +1237,32 @@ def split_with_sizes(
 
     for i in range(num_splits):
         length = split_sizes[i]
-        torch._check_is_size(
-            length,
-            lambda: "split_with_sizes expects split_sizes have only non-negative entries",
-        )
         # We know this is true thanks to the sum, but this assertion helps
         # out our internal reasoning
         expect_true(start_idx + length <= self.shape[dim])
         splits.append(self.narrow(dim, start_idx, length))
         start_idx += length
     return splits
+
+
+# out_wrapper currently does not allow optional outputs
+@register_decomposition(
+    [aten.split_with_sizes_copy.default, aten.split_with_sizes_copy.out]
+)
+def split_with_sizes_copy(
+    self: Tensor,
+    split_sizes: List[int],
+    dim: int = 0,
+    out: Optional[List[Tensor]] = None,
+) -> Optional[List[Tensor]]:
+    splits = split_with_sizes(self, split_sizes, dim=dim)
+    if out is None:
+        return [s.clone(memory_format=torch.contiguous_format) for s in splits]
+    else:
+        for output, split in zip(out, splits):
+            _maybe_resize_out(output, split.shape)
+            _safe_copy_out(copy_from=split, copy_to=output, exact_dtype=True)
+        return None
 
 
 @register_decomposition(aten.unsafe_split.Tensor)
@@ -1289,7 +1302,7 @@ def tensor_split_tensor_indices_or_sections_py_impl(
     self: Tensor,
     tensor_indices_or_sections: Tensor,
     dim: int = 0,
-) -> List[Tensor]:
+) -> Tuple[Tensor, ...]:
     assert tensor_indices_or_sections.device.type == "cpu"
     assert tensor_indices_or_sections.dtype == torch.int64
     split_dim = tensor_indices_or_sections.dim()
@@ -2832,7 +2845,7 @@ def _rnn_helper(
             final_hiddens.append(bwd_hidden)
 
         if bidirectional:
-            input = torch.cat([fwd_inp, bwd_inp], fwd_inp.dim() - 1)
+            input = torch.cat([fwd_inp, bwd_inp], fwd_inp.dim() - 1)  # type: ignore[possibly-undefined]
         else:
             input = fwd_inp
 
@@ -3354,14 +3367,8 @@ def upsample_bilinear2d(
     x = x_f32.to(torch.int64)
     y = y_f32.to(torch.int64)
 
-    # We are using torch.where instead of torch.clamp below due to an expected failure
-    # in test_aot_autograd_symbolic_exhaustive_nn_functional_interpolate_bilinear_cpu_float32 test
-    # torch.ops.aten.clamp.default(add, None, sub) on int64 input tensor is returning float32 and
-    # fails with torch.ops.aten._unsafe_index.Tensor(primals_1, [None, None, _to_copy_1, clamp_2])
-    # RuntimeError: _unsafe_index found unexpected index type Float
-    # xp1 = (x + 1).clamp(max=in_w - 1); yp1 = (y + 1).clamp(max=in_h - 1)
-    xp1 = torch.where(x < in_w - 1, x + 1, x)
-    yp1 = torch.where(y < in_h - 1, y + 1, y)
+    xp1 = (x + 1).clamp(max=in_w - 1)
+    yp1 = (y + 1).clamp(max=in_h - 1)
 
     v1 = aten._unsafe_index(input, [None, None, y, x])
     v2 = aten._unsafe_index(input, [None, None, y, xp1])
@@ -3821,18 +3828,11 @@ def mv(self, vec):
 def binary_cross_entropy_with_logits(
     self, target, weight=None, pos_weight=None, reduction=Reduction.MEAN.value
 ):
-    max_val = (-self).clamp_min(0)
     if pos_weight is not None:
         log_weight = (pos_weight - 1) * target + 1
-        loss = (1 - target) * self + log_weight * (
-            ((-max_val).exp() + (-self - max_val).exp()).log() + max_val
-        )
+        loss = (1 - target) * self - (log_weight * F.logsigmoid(self))
     else:
-        loss = (
-            (1 - target) * self
-            + max_val
-            + ((-max_val).exp() + (-self - max_val).exp()).log()
-        )
+        loss = (1 - target) * self - F.logsigmoid(self)
 
     if weight is not None:
         loss = loss * weight
@@ -3840,18 +3840,20 @@ def binary_cross_entropy_with_logits(
     return apply_loss_reduction(loss, reduction)
 
 
-def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor) -> bool:
+def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> bool:
     # For comments of the logic of this function see eager in /native/LinearAlgebra.cpp
 
     t1, t2 = (tensor1, tensor2) if tensor1.ndim >= tensor2.ndim else (tensor2, tensor1)
 
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     if not (t1.ndim >= 3 and t2.ndim <= 2):
         return False
-    if t2.requires_grad:
+    if t2.requires_grad and not is_out:
         return True
     if tensor1.ndim == 2:
         return False
-    if t1.numel() == 0:
+    if guard_size_oblivious(t1.numel() == 0):
         return True
 
     t1_shape = t1.shape
@@ -3863,8 +3865,8 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor) -> bool:
 
 
 @aten.matmul.default.py_impl(DispatchKey.CompositeImplicitAutograd)
-@out_wrapper()
-def matmul(tensor1, tensor2):
+@out_wrapper(pass_is_out=True)
+def matmul(tensor1, tensor2, *, is_out=False):
     dim_tensor1 = tensor1.dim()
     dim_tensor2 = tensor2.dim()
     assert dim_tensor1 != 0 and dim_tensor2 != 0
@@ -3876,7 +3878,7 @@ def matmul(tensor1, tensor2):
         return torch.squeeze(torch.mm(torch.unsqueeze(tensor1, 0), tensor2), 0)
     elif dim_tensor1 == 2 and dim_tensor2 == 2:
         return torch.mm(tensor1, tensor2)
-    elif should_fold(tensor1, tensor2):
+    elif should_fold(tensor1, tensor2, is_out):
         # dim_tensor1 >=3 && (dim_tensor2 == 1 || dim_tensor2 == 2) ||
         # dim_tensor2 >=3 && (dim_tensor1 == 1 || dim_tensor1 == 2)
         # and some condition on the strides is fulfilled
@@ -4309,16 +4311,9 @@ def scaled_dot_product_flash_attention_for_cpu(
     scale: Optional[float] = None,
 ) -> Tuple[Tensor, Tensor]:
     dtype = query.dtype
-    batchSize, num_head, qSize, headSize = (
-        query.shape[0],
-        query.shape[1],
-        query.shape[2],
-        query.shape[3],
-    )
-
     torch._check(
-        torch.is_floating_point(query) and dtype is not torch.half,
-        lambda: f"query must be FP32, FP64, BF16 but got {query.dtype}",
+        torch.is_floating_point(query),
+        lambda: f"query must be FP32, FP64, BF16, FP16 but got {query.dtype}",
     )
     torch._check(
         query.dim() == 4 and key.dim() == 4 and value.dim() == 4,
@@ -4438,11 +4433,61 @@ def squeeze_default(self: Tensor, dim: Optional[int] = None):
 
 
 @register_decomposition(torch.ops.aten._weight_norm_interface)
-def _weight_norm_interface(x, y, dim):
+def _weight_norm_interface(x, y, dim=0):
     # https://github.com/pytorch/pytorch/blob/852f8526c52190125446adc9a6ecbcc28fb66182/aten/src/ATen/native/WeightNorm.cpp#L58
     keep_dim = tuple(i for i in range(len(x.shape)) if i != dim)
     norm = x.norm(2, keep_dim, keepdim=True)
     return x * (y / norm), norm
+
+
+@register_decomposition(aten.isin)
+@out_wrapper()
+def isin(elements, test_elements, *, assume_unique=False, invert=False):
+    if test_elements.numel() < 10.0 * pow(elements.numel(), 0.145):
+        return isin_default(elements, test_elements, invert=invert)
+    else:
+        return isin_sorting(
+            elements, test_elements, assume_unique=assume_unique, invert=invert
+        )
+
+
+def isin_default(elements, test_elements, *, invert=False):
+    x = elements.view(*elements.shape, *((1,) * test_elements.ndim))
+    if not invert:
+        cmp = x == test_elements
+    else:
+        cmp = x != test_elements
+    dim = tuple(range(-1, -test_elements.ndim - 1, -1))
+    return cmp.any(dim=dim)
+
+
+def isin_sorting(elements, test_elements, *, assume_unique=False, invert=False):
+    elements_flat = elements.flatten()
+    test_elements_flat = test_elements.flatten()
+    if assume_unique:
+        # This is the same as the aten implementation. For
+        # assume_unique=False, we cannot use unique() here, so we use a
+        # version with searchsorted instead.
+        all_elements = torch.cat([elements_flat, test_elements_flat])
+        sorted_elements, sorted_order = torch.sort(all_elements, stable=True)
+
+        duplicate_mask = sorted_elements[1:] == sorted_elements[:-1]
+        duplicate_mask = torch.constant_pad_nd(duplicate_mask, [0, 1], False)
+
+        if invert:
+            duplicate_mask = duplicate_mask.logical_not()
+
+        mask = torch.empty_like(duplicate_mask)
+        mask = mask.index_copy(0, sorted_order, duplicate_mask)
+
+        return mask[0 : elements.numel()]
+    else:
+        sorted_test_elements, _ = torch.sort(test_elements_flat)
+        idx = torch.searchsorted(sorted_test_elements, elements_flat)
+        test_idx = torch.where(idx < sorted_test_elements.numel(), idx, 0)
+        cmp = sorted_test_elements[test_idx] == elements_flat
+        cmp = cmp.logical_not() if invert else cmp
+        return cmp.reshape(elements.shape)
 
 
 @register_decomposition(aten.take)

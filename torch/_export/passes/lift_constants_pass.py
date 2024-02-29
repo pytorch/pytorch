@@ -3,8 +3,8 @@ from typing import Dict, Union
 import torch
 from torch._export.verifier import SpecViolationError
 from torch._guards import detect_fake_mode
-from torch.export.custom_obj import ScriptObjectMeta
 from torch.export.exported_program import (
+    ArgumentSpec,
     CustomObjArgument,
     ExportGraphSignature,
     InputKind,
@@ -38,7 +38,6 @@ def lift_constants_pass(
     fake_mode = detect_fake_mode(
         tuple(node.meta["val"] for node in gm.graph.nodes if node.op == "placeholder")
     )
-    assert fake_mode is not None
 
     first_user_input_loc, first_user_input = 0, None
     for node in gm.graph.nodes:
@@ -47,19 +46,35 @@ def lift_constants_pass(
             break
         first_user_input_loc += 1
 
+    # For de-duplicating lifted tensor/objs, we need to keep a table of
+    # already-lifted objects to their corresponding placeholder node so we can
+    # re-use that node.
+    #
+    # Unfortunately, we *must* store the `hash()` of the value, becuase
+    # different torch.ScriptObjects can point to the same underlying value (but
+    # we guarantee that they will `hash()` to the same value if that's the
+    # case).
+    lifted_objs: Dict[int, torch.fx.Node] = {}
+
     for node in gm.graph.nodes:
         if node.op == "get_attr":
             constant_val = getattr(gm, node.target)
+            if hash(constant_val) in lifted_objs:
+                # We already lifted this constant elsewhere. Just rewrite uses
+                # of this get_attr to point to the already-existing placeholder
+                # node.
+                const_placeholder_node = lifted_objs[hash(constant_val)]
+                node.replace_all_uses_with(const_placeholder_node)
+                gm.graph.erase_node(node)
+                continue
 
             if isinstance(constant_val, torch.ScriptObject):
                 constant_name = f"_lifted_custom_obj{num_custom_obj}"
                 constant_kind = InputKind.CUSTOM_OBJ
-                constant_arg_cls = CustomObjArgument  # type: ignore[assignment]
                 num_custom_obj += 1
             elif isinstance(constant_val, torch.Tensor):
                 constant_name = f"_lifted_tensor_constant{num_tensor_constants}"
                 constant_kind = InputKind.CONSTANT_TENSOR
-                constant_arg_cls = TensorArgument  # type: ignore[assignment]
                 num_tensor_constants += 1
             elif isinstance(constant_val, torch.fx.GraphModule):
                 continue
@@ -88,16 +103,30 @@ def lift_constants_pass(
                 else:
                     constant_fqn = constant_name
 
+                input_spec_arg: ArgumentSpec
                 if isinstance(constant_val, torch.Tensor):
-                    const_placeholder_node.meta["val"] = fake_mode.from_tensor(
-                        constant_val, static_shapes=True
-                    )
-                    const_placeholder_node.meta["val"].constant = constant_val
+                    if fake_mode is not None:
+                        const_placeholder_node.meta["val"] = fake_mode.from_tensor(
+                            constant_val, static_shapes=True
+                        )
+                        const_placeholder_node.meta["val"].constant = constant_val
+                    else:
+                        const_placeholder_node.meta["val"] = constant_val
+                    input_spec_arg = TensorArgument(name=const_placeholder_node.name)
                 elif isinstance(constant_val, torch._C.ScriptObject):
-                    const_placeholder_node.meta["val"] = ScriptObjectMeta(constant_fqn)
+                    class_fqn = constant_val._type().qualified_name()  # type: ignore[attr-defined]
+                    const_placeholder_node.meta["val"] = CustomObjArgument(
+                        constant_fqn, class_fqn
+                    )
+                    input_spec_arg = CustomObjArgument(
+                        name=const_placeholder_node.name, class_fqn=class_fqn
+                    )
                 else:
-                    const_placeholder_node.meta["val"] = constant_val
+                    raise SpecViolationError(
+                        f"tried to lift unsupported type {type(constant_val)} from node {node.format_node()}"
+                    )
 
+                lifted_objs[hash(constant_val)] = const_placeholder_node
                 node.replace_all_uses_with(const_placeholder_node)
                 gm.graph.erase_node(node)
 
@@ -106,7 +135,7 @@ def lift_constants_pass(
                     first_user_input_loc,
                     InputSpec(
                         kind=constant_kind,
-                        arg=constant_arg_cls(name=const_placeholder_node.name),
+                        arg=input_spec_arg,
                         target=constant_fqn,
                     ),
                 )
@@ -123,7 +152,7 @@ def rewrite_script_object_meta(
     meta["val"]. Eventually we want to change this behavior, when FakeMode infra
     for ScriptObjects lands.
 
-    For now, we rewrie meta["val"] to be a placeholder ScriptObjectMeta.
+    For now, we rewrie meta["val"] to be a placeholder CustomObjArgument
     """
     constants: Dict[str, Union[torch.Tensor, torch._C.ScriptObject]] = {}
     for node in gm.graph.nodes:
@@ -133,7 +162,8 @@ def rewrite_script_object_meta(
             continue
 
         old_meta = node.meta["val"]
-        new_meta = ScriptObjectMeta(node.name)
+        class_fqn = old_meta._type().qualified_name()  # type: ignore[attr-defined]
+        new_meta = CustomObjArgument(node.name, class_fqn)
         constants[node.name] = old_meta
         node.meta["val"] = new_meta
 

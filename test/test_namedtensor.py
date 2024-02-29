@@ -2,6 +2,7 @@
 
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_NUMPY
+from torch.testing._internal.common_utils import skipIfTorchDynamo
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import get_all_device_types
 from collections import namedtuple, OrderedDict
@@ -148,6 +149,7 @@ class TestNamedTensor(TestCase):
             names65 = ['A' * i for i in range(1, 66)]
             x = factory([1] * 65, names=names64, device=device)
 
+    @skipIfTorchDynamo("not a bug: Dynamo causes the refcounts to be different")
     def test_none_names_refcount(self, N=10):
         def scope():
             unnamed = torch.empty(2, 3)
@@ -1388,6 +1390,8 @@ class TestNamedTensor(TestCase):
         new_refcnt = sys.getrefcount(seen_name)
         self.assertEqual(new_refcnt, old_refcnt)
 
+    # This test is failing on Python 3.12: https://github.com/pytorch/pytorch/issues/119464
+    @unittest.skipIf(sys.version_info >= (3, 12), "Failing on python 3.12+")
     def test_using_unseen_interned_string_bumps_refcount_permanently(self):
         # Please don't use this as a name in a different test.
         unseen_name = 'abcdefghi'
@@ -1398,6 +1402,8 @@ class TestNamedTensor(TestCase):
         new_refcnt = sys.getrefcount(unseen_name)
         self.assertEqual(new_refcnt, old_refcnt + 1)
 
+    # This test is failing on Python 3.12: https://github.com/pytorch/pytorch/issues/119464
+    @unittest.skipIf(sys.version_info >= (3, 12), "Failing on python 3.12+")
     def test_using_unseen_uninterned_string_refcounts(self):
         # Please don't use this as a name in a different test.
         # non-compile-time constants are not interned
