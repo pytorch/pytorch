@@ -13,8 +13,8 @@ jobs:
   upload-step:
     name: upload-step
     runs-on:
-#      group: arc-lf-linux.2xlarge.arc-rootless.canary
-      group: arc-lf-linux.2xlarge.arc.canary
+      group: arc-lf-linux.2xlarge.arc-rootless.canary
+#      group: arc-lf-linux.2xlarge.arc.canary
     permissions:
       id-token: write
       contents: read
@@ -43,13 +43,6 @@ jobs:
     needs: upload-step
     runs-on: linux.2xlarge
     steps:
-#    - name: Install AWS CLI v2
-#      shell: bash
-#      run: |
-#        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-#        unzip awscliv2.zip
-#        sudo ./aws/install
-#        aws --version
     - name: Download artifacts
       run: |
         OWNER="${{ github.repository_owner }}"
@@ -65,16 +58,16 @@ jobs:
 
     - name: Test
       run: |
-        ls -la
-
-    - name: Download artifact
-      uses: seemethere/download-artifact-s3@v4
-      env:
-        AWS_ACCESS_KEY_ID: 1
-        AWS_SECRET_ACCESS_KEY: 1
-      with:
-        name: test-run
-        s3-bucket: pytorch-ci-artifacts
+        less test.txt
+#
+#    - name: Download artifact
+#      uses: seemethere/download-artifact-s3@v4
+#      env:
+#        AWS_ACCESS_KEY_ID: 1
+#        AWS_SECRET_ACCESS_KEY: 1
+#      with:
+#        name: test-run
+#        s3-bucket: pytorch-ci-artifacts
 
 
 
