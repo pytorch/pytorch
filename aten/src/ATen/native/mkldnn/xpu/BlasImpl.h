@@ -16,7 +16,7 @@ static inline bool check_broadcast(
     const Tensor& src,
     const IntArrayRef& shape) {
   auto src_dim = src.dim();
-  auto tgt_dim = shape.size();
+  int64_t tgt_dim = shape.size();
   if (src_dim == 0 && src_dim < tgt_dim)
     return true;
   if (src_dim > tgt_dim)
@@ -46,7 +46,7 @@ static bool get_onednn_matmul_binary_attr(
     bool should_fold_tensor1 = false,
     bool should_fold_tensor2 = false) {
   xpu::onednn::Attr attr_update;
-  for (int i = 0; i < attr.ops_params_.size(); ++i) {
+  for (size_t i = 0; i < attr.ops_params_.size(); ++i) {
     xpu::onednn::kind_t kind = attr.ops_params_[i].kind_;
     if (kind != xpu::onednn::kind_t::binary || !attr.ops_params_[i].binary_.defined()) {
       attr_update.ops_params_.push_back(attr.ops_params_[i]);
@@ -75,7 +75,7 @@ static bool get_onednn_matmul_binary_attr(
       // case 4
       const auto binary =
           MaybeOwned<Tensor>::borrowed(attr.ops_params_[i].binary_);
-      if (binary->dim() < output_shape.size())
+      if (binary->dim() < (int64_t)output_shape.size())
         binary_final = binary->unsqueeze(0);
       else
         binary_final = *binary;
@@ -85,10 +85,10 @@ static bool get_onednn_matmul_binary_attr(
           ? MaybeOwned<Tensor>::borrowed(attr.ops_params_[i].binary_)
           : MaybeOwned<Tensor>::owned(
                 attr.ops_params_[i].binary_.unsqueeze(-1));
-      while (binary->dim() < output_shape.size())
+      while (binary->dim() < (int64_t)output_shape.size())
         binary = MaybeOwned<Tensor>::owned(binary->unsqueeze(0));
 
-      if (binary->dim() >= compute_shape.size()) {
+      if (binary->dim() >= (int64_t)compute_shape.size()) {
         std::vector<int64_t> shape = binary->sizes().vec();
         auto shape_fold = DimVector(shape.begin(), shape.end() - 1);
         const auto first_dim = c10::multiply_integers(shape_fold);
@@ -114,10 +114,10 @@ static bool get_onednn_matmul_binary_attr(
           : MaybeOwned<Tensor>::owned(
                 attr.ops_params_[i].binary_.unsqueeze(-1));
 
-      while (binary->dim() < output_shape.size())
+      while (binary->dim() < (int64_t)output_shape.size())
         binary = MaybeOwned<Tensor>::owned(binary->unsqueeze(0));
 
-      if (binary->dim() >= compute_shape.size()) {
+      if (binary->dim() >= (int64_t)compute_shape.size()) {
         if (t2_is_matrix)
           binary = MaybeOwned<Tensor>::owned(binary->mT());
 
@@ -141,7 +141,7 @@ static bool get_onednn_matmul_binary_attr(
     } else {
       // case 7
       auto binary = MaybeOwned<Tensor>::borrowed(attr.ops_params_[i].binary_);
-      while (binary->dim() < output_shape.size())
+      while (binary->dim() < (int64_t)output_shape.size())
         binary = MaybeOwned<Tensor>::owned(binary->unsqueeze(0));
 
       if (binary->dim() > 3) {
