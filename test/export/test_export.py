@@ -1969,7 +1969,6 @@ def forward(self, arg_0):
         ):
             _ = exported.module()(torch.ones(7, 5), 6.0)
 
-    @testing.expectedFailureNonStrict
     def test_runtime_assert_for_prm_str(self):
         class Foo(torch.nn.Module):
             def forward(self, a, b, mode):
@@ -2066,7 +2065,7 @@ def forward(self, arg_0):
         self.assertTrue(torch.allclose(Foo()(inp), reexported.module()(inp)))
 
         dim0_x = torch.export.Dim("dim0_x")
-        exported = torch.export.export(Foo(), (inp,), dynamic_shapes={"x": {0: dim0_x}})
+        exported = torch.export.export(Foo(), (inp,), dynamic_shapes=({0: dim0_x},))
         reexported = torch.export.export(exported.module(), (inp,))
         with self.assertRaisesRegex(
             RuntimeError, "shape\[0\] to be equal to 5, but got 7"
@@ -2202,7 +2201,7 @@ def forward(self, arg_0):
         self.assertTrue(len(stateful_module.meta["input_shape_constraints"]), 1)
 
         re_exported = export(
-            stateful_module, (inp,), constraints=[dynamic_dim(inp, 0) > 5]
+            stateful_module, (inp,), dynamic_shapes=({0: dim0_x},)
         )
         self.assertTrue(
             len(re_exported.graph_module.meta["input_shape_constraints"]) == 1
@@ -2608,7 +2607,10 @@ def forward(self, arg_0):
 
         inp = torch.randn(4, 4)
         gm = _export(
-            Foo(), (inp,), constraints=[dynamic_dim(inp, 0) >= 3], pre_dispatch=True
+            Foo(),
+            (inp,),
+            dynamic_shapes=({0: torch.export.Dim("dim", min=3)},),
+            pre_dispatch=True
         ).module()
 
         with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[0]")):
@@ -3404,6 +3406,37 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             # Can't use unqualified export() as it will attempt to deserialize
             # under a new FakeTensorMode.
             ep = torch.export.export(m, (inp,))
+
+    def test_compiling_state(self):
+        class TestModule1(torch.nn.Module):
+            def forward(self, x):
+                if torch._dynamo.is_compiling():
+                    return x * 2
+                else:
+                    return x * 3
+
+        class TestModule2(torch.nn.Module):
+            def forward(self, x):
+                if torch._utils.is_compiling():
+                    return x * 2
+                else:
+                    return x * 3
+
+        class TestModule3(torch.nn.Module):
+            def forward(self, x):
+                if torch.compiler.is_compiling():
+                    return x * 2
+                else:
+                    return x * 3
+
+        for m in [TestModule1(), TestModule2(), TestModule3()]:
+            input = torch.randn(5)
+            ep_strict = export(m, (input,), strict=True)
+            ep_non_strict = export(m, (input,), strict=False)
+
+            self.assertTrue(torch.allclose(input * 3, m(input)))
+            self.assertTrue(torch.allclose(input * 2, ep_strict(input)))
+            self.assertTrue(torch.allclose(input * 2, ep_non_strict(input)))
 
     def test_user_input_and_buffer_mutation(self):
         class MyModule(torch.nn.Module):

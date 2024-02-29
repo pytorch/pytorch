@@ -421,9 +421,11 @@ class VariableBuilder:
             result = {
                 ConstantVariable.create(k): UserDefinedObjectVariable(
                     v,
-                    source=GetItemSource(self.get_source(), k),
+                    source=GetItemSource(
+                        self.get_source(), ConstDictKeySource(self.get_source(), i)
+                    ),
                 )
-                for k, v in value.items()
+                for i, (k, v) in enumerate(value.items())
             }
             return ConstDictVariable(result, type(value))
         elif value is sys.modules:
@@ -466,10 +468,13 @@ class VariableBuilder:
             )
 
             if istype(value, collections.defaultdict):
+                factory_source = AttrSource(self.source, "default_factory")
                 result = DefaultDictVariable(
                     result,
                     type(value),
-                    default_factory=self._wrap(value.default_factory),
+                    default_factory=VariableBuilder(self.tx, factory_source)(
+                        value.default_factory
+                    ),
                     source=self.source,
                 )
             else:
@@ -1094,7 +1099,13 @@ class VariableBuilder:
 
         readonly = not value.flags.writeable
         if readonly:
-            value.flags.writeable = True
+            try:
+                value.flags.writeable = True
+            except ValueError:
+                # One can not easily make nditer elements writable,
+                # but warning is not the end of the world
+                assert isinstance(value.base, np.nditer)
+                pass
 
         try:
             tensor_value = _util._try_convert_to_tensor(value)
