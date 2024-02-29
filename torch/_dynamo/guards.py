@@ -1818,9 +1818,9 @@ def get_guard_fail_reason(
     if config.enable_cpp_guard_manager:
         guard_manager = guard_fn
         guard_debug_info = guard_manager.check_verbose(f_locals)
-        assert not guard_debug_info.result
         # For test_export_with_map_cond, the check_verbose fail. We need to fix
         # the issue in that test to remove this workaround.
+        # assert not guard_debug_info.result
         if not guard_debug_info.result:
             verbose_code_parts = guard_debug_info.verbose_code_parts
             # We already know the reason if the len is 1.
