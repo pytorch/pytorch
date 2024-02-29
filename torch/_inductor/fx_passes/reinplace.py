@@ -422,8 +422,6 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         if isinstance(mutated_arg, (list, tuple)):
             return all(can_inplace(node, arg) for arg in mutated_arg)
 
-        if mutated_arg is None:
-            return False
         if get_node_storage(mutated_arg) is None:
             return False
         shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
@@ -483,6 +481,10 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             from torch._higher_order_ops.auto_functionalize import get_mutable_arg_names
 
             tensors_to_clone = get_mutable_arg_names(_mutable_op)
+            # Don't try to reinplace Optional[Tensor] args that are None.
+            tensors_to_clone = [
+                t for t in tensors_to_clone if node.kwargs[t] is not None
+            ]
             tensors_to_clone = reinplace_and_refine_tensors_to_clone(
                 tensors_to_clone, node.kwargs
             )

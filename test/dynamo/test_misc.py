@@ -135,6 +135,13 @@ uniform_qconfig_8bit = QConfig(
 qconfig_dict = {"object_type": [(torch.nn.Linear, uniform_qconfig_8bit)]}
 
 
+def closure_adder(val):
+    def inner(x):
+        return torch.sin(x + val)
+
+    return inner
+
+
 class MiscTests(torch._dynamo.test_case.TestCase):
     def test_get_cache_entry(self):
         def f(x):
@@ -469,6 +476,25 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         cleanup_op("mylib::foo")
         del lib
 
+    def test_closure_recompiles(self):
+        cnt = CompileCounter()
+
+        def fn(x, other_fn):
+            return other_fn(x + 1) - 1
+
+        opt = torch.compile(fn, backend=cnt, fullgraph=True)
+
+        x = torch.randn(8)
+        for f in (
+            closure_adder(5),
+            closure_adder(5),
+            closure_adder(torch.randn(8)),
+            closure_adder(torch.randn(8)),
+        ):
+            self.assertEqual(opt(x, f), fn(x, f))
+
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_generate_trivial_abstract_impl(self):
         try:
             lib = torch.library.Library("mylib", "FRAGMENT")
@@ -579,14 +605,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             post_grad_graphs = "\n".join(
                 log_stream.getvalue().strip().split("\n")[3:]
             ).strip()
-            self.assertExpectedInline(
-                post_grad_graphs,
-                """\
+
+            # Check the graph under static shapes
+            if torch._dynamo.config.assume_static_by_default:
+                self.assertExpectedInline(
+                    post_grad_graphs,
+                    """\
 def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]"):
         # No stacktrace found for following nodes
         foo_default = torch.ops.mylib.foo.default(arg0_1, [arg3_1, arg4_1], arg1_1, 2, arg2_1);  arg0_1 = arg3_1 = arg4_1 = arg1_1 = arg2_1 = None
         return ()""",
-            )
+                )
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
             f(*eager_args)
@@ -634,19 +663,20 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
                     *compiled_args
                 )
 
-            post_grad_graphs = "\n".join(
-                log_stream.getvalue().strip().split("\n")[3:]
-            ).strip()
-            self.assertExpectedInline(
-                post_grad_graphs,
-                """\
+            if torch._dynamo.config.assume_static_by_default:
+                post_grad_graphs = "\n".join(
+                    log_stream.getvalue().strip().split("\n")[3:]
+                ).strip()
+                self.assertExpectedInline(
+                    post_grad_graphs,
+                    """\
 def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]"):
         # No stacktrace found for following nodes
         foo_default = torch.ops.mylib.foo.default(arg0_1, [arg3_1, arg4_1], arg1_1, 2, arg2_1);  arg0_1 = arg3_1 = arg4_1 = arg1_1 = arg2_1 = None
         getitem_4: "f32[3]" = foo_default[0]
         getitem_5: "f32[3]" = foo_default[1];  foo_default = None
         return (getitem_4, getitem_5)""",
-            )
+                )
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
             eager_out = f(*eager_args)
@@ -725,17 +755,18 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
             with ctx():
                 torch.compile(f, backend="inductor", fullgraph=True)(*compiled_args)
 
-            post_grad_graphs = "\n".join(
-                log_stream.getvalue().strip().split("\n")[3:]
-            ).strip()
-            self.assertExpectedInline(
-                post_grad_graphs,
-                """\
+            if torch._dynamo.config.assume_static_by_default:
+                post_grad_graphs = "\n".join(
+                    log_stream.getvalue().strip().split("\n")[3:]
+                ).strip()
+                self.assertExpectedInline(
+                    post_grad_graphs,
+                    """\
 def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]"):
         # No stacktrace found for following nodes
         foo_default = torch.ops.mylib.foo.default(None, [arg0_1, arg3_1], arg1_1, 2, arg2_1);  arg0_1 = arg3_1 = arg1_1 = arg2_1 = None
         return ()""",
-            )
+                )
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
             f(*eager_args)
@@ -5933,16 +5964,35 @@ def fn():
         self.assertEqual(cnt.frame_count, 0)
 
     def test_is_compiling(self):
-        def f():
+        def f1():
             if torch._dynamo.is_compiling():
                 return torch.ones(2, 2)
             else:
                 return torch.zeros(2, 2)
 
-        opt_f = torch._dynamo.optimize("eager")(f)
+        def f2():
+            if torch._utils.is_compiling():
+                return torch.ones(2, 2)
+            else:
+                return torch.zeros(2, 2)
 
-        self.assertEqual(f(), torch.zeros(2, 2))
-        self.assertEqual(opt_f(), torch.ones(2, 2))
+        def f3():
+            if torch.compiler.is_compiling():
+                return torch.ones(2, 2)
+            else:
+                return torch.zeros(2, 2)
+
+        def f4():
+            if torch.compiler.is_dynamo_compiling():
+                return torch.ones(2, 2)
+            else:
+                return torch.zeros(2, 2)
+
+        for f in [f1, f2, f3, f4]:
+            opt_f = torch._dynamo.optimize("eager")(f)
+
+            self.assertEqual(f(), torch.zeros(2, 2))
+            self.assertEqual(opt_f(), torch.ones(2, 2))
 
     def test_torch_generator_set_state(self):
         def fn():
