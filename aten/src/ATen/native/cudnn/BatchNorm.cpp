@@ -3,6 +3,15 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h>
 
+// TODO: delete this
+#if AT_ROCM_ENABLED()
+size_t _get_cudnn_batch_norm_reserve_space_size(
+    const Tensor& input_t,
+    bool training) {
+  AT_ERROR("Probably won't get here");
+}
+#endif
+
 #if !AT_CUDNN_ENABLED()
 
 namespace at {
