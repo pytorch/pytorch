@@ -186,8 +186,15 @@ static size_t _parseChosenWorkspaceSize() {
     // accept either env var
     val = getenv("HIPBLASLT_WORKSPACE_SIZE");
   }
+  size_t workspace_size = 1024;
+#else
+  size_t workspace_size = 4096;
+  cudaDeviceProp* p = at::cuda::getDeviceProperties(c10::cuda::current_device());
+  const int computeCapability = p->major * 10 + p->minor;
+  if (computeCapability >= 90) {
+    workspace_size = 32768;
+  }
 #endif
-  size_t workspace_size = 1024; /* default size in KiB according to #73328 */
   if (val) {
     try {
       workspace_size = std::stoi(val);
