@@ -383,9 +383,13 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, [code])
 
     def HASATTR(self, guard: Guard):
-        m = re.match(r"^(.*)[.]([a-zA-Z0-9_]+)$", guard.name)
-        assert m, f"invalid hasattr check {guard.name}"
-        base, attr = m.group(1, 2)
+        assert isinstance(
+            guard.originating_source, AttrSource
+        ), f"invalid source {guard.name}"
+        base_source = guard.originating_source.base
+        base = base_source.name()
+        attr = guard.originating_source.member
+
         ref = self.arg_ref(base)
         val = hasattr(self.get(base), attr)
         code = None
@@ -469,8 +473,8 @@ class GuardBuilder(GuardBuilderBase):
         # If matching equality against list/tuple, we must also check that
         # the internal types match.  (TODO: what about nested lists?)
         if istype(val, (list, tuple)):
-            # NB: LIST_LENGTH takes care of the outer __check_type_id test
-            self.LIST_LENGTH(guard)
+            # NB: SEQUENCE_LENGTH takes care of the outer __check_type_id test
+            self.SEQUENCE_LENGTH(guard)
 
             for idx, elem in enumerate(val):
                 code.append(
@@ -533,7 +537,9 @@ class GuardBuilder(GuardBuilderBase):
     def PYMODULE_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)
 
-    def LIST_LENGTH(self, guard):
+    def SEQUENCE_LENGTH(self, guard):
+        # This guard is used to check lenght of PySequence objects like list,
+        # tuple, collections.deque etc
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
@@ -546,6 +552,9 @@ class GuardBuilder(GuardBuilderBase):
             code.append(f"len({ref}) == {len(value)}")
 
         self._produce_guard_code(guard, code)
+
+    def DICT_LENGTH(self, guard):
+        self.SEQUENCE_LENGTH(guard)
 
     def TUPLE_ITERATOR_LEN(self, guard):
         ref = self.arg_ref(guard)
@@ -662,31 +671,29 @@ class GuardBuilder(GuardBuilderBase):
             ]
 
         if output_graph.export_constraints:
+            from sympy import Symbol
+
             source_pairs: List[Tuple[Source, Source]] = []
+            derived_equalities: List[  # type: ignore[type-arg]
+                Tuple[Source, Union[Source, Symbol], Callable]
+            ] = []
+            phantom_symbols: Dict[str, Symbol] = {}
             for constraint in output_graph.export_constraints:
                 if constraint.t_id in output_graph.tracked_fakes_id_to_source:
-                    source, *other_sources = get_sources(
-                        constraint.t_id, constraint.dim
+                    torch.export.dynamic_shapes._process_equalities(
+                        constraint,
+                        get_sources,
+                        output_graph.shape_env,
+                        source_pairs,
+                        derived_equalities,
+                        phantom_symbols,
                     )
-                    # When t.size()[dim] maps to src0, src1, ..., srcN, we add
-                    # constraints that make src0 "equal" to src1, ..., srcN.
-                    source_pairs.extend(
-                        (source, other_source) for other_source in other_sources
-                    )
-                    if constraint.shared is not None:
-                        # Moreover, when t.size()[dim] is specified equal to t'.size()[dim']
-                        # and t'.size()[dim'] maps to src1', ..., srcN', we add
-                        # constraints that also make src0 "equal" to src1', ..., srcN'.
-                        other_sources = get_sources(
-                            constraint.shared.t_id, constraint.shared.dim
-                        )
-                        source_pairs.extend(
-                            (source, other_source) for other_source in other_sources
-                        )
                 else:
                     log.warning("Untracked tensor used in export constraints")
             equalities_inputs = EqualityConstraint(
                 source_pairs=source_pairs,
+                derived_equalities=derived_equalities,
+                phantom_symbols=list(phantom_symbols.values()),
                 warn_only=False,
             )
         else:
@@ -1496,7 +1503,10 @@ def install_guard(*guards, skip=0):
     """
     from torch._guards import TracingContext
 
+    collect_debug_stack = guards_log.isEnabledFor(
+        logging.DEBUG
+    ) or verbose_guards_log.isEnabledFor(logging.DEBUG)
     add = TracingContext.get().guards_context.dynamo_guards.add
     for guard in guards:
         assert isinstance(guard, Guard)
-        add(guard, skip=skip + 1)
+        add(guard, collect_debug_stack=collect_debug_stack, skip=skip + 1)
