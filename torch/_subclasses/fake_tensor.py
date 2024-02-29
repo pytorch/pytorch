@@ -280,6 +280,9 @@ class FakeTensorConverter:
         if type(t) is torch.nn.Parameter:
             assert not make_constant
 
+        if not torch._C._has_storage(t):
+            raise UnsupportedFakeTensorException("Tensor must have storage to fakeify")
+
         def mk_fake_tensor(make_meta_t):
             # NB: don't use in_kernel_invocation_manager. to
             # ensure FakeTensor can internally do constant computation
