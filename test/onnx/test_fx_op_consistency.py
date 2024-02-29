@@ -894,16 +894,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("GroupNormalization", "float16"),
     ),
     xfail(
-        "nn.functional.instance_norm",
-        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
-        reason="fixme: Assertion error: result mismatch",
-    ),
-    xfail(
-        "nn.functional.instance_norm",
-        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
-        reason="Functionalize pass failed",
-    ),
-    xfail(
         "nn.functional.local_response_norm",
         dtypes=(torch.int64,),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("avgpool", "int64"),
@@ -1547,6 +1537,11 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_runtime_does_not_support(
             "Reshape", "empty tensor"
         ),
+    ),
+    xfail(
+        "nn.functional.instance_norm",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason="fixme: Assertion error: result mismatch",
     ),
     xfail(
         "nn.functional.max_pool3d",
