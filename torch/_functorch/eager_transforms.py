@@ -86,7 +86,7 @@ def _jvp_treespec_compare(primals, tangents):
             f'and tangents with structure {tangents_spec}')
 
 
-def _tensor_requires_grad(x):
+def _set_tensor_requires_grad(x):
     # avoid graph-break on x.requires_grad_()
     # https://github.com/pytorch/pytorch/pull/110053
     return x.requires_grad_()
@@ -95,7 +95,7 @@ def _create_differentiable(inps, level=None):
     def create_differentiable(x):
         if isinstance(x, torch.Tensor):
             with enable_inplace_requires_grad(True):
-                return _tensor_requires_grad(x)
+                return _set_tensor_requires_grad(x)
         raise ValueError(f'Thing passed to transform API must be Tensor, '
                          f'got {type(x)}')
     return tree_map(create_differentiable, inps)
