@@ -57,7 +57,7 @@ jobs:
         RUN_ID="${{ github.run_id }}"
         NAME="test-run"
 
-        curl -o artifacts.zip https://pytorch-ci-artifacts.s3.amazonaws.com/$OWNER/$REPO/$RUN_ID/$NAME/test.txt
+        curl -o test.txt https://pytorch-ci-artifacts.s3.amazonaws.com/$OWNER/$REPO/$RUN_ID/$NAME/test.txt
 
 #    - name: Download artifact
 #      run: |
@@ -65,7 +65,7 @@ jobs:
 
     - name: Test
       run: |
-        ls -la test.txt
+        ls -la
 
     - name: Download artifact
       uses: seemethere/download-artifact-s3@v4
