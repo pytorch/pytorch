@@ -1,20 +1,38 @@
 import copy
 import itertools
-import os
+import logging
 from typing import Any, Dict, List, Set
 
 import onnx
 
 
-def build_uses_and_sources(onnx_graph):
-    # Build a dictionary of uses and sources for each node in the model
-    # {"x": [node0, node1], "y": [node2], ...}
-    uses: Dict[str, List["onnx.NodeProto"]] = {}
-    # {"x": node0, "y": node1, ...}
+def build_uses_and_sources(onnx_graph: "onnx.GraphProto"):  # type: ignore[name-defined]
+    """Build a dictionary of uses and sources for each node in the model.
+
+    Consider a graph,
+      x -> node0 -> y -> node1 -> z
+    , where x, y, and z are tensor names, and node0 and node1 are node names.
+    Its uses dictionary and sources dictionary respectively are:
+      uses = {"x": [node0], "y": [node1]}
+      sources = {"y": node0, "z": node1}
+    Feeding a graph to this function returns the corresponding uses and
+    sources dictionaries.
+    """
+
+    # If uses = {"x": [node0, node1], "y": [node2], ...},
+    # "x" is used by "node0" and "node1", and "y" is used by "node2".
+    uses: Dict[str, List["onnx.NodeProto"]] = {}  # type: ignore[name-defined]
+    # If sources={"a": node0, "b": node1, ...},
+    # "a" is produced by "node0", and "b" is produced by "node1".
     # Model inputs and initializers do not have sources.
-    sources: Dict[str, "onnx.NodeProto"] = {}
+    sources: Dict[str, "onnx.NodeProto"] = {}  # type: ignore[name-defined]
     for node in onnx_graph.node:
-        assert node.op_type not in ("If", "Loop"), "If and Loop are not supported."
+        # FIXME: If and Loop are not supported.
+        if node.op_type in {"If", "Loop"}:
+            logger.warning(
+                f"Sub-graphs in node (name={node.name}, op_type={node.op_type}) is "
+                "ignored in uses and sources."
+            )
         for input_name in node.input:
             if input_name not in uses:
                 uses[input_name] = []
@@ -30,11 +48,28 @@ def build_uses_and_sources(onnx_graph):
     return uses, sources
 
 
-def build_upstream_nodes_and_downstream_nodes(onnx_graph):
+def build_upstream_nodes_and_downstream_nodes(onnx_graph: "onnx.GraphProto"):  # type: ignore[name-defined]
+    """Build upstream nodes and downstream nodes for each node in the model.
+
+    Consider a graph,
+      w (graph input) -> node0 -> x -> node1 -> y -> node2 -> z (graph output)
+    , where w, x, y, and z are tensor names, and node0, node1, and node 2
+    are node names. Its upstream nodes and downstream nodes respectively are:
+      upstream_nodes = {"node0": [], "node1": [node0], "node2": [node1]}
+      downstream_nodes = {"node0": [node1], "node1": [node2], "node2": []}
+    Feeding a graph to this function returns the corresponding upstream nodes and
+    downstream nodes dictionaries.
+    """
+
     uses, sources = build_uses_and_sources(onnx_graph)
-    # {node0: [node1, node2], node1: [node3, node4], ...}
-    upstream_nodes: Dict[str, List["onnx.NodeProto"]] = {}
-    downstream_nodes: Dict[str, List["onnx.NodeProto"]] = {}
+    # If upstream_nodes = {node2: [node0, node1], node3: [node0, node2], ...},
+    # node2 consumes some of node0's and node1's outputs, and
+    # node3 consumes some of node0's and node2's outputs.
+    upstream_nodes: Dict[str, List["onnx.NodeProto"]] = {}  # type: ignore[name-defined]
+    # If downstream_nodes = {node0: [node1, node2], node1: [node3, node4], ...},
+    # node0's output is consumed by node1 and node2, and
+    # node1's output is consumed by node3 and node4.
+    downstream_nodes: Dict[str, List["onnx.NodeProto"]] = {}  # type: ignore[name-defined]
 
     for node in onnx_graph.node:
         upstream_nodes_ = []
@@ -51,7 +86,15 @@ def build_upstream_nodes_and_downstream_nodes(onnx_graph):
     return upstream_nodes, downstream_nodes
 
 
-def search_for_root(onnx_graph):
+def search_for_root(onnx_graph: "onnx.GraphProto"):  # type: ignore[name-defined]
+    """Search for the root node of the graph.
+
+    For a graph like
+      w -> node0 -> x -> node1 -> y -> node2 -> z,
+    where w, x, y, and z are tensor names, and node0, node1, and node 2
+    are node names. The root node is node0. Generally speaking,
+    the root node is a node that consumes the graph's inputs or initializers.
+    """
     _, sources = build_uses_and_sources(onnx_graph)
     # Find the root node of the graph
     # A root node is a node consumes the graph's inputs or initializers;
@@ -60,27 +103,85 @@ def search_for_root(onnx_graph):
     root_nodes = []
     for node in onnx_graph.node:
         if all(input_name not in sources for input_name in node.input):
+            # If some node's input doesn't have source node, then
+            # that input must be a graph input or initializer. So, the node
+            # is a root node.
             root_nodes.append(node)
 
     return root_nodes
 
 
-def print_message(*messages):
-    if os.environ.get("DEBUG") == "1":
-        print(*messages)
+logger = logging.getLogger(__name__)
+# Uncomment the following lines to print out development info.
+# logging.basicConfig(level=logging.DEBUG)
+# logger.setLevel(logging.DEBUG)
 
 
 def search_for_pattern(
-    main_graph: "onnx.GraphProto",
-    pattern_graph: "onnx.GraphProto",
+    main_graph: "onnx.GraphProto",  # type: ignore[name-defined]
+    pattern_graph: "onnx.GraphProto",  # type: ignore[name-defined]
     skipped_main_node_names: Set[str],
-    pattern_upstreams_nodes: Dict[str, List["onnx.NodeProto"]],
-    pattern_downstream_nodes: Dict[str, List["onnx.NodeProto"]],
-    main_upstreams_nodes: Dict[str, List["onnx.NodeProto"]],
-    main_downstream_nodes: Dict[str, List["onnx.NodeProto"]],
+    pattern_upstreams_nodes: Dict[str, List["onnx.NodeProto"]],  # type: ignore[name-defined]
+    pattern_downstream_nodes: Dict[str, List["onnx.NodeProto"]],  # type: ignore[name-defined]
+    main_upstreams_nodes: Dict[str, List["onnx.NodeProto"]],  # type: ignore[name-defined]
+    main_downstream_nodes: Dict[str, List["onnx.NodeProto"]],  # type: ignore[name-defined]
 ):
+    """Search for a pattern in the main graph.
+
+    Arguments:
+    - main_graph: The main graph to search for the pattern.
+    - pattern_graph: The pattern graph to search for in the main graph.
+    - skipped_main_node_names: A set of node names in the main graph that
+      should not be used to match the pattern. This is used for avoiding
+      matching nodes that have been fused into another sub-graph.
+    - pattern_upstreams_nodes: Upstream nodes for each node in the pattern graph.
+      This is the 1st output of `build_upstream_nodes_and_downstream_nodes(pattern_graph)`.
+    - pattern_downstream_nodes: Downstream nodes for each node in the pattern graph.
+      This is the 2nd output of `build_upstream_nodes_and_downstream_nodes(pattern_graph)`.
+    - main_upstreams_nodes: Upstream nodes for each node in the main graph.
+      This is the 1st output of `build_upstream_nodes_and_downstream_nodes(main_graph)`.
+    - main_downstream_nodes: Downstream nodes for each node in the main graph.
+      This is the 2nd output of `build_upstream_nodes_and_downstream_nodes(main_graph)`.
+
+    Assume main graph is
+      w -> node0 (op_type: Relu) -> x -> node1 (op_type: Relu) -> y -> node2 (op_type: Neg) -> z
+      w1 -> node3 (op_type: Relu) -> x1 -> node4 (op_type: Relu) -> y1 -> node5 (op_type: Neg) -> z1
+    and pattern graph is
+      a -> nodea (op_type: Relu) -> b -> nodeb (op_type: Relu) -> c
+    To encode the matched sub-graphs, this function returns a pair of dictionaries
+      pattern_to_main_node_bindings = [
+        {
+          "nodea": "node0",
+          "nodeb": "node1",
+        },
+        {
+          "nodea": "node3",
+          "nodeb": "node4",
+        },
+      }
+    and
+      pattern_to_main_value_bindings = [
+        {
+          "a": "w",
+          "b": "x",
+          "c": "y",
+        },
+        {
+          "a": "w1",
+          "b": "x1",
+          "c": "y1",
+        },
+      }
+
+    """
     pattern_root_nodes = search_for_root(pattern_graph)
 
+    # This loop tries all possible combinations roots.
+    # 1. First, some nodes are selected from the main graph as root nodes.
+    # 2. Then, match them to the root nodes in the pattern graph.
+    # 3. If the root nodes are matched, then we try to match all downstream nodes.
+    # 4. If all downstream nodes are matched, then we have found a match.
+    # 5. Go back to step 1 and try another combination of root nodes.
     for selected_onnx_graph_indices in itertools.permutations(
         range(len(main_graph.node)), len(pattern_root_nodes)
     ):
@@ -98,11 +199,18 @@ def search_for_pattern(
         ):
             continue
 
-        queue = [
+        # Initialize the queue of traversed nodes
+        # with the root nodes.
+        # 1. Downstream nodes of the roots nodes will be
+        #    pushed into this queue for implementing BFS
+        #    (breadth first search).
+        # 2. nodes in queue should have been matched/bound.
+        queue = list(
             (node, pattern_node)
             for node, pattern_node in zip(main_root_nodes, pattern_root_nodes)
-        ]
+        )
 
+        # Record the bindings from pattern nodes to main nodes.
         pattern_to_main_node_bindings = {
             pattern_node.name: node.name
             for node, pattern_node in zip(main_root_nodes, pattern_root_nodes)
@@ -114,7 +222,7 @@ def search_for_pattern(
         pattern_to_main_value_bindings: Dict[str, str] = {}
 
         def try_bind_values(bindings, node, pattern_node):
-            # TODO: examine type and shape bindings for graph inputs and outputs
+            # FIXME: examine type and shape bindings for graph inputs and outputs
             # We need something like try_bind_values(
             #   bindings,
             #   type_bindings,
@@ -127,27 +235,42 @@ def search_for_pattern(
             # If a variable in main_graph "x_main" is bound to pattern_graph "x",
             # then we examin if they have the same type in the corresponding value_info's.
             # Similarly, shapes should checked too.
+            # FIXME: bind values in sub-graphs when node and pattern_node are If or Loop.
 
             for name, pattern_name in zip(node.input, pattern_node.input):
                 if pattern_name in bindings and bindings[pattern_name] != name:
-                    print_message(
-                        f"Binding fail because new pattern-to-main pair ({pattern_name}, {name}) conflicts with existing binding ({pattern_name}, {bindings[pattern_name]})"
+                    logger.debug(
+                        "Binding fail because new pattern-to-main pair "
+                        f"({pattern_name}, {name}) conflicts with existing binding "
+                        f"({pattern_name}, {bindings[pattern_name]})."
                     )
                     return False
                 elif pattern_name in bindings and bindings[pattern_name] == name:
                     pass
                 else:
+                    # Now, the value called `pattern_name` in `pattern_graph` is matched
+                    # to the value called `name` in `main_graph`.
+                    logger.debug(
+                        f"Binding succeeds for pattern-to-main pair ({pattern_name}, {name})."
+                    )
                     bindings[pattern_name] = name
 
             for name, pattern_name in zip(node.output, pattern_node.output):
                 if pattern_name in bindings and bindings[pattern_name] != name:
-                    print_message(
-                        f"Binding fail because new pattern-to-main pair ({pattern_name}, {name}) conflicts with existing binding ({pattern_name}, {bindings[pattern_name]})"
+                    logger.debug(
+                        "Binding fails because new pattern-to-main pair "
+                        f"({pattern_name}, {name}) conflicts with "
+                        f"existing binding ({pattern_name}, {bindings[pattern_name]})."
                     )
                     return False
                 elif pattern_name in bindings and bindings[pattern_name] == name:
                     pass
                 else:
+                    # Now, the value called `pattern_name` in `pattern_graph` is matched
+                    # to the value called `name` in `main_graph`.
+                    logger.debug(
+                        f"Binding succeeds for pattern-to-main pair ({pattern_name}, {name})."
+                    )
                     bindings[pattern_name] = name
 
             return True
@@ -157,13 +280,16 @@ def search_for_pattern(
                 fail = True
                 break
 
+        # binding node to pattern_node fails because it conflicts
+        # with existing value name bindings.
+        # Let's stop here and try another set of root nodes.
         if fail:
             continue
 
         while queue:
             main_node, pattern_nodes = queue.pop()
 
-            print_message(
+            logger.debug(
                 "Current pattern_to_main_node_bindings: ", pattern_to_main_node_bindings
             )
 
@@ -175,23 +301,30 @@ def search_for_pattern(
             ):
                 break
 
+            # flag to enable early stop if binding fails
+            # so that we can skip the rest of the nodes in the queue.
             fail = False
             for main_downstream_node, pattern_downstream_node in zip(
                 main_downstream_nodes[main_node.name],
                 pattern_downstream_nodes[pattern_nodes.name],
             ):
-                print_message(
-                    f"Try binding main graph node {main_downstream_node.name} to pattern node {pattern_downstream_node.name}"
+                logger.debug(
+                    f"Try binding main graph node {main_downstream_node.name} "
+                    f"to pattern node {pattern_downstream_node.name}"
                 )
                 if main_downstream_node.name in skipped_main_node_names:
-                    print_message(
-                        f"Binding fail because main graph node {main_downstream_node.name} should be skipped (e.g., when a node is already fused into another sub-graph)."
+                    logger.debug(
+                        f"Binding fail because main graph node "
+                        f"{main_downstream_node.name} should be skipped "
+                        "(e.g., when a node is already fused into another sub-graph)."
                     )
                     fail = True
                     break
                 if main_downstream_node.op_type != pattern_downstream_node.op_type:
-                    print_message(
-                        f"Binding fail because different op_types {main_downstream_node.op_type} and {pattern_downstream_node.op_type}"
+                    logger.debug(
+                        "Binding fail because different op_types "
+                        f"{main_downstream_node.op_type} and "
+                        f"{pattern_downstream_node.op_type}"
                     )
                     fail = True
                     break
@@ -201,8 +334,13 @@ def search_for_pattern(
                     and pattern_to_main_node_bindings[pattern_downstream_node.name]
                     != main_downstream_node.name
                 ):
-                    print_message(
-                        f"Binding fail because new pattern-to-main pair ({pattern_downstream_node.name}, {main_downstream_node.name}) conflicts with existing binding ({pattern_downstream_node.name}, {pattern_to_main_node_bindings[pattern_downstream_node.name]})"
+                    logger.debug(
+                        "Binding fail because new pattern-to-main pair "
+                        f"({pattern_downstream_node.name}, {main_downstream_node.name}) "
+                        "conflicts with existing binding ("
+                        f"{pattern_downstream_node.name}, "
+                        f"{pattern_to_main_node_bindings[pattern_downstream_node.name]}"
+                        ")"
                     )
                     fail = True
                     break
@@ -211,12 +349,13 @@ def search_for_pattern(
                     main_downstream_node,
                     pattern_downstream_node,
                 ):
-                    print_message(
-                        f"Binding fail because value bindings conflict for {main_downstream_node.name} and {pattern_downstream_node.name}"
+                    logger.debug(
+                        "Binding fail because value bindings conflict for "
+                        f"{main_downstream_node.name} and {pattern_downstream_node.name}"
                     )
                     fail = True
                     break
-                print_message("Binding success")
+                logger.debug("Binding success")
                 to_queue.append((main_downstream_node, pattern_downstream_node))
                 traversed_names.append(pattern_downstream_node.name)
 
@@ -229,13 +368,15 @@ def search_for_pattern(
             queue.extend(to_queue)
 
         if fail:
+            logger.debug("Binding fail when binding intermediate nodes.")
             continue
 
-        print_message("=======================")
-        print_message("One match found:")
-        print_message(pattern_to_main_node_bindings)
-        print_message(pattern_to_main_value_bindings)
-        print_message("=======================")
+        logger.debug(
+            "Node matches (pattern node name -> node name in model graph to fuse) to fuse: "
+        )
+        for pattern_node, main_node in pattern_to_main_node_bindings.items():
+            logger.debug(f"{pattern_node} -> {main_node}")
+
         return pattern_to_main_node_bindings, pattern_to_main_value_bindings
     return None, None
 
@@ -287,8 +428,8 @@ def fuse(
     pattern_to_main_node_bindings,
     pattern_to_main_value_bindings,
 ):
-    main_node_names = {value for value in pattern_to_main_node_bindings.values()}
-    main_value_names = {value for value in pattern_to_main_value_bindings.values()}
+    main_node_names = set(value for value in pattern_to_main_node_bindings.values())
+    main_value_names = set(value for value in pattern_to_main_value_bindings.values())
 
     main_node_indices = []
     for i, node in enumerate(graph.node):
@@ -313,19 +454,20 @@ def fuse(
 
 
 def apply_fusion(
-    model: "onnx.ModelProto",
-    pattern_graph: "onnx.GraphProto",
+    model: "onnx.ModelProto",  # type: ignore[name-defined]
+    pattern_graph: "onnx.GraphProto",  # type: ignore[name-defined]
     fusion_node_type: str,
     fusion_node_attributes: Dict[str, Any],
     fusion_node_domain: str,
     fusion_node_version: int,
 ):
+    logger.debug(f"Applying fusion for {fusion_node_type}")
     matches = search_for_patterns(model.graph, pattern_graph)
 
     if len(matches) > 0 and all(
         opset.domain != fusion_node_domain for opset in model.opset_import
     ):
-        print_message(
+        logger.debug(
             f"Add opset with domain={fusion_node_domain} and version={fusion_node_version} to model"
         )
         opset = model.opset_import.add()
@@ -333,12 +475,6 @@ def apply_fusion(
         opset.version = fusion_node_version
 
     for pattern_to_main_node_bindings, pattern_to_main_value_bindings in matches:
-        nodes_to_fuse = ", ".join(pattern_to_main_node_bindings.values())
-        print_message(
-            "Node matches (pattern node name -> node name in model graph to fuse) to fuse: "
-        )
-        for pattern_node, main_node in pattern_to_main_node_bindings.items():
-            print_message(f"{pattern_node} -> {main_node}")
         if (
             pattern_to_main_node_bindings is None
             or pattern_to_main_value_bindings is None
@@ -372,7 +508,7 @@ def apply_fusion(
 class FusionPattern:
     def __init__(
         self,
-        pattern: "onnx.GraphProto",
+        pattern: "onnx.GraphProto",  # type: ignore[name-defined]
         # Fused operator type. e.g., "SoftmaxGrad" or "Gemm".
         fused_op_type: str,
         # Fused operator attributes. e.g., {"transA": 0, "transB": 1}.
@@ -382,13 +518,14 @@ class FusionPattern:
         # Operator version. e.g., 1 or 12.
         fused_op_version: int,
     ):
-        self.pattern: "onnx.GraphProto" = pattern
+        self.pattern: "onnx.GraphProto" = pattern  # type: ignore[name-defined]
         self.fused_op_type: str = fused_op_type
         self.fused_op_kwargs: Dict[str, Any] = fused_op_kwargs
         self.fused_op_domain: str = fused_op_domain
         self.fused_op_version: int = fused_op_version
 
 
+# Patterns called by `apply_all_fusions` are stored in `_FUSION_PATTERNS`.
 _FUSION_PATTERNS: List[FusionPattern] = []
 
 
@@ -400,38 +537,13 @@ def pop_pattern():
     _FUSION_PATTERNS.pop()
 
 
-try:
-    import onnxscript
-    from onnxscript import FLOAT, opset18
+def apply_all_fusions(onnx_model: "onnx.ModelProto"):  # type: ignore[name-defined]
+    """Apply all fusions in _FUSION_PATTERNS to the given ONNX model.
 
-    aten_opset = onnxscript.values.Opset(domain="pkg.onnxscript.torch_lib", version=1)
-
-    @onnxscript.script(default_opset=opset18)
-    def softmax_backward(dY: FLOAT, Y: FLOAT) -> FLOAT:
-        dYY = aten_opset.aten_mul(dY, Y)
-        sum = aten_opset._aten_sum_dim_onnx(dYY, -1)
-        scaled = aten_opset.aten_mul(Y, sum)
-        dX = aten_opset.aten_sub(dYY, scaled)
-        return dX
-
-    softmax_backward_model = softmax_backward.to_model_proto(
-        input_types=[FLOAT["S", "H"], FLOAT["S", "H"]], output_types=[FLOAT["S", "H"]]
-    )
-
-    _FUSION_PATTERNS.append(
-        FusionPattern(
-            pattern=softmax_backward_model.graph,
-            fused_op_type="SoftmaxGrad",
-            fused_op_kwargs={"axis": -1},
-            fused_op_domain="com.microsoft",
-            fused_op_version=1,
-        )
-    )
-except ImportError:
-    pass
-
-
-def apply_all_fusions(onnx_model):
+    A new model is generated so the fusion is not in-place. Use
+    pattern_push and pattern_pop to adjust _FUSION_PATTERNS if needed.
+    """
+    logger.debug("Applying all fusions")
     # Make this function immutable for `onnx_model`.
 
     fused_onnx_model = copy.deepcopy(onnx_model)

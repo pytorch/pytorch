@@ -8,6 +8,8 @@ import os
 import sys
 from typing import Tuple
 
+import onnx
+import onnx.inliner
 import onnxruntime
 
 import torch
@@ -22,9 +24,9 @@ from torch.onnx import (
 from torch.onnx._internal.fusion import (
     apply_all_fusions,
     FusionPattern,
+    pop_pattern,
     push_pattern,
 )
-
 
 from torch.testing._internal import common_utils
 
@@ -662,25 +664,12 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             w1 = z1.sigmoid()
             return w1
 
-        def pattern_model(x: torch.Tensor):
+        def pattern(x: torch.Tensor):
             y = x.relu()
             z = y.relu()
             return z
 
-            torch.onnx.dynamo_export(func, x, y, z)
-
-        onnx_model = dynamo_export(
-            toy_model,
-            torch.randn(
-                (
-                    2,
-                    3,
-                ),
-                dtype=torch.float32,
-            ),
-        )
-
-        onnx_model = dynamo_export(
+        onnx_model = torch.onnx.dynamo_export(
             toy_model,
             torch.randn(
                 (
@@ -692,7 +681,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         ).model_proto
 
         pattern_model = torch.onnx.dynamo_export(
-            pattern_model,
+            pattern,
             torch.randn(
                 (
                     2,
@@ -713,20 +702,179 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
 
         # There should be no Relu before fusion.
-        self.assertTrue(
-            all(node.op_type != "Relu" for node in onnx_model.graph.node)
-        )
+        self.assertTrue(all(node.op_type != "Relu" for node in onnx_model.graph.node))
 
         # Every aten_relu -> aten_relu should be fused into one Relu.
         fused = apply_all_fusions(onnx_model)
 
-        expected_relu_count = 2
         actual_relu_count = sum(
             1 for node in fused.graph.node if node.op_type == "Relu"
         )
         # Two Relu because the every two consecutive Relu are fused into one.
         self.assertEqual(actual_relu_count, 2)
 
+        pop_pattern()
+
+    def test_fusion_interleaved_subgraphs(self):
+        # The model contains two independent paths.
+        #   relu_0 -> relu_1 -> sigmoid_2
+        #   relu_3 -> relu_4 -> sigmoid_5
+        # They are reordered to
+        #   relu_0, relu_3, relu_1, relu_4, sigmoid_2, sigmoid_5
+        # in the exported onnx.ModelProto.
+        #
+        # Below we test if this fusion tool can still
+        # fuse relu_0 -> relu_1 to Relu
+        # and relu_3 -> relu_4 to another Relu.
+        def toy_model(x: torch.Tensor, y: torch.Tensor):
+            x1 = x.relu()
+            y1 = y.relu()
+            x2 = x1.relu()
+            y2 = y1.relu()
+            x3 = x2.sigmoid()
+            y3 = y2.sigmoid()
+            return x3, y3
+
+        def pattern(x: torch.Tensor):
+            y = x.relu()
+            z = y.relu()
+            return z
+
+        onnx_model = torch.onnx.dynamo_export(
+            toy_model,
+            torch.randn(
+                (
+                    2,
+                    3,
+                ),
+                dtype=torch.float32,
+            ),
+            torch.randn(
+                (
+                    2,
+                    3,
+                ),
+                dtype=torch.float32,
+            ),
+        ).model_proto
+
+        pattern_model = torch.onnx.dynamo_export(
+            pattern,
+            torch.randn(
+                (
+                    2,
+                    3,
+                ),
+                dtype=torch.float32,
+            ),
+        ).model_proto
+
+        push_pattern(
+            FusionPattern(
+                pattern=pattern_model.graph,
+                fused_op_type="Relu",
+                fused_op_kwargs={},
+                fused_op_domain="",
+                fused_op_version=18,
+            )
+        )
+
+        # There should be no Relu before fusion.
+        self.assertTrue(all(node.op_type != "Relu" for node in onnx_model.graph.node))
+
+        # Every aten_relu -> aten_relu should be fused into one Relu.
+        fused = apply_all_fusions(onnx_model)
+
+        actual_relu_count = sum(
+            1 for node in fused.graph.node if node.op_type == "Relu"
+        )
+        # Two Relu because the every two consecutive Relu are fused into one.
+        self.assertEqual(actual_relu_count, 2)
+
+        pop_pattern()
+
+    def test_fusion_multi_input_pattern(self):
+        input_dim = 2
+        hidden_dim = 4
+        output_dim = 2
+
+        input_dim = 2
+        hidden_dim = 4
+        output_dim = 2
+
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Declare two linear layers.
+                self.fc1 = torch.nn.Linear(input_dim, hidden_dim, bias=False)
+                self.fc2 = torch.nn.Linear(hidden_dim, output_dim, bias=False)
+
+            def forward(self, x: torch.Tensor):
+                x1 = self.fc1(x)
+                x2 = x1.relu()
+                x3 = self.fc2(x2)
+                x4 = x3.relu()
+                return x4
+
+        def pattern(input: torch.Tensor, weight: torch.Tensor):
+            return torch.nn.functional.linear(input, weight)
+
+        toy_model = ToyModel()
+
+        onnx_model = torch.onnx.dynamo_export(
+            toy_model,
+            torch.randn(
+                (
+                    3,
+                    input_dim,
+                ),
+                dtype=torch.float32,
+            ),
+        ).model_proto
+        onnx_model = onnx.inliner.inline_local_functions(onnx_model)
+
+        pattern_model = torch.onnx.dynamo_export(
+            pattern,
+            torch.randn(
+                (
+                    3,
+                    input_dim,
+                ),
+                dtype=torch.float32,
+            ),
+            torch.randn(
+                (
+                    hidden_dim,
+                    input_dim,
+                ),
+                dtype=torch.float32,
+            ),
+        ).model_proto
+        pattern_model = onnx.inliner.inline_local_functions(pattern_model)
+
+        push_pattern(
+            FusionPattern(
+                pattern=pattern_model.graph,
+                fused_op_type="Gemm",
+                fused_op_kwargs={"transB": 1},
+                fused_op_domain="",
+                fused_op_version=18,
+            )
+        )
+
+        # There should be no Gemm before fusion.
+        self.assertTrue(all(node.op_type != "Gemm" for node in onnx_model.graph.node))
+
+        fused = apply_all_fusions(onnx_model)
+
+        actual_fusion_count = sum(
+            1 for node in fused.graph.node if node.op_type == "Gemm"
+        )
+        # Two Gemm because the every nn.Linear are fused into one.
+        self.assertEqual(actual_fusion_count, 2)
+
+        # Remove this fusion from the stack.
+        pop_pattern()
 
     @parameterized.expand(
         [
