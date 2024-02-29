@@ -3639,30 +3639,18 @@ class ShapeEnv:
         return self.replacements[a]
 
     @lru_cache(256)
-    def _maybe_guard_rel(self, expr: "sympy.Rel", concrete_bool: bool) -> None:
+    def _maybe_guard_rel(self, expr: "sympy.Rel") -> None:
         """
-        Evaluates the result of an eq call. If true, uses information to
+        The relational guard is guarded to be true.  Use this information to
         simplify shapes (i.e. a == b or a % 5 == 0)
         """
-        assert type(concrete_bool) is bool
-        is_eq = False
-        if isinstance(expr, sympy.Eq):
-            if not concrete_bool:
-                return
-            is_eq = True
-        # NB: Apparently this is load bearing; to see what test fails if
-        # you comment it out run:
+        assert isinstance(expr, sympy.Rel)
+
+        # A good example of what goes wrong if you don't do this is
         # python test/functorch/test_aotdispatch.py -k
         # test_aot_autograd_symbolic_module_exhaustive_nn_LazyConv3d_cpu_float32
-        elif isinstance(expr, sympy.Ne):
-            if concrete_bool:
-                return
-            is_eq = True
-        else:
-            # Canonicalize the truth branch
-            if not concrete_bool:
-                expr = sympy.Not(expr)
-                concrete_bool = True
+        if isinstance(expr, sympy.Ne):
+            return
 
         free = list(expr.free_symbols)
 
@@ -3675,41 +3663,11 @@ class ShapeEnv:
         lhs = expr.lhs
         rhs = expr.rhs
 
-        if not is_eq:
-            # Unfortunately, range refinement is probably going to not
-            # work most of the time, because we don't support symbols
-            # in ranges.  For example, i0 <= s0 is un-rangeable, because
-            # we can't put s0 in the range.
-            #
-            # TODO: deal with conjunction/disjunction?
-            if len(free) == 1:
-                lhs = free[0]
-                r = try_solve(expr, lhs)
-                if r is not None and isinstance(r[0], (sympy.Lt, sympy.Le, sympy.Gt, sympy.Ge)) and isinstance(r[1], sympy.Integer):
-                    res = r[0]
-                    bound = int(r[1])
-                    if isinstance(res, sympy.Lt):
-                        # lhs < bound
-                        update_vr = [-sympy.oo, bound - 1]
-                    elif isinstance(res, sympy.Le):
-                        # lhs <= bound
-                        update_vr = [-sympy.oo, bound]
-                    elif isinstance(res, sympy.Gt):
-                        # lhs > bound
-                        update_vr = [bound + 1, sympy.oo]
-                    elif isinstance(res, sympy.Ge):
-                        # lhs >= bound
-                        update_vr = [bound, sympy.oo]
-                    else:
-                        raise AssertionError(f"illegal expr {expr}")
-                    old_range = self.var_to_range[lhs]
-                    self.var_to_range[lhs] &= ValueRanges(*update_vr)
-                    if old_range != self.var_to_range[lhs]:
-                        self.log.info("refined range on %s to %s", lhs, self.var_to_range[lhs])
-                        self._maybe_evaluate_static.cache_clear()
-            return
+        self._refine_ranges(expr)
 
         # The rest of this stuff is for equality only
+        if not isinstance(expr, sympy.Eq):
+            return
 
         if not expr.has(Mod):
             try:
@@ -3972,13 +3930,14 @@ class ShapeEnv:
             ):
                 expr = sympy.Not(expr)
 
-            if isinstance(expr, sympy.Rel):
-                self._maybe_guard_rel(expr, bool(concrete_val))
-                # TODO: If we successfully eliminate a symbol via equality, it
-                # is not actually necessary to save a guard for the equality,
-                # as we will implicitly generate a guard when we match that
-                # input against the symbol
-            elif isinstance(concrete_val, sympy.Integer):
+            # Turn this into a boolean expression, no longer need to consult
+            # concrete_val
+            suppress_maybe_guard_rel = False
+            if concrete_val is sympy.true:
+                g = expr
+            elif concrete_val is sympy.false:
+                g = sympy.Not(expr)
+            else:
                 # WARNING: we cannot actually do simplifications on guards
                 # on floating point values, because Sympy generally does not
                 # think expressions on integers can ever be equal to floating
@@ -3986,14 +3945,19 @@ class ShapeEnv:
                 # very clear algebraic laws that hold for floating point, such
                 # simplifications are error prone anyway, so be sure not to
                 # maybe_guard_rel in those cases.
-                self._maybe_guard_rel(sympy.Eq(expr, concrete_val), True)
-
-            if concrete_val is sympy.true:
-                g = expr
-            elif concrete_val is sympy.false:
-                g = sympy.Not(expr)
-            else:
+                if not isinstance(concrete_val, sympy.Integer):
+                    suppress_maybe_guard_rel = True
                 g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
+
+            if isinstance(g, sympy.Rel):
+                # TODO: If we successfully eliminate a symbol via equality, it
+                # is not actually necessary to save a guard for the equality,
+                # as we will implicitly generate a guard when we match that
+                # input against the symbol.  Probably the easiest way to
+                # implement this is to have maybe_guard_rel return a bool
+                # saying if it "subsumed" the guard (and therefore the guard
+                # is no longer necessary)
+                self._maybe_guard_rel(g)
 
             if not self._suppress_guards_tls():
                 stack = CapturedTraceback.extract(skip=1)
@@ -4007,8 +3971,6 @@ class ShapeEnv:
         else:
             if not self._suppress_guards_tls():
                 assert guard is not None
-
-                self._refine_ranges(guard)
 
                 self._log_guard("eval", g, forcing_spec=forcing_spec)
 
@@ -4090,7 +4052,7 @@ class ShapeEnv:
 
         # eliminate symbols on equality tests / refine ranges
         if isinstance(expr, sympy.Rel):
-            self._maybe_guard_rel(expr, True)
+            self._maybe_guard_rel(expr)
 
         if not self._suppress_guards_tls():
             # canonicalise to remove equations that are trivially equal
@@ -4119,8 +4081,8 @@ class ShapeEnv:
     #   1. Tries to isolate a variable in the left-hand side
     #   2. Compute the value range of the right-hand side
     #   3. Update the value range of the variable, if better
-    def _refine_ranges(self, guard: ShapeGuard) -> None:
-        expr = self.simplify(guard.expr)
+    def _refine_ranges(self, expr: sympy.Expr) -> None:
+        expr = self.simplify(expr)
 
         for symbol in expr.free_symbols:
             assert isinstance(symbol, sympy.Symbol)
