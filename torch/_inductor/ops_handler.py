@@ -212,7 +212,7 @@ class OpsHandler(Protocol[T]):
     def scan(
         self,
         dtypes: Tuple[torch.dtype, ...],
-        combine_fn: Callable[..., Tuple[T, ...]],
+        combine_fn: Callable[[Tuple[T, ...], Tuple[T, ...]], Tuple[T, ...]],
         values: Tuple[T, ...],
         inits: Tuple[int, ...],
     ) -> Tuple[T, ...]:

@@ -2354,7 +2354,9 @@ class TritonKernel(Kernel):
     def scan(
         self,
         dtypes: Tuple[torch.dtype, ...],
-        combine_fn: Callable[..., Tuple[CSEVariable, ...]],
+        combine_fn: Callable[
+            [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]], Tuple[CSEVariable, ...]
+        ],
         values: Tuple[CSEVariable, ...],
         inits: Tuple[int, ...],
     ) -> Tuple[CSEVariable, ...]:
@@ -2437,7 +2439,7 @@ class TritonKernel(Kernel):
                 if masks:
                     result_var.mask_vars = masks  # type: ignore[attr-defined]
                 self.cse.cache[cache_key] = result_var
-            return result_vars
+            return tuple(result_vars)
 
         result_vars = cse_multiple(
             f"tl.associative_scan(({csv(masked_values)}), {dim}, {combine_helper_fn})",
@@ -2451,8 +2453,8 @@ class TritonKernel(Kernel):
                 len(values),
                 None,
             )
-            accs_next = combine_fn(accumulators, partial_reduce)
-            new_result_vars = combine_fn(accumulators, result_vars)
+            accs_next = combine_fn(tuple(accumulators), partial_reduce)
+            new_result_vars = combine_fn(tuple(accumulators), result_vars)
             result_vars = [
                 self.cse.generate(self.compute, var) for var in new_result_vars
             ]

@@ -1399,7 +1399,9 @@ class Kernel(CodeGen):
     def scan(
         self,
         dtypes: Tuple[torch.dtype, ...],
-        combine_fn: Callable[..., Tuple[CSEVariable, ...]],
+        combine_fn: Callable[
+            [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]], Tuple[CSEVariable, ...]
+        ],
         values: Tuple[CSEVariable, ...],
         inits: Tuple[int, ...],
     ) -> Tuple[CSEVariable, ...]:
@@ -1563,7 +1565,10 @@ class Kernel(CodeGen):
             @staticmethod
             def scan(
                 dtypes: Tuple[torch.dtype, ...],
-                combine_fn: Callable[..., Tuple[CSEVariable, ...]],
+                combine_fn: Callable[
+                    [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]],
+                    Tuple[CSEVariable, ...],
+                ],
                 values: Tuple[CSEVariable, ...],
                 inits: Tuple[int, ...],
             ) -> Tuple[CSEVariable, ...]:
