@@ -90,6 +90,14 @@ hf_Bart,pass,0
 
 
 
+hf_Bert,pass,0
+
+
+
+hf_Bert_large,pass,0
+
+
+
 hf_DistilBert,pass,0
 
 
@@ -130,6 +138,10 @@ llama,pass,0
 
 
 
+maml,pass_due_to_skip,0
+
+
+
 maml_omniglot,pass,0
 
 
@@ -142,7 +154,7 @@ mobilenet_v2,pass,0
 
 
 
-mobilenet_v2_quantized_qat,eager_fail_to_run,0
+mobilenet_v2_quantized_qat,pass,2
 
 
 
@@ -178,6 +190,10 @@ pyhpc_isoneutral_mixing,pass,0
 
 
 
+pyhpc_turbulent_kinetic_energy,pass,0
+
+
+
 pytorch_CycleGAN_and_pix2pix,pass,0
 
 
@@ -202,7 +218,7 @@ resnet50,pass,0
 
 
 
-resnet50_quantized_qat,eager_fail_to_run,0
+resnet50_quantized_qat,pass,2
 
 
 
