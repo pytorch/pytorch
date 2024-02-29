@@ -1,0 +1,162 @@
+name: mac-test-arm64
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Top-level label for what's being built/tested.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
+      python-version:
+        required: false
+        type: string
+        default: "3.8"
+        description: |
+          The python version to be used. Will be 3.8 by default
+      test-matrix:
+        required: true
+        type: string
+        description: |
+          A JSON description of what configs to run later on.
+
+jobs:
+  filter:
+    if: github.repository_owner == 'pytorch'
+    runs-on: [self-hosted, linux.large]
+    outputs:
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
+      keep-going: ${{ steps.filter.outputs.keep-going }}
+      ci-verbose-test-logs: ${{ steps.filter.outputs.ci-verbose-test-logs }}
+      ci-no-test-timeout: ${{ steps.filter.outputs.ci-no-test-timeout }}
+      ci-no-td: ${{ steps.filter.outputs.ci-no-td }}
+      reenabled-issues: ${{ steps.filter.outputs.reenabled-issues }}
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+
+      - name: Select all requested test configurations
+        id: filter
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+
+  test:
+    needs: filter
+    # Don't run on forked repos.
+    if: github.repository_owner == 'pytorch' && needs.filter.outputs.is-test-matrix-empty == 'False'
+    strategy:
+      matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
+      fail-fast: false
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Print runner OS/HW info
+        run: |
+          sysctl machdep.cpu.brand_string kern.osproductversion
+
+      - name: Checkout PyTorch
+        uses: malfet/checkout@silent-checkout
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          quiet-checkout: true
+
+      - name: Clean checkout
+        run: |
+          git clean -fxd
+
+      - name: Download build artifacts
+        uses: ./.github/actions/download-build-artifacts
+        with:
+          name: ${{ inputs.build-environment }}
+          use-gha: true
+
+      - name: Setup miniconda
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
+        with:
+          python-version: ${{ inputs.python-version }}
+          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
+          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
+
+      - name: Install PyTorch and run MPS tests
+        id: test
+        env:
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          TEST_CONFIG: ${{ matrix.config }}
+          ENV_NAME: conda-test-env-${{ github.run_id }}
+          PY_VERS: 3.9
+          PR_BODY: ${{ github.event.pull_request.body }}
+          CONTINUE_THROUGH_ERROR: ${{ needs.filter.outputs.keep-going }}
+          VERBOSE_TEST_LOGS: ${{ needs.filter.outputs.ci-verbose-test-logs }}
+          NO_TEST_TIMEOUT: ${{ needs.filter.outputs.ci-no-test-timeout }}
+          NO_TD: ${{ needs.filter.outputs.ci-no-td }}
+          PIP_REQUIREMENTS_FILE: .github/requirements/pip-requirements-${{ runner.os }}.txt
+          REENABLED_ISSUES: ${{ needs.filter.outputs.reenabled-issues }}
+        run: |
+          # shellcheck disable=SC1090
+          set -ex
+
+          if [[ -n "$CONDA_ENV" ]]; then
+            # Use binaries under conda environment
+            export PATH="$CONDA_ENV/bin":$PATH
+          fi
+
+          # Print out some information about the test environment
+          which conda
+          conda --version
+          ${CONDA_RUN} which python3
+          ${CONDA_RUN} python3 --version
+          ${CONDA_RUN} which python
+          ${CONDA_RUN} python --version
+
+          ${CONDA_RUN} python3 -mpip install --no-index --no-deps dist/*.whl
+
+          set +e
+          pushd "${RUNNER_TEMP}"
+          # Install pip dependencies if they are not found. This is to mitigate a peculiar
+          # flaky missing dependencies on MacOS
+          ${CONDA_RUN} python3 -c "import torch"
+          RC=$?
+          popd
+
+          if [ "${RC}" -ne 0 ]; then
+            ${CONDA_RUN} python3 -mpip install --ignore-installed -r "${PIP_REQUIREMENTS_FILE}"
+          fi
+          set -e
+
+          ${CONDA_RUN} python3 test/run_test.py --mps --verbose
+
+      - name: Print remaining test logs
+        shell: bash
+        if: always() && steps.test.conclusion
+        run: |
+          cat test/**/*_toprint.log || true
+
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload test artifacts
+        uses: ./.github/actions/upload-test-artifacts
+        if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
+        with:
+          use-gha: true
+          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
+
+      - name: Clean up disk space
+        if: always()
+        continue-on-error: true
+        uses: pytorch/test-infra/.github/actions/check-disk-space@main
