@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-set -x
+set -ex
 
 # The generic Linux job chooses to use base env, not the one setup by the image
 CONDA_ENV=$(conda env list --json | jq -r ".envs | .[-1]")
+eval "$(command conda 'shell.bash' 'hook' 2> /dev/null)"
 conda activate "${CONDA_ENV}"
 
 CACHE_DIRECTORY="/tmp/.lintbin"
