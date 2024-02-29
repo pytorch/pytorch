@@ -122,7 +122,7 @@ struct BlockInfo {
 
 // Struct containing info of a memory segment (i.e. one contiguous cudaMalloc).
 struct SegmentInfo {
-  int64_t device = 0;
+  c10::DeviceIndex device = 0;
   int64_t address = 0;
   int64_t total_size = 0;
   int64_t requested_size = 0; // unrounded, actually requested size
@@ -179,7 +179,7 @@ struct TraceEntry {
     time_.approx_t_ = time;
   }
   Action action_;
-  int device_;
+  c10::DeviceIndex device_;
   int64_t addr_; // for OOM, this is the amount of free bytes reported by cuda
   std::shared_ptr<GatheredContext> context_;
   cudaStream_t stream_{};
@@ -187,9 +187,21 @@ struct TraceEntry {
   trace_time_ time_{};
 };
 
+struct AllocatorConfigInfo {
+  double garbage_collection_threshold;
+  size_t max_split_size;
+  size_t pinned_num_register_threads;
+  bool expandable_segments;
+  bool release_lock_on_malloc;
+  bool pinned_use_host_register;
+  std::string last_allocator_settings;
+  std::vector<size_t> roundup_power2_divisions;
+};
+
 struct SnapshotInfo {
   std::vector<SegmentInfo> segments;
   std::vector<std::vector<TraceEntry>> device_traces;
+  AllocatorConfigInfo config_metadata;
 };
 
 // returns the pointers freed in the pool

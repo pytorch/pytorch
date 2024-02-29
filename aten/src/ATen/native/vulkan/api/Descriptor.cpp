@@ -167,7 +167,7 @@ VkDescriptorSet DescriptorSetPile::get_descriptor_set() {
 }
 
 void DescriptorSetPile::allocate_new_batch() {
-  // No-ops if there are still descriptor sets availble
+  // No-ops if there are still descriptor sets available
   if (in_use_ < descriptors_.size() &&
       descriptors_[in_use_] != VK_NULL_HANDLE) {
     return;

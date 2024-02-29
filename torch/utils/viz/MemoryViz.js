@@ -969,9 +969,8 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
     elements_length: elements.length,
     context_for_id: id => {
       const elem = elements[id];
-      let text = `${formatAddr(elem)} ${formatSize(elem.size)} allocation (${
-        elem.size
-      } bytes)`;
+      let text = `Addr: ${formatAddr(elem)}`;
+      text = `${text}, Size: ${formatSize(elem.size)} allocation`;
       if (elem.stream !== null) {
         text = `${text}, stream ${elem.stream}`;
       }

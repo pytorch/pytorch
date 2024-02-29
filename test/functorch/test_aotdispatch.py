@@ -1473,8 +1473,15 @@ def forward(self, primals_1, primals_2):
 
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True)
         self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True)
-        self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
-        with self.assertRaisesRegex(AssertionError, "attempted to compile the backward with incorrect subclass metadata"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses"
+        ):
+            self.verify_aot_autograd(f, partial(inp_callable, req_grad=False), test_mutation=True, make_inputs_subclasses=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses"
+        ):
             self.verify_aot_autograd(f, partial(inp_callable, req_grad=True), test_mutation=True, make_inputs_subclasses=True)
 
     # Mutations in the backward are allowed as long as the mutated object does not require grad
@@ -1567,13 +1574,13 @@ def forward(self, primals_1, primals_2):
         def f(a, b):
             a.mul_(3)
             b.mul_(2)
-            return a + b
+            return a.clone().view(-1) + b.clone().view(-1)
 
         # No overlap, contiguous
         def inp_callable1(req_grad):
             base = torch.ones(4, 4, requires_grad=req_grad)
             x = base.add(1)
-            # create two non-contiguous views that share storage, but are actually non-overlapping
+            # create two views that share storage, but are actually non-overlapping
             a = x[0:2]
             b = x[2:4]
             return [base], [a, b]
@@ -1592,7 +1599,11 @@ def forward(self, primals_1, primals_2):
 def forward(self, arg0_1, arg1_1):
     mul = torch.ops.aten.mul.Tensor(arg0_1, 3);  arg0_1 = None
     mul_1 = torch.ops.aten.mul.Tensor(arg1_1, 2);  arg1_1 = None
-    add = torch.ops.aten.add.Tensor(mul, mul_1)
+    clone = torch.ops.aten.clone.default(mul)
+    view = torch.ops.aten.view.default(clone, [-1]);  clone = None
+    clone_1 = torch.ops.aten.clone.default(mul_1)
+    view_1 = torch.ops.aten.view.default(clone_1, [-1]);  clone_1 = None
+    add = torch.ops.aten.add.Tensor(view, view_1);  view = view_1 = None
     return (mul, mul_1, add)""")
 
         # No overlap, non-contiguous: first tensor ends before second tensor start
@@ -1627,6 +1638,16 @@ def forward(self, arg0_1, arg1_1):
             b = x.as_strided((4, 4), (9, 1), storage_offset=23)
             return [base], [a, b]
 
+        # No overlap, non-contiguous
+        def inp_callable6(req_grad):
+            base = torch.ones(256, requires_grad=req_grad)
+            x = base.add(1)
+            # a's last element is at offset 195 (24 total elements)
+            a = x.as_strided((2, 4, 3), (110, 24, 4), storage_offset=5)
+            # b's first element is at offset 196: no overlap
+            b = x[196:196 + a.numel()]
+            return [base], [a, b]
+
         # overlap! non-contiguous
         def inp_callable_overlap1(req_grad):
             base = torch.ones(256, requires_grad=req_grad)
@@ -1643,10 +1664,21 @@ def forward(self, arg0_1, arg1_1):
             b = x.as_strided((4, 4), (9, 1), storage_offset=25)
             return [base], [a, b]
 
+        # overlap! non-contiguous
+        def inp_callable_overlap3(req_grad):
+            base = torch.ones(256, requires_grad=req_grad)
+            x = base.add(1)
+            # a's last element is at offset 195 (24 total elements)
+            a = x.as_strided((2, 4, 3), (110, 24, 4), storage_offset=5)
+            # b's first element is at offset 195: overlap!
+            b = x[195:195 + a.numel()]
+            return [base], [a, b]
+
         fw_graph2 = self.verify_aot_autograd(f, partial(inp_callable2, req_grad=False), test_mutation=True)
         fw_graph3 = self.verify_aot_autograd(f, partial(inp_callable3, req_grad=False), test_mutation=True)
         fw_graph4 = self.verify_aot_autograd(f, partial(inp_callable4, req_grad=False), test_mutation=True)
         fw_graph5 = self.verify_aot_autograd(f, partial(inp_callable5, req_grad=False), test_mutation=True)
+        fw_graph6 = self.verify_aot_autograd(f, partial(inp_callable6, req_grad=False), test_mutation=True)
 
         fw_graph_overlap1 = self.verify_aot_autograd(f, partial(inp_callable_overlap2, req_grad=False), test_mutation=True)
         fw_graph_overlap2 = self.verify_aot_autograd(f, partial(inp_callable_overlap1, req_grad=False), test_mutation=True)
@@ -1656,6 +1688,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(str(fw_graph.code), str(fw_graph3.code))
         self.assertEqual(str(fw_graph.code), str(fw_graph4.code))
         self.assertEqual(str(fw_graph.code), str(fw_graph5.code))
+        self.assertEqual(str(fw_graph.code), str(fw_graph6.code))
 
         # All overlap graphs should be the same since we detected real aliasing
         self.assertNotEqual(str(fw_graph.code), str(fw_graph_overlap1.code))

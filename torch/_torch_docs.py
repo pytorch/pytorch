@@ -3415,13 +3415,11 @@ Keyword args:
 
 Example::
 
-    >>> a = torch.randn(10)
+    >>> a = torch.randint(1, 20, (10,))
     >>> a
-    tensor([-0.8286, -0.4890,  0.5155,  0.8443,  0.1865, -0.1752, -2.0595,
-             0.1850, -1.1571, -0.4243])
+    tensor([13,  7,  3, 10, 13,  3, 15, 10,  9, 10])
     >>> torch.cumsum(a, dim=0)
-    tensor([-0.8286, -1.3175, -0.8020,  0.0423,  0.2289,  0.0537, -2.0058,
-            -1.8209, -2.9780, -3.4022])
+    tensor([13, 20, 23, 33, 46, 49, 64, 74, 83, 93])
 """.format(
         **reduceops_common_args
     ),
@@ -6904,10 +6902,11 @@ add_docstr(
     r"""
 mean(input, *, dtype=None) -> Tensor
 
-Returns the mean value of all elements in the :attr:`input` tensor.
+Returns the mean value of all elements in the :attr:`input` tensor. Input must be floating point or complex.
 
 Args:
-    {input}
+    input (Tensor):
+      the input tensor, either of floating point or complex dtype
 
 Keyword args:
     {dtype}
@@ -13781,7 +13780,7 @@ Args:
 add_docstr(
     torch.searchsorted,
     r"""
-searchsorted(sorted_sequence, values, *, out_int32=False, right=False, side='left', out=None, sorter=None) -> Tensor
+searchsorted(sorted_sequence, values, *, out_int32=False, right=False, side=None, out=None, sorter=None) -> Tensor
 
 Find the indices from the *innermost* dimension of :attr:`sorted_sequence` such that, if the
 corresponding values in :attr:`values` were inserted before the indices, when sorted, the order

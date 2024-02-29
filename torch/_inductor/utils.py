@@ -20,6 +20,7 @@ import tempfile
 import textwrap
 import time
 import unittest
+from dataclasses import fields
 from datetime import datetime
 from io import StringIO
 from typing import (
@@ -224,15 +225,50 @@ def ceildiv(
 
 def next_power_of_2(n: int) -> int:
     """Return the smallest power of 2 greater than or equal to n"""
-    assert n <= 2**32, "32-bit only"
     n -= 1
     n |= n >> 1
     n |= n >> 2
     n |= n >> 4
     n |= n >> 8
     n |= n >> 16
+    n |= n >> 32
     n += 1
     return n
+
+
+def _type_of(key):
+    # Use the function here to get rid of dependencies on the Triton during the codegen.
+    # Refer to Triton implementation here:
+    # https://github.com/openai/triton/blob/98b5945d2aef679e00ebca8e07c35c3658ec76de/python/triton/runtime/jit.py#L238
+    # `None` is nullptr.  Implicitly convert to *i8.
+    if key is None:
+        return "*i8"
+    dtype_str = str(key).split(".")[-1]
+    tys = {
+        "bool": "i1",
+        "float8e4nv": "fp8e4nv",
+        "float8e5": "fp8e5",
+        "float8e4b15": "fp8e4b15",
+        "float8e4b15x4": "fp8e4b15x4",
+        "float8_e4m3fn": "fp8e4nv",
+        "float8_e5m2": "fp8e5",
+        "float16": "fp16",
+        "bfloat16": "bf16",
+        "float32": "fp32",
+        "float64": "fp64",
+        "int8": "i8",
+        "int16": "i16",
+        "int32": "i32",
+        "int64": "i64",
+        "uint8": "u8",
+        "uint16": "u16",
+        "uint32": "u32",
+        "uint64": "u64",
+    }
+    # reinterpret can create triton type
+    for v in list(tys.values()):
+        tys[v] = v
+    return key if isinstance(key, str) else f"*{tys[dtype_str]}"
 
 
 def convert_shape_to_inductor(
@@ -634,11 +670,43 @@ def has_incompatible_cudagraph_ops(gm):
     return False
 
 
+# Attempt to import AttrsDescriptor from Triton
 try:
-    from triton.compiler.compiler import AttrsDescriptor as instance_descriptor
+    from triton.compiler.compiler import AttrsDescriptor
+
+    attrs_descriptor_available = True
+    # Determine if 'ids_of_folded_args' is a valid field for AttrsDescriptor
+    ids_of_folded_args_available = "ids_of_folded_args" in [
+        f.name for f in fields(AttrsDescriptor)
+    ]
 except ImportError:
-    # To support older version of triton which does not have AttrsDescriptor
-    # class
+    attrs_descriptor_available = False
+
+# Define `instance_descriptor` function with clear conditional handling
+if attrs_descriptor_available:
+
+    def instance_descriptor(
+        divisible_by_16=None,
+        equal_to_1=None,
+        ids_of_folded_args=None,
+        divisible_by_8=None,
+    ):
+        # Prepare the arguments for AttrsDescriptor
+        kwargs = {
+            "divisible_by_16": divisible_by_16,
+            "equal_to_1": equal_to_1,
+            "divisible_by_8": divisible_by_8,
+        }
+
+        # Conditionally add 'ids_of_folded_args' if it's available in AttrsDescriptor
+        if ids_of_folded_args_available:
+            kwargs["ids_of_folded_args"] = ids_of_folded_args
+
+        # Instantiate AttrsDescriptor with the prepared arguments
+        return AttrsDescriptor(**kwargs)
+
+else:
+    # Define a namedtuple as a fallback when AttrsDescriptor is not available
     instance_descriptor = collections.namedtuple(  # type: ignore[no-redef]
         "instance_descriptor",
         ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
@@ -786,6 +854,12 @@ class IndentedBuffer:
                 self._indent -= offset
 
         return ctx()
+
+    def do_indent(self, offset=1):
+        self._indent += offset
+
+    def do_unindent(self, offset=1):
+        self._indent -= offset
 
     def splice(self, other_code, strip=False):
         if isinstance(other_code, IndentedBuffer):
@@ -1156,9 +1230,9 @@ def get_device_tflops(dtype):
 
     if inspect.signature(get_max_simd_tflops).parameters.get("clock_rate"):
         # Triton API change in https://github.com/openai/triton/pull/2293
-        from triton.testing import nvsmi
+        from torch._utils_internal import max_clock_rate
 
-        sm_clock = nvsmi(["clocks.max.sm"])[0]
+        sm_clock = max_clock_rate()
         if dtype in (torch.float16, torch.bfloat16):
             return get_max_tensorcore_tflops(dtype, sm_clock)
 

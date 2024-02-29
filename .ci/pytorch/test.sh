@@ -139,6 +139,8 @@ if [[ "$TEST_CONFIG" == *crossref* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # regression in ROCm 6.0 on MI50 CI runners due to hipblaslt; remove in 6.1
+  export VALGRIND=OFF
   # Print GPU info
   rocminfo
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
@@ -288,10 +290,16 @@ test_inductor_distributed() {
   pytest test/inductor/test_torchinductor.py -k test_multi_gpu
   pytest test/inductor/test_aot_inductor.py -k test_non_default_cuda_device
   pytest test/inductor/test_aot_inductor.py -k test_replicate_on_devices
+  pytest test/distributed/test_c10d_functional_native.py
   pytest test/distributed/_tensor/test_dtensor_compile.py
   pytest test/distributed/tensor/parallel/test_fsdp_2d_parallel.py
   pytest test/distributed/_composable/fsdp/test_fully_shard_comm.py
   pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_multi_group
+  pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_with_activation_checkpointing
+  pytest test/distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_2d_mlp
+  pytest test/distributed/_composable/fsdp/test_fully_shard_frozen.py
+  pytest test/distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_compute_dtype
+  pytest test/distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_reduce_dtype
 
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
@@ -528,6 +536,50 @@ test_inductor_torchbench_smoketest_perf() {
     python benchmarks/dynamo/check_memory_compression_ratio.py --actual \
       "$TEST_REPORTS_DIR/inductor_training_smoketest_$test.csv" \
       --expected benchmarks/dynamo/expected_ci_perf_inductor_torchbench.csv
+  done
+}
+
+test_inductor_torchbench_cpu_smoketest_perf(){
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
+  #set jemalloc
+  JEMALLOC_LIB="/usr/lib/x86_64-linux-gnu/libjemalloc.so.2"
+  IOMP_LIB="$(dirname "$(which python)")/../lib/libiomp5.so"
+  export LD_PRELOAD="$JEMALLOC_LIB":"$IOMP_LIB":"$LD_PRELOAD"
+  export MALLOC_CONF="oversize_threshold:1,background_thread:true,metadata_thp:auto,dirty_decay_ms:-1,muzzy_decay_ms:-1"
+  export KMP_AFFINITY=granularity=fine,compact,1,0
+  export KMP_BLOCKTIME=1
+  CORES=$(lscpu | grep Core | awk '{print $4}')
+  export OMP_NUM_THREADS=$CORES
+  end_core=$(( CORES-1 ))
+
+  MODELS_SPEEDUP_TARGET=benchmarks/dynamo/expected_ci_speedup_inductor_torchbench_cpu.csv
+
+  grep -v '^ *#' < "$MODELS_SPEEDUP_TARGET" | while IFS=',' read -r -a model_cfg
+  do
+    local model_name=${model_cfg[0]}
+    local data_type=${model_cfg[1]}
+    local speedup_target=${model_cfg[4]}
+    if [[ ${model_cfg[3]} == "cpp" ]]; then
+      export TORCHINDUCTOR_CPP_WRAPPER=1
+    else
+      unset TORCHINDUCTOR_CPP_WRAPPER
+    fi
+    local output_name="$TEST_REPORTS_DIR/inductor_inference_${model_cfg[0]}_${model_cfg[1]}_${model_cfg[2]}_${model_cfg[3]}_cpu_smoketest.csv"
+
+    if [[ ${model_cfg[2]} == "dynamic" ]]; then
+      taskset -c 0-"$end_core" python benchmarks/dynamo/torchbench.py \
+        --inference --performance --"$data_type" -dcpu -n50 --only "$model_name" --dynamic-shapes \
+        --dynamic-batch-only --freezing --timeout 9000 --backend=inductor --output "$output_name"
+    else
+      taskset -c 0-"$end_core" python benchmarks/dynamo/torchbench.py \
+        --inference --performance --"$data_type" -dcpu -n50 --only "$model_name" \
+        --freezing --timeout 9000 --backend=inductor --output "$output_name"
+    fi
+    cat "$output_name"
+    # The threshold value needs to be actively maintained to make this check useful.
+    python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target"
   done
 }
 
@@ -1104,6 +1156,11 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
     checkout_install_torchbench hf_Bert hf_Albert nanogpt timm_vision_transformer
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
+  elif [[ "${TEST_CONFIG}" == *inductor_torchbench_cpu_smoketest_perf* ]]; then
+    checkout_install_torchbench timm_vision_transformer phlippe_densenet basic_gnn_gcn \
+      llama_v2_7b_16h resnet50 timm_efficientnet mobilenet_v3_large timm_resnest \
+      shufflenet_v2_x1_0 hf_GPT2
+    PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_cpu_smoketest_perf
   else
     checkout_install_torchbench
     # Do this after checkout_install_torchbench to ensure we clobber any

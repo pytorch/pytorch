@@ -2391,6 +2391,20 @@ def caching_device_properties():
             device_interface.Worker.get_device_properties()
 
 
+def _set_triton_ptxas_path() -> None:
+    if os.environ.get("TRITON_PTXAS_PATH") is not None:
+        return
+    ptxas_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "bin", "ptxas")
+    )
+    if not os.path.exists(ptxas_path):
+        return
+    if os.path.isfile(ptxas_path) and os.access(ptxas_path, os.X_OK):
+        os.environ["TRITON_PTXAS_PATH"] = ptxas_path
+    else:
+        warnings.warn(f"{ptxas_path} exists but is not an executable")
+
+
 def _worker_compile(
     kernel_name: str, source_code: str, cc: int, device: torch.device
 ) -> None:
@@ -2401,6 +2415,7 @@ def _worker_compile(
 
 
 def _load_kernel(kernel_name: str, source_code: str) -> ModuleType:
+    _set_triton_ptxas_path()
     kernel = TritonCodeCache.load(kernel_name, source_code)
     kernel.precompile()
     return kernel

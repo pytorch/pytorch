@@ -211,11 +211,9 @@ inductor_expected_failures_single_sample["cpu"] = {
     "_upsample_bilinear2d_aa": {f32, f64},
     "cholesky": {f32, f64},
     "complex": {f16},
-    "cross": {f16},
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
     "histc": {f16},
-    "linalg.cross": {f16},
     "multinomial": {f16, f32, f64},
     "nn.functional.avg_pool1d": {i64},
     "nn.functional.avg_pool2d": {i64},
@@ -315,6 +313,8 @@ inductor_override_kwargs = {
     "empty_strided": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
+    ("cross", "cuda", f16): {"reference_in_float": True},
+    ("linalg.cross", "cuda", f16): {"reference_in_float": True},
     ("addr", "cuda", f16): {"reference_in_float": True},
     ("baddbmm", "cuda", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
     ("angle", "cuda", f64): {"reference_in_float": True},
@@ -322,7 +322,9 @@ inductor_override_kwargs = {
     ("atanh", "cuda", f16): {"reference_in_float": True},
     ("cauchy", "cuda"): {"reference_in_float": True},
     ("cummax", "cuda", f16): {"atol": 5e-4, "rtol": 0.002},
+    ("cumsum", "cuda", f16): {"reference_in_float": True},
     ("cumprod", "cuda"): {"reference_in_float": True, "atol": 7e-5, "rtol": 0.002},
+    ("logcumsumexp", "cuda"): {"grad_atol": 8e-4, "grad_rtol": 0.001},
     ("exponential", "cuda"): {"reference_in_float": True},
     ("geometric", "cuda"): {"reference_in_float": True},
     ("kron", "cuda", f16): {"reference_in_float": True},
@@ -372,15 +374,6 @@ inductor_override_kwargs = {
         "check_gradient": False,
     },
 }
-
-
-if not TEST_WITH_ROCM:
-    inductor_override_kwargs.update(
-        {
-            # We have better precision than eager
-            ("cumsum", "cuda", f16): {"reference_in_float": True},
-        }
-    )
 
 
 # Always test with all sample for following ops

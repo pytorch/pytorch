@@ -3,23 +3,20 @@
 #define C10_UTIL_CPP17_H_
 
 #include <c10/macros/Macros.h>
-#include <cstdlib>
 #include <functional>
 #include <memory>
-#include <sstream>
-#include <string>
 #include <type_traits>
 #include <utility>
 
 #if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
-    __GNUC__ < 5
+    __GNUC__ < 9
 #error \
-    "You're trying to build PyTorch with a too old version of GCC. We need GCC 5 or later."
+    "You're trying to build PyTorch with a too old version of GCC. We need GCC 9 or later."
 #endif
 
-#if defined(__clang__) && __clang_major__ < 4
+#if defined(__clang__) && __clang_major__ < 9
 #error \
-    "You're trying to build PyTorch with a too old version of Clang. We need Clang 4 or later."
+    "You're trying to build PyTorch with a too old version of Clang. We need Clang 9 or later."
 #endif
 
 #if (defined(_MSC_VER) && (!defined(_MSVC_LANG) || _MSVC_LANG < 201703L)) || \
@@ -53,11 +50,7 @@ using invoke_result_t = typename invoke_result<F, args...>::type;
 // std::is_trivial are introduced in C++11, std::conjunction has been introduced
 // in C++17.
 template <typename T>
-#if defined(__cpp_lib_logical_traits) && __cpp_lib_logical_traits >= 201510L
 using is_pod = std::conjunction<std::is_standard_layout<T>, std::is_trivial<T>>;
-#else
-using is_pod = std::is_pod<T>;
-#endif
 
 template <typename T>
 constexpr bool is_pod_v = is_pod<T>::value;

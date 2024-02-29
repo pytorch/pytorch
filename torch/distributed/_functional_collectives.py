@@ -12,8 +12,6 @@ from torch.fx.experimental.proxy_tensor import get_innermost_proxy_mode
 from . import _functional_collectives_impl as fun_col_impl
 from ._functional_collectives_impl import (  # noqa: F401
     _register_tensor_wrapper,
-    disable_native_funcol,
-    enable_native_funcol,
     native_funcol_enabled,
 )
 
@@ -159,8 +157,14 @@ def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
         group (ProcessGroup or List[int]): The process group to work on.
         tag (str, optional): A unique identifier for the collective. Default: empty string
     """
-    tag, rankset, group_size = _expand_group(group, tag)
-    tensor = torch.ops.c10d_functional.broadcast(self, src, tag, rankset, group_size)
+    if native_funcol_enabled():
+        group_name = _resolve_group_name(group, tag)
+        tensor = torch.ops._c10d_functional.broadcast(self, src, group_name)
+    else:
+        tag, rankset, group_size = _expand_group(group, tag)
+        tensor = torch.ops.c10d_functional.broadcast(
+            self, src, tag, rankset, group_size
+        )
     return _maybe_wrap_tensor(tensor)
 
 
@@ -476,6 +480,13 @@ def all_to_all_single(
     if native_funcol_enabled():
         group_name = _resolve_group_name(group, tag)
         group_size = c10d._get_group_size_by_name(group_name)
+        if output_split_sizes is None or input_split_sizes is None:
+            assert output_split_sizes is None and input_split_sizes is None, (
+                "output_split_sizes and input_split_sizes must either be "
+                "specified together or both set to None"
+            )
+            output_split_sizes = [self.shape[0] // group_size] * group_size
+            input_split_sizes = output_split_sizes
         tensor = torch.ops._c10d_functional.all_to_all_single(  # type: ignore[attr-defined]
             self,
             output_split_sizes,
@@ -812,6 +823,10 @@ def _all_reduce__meta(inp, *args):
     return inp
 
 
+def _broadcast__meta(inp, *args):
+    return inp
+
+
 def _all_reduce_coalesced__meta(inputs, *args):
     return inputs
 
@@ -926,6 +941,8 @@ if not torch._running_with_deploy():
         "Meta",
     )
     _c10_lib_impl.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
+    _c10_lib_impl.impl("broadcast", _broadcast_meta, "Meta")
+    _c10_lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
 else:
     warnings.warn(
         "PyTorch Distributed functional collectives do not work with torch::deploy."
@@ -986,9 +1003,48 @@ def all_reduce_inplace(
     return tensor.copy_(all_reduce(tensor, op, group, tag))
 
 
+def all_to_all_inplace(
+    output: torch.Tensor,
+    input: torch.Tensor,
+    output_split_sizes=None,
+    input_split_sizes=None,
+    group=None,
+    async_op=False,
+    tag: str = "",
+):
+    assert (
+        not async_op
+    ), "Can't remap async version of inplace op to functional collective"
+    return output.copy_(
+        all_to_all_single(input, output_split_sizes, input_split_sizes, group, tag)
+    )
+
+
+def all_gather_inplace(
+    tensor_list: List[torch.Tensor],
+    tensor: torch.Tensor,
+    group=None,
+    async_op=False,
+    tag: str = "",
+):
+    assert (
+        not async_op
+    ), "Can't remap async version of inplace op to functional collective"
+    output = all_gather_tensor(tensor, 0, group, tag)
+    for dst, src in zip(
+        tensor_list, output.split([t.size(0) for t in tensor_list], dim=0)
+    ):
+        dst.copy_(src)
+    return tensor_list
+
+
 from torch.distributed.distributed_c10d import (
+    _all_gather_base as legacy_all_gather_base,
+    _reduce_scatter_base as legacy_reduce_scatter_base,
+    all_gather as legacy_all_gather,
     all_gather_into_tensor as legacy_allgather,
     all_reduce as legacy_allreduce,
+    all_to_all_single as legacy_all_to_all_single,
     reduce_scatter_tensor as legacy_reducescatter,
 )
 
@@ -998,4 +1054,8 @@ traceable_collective_remaps = {
     legacy_allgather: all_gather_tensor_inplace,
     legacy_reducescatter: reduce_scatter_tensor_inplace,
     legacy_allreduce: all_reduce_inplace,
+    legacy_all_to_all_single: all_to_all_inplace,
+    legacy_all_gather: all_gather_inplace,
+    legacy_reduce_scatter_base: reduce_scatter_tensor_inplace,
+    legacy_all_gather_base: all_gather_tensor_inplace,
 }

@@ -70,12 +70,21 @@ class TestSerialize(TestCase):
                 with torch.enable_grad():
                     return x + x
 
+        inp = (torch.ones(10),)
         with torch.no_grad():
             from torch.export._trace import _export
-            ep = _export(Foo(), (torch.ones(10),), pre_dispatch=True)
+            ep = _export(Foo(), inp, pre_dispatch=True)
 
-        with self.assertRaisesRegex(SerializeError, "Failed serializing node _set_grad_enabled"):
-            torch.export.save(ep, io.BytesIO())
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = torch.export.load(buffer)
+
+        exp_out = ep.module()(*inp)
+        actual_out = loaded_ep.module()(*inp)
+        self.assertEqual(exp_out, actual_out)
+        self.assertEqual(exp_out.requires_grad, actual_out.requires_grad)
+
 
     def test_serialize_multiple_returns_from_node(self) -> None:
         class MyModule(torch.nn.Module):
@@ -326,7 +335,7 @@ class TestDeserialize(TestCase):
 
     def test_auto_functionalize(self):
         try:
-            lib = torch.library.Library("mylib", "FRAGMENT")
+            lib = torch.library.Library("mylib", "FRAGMENT")  # noqa: TOR901
             torch.library.define(
                 "mylib::foo1",
                 "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor n) -> Tensor",
@@ -522,7 +531,7 @@ class TestDeserialize(TestCase):
     def test_tensor_tensor_list(self):
         try:
             from torch.library import Library
-            lib = Library("_export", "FRAGMENT")
+            lib = Library("_export", "FRAGMENT")  # noqa: TOR901
             lib.define(
                 "_test_tensor_tensor_list_output(Tensor x, Tensor y) -> (Tensor, Tensor[])",
                 tags=torch.Tag.pt2_compliant_tag)

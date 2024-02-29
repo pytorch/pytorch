@@ -309,9 +309,36 @@ void cacheAllocatorDeregisterHook(
   }
 }
 
+#ifdef IS_NCCL_EXP
+#ifdef NCCL_COMM_DUMP
 std::string dump_nccl_trace() {
-  return NCCLTraceBuffer::get()->dump();
+  std::unordered_map<
+      std::string /* ncclUniqueID */,
+      std::unordered_map<std::string, std::string> /* dump from this comm */>
+      ncclDumpMap;
+  // dump_nccl_trace is only called from the default PG (uid_=0), but we want to
+  // dump from all comms so we need to iterate over ncclCommDevIdxMap, which
+  // is static
+  std::vector<std::shared_ptr<NCCLComm>> allNCCLComms;
+  // within the critical section, we don't want to dump while holding the lock
+  // as dump might hang
+  ncclCommDevIdxMapMutex.lock();
+  for (auto& [ncclComm, _] : ncclCommDevIdxMap) {
+    allNCCLComms.push_back(ncclComm);
+  }
+  ncclCommDevIdxMapMutex.unlock();
+  for (auto& ncclComm : allNCCLComms) {
+    std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getNcclId());
+    ncclDumpMap[ncclUniqueIDStr] = ncclComm->ncclCommDump();
+  }
+  return NCCLTraceBuffer::get()->dump(ncclDumpMap);
 }
+#endif
+#else
+std::string dump_nccl_trace() {
+  return NCCLTraceBuffer::get()->dump(c10::nullopt);
+}
+#endif
 
 c10::optional<std::function<std::string()>>& get_cpp_trace_dumper() {
   static c10::optional<std::function<std::string()>> dumper(c10::nullopt);
@@ -616,7 +643,6 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
     // Python, thus blocking current stream would already block the next
     // compute kernel;
     // - achieve better barrier performance.
-    LOG(INFO) << logPrefix() << "Waiting in barrier; this is a CPU halt";
     auto currentStream = at::cuda::getCurrentCUDAStream(device_.index());
     AT_CUDA_CHECK(cudaStreamSynchronize(currentStream));
   }
@@ -842,7 +868,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // segment when SEGMENT_ALLOC action occurs, and deregister a segment when
   // SEGMENT_FREE action occurs.
   // We attach hooks only once at the first PG creation.
+  // Attaching hooks fails if CUDACachingAllocator is not initialized, so
+  // lazyInitCUDA is called (and is a no-op if CUDA is already initialized).
   if (useTensorRegisterAllocatorHook_ && !allocatorHooksAttached) {
+    at::globalContext().lazyInitCUDA();
     c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
         &cacheAllocatorRegisterHook);
     c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
@@ -1938,7 +1967,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     rank = p2pRank;
   }
   // Get the device index
-  int deviceIndex = device.index();
+  auto deviceIndex = device.index();
   gpuGuard.set_index(deviceIndex);
 #ifdef NCCL_HAS_COMM_SPLIT
   if (options_->split_from) {
@@ -2162,7 +2191,8 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
   r->trace_id_ = NCCLTraceBuffer::get()->record(
       uid_,
       seq_,
-      profilingTitle,
+      // create a string copy of profilingTitle
+      profilingTitle ? profilingTitle : "",
       inputs,
       outputs,
       r->ncclStartEvent_.get(),
@@ -2793,61 +2823,59 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
   tensor = tensor.coalesce();
   at::Tensor outputTensor =
       torch::zeros(tensor.sizes(), tensor.options().layout(torch::kStrided));
-}
-int dev_in_group = 0;
-auto work = collective(
-    tensor,
-    outputTensor,
-    [&](at::Tensor& input,
-        at::Tensor& output,
-        ncclComm_t comm,
-        at::cuda::CUDAStream& stream) {
-      auto ncclDataType = getNcclDataType(input.scalar_type());
-      auto ncclReduceOp =
-          getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
+  auto work = collective(
+      tensor,
+      outputTensor,
+      [&](at::Tensor& input,
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        auto ncclDataType = getNcclDataType(input.scalar_type());
+        auto ncclReduceOp =
+            getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
 
-      size_t num_elements = output.numel();
-      auto indices = input.indices();
-      auto sizes = input.sizes();
-      int colSize = sizes[1];
-      auto rows = indices[0];
-      size_t blockCount = rows.sizes()[0];
-      auto recvIndices = indices[0] * colSize;
+        size_t num_elements = output.numel();
+        auto indices = input.indices();
+        auto sizes = input.sizes();
+        int colSize = sizes[1];
+        auto rows = indices[0];
+        size_t blockCount = rows.sizes()[0];
+        auto recvIndices = indices[0] * colSize;
 
-      // prevent output and recvIndices from being freed
-      c10::cuda::CUDACachingAllocator::recordStream(
-          output.storage().data_ptr(), stream);
-      c10::cuda::CUDACachingAllocator::recordStream(
-          recvIndices.storage().data_ptr(), stream);
-      auto result = ncclAllReduceSparseBlock(
-          input._values().data_ptr(), // sendbuff
-          recvIndices.data_ptr<int64_t>(), // recv_indices
-          blockCount, // block_count
-          colSize, // block_length
-          output.data_ptr(), // recvbuff
-          output.numel(), // recv_count
-          ncclDataType,
-          ncclReduceOp,
-          comm,
-          stream.stream());
-      return result;
-    },
-    [](at::cuda::CUDAStream& ncclStream,
-       c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
-    [&](at::cuda::CUDAStream& ncclStream,
-        c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {
-      // Convert output tensors to sparse and back into tensors.
-      at::cuda::CUDAStreamGuard guard(ncclStream);
-      if (opts.sparseIndices.has_value()) {
-        tensor = at::sparse_coo_tensor(
-            opts.sparseIndices.value(), outputTensor, tensor.sizes());
-      } else {
-        tensor = outputTensor.to_sparse();
-      }
-    },
-    OpType::_ALLREDUCE_SPARSE,
-    "nccl:all_reduce_sparse");
-return work;
+        // prevent output and recvIndices from being freed
+        c10::cuda::CUDACachingAllocator::recordStream(
+            output.storage().data_ptr(), stream);
+        c10::cuda::CUDACachingAllocator::recordStream(
+            recvIndices.storage().data_ptr(), stream);
+        auto result = ncclAllReduceSparseBlock(
+            input._values().data_ptr(), // sendbuff
+            recvIndices.data_ptr<int64_t>(), // recv_indices
+            blockCount, // block_count
+            colSize, // block_length
+            output.data_ptr(), // recvbuff
+            output.numel(), // recv_count
+            ncclDataType,
+            ncclReduceOp,
+            comm,
+            stream.stream());
+        return result;
+      },
+      [](at::cuda::CUDAStream& ncclStream,
+         c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {},
+      [&](at::cuda::CUDAStream& ncclStream,
+          c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work) {
+        // Convert output tensors to sparse and back into tensors.
+        at::cuda::CUDAStreamGuard guard(ncclStream);
+        if (opts.sparseIndices.has_value()) {
+          tensor = at::sparse_coo_tensor(
+              opts.sparseIndices.value(), outputTensor, tensor.sizes());
+        } else {
+          tensor = outputTensor.to_sparse();
+        }
+      },
+      OpType::_ALLREDUCE_SPARSE,
+      "nccl:all_reduce_sparse");
+  return work;
 #else
   // If the nccl branch is not "exp" then we just error
   C10_THROW_ERROR(

@@ -134,7 +134,7 @@
   autogen: _new_zeros_with_same_feature_meta.out
 
 # This function compares the storage numel of self with that of other, where
-# storage numel is cumputed as: `other.storage().nbytes() / other.itemsize()`.
+# storage numel is computed as: `other.storage().nbytes() / other.itemsize()`.
 # We create this function for composite compliance purposes. The batching rule
 # always returns true because vmapped as_strided does not support accessing
 # storage locations not indexable by the input tensor.
@@ -478,6 +478,7 @@
 - func: conj_physical.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: conj_physical_out
+    MPS: conj_physical_out_mps
     SparseCPU, SparseCUDA: conj_physical_out_sparse
     SparseCsrCPU, SparseCsrCUDA: conj_physical_sparse_csr_out
   tags: pointwise
@@ -771,7 +772,7 @@
   dispatch:
     CompositeExplicitAutograd: arange
 
-# This operator should be named `aragne.start_out` if following the naming convention. However that
+# This operator should be named `arange.start_out` if following the naming convention. However that
 # name is already taken. Disabled because of CI job failures.
 # FIXME: enable this
 #- func: arange.start_out_(Scalar start, Scalar end, *, Tensor(a!) out) -> Tensor(a!)
@@ -2973,12 +2974,14 @@
   dispatch:
     CPU: _fft_r2c_mkl
     CUDA: _fft_r2c_cufft
+    MPS: _fft_r2c_mps
 
 - func: _fft_r2c.out(Tensor self, int[] dim, int normalization, bool onesided, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: _fft_r2c_mkl_out
     CUDA: _fft_r2c_cufft_out
+    MPS: _fft_r2c_mps_out
 
 # Complex to real inverse FFT
 - func: _fft_c2r(Tensor self, int[] dim, int normalization, SymInt last_dim_size) -> Tensor
@@ -2986,12 +2989,14 @@
   dispatch:
     CPU: _fft_c2r_mkl
     CUDA: _fft_c2r_cufft
+    MPS: _fft_c2r_mps
 
 - func: _fft_c2r.out(Tensor self, int[] dim, int normalization, SymInt last_dim_size, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: _fft_c2r_mkl_out
     CUDA: _fft_c2r_cufft_out
+    MPS: _fft_c2r_mps_out
 
 # Standard complex to complex FFT (forward or backward)
 - func: _fft_c2c(Tensor self, SymInt[] dim, int normalization, bool forward) -> Tensor
@@ -2999,12 +3004,14 @@
   dispatch:
     CPU: _fft_c2c_mkl
     CUDA: _fft_c2c_cufft
+    MPS: _fft_c2c_mps
 
 - func: _fft_c2c.out(Tensor self, SymInt[] dim, int normalization, bool forward, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: _fft_c2c_mkl_out
     CUDA: _fft_c2c_cufft_out
+    MPS: _fft_c2c_mps_out
 
 - func: _validate_compressed_sparse_indices(bool is_crow, Tensor compressed_idx, Tensor plain_idx, int cdim, int dim, int nnz) -> ()
   device_check: NoCheck
@@ -4462,7 +4469,6 @@
     MPS: pixel_shuffle_mps
     CompositeExplicitAutogradNonFunctional: math_pixel_shuffle
   autogen: pixel_shuffle.out
-  tags: core
 
 - func: pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
   dispatch:
@@ -4992,6 +4998,7 @@
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
+    QuantizedCPU: gelu_quantized_cpu_
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_gelu_
 
 - func: gelu(Tensor self, *, str approximate='none') -> Tensor
@@ -5791,6 +5798,7 @@
   variants: function
   dispatch:
     CPU, CUDA: std_mean
+    MPS: std_mean_mps
   autogen: std_mean.correction_out
 
 - func: std_mean.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
@@ -6046,7 +6054,6 @@
     CPU, MPS: roll
     CUDA: roll_cuda
   autogen: roll.out
-  tags: core
 
 # default int[] value [0,1] should not add space after comma, since codegen parser uses ', ' to split args
 
@@ -6313,6 +6320,7 @@
   variants: function
   dispatch:
     CPU, CUDA: var_mean
+    MPS: var_mean_mps
   autogen: var_mean.correction_out
 
 - func: var_mean.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
@@ -12872,7 +12880,7 @@
     SparseMeta: isinf_sparse_meta
     SparseCsrCPU, SparseCsrCUDA: isinf_sparse_csr
   autogen: isinf.out
-  tags: core
+  tags: [core, pointwise]
 
 - func: record_stream(Tensor(a!) self, Stream s) -> ()
   variants: method
@@ -14551,6 +14559,11 @@
     CUDA: _scaled_dot_product_efficient_attention_backward_cuda
   tags: nondeterministic_seeded
 
+- func: _scaled_dot_product_cudnn_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor ouput, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset)
+  dispatch:
+    CUDA: _scaled_dot_product_cudnn_attention_cuda
+  tags: nondeterministic_seeded
+
 - func: _flash_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cum_seq_q, Tensor? cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, bool return_debug_mask, *, float? scale=None) -> (Tensor output, Tensor softmax_logsumexp, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
   variants: function
   dispatch:
@@ -14563,7 +14576,7 @@
   dispatch:
     CUDA: _flash_attention_backward
 
-# Returns ouput, logsumexp if compute_logsumexp
+# Returns output, logsumexp if compute_logsumexp
 - func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, int? max_seqlen_k, float dropout_p, int custom_mask_type, bool compute_log_sumexp=False, *, float? scale=None, Tensor? causal_diagonal=None, Tensor? seqlen_k=None) -> (Tensor output, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, SymInt max_seqlen_batch_q, SymInt max_seqlen_batch_k)
   variants: function
   dispatch:

@@ -183,7 +183,7 @@ struct Flash_fwd_kernel_traits : public Base {
                         Layout<Shape < _1, _8>>{}));  // Val layout, 8 vals per load
 };
 
-// Is_V_in_regs is an option to reduce smem usage, but will increase register pressue.
+// Is_V_in_regs is an option to reduce smem usage, but will increase register pressure.
 // No_double_buffer is another option to reduce smem usage, but will slow things down.
 template<int kHeadDim_, int kBlockM_, int kBlockN_, int kNWarps_,
          int AtomLayoutMSdP_=1, int AtomLayoutNdKV=2, int AtomLayoutMdQ=2,

@@ -647,6 +647,20 @@ class TestForeach(TestCase):
         self.assertEqual(expect, actual, equal_nan=False)
 
     @onlyCUDA
+    @ops(foreach_reduce_op_db, allowed_dtypes=floating_types())
+    def test_big_num_tensors(self, device, dtype, op):
+        N = 600
+        tensorlist = [make_tensor((2, 3), dtype=dtype, device=device, noncontiguous=False) for _ in range(N)]
+        fn, ref_fn, *_ = self._get_funcs(op)
+
+        import math
+        for ord in (1, 2, math.inf):
+            actual = fn(inputs=[tensorlist], is_cuda=True, expect_fastpath=True, ord=ord, zero_size=False)
+            expect = ref_fn(inputs=[tensorlist], ord=ord)
+
+            self.assertEqual(expect, actual, equal_nan=True)
+
+    @onlyCUDA
     @ops(foreach_reduce_op_db)
     def test_foreach_reduce_large_input(self, device, dtype, op):
         # test inputs larger than kChunkSize = 65536

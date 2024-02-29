@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <iosfwd>
+#include <limits>
 #include <string>
 
 namespace c10 {
@@ -16,7 +17,7 @@ namespace c10 {
 /// A DeviceIndex is not independently meaningful without knowing
 /// the DeviceType it is associated; try to use Device rather than
 /// DeviceIndex directly.
-using DeviceIndex = int8_t;
+using DeviceIndex = int16_t;
 
 /// Represents a compute device on which a tensor is located. A device is
 /// uniquely identified by a type, which specifies the type of machine it is
@@ -29,6 +30,18 @@ using DeviceIndex = int8_t;
 /// represents a specific, concrete device,
 /// 2. When the device type is CPU, the device index must be zero.
 struct C10_API Device final {
+  /// The maximum number of devices that we recognize (formerly known as
+  /// C10_COMPILE_TIME_MAX_GPUS). This value cannot be more than 32767 because
+  /// our DeviceIndex is a int16_t. Note that this does not include the default
+  /// device index -1, but instead defines the range from 0 to MAX_NUM_DEVICES-1
+  /// inclusively.
+#ifdef FBCODE_CAFFE2
+  // fbcode depends on this value being 16
+  static constexpr DeviceIndex MAX_NUM_DEVICES = 16;
+#else
+  static constexpr DeviceIndex MAX_NUM_DEVICES = 512;
+#endif
+
   using Type = DeviceType;
 
   /// Constructs a new `Device` from a `DeviceType` and an optional device
@@ -60,6 +73,7 @@ struct C10_API Device final {
   /// Sets the device index.
   void set_index(DeviceIndex index) {
     index_ = index;
+    validate();
   }
 
   /// Returns the type of device this is.
@@ -175,8 +189,10 @@ struct C10_API Device final {
     // This is safe to do, because backends that use the DeviceIndex
     // have a later check when we actually try to switch to that device.
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        index_ >= -1,
-        "Device index must be -1 or non-negative, got ",
+        index_ >= -1 && index_ < MAX_NUM_DEVICES,
+        "Device index must be between -1 and ",
+        MAX_NUM_DEVICES - 1,
+        " inclusively, got ",
         static_cast<int>(index_));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         !is_cpu() || index_ <= 0,
@@ -196,7 +212,7 @@ struct hash<c10::Device> {
     // Are you here because this static assert failed?  Make sure you ensure
     // that the bitmasking code below is updated accordingly!
     static_assert(sizeof(c10::DeviceType) == 1, "DeviceType is not 8-bit");
-    static_assert(sizeof(c10::DeviceIndex) == 1, "DeviceIndex is not 8-bit");
+    static_assert(sizeof(c10::DeviceIndex) == 2, "DeviceIndex is not 16-bit");
     // Note [Hazard when concatenating signed integers]
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // We must first convert to a same-sized unsigned type, before promoting to
@@ -209,7 +225,7 @@ struct hash<c10::Device> {
     // sake.
     uint32_t bits = static_cast<uint32_t>(static_cast<uint8_t>(d.type()))
             << 16 |
-        static_cast<uint32_t>(static_cast<uint8_t>(d.index()));
+        static_cast<uint32_t>(static_cast<uint16_t>(d.index()));
     return std::hash<uint32_t>{}(bits);
   }
 };

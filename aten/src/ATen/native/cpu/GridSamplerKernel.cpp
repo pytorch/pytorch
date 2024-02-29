@@ -7,12 +7,10 @@
 #include <ATen/TensorGeometry.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/cpu/vec/vec.h>
-#include <c10/util/C++17.h>
 #include <c10/util/irange.h>
 
 #include <algorithm>
 #include <cstring>
-#include <type_traits>
 
 namespace at::native { namespace {
 
@@ -110,7 +108,7 @@ namespace at::native { namespace {
  *          //   3. writes the first `len` values in the interpolated vector to
  *          //      `out_slice` with spatial offset being `offset`.
  *          //
- *          // This assimes that `grid_x` and `grid_y` all contain valid grid
+ *          // This assumes that `grid_x` and `grid_y` all contain valid grid
  *          // values \in [-1, 1], even at indices greater than `len`.
  *          //
  *          // The `*_slice` argument names mean samples within a batch (i.e.,

@@ -1468,6 +1468,41 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             model_type=self.model_type,
         )
 
+    @pytorch_test_common.skip_dynamic_fx_test(
+        reason="Dynamic shape check is not expected for exported program in this test suite.",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+    )
+    @pytorch_test_common.xfail_if_model_type_is_not_exportedprogram(
+        error_message="Expected 4 inputs, got 2",
+        reason="https://github.com/pytorch/pytorch/issues/115745",
+    )
+    def test_fake_tensor_mode_huggingface_tiny_gpt2_torch_load(self):
+        model_name = "sshleifer/tiny-gpt2"
+        device = "cpu"
+
+        def create_model():
+            return transformers.AutoModel.from_pretrained(model_name).to(device).eval()
+
+        def create_args():
+            tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
+            kwargs = tokenizer("Hello world!", return_tensors="pt")
+            input_ids = kwargs["input_ids"]
+            attention_mask = kwargs["attention_mask"]
+            return input_ids, None, attention_mask
+
+        def create_pytorch_only_extra_kwargs():
+            return {"return_dict": False}
+
+        self._test_fake_tensor_mode_exporter(
+            "huggingface_sshleifer_tiny-gpt2",
+            create_model,
+            create_args,
+            create_pytorch_only_extra_kwargs,
+            load_checkpoint_during_init=self.load_checkpoint_during_init,
+            export_within_fake_mode=self.export_within_fake_mode,
+            model_type=self.model_type,
+        )
+
 
 if __name__ == "__main__":
     common_utils.run_tests()

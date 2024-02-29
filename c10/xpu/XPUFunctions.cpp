@@ -5,7 +5,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <cmath>
-#include <deque>
 #include <mutex>
 #include <vector>
 
@@ -90,10 +89,12 @@ void initDeviceProperties(DeviceProp* device_prop, int device) {
   return;
 }
 
-inline void check_device(int device) {
-  int total = static_cast<int>(gDevicePool.devices.size());
+inline void check_device(DeviceIndex device) {
   TORCH_CHECK(
-      device >= 0 && device < total,
+      device >= 0 &&
+          device < std::min(
+                       gDevicePool.devices.size(),
+                       std::numeric_limits<DeviceIndex>::max()),
       "device is out of range, device is ",
       device,
       ", total number of device is ",
@@ -103,7 +104,7 @@ inline void check_device(int device) {
 
 } // anonymous namespace
 
-sycl::device& get_raw_device(int device) {
+sycl::device& get_raw_device(DeviceIndex device) {
   initDevicePoolCallOnce();
   check_device(device);
   return *gDevicePool.devices[device];
@@ -117,7 +118,7 @@ sycl::context& get_device_context() {
   return *gDevicePool.context;
 }
 
-void get_device_properties(DeviceProp* device_prop, int device) {
+void get_device_properties(DeviceProp* device_prop, DeviceIndex device) {
   initDevicePoolCallOnce();
   TORCH_CHECK(device_prop, "device_prop is an invalid pointer.");
   check_device(device);
@@ -166,16 +167,16 @@ void set_device(DeviceIndex device) {
   curDeviceIndex = device;
 }
 
-int exchange_device(int to_device) {
-  auto cur_device = static_cast<int>(current_device());
+c10::DeviceIndex exchange_device(c10::DeviceIndex to_device) {
+  auto cur_device = current_device();
   if (to_device == cur_device) {
     return cur_device;
   }
-  set_device(static_cast<DeviceIndex>(to_device));
+  set_device(to_device);
   return cur_device;
 }
 
-int maybe_exchange_device(int to_device) {
+c10::DeviceIndex maybe_exchange_device(c10::DeviceIndex to_device) {
   return exchange_device(to_device);
 }
 

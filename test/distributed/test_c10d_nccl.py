@@ -1389,7 +1389,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @requires_nccl()
-    @skip_but_pass_in_sandcastle_if(not TEST_CUDA, "No GPUs available, skipping test")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_set_nccl_pg_timeout(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         opts = dict(
@@ -1452,6 +1452,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             self.assertEqual(backend.comm_split_count(), 1)
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_comm_split_subgroup(self):
         # Test `ncclCommSplit` for smaller subgroups of the world when
         # we've passed a specific device_id to init_process_group.
@@ -4151,6 +4152,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(len(t), 10)
         first = t[0]
         last = t[-1]
+        self.assertEqual(last['profiling_name'], 'nccl:all_reduce')
         self.assertEqual(last['state'], 'completed')
         self.assertIn('test_c10d_nccl.py', str(last['frames']))
         self.assertEqual(last['input_sizes'], ((3, 4),))
@@ -4183,6 +4185,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             e.synchronize()
             t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
             t = t['entries']
+            self.assertEqual(t[-1]['profiling_name'], 'nccl:all_reduce')
             if self.rank == 0:
                 self.assertEqual(t[-1]['seq_id'], 1)
                 self.assertEqual(t[-1]['state'], 'completed')
@@ -4225,6 +4228,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 time.sleep(5)
                 t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
                 t = t['entries']
+                self.assertEqual(t[-1]['profiling_name'], 'nccl:all_reduce')
                 if self.rank == 0:
                     self.assertEqual(t[-1]['seq_id'], 1)
                     self.assertEqual(t[-1]['state'], 'completed')
