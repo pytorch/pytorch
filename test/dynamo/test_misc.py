@@ -5908,16 +5908,35 @@ def fn():
         self.assertEqual(cnt.frame_count, 0)
 
     def test_is_compiling(self):
-        def f():
+        def f1():
             if torch._dynamo.is_compiling():
                 return torch.ones(2, 2)
             else:
                 return torch.zeros(2, 2)
 
-        opt_f = torch._dynamo.optimize("eager")(f)
+        def f2():
+            if torch._utils.is_compiling():
+                return torch.ones(2, 2)
+            else:
+                return torch.zeros(2, 2)
 
-        self.assertEqual(f(), torch.zeros(2, 2))
-        self.assertEqual(opt_f(), torch.ones(2, 2))
+        def f3():
+            if torch.compiler.is_compiling():
+                return torch.ones(2, 2)
+            else:
+                return torch.zeros(2, 2)
+
+        def f4():
+            if torch.compiler.is_dynamo_compiling():
+                return torch.ones(2, 2)
+            else:
+                return torch.zeros(2, 2)
+
+        for f in [f1, f2, f3, f4]:
+            opt_f = torch._dynamo.optimize("eager")(f)
+
+            self.assertEqual(f(), torch.zeros(2, 2))
+            self.assertEqual(opt_f(), torch.ones(2, 2))
 
     def test_torch_generator_set_state(self):
         def fn():
@@ -6014,7 +6033,7 @@ def fn():
                 first_guard_failure,
             )
         else:
-            self.assertIn("""L['x'].size()[0] < 3""", first_guard_failure)
+            self.assertIn("""2 <= L['x'].size()[0] <= 2""", first_guard_failure)
 
     def test_guard_failure_fn2(self):
         def fn(x, y):
@@ -6201,6 +6220,18 @@ def fn():
         inputs = [torch.randn(10, 10) for _ in range(3)]
 
         fn(inputs, iter(tuple(inputs)))
+
+        def fn(params):
+            y = tuple(params)
+            return inner_fn(*y)
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        inputs = [torch.randn(10, 10) for _ in range(3)]
+        self.assertTrue(same(fn(iter(tuple(inputs))), opt_fn(iter(tuple(inputs)))))
+
+        # Force recompilation
+        inputs = [torch.randn(10, 10) for _ in range(4)]
+        self.assertTrue(same(fn(iter(tuple(inputs))), opt_fn(iter(tuple(inputs)))))
 
     def test_torch_package_working_with_trace(self):
         # from torch._dynamo.test_case import run_tests
@@ -9278,9 +9309,6 @@ ShapeEnv not equal: field values don't match:
 ==> name_to_node: values don't match.
   >  Left: {_assert, ge, x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
   > Right: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
-==> var_to_guards: values don't match.
-  >  Left: {s0: (s0 >= 3, None)}
-  > Right: {}
 ==> var_to_range: values don't match.
   >  Left: {s0: ValueRanges(lower=3, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
   > Right: {s0: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}

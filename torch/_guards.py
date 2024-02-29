@@ -620,6 +620,11 @@ class TracingContext:
         # See note [Tensor Fakification and Symbol Caching]
         self.tensor_to_context = WeakTensorKeyDictionary()
 
+        # If this true, Aot Autograd will return output Fake Tensors with appropiate
+        # meta on the first invocation
+        # see note: [Returning Fake Tensors on First AOT Autograd Call]
+        self.fakify_first_call = False
+
     def clear(self):
         # Look at the note in output_graph.py in function `save_global_state`
         # for the context on clearing global context.
