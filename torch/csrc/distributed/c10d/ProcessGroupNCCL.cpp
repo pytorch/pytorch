@@ -273,6 +273,9 @@ inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
 static std::unordered_map<std::shared_ptr<NCCLComm>, int> ncclCommDevIdxMap;
 static std::mutex ncclCommDevIdxMapMutex;
 static bool allocatorHooksAttached = false;
+
+std::atomic<bool> ProcessGroupNCCL::shouldDump_(false);
+
 void cacheAllocatorRegisterHook(
     const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
   // Register after SEGMENT_ALLOC
@@ -1197,6 +1200,32 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     // dump debugging info, and we avoid hammering the TCPStore from all PGs on
     // the same rank.
     if (checkTimeoutSignal) {
+      // There are two scenarios where monitor thread will dump on timeout:
+      // 1. The local rank is the first to observe a timeout.shouldDump_ will be
+      // set to true.
+      // 2. other ranks detected the timeout and signal the local rank to dump
+      // In addtion, monitor threads will dump if watchdog threads has not
+      // heartbeat.
+      if (shouldDump_.load()) {
+        errorMsg = c10::str(
+            logPrefix(),
+            "Received a timeout signal from this local rank and will ",
+            "start to dump the debug info. ",
+            "Last enqueued NCCL work: ",
+            lastEnqueuedSeq_,
+            ", last completed NCCL work: ",
+            lastCompletedSeq_,
+            ".");
+        exitMsg = c10::str(
+            "ProcessGroupNCCL's watchdog detected a collective timeout locally. ",
+            "This is most likely caused by incorrect usages of collectives, e.g., wrong ",
+            "sizes used across ranks, the order of collectives is not same for all ranks ",
+            "or the scheduled collective, for some reason, didn't run. Additionally, ",
+            "this can be caused by GIL deadlock or other reasons such as network errors or ",
+            "bugs in the communications library (e.g. NCCL), etc. We tried our best to ",
+            "dump the debug info into the storage to help you debug the issue.");
+        break;
+      }
       // We poll store to see if some ranks have flagged a timeout when
       // we haven't polled for `heartbeat_timeout` seconds and there haven't
       // any work added or removed for `watchdog_timeout` seconds.
@@ -1475,8 +1504,6 @@ const int& ProcessGroupNCCL::globalRank() const {
 void ProcessGroupNCCL::watchdogHandler() {
   bool done = false;
   lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
-  c10::optional<std::future<bool>> optAsyncDebugDump;
-
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
 
   c10::optional<DumpPipe> dumpPipe = c10::nullopt;
@@ -1553,21 +1580,11 @@ void ProcessGroupNCCL::watchdogHandler() {
               globalStore_->set(std::string(TIMEOUT_DUMP), vec);
             }
 
-            if (dumpOnTimeout_ && !optAsyncDebugDump) {
-              // Store debug info to storage. (By default to local disk)
-              optAsyncDebugDump = std::async(std::launch::async, [this]() {
-                return this->dumpDebuggingInfo();
-              });
-              // wait for the dump until timeout
-              waitForFutureOrTimeout(
-                  *optAsyncDebugDump,
-                  std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
-                  "Flight recorder dump in watchdog");
-              // This sleep is used to give additional time for other ranks to
-              // receive the dump signal and then dump flight records, the same
-              // sleep time used in the heartbeatmonitor thread
-              // TODO, we should probably dump from a single thread in the
-              // future
+            if (dumpOnTimeout_) {
+              // signal the monitor thread to start dumping
+              shouldDump_.store(true);
+              // This sleep is used to give time for dumping before throwing
+              // exeption
               std::this_thread::sleep_for(
                   std::chrono::seconds(heartbeatTimeoutInSec_));
             }
@@ -1632,9 +1649,9 @@ void ProcessGroupNCCL::watchdogHandler() {
     // requests, but this is fine since all PG's feed into the same flight
     // recorder and dump.
     if (dumpPipe.has_value() && dumpPipe->shouldDump()) {
-      std::future<bool> fut = std::async(
-          std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
       // best effort dump, watchdog is not waiting for the dump here
+      // signal the monitor thread to start dumping
+      shouldDump_.store(true);
     }
     done = workMetaList_.empty();
   }
