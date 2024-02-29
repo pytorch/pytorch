@@ -128,24 +128,21 @@ class GuardManager:
             s += self.pretty_print_leaf_guard(prefix + "+- ", guard)
 
         if istype(mgr, DictGuardManager):
-            for kv_mgr in mgr.get_child_managers():
+            for kv_mgr in mgr.get_index_managers():
                 s += prefix + "+- " + kv_mgr.__class__.__name__ + "\n"
                 s += self._debug_print(kv_mgr, prefix + "|  ")
         elif istype(mgr, KeyValueDictGuardManager):
-            for idx, child_mgr in enumerate(mgr.get_child_managers()):
+            for idx, child_mgr in enumerate(mgr.get_key_value_managers()):
                 if child_mgr is None:
                     continue
                 suffix = " for key\n" if idx == 0 else "value\n"
                 s += prefix + "+- " + child_mgr.__class__.__name__ + suffix
                 s += self._debug_print(child_mgr, prefix + "|  ")
-        else:
-            # Now handle the general case of GuardManager/RootGuardManager
-            for accessor, child_mgr in zip(
-                mgr.get_accessors(), mgr.get_child_managers()
-            ):
-                suffix = " with " + accessor.repr() + "\n"
-                s += prefix + "+- " + child_mgr.__class__.__name__ + suffix
-                s += self._debug_print(child_mgr, prefix + "|  ")
+        # Now handle the general case of GuardManager/RootGuardManager
+        for accessor, child_mgr in zip(mgr.get_accessors(), mgr.get_child_managers()):
+            suffix = " with " + accessor.repr() + "\n"
+            s += prefix + "+- " + child_mgr.__class__.__name__ + suffix
+            s += self._debug_print(child_mgr, prefix + "|  ")
         return s
 
     def __str__(self):
@@ -700,9 +697,9 @@ class GuardBuilder(GuardBuilderBase):
             # TODO(anijain2305) - Consider this moving this guard to C++
             def fn(x):
                 return torch._functorch.pyfunctorch.compare_functorch_state(states)
+
             self.guard_manager.root.add_lambda_guard(
-                fn,
-                get_verbose_code_parts(code, guard)
+                fn, get_verbose_code_parts(code, guard)
             )
 
     def EQUALS_MATCH(self, guard: Guard):
@@ -930,14 +927,21 @@ class GuardBuilder(GuardBuilderBase):
         else:
             code.append(f"list({ref}.keys()) == {const_keys_repr}")
 
-            if config.enable_cpp_guard_manager:
-                # Install the key managers, no need of value managers
-                dict_mgr = self.get_guard_manager(guard)
-                assert isinstance(dict_mgr, DictGuardManager)
-                for idx, key in enumerate(list(value.keys())):
-                    dict_mgr.get_key_value_manager(idx).get_key_manager(
-                        key
-                    ).add_equals_match_guard(key, get_verbose_code_parts(code, guard))
+        if config.enable_cpp_guard_manager:
+            # Install the key managers, no need of value managers
+            dict_mgr = self.get_guard_manager(guard)
+            assert isinstance(dict_mgr, DictGuardManager)
+            for idx, key in enumerate(value.keys()):
+                index_mgr = dict_mgr.get_key_value_manager(idx)
+                if key_is_id(key):
+                    id_val = self.id_ref(key)
+                    index_mgr.get_key_manager(key).add_id_match_guard(
+                        id_val, get_verbose_code_parts(code, guard)
+                    )
+                else:
+                    index_mgr.get_key_manager(key).add_equals_match_guard(
+                        key, get_verbose_code_parts(code, guard)
+                    )
 
         self._produce_guard_code(guard, code)
 
@@ -1504,7 +1508,8 @@ class CheckFunctionManager:
 
         if config.enable_cpp_guard_manager:
             if guards_log.isEnabledFor(logging.DEBUG):
-                print(self.guard_manager)
+                guards_log.debug("%s", self.guard_manager)
+                # print(self.guard_manager)
             # breakpoint()
             self.guard_manager.id_matched_objs = builder.id_matched_objs
             self.check_fn = self.guard_manager
