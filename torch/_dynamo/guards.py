@@ -43,12 +43,13 @@ from torch._guards import (
     GuardSource,
     Source,
 )
+
+from torch._logging import structured
 from torch.fx.experimental.symbolic_shapes import (
     EqualityConstraint,
     is_symbolic,
     SYMPY_INTERP,
 )
-
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
 
@@ -669,31 +670,29 @@ class GuardBuilder(GuardBuilderBase):
             ]
 
         if output_graph.export_constraints:
+            from sympy import Symbol
+
             source_pairs: List[Tuple[Source, Source]] = []
+            derived_equalities: List[  # type: ignore[type-arg]
+                Tuple[Source, Union[Source, Symbol], Callable]
+            ] = []
+            phantom_symbols: Dict[str, Symbol] = {}
             for constraint in output_graph.export_constraints:
                 if constraint.t_id in output_graph.tracked_fakes_id_to_source:
-                    source, *other_sources = get_sources(
-                        constraint.t_id, constraint.dim
+                    torch.export.dynamic_shapes._process_equalities(
+                        constraint,
+                        get_sources,
+                        output_graph.shape_env,
+                        source_pairs,
+                        derived_equalities,
+                        phantom_symbols,
                     )
-                    # When t.size()[dim] maps to src0, src1, ..., srcN, we add
-                    # constraints that make src0 "equal" to src1, ..., srcN.
-                    source_pairs.extend(
-                        (source, other_source) for other_source in other_sources
-                    )
-                    if constraint.shared is not None:
-                        # Moreover, when t.size()[dim] is specified equal to t'.size()[dim']
-                        # and t'.size()[dim'] maps to src1', ..., srcN', we add
-                        # constraints that also make src0 "equal" to src1', ..., srcN'.
-                        other_sources = get_sources(
-                            constraint.shared.t_id, constraint.shared.dim
-                        )
-                        source_pairs.extend(
-                            (source, other_source) for other_source in other_sources
-                        )
                 else:
                     log.warning("Untracked tensor used in export constraints")
             equalities_inputs = EqualityConstraint(
                 source_pairs=source_pairs,
+                derived_equalities=derived_equalities,
+                phantom_symbols=list(phantom_symbols.values()),
                 warn_only=False,
             )
         else:
@@ -1085,10 +1084,23 @@ class CheckFunctionManager:
         # Don't report this guard, it's always the same, useless!
         code_parts = ["___check_global_state()"]
         verbose_code_parts = code_parts[:]
+        structured_guard_fns = []
 
         def add_code_part(code_part, guard, log_only=False):
             verbose_code_part = get_verbose_code_part(code_part, guard)
             guards_log.debug("%s", verbose_code_part)
+
+            structured_guard_fns.append(
+                lambda: {
+                    "code": code_part,
+                    "stack": structured.from_traceback(guard.stack.summary())
+                    if guard.stack
+                    else None,
+                    "user_stack": structured.from_traceback(guard.user_stack)
+                    if guard.user_stack
+                    else None,
+                }
+            )
 
             if verbose_guards_log.isEnabledFor(logging.DEBUG):
                 maybe_stack = ""
@@ -1183,6 +1195,11 @@ class CheckFunctionManager:
         for gcl in builder.shape_env_code:
             for code in gcl.code_list:
                 add_code_part(code, gcl.guard)
+
+        # OK, all done generating guards
+        torch._logging.trace_structured(
+            "dynamo_guards", payload_fn=lambda: [f() for f in structured_guard_fns]
+        )
 
         global_state = convert_frame.initial_global_state
         if global_state is None:

@@ -9,7 +9,7 @@
 
 namespace at {
 
-std::ostream& operator<<(std::ostream & out, TensorGeometryArg t) {
+std::ostream& operator<<(std::ostream & out, const TensorGeometryArg& t) {
   if (t.pos == 0) {
     // 0 is distinguished; it usually indicates 'self' or the return
     // tensor
@@ -91,7 +91,7 @@ void checkSize(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, int64_t s
     " (while checking arguments for ", c, ")");
 }
 
-void checkSize_symint(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, c10::SymInt size) {
+void checkSize_symint(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, const c10::SymInt& size) {
   TORCH_CHECK(
     t->sym_size(dim) == size,
     "Expected tensor to have size ", size, " at dimension ", dim,
