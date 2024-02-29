@@ -4100,7 +4100,7 @@ class UserDefinedTritonKernel(ExternKernel):
         kernel, configs = self.get_kernel_and_configs()
 
         # Definition of kernel
-        new_name = wrapper.define_user_defined_triton_kernel(
+        new_name, triton_meta = wrapper.define_user_defined_triton_kernel(
             kernel, configs, self.kwargs
         )
 
@@ -4118,6 +4118,7 @@ class UserDefinedTritonKernel(ExternKernel):
             self.grid,
             configs,
             args,
+            triton_meta,
         )
 
     def should_allocate(self):

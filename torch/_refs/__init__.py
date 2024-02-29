@@ -4303,16 +4303,16 @@ def diag_embed(
     """
     Reference implementation of torch.diag_embed
     """
+    # convert from negative dims
+    rank = t.ndim + 1
+    dim1 = utils.canonicalize_dim(rank=rank, idx=dim1)
+    dim2 = utils.canonicalize_dim(rank=rank, idx=dim2)
+
     # as per the docs, exchanging dims is equivalent to changing the sign of
     # offset
     if dim1 > dim2:
         dim1, dim2 = dim2, dim1
         offset = -offset
-
-    # convert from negative dims
-    rank = t.ndim + 1
-    dim1 = utils.canonicalize_dim(rank=rank, idx=dim1)
-    dim2 = utils.canonicalize_dim(rank=rank, idx=dim2)
 
     torch._check(
         dim1 != dim2, lambda: f"diagonal dimensions cannot be identical {dim1}, {dim2}"
