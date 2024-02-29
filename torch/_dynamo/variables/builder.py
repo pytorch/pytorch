@@ -421,9 +421,11 @@ class VariableBuilder:
             result = {
                 ConstantVariable.create(k): UserDefinedObjectVariable(
                     v,
-                    source=GetItemSource(self.get_source(), k),
+                    source=GetItemSource(
+                        self.get_source(), ConstDictKeySource(self.get_source(), i)
+                    ),
                 )
-                for k, v in value.items()
+                for i, (k, v) in enumerate(value.items())
             }
             return ConstDictVariable(result, type(value))
         elif value is sys.modules:

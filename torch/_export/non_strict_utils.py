@@ -51,7 +51,7 @@ def key_path_to_source(kp: KeyPath) -> Source:
 
 
 def _is_constant_argument(t):
-    return t is None or isinstance(t, (int, float, bool))
+    return t is None or isinstance(t, (int, float, bool, str))
 
 
 def fakify(
@@ -65,7 +65,7 @@ def fakify(
     if _is_constant_argument(t) or isinstance(t, torch.ScriptObject):
         return t
     if not isinstance(t, torch.Tensor):
-        raise ValueError("Only tensors allowed as input")
+        raise ValueError(f"Unsupported input type {type(t)}")
     n_dims = len(t.shape)
     symbolic_context = StatelessSymbolicContext(
         dynamic_sizes=[DimDynamic.STATIC] * n_dims,
