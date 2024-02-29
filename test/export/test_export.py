@@ -2065,7 +2065,7 @@ def forward(self, arg_0):
         self.assertTrue(torch.allclose(Foo()(inp), reexported.module()(inp)))
 
         dim0_x = torch.export.Dim("dim0_x")
-        exported = torch.export.export(Foo(), (inp,), dynamic_shapes={"x": {0: dim0_x}})
+        exported = torch.export.export(Foo(), (inp,), dynamic_shapes=({0: dim0_x},))
         reexported = torch.export.export(exported.module(), (inp,))
         with self.assertRaisesRegex(
             RuntimeError, "shape\[0\] to be equal to 5, but got 7"
@@ -2201,7 +2201,7 @@ def forward(self, arg_0):
         self.assertTrue(len(stateful_module.meta["input_shape_constraints"]), 1)
 
         re_exported = export(
-            stateful_module, (inp,), constraints=[dynamic_dim(inp, 0) > 5]
+            stateful_module, (inp,), dynamic_shapes=({0: dim0_x},)
         )
         self.assertTrue(
             len(re_exported.graph_module.meta["input_shape_constraints"]) == 1
@@ -2607,7 +2607,10 @@ def forward(self, arg_0):
 
         inp = torch.randn(4, 4)
         gm = _export(
-            Foo(), (inp,), constraints=[dynamic_dim(inp, 0) >= 3], pre_dispatch=True
+            Foo(),
+            (inp,),
+            dynamic_shapes=({0: torch.export.Dim("dim", min=3)},),
+            pre_dispatch=True
         ).module()
 
         with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[0]")):
