@@ -293,13 +293,9 @@ class profile:
         if self.use_cuda:
             torch.cuda.synchronize()
         if self.use_device:
-            try:
-                privateuse1_module = getattr(torch, self.use_device)
+            privateuse1_module = getattr(torch, self.use_device)
+            if hasattr(privateuse1_module, "synchronize"):
                 privateuse1_module.synchronize()
-            except AttributeError:
-                warn(
-                    f"Not found torch.{self.use_device}.synchronize(). Skip syncing on {self.use_device}."
-                )
         self.kineto_results = _disable_profiler()
         _run_on_profiler_stop()
         parsed_results = self._parse_kineto_results(self.kineto_results)
