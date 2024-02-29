@@ -584,6 +584,7 @@ class ExternKernelChoice:
         *,
         name=None,
         has_out_variant=True,
+        op_overload=None,
     ):
         super().__init__()
         name = name or kernel.__name__
@@ -593,6 +594,7 @@ class ExternKernelChoice:
         self.cpp_kernel_name = cpp_kernel
         self.has_out_variant = has_out_variant
         setattr(extern_kernels, name, kernel)
+        self.op_overload = op_overload
 
     def to_callable(self):
         return getattr(extern_kernels, self.name)
@@ -619,11 +621,9 @@ class ExternKernelChoice:
         input_nodes,
         layout,
         ordered_kwargs_for_cpp_kernel=(),
-        op_overload=None,
         **kwargs,
     ):
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
-        self.op_overload = op_overload
         return ExternKernelCaller(
             self, input_nodes, layout, kwargs, has_out_variant=self.has_out_variant
         )

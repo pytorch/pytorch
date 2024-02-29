@@ -203,6 +203,7 @@ aten_convolution = ExternKernelChoice(
     torch.convolution,
     "at::convolution",
     has_out_variant=False,
+    op_overload=aten.convolution.default,
 )
 
 
@@ -412,7 +413,6 @@ def convolution(
             args,
             layout,
             ordered_kwargs_for_cpp_kernel,
-            aten.convolution.default,
             **kwargs,
         )
     ]
