@@ -762,7 +762,7 @@ def _export(
             fake_mode,
             fake_args,
             fake_kwargs,
-            src_equalities,
+            equalities_inputs,
             original_signature,
         ) = make_fake_inputs(f, args, kwargs, constraints)
 
@@ -778,9 +778,16 @@ def _export(
             pre_dispatch=pre_dispatch,
             transform=_tuplify_outputs,
         )
-        range_constraints, equality_constraints = make_constraints(
-            fake_mode, src_equalities, original_signature, ep_non_strict.gm
-        )
+        try:
+            range_constraints = make_constraints(
+                fake_mode,
+                equalities_inputs,
+                original_signature,
+                ep_non_strict.gm,
+            )
+        except (ConstraintViolationError, ValueRangeError) as e:
+            raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: TRY200
+
         assert out_spec is not None
 
         gm = ep_non_strict.gm
@@ -975,6 +982,7 @@ def _export(
         len(export_graph_signature.input_specs),
     )
     range_constraints = _process_constraints(
+        dynamo_fake_mode,
         gm,
         num_lifted,
         flat_args,
