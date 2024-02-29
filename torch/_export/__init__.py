@@ -191,7 +191,7 @@ def capture_pre_autograd_graph(
             _restore_state_dict(f, m)
 
         flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
-        range_constraints = _process_constraints(m, 0, flat_args)
+        range_constraints = _process_constraints(fake_mode, m, 0, flat_args)
         module = _create_stateful_graph_module(
             m,
             range_constraints=range_constraints,
