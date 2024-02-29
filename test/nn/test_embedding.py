@@ -1002,9 +1002,9 @@ class TestEmbeddingNNDeviceType(NNTestCase):
 
         output.backward(grad_output)
         ref_output.backward(grad_output)
-        es_weight_grad = torch.clone(es.weight.grad)
+        es_weight_grad = es.weight.grad
         if sparse:
-            es_weight_grad = torch.clone(es.weight.grad).to_dense()
+            es_weight_grad = es.weight.grad.to_dense()
 
         # We have more floating point error here because we are dealing with larger numbers
         if backward_prec is None:
@@ -1122,7 +1122,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         output = es(input, offsets)
         output.backward(grad_output_with_empty)
 
-        es_weight_grad = es.weight.grad.data
+        es_weight_grad = es.weight.grad
         if sparse:
             es_weight_grad = es.weight.grad.to_dense()
         self.assertEqual(output, expected_output_with_empty)
