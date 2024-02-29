@@ -2,6 +2,7 @@
 #include <ATen/Config.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <ATen/native/cudnn/BatchNorm.h>
 
 #if !AT_CUDNN_ENABLED()
 
@@ -52,7 +53,6 @@ size_t _get_cudnn_batch_norm_reserve_space_size(
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
-#include <ATen/native/cudnn/BatchNorm.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
