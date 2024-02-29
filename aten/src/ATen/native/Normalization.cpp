@@ -409,7 +409,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
           invstd = 1 / std::sqrt(running_var_a[f] + eps);
         }
 
-        // dot product of the Q(X) and gradOuput
+        // dot product of the Q(X) and gradOutput
         accscalar_t dotp = 0;
         reduce_iter_local.unsafe_replace_operand(
             0, in_data + f * in_channel_stride);
