@@ -450,7 +450,7 @@ class FakeTensor(torch.Tensor):
     # We don't support named tensors; graph break
     @property
     def names(self):
-        raise UnsupportedFakeTensorException("Fake tensors don't support names")
+        raise UnsupportedFakeTensorException("torch.compile doesn't support named tensors")
 
     @staticmethod
     def __new__(cls, fake_mode, elem, device, constant=None):

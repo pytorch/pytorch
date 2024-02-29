@@ -157,7 +157,7 @@ def constructors(fake_mode, func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
     if "names" in kwargs:
-        raise UnsupportedOperatorException("torch.compile doesn't supported named tensors")
+        raise UnsupportedOperatorException("torch.compile doesn't support named tensors")
 
     if func in _like_tensor_constructors:
         default_device = new_kwargs["input"].device
