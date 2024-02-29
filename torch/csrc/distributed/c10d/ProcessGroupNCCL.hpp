@@ -594,13 +594,16 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   virtual std::exception_ptr checkForNCCLErrors(
       std::shared_ptr<NCCLComm>& ncclComm);
 
+  // Ensure thaht if record is True, the work obj will be enqueued via
+  // workEnqueue
   virtual c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       at::Device& device,
       int rank,
       OpType opType,
       const char* profilingTitle = nullptr,
       const std::vector<at::Tensor>& inputs = {},
-      const std::vector<at::Tensor>& outputs = {});
+      const std::vector<at::Tensor>& outputs = {},
+      bool record = false);
 
   // In the timeout case and we will dump debug info such as the NCCL flight
   // recorder to storage. Down the road, if we have more complicated or blocking
@@ -725,6 +728,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // devices. It is called in the constructor of ProcessGroupNCCL, so it always
   // return the rank_ of the the very first PG created, aka, default global PG.
   const int& globalRank() const;
+
+  // Returns the global ranks of a PG.
+  const std::vector<uint64_t>& groupRanks() const;
 
  protected:
   // Function that runs as part of a separate thread aside from watchdog
@@ -974,7 +980,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   static thread_local uint64_t ncclActiveGroupCounter_;
 
   // Counting for the sequential number of NCCL collective call.
+  // (specifically, how many actual kernels we launched, which differs from
+  // op_id_ when coalescing is enabled)
   uint64_t seq_{0};
+
+  // Incrementing counter for logical operations (collective or p2p) issued on
+  // the ProcessGroup
+  uint64_t op_id_{0};
 
   // the sequential number of the last colletive enqueued into workMetaList_
   // This is useful for indentifying a rank that has not join a collective
