@@ -2521,9 +2521,7 @@ class Layout(IRNode):
         # reorder the stride given order
         stride_ordered = [-1] * len(order)
         for i in range(len(order)):
-            stride_ordered[order[i]] = V.graph.sizevars.size_hint(
-                stride[i], fallback=config.unbacked_symint_fallback
-            )
+            stride_ordered[order[i]] = V.graph.sizevars.size_hint(stride[i])
         # check if it is in ascending order
         for i in range(len(order) - 1):
             if stride_ordered[i] > stride_ordered[i + 1]:
@@ -4320,21 +4318,6 @@ class MutatingFirstArgExternKernel(ExternKernel):
 
     def has_side_effects(self):
         return True
-
-
-class AccumulateGrad(MutatingFirstArgExternKernel):
-    def __init__(self, variable, new_grad):
-        super().__init__(
-            None,
-            NoneLayout(variable.get_device()),  # type: ignore[arg-type]
-            self.unwrap_storage([variable, new_grad]),
-        )
-        self.name = V.graph.register_buffer(self)
-        self.python_kernel_name = "inductor_ops.accumulate_grad_"
-        self.cpp_kernel_name = "torch::inductor::accumulate_grad_"
-        mark_node_as_mutating(self, variable)
-        # never reuse gradient buffers since they might be stolen
-        V.graph.never_reuse_buffers.add(new_grad.data.get_name())
 
 
 class ResizeStorageBytes(MutatingFirstArgExternKernel):

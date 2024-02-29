@@ -8534,14 +8534,17 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
     )
 
     # jagged (with query/keys offsets)
+    cu_seqlens_k = torch.arange(-1, 32 * 2 + 1, dtype=torch.int32, device=device)
+    cu_seqlens_k[-1] = 62
+    cu_seqlens_k[0] = 0
     samples.append(
         SampleInput(
-            make((4, 2, 64)).view(-1, 8, 8).unsqueeze(0),
+            make((32, 2, 64)).view(-1, 8, 8).unsqueeze(0),
             make((6, 64)).view(-1, 8, 8).unsqueeze(0),
             make((6, 64)).view(-1, 8, 8).unsqueeze(0),
             bias=None,
-            cu_seqlens_q=torch.tensor((0, 2, 4, 6, 8), dtype=torch.int32, device=device),
-            cu_seqlens_k=torch.tensor((0, 1, 3, 5, 6), dtype=torch.int32, device=device),
+            cu_seqlens_q=torch.arange(0, 32 * 2 + 2, dtype=torch.int32, device=device),
+            cu_seqlens_k=cu_seqlens_k,
             max_seqlen_q=2,
             max_seqlen_k=2,
             dropout_p=0.0,
@@ -20149,6 +20152,12 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.frexp",
         torch_opinfo_name="frexp",
+        # Skipped due to numerical failures on Windows CI.
+        # This is also skipped in frexp earlier in the file.
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                         active_if=IS_WINDOWS),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.frac",
