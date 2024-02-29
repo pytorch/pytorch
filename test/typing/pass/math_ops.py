@@ -20,6 +20,8 @@ torch.acosh(a.uniform_(1, 2))
 # add
 torch.add(a, 20)
 torch.add(a, torch.randn(4, 1), alpha=10)
+torch.add(a+1j, 20+1j)
+torch.add(a+1j, 20, alpha=1j)
 
 # addcdiv
 torch.addcdiv(torch.randn(1, 3), torch.randn(3, 1), torch.randn(1, 3), value=0.1)
@@ -233,6 +235,7 @@ torch.igammac(a1, a2)
 # mul/multiply
 torch.mul(torch.randn(3), 100)
 torch.multiply(torch.randn(4, 1), torch.randn(1, 4))
+torch.mul(torch.randn(3)+1j, 100+1j)
 
 # mvlgamma
 torch.mvlgamma(torch.empty(2, 3).uniform_(1, 2), 2)
@@ -308,6 +311,8 @@ torch.square(a)
 
 # sub/subtract
 torch.sub(torch.tensor((1, 2)), torch.tensor((0, 1)), alpha=2)
+torch.sub(torch.tensor((1j, 2j)), 1j, alpha=2)
+torch.sub(torch.tensor((1j, 2j)), 10, alpha=2j)
 
 # tan
 torch.tan(a)

@@ -1222,6 +1222,31 @@ class OnnxModel(abc.ABC):
             self.model_dir / f"{model_name}_{self._COMPILER_NAME}.onnx"
         )
 
+    def _determine_deepcopy_target_device(self):
+        if current_device == "cpu":
+            target_device = "cpu"
+        else:
+            if torch.cuda.device_count() > 1:
+                # Copy to another cuda device to avoid OOM.
+                target_device = "cuda:1"
+            else:
+                target_device = "cuda"
+        return target_device
+
+    def deepcopy_model_and_inputs_to_device(self, model, example_inputs, target_device):
+        # Deepcopy model before export to avoid modification to baseline model.
+        # To avoid OOM, the model is first moved to CPU. Both models are then moved to device.
+        model_device = next(model.parameters()).device
+        model.to("cpu")
+        model_copy = copy.deepcopy(model).to(target_device)
+        model.to(model_device)
+
+        target_device_example_inputs = tree_map_only(
+            torch.Tensor, lambda x: x.to(device=target_device), example_inputs
+        )
+
+        return model_copy, target_device_example_inputs
+
     @classmethod
     def _generate_onnx_model_directory(
         cls, output_directory: str, compiler_name: str, model_name: str
@@ -1404,7 +1429,9 @@ class OnnxModelFromTorchScript(OnnxModel):
     def _export(self, model, example_inputs, output_path: str, /, **kwargs) -> None:
         if self.copy_before_export:
             # Deepcopy model before export to avoid modification to baseline model.
-            model = copy.deepcopy(model)
+            model, example_inputs = self.deepcopy_model_and_inputs_to_device(
+                model, example_inputs, self._determine_deepcopy_target_device()
+            )
 
         # Hack for huggingface models (kwargs only).
         if isinstance(example_inputs, dict):
@@ -1486,7 +1513,9 @@ class OnnxModelFromDynamo(OnnxModel):
     ) -> torch.onnx.ONNXProgram:
         if self.copy_before_export:
             # Deepcopy model before export to avoid modification to baseline model.
-            model = copy.deepcopy(model)
+            model, example_inputs = self.deepcopy_model_and_inputs_to_device(
+                model, example_inputs, self._determine_deepcopy_target_device()
+            )
 
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
         options = torch.onnx.ExportOptions(dynamic_shapes=self._dynamic_shapes)
@@ -1513,6 +1542,12 @@ class OnnxModelFromDynamoAotInline(OnnxModelFromDynamo):
     def _export(
         self, model, example_inputs, output_path: str
     ) -> torch.onnx.ONNXProgram:
+        if self.copy_before_export:
+            # Deepcopy model before export to avoid modification to baseline model.
+            model, example_inputs = self.deepcopy_model_and_inputs_to_device(
+                model, example_inputs, self._determine_deepcopy_target_device()
+            )
+
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
         options = torch.onnx.ExportOptions(dynamic_shapes=self._dynamic_shapes)
         onnx_program = torch.onnx.dynamo_export(
@@ -2951,9 +2986,10 @@ def parse_args(args=None):
     """,
     )
     parser.add_argument(
-        "--no-optimize-ddp",
-        action="store_true",
-        help="Disables dynamo DDPOptimizer (graph breaks). (Applies only when using --ddp benchmark mode).",
+        "--optimize-ddp-mode",
+        type=str,
+        default="ddp_optimizer",
+        help="Specify the DDP optimization mode -- the value of torch._dynamo.config.optimize_ddp.",
     )
     parser.add_argument(
         "--distributed-master-port",
@@ -3403,11 +3439,7 @@ def run(runner, args, original_dir=None):
         )
     if args.ddp:
         assert args.training, "DDP benchmark requires --training mode"
-        if args.no_optimize_ddp:
-            torch._dynamo.config.optimize_ddp = False
-        else:
-            # TODO(whc) after enabling DDPOptimizer by default this could be removed or assert
-            torch._dynamo.config.optimize_ddp = True
+        torch._dynamo.config.optimize_ddp = args.optimize_ddp_mode
         if args.only == "dlrm":
             log.error(
                 "DLRM+DDP is unsupported as it requires sharding the embedding layer separately from DDP"
@@ -3443,6 +3475,8 @@ def run(runner, args, original_dir=None):
             "Wav2Vec2ForCTC",
             "Wav2Vec2ForPreTraining",
             "sam",
+            "resnet50_quantized_qat",
+            "mobilenet_v2_quantized_qat",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)

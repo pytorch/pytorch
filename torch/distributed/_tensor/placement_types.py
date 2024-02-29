@@ -201,7 +201,7 @@ class Shard(Placement):
         )
 
         if is_padded:
-            output = self._unpad_tensor(output, pad_sizes[my_coordinate[mesh_dim]])
+            output = self._unpad_tensor(output, pad_sizes[my_coordinate[mesh_dim]])  # type: ignore[possibly-undefined]
         return output
 
     def _to_replicate_tensor(
@@ -236,7 +236,7 @@ class Shard(Placement):
             group=(mesh, mesh_dim),
         )
         if is_padded:
-            unpad_size = full_chunk_size * num_chunks - logical_dim_size
+            unpad_size = full_chunk_size * num_chunks - logical_dim_size  # type: ignore[possibly-undefined]
             result = self._unpad_tensor(result, unpad_size)
         return result
 
@@ -605,3 +605,16 @@ class DTensorSpec:
         return True if the current DTensorSpec replicates on all mesh dims (devices)
         """
         return all(placement.is_replicate() for placement in self.placements)
+
+    def shallow_copy_with_tensor_meta(
+        self, tensor_meta: Optional[TensorMeta]
+    ) -> "DTensorSpec":
+        """
+        Shallow copy the DTensorSpec with a new tensor_meta.
+        """
+        assert tensor_meta is not None, "shallow copy with no tensor_meta!"
+        return DTensorSpec(
+            self.mesh,
+            self.placements,
+            tensor_meta=tensor_meta,
+        )

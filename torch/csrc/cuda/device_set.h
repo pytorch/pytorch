@@ -1,10 +1,12 @@
 #pragma once
 
+#include <c10/core/Device.h>
+#include <c10/cuda/CUDAMacros.h>
 #include <bitset>
+#include <cstddef>
 
 namespace torch {
 
-static constexpr size_t MAX_CUDA_DEVICES = 64;
-using device_set = std::bitset<MAX_CUDA_DEVICES>;
+using device_set = std::bitset<c10::Device::MAX_NUM_DEVICES>;
 
 } // namespace torch

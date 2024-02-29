@@ -150,7 +150,7 @@ def reorder_compute_for_overlap(
     comm_ancestors = {node: get_ancestors(node) for node in comm_nodes}
     comm_descendants = {node: get_descendants(node) for node in comm_nodes}
 
-    indeg = {k: 0 for k in snodes}
+    indeg = dict.fromkeys(snodes, 0)
     for snode in snodes:
         for user in snode.node_users:
             if user in indeg:

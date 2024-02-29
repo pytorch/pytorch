@@ -3,6 +3,7 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_sym_bool)
 """
 # Owner(s): ["oncall: export"]
+import copy
 import io
 import pathlib
 import tempfile
@@ -22,9 +23,9 @@ from torch._export.serde.serialize import (
     serialize,
     SerializeError,
 )
-from torch._subclasses.fake_tensor import FakeTensor
-from torch.export import Dim, export, load, save
-from torch.export import WrapperModule
+from torch._higher_order_ops.torchbind import enable_torchbind_tracing
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch.export import Dim, export, load, save, WrapperModule
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 from torch.testing._internal.common_utils import (
     find_library_location,
@@ -48,6 +49,16 @@ def get_filtered_export_db_tests():
     ]
 
 
+def cleanup_op(opname):
+    ns, name = opname.split("::")
+    if not hasattr(torch.ops, ns):
+        return
+    actual_ns = getattr(torch.ops, ns)
+    if not hasattr(actual_ns, name):
+        return
+    delattr(actual_ns, name)
+
+
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerialize(TestCase):
     def test_predispatch_export_with_autograd_op(self):
@@ -59,12 +70,21 @@ class TestSerialize(TestCase):
                 with torch.enable_grad():
                     return x + x
 
+        inp = (torch.ones(10),)
         with torch.no_grad():
             from torch.export._trace import _export
-            ep = _export(Foo(), (torch.ones(10),), pre_dispatch=True)
+            ep = _export(Foo(), inp, pre_dispatch=True)
 
-        with self.assertRaisesRegex(SerializeError, "Failed serializing node _set_grad_enabled"):
-            torch.export.save(ep, io.BytesIO())
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = torch.export.load(buffer)
+
+        exp_out = ep.module()(*inp)
+        actual_out = loaded_ep.module()(*inp)
+        self.assertEqual(exp_out, actual_out)
+        self.assertEqual(exp_out.requires_grad, actual_out.requires_grad)
+
 
     def test_serialize_multiple_returns_from_node(self) -> None:
         class MyModule(torch.nn.Module):
@@ -210,21 +230,20 @@ class TestSerialize(TestCase):
             g.nodes[1].inputs[0].arg.as_tensor.name
         )
 
-
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestDeserialize(TestCase):
     def check_graph(self, fn, inputs, dynamic_shapes=None, _check_meta=True) -> None:
         """Export a graph, serialize it, deserialize it, and compare the results."""
-        # TODO(angelayi): test better with some sort of wrapper
-        ep = torch.export.export(fn, inputs, {}, dynamic_shapes=dynamic_shapes)
+        ep = torch.export.export(fn, copy.deepcopy(inputs), {}, dynamic_shapes=dynamic_shapes)
         ep.graph.eliminate_dead_code()
 
         serialized_artifact = serialize(ep, opset_version={"aten": 0})
         deserialized_ep = deserialize(serialized_artifact, expected_opset_version={"aten": 0})
         deserialized_ep.graph.eliminate_dead_code()
 
-        orig_outputs = ep(*inputs)
-        loaded_outputs = deserialized_ep(*inputs)
+        orig_outputs = ep.module()(*copy.deepcopy(inputs))
+        loaded_outputs = deserialized_ep.module()(*copy.deepcopy(inputs))
 
         flat_orig_outputs = pytree.tree_leaves(orig_outputs)
         flat_loaded_outputs = pytree.tree_leaves(loaded_outputs)
@@ -270,8 +289,9 @@ class TestDeserialize(TestCase):
                         # Or both are fake tensors lists with one element and with the
                         # same shape/dtype
                         for v1, v2 in zip(pytree.tree_leaves(val1), pytree.tree_leaves(val2)):
-                            self.assertEqual(v1.shape, v2.shape)
-                            self.assertEqual(v1.dtype, v2.dtype)
+                            if isinstance(v1, FakeTensor):
+                                self.assertEqual(v1.shape, v2.shape)
+                                self.assertEqual(v1.dtype, v2.dtype)
                     else:
                         # For expressions like 's0 < 10' can only compare through string
                         self.assertEqual(str(val1), str(val2))
@@ -312,6 +332,67 @@ class TestDeserialize(TestCase):
                     )
 
         _check_graph_nodes(ep.graph_module, deserialized_ep.graph_module, _check_meta)
+
+    def test_auto_functionalize(self):
+        try:
+            lib = torch.library.Library("mylib", "FRAGMENT")  # noqa: TOR901
+            torch.library.define(
+                "mylib::foo1",
+                "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor n) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+            torch.library.define(
+                "mylib::foo2",
+                "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor n) -> (Tensor, Tensor)",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+            torch.library.define(
+                "mylib::foo3",
+                "(Tensor(a!) x, Tensor[] y, Tensor(b!) z, SymInt w, Tensor n) -> ()",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl("mylib::foo1", "cpu", lib=lib)
+            @torch.library.impl_abstract("mylib::foo1")
+            def foo1_impl(x, y, z, w, n):
+                x.add_(y[0] + w)
+                z.add_(y[1] + n)
+                return n + n
+
+            @torch.library.impl("mylib::foo2", "cpu", lib=lib)
+            @torch.library.impl_abstract("mylib::foo2")
+            def foo2_impl(x, y, z, w, n):
+                x.add_(y[0] + w)
+                z.add_(y[1] + n)
+                return (n + n, n * n)
+
+            @torch.library.impl("mylib::foo3", "cpu", lib=lib)
+            @torch.library.impl_abstract("mylib::foo3")
+            def foo3_impl(x, y, z, w, n):
+                x.add_(y[0] + w)
+                z.add_(y[1] + n)
+                return
+
+            class M(torch.nn.Module):
+                def forward(self, x, y, z, n):
+                    n = torch.ops.mylib.foo1(x, y, z, 2, n)
+                    torch.ops.mylib.foo3(x, y, z, 2, n)
+                    return torch.ops.mylib.foo2(x, y, z, 2, n)
+
+            x = torch.randn(3)
+            y = (torch.randn(3), torch.randn(3))
+            z = torch.randn(3)
+            n = torch.randn(3)
+            orig_args = (x, y, z, n)
+
+            self.check_graph(M(), orig_args)
+
+        finally:
+            cleanup_op("mylib::foo")
+            del lib
 
     def test_multi_return(self) -> None:
         """
@@ -448,24 +529,29 @@ class TestDeserialize(TestCase):
         self.check_graph(WrapperModule(g), inputs, _check_meta=False)
 
     def test_tensor_tensor_list(self):
-        from torch.library import Library
-        lib = Library("_export", "FRAGMENT")
-        lib.define(
-            "_test_tensor_tensor_list_output(Tensor x, Tensor y) -> (Tensor, Tensor[])",
-            tags=torch.Tag.pt2_compliant_tag)
+        try:
+            from torch.library import Library
+            lib = Library("_export", "FRAGMENT")  # noqa: TOR901
+            lib.define(
+                "_test_tensor_tensor_list_output(Tensor x, Tensor y) -> (Tensor, Tensor[])",
+                tags=torch.Tag.pt2_compliant_tag)
 
-        def _test_tensor_tensor_list_output(x, y):
-            return y, [x]
+            def _test_tensor_tensor_list_output(x, y):
+                return y, [x]
 
-        lib.impl("_test_tensor_tensor_list_output", _test_tensor_tensor_list_output, "CPU")
-        lib.impl("_test_tensor_tensor_list_output", _test_tensor_tensor_list_output, "Meta")
+            lib.impl("_test_tensor_tensor_list_output", _test_tensor_tensor_list_output, "CPU")
+            lib.impl("_test_tensor_tensor_list_output", _test_tensor_tensor_list_output, "Meta")
 
-        class M(torch.nn.Module):
-            def forward(self, x, y):
-                a, b = torch.ops._export._test_tensor_tensor_list_output.default(x, y)
-                return a + b[0]
+            class M(torch.nn.Module):
+                def forward(self, x, y):
+                    a, b = torch.ops._export._test_tensor_tensor_list_output.default(x, y)
+                    return a + b[0]
 
-        self.check_graph(M(), (torch.rand(3, 2), torch.rand(3, 2)))
+            self.check_graph(M(), (torch.rand(3, 2), torch.rand(3, 2)))
+
+        finally:
+            cleanup_op("_export::_test_tensor_tensor_list_output")
+            del lib
 
     def test_list_of_optional_tensors(self) -> None:
         class MyModule(torch.nn.Module):
@@ -591,24 +677,22 @@ unittest.expectedFailure(
     TestDeserialize.test_exportdb_supported_case_scalar_output
 )
 
-# TODO(zhxchen17) Support serializing user inputs mutation.
-unittest.expectedFailure(
-    TestDeserialize.test_exportdb_supported_case_user_input_mutation
-)
-
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSaveLoad(TestCase):
     def test_save_buffer(self):
         inp = (torch.tensor([0.1, 0.1]),)
-        linear = torch.nn.Linear(2, 2)
 
         class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
             def forward(self, x):
                 x = x + 1
                 y = x.t()
                 y = y.relu()
-                y = linear(y)
+                y = self.linear(y)
                 return y
 
         ep = export(Module(), inp)
@@ -618,7 +702,7 @@ class TestSaveLoad(TestCase):
         buffer.seek(0)
         loaded_ep = load(buffer)
 
-        self.assertTrue(torch.allclose(ep(*inp), loaded_ep(*inp)))
+        self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 
     def test_save_file(self):
         class Foo(torch.nn.Module):
@@ -635,7 +719,7 @@ class TestSaveLoad(TestCase):
             f.seek(0)
             loaded_ep = load(f)
 
-        self.assertTrue(torch.allclose(ep(*inp), loaded_ep(*inp)))
+        self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 
     def test_save_path(self):
         class Foo(torch.nn.Module):
@@ -652,7 +736,7 @@ class TestSaveLoad(TestCase):
             save(ep, path)
             loaded_ep = load(path)
 
-        self.assertTrue(torch.allclose(ep(*inp), loaded_ep(*inp)))
+        self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 
     def test_save_extra(self):
         inp = (torch.tensor([0.1, 0.1]),)
@@ -671,7 +755,7 @@ class TestSaveLoad(TestCase):
         extra_files = {"extra.txt": ""}
         loaded_ep = load(buffer, extra_files=extra_files)
 
-        self.assertTrue(torch.allclose(ep(*inp), loaded_ep(*inp)))
+        self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
         self.assertEqual(extra_files["extra.txt"], "moo")
 
     def test_version_error(self):
@@ -712,7 +796,7 @@ class TestSaveLoad(TestCase):
         loaded_ep = load(buffer)
 
         inp = (torch.tensor(1),)
-        self.assertTrue(torch.allclose(ep(*inp), loaded_ep(*inp)))
+        self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerializeCustomClass(TestCase):
@@ -754,6 +838,11 @@ class TestSerializeCustomClass(TestCase):
                     node.args = (arg0, custom_node)
 
         serialized_vals = serialize(ep)
+
+        ep_str = serialized_vals.exported_program.decode("utf-8")
+        assert "class_fqn" in ep_str
+        assert custom_obj._type().qualified_name() in ep_str
+
         deserialized_ep = deserialize(serialized_vals)
 
         for node in deserialized_ep.graph.nodes:
@@ -763,8 +852,29 @@ class TestSerializeCustomClass(TestCase):
             ):
                 arg = node.args[0]
                 self.assertTrue(isinstance(arg, torch._C.ScriptObject))
+                self.assertEqual(arg._type(), custom_obj._type())
                 self.assertEqual(arg.__getstate__(), custom_obj.__getstate__())
                 self.assertEqual(arg.top(), 7)
+
+    def test_custom_class_containing_fake_tensor(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.custom_obj = torch.classes._TorchScriptTesting._ContainsTensor(torch.rand(2, 3))
+
+            def forward(self, x):
+                return x + self.custom_obj.get()
+
+        with FakeTensorMode():
+            f = Foo()
+
+        inputs = (torch.zeros(2, 3),)
+        with enable_torchbind_tracing():
+            ep = export(f, inputs, strict=False)
+
+        serialized_vals = serialize(ep)
+        ep = deserialize(serialized_vals)
+        self.assertTrue(isinstance(ep.constants["custom_obj"].get(), FakeTensor))
 
 
 if __name__ == '__main__':
