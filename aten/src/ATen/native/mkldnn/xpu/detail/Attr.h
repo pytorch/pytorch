@@ -241,7 +241,7 @@ class Attr {
             dnnl::memory::format_tag::abcde);
         break;
       default:
-        AT_ERROR(
+        TORCH_INTERNAL_ASSERT(0,
             "XPU only supports append_bias for Conv1d, Conv2d and Conv3d.");
     }
     // In this case, expected_md = binary_md
@@ -256,7 +256,7 @@ class Attr {
     return *this;
   }
 
-  void extract_post_ops(dnnl::post_ops& dnnl_post_ops, const at::Tensor& dst) {
+  dnnl::post_ops extract_post_ops(const at::Tensor& dst){
     // this function is used to extract post ops params from the ops_params_
     // and put them into onednn post ops
     for (size_t i = 0; i < ops_params_.size(); ++i) {
@@ -266,14 +266,14 @@ class Attr {
           dnnl::algorithm algo = ops_params_[i].algo_;
           float alpha = ops_params_[i].alpha_;
           float beta = ops_params_[i].beta_;
-          dnnl_post_ops.append_eltwise(algo, alpha, beta);
+          dnnl_post_ops_.append_eltwise(algo, alpha, beta);
           break;
         }
         case kind_t::sum: {
           float scale = ops_params_[i].scale_;
           // TODO [Asymmetric]:
           // Post-sum zp for gpu is not supported currently
-          dnnl_post_ops.append_sum(scale);
+          dnnl_post_ops_.append_sum(scale);
           break;
         }
         case kind_t::binary: {
@@ -286,7 +286,7 @@ class Attr {
           // selected.
           // Thus we use expected_md (with format_any) here to create pd instead
           // of original md
-          dnnl_post_ops.append_binary(algo, expected_md);
+          dnnl_post_ops_.append_binary(algo, expected_md);
           break;
         }
         default:
@@ -307,9 +307,10 @@ class Attr {
       // On the other hand, for u8 in oneDNN, the scale for quantization is
       // defined as max_v/(qmax-qmin). Hence, we need to divide by 2 here.
       // (https://oneapi-src.github.io/oneDNN/dev_guide_inference_int8.html)
-      dnnl_post_ops.append_eltwise(
+      dnnl_post_ops_.append_eltwise(
           kind_with_linear, 1.f / q_scale_, q_zero_point_);
     }
+    return dnnl_post_ops_;
   }
 
   bool with_sum() {
@@ -332,7 +333,6 @@ class Attr {
 
   void construct_post_binary(
       dnnl::primitive_desc& pd,
-      dnnl::post_ops& dnnl_post_ops,
       std::unordered_map<int, dnnl::memory>& args) {
     // This function is used to construct binary memory desc in binary post ops.
     // According to oneDNN doc, the binary tensor can be in shape of
@@ -363,6 +363,7 @@ class Attr {
                         // to int8, only works for int8 case
   int64_t q_zero_point_ = 0;
   std::vector<PostOpParam> ops_params_; // series of post ops
+  dnnl::post_ops dnnl_post_ops_;
 };
 
 } // namespace onednn
