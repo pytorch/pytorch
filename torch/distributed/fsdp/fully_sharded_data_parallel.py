@@ -248,8 +248,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         cluster setups.
 
     .. warning::
-        FSDP does not work with double backwards due to its backward hook
-        registration design.
+        FSDP does not work with double backwards due to how it registers
+        backward hooks.
 
     Args:
         module (nn.Module):
