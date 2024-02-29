@@ -8,7 +8,13 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._triton import has_triton
 
-from ..pattern_matcher import fwd_only, joint_fwd_bwd, Match, register_replacement
+from ..pattern_matcher import (
+    fwd_only,
+    joint_fwd_bwd,
+    Match,
+    MatchContext,
+    register_replacement,
+)
 
 aten = torch.ops.aten
 
@@ -90,9 +96,13 @@ def _result_layout_affects_graph_output(match: Match) -> bool:
     It tries to err on the side of caution, e.g. it's better to return True
     even if the match cannot affect output strides than to return False if it can.
     """
-    graph: torch.fx.Graph = match.ctx.graph
-    output_nodes: List[torch.fx.Node] = [n for n in graph.nodes if n.op == "output"]
-    search_node = match.output_node()
+    if match.ctx is not None:
+        assert isinstance(match.ctx, MatchContext)
+        graph: torch.fx.Graph = match.ctx.graph
+        output_nodes: List[torch.fx.Node] = [n for n in graph.nodes if n.op == "output"]
+        search_node = match.output_node()
+    else:
+        return True
 
     def recursively_search(n, depth=100000):
         if depth == 0:
