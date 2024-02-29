@@ -26,7 +26,6 @@ except ModuleNotFoundError:
 import torch
 import torch._logging
 from torch._guards import compile_context, CompileContext, CompileId, tracing
-from torch._logging import structured
 from torch._utils_internal import signpost_event
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -660,15 +659,6 @@ def _compile(
             skip + 2,
             # -2: omit current frame, omit contextlib decorator
             "".join(traceback.format_list(traceback.extract_stack()[: -2 - skip])),
-        )
-        # -4: -2 as above, plus trace_structured frames
-        torch._logging.trace_structured(
-            "dynamo_start",
-            lambda: {
-                "stack": structured.from_traceback(
-                    traceback.extract_stack()[: -4 - skip]
-                )
-            },
         )
         start_time = time.time()
         try:

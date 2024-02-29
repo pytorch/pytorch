@@ -4343,6 +4343,8 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
     def test_timeout_dumps_on_stuck_ranks(self):
         # need rank0 to crash quicker after detecting timeout
         os.environ['TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC'] = '1'
+        # restore this env var to its prior default in case another test changed it
+        os.environ['TORCH_NCCL_COORD_CHECK_MILSEC'] = '1000'
 
         if self.rank == self.MAIN_PROCESS_RANK:
             # wait for both rank0 and 1 to crash before looking for both ranks' output
