@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <functional>
 #include <iosfwd>
-#include <limits>
 #include <string>
 
 namespace c10 {

@@ -36,7 +36,10 @@ static int max_stream_priorities;
 // already been destroyed and thus invoking cudaStreamDestroy could lead to a
 // crash. It's likely an issue in CUDA, but to be safe - let's just "forget"
 // the destruction.
+#if !defined(USE_ROCM)
+// CUDA-only: used to initializes the stream pools (once)
 static c10::once_flag device_flags[c10::Device::MAX_NUM_DEVICES];
+#endif
 static std::atomic<uint32_t>
     priority_counters[c10::cuda::max_compile_time_stream_priorities]
                      [c10::Device::MAX_NUM_DEVICES];
