@@ -396,6 +396,13 @@ class GuardBuilder(GuardBuilderBase):
 
         self._produce_guard_code(guard, [code], provided_guarded_object=self.get(base))
 
+    def DUAL_LEVEL(self, guard: Guard):
+        # Invalidate dual level if current dual level is different than the one
+        # in the fx graph
+        dual_level = torch.autograd.forward_ad._current_level
+        code = [f"torch.autograd.forward_ad._current_level == {dual_level}"]
+        self._produce_guard_code(guard, code)
+
     def FUNCTORCH_STACK_MATCH(self, guard: Guard):
         # Invalidate functorch code if current level is different than
         # the one when FX graph was generated
