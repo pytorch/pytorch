@@ -223,12 +223,12 @@ class WrapperLine:
     pass
 
 
-class IndentLine(WrapperLine):
+class EnterScopeLine(WrapperLine):
     def codegen(self, code: IndentedBuffer) -> None:
         code.do_indent()
 
 
-class UnindentLine(WrapperLine):
+class ExitScopeLine(WrapperLine):
     def codegen(self, code: IndentedBuffer) -> None:
         code.do_unindent()
 
@@ -416,7 +416,7 @@ class WrapperCodeGen(CodeGen):
         self.last_seen_device_guard_index: Optional[int] = None
         self.supports_intermediate_hooks = True
         self.expr_printer = pexpr
-        self.user_defined_kernel_cache: Dict[Tuple[Any, ...], str] = {}
+        self.user_defined_kernel_cache: Dict[Tuple[Any, ...], Tuple[str, Any]] = {}
         self.unbacked_symbol_decls: Set[str] = set()  # str of sympy.Symbol
         self.allow_stack_allocation: Optional[bool] = None
         self.stack_allocated_buffers: Dict[BufferName, ir.Buffer] = {}
@@ -624,7 +624,9 @@ class WrapperCodeGen(CodeGen):
             args.append(f"out={codegen_reference}")
         self.writeline(f"{kernel}({', '.join(args)})")
 
-    def generate_user_defined_triton_kernel(self, kernel_name, grid, configs, args):
+    def generate_user_defined_triton_kernel(
+        self, kernel_name, grid, configs, args, triton_meta
+    ):
         grid, code = user_defined_kernel_grid_fn_code(
             kernel_name, configs, grid, wrapper=self
         )
@@ -746,16 +748,29 @@ class WrapperCodeGen(CodeGen):
             self.lines.pop()
 
         # codegen allocations in two passes
-        planning_state = MemoryPlanningState()
+        planning_states = [MemoryPlanningState()]
+        past_planning_states = []
         for i in range(len(self.lines)):
             line = self.lines[i]
             if isinstance(line, MemoryPlanningLine):
-                self.lines[i] = line.plan(planning_state)
+                self.lines[i] = line.plan(planning_states[-1])
+            elif isinstance(line, EnterScopeLine):
+                planning_states.append(MemoryPlanningState())
+            elif isinstance(line, ExitScopeLine):
+                past_planning_states.append(planning_states.pop())
+        past_planning_states.append(planning_states.pop())
+        assert len(planning_states) == 0
+
+        # conservatively use the sum of all allocated buffer sizes
+        # in potentially nested scopes as the total allocated size
+        total_allocated_buffer_size = sum(
+            s.total_allocated_buffer_size for s in past_planning_states
+        )
 
         self.allow_stack_allocation = (
             self.allow_stack_allocation is not False
             and config.allow_stack_allocation
-            and planning_state.total_allocated_buffer_size <= MAX_STACK_ALLOCATION_SIZE
+            and total_allocated_buffer_size <= MAX_STACK_ALLOCATION_SIZE
         )
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
@@ -971,6 +986,7 @@ class WrapperCodeGen(CodeGen):
         signature: List[KernelArgType] = []
         constants = {}
         non_constant_indices = []
+        equal_to_1_args: List[str] = []
         for idx, key in enumerate(kernel.arg_names):
             if key not in kwargs:
                 continue
@@ -1001,15 +1017,34 @@ class WrapperCodeGen(CodeGen):
                     )
                 else:
                     signature.append(SizeArg(key, arg))
+                    if arg is not None and V.graph.sizevars.statically_known_equals(arg, 1):  # type: ignore[arg-type]
+                        equal_to_1_args.append(key)
         index_dtype = "tl.int32"
         triton_meta = {
             "signature": signature_to_meta(
-                signature, size_dtype=index_dtype, indices=non_constant_indices
+                signature,
+                size_dtype=index_dtype,
+                indices=non_constant_indices,
             ),
             "device": V.graph.scheduler.current_device.index,
             "device_type": V.graph.scheduler.current_device.type,
-            "constants": constants,
-            "configs": [config_of(signature, indices=non_constant_indices)],
+            # Triton compiler includes equal_to_1 args into constants even
+            # when they are not constexpr. otherwise there may be a segfault
+            # during launching the Inductor-compiled Triton kernel.
+            # TODO(aakhundov): add None args to constnats, too. currently, this
+            # causes CUDA errors in test_aot_inductor.test_triton_kernel_with_none_input.
+            # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
+            # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
+            "constants": {
+                **constants,
+                **{arg: 1 for arg in equal_to_1_args},
+            },
+            "configs": [
+                config_of(
+                    signature,
+                    indices=non_constant_indices,
+                )
+            ],
         }
 
         # Distinguish between different functions using function id
@@ -1027,7 +1062,7 @@ class WrapperCodeGen(CodeGen):
 
         name = f"{original_name}_{len(self.user_defined_kernel_cache)}"
         # Add to the cache for the next use
-        self.user_defined_kernel_cache[cache_key] = name
+        self.user_defined_kernel_cache[cache_key] = (name, triton_meta)
 
         compile_wrapper = IndentedBuffer()
         compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
@@ -1110,7 +1145,7 @@ class WrapperCodeGen(CodeGen):
             compile_wrapper.getvalue(),
             metadata,
         )
-        return name
+        return name, triton_meta
 
     def generate_numel_expr(self, kernel_name: str, tree):
         expr = f"{kernel_name}_{tree.prefix}numel"
@@ -1167,6 +1202,7 @@ class WrapperCodeGen(CodeGen):
         triton=True,
         arg_types=None,
         grid_fn: str = "grid",
+        triton_meta=None,
     ):
         """
         Generates kernel call code.
@@ -1401,13 +1437,13 @@ class WrapperCodeGen(CodeGen):
         # TODO(aakhundov): make this work for C++ wrapper codegen (and ABI mode)
         self.writeline(f"{name} = [None] * {len(conditional.outputs)}")
         self.writeline(f"if {conditional.predicate.codegen_reference()}.item():")
-        self.writeline(IndentLine())
+        self.writeline(EnterScopeLine())
         self.codegen_subgraph(conditional.true_subgraph, outer_inputs, outer_outputs)
-        self.writeline(UnindentLine())
+        self.writeline(ExitScopeLine())
         self.writeline("else:")
-        self.writeline(IndentLine())
+        self.writeline(EnterScopeLine())
         self.codegen_subgraph(conditional.false_subgraph, outer_inputs, outer_outputs)
-        self.writeline(UnindentLine())
+        self.writeline(ExitScopeLine())
 
     @staticmethod
     def statically_known_int_or_none(x):
