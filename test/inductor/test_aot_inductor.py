@@ -1322,13 +1322,12 @@ class AOTInductorTestsTemplate:
         a = torch.randn((4, 5), device=self.device)
         b = torch.randn((5, 5), device=self.device)
         dim0_x = Dim("dim0_x", min=2, max=1024)
-        dim0_y = Dim("dim0_y", min=3, max=1025)
+        dim0_y = dim0_x + 1
         dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_y}}
         self.check_model(
             Model(),
             (a, b),
             dynamic_shapes=dynamic_shapes,
-            disable_constraint_solver=True,
         )
 
     def test_scatter_fallback(self):
