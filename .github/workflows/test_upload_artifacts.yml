@@ -45,12 +45,11 @@ jobs:
     steps:
     - name: Download artifacts
       run: |
-        OWNER="${{ github.repository_owner }}"
         REPO="${{ github.repository }}"
         RUN_ID="${{ github.run_id }}"
         NAME="test-run"
 
-        curl -o test.txt https://pytorch-ci-artifacts.s3.amazonaws.com/$OWNER/$REPO/$RUN_ID/$NAME/test.txt
+        curl -o test.txt https://pytorch-ci-artifacts.s3.amazonaws.com/$REPO/$RUN_ID/$NAME/test.txt
 
 #    - name: Download artifact
 #      run: |
@@ -58,6 +57,8 @@ jobs:
 
     - name: Test
       run: |
+        whoami
+        ls -l test.txt
         less test.txt
 #
 #    - name: Download artifact
