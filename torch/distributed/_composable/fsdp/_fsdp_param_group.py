@@ -82,7 +82,7 @@ def _fsdp_param_group_post_backward_hook(param_group, *unused: Any) -> None:
 
 
 count = 0
-def _post_accumulate_grad_hook(param_group, num_tensors, param) -> None:
+def _backward_hook(param_group, num_tensors, param) -> None:
     global count
     count += 1
     if count == num_tensors:
@@ -432,7 +432,7 @@ class FSDPParamGroup:
         tensors = [tensor for tensor in (inp_tensors + [fsdp_param.all_gather_output for fsdp_param in self.fsdp_params]) if tensor.requires_grad]
         # handle = register_multi_grad_hook(tensors, functools.partial(_fsdp_param_group_post_backward_hook, self), mode="all")
         for tensor in tensors:
-            tensor.register_post_accumulate_grad_hook(functools.partial(_post_accumulate_grad_hook(self, len(tensors))))
+            tensor.register_hook(functools.partial(_backward_hook(self, len(tensors))))
         for inp_tensor_idx, inp_tensor in zip(inp_tensor_indices, inp_tensors):
             args_kwargs_list[inp_tensor_idx] = inp_tensor
         args_list = args_kwargs_list[: len(args_list)]
