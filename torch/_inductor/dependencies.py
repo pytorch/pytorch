@@ -323,6 +323,12 @@ class RecordLoadStore(V.KernelFormatterHandler):  # type: ignore[name-defined]
         parent_handler = _OpCounter(parent_handler)
         super().__init__(parent_handler=parent_handler)
 
+    def __getattr__(self, name):
+        def inner(*args, **kwargs):
+            line = getattr(self.parent_handler, name)(*args, **kwargs)
+            return line
+        return inner
+
 
 def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:
     cnt = itertools.count()
