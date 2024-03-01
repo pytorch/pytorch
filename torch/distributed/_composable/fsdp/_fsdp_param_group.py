@@ -411,7 +411,11 @@ class FSDPParamGroup:
                 inp_tensors.append(obj)
         if len(inp_tensors) == 0:
             return args, kwargs  # no tensors that require gradients
-        inp_tensors = RegisterPostBackwardFunction.apply(self, *inp_tensors)
+        # NOTE: we ignore this custom autograd function in compile, instead we rely on _root_post_backward_final_callback
+        # to call the param_group.post_backward(), and rely on Inductor comm reordering to optimally decide
+        # when to issue prefetch and reshard.
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            inp_tensors = RegisterPostBackwardFunction.apply(self, *inp_tensors)
         for inp_tensor_idx, inp_tensor in zip(inp_tensor_indices, inp_tensors):
             args_kwargs_list[inp_tensor_idx] = inp_tensor
         args_list = args_kwargs_list[: len(args_list)]
