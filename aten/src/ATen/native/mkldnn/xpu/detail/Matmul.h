@@ -202,9 +202,9 @@ static inline void matmul(
   dst_usr_md = dnnl::memory::desc(dst_dims, dst_usr_dt, dst_strides);
 
   // STEP4: create memory
-  auto m1_usr_m = xpu_onednn_memory(m1_usr_md, engine, m1.data_ptr());
-  auto m2_usr_m = xpu_onednn_memory(m2_usr_md, engine, m2.data_ptr());
-  auto dst_usr_m = xpu_onednn_memory(dst_usr_md, engine, dst.data_ptr());
+  auto m1_usr_m = make_onednn_memory(m1_usr_md, engine, m1.data_ptr());
+  auto m2_usr_m = make_onednn_memory(m2_usr_md, engine, m2.data_ptr());
+  auto dst_usr_m = make_onednn_memory(dst_usr_md, engine, dst.data_ptr());
 
   auto expected_m1_md = matmul_pd.src_desc();
   auto expected_m2_md = matmul_pd.weights_desc();
@@ -221,7 +221,7 @@ static inline void matmul(
   size_t scratchpad_size = matmul_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::empty(
       {static_cast<int64_t>(scratchpad_size)}, m1.options().dtype(at::kByte), c10::nullopt);
-  auto scratchpad_memory = xpu_onednn_memory(
+  auto scratchpad_memory = make_onednn_memory(
       matmul_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_memory});
 
@@ -229,7 +229,7 @@ static inline void matmul(
   args.insert({DNNL_ARG_WEIGHTS, m2_m});
   args.insert({DNNL_ARG_DST, dst_m});
   if (with_bias) {
-    auto bias_m = xpu_onednn_memory(bias_md, engine, b.data_ptr());
+    auto bias_m = make_onednn_memory(bias_md, engine, b.data_ptr());
     args.insert({DNNL_ARG_BIAS, bias_m});
   }
 
