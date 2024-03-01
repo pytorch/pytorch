@@ -304,11 +304,6 @@ class HigherOrderOperator(OperatorBase):
     def dispatch(self, dispatch_key, *args, **kwargs):
         from torch.utils._python_dispatch import _get_current_dispatch_mode
 
-        if dispatch_key in self._dispatch_cache:
-            kernel = self._dispatch_cache[dispatch_key]
-            assert not isinstance(kernel, torch._C.DispatchKey)
-            return kernel(*args, **kwargs)
-
         if dispatch_key == torch._C.DispatchKey.FuncTorchDynamicLayerFrontMode:
             return dispatch_functorch(self, args, kwargs)
 
@@ -350,6 +345,11 @@ class HigherOrderOperator(OperatorBase):
                     return handler(mode, *args, **kwargs)
 
         final_key = resolve_key(self, dispatch_key)
+
+        if final_key in self._dispatch_cache:
+            kernel = self._dispatch_cache[dispatch_key]
+            assert not isinstance(kernel, torch._C.DispatchKey)
+            return kernel(*args, **kwargs)
 
         # This can current fail due to backend fallbacks.  You just have to
         # register them by hand for HigherOrderOperator.

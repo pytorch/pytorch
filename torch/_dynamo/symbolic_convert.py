@@ -341,6 +341,21 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 self.jump(inst)
                 return
 
+            if isinstance(value, SymNodeVariable):
+                # if the assertion is normal shape expression.
+                # just install guard and bail out.
+                sym_expr = value.sym_num
+                if not isinstance(sym_expr, torch.SymBool):
+                    sym_expr = sym_expr != 0
+
+                result = torch.fx.experimental.symbolic_shapes.expect_true(sym_expr)
+                if not result:
+                    raise unimplemented(
+                        "Assertion failed on symbolic shapes. Did you make sure eager mode succeeds?"
+                    )
+                self.jump(inst)
+                return
+
             scalar_to_tensor_proxy = self.output.create_proxy(
                 "call_function", torch.scalar_tensor, *proxy_args_kwargs((value,), {})
             )
@@ -431,6 +446,10 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         elif isinstance(value, SymNodeVariable):
             eval_result = value.evaluate_expr(self.output)
             if truth_fn(eval_result):
+                push and self.push(value)
+                self.jump(inst)
+        elif isinstance(value, variables.BackwardHookVariable):
+            if truth_fn(True):
                 push and self.push(value)
                 self.jump(inst)
         else:
@@ -579,6 +598,44 @@ def break_graph_if_unsupported(*, push):
     return decorator
 
 
+class BackedgeTracker:
+    """
+    A BackedgeTracker is used to keep track of backedges and how many nodes
+    we're expanding the graph by each time the backedge is seen. The general
+    idea is that if you're looping and each loop is inlining a large sub-graph
+    we detect that and skip frame when it's looking untenable.
+    """
+
+    def __init__(self):
+        # How many loops have we performed?
+        self.n_seen = 0
+        # How many nodes were in the graph on our first loop?
+        self.n_nodes_on_first_loop = None
+
+    # Raises SkipFrame if the loop is getting too big.
+    def append(self, count):
+        self.n_seen += 1
+        if self.n_seen == 1:
+            self.n_nodes_on_first_loop = count
+
+        # Don't skip if we haven't seen this particular backedge at least a few
+        # times.
+        if self.n_seen < 3:
+            return
+
+        # For now use the trivial hueristic of checking the raw number of nodes
+        # since the first time we saw this backedge. In the future we could do
+        # something more interesting like watching the rate of growth to trim
+        # loops earlier (so we don't have to wait for `max` nodes before
+        # skipping).
+        added_nodes = count - self.n_nodes_on_first_loop
+        if (
+            config.max_loop_unroll_nodes > 0
+            and added_nodes > config.max_loop_unroll_nodes
+        ):
+            raise exc.SkipFrame("unrolled loop getting too big")
+
+
 class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState]):
     output: OutputGraph
     symbolic_locals: Dict[str, VariableTracker]
@@ -595,6 +652,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     inline_depth: int
     inconsistent_side_effects: bool
     current_speculation: Optional[SpeculationEntry]
+    # Used to track how big the graph is getting on loop backedges.
+    loop_backedge_trackers: Dict[Tuple[int, int], BackedgeTracker]
 
     def mark_inconsistent_side_effects(self):
         """
@@ -1052,7 +1111,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.push(ConstantVariable.create(value=val))
 
     def jump(self, inst):
-        self.instruction_pointer = self.indexof[inst.target]
+        target = self.indexof[inst.target]
+        if self.instruction_pointer and target < self.instruction_pointer:
+            key = (self.instruction_pointer, target)
+            count = len(self.output.graph.nodes)
+            self.loop_backedge_trackers[key].append(count)
+        self.instruction_pointer = target
 
     JUMP_FORWARD = jump
     JUMP_ABSOLUTE = jump
@@ -1941,6 +2005,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     ):
         super().__init__()
         self.speculation_log = speculation_log
+        self.loop_backedge_trackers = collections.defaultdict(BackedgeTracker)
 
         # Mutable state checkpointed by copy_graphstate()
         self.output = output
@@ -2063,7 +2128,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             speculation_log=speculation_log,
         )
 
-        self._throw_if_in_vmap()
+        self._throw_if_in_functorch()
 
         # as soon as we create the tracing context we should keep it active, so any calls
         # into dynamo apis can rely on finding it
@@ -2089,6 +2154,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 for k in vars
                 if k in f_locals
             }
+            self.debug_locals: List[Tuple[VariableTracker, List[VariableTracker]]] = []
             if export:
                 # export gets confused if we never realize unused inputs
                 # in export mode just eagerly realize everything
@@ -2101,20 +2167,21 @@ class InstructionTranslator(InstructionTranslatorBase):
                 if name in f_locals:
                     self._freevars_ids[name] = id(f_locals[name])
 
-    def _throw_if_in_vmap(self):
+    def _throw_if_in_functorch(self):
         # Fallback to eager in case of a graph break inside vmap
         eager = torch._dynamo.lookup_backend("eager")
         compiler_fn = inspect.getattr_static(
             self.output.compiler_fn, "compiler_fn", self.output.compiler_fn
         )
         ci = torch._C._functorch.peek_interpreter_stack()
-        if (
-            ci is not None
-            and ci.key() == torch._C._functorch.TransformType.Vmap
-            and compiler_fn is not eager
-        ):
-            # if it reaches here, it means Dynamo failed to inline vmap
-            msg = "torch.vmap(fn) requires the function to be inlined by dynamo"
+        forbidden_keys = (
+            torch._C._functorch.TransformType.Vmap,
+            torch._C._functorch.TransformType.Grad,
+        )
+        if ci is not None and ci.key() in forbidden_keys and compiler_fn is not eager:
+            # if it reaches here, it means Dynamo failed to inline a functorch function
+            name = ci.key().name.lower()
+            msg = f"torch.func.{name}(fn) requires the function to be inlined by dynamo"
             unimplemented(msg)
 
     def get_example_value(self, source: Source):

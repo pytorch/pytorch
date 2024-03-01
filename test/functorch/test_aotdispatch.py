@@ -3098,7 +3098,7 @@ def forward(self, arg0_1):
     cos = torch.ops.aten.cos.default(add);  add = None
     return (cos,)""")
 
-    def test_aot_export_predispatch_cond_with_map(self):
+    def test_aot_export_predispatch_map_1(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -3159,6 +3159,41 @@ def forward(self, arg0_1, arg1_1):
     add = torch.ops.aten.add.Tensor(cos, 5);  cos = None
     add_1 = torch.ops.aten.add.Tensor(add, arg1_1);  add = arg1_1 = None
     return (add_1,)""")
+
+    def test_aot_export_predispatch_map_2(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                z = x.cos()
+
+                def f(x, y):
+                    a = x.cos()
+                    a.add_(5)
+                    return a + y
+
+                return (z + control_flow.map(f, z, y).sum(),)
+
+        inps = [torch.randn(2, 2), torch.ones(2)]
+        gm, _ = aot_export_module(M(), inps, trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+    body_graph_0 = self.body_graph_0
+    map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = arg1_1 = None
+    getitem = map_impl[0];  map_impl = None
+    sum_1 = torch.ops.aten.sum.default(getitem);  getitem = None
+    add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add,)""")  # noqa: B950
+        self.assertExpectedInline(str(gm.body_graph_0.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(cos, 5);  cos = None
+    add_1 = torch.ops.aten.add.Tensor(add, arg1_1);  add = arg1_1 = None
+    return [add_1]""")
+
+
 
     def test_aot_export_predispatch_conv_and_bn(self):
         class ConvBatchnorm(torch.nn.Module):
@@ -4544,8 +4579,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.fractional_max_pool2d', ''),  # rand() received an invalid combination of arguments - g...
     xfail('nn.functional.fractional_max_pool3d', ''),  # rand() received an invalid combination of arguments - g...
     xfail('nn.functional.group_norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.interpolate', 'linear'),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.interpolate', 'trilinear'),  # Cannot call sizes() on tensor with symbolic sizes/st...
     xfail('nn.functional.nll_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('_segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
@@ -4703,8 +4736,6 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.FractionalMaxPool3d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
     torch.nn.BCELoss,  # new_size = _infer_size(target.size(), weight.size())
                        # RuntimeError: expected int at position 0, but got: SymInt
-    torch.nn.CrossEntropyLoss,  # RuntimeError: Cannot call numel() on tensor with symbolic sizes/strides
-    torch.nn.NLLLoss,  # RuntimeError: Cannot call numel() on tensor with symbolic sizes/strides
 }
 
 
