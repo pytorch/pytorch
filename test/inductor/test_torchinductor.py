@@ -3216,48 +3216,35 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 0)
 
-    @config.patch(fallback_random=True)
     def test_fractional_max_pool2d1(self):
-        random.seed(1234)
-        torch.manual_seed(1234)
+        def fn(x, samples):
+            return aten.fractional_max_pool2d(x, (3, 3), (2, 2), samples)
 
-        def fn(x):
-            return torch.nn.functional.fractional_max_pool2d_with_indices(
-                x, (3, 3), (2, 2)
-            )
+        self.common(
+            fn, (torch.randn(1, 4, 16, 16), torch.rand(1, 4, 2)), check_lowp=False
+        )
 
-        self.common(fn, (torch.randn(1, 4, 16, 16),), check_lowp=False)
-
-    @config.patch(fallback_random=True)
     def test_fractional_max_pool2d2(self):
         # fallback for larger kernel size
-        random.seed(1234)
-        torch.manual_seed(1234)
 
-        def fn(x):
-            return torch.nn.functional.fractional_max_pool2d_with_indices(
-                x, (6, 5), (3, 3)
-            )
+        def fn(x, samples):
+            return aten.fractional_max_pool2d(x, (6, 5), (3, 3), samples)
 
         torch._inductor.metrics.generated_kernel_count = 0
         self.common(
             fn,
-            (torch.randn(2, 4, 36, 36),),
+            (torch.randn(2, 4, 36, 36), torch.rand(2, 4, 2)),
             check_lowp=False,
         )
         assertGeneratedKernelCountEqual(self, 0)
 
-    @config.patch(fallback_random=True)
     def test_fractional_max_pool2d3(self):
-        random.seed(1234)
-        torch.manual_seed(1234)
+        def fn(x, samples):
+            return aten.fractional_max_pool2d(x, (1, 1), (16, 16), samples)
 
-        def fn(x):
-            return torch.nn.functional.fractional_max_pool2d_with_indices(
-                x, (1, 1), (16, 16)
-            )
-
-        self.common(fn, (torch.randn(2, 4, 16, 16),), check_lowp=False)
+        self.common(
+            fn, (torch.randn(2, 4, 16, 16), torch.rand(2, 4, 2)), check_lowp=False
+        )
 
     @config.patch(fallback_random=True)
     def test_fractional_max_pool2d4(self):

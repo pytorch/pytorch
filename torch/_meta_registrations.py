@@ -4320,12 +4320,11 @@ def meta_max_pool2d_with_indices(
 def meta_fractional_max_pool2d(self_, kernel_size, output_size, random_samples):
     torch._check(
         self_.ndim in (3, 4),
-        lambda: f"fractional_max_pool2d: Expected 3D or 4D tensor, but got: {self_._ndim}",
+        lambda: f"fractional_max_pool2d: Expected 3D or 4D tensor, but got: {self_.ndim}",
     )
     ndim = self_.ndim
 
-    for i in range(3):
-        d = i + (ndim - 3)
+    for d in range(ndim - 3, ndim):
         torch._check(
             self_.size(d) > 0,
             f"fractional_max_pool2d: Expected input to have non-zero "
@@ -4344,50 +4343,60 @@ def meta_fractional_max_pool2d(self_, kernel_size, output_size, random_samples):
         "either be a single int or tuple of Ints",
     )
 
-    nPlane = self_.size(-3)
-    inH = self_.size(-2)
-    inW = self_.size(-1)
+    input_channels = self_.size(-3)
+    input_height = self_.size(-2)
+    input_width = self_.size(-1)
     if ndim == 4:
-        nBatch = self_.size(0)
+        input_batch = self_.size(0)
     else:
-        nBatch = 1
-
-    samples_shape = [nBatch, nPlane, 2]
+        input_batch = 1
 
     torch._check(
-        all(ss == random_samples.size(i) for i, ss in enumerate(samples_shape)),
-        lambda: f"fractional_max_pool2d: Expected random samples with size "
-        f"{samples_shape}, but got {random_samples.size()}",
-    )
-
-    torch._check(
-        output_size[0] + kernel_size[0] - 1 <= inH,
-        lambda: f"fractional_max_pool2d: kernel height {kernel_size[0]} is too large relative to input height {inH}",
+        self_.dtype == random_samples.dtype,
+        lambda: "Expect _random_samples to have the same dtype as input",
     )
     torch._check(
-        output_size[1] + kernel_size[1] - 1 <= inW,
-        lambda: f"fractional_max_pool2d: kernel width {kernel_size[1]} is too large relative to input width {inW}",
+        random_samples.ndim == 3,
+        lambda: f"Expect _random samples to have 3 dimensions got, {random_samples.ndim}",
+    )
+
+    n = random_samples.size(0)
+    c = random_samples.size(1)
+    d = random_samples.size(2)
+    torch._check(
+        n >= input_batch,
+        "Expect _random_samples.size(0) no less then input batch size.",
+    )
+    torch._check(
+        c == input_channels,
+        lambda: "Expect _random_samples.size(1) equals to input channel size.",
+    )
+    torch._check(d == 2, lambda: f"Expect _random_samples.size(2) equals to 2 got {d}.")
+
+    torch._check(
+        output_size[0] + kernel_size[0] - 1 <= input_height,
+        lambda: f"fractional_max_pool2d: kernel height {kernel_size[0]} is too large relative to input height {input_height}",
+    )
+    torch._check(
+        output_size[1] + kernel_size[1] - 1 <= input_width,
+        lambda: f"fractional_max_pool2d: kernel width {kernel_size[1]} is too large relative to input width {input_width}",
     )
 
     if self_.dim() == 4:
-        size = [nBatch, nPlane, output_size[0], output_size[1]]
+        size = [input_batch, input_channels, output_size[0], output_size[1]]
     else:
-        size = [nPlane, output_size[0], output_size[1]]
-
-    memory_format = utils.suggest_memory_format(self_)
+        size = [input_channels, output_size[0], output_size[1]]
 
     return (
         torch.empty(
             size,
             dtype=self_.dtype,
             device=self_.device,
-            memory_format=memory_format,
         ),
         torch.empty(
             size,
             dtype=torch.int64,
             device=self_.device,
-            memory_format=memory_format,
         ),
     )
 
