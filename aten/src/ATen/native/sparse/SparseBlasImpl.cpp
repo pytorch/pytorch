@@ -174,8 +174,7 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
     values.unsqueeze_(-1).unsqueeze_(-1);
   }
 
-  Tensor compressed_indices, plain_indices;
-  std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(compressed);
+  auto [compressed_indices, plain_indices] = at::sparse_csr::getCompressedPlainIndices(compressed);
 
   // Select block rows of the strided input that intersect with the block columns of the sparse input.
   auto strided_tiled_selected_rows = strided_tiled.index_select(-4, plain_indices);
