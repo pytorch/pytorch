@@ -1597,10 +1597,8 @@ def get_fake_values_from_nodes(tx, nodes, allow_non_graph_fake):
 
         return n.meta["example_value"]
 
-    args_kwargs = torch.fx.node.map_arg(nodes, visit)
-    return tree_map_only(
-        torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), args_kwargs
-    )
+    # get_fake_value already checks for ensure_graph_fake
+    return torch.fx.node.map_arg(nodes, visit)
 
 
 def get_fake_value(node, tx, allow_non_graph_fake=False):
