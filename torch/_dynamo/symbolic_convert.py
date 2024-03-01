@@ -433,6 +433,10 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if truth_fn(eval_result):
                 push and self.push(value)
                 self.jump(inst)
+        elif isinstance(value, variables.BackwardHookVariable):
+            if truth_fn(True):
+                push and self.push(value)
+                self.jump(inst)
         else:
             from .source import is_constant_source
 
@@ -2135,6 +2139,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 for k in vars
                 if k in f_locals
             }
+            self.debug_locals: List[Tuple[VariableTracker, List[VariableTracker]]] = []
             if export:
                 # export gets confused if we never realize unused inputs
                 # in export mode just eagerly realize everything
