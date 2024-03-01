@@ -91,7 +91,7 @@ class ExportDynamoConfig:
 
 @compatibility(is_backward_compatible=False)
 def capture_pre_autograd_graph(
-    f: Callable,
+    f: torch.nn.Module,
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
     constraints: Optional[List[Constraint]] = None,
@@ -104,7 +104,7 @@ def capture_pre_autograd_graph(
     torch.export API.
 
     Args:
-      f: A callable to be traced
+      f: nn.Module to be traced
 
       args: example positional inputs.
 
@@ -141,6 +141,8 @@ def capture_pre_autograd_graph(
     from torch.export.dynamic_shapes import _process_dynamic_shapes
 
     log_export_usage(event="export.private_api", flags={"capture_pre_autograd_graph"})
+
+    assert isinstance(f, torch.nn.Module), "Expected an nn.Module instance."
 
     if kwargs is None:
         kwargs = {}
@@ -327,7 +329,6 @@ def aot_compile(
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
-    constraints: Optional[List[Constraint]] = None,
     dynamic_shapes: Optional[Dict[str, Any]] = None,
     options: Optional[Dict[str, Any]] = None,
     remove_runtime_assertions: bool = False,
@@ -347,14 +348,19 @@ def aot_compile(
 
         kwargs: optional example keyword inputs.
 
-        constraints: A optional list of constraints on the dynamic arguments specifying
-            their possible range of their shapes
+        dynamic_shapes: Should either be:
+            1) a dict from argument names of ``f`` to their dynamic shape specifications,
+            2) a tuple that specifies dynamic shape specifications for each input in original order.
+            If you are specifying dynamism on keyword args, you will need to pass them in the order that
+            is defined in the original function signature.
 
-        dynamic_shapes: An experimental new feature designed to subsume ``constraints``.
-            A dict mapping argument names of ``f`` to their dynamic shape
-            specifications, as follows. Dynamic shape specifications can be a
-            dict from dynamic dimensions to ``Dim`` types, or a tuple/list of
-            ``Optional[Dim]`` corresponding to each input dimension.
+            The dynamic shape of a tensor argument can be specified as either
+            (1) a dict from dynamic dimension indices to :func:`Dim` types, where it is
+            not required to include static dimension indices in this dict, but when they are,
+            they should be mapped to None; or (2) a tuple / list of :func:`Dim` types or None,
+            where the :func:`Dim` types correspond to dynamic dimensions, and static dimensions
+            are denoted by None. Arguments that are dicts or tuples / lists of tensors are
+            recursively specified by using mappings or sequences of contained specifications.
 
         options: A dictionary of options to control inductor
 
@@ -363,17 +369,10 @@ def aot_compile(
     Returns:
         Path to the generated shared library
     """
-    if constraints is not None:
-        warnings.warn(
-            "The constraints field is deprecated. "
-            "Please use dynamic_shapes instead."
-        )
-
     from torch.export._trace import _export_to_torch_ir
     from torch._inductor.decomposition import select_decomp_table
 
-    if constraints is None:
-        constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
+    constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
 
     if config.is_predispatch:
         gm = torch.export._trace._export(f, args, kwargs, constraints, pre_dispatch=True).module()
