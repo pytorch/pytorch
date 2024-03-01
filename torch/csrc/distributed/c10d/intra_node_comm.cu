@@ -728,38 +728,38 @@ void IntraNodeComm::barrier(c10::optional<std::vector<int64_t>> ranks) {
 void IntraNodeComm::put(const at::Tensor& tensor, int64_t offset) {
   TORCH_CHECK(
       tensor.is_non_overlapping_and_dense(),
-      "IntraNodeComm::put: tensor must be non-overlapping and dense");
+      "IntraNodeComm::put(): tensor must be non-overlapping and dense");
   size_t sz = tensor.numel() * tensor.element_size();
   TORCH_CHECK(
-      offset + sz < bufferSize_,
-      "IntraNodeComm::put: offset + tensor size exceeded "
+      offset + sz <= bufferSize_,
+      "IntraNodeComm::put(): offset + tensor size exceeded "
       "p2p buffer size");
   // This results in "Memcpy PtoP" which does not use SMs for copying
-  cudaMemcpyAsync(
+  AT_CUDA_CHECK(cudaMemcpyAsync(
       static_cast<char*>(buffers_[rank_]) + offset,
       static_cast<char*>(tensor.data_ptr()),
       sz,
       cudaMemcpyDeviceToDevice,
-      at::cuda::getCurrentCUDAStream());
+      at::cuda::getCurrentCUDAStream()));
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 void IntraNodeComm::get(size_t rank, at::Tensor tensor, int64_t offset) {
   TORCH_CHECK(
       tensor.is_non_overlapping_and_dense(),
-      "IntraNodeComm::get: tensor must be non-overlapping and dense");
+      "IntraNodeComm::get(): tensor must be non-overlapping and dense");
   size_t sz = tensor.numel() * tensor.element_size();
   TORCH_CHECK(
-      offset + sz < bufferSize_,
-      "IntraNodeComm::get: offset + tensor size exceeded "
+      offset + sz <= bufferSize_,
+      "IntraNodeComm::get(): offset + tensor size exceeded "
       "p2p buffer size");
   // This results in "Memcpy PtoP" which does not use SMs for copying
-  cudaMemcpyAsync(
+  AT_CUDA_CHECK(cudaMemcpyAsync(
       static_cast<char*>(tensor.data_ptr()),
       static_cast<char*>(buffers_[rank]) + offset,
       sz,
       cudaMemcpyDeviceToDevice,
-      at::cuda::getCurrentCUDAStream());
+      at::cuda::getCurrentCUDAStream()));
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
