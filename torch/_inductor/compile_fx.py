@@ -23,8 +23,6 @@ from unittest import mock
 
 from functorch.compile import min_cut_rematerialization_partition
 
-import torch._functorch.config as functorch_config
-
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo import (
@@ -43,6 +41,7 @@ from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
+from torch._inductor.utils import BoxedBool, count_tangents
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
@@ -74,21 +73,6 @@ log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 post_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "post_grad_graphs")
 ALIGNMENT = 16
-
-
-@dataclasses.dataclass
-class BoxedBool:
-    value: bool
-
-    def __bool__(self):
-        return self.value
-
-    @staticmethod
-    def disable(obj):
-        if isinstance(obj, BoxedBool):
-            obj.value = False
-            return obj
-        return False
 
 
 @dataclasses.dataclass
@@ -373,6 +357,7 @@ def compile_fx_inner(
     If you change the argument list for this function, make sure you
     also update the call to save_args_for_compile_fx_inner below accordingly.
     """
+    breakpoint()
     if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
         # trigger the real recompilation for _LazyGraphModule before returning
         # the forward method.
@@ -951,30 +936,6 @@ def cudagraphify_impl(
     return align_inputs_from_check_idxs(run, check_input_idxs)
 
 
-def count_tangents(fx_g: torch.fx.GraphModule):
-    """
-    Infers which inputs are static for a backwards graph
-    """
-
-    def is_saved_tensor(x):
-        return (
-            "tangents" not in x.name
-            and "bwd_seed" not in x.name
-            and "bwd_base_offset" not in x.name
-        )
-
-    arg_count = 0
-    static_arg_idxs = []
-    for n in fx_g.graph.nodes:
-        if n.op == "placeholder":
-            if is_saved_tensor(n):
-                static_arg_idxs.append(arg_count)
-            arg_count += 1
-
-    assert static_arg_idxs == list(range(len(static_arg_idxs)))
-    return len(static_arg_idxs)
-
-
 def compile_fx_aot(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
@@ -1202,8 +1163,9 @@ def compile_fx(
             # partition_fn won't be called
             joint_graph_passes(model)
 
-        num_rng_seed_offset_inputs = 2 if functorch_config.functionalize_rng_ops else 0
-        fixed = len(example_inputs) - num_example_inputs - num_rng_seed_offset_inputs
+        fixed = torch._inductor.utils.num_fw_fixed_arguments(
+            num_example_inputs, len(example_inputs)
+        )
         user_visible_outputs = set()
 
         if config.keep_output_stride:
