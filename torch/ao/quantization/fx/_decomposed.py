@@ -143,7 +143,7 @@ def dequantize_per_tensor(
         quant_min: int,
         quant_max: int,
         dtype: torch.dtype,
-        output_dtype: torch.dtype = torch.float32
+        output_dtype: torch.dtype=torch.float32
 ) -> torch.Tensor:
     """ Affine dequantization for the Tensor using the same quantization parameters to map
     from quantized values to floating point values
@@ -183,7 +183,7 @@ def dequantize_per_tensor(
         raise ValueError(f"Unsupported dtype in dequantize_per_tensor: {dtype}")
 
 @impl(quantized_decomposed_lib, "dequantize_per_tensor", "Meta")
-def dequantize_per_tensor_meta(input, scale, zero_point, quant_min, quant_max, dtype):
+def dequantize_per_tensor_meta(input, scale, zero_point, quant_min, quant_max, dtype, output_dtype=torch.float32):
     return torch.empty_like(input, dtype=dtype)
 
 quantized_decomposed_lib.define(
@@ -198,7 +198,7 @@ def dequantize_per_tensor_tensor(
         quant_min: int,
         quant_max: int,
         dtype: torch.dtype,
-        output_dtype: torch.dtype = torch.float32
+        output_dtype: torch.dtype=torch.float32
 ) -> torch.Tensor:
     """ Affine dequantization for the Tensor using the same quantization parameters to map
     from quantized values to floating point values
@@ -210,7 +210,7 @@ def dequantize_per_tensor_tensor(
     return dequantize_per_tensor(input, scale.item(), zero_point.item(), quant_min, quant_max, dtype, output_dtype=output_dtype)
 
 @impl(quantized_decomposed_lib, "dequantize_per_tensor.tensor", "Meta")
-def dequantize_per_tensor_tensor_meta(input, scale, zero_point, quant_min, quant_max, dtype):
+def dequantize_per_tensor_tensor_meta(input, scale, zero_point, quant_min, quant_max, dtype, output_dtype=torch.float32):
     assert zero_point.numel() == 1, f"Expecting zero_point tensor to be one element, but received : {zero_point.numel()}"
     assert scale.numel() == 1, f"Expecting scale tensor to be one element, but received : {scale.numel()}"
     return torch.empty_like(input, dtype=dtype)
@@ -228,7 +228,7 @@ def dequantize_per_tensor_tensor2(
         quant_min: torch.Tensor,
         quant_max: torch.Tensor,
         dtype: torch.dtype,
-        output_dtype: torch.dtype = torch.float32
+        output_dtype: torch.dtype=torch.float32
 ) -> torch.Tensor:
     """ Affine dequantization for the Tensor using the same quantization parameters to map
     from quantized values to floating point values
@@ -240,8 +240,8 @@ def dequantize_per_tensor_tensor2(
     return dequantize_per_tensor(input, scale.item(), zero_point.item(), quant_min.item(), quant_max.item(), dtype, output_dtype=output_dtype)
 
 @impl(quantized_decomposed_lib, "dequantize_per_tensor.tensor2", "Meta")
-def dequantize_per_tensor_tensor2_meta(input, scale, zero_point, quant_min, quant_max, dtype):
-    return dequantize_per_tensor_tensor_meta(input, scale, zero_point, quant_min, quant_max, dtype)
+def dequantize_per_tensor_tensor2_meta(input, scale, zero_point, quant_min, quant_max, dtype, output_dtype=torch.float32):
+    return dequantize_per_tensor_tensor_meta(input, scale, zero_point, quant_min, quant_max, dtype, output_dtype)
 
 quantized_decomposed_lib.define(
     "choose_qparams.tensor(Tensor input, int quant_min, int quant_max, "
@@ -433,7 +433,7 @@ def dequantize_per_channel(
         quant_min: int,
         quant_max: int,
         dtype: torch.dtype,
-        output_dtype: torch.dtype = torch.float32
+        output_dtype: torch.dtype=torch.float32
 ) -> torch.Tensor:
     """ Affine per channel dequantization for the Tensor using the same quantization
     parameters for each channel/axis to map from quantized values to floating point values
@@ -488,7 +488,8 @@ def dequantize_per_channel_meta(
         axis: int,
         quant_min: int,
         quant_max: int,
-        dtype: torch.dtype
+        dtype: torch.dtype,
+        output_dtype: torch.dtype=torch.float32
 ) -> torch.Tensor:
     assert input.dtype == dtype, f"Expecting input to have dtype {dtype}, but got dtype: {input.dtype}"
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
