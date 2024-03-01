@@ -145,10 +145,6 @@ class FunctionalTensor(torch.Tensor):
         # In theory we don't have to do this - but if we want to service metadata requests here,
         # we need to carefully make sure all metadata is accurate (including metadata mutations)
         if func in FunctionalTensor.metadata_fns:
-
-            def unwrap(x):
-                return x.elem
-
             assert len(args) == 1 and isinstance(args[0], FunctionalTensor)
             assert len(kwargs) == 0
             # All metadata accesses should be plumbed to the inner tensor, that way we don't have to worry
