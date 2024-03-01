@@ -473,6 +473,7 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
         return inner
     return inner(func)
 
+
 # If the op was defined in C++, then we want to make sure there was an
 # m.impl_abstract_pystub(module, ...) call and that the module is the
 # same as the module that called torch.library.impl_abstract.
