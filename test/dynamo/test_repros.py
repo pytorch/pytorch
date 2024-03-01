@@ -3530,7 +3530,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_odict_get_item_index_name(self):
         d = {float: torch.float32, np.float16: torch.float16}
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def f(x, y1, y2):
             return torch.zeros(5, dtype=d[y1]), torch.zeros(5, dtype=d[y2])
 
