@@ -14,6 +14,7 @@ from weakref import ReferenceType
 import torch
 import torch._custom_op
 import torch._logging
+from torch._C._functorch import is_functorch_wrapped_tensor
 
 from torch._guards import Source
 from torch._ops import OpOverload
@@ -124,7 +125,7 @@ def is_fake(x):
         reapply_views = torch._C._functionalization_reapply_views_tls()
         unwrapped = torch._C._functorch._unwrap_functional_tensor(x, reapply_views)
         return is_fake(unwrapped)
-    elif isinstance(x, torch.Tensor) and torch._C._functorch.is_batchedtensor(x):
+    elif isinstance(x, torch.Tensor) and is_functorch_wrapped_tensor(x):
         unwrapped = torch._C._functorch.get_unwrapped(x)
         return is_fake(unwrapped)
     return False
@@ -145,7 +146,7 @@ def maybe_get_fake_mode(t):
         reapply_views = torch._C._functionalization_reapply_views_tls()
         unwrapped = torch._C._functorch._unwrap_functional_tensor(t, reapply_views)
         return maybe_get_fake_mode(unwrapped)
-    elif isinstance(t, torch.Tensor) and torch._C._functorch.is_batchedtensor(t):
+    elif isinstance(t, torch.Tensor) and is_functorch_wrapped_tensor(t):
         unwrapped = torch._C._functorch.get_unwrapped(t)
         return maybe_get_fake_mode(unwrapped)
     return None
@@ -166,8 +167,12 @@ def torch_decomp_decompositions(func):
     from torch._decomp import decomposition_table
 
     decompositions = torch._decomp.decompositions
-    decomp_attrs = [getattr(decompositions, attr) for attr in dir(decompositions)]
-    return decomposition_table[func] in decomp_attrs
+    # Note that the function in the decomposition table might be
+    # different from the one in the module because of the difference
+    # in out handling in aten API and torch public API
+    return decomposition_table[func].__module__.startswith(
+        "torch._decomp"
+    ) and decomposition_table[func].__name__ in dir(decompositions)
 
 
 def tree_flatten_only(ty: Type[T], tree: PyTree):

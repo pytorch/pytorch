@@ -99,6 +99,8 @@ constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
 constexpr const char* TIMEOUT_DUMP = "timeout_dump";
 
+constexpr const int kWorkStatusUpdatePeriodMs = 10 * 1000; // 10 seconds
+
 constexpr auto kProcessGroupNCCLDefaultTimeout =
     std::chrono::milliseconds(10 * 60 * 1000);
 
@@ -592,13 +594,21 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   virtual std::exception_ptr checkForNCCLErrors(
       std::shared_ptr<NCCLComm>& ncclComm);
 
+  // Ensure thaht if record is True, the work obj will be enqueued via
+  // workEnqueue
   virtual c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       at::Device& device,
       int rank,
       OpType opType,
       const char* profilingTitle = nullptr,
       const std::vector<at::Tensor>& inputs = {},
-      const std::vector<at::Tensor>& outputs = {});
+      const std::vector<at::Tensor>& outputs = {},
+      bool record = false);
+
+  // In the timeout case and we will dump debug info such as the NCCL flight
+  // recorder to storage. Down the road, if we have more complicated or blocking
+  // operations, we might need to use a side thread to do it.
+  bool dumpDebuggingInfo();
 
  private:
   int globalRankStart;
@@ -700,11 +710,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void runHookLoop();
 
-  // In the timeout case and we will dump debug info such as the NCCL flight
-  // recorder to storage. Down the road, if we have more complicated or blocking
-  // operations, we might need to use a side thread to do it.
-  bool dumpDebuggingInfo();
-
   // Desync debug helper
   void logWorkStart(WorkNCCL& work);
 
@@ -724,6 +729,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // return the rank_ of the the very first PG created, aka, default global PG.
   const int& globalRank() const;
 
+  // Returns the global ranks of a PG.
+  const std::vector<uint64_t>& groupRanks() const;
+
  protected:
   // Function that runs as part of a separate thread aside from watchdog
   // thread because we need to check the heartbeat from watchdog thread
@@ -735,25 +743,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // gets terminated.
   virtual void terminateProcess(std::string errMsg);
 
-  // Create a thread that dumps debug info to the file specified as
-  // ${TORCH_NCCL_DEBUG_INFO_TEMP_FILE}{$RANK}
-  // Serializes all dumping activity, but allows concurrent calls.
-  // Each call returns a future, which can be checked or waited on
-  // for dump completion.
-  std::future<bool> launchAsyncDebugDump();
-
-  // Helper to wait up to the specified timeout and then abandon the dump.
-  // Logs on timeout, and asserts the future's status is as expected.
-  void waitForDumpOrTimeout(
-      std::future<bool>& fut,
-      const std::chrono::time_point<std::chrono::steady_clock>& wakeUpTime,
-      size_t timeout_sec = 30);
-
   // A helper function to wait for a future to complete or timeout.
   void waitForFutureOrTimeout(
       std::future<bool>& fut,
       const std::chrono::milliseconds& timeOutMilSec,
-      const std::string& futDescription);
+      const std::string& futDescription,
+      bool throwException = false);
 
   // When watchdog timeout, this function will be called and return debug info
   // for users. For now we only get information from retrieveDesyncReport.
@@ -834,7 +829,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // The time interval used for deciding whether there is no watchdog heartbeat.
   int heartbeatTimeoutInSec_;
 
-  // Extra time of sleep when waiting for timeout dump to finish.
+  // timeout for the dump to finish.
   int waitTimeoutDumpInMilSec_;
 
   // Interval of check coordinated signals in ProcessGroupNCCL from other ranks
@@ -985,7 +980,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   static thread_local uint64_t ncclActiveGroupCounter_;
 
   // Counting for the sequential number of NCCL collective call.
+  // (specifically, how many actual kernels we launched, which differs from
+  // op_id_ when coalescing is enabled)
   uint64_t seq_{0};
+
+  // Incrementing counter for logical operations (collective or p2p) issued on
+  // the ProcessGroup
+  uint64_t op_id_{0};
 
   // the sequential number of the last colletive enqueued into workMetaList_
   // This is useful for indentifying a rank that has not join a collective
