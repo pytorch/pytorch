@@ -86,6 +86,7 @@ class GuardSource(enum.Enum):
     SHAPE_ENV = 6
     LOCAL_FSDP_MODULE = 7
     GLOBAL_FSDP_MODULE = 8
+    BACKWARD_STATE = 9
 
     def is_fsdp_module(self) -> bool:
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
@@ -618,6 +619,11 @@ class TracingContext:
         self.force_unspec_int_unbacked_size_like = False
         # See note [Tensor Fakification and Symbol Caching]
         self.tensor_to_context = WeakTensorKeyDictionary()
+
+        # If this true, Aot Autograd will return output Fake Tensors with appropiate
+        # meta on the first invocation
+        # see note: [Returning Fake Tensors on First AOT Autograd Call]
+        self.fakify_first_call = False
 
     def clear(self):
         # Look at the note in output_graph.py in function `save_global_state`
