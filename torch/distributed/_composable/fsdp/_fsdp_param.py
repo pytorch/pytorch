@@ -248,7 +248,7 @@ class FSDPParam:
         all_gather_output_size = torch.Size([all_gather_input_numel * world_size])
         # NOTE(yf225): here we explicitly make fsdp_param.all_gather_output the leaf tensor (instead of unsharded_param being leaf tensor)
         self.all_gather_output = torch.empty(
-            all_gather_output_size, dtype=dtype, device=device, requires_grad=True
+            all_gather_output_size, dtype=dtype, device=device, requires_grad=self.sharded_param.requires_grad
         )
 
     def init_unsharded_param(self):
@@ -271,7 +271,7 @@ class FSDPParam:
                 stride=self._global_stride,
             )
         self._unsharded_param = unsharded_param
-        self._unsharded_param.requires_grad_(self.sharded_param.requires_grad)
+        # self._unsharded_param.requires_grad_(self.sharded_param.requires_grad)
 
     def to_sharded(self) -> None:
         self._setattr_on_modules(self.sharded_param)
@@ -311,7 +311,8 @@ class FSDPParam:
 
     def to_unsharded(self) -> None:
         # Assume that the data has been allocated and all-gathered
-        set_requires_grad_if_needed(self.sharded_param, self._unsharded_param)
+        # set_requires_grad_if_needed(self.sharded_param, self._unsharded_param)
+        assert self.all_gather_output.requires_grad == self.sharded_param.requires_grad  # NOTE: should already be set to be the same in init_all_gather_output()
         self._setattr_on_modules(self._unsharded_param)
         if self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             # The data is allocated in the default stream via the post-forward
