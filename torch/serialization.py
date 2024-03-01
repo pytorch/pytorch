@@ -1196,7 +1196,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             nbytes = numel * torch._utils._element_size(dtype)
 
             if root_key not in deserialized_objects:
-                if torch._guards.detect_fake_mode(None) is not None:
+                if torch._guards.active_fake_mode() is not None:
                     obj = cast(Storage, torch.UntypedStorage(nbytes, device='meta'))
                 else:
                     obj = cast(Storage, torch.UntypedStorage(nbytes))
@@ -1272,7 +1272,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
 
     deserialized_storage_keys = pickle_module.load(f, **pickle_load_args)
 
-    if torch._guards.detect_fake_mode(None) is None:
+    if torch._guards.active_fake_mode() is None:
         offset = f.tell() if f_should_read_directly else None
         for key in deserialized_storage_keys:
             assert key in deserialized_objects
