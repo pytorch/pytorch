@@ -107,7 +107,6 @@ class StructuredTraceTest(TestCase):
         trace_log.setLevel(self.old_level)
 
     def assertParses(self):
-        return  # TODO: enable
         out = tempfile.mkdtemp()
         try:
             subprocess.check_call(

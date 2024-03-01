@@ -1208,7 +1208,7 @@ auto Engine::execute(
   TORCH_INTERNAL_ASSERT(compiled_autograd != COMPILED_AUTOGRAD_POISON);
 
   // accumulate_grad is true if and only if the frontend call was to
-  // grad(), not backward(). grad() returns the sum of the gradients
+  // backward(), not grad(). grad() returns the sum of the gradients
   // w.r.t. the inputs and thus needs the inputs to be present.
   TORCH_CHECK_VALUE(
       accumulate_grad || !outputs.empty(), "grad requires non-empty inputs.");
