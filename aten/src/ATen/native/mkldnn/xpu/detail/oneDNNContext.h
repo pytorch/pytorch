@@ -17,7 +17,7 @@ namespace onednn {
 // Keep non-static and non-inline
 bool set_onednn_verbose(int level);
 
-static inline dnnl::memory xpu_onednn_memory(
+static inline dnnl::memory make_onednn_memory(
     dnnl::memory::desc md,
     dnnl::engine& engine,
     void* ptr) {
