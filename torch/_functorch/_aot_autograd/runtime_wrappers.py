@@ -75,7 +75,7 @@ def create_runtime_wrapper(
         compiled_fn = make_boxed_func(compiled_fn)
 
     def runtime_wrapper(*args):
-        # Pass in effect tokens
+        # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
         args = (*[torch.tensor([])] * num_tokens, *args)
 
         if trace_joint:
@@ -128,7 +128,7 @@ def create_runtime_wrapper(
             + num_tokens
         )
 
-        # Toss out the effect tokens
+        # Toss out the effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
         all_outs = all_outs[num_tokens:]
 
         # Step 3: After running the compiled fw, apply updates to mutated inputs

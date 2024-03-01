@@ -584,6 +584,7 @@ class GraphSignature:
         # (2) graph outputs = (output_tokens, mutated_inputs, user_outs, param_gradients)
         # (If we are capturing an inference graph, this convention is identical
         #  except that param_gradients is empty)
+        # See Note [Side-Effectful Tokens in AOTAutograd] for information on tokens
 
         # Address input calling conventions:
         start, stop = 0, num_tokens
