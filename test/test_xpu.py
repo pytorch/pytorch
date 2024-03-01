@@ -108,6 +108,24 @@ if __name__ == "__main__":
         event.synchronize()
         self.assertTrue(event.query())
 
+    def test_generator(self):
+        torch.manual_seed(2024)
+        g_state0 = torch.xpu.get_rng_state()
+        torch.manual_seed(1234)
+        g_state1 = torch.xpu.get_rng_state()
+        self.assertNotEqual(g_state0, g_state1)
+
+        torch.xpu.manual_seed(2024)
+        g_state2 = torch.xpu.get_rng_state()
+        self.assertEqual(g_state0, g_state2)
+
+        torch.xpu.set_rng_state(g_state1)
+        self.assertEqual(g_state1, torch.xpu.get_rng_state())
+
+        torch.manual_seed(1234)
+        torch.xpu.set_rng_state(g_state0)
+        self.assertEqual(2024, torch.xpu.initial_seed())
+
 
 if __name__ == "__main__":
     run_tests()
