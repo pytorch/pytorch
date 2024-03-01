@@ -94,7 +94,7 @@ class PlacementStrategy:
                 f"function output_spec expects a single DTensorSpec but got: {self.output_specs}"
             )
 
-    def input_spec(self, index: int) -> DTensorSpec:
+    def input_spec(self, index: int = 0) -> DTensorSpec:
         assert self.input_specs is not None, "input_specs of PlacementStrategy is None!"
         assert len(self.input_specs) > index, (
             f"Invalid index {index} for input_specs of length "
