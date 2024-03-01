@@ -76,6 +76,18 @@ def _maybe_run_with_interpreter(fn):
     return maybe_interpreted_fn
 
 
+# We'll use the current decomposition table to make sure operators in subgraphs are
+# decomposed properly.
+# We also need to maybe run with interpreter for propagating stack_trace
+def reenter_make_fx(fn, pre_dispatch=False):
+    decomp_table = torch.fx.experimental.proxy_tensor.CURRENT_DECOMPOSITION_TABLE
+    return make_fx(
+        _maybe_run_with_interpreter(fn),
+        decomposition_table=decomp_table,
+        pre_dispatch=pre_dispatch,
+    )
+
+
 @contextmanager
 def _set_compilation_env():
     _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
@@ -88,14 +100,14 @@ def _set_compilation_env():
         torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
 
 
-def _has_potential_branch_input_mutation(branch, inputs):
+def _has_potential_branch_input_mutation(branch, inputs, pre_dispatch=False):
     """
     Dispatch-trace the branch with inputs and check if
     producing graph has mutable op on the input. This is
     bit restrictive as the branch must be traceable.
     """
     try:
-        gm = make_fx(branch)(*inputs)
+        gm = make_fx(branch, pre_dispatch=pre_dispatch)(*inputs)
     except UnsupportedAliasMutationException:
         # this can happen when nested cond_op is
         # functionalized
@@ -128,15 +140,14 @@ def _has_potential_branch_input_mutation(branch, inputs):
     return _detect_input_mutation(gm)
 
 
-def _has_potential_branch_input_alias(branch, inputs):
+def _has_potential_branch_input_alias(branch, inputs, pre_dispatch=False):
     """
     Dispatch-trace the branch with inputs and check if
     producing graph has output aliasing the branch input. This is
     bit restrictive as the branch must be traceable.
     """
     try:
-        gm = make_fx(branch)(*inputs)
-
+        gm = make_fx(branch, pre_dispatch=pre_dispatch)(*inputs)
     except UnsupportedAliasMutationException:
         # this can happen when nested cond_op is
         # functionalized
