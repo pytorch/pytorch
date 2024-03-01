@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from torch.distributed.tensor.parallel.api import parallelize_module
 
-from torch.distributed.tensor.parallel.loss_parallel import loss_parallel
+from torch.distributed.tensor.parallel.loss import loss_parallel
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
     ParallelStyle,
