@@ -357,7 +357,6 @@ static inline bool binary_valid(
   return false;
 }
 
-
 inline bool is_channels_last(at::MemoryFormat fmt){
   return (at::MemoryFormat::ChannelsLast3d == fmt) || (at::MemoryFormat::ChannelsLast3d == fmt);
 }
