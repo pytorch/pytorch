@@ -134,8 +134,6 @@ def shard(
         assert len(tests) == 0, "No shards provided but there are tests to shard"
         return
     # Modifies sharded_jobs in place
-    known_tests = tests
-    unknown_tests = []
     if sort_by_time:
         known_tests = [
             x
@@ -147,12 +145,28 @@ def shard(
         assert (
             unknown_tests == [] or serial
         ), f"Attmempting to parallelize unknown tests {unknown_tests}"
+        pytest_sharded_tests = sorted(
+            get_with_pytest_shard(known_tests, test_file_times, test_class_times),
+            key=lambda j: j.get_time(),
+            reverse=True,
+        ) + get_with_pytest_shard(unknown_tests, test_file_times, test_class_times)
+    else:
+        pytest_sharded_tests = get_with_pytest_shard(
+            tests, test_file_times, test_class_times
+        )
     del tests
 
-    known_tests = get_with_pytest_shard(known_tests, test_file_times, test_class_times)
+    round_robin_index = 0
 
-    if sort_by_time:
-        known_tests = sorted(known_tests, key=lambda j: j.get_time(), reverse=True)
+    def _get_min_sharded_job(
+        test: ShardedTest, sharded_jobs: List[ShardJob]
+    ) -> ShardJob:
+        if test.get_time() == 0:
+            nonlocal round_robin_index
+            job = sharded_jobs[round_robin_index % len(sharded_jobs)]
+            round_robin_index += 1
+            return job
+        return min(sharded_jobs, key=lambda j: j.get_total_time())
 
     def _shard_serial(tests: List[ShardedTest], sharded_jobs: List[ShardJob]) -> None:
         assert estimated_time_limit is not None, "Estimated time limit must be provided"
@@ -163,25 +177,18 @@ def shard(
                 and sharded_jobs[-1].get_total_time() > estimated_time_limit
             ):
                 new_sharded_jobs = sharded_jobs[:-1]
-            min_sharded_job = min(new_sharded_jobs, key=lambda j: j.get_total_time())
+            min_sharded_job = _get_min_sharded_job(test, new_sharded_jobs)
             min_sharded_job.serial.append(test)
 
     def _shard_parallel(tests: List[ShardedTest], sharded_jobs: List[ShardJob]) -> None:
         for test in tests:
-            min_sharded_job = min(sharded_jobs, key=lambda j: j.get_total_time())
+            min_sharded_job = _get_min_sharded_job(test, sharded_jobs)
             min_sharded_job.parallel.append(test)
 
     if serial:
-        _shard_serial(known_tests, sharded_jobs)
+        _shard_serial(pytest_sharded_tests, sharded_jobs)
     else:
-        _shard_parallel(known_tests, sharded_jobs)
-
-    # Round robin the unknown jobs starting with the smallest shard
-    num_shards = len(sharded_jobs)
-    index = min(range(num_shards), key=lambda i: sharded_jobs[i].get_total_time())
-    for unknown_test in unknown_tests:
-        sharded_jobs[index].serial.append(ShardedTest(unknown_test, 1, 1, None))
-        index = (index + 1) % num_shards
+        _shard_parallel(pytest_sharded_tests, sharded_jobs)
 
     return
 
