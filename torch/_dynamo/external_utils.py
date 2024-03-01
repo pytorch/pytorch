@@ -12,7 +12,18 @@ except ModuleNotFoundError:
 
 
 def is_compiling() -> bool:
-    return False
+    """
+    Indicates whether we are tracing/compiling with torch.compile() or torch.export().
+
+    If need to check specifically that TorchDynamo is used, then use
+    torch.compiler.is_dynamo_compiling().
+
+    TODO(khabinov): we should deprecate this function and use one of these two:
+    * torch.compiler.is_compiling(),
+    * torch.compiler.is_dynamo_compiling().
+    It will depend on the context where to use what.
+    """
+    return torch.compiler.is_compiling()
 
 
 def wrap_inline(fn):
