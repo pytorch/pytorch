@@ -171,7 +171,7 @@ struct C10_API Allocator {
   // attached to the input data.
   //
   // Requires: input data was allocated by the same allocator.
-  DataPtr clone(const void* data, std::size_t n) const;
+  DataPtr clone(const void* data, std::size_t n);
 
   // Checks if DataPtr has a simple context, not wrapped with any out of the
   // ordinary contexts.
