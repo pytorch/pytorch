@@ -10,136 +10,140 @@ import weakref
 def _get_nested_int(equiv_set, vec):
     return torch._C._get_nested_int(equiv_set, coeff=1, vec=vec)
 
-# Only to be used in NestedTensorState
-class UnionFind:
-    # Wrapper around cpp union find that operates on vecs
-    def __init__(self, tensor_counter):
-        self._tensor_counter = tensor_counter
-        self._cpp_union_find = torch._C._get_nested_int_union_find()
-        self._vecs = WeakTensorKeyDictionary()
 
-    # Union find in python
-    def merge(self, src, tgt):
-        src_id = self._tensor_counter.get_id(src)
-        tgt_id = self._tensor_counter.get_id(tgt)
-        self._cpp_union_find.merge(src_id, tgt_id)
-
-        # Point the non-canonical vec to canonical vec so to ensure lifetime
-        # of canonical vec is the longest among all vecs in the equiv set.
-        if src not in self._vecs:
-            self._vecs[src] = src
-        if tgt not in self._vecs:
-            self._vecs[tgt] = tgt
-        self._vecs[self._vecs[src]] = self._vecs[self._vecs[tgt]]
-
-    def find(self, vec):
-        vec_id = self._tensor_counter.get_id(vec)
-        canonical_id = self._cpp_union_find.find(vec_id)
-        return self._tensor_counter.get_vec(canonical_id)
-
-class DefaultWeakTensorKeyDictionary():
-    # If getitem is called on a key that is not in the dictionary, the dictionary
-    # will create a new entry for the key and return the default value.
+class DefaultWeakTensorKeyDictionary(WeakTensorKeyDictionary):
     def __init__(self, default_cls):
-        self._data = WeakTensorKeyDictionary()
+        super().__init__()
         self._default_cls = default_cls
 
     def __getitem__(self, key):
-        if key not in self._data:
-            self._data[key] = self._default_cls()
-        return self._data[key]
+        if not super().__contains__(key):
+            super().__setitem__(key, self._default_cls())
+        return super().__getitem__(key)
 
-    def __setitem__(self, key, value):
-        self._data[key] = value
 
-    def items(self):
-        return self._data.items()
-
-# Only to be used in NestedTensorState
-class TensorCounter:
-    # This class is NOT equiv set aware, simply assigns a unique id to each tensor
-    # object. This is all the state you need for nested int creation.
+class TensorIntMap:
+    # Maps Tensor objects to unique ints in an incrementing fashion
     _incrementing_id = 0
-    # TODO: id to vec would belong here, but not sure why we need it?
-    _global_nested_int_ids = WeakTensorKeyDictionary()
-    _id_to_vec = dict()
+    _tensor_to_int = WeakTensorKeyDictionary()
+    _int_to_tensor = dict()
 
-    def get_id(self, vec):
-        if vec not in self._global_nested_int_ids:
-            self._global_nested_int_ids[vec] = self._incrementing_id
-            self._id_to_vec[self._incrementing_id] = weakref.ref(vec)
+    def get_int(self, t):
+        if t not in self._tensor_to_int:
+            self._tensor_to_int[t] = self._incrementing_id
+            self._int_to_tensor[self._incrementing_id] = weakref.ref(t)
             self._incrementing_id += 1
-        return self._global_nested_int_ids[vec]
+        return self._tensor_to_int[t]
 
-    def get_vec(self, id):
-        return self._id_to_vec[id]()
+    def get_tensor(self, i):
+        return self._int_to_tensor[i]()
 
-class NestedTensorState:
-    # Class that encapsulates all the state needed for NestedTensor
-    def __init__(self):
-        self._tensor_counter = TensorCounter()
-        self._union_find = UnionFind(self._tensor_counter)
-        # The union find data structure in python ensures that the canonical vec
-        # stays alive as long as any vec in its equiv set is alive.
-        # the following data structures only allow canonical vec as keys
-        # once a merge happens, one of the keys becomes invalid,
-        # the value of the non-canonical key is invalidated
-        self._INVALID = object()
+
+class UnionFindWrapper:
+    # Wrapper around an union-find data structure over ints that exposes an API
+    # for union-find over tensors. Also for each set, we
+    #
+    # 1) maintain a metadata dict that can hold arbitrary data. The data in the
+    #   metadata dicts are merged when two sets are merged.
+    #
+    # 2) maintain a set of weak ref to Tensors that are in it.
+    def __init__(self, union_find_int, tensor_int_map):
+        self._union_find_int = union_find_int
+        self._tensor_int_map = tensor_int_map
+
         self._metadata = DefaultWeakTensorKeyDictionary(dict)
-        self._weak_tensors = DefaultWeakTensorKeyDictionary(set)
+        self._equiv_sets = DefaultWeakTensorKeyDictionary(set)
+        self._tensors = WeakTensorKeyDictionary()
+
+        self._INVALID = object()
 
     def merge(self, src, tgt):
-        if src is tgt:
-            return
-        canonical_src = self._union_find.find(src)
-        canonical_tgt = self._union_find.find(tgt)
-
+        canonical_src = self.find(src)
+        canonical_tgt = self.find(tgt)
+        # To satisfy (1) above:
+        # (i) maintain the invariant that for every valid entry in _metadata,
+        #     the key is the canonical tensor of some set.
+        # (ii) when two equiv sets are merged, since only one tensor remains
+        #     canonical, merge the metadata of the non-canonical set into that
+        #     of the canonical set, invalidate the non-canonical tensor's entry.
         self._metadata[canonical_src].update(self._metadata[canonical_tgt])
         self._metadata[canonical_tgt] = self._metadata[canonical_src]
         self._metadata[canonical_src] = self._INVALID
 
-        self._weak_tensors[canonical_tgt].update(self._weak_tensors[canonical_src])
-        self._weak_tensors[canonical_src] = self._INVALID
+        # (2) operates the same way as (1)
+        self._equiv_sets[canonical_tgt].update(self._equiv_sets[canonical_src])
+        self._equiv_sets[canonical_src] = self._INVALID
 
-        self._union_find.merge(canonical_src, canonical_tgt)
+        # Maintains that the the canonical tensor and by extension the metadata
+        # and equiv sets are kept alive by any tensors alive in the set.
+        self._tensors[canonical_src] = canonical_tgt
 
-    def get_metadata(self, vec):
-        canonical_vec = self._union_find.find(vec)
-        ret = self._metadata[canonical_vec]
-        # I am asking for the metadata a vec that is no longer canonical
+        self._union_find_int.merge(
+            self._tensor_int_map.get_int(src),
+            self._tensor_int_map.get_int(tgt)
+        )
+
+    def find(self, tensor):
+        canonical_id = self._union_find_int.find(
+            self._tensor_int_map.get_int(tensor)
+        )
+        return self._tensor_int_map.get_tensor(canonical_id)
+
+    def get_metadata(self, tensor):
+        ret = self._metadata[self.find(tensor)]
         assert ret is not self._INVALID
         return ret
 
-    def get_equivalent_vecs(self, vec):
-        canonical_vec = self._union_find.find(vec)
-        # Returns all vecs that are alive in the same equiv set as vec
-        # check that canonical vec is actually in the set?
-        for weak_vec in self._weak_tensors[canonical_vec]:
-            vec = weak_vec()
-            if vec is not None:
-                yield vec
-
-    def create_nested_int(self, vec, ctor_fn=None):
-        # Parameters:
-        #     ctor_fn (Callable[[int, Tensor], SymInt]): If not None, use a custom
-        #        constructor to create the nested int.
-        if (isinstance(vec, torch._subclasses.fake_tensor.FakeTensor) or
-            isinstance(vec, torch._subclasses.functional_tensor.FunctionalTensor)) and ctor_fn is None:
-            # TODO: this seems weird, understand it better
-            return vec.create_nested_int(_get_nested_int, use_cache=True)
-        _ctor_fn = ctor_fn if ctor_fn is not None else _get_nested_int
-        return _ctor_fn(self._tensor_counter.get_id(vec), vec)
+    def get_equiv_set(self, tensor):
+        equiv_set = self._equiv_sets[self.find(tensor)]
+        assert equiv_set is not self._INVALID
+        return equiv_set
 
     def validate_invariants(self):
         # for testing only
         for vec, val in self._metadata.items():
-            assert (self._union_find.find(vec) is vec) == (val is self._INVALID)
-        for vec, val in self._weak_tensors.items():
-            assert (self._union_find.find(vec) is vec) == (val is self._INVALID)
+            assert (self.find(vec) is vec) == (val is self._INVALID)
+        for vec, val in self._equiv_sets.items():
+            assert (self.find(vec) is vec) == (val is self._INVALID)
 
     def print_metadata(self):
         for vec, val in self._metadata.items():
             print(f"vec: {id(vec)}, val: {val}")
+
+
+class NestedTensorState:
+    # Class that encapsulates all the global state needed for NestedTensor
+    def __init__(self):
+        self._tensor_int_map = TensorIntMap()
+        self._union_find = UnionFindWrapper(
+            # TODO: allow setting this for testing purposes
+            torch._C._get_nested_int_union_find(),
+            self._tensor_int_map,
+        )
+
+    def union_find_merge(self, src, tgt):
+        if src is not tgt:
+             self._union_find.merge(src, tgt)
+
+    def get_metadata(self, tensor):
+        return self._union_find.get_metadata(tensor)
+
+    def get_equiv_tensors(self, tensor):
+        for weak_tensor in self._union_find.get_equiv_set(tensor):
+            mb_tensor = weak_tensor()
+            if mb_tensor is not None:
+                yield mb_tensor
+
+    def create_nested_int(self, tensor, ctor_fn=None):
+        # Parameters:
+        #     ctor_fn (Callable[[int, Tensor], SymInt]): If not None, use a custom
+        #        constructor to create the nested int.
+        if (isinstance(tensor, torch._subclasses.fake_tensor.FakeTensor) or
+            isinstance(tensor, torch._subclasses.functional_tensor.FunctionalTensor)) and ctor_fn is None:
+            # TODO: this seems weird, understand it better
+            return tensor.create_nested_int(_get_nested_int, use_cache=True)
+        _ctor_fn = ctor_fn if ctor_fn is not None else _get_nested_int
+        return _ctor_fn(self._tensor_int_map.get_int(tensor), tensor)
 
 
 _nt_state: Optional[NestedTensorState] = None
@@ -153,7 +157,7 @@ def get_nt_state() -> NestedTensorState:
 
 def trust_me_assert_equal(vec1, vec2, _nt_state=None):
     nt_state = get_nt_state() if _nt_state is None else _nt_state
-    nt_state.merge(vec1, vec2)
+    nt_state.union_find_merge(vec1, vec2)
 
 
 # SDPA metadata; max / min seqlens are needed for e.g. flash
