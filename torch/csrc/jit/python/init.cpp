@@ -1408,13 +1408,13 @@ void initJITBindings(PyObject* module) {
              const std::string& name,
              py::bytes data,
              size_t size) {
-            // It is not clear from the doc but according to CPython own code, it is ok
-            // to use the result of PyBytes_AsString without the GIL being held
+            // It is not clear from the doc but according to CPython own code,
+            // it is ok to use the result of PyBytes_AsString without the GIL
+            // being held
             // https://github.com/python/cpython/blob/e2a3e4b7488aff6fdc704a0f258bc315e96c1d6e/Objects/stringlib/join.h#L67
             const char* data_str = PyBytes_AsString(data.ptr());
             py::gil_scoped_release release;
-            return self.writeRecord(
-                name, data_str, size);
+            return self.writeRecord(name, data_str, size);
           })
       .def(
           "write_record",
