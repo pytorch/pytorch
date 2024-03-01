@@ -803,23 +803,22 @@ class Module:
                 param_applied = fn(param)
             p_should_use_set_data = compute_should_use_set_data(param, param_applied)
             param_grad = param.grad
-            if p_should_use_set_data:
-                if should_use_swap_tensors:
-                    try:
-                        if param_grad is not None:
-                            # Accessing param.grad makes its at::Tensor's use_count 2, which will prevent swapping.
-                            # Decrement use count of the gradient by setting to None
-                            param.grad = None
-                        param_applied = torch.nn.Parameter(param_applied, requires_grad=param.requires_grad)
-                        torch.utils.swap_tensors(param, param_applied)
-                    except Exception as e:
-                        if param_grad is not None:
-                            param.grad = param_grad
-                        raise RuntimeError(f"_apply(): Couldn't swap {self._get_name()}.{key}") from e
-                    out_param = param
-                else:
-                    param.data = param_applied
-                    out_param = param
+            if should_use_swap_tensors:
+                try:
+                    if param_grad is not None:
+                        # Accessing param.grad makes its at::Tensor's use_count 2, which will prevent swapping.
+                        # Decrement use count of the gradient by setting to None
+                        param.grad = None
+                    param_applied = torch.nn.Parameter(param_applied, requires_grad=param.requires_grad)
+                    torch.utils.swap_tensors(param, param_applied)
+                except Exception as e:
+                    if param_grad is not None:
+                        param.grad = param_grad
+                    raise RuntimeError(f"_apply(): Couldn't swap {self._get_name()}.{key}") from e
+                out_param = param
+            elif p_should_use_set_data:
+                param.data = param_applied
+                out_param = param
             else:
                 assert isinstance(param, Parameter)
                 assert param.is_leaf
@@ -830,17 +829,16 @@ class Module:
                 with torch.no_grad():
                     grad_applied = fn(param_grad)
                 g_should_use_set_data = compute_should_use_set_data(param_grad, grad_applied)
-                if g_should_use_set_data:
-                    if should_use_swap_tensors:
-                        grad_applied.requires_grad_(param_grad.requires_grad)
-                        try:
-                            torch.utils.swap_tensors(param_grad, grad_applied)
-                        except Exception as e:
-                            raise RuntimeError(f"_apply(): Couldn't swap {self._get_name()}.{key}.grad") from e
-                        out_param.grad = param_grad
-                    else:
-                        assert out_param.grad is not None
-                        out_param.grad.data = grad_applied
+                if should_use_swap_tensors:
+                    grad_applied.requires_grad_(param_grad.requires_grad)
+                    try:
+                        torch.utils.swap_tensors(param_grad, grad_applied)
+                    except Exception as e:
+                        raise RuntimeError(f"_apply(): Couldn't swap {self._get_name()}.{key}.grad") from e
+                    out_param.grad = param_grad
+                elif g_should_use_set_data:
+                    assert out_param.grad is not None
+                    out_param.grad.data = grad_applied
                 else:
                     assert param_grad.is_leaf
                     out_param.grad = grad_applied.requires_grad_(param_grad.requires_grad)

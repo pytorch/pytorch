@@ -15,9 +15,9 @@ from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
-    _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
+    reenter_make_fx,
     UnsupportedAliasMutationException,
 )
 
@@ -25,7 +25,6 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
-    make_fx,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
@@ -104,7 +103,7 @@ def cond(pred, true_fn, false_fn, operands):
 
     """
 
-    if torch._dynamo.is_compiling():
+    if torch.compiler.is_dynamo_compiling():
         return cond_op(pred, true_fn, false_fn, operands)
 
     def _validate_input(pred, true_fn, false_fn, operands):
@@ -157,12 +156,8 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
 
     with disable_proxy_modes_tracing():
-        true_graph = make_fx(
-            _maybe_run_with_interpreter(true_fn), pre_dispatch=pre_dispatch
-        )(*operands)
-        false_graph = make_fx(
-            _maybe_run_with_interpreter(false_fn), pre_dispatch=pre_dispatch
-        )(*operands)
+        true_graph = reenter_make_fx(true_fn, pre_dispatch)(*operands)
+        false_graph = reenter_make_fx(false_fn, pre_dispatch)(*operands)
 
     true_outs = []
     false_outs = []
@@ -285,13 +280,18 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
     with ctx.redispatch_to_next() as m:
         functional_true = ctx.functionalize(true_fn)
         functional_false = ctx.functionalize(false_fn)
+        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         for branch in [functional_true, functional_false]:
-            if _has_potential_branch_input_mutation(branch, unwrapped_inputs):
+            if _has_potential_branch_input_mutation(
+                branch, unwrapped_inputs, pre_dispatch=pre_dispatch
+            ):
                 raise UnsupportedAliasMutationException(
                     "One of torch.cond branch might be modifying the input!"
                 )
         for branch in [true_fn, false_fn]:
-            if _has_potential_branch_input_alias(branch, unwrapped_inputs):
+            if _has_potential_branch_input_alias(
+                branch, unwrapped_inputs, pre_dispatch=pre_dispatch
+            ):
                 raise UnsupportedAliasMutationException(
                     "One of torch.cond branch might be aliasing the input!"
                 )

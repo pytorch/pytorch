@@ -91,7 +91,7 @@ class ExportDynamoConfig:
 
 @compatibility(is_backward_compatible=False)
 def capture_pre_autograd_graph(
-    f: Callable,
+    f: torch.nn.Module,
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
     constraints: Optional[List[Constraint]] = None,
@@ -104,7 +104,7 @@ def capture_pre_autograd_graph(
     torch.export API.
 
     Args:
-      f: A callable to be traced
+      f: nn.Module to be traced
 
       args: example positional inputs.
 
@@ -142,6 +142,8 @@ def capture_pre_autograd_graph(
 
     log_export_usage(event="export.private_api", flags={"capture_pre_autograd_graph"})
 
+    assert isinstance(f, torch.nn.Module), "Expected an nn.Module instance."
+
     if kwargs is None:
         kwargs = {}
 
@@ -173,6 +175,7 @@ def capture_pre_autograd_graph(
             decomposition_table=decomp_table,
             pre_dispatch=True,
             aten_graph=True,
+            _log_export_usage=False,
         )(
             *args,
             **kwargs,
@@ -191,7 +194,7 @@ def capture_pre_autograd_graph(
             _restore_state_dict(f, m)
 
         flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
-        range_constraints = _process_constraints(m, 0, flat_args)
+        range_constraints = _process_constraints(fake_mode, m, 0, flat_args)
         module = _create_stateful_graph_module(
             m,
             range_constraints=range_constraints,

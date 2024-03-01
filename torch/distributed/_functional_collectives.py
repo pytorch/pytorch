@@ -29,9 +29,7 @@ if torch._running_with_deploy():
 
 else:
     try:
-        from torch._dynamo.external_utils import (
-            is_compiling as is_torchdynamo_compiling,
-        )
+        from torch.compiler import is_dynamo_compiling as is_torchdynamo_compiling
     except Exception:
         warnings.warn(
             "Unable to import torchdynamo util `is_torchdynamo_compiling`, so won't support torchdynamo correctly"
@@ -480,6 +478,13 @@ def all_to_all_single(
     if native_funcol_enabled():
         group_name = _resolve_group_name(group, tag)
         group_size = c10d._get_group_size_by_name(group_name)
+        if output_split_sizes is None or input_split_sizes is None:
+            assert output_split_sizes is None and input_split_sizes is None, (
+                "output_split_sizes and input_split_sizes must either be "
+                "specified together or both set to None"
+            )
+            output_split_sizes = [self.shape[0] // group_size] * group_size
+            input_split_sizes = output_split_sizes
         tensor = torch.ops._c10d_functional.all_to_all_single(  # type: ignore[attr-defined]
             self,
             output_split_sizes,
@@ -721,9 +726,6 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
     """
     # `tag` will be deprecated. See details in:
     # https://github.com/pytorch/pytorch/issues/93173#issuecomment-1907095208
-    if tag != "":
-        warnings.warn(f"tag ({tag}) is ignored for process group resolution.")
-
     if isinstance(group, dist.ProcessGroup):
         return group.group_name
     elif isinstance(group, str):
@@ -744,6 +746,14 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
             return dmesh._dim_group_infos[dim][2]
         else:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
+    elif isinstance(group, list):
+        if not is_torchdynamo_compiling():
+            warnings.warn(
+                "The combination of ranks + tag as process group "
+                "identifier has been deprecated. Please switch to "
+                "using ProcessGroup, DeviceMesh, or group name instead."
+            )
+        return c10d._resolve_group_name_by_ranks_and_tag(cast(List[int], group), tag)
     else:
         raise ValueError(f"Unsupported group type: {type(group)}, {group}")
 
