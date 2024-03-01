@@ -3610,7 +3610,10 @@ def _unsafe_masked_index(x, mask, indices, fill):
         index = indices[i]
         if index is not None:
             indices[i] = index.clamp(min=0, max=x.size(i) - 1)
-    return torch.where(mask, aten._unsafe_index(x, indices), fill)
+
+    result = aten._unsafe_index(x, indices)
+    result.masked_fill_(~mask, fill)
+    return result
 
 
 @register_decomposition([aten._unsafe_masked_index_put])
@@ -3632,7 +3635,7 @@ def _unsafe_masked_index_put(x, mask, indices, values, accumulate=False):
         if index is not None:
             indices[i] = index.clamp(min=0, max=x.size(i) - 1)
 
-    masked_value = torch.where(mask, values, 0)
+    masked_value = values.masked_fill(~mask, 0)
     return aten._unsafe_index_put(x, indices, masked_value, accumulate)
 
 
