@@ -2150,6 +2150,11 @@ def meta_conv(
         output_padding if is_transposed else None,
     )
 
+    input_channels_dim = 1
+    output_channels_dim = 1
+    if input_tensor.size(input_channels_dim) == 0:
+        shape_out[output_channels_dim] = 0
+
     out = input_tensor.new_empty(shape_out)
     out = out.to(memory_format=pick_memory_format())  # type: ignore[call-overload]
     return out
@@ -5959,6 +5964,31 @@ def meta_searchsorted(
         return torch.empty_like(self, dtype=dtype).contiguous()
     else:  # Scalar
         return torch.empty((), dtype=dtype, device=sorted_sequence.device)
+
+
+def _check_for_unsupported_isin_dtype(dtype):
+    torch._check(
+        dtype not in [torch.bool, torch.bfloat16, torch.complex128, torch.complex64],
+        lambda: f"Unsupported input type encountered for isin(): {dtype}",
+    )
+
+
+@register_meta(aten.isin)
+@out_wrapper()
+def meta_isin(elements, test_elements, *, assume_unique=False, invert=False):
+    torch._check(
+        isinstance(elements, Tensor) or isinstance(test_elements, Tensor),
+        lambda: "At least one of elements and test_elements must be a Tensor.",
+    )
+    if not isinstance(elements, Tensor):
+        elements = torch.tensor(elements, device=test_elements.device)
+
+    if not isinstance(test_elements, Tensor):
+        test_elements = torch.tensor(test_elements, device=elements.device)
+
+    _check_for_unsupported_isin_dtype(elements.dtype)
+    _check_for_unsupported_isin_dtype(test_elements.dtype)
+    return torch.empty_like(elements, dtype=torch.bool)
 
 
 @register_meta(aten.polygamma)
