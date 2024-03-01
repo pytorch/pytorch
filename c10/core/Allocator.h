@@ -160,7 +160,7 @@ inline bool operator!=(std::nullptr_t, const DataPtr& dp) noexcept {
 struct C10_API Allocator {
   virtual ~Allocator() = default;
 
-  virtual DataPtr allocate(size_t n) const = 0;
+  virtual DataPtr allocate(size_t n) = 0;
 
   // Clones an allocation that came from this allocator.
   //
