@@ -43,6 +43,14 @@ from inductor.test_torchinductor import (
 from inductor.test_torchinductor_dynamic_shapes import make_dynamic_cls
 
 
+# TODO: decide what to do about testing dynamic shapes with the FX graph code cache
+# enabled. Emperically, most tests pass with caching enabled.  Caching introduces
+# non-determinism, however, for at least some of the tests because a) a cache hit from a
+# previous compilation may bypass the codegen expected by a test, and b) when multiple
+# versions of a compiled graph exist, the caching implementation does not attempt to
+# discern among them and simply returns the first hit where the guards evaluate to True.
+torch._inductor.config.fx_graph_cache = False
+
 # Checks for patterns in generated C++/Triton code to see if it's dynamic
 def check_codegen(
     self: TestCase,
