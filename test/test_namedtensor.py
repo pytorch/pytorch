@@ -1083,13 +1083,13 @@ class TestNamedTensor(TestCase):
                                     "Dimension out of range (expected to be in range of [-2, 1], but got 2)"):
             tensor.flatten(0, 2)
         with self.assertRaisesRegex(IndexError,
-                                    "IndexError: Dimension out of range (expected to be in range of [-2, 1], but got 2)"):
+                                    "Dimension out of range (expected to be in range of [-2, 1], but got 2)"):
             tensor.flatten(0, 2, 'N')
         with self.assertRaisesRegex(RuntimeError,
                                     "flatten() has invalid args: start_dim cannot come after end_dim"):
             tensor.flatten(1, 0)
         with self.assertRaisesRegex(RuntimeError,
-                                    "RuntimeError: flatten() has invalid args: start_dim cannot come after end_dim"):
+                                    "flatten() has invalid args: start_dim cannot come after end_dim"):
             tensor.flatten(1, 0, 'N')
 
     def test_unflatten(self):
