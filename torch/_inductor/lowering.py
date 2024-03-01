@@ -1074,8 +1074,8 @@ def quantized_decomposed_quantize_per_channel(
         zero_point = zero_points_loader(channel_idx)
         qmin, qmax = _create_constants(quant_min, quant_max, dtype=torch.float32)
 
-        inv_scale = ops.reciprocal(scale)
-        val = ops.round(input * inv_scale) + zero_point
+        inv_scale = ops.to_dtype(ops.reciprocal(scale), torch.float32)
+        val = ops.round(input * inv_scale) + ops.to_dtype(zero_point, torch.int32)
         clamped = ops.maximum(qmin, ops.minimum(qmax, val))
         return ops.to_dtype(clamped, dtype)
 
@@ -1119,7 +1119,9 @@ def quantized_decomposed_dequantize_per_channel(
         scale = scales_loader(channel_idx)
         zero_point = zero_points_loader(channel_idx)
 
-        val = ops.sub(ops.to_dtype(input, torch.float32), zero_point) * scale
+        val = ops.sub(
+            ops.to_dtype(input, torch.float32), ops.to_dtype(zero_point, torch.float32)
+        ) * ops.to_dtype(scale, torch.float32)
         return val
 
     return Pointwise.create(
