@@ -2413,12 +2413,6 @@ def forward(self, x):
 
         x = torch.randn(2)
         y = torch.randn(5, 4)
-        constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0)]
-
-        example_inputs = (copy(x), y)
-        ep = torch.export.export(foo, example_inputs, constraints=constraints)
-        with self.assertRaisesRegex(RuntimeError, "input.*shape.*to be equal to 2"):
-            ep(torch.randn(3), y)
 
         dim0_x, dim0_y = torch.export.dims("dim0_x", "dim0_y")
         dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_y}}
