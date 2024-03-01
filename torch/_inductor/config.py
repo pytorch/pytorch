@@ -496,6 +496,10 @@ class triton:
     # TODO - need to debug why this prevents cleanup
     cudagraph_trees_history_recording = False
 
+    force_cudagraph_sync = False
+
+    force_cudagraphs_warmup = False    
+
     # assertions on the fast path
     fast_path_cudagraph_asserts = False
 

@@ -961,6 +961,9 @@ class CUDAGraphNode:
         outputs = self.reconstruct_outputs()
         self.debug_check_invariants_after_invocation()
 
+        if config.triton.force_cudagraph_sync:
+            torch.cuda.synchronize()
+
         return outputs
 
     def reconstruct_outputs(self):
@@ -1789,7 +1792,7 @@ class CUDAGraphTreeManager:
                 function_id in self.warmed_up_functions
                 or config.triton.skip_cudagraph_warmup
             )
-        ) or self.in_warmup:
+        ) or self.in_warmup or config.triton.force_cudagraphs_warmup:
             # If we are in the middle of executing cuda graphs, then we need to checkpoint memory state.
             # Both Recording and Warmup will be reflected in the allocator and dont need changes
             if self.path_state == ExecutionState.EXECUTION:
