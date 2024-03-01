@@ -93,7 +93,7 @@ class ChunkShardingSpec(ShardingSpec):
             chunked_dim_size = get_chunked_dim_size(sharding_dim_size, split_size, idx)
             shard_size = list(tensor_sizes)
             current_offsets = [0] * tensor_num_dim
-            current_offsets[self.dim] = min(sharding_dim_size, split_size * idx)  # type: ignore[index]
+            current_offsets[self.dim] = split_size * idx  # type: ignore[index]
             shard_size[self.dim] = chunked_dim_size  # type: ignore[index]
 
             shard_metadata = ShardMetadata(
