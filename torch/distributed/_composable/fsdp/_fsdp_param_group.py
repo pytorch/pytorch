@@ -155,29 +155,27 @@ class FSDPParamGroup:
         self._reduce_dtype = next(iter(reduce_dtypes))
 
     def _init_grad_divide_factors(self):
-        """
-        For N data parallel workers, each worker computes g_i, and they
-        collectively reduce to compute (g_1 + ... + g_N) / N. To avoid overflow
-        and underflow, we divide by ~sqrt(N) before and after the reduction.
-        """
         data_parallel_world_size = 1
         data_parallel_world_size *= self.mesh_info.shard_mesh_size
         if isinstance(self.mesh_info, HSDPMeshInfo):
             data_parallel_world_size *= self.mesh_info.replicate_mesh_size
         if self._reduce_dtype == torch.float32:
-            # Only divide after reduction since fp32 has sufficient precision
-            self._grad_predivide_factor: float = 1.0
-            self._grad_postdivide_factor: float = data_parallel_world_size
+            # Use NCCL's AVG op to divide after reduction since fp32 has
+            # sufficient precision
+            self._grad_divide_factors: Optional[Tuple[float, float]] = None
             return
+        # For N data parallel workers, each worker computes g_i, and they
+        # collectively reduce (g_1 + ... + g_N) / N. To avoid overflow and
+        # underflow, we divide by ~sqrt(N) before and after the reduction.
         factor: int = 1
         while (
             data_parallel_world_size % factor == 0
             and data_parallel_world_size / factor > factor
         ):
             factor *= 2
-        self._grad_predivide_factor = float(factor)
-        self._grad_postdivide_factor = (
-            data_parallel_world_size / self._grad_predivide_factor
+        self._grad_divide_factors = (
+            float(factor),
+            data_parallel_world_size / float(factor),
         )
 
     def lazy_init(self):
@@ -309,8 +307,7 @@ class FSDPParamGroup:
                 self._orig_dtype,
                 self._reduce_dtype,
                 self.device,
-                self._grad_predivide_factor,
-                self._grad_postdivide_factor,
+                self._grad_divide_factors,
             )
 
     def finalize_backward(self):
