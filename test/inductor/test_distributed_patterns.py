@@ -10,6 +10,68 @@ from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import IS_MACOS
 from torch.testing._internal.inductor_utils import HAS_CPU
 
+# Fake distributed
+WORLD_SIZE = 2
+
+
+@torch.no_grad
+def all_gather(t):
+    return torch.cat([t] * WORLD_SIZE, 0)
+
+
+@torch.no_grad
+def reduce_scatter(t):
+    return t.narrow(0, 0, t.size(0) // WORLD_SIZE)
+
+
+def fw_pre_hook(mod, inp):
+    with torch.no_grad():
+        mod.og_weight = mod.weight
+        mod.weight = nn.Parameter(all_gather(mod.weight))
+
+
+def fw_post_hook(mod, inp, out):
+    # Drop the big weight
+    mod.weight.untyped_storage().resize_(0)
+    mod.empty_weight = mod.weight
+    mod.weight = mod.og_weight
+    del mod.og_weight
+
+
+def bw_pre_hook(mod, gO):
+    mod.empty_weight.untyped_storage().resize_(
+        WORLD_SIZE * mod.weight.nelement() * mod.weight.element_size()
+    )
+    mod.og_weight = mod.weight
+    full_weight = nn.Parameter(all_gather(mod.weight))
+    with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
+        mod.empty_weight
+    ):
+        mod.empty_weight.copy_(full_weight)
+    mod.weight = mod.empty_weight
+    del mod.empty_weight
+
+
+def bw_post_hook(mod, gI, gO):
+    grad = mod.weight.grad
+    new_grad = reduce_scatter(grad)
+    # No need to re-empty the weight here, the graph has been cleared
+    # This removes the last reference to the big Tensor
+    mod.weight = mod.og_weight
+    del mod.og_weight
+    mod.weight.grad = new_grad
+
+
+def init_fake_distributed():
+    torch.manual_seed(1234)
+    m = nn.Linear(20, 10)
+    m.weight = nn.Parameter(reduce_scatter(m.weight))
+    m.register_full_backward_pre_hook(bw_pre_hook)
+    m.register_full_backward_hook(bw_post_hook)
+    m.register_forward_pre_hook(fw_pre_hook)
+    m.register_forward_hook(fw_post_hook)
+    return m, torch.rand(2, 20, requires_grad=True)
+
 
 def init_module_bw_hooks(allow_eager):
     def bw_pre_hook(mod, gO):
@@ -247,6 +309,50 @@ class DistributedPatternTests(TestCase):
         p2, r2 = opt(x2)
         self._assert_same_grad(r1, r2)
         self._assert_same_grad(p1, p2)
+
+    def test_fake_distributed_eager(self):
+        steps = 5
+        m1, inp1 = init_fake_distributed()
+
+        for _ in range(steps):
+            out = m1(inp1)
+            out.sum().backward()
+
+        m2, inp2 = init_fake_distributed()
+        fw_cnt = CompileCounter()
+        m2 = torch.compile(m2, backend=fw_cnt, fullgraph=True)
+
+        bw_cnt = CompileCounter()
+        with compiled_autograd.enable(torch.compile(backend=bw_cnt, fullgraph=False)):
+            for step in range(steps):
+                out = m2(inp2)
+                out.sum().backward()
+
+        self.assertEqual(fw_cnt.frame_count, 1)
+        self.assertEqual(m1.weight.grad, m2.weight.grad)
+        self.assertEqual(inp1.grad, inp2.grad)
+
+        # TODO(jansel): fix graph breaks on torch.autograd._unsafe_preserve_version_counter
+        self.assertEqual(bw_cnt.frame_count, 7)
+
+    def test_fake_distributed_aot_eager(self):
+        steps = 5
+        m1, inp1 = init_fake_distributed()
+
+        for _ in range(steps):
+            out = m1(inp1)
+            out.sum().backward()
+
+        m2, inp2 = init_fake_distributed()
+        m2 = torch.compile(m2, backend="aot_eager", fullgraph=True)
+
+        with compiled_autograd.enable(torch.compile(fullgraph=False)):
+            for step in range(steps):
+                out = m2(inp2)
+                out.sum().backward()
+
+        self.assertEqual(m1.weight.grad, m2.weight.grad)
+        self.assertEqual(inp1.grad, inp2.grad)
 
 
 if __name__ == "__main__":
