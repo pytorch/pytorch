@@ -227,9 +227,13 @@ class CompiledNodeArgs {
     }
   }
   template <typename T>
-  void collect(const std::unordered_set<T>& t) {
-    collect_size(t.size());
-    for (const T& i : t) {
+  void collect(const std::unordered_set<T>& s) {
+    collect_size(s.size());
+
+    std::vector<T> v(s.begin(), s.end());
+    // stable sort over keys to ensure deterministic collect order
+    std::stable_sort(v.begin(), v.end());
+    for (const T& i : v) {
       collect(i);
     }
   }
@@ -248,12 +252,22 @@ class CompiledNodeArgs {
     collect(t.first);
     collect(t.second);
   }
-  template <typename K, typename V>
-  void collect(ska::flat_hash_map<K, V>& m) {
-    for (auto& [k, v] : m) {
+  template <typename V>
+  void collect(const ska::flat_hash_map<std::string, V>& m) {
+    collect_size(m.size());
+
+    std::vector<std::string> keys;
+    keys.reserve(m.size());
+    std::transform(
+        m.begin(), m.end(), std::back_inserter(keys), [](const auto& entry) {
+          return entry.first;
+        });
+    // stable sort to ensure deterministic collect order
+    std::stable_sort(keys.begin(), keys.end());
+    for (const auto& k : keys) {
       collect(k);
       // TODO: we can't specialize on number of bytes here
-      specialize_on_bytes(v);
+      specialize_on_bytes(m.at(k));
     }
   }
   void collect(const c10::Scalar& t) {
