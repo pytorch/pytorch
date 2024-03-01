@@ -43,6 +43,10 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(__xor__, Tensor);
   OP_DECOMPOSE2(__xor__, Scalar);
   OP_DECOMPOSE(_batch_norm_impl_index);
+  m.impl("_unsafe_index.Tensor", native::_unsafe_index);
+  m.impl("_unsafe_masked_index", native::_unsafe_masked_index);
+  m.impl("_unsafe_index_put", native::_unsafe_index_put);
+  m.impl("_unsafe_masked_index_put", native::_unsafe_masked_index_put);
   OP_DECOMPOSE(absolute);
   OP_DECOMPOSE(absolute_);
   OP_DECOMPOSE(arctan2);
