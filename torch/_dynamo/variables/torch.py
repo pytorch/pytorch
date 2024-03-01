@@ -236,7 +236,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             torch.autograd.profiler.record_function,
         ):
             warning_once(log, "Profiler function %s will be ignored", self.value)
-            return NullContextVariable()
+            return NullContextVariable(enter_result=self.value(*args, **kwargs))
         elif self.value is torch._C.DisableTorchFunctionSubclass:
             assert not (args or kwargs)
             return TorchFunctionDisableVariable.create(tx)

@@ -890,6 +890,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.push(self.symbolic_locals[inst.argval])
 
     def STORE_FAST(self, inst):
+        # print("STORE_FAST()", inst, self.stack[-1], inst.argval)
         loaded_vt = self.pop()
         name = inst.argval
         # Only rename at the top-level scope, this is to avoid the confusion between
@@ -1873,7 +1874,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.block_stack.append(BlockStackEntry(target))
 
         self.push(exit)
-        self.push(ctx)
+        self.push(ctx.enter(self))
 
     def append_prefix_inst(self, inst):
         assert self.accept_prefix_inst

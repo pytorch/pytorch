@@ -562,11 +562,12 @@ class NullContextVariable(ContextWrappingVariable):
     support yet, e.g, torch.autograd.profiler.record_function.
     """
 
-    def __init__(self, target_values=None, **kwargs):
+    def __init__(self, enter_result=None, target_values=None, **kwargs):
         super().__init__(target_values=target_values, **kwargs)
+        self.enter_result = enter_result
 
     def enter(self, tx):
-        return variables.ConstantVariable.create(None)
+        return variables.UserDefinedObjectVariable(self.enter_result)
 
     def exit(self, tx, *args):
         return variables.ConstantVariable.create(None)
