@@ -2041,15 +2041,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return ts.has_any(sparse_k) && ts.has_any(sparse_backends);
     };
     auto is_sparse_compressed = [](DispatchKeySet ts) {
-      constexpr auto sparse_compressed_backends = DispatchKeySet(
-          {BackendComponent::CPUBit,
-           BackendComponent::CUDABit,
-           BackendComponent::HIPBit,
-           BackendComponent::XPUBit});
       constexpr auto sparse_compressed_k =
           DispatchKeySet(DispatchKey::SparseCsr);
-      return ts.has_any(sparse_compressed_k) &&
-          ts.has_any(sparse_compressed_backends);
+      return ts.has_any(sparse_compressed_k);
     };
     return (key_set_ == from) || (is_dense(key_set_) && is_dense(from)) ||
         (is_sparse(key_set_) && is_sparse(from)) ||
