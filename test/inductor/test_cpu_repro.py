@@ -1527,19 +1527,25 @@ class CPUReproTests(TestCase):
     def test_auto_simd(self):
         vec_avx512 = codecache.supported_vec_isa_list[0]
         vec_avx2 = codecache.supported_vec_isa_list[1]
+        vec_neon = codecache.supported_vec_isa_list[2]
         self.assertTrue(vec_avx512.bit_width() == 512)
         self.assertTrue(vec_avx2.bit_width() == 256)
+        self.assertTrue(vec_neon.bit_width() == 256)
         self.assertTrue(vec_avx512.nelements() == 16)
         self.assertTrue(vec_avx2.nelements() == 8)
+        self.assertTrue(vec_neon.nelements() == 8)
         self.assertTrue(vec_avx512.nelements(torch.bfloat16) == 32)
         self.assertTrue(vec_avx2.nelements(torch.bfloat16) == 16)
+        self.assertTrue(vec_neon.nelements(torch.bfloat16) == 16)
 
         with config.patch({"cpp.simdlen": None}):
             isa = codecache.pick_vec_isa()
             if vec_avx512 in codecache.valid_vec_isa_list():
                 self.assertTrue(isa == vec_avx512)
-            else:
+            elif vec_avx2 in codecache.valid_vec_isa_list():
                 self.assertTrue(isa == vec_avx2)
+            else:
+                self.assertTrue(isa == vec_neon)
 
         with config.patch({"cpp.simdlen": 0}):
             isa = codecache.pick_vec_isa()
@@ -1569,6 +1575,9 @@ class CPUReproTests(TestCase):
             if vec_avx2 in isa_list:
                 isa = codecache.pick_vec_isa()
                 self.assertTrue(isa == vec_avx2)
+            elif vec_neon in isa_list:
+                isa = codecache.pick_vec_isa()
+                self.assertTrue(isa == vec_neon)
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -1654,6 +1663,7 @@ class CPUReproTests(TestCase):
             "index_expr",
             "signbit",
             "isinf",
+            "frexp",
             "mod",
             "masked",
             "randn",
@@ -2937,7 +2947,7 @@ class CPUReproTests(TestCase):
                     batch_size, seq_len, self.num_heads, self.head_size
                 ).permute(0, 2, 1, 3)
                 attention_weights = (
-                    torch.matmul(query, key).div(self.inv_scale).softmax(dim=-1)
+                    torch.matmul(query, key).mul(self.inv_scale).softmax(dim=-1)
                 )
                 output = torch.matmul(attention_weights, value)
                 return output
@@ -3398,6 +3408,17 @@ class CPUReproTests(TestCase):
                 torch.tensor(4.39, dtype=torch.float16),
             ),
         )
+
+    def test_masked_load_int64_vec(self):
+        # https://github.com/pytorch/pytorch/issues/120377
+        def fn(x):
+            return torch.nn.functional.pad(x, (0, 13))
+
+        x = torch.randint(0, 100, (819,), dtype=torch.int64)
+        metrics.reset()
+        self.common(fn, (x,))
+        # TODO: support vectorized int64 masked load
+        assert metrics.generated_cpp_vec_kernel_count == 0
 
 
 if __name__ == "__main__":

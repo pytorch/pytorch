@@ -106,6 +106,11 @@ def functional_assert_async_msg_decomp(tensor, msg):
     return
 
 
+@register_decomposition([aten._assert_scalar.default])
+def assert_scalar_decomp(tensor, msg):
+    return
+
+
 @register_decomposition([aten.sym_constrain_range_for_size.default])
 def sym_constrain_range_for_size(symbol, *, min=None, max=None):
     return
@@ -223,20 +228,22 @@ def mm(self, input2):
         definitely_true,
         guard_size_oblivious,
     )
+
     def mul_sum_decomp(self, input2):
         return (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1)
 
     def coordesc_or(cond):
         return config.coordinate_descent_tuning or cond
 
-    gso = guard_size_oblivious
-    # Corresponds to BS=1 cases morally. If it's contiguous we can decompose it
-    # and generate efficiently kernels without autotuning. Otherwise we need coordinate descent tuning
-    if gso(self.shape[0] == 1) and coordesc_or(gso(input2.stride(0) == 1)):
-        return mul_sum_decomp(self, input2)
+    if config.decompose_mm_to_mv:
+        gso = guard_size_oblivious
+        # Corresponds to BS=1 cases morally. If it's contiguous we can decompose it
+        # and generate efficiently kernels without autotuning. Otherwise we need coordinate descent tuning
+        if gso(self.shape[0] == 1) and coordesc_or(gso(input2.stride(0) == 1)):
+            return mul_sum_decomp(self, input2)
 
-    if gso(input2.shape[1] == 1) and coordesc_or(gso(self.stride(1) == 1)):
-        return mul_sum_decomp(self, input2)
+        if gso(input2.shape[1] == 1) and coordesc_or(gso(self.stride(1) == 1)):
+            return mul_sum_decomp(self, input2)
 
     if self.device.type == "cpu":
         if (
