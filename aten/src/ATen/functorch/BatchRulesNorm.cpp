@@ -9,7 +9,7 @@
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 static bool is_empty_tensor(const Tensor& tensor) {
   const auto shape = tensor.sizes();
@@ -876,4 +876,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("native_layer_norm_backward", native_layer_norm_backward_plumbing);
 }
 
-}}
+} // namespace at::functorch

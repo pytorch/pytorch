@@ -86,6 +86,7 @@ class GuardSource(enum.Enum):
     SHAPE_ENV = 6
     LOCAL_FSDP_MODULE = 7
     GLOBAL_FSDP_MODULE = 8
+    BACKWARD_STATE = 9
 
     def is_fsdp_module(self) -> bool:
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
@@ -481,13 +482,14 @@ class GuardsSet:
     def __bool__(self):
         return bool(self.inner)
 
-    def add(self, guard: Guard, *, skip=0):
+    def add(self, guard: Guard, *, collect_debug_stack=True, skip=0):
         if guard in self.inner:
             return
-        if guard.stack is None:
-            guard.stack = CapturedTraceback.extract(skip=1 + skip)
-        if guard.user_stack is None:
-            guard.user_stack = TracingContext.extract_stack()
+        if collect_debug_stack:
+            if guard.stack is None:
+                guard.stack = CapturedTraceback.extract(skip=1 + skip)
+            if guard.user_stack is None:
+                guard.user_stack = TracingContext.extract_stack()
         self.inner.add(guard)
 
     def update(self, *others: Set[Guard]):
@@ -617,6 +619,11 @@ class TracingContext:
         self.force_unspec_int_unbacked_size_like = False
         # See note [Tensor Fakification and Symbol Caching]
         self.tensor_to_context = WeakTensorKeyDictionary()
+
+        # If this true, Aot Autograd will return output Fake Tensors with appropiate
+        # meta on the first invocation
+        # see note: [Returning Fake Tensors on First AOT Autograd Call]
+        self.fakify_first_call = False
 
     def clear(self):
         # Look at the note in output_graph.py in function `save_global_state`
@@ -839,3 +846,18 @@ def detect_fake_mode(inputs: Any = None):
         return fake_mode
     else:
         return None
+
+
+def active_fake_mode():
+    """
+    Inspects the dispatch mode stack for an active fake mode and returns it.
+    Returns None if no fake mode is active.
+    """
+    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
+
+    for _, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
+        if isinstance(m, FakeTensorMode):
+            return m
+
+    return None

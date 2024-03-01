@@ -2,7 +2,10 @@
 # implement matrix related ops for distributed tensor
 from typing import List
 
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None  # type: ignore[assignment]
 
 import torch
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
