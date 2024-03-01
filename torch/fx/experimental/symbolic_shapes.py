@@ -66,6 +66,7 @@ from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._traceback import format_frame, CapturedTraceback
 from torch._utils_internal import signpost_event
+from torch._subclasses.meta_utils import is_sparse_any
 
 from torch._logging import LazyString
 
@@ -286,6 +287,8 @@ def _iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Basic]:
     elif isinstance(val, (tuple, list)):
         for s in val:
             yield from _iterate_exprs(s)
+    elif val is None:
+        pass
     else:
         raise AssertionError(f"cannot extract sympy expressions from {val} {type(val)}")
 
@@ -3030,12 +3033,17 @@ class ShapeEnv:
                 sources_tensors_constraints = [(source, t, context.constraint_sizes)]
 
             for src, curr_t, constraint in sources_tensors_constraints:
-                for i, ss in enumerate(curr_t.size()):
-                    property_source = TensorPropertySource(src, TensorProperty.SIZE, i)
-                    track_symint(property_source, ss, constraint[i])
-                for i, ss in enumerate(curr_t.stride()):
-                    track_symint(TensorPropertySource(src, TensorProperty.STRIDE, i), ss)
-                track_symint(TensorPropertySource(src, TensorProperty.STORAGE_OFFSET), curr_t.storage_offset())
+                if is_sparse_any(curr_t):
+                    for i, ss in enumerate(curr_t.size()):
+                        property_source = TensorPropertySource(src, TensorProperty.SIZE, i)
+                        track_symint(property_source, ss, constraint[i])
+                else:
+                    for i, ss in enumerate(curr_t.size()):
+                        property_source = TensorPropertySource(src, TensorProperty.SIZE, i)
+                        track_symint(property_source, ss, constraint[i])
+                    for i, ss in enumerate(curr_t.stride()):
+                        track_symint(TensorPropertySource(src, TensorProperty.STRIDE, i), ss)
+                    track_symint(TensorPropertySource(src, TensorProperty.STORAGE_OFFSET), curr_t.storage_offset())
 
         # 1. Every input must equal the final simplified symbolic expression
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),
