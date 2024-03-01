@@ -642,11 +642,11 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         # Check structure
         # Check that we are only guarding on two keys. This is common in
         # LazyVariableTracker.
-        self.assertEqual(len(dict_mgr.get_child_managers()), 2)
+        self.assertEqual(len(dict_mgr.get_index_managers()), 2)
         self.assertTrue(isinstance(mgr0, KeyValueDictGuardManager))
         self.assertTrue(isinstance(mgr1, KeyValueDictGuardManager))
-        self.assertEqual(len(mgr0.get_child_managers()), 2)
-        self.assertEqual(len(mgr1.get_child_managers()), 2)
+        self.assertEqual(len(mgr0.get_key_value_managers()), 2)
+        self.assertEqual(len(mgr1.get_key_value_managers()), 2)
 
         f_locals["d"]["a"] = 2
         self.assertFalse(root.check(f_locals))
