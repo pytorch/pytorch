@@ -61,6 +61,7 @@ ignored_c_binding_in_graph_function_names = {
     "torch._lazy_clone",
     "torch._C._storage_address",
     "torch._C._pickle_save",
+    "torch.cuda._get_device_properties",
 }
 if torch._C._llvm_enabled():
     ignored_c_binding_in_graph_function_names |= {
