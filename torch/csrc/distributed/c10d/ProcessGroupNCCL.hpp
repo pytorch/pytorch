@@ -567,7 +567,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // return true if abort is successful, otherwise false
   bool abort(c10::optional<std::string> abortReason = c10::nullopt);
 
-  void shutdown();
+  void shutdown(c10::optional<std::string> reason = c10::nullopt);
 
   void eagerConnectSingleDevice(at::Device device) override;
 
@@ -980,13 +980,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   static thread_local uint64_t ncclActiveGroupCounter_;
 
   // Counting for the sequential number of NCCL collective call.
-  // (specifically, how many actual kernels we launched, which differs from
-  // op_id_ when coalescing is enabled)
   uint64_t seq_{0};
-
-  // Incrementing counter for logical operations (collective or p2p) issued on
-  // the ProcessGroup
-  uint64_t op_id_{0};
 
   // the sequential number of the last colletive enqueued into workMetaList_
   // This is useful for indentifying a rank that has not join a collective
