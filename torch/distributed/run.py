@@ -380,7 +380,7 @@ from typing import Callable, List, Tuple, Union, Optional, Set
 
 import torch
 from torch.distributed.argparse_util import check_env, env
-from torch.distributed.elastic.multiprocessing import Std
+from torch.distributed.elastic.multiprocessing import Std, DefaultLogsSpecs
 from torch.distributed.elastic.multiprocessing.errors import record
 from torch.distributed.elastic.rendezvous.utils import _parse_rendezvous_config
 from torch.distributed.elastic.utils import macros
@@ -633,7 +633,7 @@ def parse_min_max_nnodes(nnodes: str):
         min_nodes = int(arr[0])
         max_nodes = int(arr[1])
     else:
-        raise RuntimeError(f'nnodes={nnodes} is not in "MIN:MAX" format')
+        raise RuntimeError(f'nnodes={nnodes} is not in "MIN:MAX" format')  # noqa: E231
 
     return min_nodes, max_nodes
 
@@ -681,7 +681,7 @@ def determine_local_world_size(nproc_per_node: str):
 
 def get_rdzv_endpoint(args):
     if args.rdzv_backend == "static" and not args.rdzv_endpoint:
-        return f"{args.master_addr}:{args.master_port}"
+        return f"{args.master_addr}:{args.master_port}"  # noqa: E231
     return args.rdzv_endpoint
 
 
@@ -745,6 +745,13 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
                 "--local_ranks_filter must be a comma-separated list of integers e.g. --local_ranks_filter=0,1,2"
             ) from e
 
+    logs_specs = DefaultLogsSpecs(
+        log_dir=args.log_dir,
+        redirects=Std.from_str(args.redirects),
+        tee=Std.from_str(args.tee),
+        local_ranks_filter=ranks,
+    )
+
     config = LaunchConfig(
         min_nodes=min_nodes,
         max_nodes=max_nodes,
@@ -757,12 +764,9 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
         max_restarts=args.max_restarts,
         monitor_interval=args.monitor_interval,
         start_method=args.start_method,
-        redirects=Std.from_str(args.redirects),
-        tee=Std.from_str(args.tee),
-        log_dir=args.log_dir,
         log_line_prefix_template=log_line_prefix_template,
         local_addr=args.local_addr,
-        local_ranks_filter=ranks,
+        logs_specs=logs_specs,
     )
 
     with_python = not args.no_python
