@@ -20,15 +20,18 @@ from torch.distributed.device_mesh import DeviceMesh
 aten = torch.ops.aten
 
 
+__all__ = ["loss_parallel"]
+
+
 @contextlib.contextmanager
 def loss_parallel():
     """
     A context manager which enables loss parallelism, where efficient parallelized cross-entropy loss
     computation can be performed when the input is sharded on the class dimension. Within this context
-    manager, one can use ``torch.nn.functional.cross_entropy`` and :class:`~torch.nn.CrossEntropyLoss`
+    manager, one can use :func:`~torch.nn.functional.cross_entropy` or :class:`~torch.nn.CrossEntropyLoss`
     as usual, with the following assumptions on the input parameters.
 
-    Parameters to the cross entropy function:
+    Args:
         input (:class:`DTensor`):
             Input logits. Assumed to be sharded on the class dimension.
         target (Union[:class:`torch.Tensor`, :class:`DTensor`]):
@@ -39,16 +42,17 @@ def loss_parallel():
         label_smoothing:
             Currently not supported.
 
-    Returns::
+    Returns:
         A replicated :class:`DTensor`.
 
-    Example::
+    Example:
+        A sharded DTensor is manually created here to showcase the usage.
+        In practice, it is usually the output of a TP module.
+
         >>> # xdoctest: +SKIP("distributed")
         >>> from torch.distributed.tensor.parallel import loss_parallel
         >>> from torch.distributed.device_mesh import init_device_mesh
         >>> ...
-        >>> # A sharded DTensor is manually created here to showcase the usage.
-        >>> # In practice, it is usually the output of a TP module.
         >>> device_mesh = init_device_mesh("cuda", (8,))
         >>> input = torch.randn(3, 5, device="cuda", requires_grad=True)
         >>> dist_input = distribute_tensor(input, device_mesh, placements=[Shard(1)])
