@@ -57,6 +57,8 @@ def _get_woq_mm_patterns():
     w = functools.partial(w_inp, dtype=torch.int8)
     s = functools.partial(s_inp, dtype=torch.bfloat16)
 
+    workaround: dict[str, any]
+
     for pattern, replacement, args, workaround, extra_check in [
         (
             _woq_mm_pattern_1,
@@ -96,4 +98,3 @@ def _get_woq_mm_patterns():
 def _woq_mm_init():
     for key, register_replacement_kwargs in _get_woq_mm_patterns():
         register_replacement(**register_replacement_kwargs)
-
