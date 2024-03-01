@@ -21,7 +21,6 @@ from tools.stats.upload_metrics import emit_metric
 from tools.testing.discover_tests import TESTS
 from tools.testing.target_determination.determinator import (
     AggregatedHeuristics,
-    get_prediction_confidences,
     get_test_prioritizations,
     TestPrioritizations,
 )
@@ -57,14 +56,9 @@ def main() -> None:
 
     test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
 
-    prediction_confidences = get_prediction_confidences(selected_tests)
     if os.getenv("CI") == "true":
         print("Emitting metrics")
         # Split into 3 due to size constraints
-        emit_metric(
-            "td_results_prediction_confidences",
-            {"prediction_confidences": prediction_confidences},
-        )
         emit_metric(
             "td_results_final_test_prioritizations",
             {"test_prioritizations": test_prioritizations.to_json()},
