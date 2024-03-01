@@ -101,7 +101,7 @@ def diagonal(
 @out_wrapper(exact_dtype=True)
 def vector_norm(
     x: TensorLikeType,
-    ord: Union[float, int] = 2.0,
+    ord: Union[float, int] = 2,
     dim: Optional[DimsType] = None,
     keepdim: bool = False,
     *,
