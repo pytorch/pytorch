@@ -3530,7 +3530,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_odict_get_item_index_name(self):
         d = {float: torch.float32, np.float16: torch.float16}
 
-        @torch.compile
+        @torch.compile(backend="eager")
         def f(x, y1, y2):
             return torch.zeros(5, dtype=d[y1]), torch.zeros(5, dtype=d[y2])
 
@@ -3795,7 +3795,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_deferred_runtime_asserts(self):
-        @torch.compile(backend="aot_eager", fullgraph=True)
+        @torch.compile(fullgraph=True)
         def f(x):
             y = x.item()
             torch._check_is_size(y)

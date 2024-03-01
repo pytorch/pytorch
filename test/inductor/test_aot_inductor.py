@@ -478,6 +478,23 @@ class AOTInductorTestsTemplate:
             options={"debug_check_inf_and_nan": True},
         )
 
+    def test_assert_async(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                u0 = x.item()
+                torch._check(u0 > 3)
+                return torch.ones(u0)[0]
+
+        x = torch.tensor(23, device=self.device)
+        example_inputs = (x,)
+        self.check_model(Model(), example_inputs)
+
     def test_simple_dynamic(self):
         class Model(torch.nn.Module):
             def __init__(self):
