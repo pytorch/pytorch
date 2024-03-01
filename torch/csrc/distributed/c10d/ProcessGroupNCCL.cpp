@@ -33,6 +33,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/torch.h>
@@ -901,8 +902,14 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
 
 c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
     initIntraNodeComm() {
-  return intra_node_comm::IntraNodeComm::rendezvous(
-      store_, std::to_string(uid_), rank_, size_);
+  using IntraNodeComm = intra_node_comm::IntraNodeComm;
+  auto prefixStore = c10::make_intrusive<PrefixStore>("IntraNodeComm", store_);
+  auto comm = c10::make_intrusive<IntraNodeComm>(prefixStore, rank_, size_);
+  if (comm->rendezvous()) {
+    return comm;
+  } else {
+    return nullptr;
+  }
 }
 
 void ProcessGroupNCCL::setSequenceNumberForGroup() {
