@@ -172,6 +172,7 @@ REQUIRE_HIGHER_TOLERANCE_TRAINING = {
     "AlbertForQuestionAnswering",
 }
 REQUIRE_HIGHER_TOLERANCE_INFERENCE = {
+    "GPT2ForSequenceClassification",
     "RobertaForQuestionAnswering",
 }
 

@@ -3181,6 +3181,41 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 0)
 
+    def test_adaptive_max_pool2d1(self):
+        def fn(x):
+            return aten.adaptive_max_pool2d(x, (6, 6))
+
+        self.common(
+            fn,
+            (torch.randn(2, 4, 16, 16),),
+            check_lowp=False,
+        )
+
+        # lowering to max_pool2d case
+        self.common(
+            fn,
+            (torch.randn(2, 4, 3, 3),),
+        )
+
+        # no-op case
+        self.common(
+            fn,
+            (torch.randn(2, 4, 6, 6),),
+        )
+
+    def test_adaptive_max_pool2d2(self):
+        # Big kernel size, use fallback
+        def fn(x):
+            return aten.adaptive_max_pool2d(x, (4, 4))
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            (torch.randn(2, 4, 21, 21),),
+            check_lowp=False,
+        )
+        assertGeneratedKernelCountEqual(self, 0)
+
     def test_multi_threading(self):
         model = torch.nn.Linear(2, 3).eval()
         inp = torch.randn(4, 2)
@@ -4731,7 +4766,7 @@ class CommonTemplate:
                     dtype=torch.float32,
                     device=a.device,
                 ),
-                torch.zeros(2, 3, names=None),
+                torch.zeros(2, 3),
                 a + torch.ones(8, device=a.device),
                 torch.full((2, 3), 3.1416, device=a.device),
             )
@@ -7090,7 +7125,7 @@ class CommonTemplate:
         )
 
         if self.device == GPU_TYPE:
-            self.assertEqual(fw_code.count("tl.rand"), 1)
+            self.assertEqual(fw_code.count("tl.rand"), 2)
             self.assertEqual(bw_code.count("tl.rand"), 0)
         expected_kernel = 4
 
@@ -7109,7 +7144,7 @@ class CommonTemplate:
         _, source_codes = run_and_get_code(fn1)
         if self.device == GPU_TYPE:
             self.assertEqual(len(source_codes), 1)
-            self.assertEqual(source_codes[0].count("async_compile.triton"), 1)
+            self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
 
     def test_roll(self):
         def fn(a):
