@@ -2908,25 +2908,6 @@ class CPUReproTests(TestCase):
             v2 = jit_func(input_tensor)
             self.assertEqual(v1, v2)
 
-    def test_nn_param_return(self):
-        def fn(x):
-            p = torch.nn.Parameter(x)
-            return p, p.sin()
-
-        opt = torch.compile(fn, fullgraph=True)
-        x1 = torch.randn(16)
-        x2 = x1.clone()
-
-        p1, r1 = fn(x1)
-        r1.sum().backward()
-        p2, r2 = opt(x2)
-        r2.sum().backward()
-        self.assertEqual(p1.grad, p2.grad)
-        self.assertEqual(x1.grad, x2.grad)
-        self.assertEqual(r1, r2)
-        self.assertEqual(p1.requires_grad, p2.requires_grad)
-        self.assertIs(type(p1), type(p2))
-
     @config.patch(inplace_buffers=True)
     def test_in_out_buffer(self):
         def fn(x, y):

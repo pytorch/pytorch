@@ -767,40 +767,28 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         else:
             return handle_ntuple(args[0])
 
-    @staticmethod
-    def call_nn_parameter(tx, data=None, requires_grad=True):
+    @classmethod
+    def call_nn_parameter(cls, tx, data=None, requires_grad=True):
         """A call to torch.nn.Parameter() gets lifted to before the graph"""
-        from .builder import VariableBuilder, wrap_fx_proxy_cls
-
         if isinstance(requires_grad, variables.VariableTracker):
             try:
                 requires_grad = requires_grad.as_python_constant()
             except NotImplementedError:
                 unimplemented("Parameter(requires_grad=...) not constant")
 
-        if data is None:
-            unimplemented("Parameter(data=None) not implemented")
+        if not isinstance(data, variables.TensorVariable):
+            unimplemented(f"Parameter(data={data}) not implemented")
 
-        if data.python_type() is not torch.Tensor:
-            unimplemented(f"Parameter with tensor subclass: {data.python_type()}")
+        # this results in cleaner graphs, but only works for inputs
+        if data.source:
+            return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
 
-        if data.source is None:
-            # lifting params to inputs (handled at the end) is a bit more
-            # robust, since in the source=None case functionalization can
-            # change aliasing relationships.  But here we have no choice,
-            # so we put it in the graph.
-            def fake_param_call(x):
-                t = x.detach().requires_grad_(requires_grad)
-                t._is_param = True
-                return t
+        unimplemented("Parameter() on non-input")
 
-            return wrap_fx_proxy_cls(
-                target_cls=variables.TensorVariable,
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function", fake_param_call, (data.as_proxy(),), {}
-                ),
-            )
+    @staticmethod
+    def _nn_param_via_prefix_insert(tx, data, requires_grad):
+        # Alternate version if we have a .source
+        from .builder import VariableBuilder
 
         varname = tx.output.new_var()
 
