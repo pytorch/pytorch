@@ -374,8 +374,13 @@ struct alignas(2) Half {
 #endif
 
   constexpr C10_HOST_DEVICE Half(unsigned short bits, from_bits_t) : x(bits) {}
+#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
+  inline Half(float16_t value);
+  inline operator float16_t() const;
+#else
   inline C10_HOST_DEVICE Half(float value);
   inline C10_HOST_DEVICE operator float() const;
+#endif
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
   inline C10_HOST_DEVICE Half(const __half& value);
