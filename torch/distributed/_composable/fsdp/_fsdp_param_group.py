@@ -1,4 +1,5 @@
 import contextlib
+import functools
 
 from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple
 
@@ -6,7 +7,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 
-from torch.autograd.graph import Node
+from torch.autograd.graph import Node, register_multi_grad_hook
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
@@ -74,6 +75,10 @@ class FSDPCommContext:
 class AllGatherState(NamedTuple):
     all_gather_result: AllGatherResult
     event: torch.cuda.Event  # all-gather copy-out
+
+
+def _fsdp_param_group_post_backward_hook(param_group, *unused: Any) -> None:
+    param_group.post_backward()
 
 
 class FSDPParamGroup:
@@ -411,7 +416,12 @@ class FSDPParamGroup:
                 inp_tensors.append(obj)
         if len(inp_tensors) == 0:
             return args, kwargs  # no tensors that require gradients
-        inp_tensors = RegisterPostBackwardFunction.apply(self, *inp_tensors)
+        # inp_tensors = RegisterPostBackwardFunction.apply(self, *inp_tensors)
+        # NOTE: unit tests to run:
+        # CUDA_VISIBLE_DEVICES=6,7 pytest test/distributed/_composable/fsdp/test_fully_shard_frozen.py::TestFullyShardFrozen::test_train_mixed_requires_grad_per_group
+        # CUDA_VISIBLE_DEVICES=6,7 pytest test/distributed/_composable/fsdp/test_fully_shard_frozen.py::TestFullyShardFrozen::test_train_mixed_requires_grad_across_groups
+        tensors = [tensor for tensor in (inp_tensors + [fsdp_param.all_gather_output for fsdp_param in self.fsdp_params]) if tensor.requires_grad]
+        handle = register_multi_grad_hook(tensors, functools.partial(_fsdp_param_group_post_backward_hook, self), mode="all")
         for inp_tensor_idx, inp_tensor in zip(inp_tensor_indices, inp_tensors):
             args_kwargs_list[inp_tensor_idx] = inp_tensor
         args_list = args_kwargs_list[: len(args_list)]
@@ -493,14 +503,14 @@ def _get_param_module_infos(
     return [param_to_module_info[param] for param in params]
 
 
-class RegisterPostBackwardFunction(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, param_group: FSDPParamGroup, *inputs: torch.Tensor):
-        # All tensors in `inputs` should require gradient
-        ctx.param_group = param_group
-        return inputs
+# class RegisterPostBackwardFunction(torch.autograd.Function):
+#     @staticmethod
+#     def forward(ctx, param_group: FSDPParamGroup, *inputs: torch.Tensor):
+#         # All tensors in `inputs` should require gradient
+#         ctx.param_group = param_group
+#         return inputs
 
-    @staticmethod
-    def backward(ctx, *grads: torch.Tensor):
-        ctx.param_group.post_backward()
-        return (None,) + grads
+#     @staticmethod
+#     def backward(ctx, *grads: torch.Tensor):
+#         ctx.param_group.post_backward()
+#         return (None,) + grads
