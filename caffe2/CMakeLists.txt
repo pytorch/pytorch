@@ -383,7 +383,6 @@ set(GENERATED_H_TORCH
   "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.h"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/variable_factories.h"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/ViewFuncs.h"
-  "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_cpu.h"
   )
 
 if(NOT INTERN_DISABLE_AUTOGRAD)
@@ -424,10 +423,6 @@ set(GENERATED_TESTING_PYTHON
   "${TORCH_SRC_DIR}/testing/_internal/generated/annotated_fn_args.py"
   )
 
-set(GENERATED_H_TORCH_CUDA
-  "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_cuda.h"
-  )
-
 set(GENERATED_CXX_TORCH_CUDA
   "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_cuda.cpp"
   )
@@ -439,7 +434,6 @@ set(TORCH_GENERATED_CODE
   ${GENERATED_H_PYTHON}
   ${GENERATED_TESTING_PYTHON}
   ${GENERATED_CXX_TORCH_CUDA}
-  ${GENERATED_H_TORCH_CUDA}
   )
 
 set(GEN_PER_OPERATOR_FLAG)
@@ -980,9 +974,9 @@ if(USE_ROCM)
 endif()
 
 # Compile exposed libraries.
-list(APPEND Caffe2_GPU_SRCS ${GENERATED_CXX_TORCH_CUDA} ${GENERATED_H_TORCH_CUDA})
 if(USE_ROCM)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
+  list(APPEND Caffe2_HIP_SRCS ${GENERATED_CXX_TORCH_CUDA})
   hip_add_library(torch_hip ${Caffe2_HIP_SRCS})
   if(USE_FLASH_ATTENTION)
     target_link_libraries(torch_hip PRIVATE __caffe2_oort)
@@ -1001,6 +995,7 @@ if(USE_ROCM)
   endif()
 elseif(USE_CUDA)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
+  list(APPEND Caffe2_GPU_SRCS ${GENERATED_CXX_TORCH_CUDA})
   if(CUDA_SEPARABLE_COMPILATION)
     # Separate compilation fails when kernels using `thrust::sort_by_key`
     # are linked with the rest of CUDA code. Workaround by linking them separately.
