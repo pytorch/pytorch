@@ -51,6 +51,7 @@ from inductor.test_torchinductor_dynamic_shapes import make_dynamic_cls
 # discern among them and simply returns the first hit where the guards evaluate to True.
 torch._inductor.config.fx_graph_cache = False
 
+
 # Checks for patterns in generated C++/Triton code to see if it's dynamic
 def check_codegen(
     self: TestCase,
