@@ -504,7 +504,7 @@ def create_functionalized_fn(
     # See Note [Side-Effectful Tokens in AOTAutograd]
     additional_token_inputs = [torch.tensor([])] * len(meta.tokens)
     if trace_joint:
-        args = ([*additional_token_inputs, *args[0]], args[1])
+        args = ([*additional_token_inputs, *args[0]], *args[1:])
     else:
         args = [*additional_token_inputs, *args]
 
