@@ -713,21 +713,24 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 error_msg = 'input has to be 1D or 2D Tensor'
             else:
                 error_msg = 'input has to be a 1D or 2D Tensor'
-            with self.assertRaisesRegex(err_type, error_msg):
-                f(weight, indices, offsets)
+            torch._dynamo.disable(self.assertRaisesRegex)(
+                err_type, error_msg, lambda: f(weight, indices, offsets)
+            )
 
             weight = torch.full((2, 2), 0, dtype=torch.float64, device=device)
             indices = torch.full((2,), 1, dtype=torch.int64, device=device)
 
-            with self.assertRaisesRegex(err_type, 'offsets has to be a 1D Tensor'):
-                f(weight, indices, offsets)
+            torch._dynamo.disable(self.assertRaisesRegex)(
+                err_type, 'offsets has to be a 1D Tensor', lambda: f(weight, indices, offsets)
+            )
 
             weight = torch.full((2, 2, 2), 0, dtype=torch.float64, device=device)
             indices = torch.full((2,), 2, dtype=torch.int64, device=device)
             offsets = torch.full((2,), 0, dtype=torch.int64, device=device)
 
-            with self.assertRaisesRegex(err_type, 'weight has to be a 2D Tensor'):
-                f(weight, indices, offsets)
+            torch._dynamo.disable(self.assertRaisesRegex)(
+                err_type, 'weight has to be a 2D Tensor', lambda: f(weight, indices, offsets)
+            )
 
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_EmbeddingBag_per_sample_weights_failures(self, device, dtypes):
