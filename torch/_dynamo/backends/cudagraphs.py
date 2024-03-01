@@ -1,6 +1,5 @@
 # mypy: ignore-errors
 
-import functools
 import logging
 import operator
 from collections import defaultdict
@@ -135,27 +134,27 @@ def apply_cuda_graphs(gm):
     # NB: we didn't actually change the graph, no need for recompile
 
 
-def cudagraphs(model, inputs):
+def cudagraphs(dynamo_model, dynamo_inputs):
     do_cudagraphs = BoxedBool(True)
 
     def forward_cudagraphs(aot_model, aot_inputs):
         fixed = torch._inductor.utils.num_fw_fixed_arguments(
-            len(inputs), len(aot_inputs)
+            len(dynamo_inputs), len(aot_inputs)
         )
-        model = partition_cudagraphs(model, inputs)
+        model = partition_cudagraphs(aot_model, aot_inputs)
         apply_cuda_graphs(model)
         return model
 
     def backward_cudagraphs(aot_model, aot_inputs):
-        fixed = torch._inductor.utils.count_tangents(model)
-        model = partition_cudagraphs(model, inputs)
+        fixed = torch._inductor.utils.count_tangents(aot_model)
+        model = partition_cudagraphs(aot_model, aot_inputs)
         apply_cuda_graphs(model)
         return model
 
     aot_cudagraphs = aot_autograd(
         fw_compiler=forward_cudagraphs, bw_compiler=backward_cudagraphs
     )
-    return aot_cudagraphs(model, inputs)
+    return aot_cudagraphs(dynamo_model, dynamo_inputs)
 
 
 aot_cudagraphs = aot_autograd(fw_compiler=cudagraphs, bw_compiler=cudagraphs)
