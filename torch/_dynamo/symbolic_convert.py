@@ -344,9 +344,11 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if isinstance(value, SymNodeVariable):
                 # if the assertion is normal shape expression.
                 # just install guard and bail out.
-                result = torch.fx.experimental.symbolic_shapes.expect_true(
-                    value.sym_num
-                )
+                sym_expr = value.sym_num
+                if not isinstance(sym_expr, torch.SymBool):
+                    sym_expr = sym_expr != 0
+
+                result = torch.fx.experimental.symbolic_shapes.expect_true(sym_expr)
                 if not result:
                     raise unimplemented(
                         "Assertion failed on symbolic shapes. Did you make sure eager mode succeeds?"
