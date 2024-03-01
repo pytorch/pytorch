@@ -7948,8 +7948,8 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
             inputs=inputs,
             outputs=outputs,
             constant_args=[tag, ranks, group_size],
-            output_split_sizes=output_split_sizes,
-            input_split_sizes=input_split_sizes,
+            output_split_sizes=[V.graph.sizevars.simplify(s) for s in output_split_sizes],
+            input_split_sizes=[V.graph.sizevars.simplify(s) for s in input_split_sizes],
         )
         return cls.create_output_nodes(packed, outputs)[0]
 
