@@ -903,6 +903,9 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
 c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
     initIntraNodeComm() {
   using IntraNodeComm = intra_node_comm::IntraNodeComm;
+  if (!IntraNodeComm::isEnabled()) {
+    return nullptr;
+  }
   auto prefixStore = c10::make_intrusive<PrefixStore>("IntraNodeComm", store_);
   auto comm = c10::make_intrusive<IntraNodeComm>(prefixStore, rank_, size_);
   if (comm->rendezvous()) {

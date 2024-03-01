@@ -217,6 +217,9 @@ IntraNodeComm::IntraNodeComm(
 }
 
 IntraNodeComm::~IntraNodeComm() {
+  if (!isInitialized_) {
+    return;
+  }
   // Intentionally releasing resources without synchronizing devices. The
   // teardown logic is safe for propoerly sync'd user program. We don't want
   // improperly sync'd user program to hang here.
@@ -234,6 +237,10 @@ IntraNodeComm::~IntraNodeComm() {
   }
   AT_CUDA_CHECK(cudaFree(p2pStatesDev_));
   AT_CUDA_CHECK(cudaFree(buffersDev_));
+}
+
+bool IntraNodeComm::isEnabled() {
+  return getCvarBool(ENABLE_INTRA_NODE_COMM, false);
 }
 
 /**
@@ -283,8 +290,7 @@ bool IntraNodeComm::rendezvous() {
     return true;
   }
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  if (!isIntraNodeCommSupported() ||
-      !getCvarBool(ENABLE_INTRA_NODE_COMM, false) || worldSize_ < 2 ||
+  if (!isIntraNodeCommSupported() || !isEnabled() || worldSize_ < 2 ||
       worldSize_ > kMaxDevices) {
     return false;
   }
