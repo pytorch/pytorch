@@ -610,8 +610,11 @@ class BackedgeTracker:
         # loops earlier (so we don't have to wait for `max` nodes before
         # skipping).
         added_nodes = count - self.n_nodes_on_first_loop
+        # TODO(anijain2305) - REMOVE THIS CHANGE - THIS IS JUST TO STRESS TEST
+        # DYNAMO
         if (
-            config.max_loop_unroll_nodes > 0
+            False
+            and config.max_loop_unroll_nodes > 0
             and added_nodes > config.max_loop_unroll_nodes
         ):
             raise exc.SkipFrame("unrolled loop getting too big")
@@ -635,6 +638,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     current_speculation: Optional[SpeculationEntry]
     # Used to track how big the graph is getting on loop backedges.
     loop_backedge_trackers: Dict[Tuple[int, int], BackedgeTracker]
+    cached_vts: Dict[int, VariableTracker]
 
     def mark_inconsistent_side_effects(self):
         """
@@ -1987,6 +1991,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         super().__init__()
         self.speculation_log = speculation_log
         self.loop_backedge_trackers = collections.defaultdict(BackedgeTracker)
+        self.cached_vts = {}
 
         # Mutable state checkpointed by copy_graphstate()
         self.output = output

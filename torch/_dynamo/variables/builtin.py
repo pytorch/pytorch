@@ -679,25 +679,27 @@ class BuiltinVariable(VariableTracker):
                     return res
 
         handler = getattr(self, f"call_{self.fn.__name__}", None)
-        if handler:
-            try:
-                inspect.signature(handler).bind(tx, *args, **kwargs)
-            except TypeError as exc:
-                has_constant_handler = self.has_constant_handler(args, kwargs)
-                if not has_constant_handler:
-                    log.warning(
-                        "incorrect arg count %s %s and no constant handler",
-                        handler,
-                        exc,
-                    )
-                handler = None
+
+        # Saves ~1.5 second because inspect.signature .. bind is expensive
+        # if handler:
+        #     try:
+        #         inspect.signature(handler).bind(tx, *args, **kwargs)
+        #     except TypeError as exc:
+        #         has_constant_handler = self.has_constant_handler(args, kwargs)
+        #         if not has_constant_handler:
+        #             log.warning(
+        #                 "incorrect arg count %s %s and no constant handler",
+        #                 handler,
+        #                 exc,
+        #             )
+        #         handler = None
 
         if handler:
             try:
                 result = handler(tx, *args, **kwargs)
                 if result is not None:
                     return result
-            except Unsupported as exc:
+            except Exception as exc:
                 has_constant_handler = self.has_constant_handler(args, kwargs)
                 if not has_constant_handler:
                     raise

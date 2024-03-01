@@ -262,10 +262,17 @@ class VariableBuilder:
             if dup_guard:
                 self.install_guards(dup_guard)
             return side_effect_result
+
+        # TODO - Is id(value) sufficient?
+        # This is useful for LOAD_ATTR e.g. if we retrace export result, we will
+        # have each op with torch.ops.aten.
+        if id(value) in self.tx.cached_vts:
+            return self.tx.cached_vts[id(value)]
         vt = self._wrap(value)
         vt.source = self.source
         if self._can_lift_attrs_to_inputs(vt):
             vt = self.tx.output.side_effects.track_object_existing(value, vt)
+        self.tx.cached_vts[id(value)] = vt
         return vt
 
     def _can_lift_attrs_to_inputs(self, vt):
