@@ -179,7 +179,7 @@ uint32_t _getAlignment(uintptr_t address) {
 }
 #endif
 
-static size_t _parseChosenSize() {
+static size_t _parseChosenWorkspaceSize() {
   const char * val = getenv("CUBLASLT_WORKSPACE_SIZE");
   size_t workspace_size = 1024;
 #ifdef USE_ROCM
