@@ -1,14 +1,21 @@
 # mypy: ignore-errors
 
-import functools
-import logging
 import operator
+import warnings
 from collections import defaultdict
-from typing import Set
+from typing import Dict, Optional, Set
 
 import torch
-from torch._inductor.utils import BoxedBool
-
+from torch._inductor.cudagraph_utils import (
+    check_multiple_devices_or_any_cpu_nodes,
+    get_mutation_stack_trace,
+)
+from torch._inductor.utils import (
+    BoxedBool,
+    count_tangents,
+    has_incompatible_cudagraph_ops,
+    num_fw_fixed_arguments,
+)
 from torch.fx import GraphModule
 from torch.fx.passes.backends.cudagraphs import partition_cudagraphs
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -17,7 +24,7 @@ from torch.utils._pytree import tree_map
 from .common import aot_autograd
 from .registry import register_backend
 
-log = logging.getLogger(__name__)
+perf_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 
 
 def cloner(t):
@@ -94,9 +101,11 @@ def find_input_mutations(g):
     inputs = defaultdict(set)
     input_idx = 0
     mutated_inputs = set()
+    mutated_node = {}
     for n in g.nodes:
         if n.op == "placeholder":
-            inputs[StorageWeakRef(meta_fk(n.meta)._typed_storage())].add(input_idx)
+            if isinstance(meta_fk(n.meta), torch.Tensor):
+                inputs[StorageWeakRef(meta_fk(n.meta)._typed_storage())].add(input_idx)
             input_idx += 1
         elif n.op == "call_function":
             if n.target is operator.getitem:
@@ -119,6 +128,7 @@ def find_input_mutations(g):
                     mutated_inputs |= inputs[
                         StorageWeakRef(meta_fk(argument.meta)._typed_storage())
                     ]
+
         # TODO: error on unrecognized nodes
     return mutated_inputs
 
@@ -135,27 +145,72 @@ def apply_cuda_graphs(gm):
     # NB: we didn't actually change the graph, no need for recompile
 
 
-def cudagraphs(model, inputs):
+def get_device_node_mapping(gm: torch.fx.GraphModule):
+    device_node_mapping: Dict[torch.device, torch.fx.Node] = {}
+    for n in gm.graph.nodes:
+        t = n.meta.get("val", None)
+        if isinstance(t, torch.Tensor) and t.device not in device_node_mapping:
+            device_node_mapping[t.device] = n
+    return device_node_mapping
+
+
+def check_for_mutation(aot_model: torch.fx.GraphModule, num_fixed) -> Optional[str]:
+    mutation_indices = find_input_mutations(aot_model.graph) - set(range(num_fixed))
+    if not mutation_indices:
+        return None
+
+    return get_mutation_stack_trace(aot_model, mutation_indices)
+
+
+def check_for_skip(aot_model: torch.fx.GraphModule, num_fixed) -> Optional[str]:
+    if mut_skip := check_for_mutation(aot_model, num_fixed):
+        return mut_skip
+
+    if skip := check_multiple_devices_or_any_cpu_nodes(
+        get_device_node_mapping(aot_model)
+    ):
+        return skip
+
+    if has_incompatible_cudagraph_ops(aot_model):
+        return "skipping cudagraphs due to incompatible op"
+
+    return None
+
+
+def cudagraphs(dynamo_model, dynamo_inputs):
     do_cudagraphs = BoxedBool(True)
 
     def forward_cudagraphs(aot_model, aot_inputs):
-        fixed = torch._inductor.utils.num_fw_fixed_arguments(
-            len(inputs), len(aot_inputs)
-        )
-        model = partition_cudagraphs(model, inputs)
+        fixed = num_fw_fixed_arguments(len(dynamo_inputs), len(aot_inputs))
+        if skip_msg := check_for_skip(aot_model, fixed):
+            BoxedBool.disable(cudagraphs)
+            perf_log.warning("skipping cudagraphs due to %s", skip_msg)
+            return aot_model
+
+        model = partition_cudagraphs(aot_model, aot_inputs)
         apply_cuda_graphs(model)
         return model
 
     def backward_cudagraphs(aot_model, aot_inputs):
-        fixed = torch._inductor.utils.count_tangents(model)
-        model = partition_cudagraphs(model, inputs)
+        if not do_cudagraphs:
+            return aot_model
+
+        fixed = count_tangents(aot_model)
+        if skip_msg := check_for_skip(aot_model, fixed):
+            perf_log.warning("skipping cudagraphs due to %s", skip_msg)
+            warnings.warn(skip_msg)
+            return aot_model
+
+        model = partition_cudagraphs(aot_model, aot_inputs)
         apply_cuda_graphs(model)
         return model
 
     aot_cudagraphs = aot_autograd(
-        fw_compiler=forward_cudagraphs, bw_compiler=backward_cudagraphs
+        fw_compiler=forward_cudagraphs,
+        bw_compiler=backward_cudagraphs,
+        keep_inference_input_mutations=torch._dynamo.config.cudagraph_backend_keep_input_mutation,
     )
-    return aot_cudagraphs(model, inputs)
+    return aot_cudagraphs(dynamo_model, dynamo_inputs)
 
 
 aot_cudagraphs = aot_autograd(fw_compiler=cudagraphs, bw_compiler=cudagraphs)

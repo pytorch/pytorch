@@ -353,6 +353,8 @@ _save_config_ignore = {
     "skipfiles_inline_module_allowlist",
 }
 
+cudagraph_backend_keep_input_mutation = False
+
 # When True, only ops that have the torch.Tag.pt2_compliant tag
 # will be allowed into the graph; all other ops will be disallowed
 # and will fall back to eager-mode PyTorch. Useful to ensure

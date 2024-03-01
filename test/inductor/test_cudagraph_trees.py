@@ -19,9 +19,11 @@ from torch.testing import FileCheck
 
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_CI,
     IS_LINUX,
     IS_WINDOWS,
+    parametrize,
     skipIfRocm,
     TEST_CUDA_GRAPH,
     TEST_WITH_ASAN,
@@ -48,6 +50,13 @@ requires_multigpu = functools.partial(
     unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
 )
 from io import StringIO
+
+
+def get_compile_fn(backend):
+    if backend == "cudagraphs":
+        return functools.partial(torch.compile, backend="cudagraphs")
+    else:
+        return functools.partial(torch.compile, mode="reduce-overhead")
 
 
 class capture_stderr(list):
@@ -223,7 +232,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def test_rng_non_trees(self):
             self.check_rng()
 
-        def test_mutation_reinplaced(self):
+        def test_mutation_reinplaced(self, backend):
             import torch.nn as nn
 
             class Model(nn.Module):
@@ -241,18 +250,21 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             model = Model().cuda()
             eag = model(x, y, z)
             with capture_stderr() as captured_output:
-                opt = torch.compile(model.forward, mode="reduce-overhead")(x, y, z)
+                opt = torch.compile(backend, mode="reduce-overhead")(model.forward)(
+                    x, y, z
+                )
 
             FileCheck().check(
                 "skipping cudagraphs due to mutaton on input. Found from"
             ).check("torch.logical_xor").run(captured_output[0])
 
         @requires_multigpu()
-        def test_multiple_devices_msg(self):
-            @torch.compile()
+        @parametrize("backend", ("inductor", "cudagraphs"))
+        def test_multiple_devices_msg(self, backend):
             def foo(x, y):
                 return (x + 1, y + 2)
 
+            foo = get_compile_fn(backend)(foo)
             with capture_stderr() as captured_output:
                 foo(torch.ones([10], device="cuda"), torch.ones([20]))
 
@@ -269,11 +281,14 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 captured_output[0]
             )
 
-        def test_mutation(self):
-            @torch.compile()
+        @parametrize("backend", ("inductor", "cudagraphs"))
+        @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
+        def test_mutation_on_inp(self, backend):
             def foo(x):
                 x.add_(2)
                 return x
+
+            foo = get_compile_fn(backend)(foo)
 
             def inp():
                 return torch.ones([10], device="cuda")
@@ -1432,6 +1447,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             with self.assertRaisesRegex(Exception, "custom error msg"):
                 device = x.untyped_storage()
 
+    instantiate_parametrized_tests(CudaGraphTreeTests)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
