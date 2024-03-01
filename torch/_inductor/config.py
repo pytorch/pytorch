@@ -498,7 +498,7 @@ class triton:
 
     force_cudagraph_sync = False
 
-    force_cudagraphs_warmup = False    
+    force_cudagraphs_warmup = False
 
     # assertions on the fast path
     fast_path_cudagraph_asserts = False

@@ -122,7 +122,7 @@ def cudagraphs(dynamo_model, dynamo_inputs):
         interp = boxed_nop(aot_model, aot_inputs)
         fixed = num_fw_fixed_arguments(len(dynamo_inputs), len(aot_inputs))
         if skip_msg := check_for_skip(aot_model, fixed):
-            BoxedBool.disable(cudagraphs)
+            BoxedBool.disable(do_cudagraphs)
             perf_log.warning("skipping cudagraphs due to %s", skip_msg)
             return interp
 

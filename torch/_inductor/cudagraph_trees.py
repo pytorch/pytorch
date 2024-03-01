@@ -1788,11 +1788,15 @@ class CUDAGraphTreeManager:
         # necessarily use the same addresses as in the warm up. Thus any warm up of a node can only
         # be followed by warm up runs.
         if (
-            not (
-                function_id in self.warmed_up_functions
-                or config.triton.skip_cudagraph_warmup
+            (
+                not (
+                    function_id in self.warmed_up_functions
+                    or config.triton.skip_cudagraph_warmup
+                )
             )
-        ) or self.in_warmup or config.triton.force_cudagraphs_warmup:
+            or self.in_warmup
+            or config.triton.force_cudagraphs_warmup
+        ):
             # If we are in the middle of executing cuda graphs, then we need to checkpoint memory state.
             # Both Recording and Warmup will be reflected in the allocator and dont need changes
             if self.path_state == ExecutionState.EXECUTION:

@@ -41,8 +41,8 @@ from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
-from torch._logging import trace_structured
 from torch._inductor.utils import BoxedBool, count_tangents
+from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
