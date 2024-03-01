@@ -1707,7 +1707,7 @@ def unravel_index(indices: Tensor, shape: Union[int, Sequence[int], torch.Size])
             tensor. All elements must be non-negative.
 
     Returns:
-        tuple of Tensors: Each ``i``-th tensor in the ouput corresponds with
+        tuple of Tensors: Each ``i``-th tensor in the output corresponds with
         dimension ``i`` of :attr:`shape`. Each tensor has the same shape as
         ``indices`` and contains one index into dimension ``i`` for each of the
         flat indices given by ``indices``.

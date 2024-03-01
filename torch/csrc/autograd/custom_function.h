@@ -189,8 +189,8 @@ struct CppNode : public Node {
           name());
     }
 
-    // TODO: collect the actual function id by calling the python counter
-    // args.collect(function_id);
+    // Don't need to autograd function id
+    // since we already collect NodeCall::id
     args.collect(ctx_.saved_data);
     args.collect(ctx_.non_differentiable_);
     args.collect(ctx_.dirty_inputs_);

@@ -1,8 +1,11 @@
 #pragma once
+#include <ATen/TensorGeometry.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/flat_hash_map.h>
-#include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/input_metadata.h>
+#include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/variable_info.h>
 #include <torch/csrc/utils/python_stub.h>
 #include <torch/csrc/utils/torch_dispatch_mode.h>
@@ -249,7 +252,7 @@ class CompiledNodeArgs {
   void collect(ska::flat_hash_map<K, V>& m) {
     for (auto& [k, v] : m) {
       collect(k);
-      // TODO: we can't specialize on number of bytes here, need to break down further
+      // TODO: we can't specialize on number of bytes here
       specialize_on_bytes(v);
     }
   }
@@ -389,6 +392,10 @@ class CompiledNodeArgs {
   }
 
   int add_backward(c10::SafePyObject&& obj) {
+    return _compiler.emplace_hook(std::move(obj));
+  }
+
+  int add_backward_state(c10::SafePyObject&& obj) {
     return _compiler.emplace_hook(std::move(obj));
   }
 

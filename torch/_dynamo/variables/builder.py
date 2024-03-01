@@ -27,6 +27,7 @@ from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
 from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
+from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
     DimDynamic,
@@ -211,6 +212,24 @@ class GraphArg:
 
     def __eq__(self, other):
         return self.source.name() == other.source.name()
+
+
+class BackwardStateGraphArg(GraphArg):
+    def __init__(self):
+        super().__init__(
+            source=None,
+            _example=BackwardState(),
+            is_unspecialized=False,
+            fake_tensor=None,
+            is_tensor=False,
+        )
+
+    def reconstruct(self, codegen):
+        assert codegen.tx.output.backward_state_var
+        codegen.load_import_from(BackwardState.__module__, "BackwardState")
+        codegen.call_function(0, True)
+        codegen.dup_top()
+        codegen.store(codegen.tx.output.backward_state_var)
 
 
 @dataclasses.dataclass
@@ -402,12 +421,15 @@ class VariableBuilder:
             result = {
                 ConstantVariable.create(k): UserDefinedObjectVariable(
                     v,
-                    source=GetItemSource(self.get_source(), k),
+                    source=GetItemSource(
+                        self.get_source(), ConstDictKeySource(self.get_source(), i)
+                    ),
                 )
-                for k, v in value.items()
+                for i, (k, v) in enumerate(value.items())
             }
             return ConstDictVariable(result, type(value))
         elif value is sys.modules:
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return PythonSysModulesVariable(source=self.source)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             if not value and self.get_source().is_nn_module():
@@ -420,7 +442,7 @@ class VariableBuilder:
                 # but not completely secure job ensuring a property wasn't changed.
                 self.install_guards(GuardBuilder.BOOL_FALSE)
             else:
-                self.install_guards(GuardBuilder.LIST_LENGTH)
+                self.install_guards(GuardBuilder.DICT_LENGTH)
 
             # Optimisation for the common case strings, ints, etc
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
@@ -447,10 +469,13 @@ class VariableBuilder:
             )
 
             if istype(value, collections.defaultdict):
+                factory_source = AttrSource(self.source, "default_factory")
                 result = DefaultDictVariable(
                     result,
                     type(value),
-                    default_factory=self._wrap(value.default_factory),
+                    default_factory=VariableBuilder(self.tx, factory_source)(
+                        value.default_factory
+                    ),
                     source=self.source,
                 )
             else:
@@ -496,7 +521,7 @@ class VariableBuilder:
             install_guard(
                 self.get_source().make_guard(GuardBuilder.TYPE_MATCH),
                 keywords_source.make_guard(GuardBuilder.DICT_KEYS),
-                args_source.make_guard(GuardBuilder.LIST_LENGTH),
+                args_source.make_guard(GuardBuilder.SEQUENCE_LENGTH),
             )
             return FunctoolsPartialVariable(func_obj, args, keywords)
         elif is_typing(value):
@@ -535,7 +560,7 @@ class VariableBuilder:
             saved_tensors_source = AttrSource(self.source, "saved_tensors")
             install_guard(
                 self.source.make_guard(GuardBuilder.TYPE_MATCH),
-                saved_tensors_source.make_guard(GuardBuilder.LIST_LENGTH),
+                saved_tensors_source.make_guard(GuardBuilder.SEQUENCE_LENGTH),
             )
             saved_tensors = [
                 VariableBuilder(self.tx, GetItemSource(saved_tensors_source, n))(v)
@@ -759,6 +784,11 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type):
+            if value in (torch.utils.hooks.BackwardHook,):
+                # TODO(jansel): combine this case with the one above
+                return trace_rules.lookup(value).create_with_source(
+                    value, source=self.source
+                )
             # This is a userdefined class, so install an ID_MATCH even if its a
             # global variable.
             self.install_guards(GuardBuilder.ID_MATCH)
@@ -767,7 +797,7 @@ class VariableBuilder:
                 source=self.source,
             )
         elif RestrictedListSubclassVariable.is_matching_cls(type(value)):
-            self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.LIST_LENGTH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
             return self.set_source_and_track_mutable(
                 value,
                 RestrictedListSubclassVariable(
@@ -795,7 +825,7 @@ class VariableBuilder:
             return ConstantVariable.create(value=value)
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
-        self.install_guards(GuardBuilder.LIST_LENGTH)
+        self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
         for item in value:
             if item is value:
@@ -1075,7 +1105,13 @@ class VariableBuilder:
 
         readonly = not value.flags.writeable
         if readonly:
-            value.flags.writeable = True
+            try:
+                value.flags.writeable = True
+            except ValueError:
+                # One can not easily make nditer elements writable,
+                # but warning is not the end of the world
+                assert isinstance(value.base, np.nditer)
+                pass
 
         try:
             tensor_value = _util._try_convert_to_tensor(value)
@@ -1510,6 +1546,8 @@ def wrap_fx_proxy_cls(
         torch._C._functorch._vmap_increment_nesting,
         torch._C._functorch._vmap_decrement_nesting,
         torch._functorch.vmap._validate_and_get_batch_size,
+        torch._C._functorch._grad_increment_nesting,
+        torch._C._functorch._grad_decrement_nesting,
         # some mac builds are missing torch.distributed.get_rank()
         getattr(torch.distributed, "get_rank", _missing),
         getattr(torch.distributed, "get_world_size", _missing),
@@ -1663,11 +1701,9 @@ def _automatic_dynamic(
                 vr=constraint_range.vr & old_constraint_range.vr,
                 warn_only=False,
             )
-            if old_debug_name is not None:
-                assert debug_name is None or debug_name == old_debug_name
-                new_debug_name = old_debug_name
-            else:
-                new_debug_name = debug_name
+            # It is possible for (non-None) old_debug_name and debug_name to be different
+            # but this will only happen the corresponding Dims can be derived equal.
+            new_debug_name = old_debug_name or debug_name
             dim2constraint[dim] = new_constraint_range, new_debug_name
         else:
             dim2constraint[dim] = constraint_range, debug_name

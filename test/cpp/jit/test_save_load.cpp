@@ -35,7 +35,7 @@ template <class Functor>
 inline void expectThrowsEq(Functor&& functor, const char* expectedMessage) {
   try {
     std::forward<Functor>(functor)();
-  } catch (const c10::Error& e) {
+  } catch (const Error& e) {
     EXPECT_STREQ(e.what_without_backtrace(), expectedMessage);
     return;
   }
