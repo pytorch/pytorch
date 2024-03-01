@@ -3260,6 +3260,16 @@ def add(import_name: str):
     _recompile_re()
 
 
+# Skip these even if they would otherwise be inlined due to their location in torch.
+TORCH_SKIP_FILES = [
+    # NB: Parametrization injects dynamically-constructed properties onto parametrized
+    # modules that aren't yet traced correctly in Dynamo.
+    # See https://github.com/pytorch/pytorch/issues/120914
+    "torch/nn/utils/parametrize.py"
+]
+TORCH_SKIP_FILES_RE = re.compile(f".*({'|'.join(map(re.escape, TORCH_SKIP_FILES))})")
+
+
 @dataclasses.dataclass
 class SkipResult:
     skipped: bool
@@ -3285,8 +3295,10 @@ def check_file(filename, is_inlined_call=False):
             True,
             "skipped according trace_rules.FBCODE_SKIP_DIRS",
         )
+    if bool(TORCH_SKIP_FILES_RE.match(filename)):
+        return SkipResult(True, "skipped according to trace_rules.TORCH_SKIP_FILES")
     if bool(SKIP_DIRS_RE.match(filename)):
-        return SkipResult(True, "skipped according trace_rules.SKIP_DIRS")
+        return SkipResult(True, "skipped according to trace_rules.SKIP_DIRS")
     else:
         return SkipResult(False, "inlined by default")
 
@@ -3380,7 +3392,9 @@ _recompile_re()
 
 
 def is_torch_inline_allowed(filename):
-    return any(filename.startswith(d) for d in get_mod_inlinelist())
+    return any(filename.startswith(d) for d in get_mod_inlinelist()) and not bool(
+        TORCH_SKIP_FILES_RE.match(filename)
+    )
 
 
 @functools.lru_cache(None)
