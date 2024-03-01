@@ -1186,6 +1186,7 @@ def main():
         "include/ATen/native/hip/*.h",
         "include/ATen/native/hip/*.cuh",
         "include/ATen/native/mps/*.h",
+        "include/ATen/native/nested/*.h",
         "include/ATen/native/quantized/*.h",
         "include/ATen/native/quantized/cpu/*.h",
         "include/ATen/native/sparse/*.h",
