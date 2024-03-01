@@ -848,9 +848,13 @@ def classproperty(func):
     return _ClassPropertyDescriptor(func)
 
 
-# Whether we are compiling with torch.compile or not
-def is_compiling():
-    return False
+def is_compiling() -> bool:
+    """
+    Indicates whether we are tracing/compiling with torch.compile() or torch.export().
+
+    TODO(khabinov): we should deprecate this function and use torch.compiler.is_compiling().
+    """
+    return torch.compiler.is_compiling()
 
 
 def _functionalize_sync(t):
@@ -891,3 +895,43 @@ def _get_device_module(device_type: str):
             f"Device '{device_type}' does not have a corresponding module registered as 'torch.{device_type}'."
         )
     return device_module
+
+
+def _dummy_type(name: str) -> type:
+    def get_err_fn(is_init: bool):
+        def err_fn(obj, *args, **kwargs):
+            if is_init:
+                class_name = obj.__class__.__name__
+            else:
+                class_name = obj.__name__
+            raise RuntimeError(f"Tried to instantiate dummy base class {class_name}")
+
+        return err_fn
+
+    return type(
+        name, (object,), {"__init__": get_err_fn(True), "__new__": get_err_fn(False)}
+    )
+
+
+class _LazySeedTracker:
+    # Since seeding is memory-less, only track the latest seed.
+    # Note: `manual_seed_all` followed by `manual_seed` overwrites
+    # the seed on current device. We track the order of **latest**
+    # calls between these two API.
+    def __init__(self):
+        self.manual_seed_all_cb = None
+        self.manual_seed_cb = None
+        self.call_order = []
+
+    def queue_seed_all(self, cb, traceback):
+        self.manual_seed_all_cb = (cb, traceback)
+        # update seed_all to be latest
+        self.call_order = [self.manual_seed_cb, self.manual_seed_all_cb]
+
+    def queue_seed(self, cb, traceback):
+        self.manual_seed_cb = (cb, traceback)
+        # update seed to be latest
+        self.call_order = [self.manual_seed_all_cb, self.manual_seed_cb]
+
+    def get_calls(self) -> List:
+        return self.call_order
