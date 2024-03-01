@@ -1725,14 +1725,17 @@ def main():
         all_failures = test_batch.failures
 
         if IS_CI:
-            print_to_stderr("Emiting failed_test_info")
-            emit_metric(
-                "failed_test_info",
-                {
-                    "selected_tests": selected_tests,
-                    "failure": [str(test) for test, _ in all_failures],
-                },
-            )
+            for test, _ in all_failures:
+                test_stats = test_prioritizations.get_test_stats(test)
+                print_to_stderr("Emiting td_test_failure_stats_v2")
+                emit_metric(
+                    "td_test_failure_stats_v2",
+                    {
+                        "selected_tests": selected_tests,
+                        "failure": str(test),
+                        **test_stats,
+                    },
+                )
 
     if len(all_failures):
         for _, err in all_failures:

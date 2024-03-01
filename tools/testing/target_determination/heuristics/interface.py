@@ -139,6 +139,18 @@ class TestPrioritizations:
                 return {"position": idx, "score": score}
         raise AssertionError(f"Test run {test_run} not found")
 
+    def get_test_stats(self, test: TestRun) -> Dict[str, Any]:
+        return {
+            "test_name": test.test_file,
+            "test_filters": test.get_pytest_filter(),
+            **self.get_priority_info_for_test(test),
+            "max_score": max(score for score, _ in self._traverse_scores()),
+            "min_score": min(score for score, _ in self._traverse_scores()),
+            "all_scores": {
+                str(test): score for test, score in self._test_scores.items()
+            },
+        }
+
     def to_json(self) -> Dict[str, Any]:
         """
         Returns a JSON dict that describes this TestPrioritizations object.
