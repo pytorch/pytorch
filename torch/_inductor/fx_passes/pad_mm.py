@@ -6,8 +6,7 @@ from torch import Tensor
 from torch._inductor import utils
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
-from ...utils._triton import has_triton
-from ..ir import FixedLayout
+from torch.utils._triton import has_triton
 
 from ..pattern_matcher import (
     fwd_only,
@@ -16,7 +15,7 @@ from ..pattern_matcher import (
     MatchContext,
     register_replacement,
 )
-from ..utils import is_view, use_cutlass_template
+from ..utils import is_view
 
 aten = torch.ops.aten
 
@@ -156,23 +155,6 @@ def addmm_pattern(
     return aten.addmm(input, mat1, mat2, beta=beta, alpha=alpha)
 
 
-# addmm wrapper for testing purposes
-def call_addmm(bias, mat1, mat2, *args, **kwargs):
-    if len(bias.shape) == 2 and bias.shape[0] == 1:
-        bias = bias.squeeze(0)
-    return aten.addmm(bias, mat1, mat2, *args, **kwargs)
-
-
-# bmm wrapper for testing purposes
-def call_bmm(*args, **kwargs):
-    return aten.bmm(*args, **kwargs)
-
-
-# mm wrapper for testing purposes
-def call_mm(*args, **kwargs):
-    return aten.mm(*args, **kwargs)
-
-
 def should_pad_addmm(match: Match) -> bool:
     if (
         torch._inductor.config.keep_output_stride
@@ -185,6 +167,28 @@ def should_pad_addmm(match: Match) -> bool:
     )
 
 
+def addmm_replace(
+    input: Optional[Tensor], mat1: Tensor, mat2: Tensor, beta=1.0, alpha=1.0
+) -> Tensor:
+    m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
+    k_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
+    n_padded_length = get_padded_length(mat2.shape[1], get_alignment_size(mat2))
+
+    if m_padded_length != 0 or k_padded_length != 0 or n_padded_length != 0:
+        return pad_addmm(
+            input,
+            mat1,
+            mat2,
+            m_padded_length,
+            k_padded_length,
+            n_padded_length,
+            beta,
+            alpha,
+        )
+
+    return aten.addmm(input, mat1, mat2, beta=beta, alpha=alpha)
+
+
 def pad_addmm(
     input: Optional[Tensor],
     mat1: Tensor,
@@ -194,112 +198,36 @@ def pad_addmm(
     n_padded_length: int,
     beta=1.0,
     alpha=1.0,
-    explicit_transpose=False,
 ):
-    # for paddings, dim order is reversed for some reasons
-    # and for every dim, we need to specify left and right padding
-    if k_padded_length != 0 or m_padded_length != 0:
-        mat1_padded = aten.constant_pad_nd(
-            mat1, [0, k_padded_length, 0, m_padded_length]
-        )
+    # addmm decomp with padding will go through pad_addmm multiple times if multiple dimensions are needed to be padded
+    if k_padded_length != 0:
+        mat1 = pad_dim(mat1, k_padded_length, 1)
+        mat2 = pad_dim(mat2, k_padded_length, 0)
+    elif n_padded_length != 0:
+        mat2 = pad_dim(mat2, n_padded_length, 1)
+    elif m_padded_length != 0:
+        mat1 = pad_dim(mat1, m_padded_length, 0)
+
+    # the add broadcasts, so we only pad if the dimension != 1
+    if input is not None and k_padded_length == 0:
+        if n_padded_length != 0:
+            if input.dim() == 2 and input.shape[1] != 1:
+                input = pad_dim(input, n_padded_length, 1)
+            elif input.dim() == 1 and input.shape[0] != 1:
+                input = pad_dim(input, n_padded_length, 0)
+        elif m_padded_length != 0 and input.dim() == 2 and input.shape[0] != 1:
+            input = pad_dim(input, m_padded_length, 0)
+
+    if k_padded_length != 0:
+        return addmm_replace(input, mat1, mat2, beta=beta, alpha=alpha)
+    elif n_padded_length != 0:
+        return addmm_replace(input, mat1, mat2, beta=beta, alpha=alpha)[
+            :, :-n_padded_length
+        ]
     else:
-        mat1_padded = mat1
-    if k_padded_length != 0 or n_padded_length != 0:
-        mat2_padded = aten.constant_pad_nd(
-            mat2, [0, n_padded_length, 0, k_padded_length]
-        )
-    else:
-        mat2_padded = mat2
-    if input is not None and not explicit_transpose:
-        if len(input.shape) < 2:
-            # make sure we have at least two dimensions
-            # the first one to be broadcasted over is sometimes implicit
-            # warning: If we don't squeeze this out later, it can
-            # cost performance
-            input = input.unsqueeze(0)
-        if n_padded_length != 0 or m_padded_length != 0:
-            bias_n_padded_length = n_padded_length
-            bias_m_padded_length = m_padded_length
-            # What if we're broadcasting?
-            if input.shape[0] == 1 and mat1.shape[0] > 1:
-                bias_m_padded_length = 0
-            if input.shape[1] == 1 and mat2.shape[1] > 1:
-                bias_n_padded_length = 0
-            if bias_m_padded_length > 0 or bias_n_padded_length > 0:
-                input_padded = aten.constant_pad_nd(
-                    input, [0, bias_n_padded_length, 0, bias_m_padded_length]
-                )
-            else:
-                input_padded = input
-        else:
-            input_padded = input
-    else:
-        input_padded = None
-    if explicit_transpose:
-        # If M dimension is aligned but N is not, this is an alternative to a padding N
-        # which has the advantage of enabling downstream epilogue fusions
-        # padding on K dim, transpose and contiguous should be fuseable into a single op
-
-        res = call_mm(
-            mat2_padded.transpose(-1, -2),
-            mat1_padded.transpose(-1, -2),
-        ).transpose(-1, -2)
-    else:
-        try:
-            res = call_addmm(
-                input_padded, mat1_padded, mat2_padded, beta=beta, alpha=alpha
-            )
-        except RuntimeError as e:
-            if input_padded is not None:
-                note1 = f"\npad_addmm was called with argument shapes: input.shape={input.shape}, mat1.shape={mat1.shape}, mat2.shape={mat2.shape}, m_padded_length={m_padded_length}, k_padded_length={k_padded_length}, n_padded_length={n_padded_length}, explicit_transpose={explicit_transpose}"  # type: ignore[union-attr] # noqa: B950
-            else:
-                note1 = f"pad_addmm was called with argument shapes: input_padded=None, mat1.shape={mat1.shape}, mat2.shape={mat2.shape}, m_padded_length={m_padded_length}, k_padded_length={k_padded_length}, n_padded_length={n_padded_length}, explicit_transpose={explicit_transpose}"  # noqa: B950
-
-            note2 = f"\naten.addmm was called with shapes: input_padded.shape={input_padded.shape}, mat1_padded.shape={mat1_padded.shape}, mat2_padded.shape={mat2_padded.shape}, beta={beta}, alpha={alpha}"  # noqa: B950
-            raise RuntimeError(str(e) + note1 + note2) from e
-
-    if m_padded_length != 0:
-        res = res[:-m_padded_length, :]
-    if n_padded_length != 0:
-        res = res[:, :-n_padded_length]
-    if explicit_transpose and input is not None:
-        # in this case we used aten.mm and have to add bias and multiply in alpha and beta manually
-        if alpha == 1 and beta == 1:
-            res = res + input
-        else:
-            res = alpha * res + beta * input
-    return res
-
-
-def addmm_replace(
-    input: Tensor, mat1: Tensor, mat2: Tensor, beta=1.0, alpha=1.0
-) -> Tensor:
-    m, n, k = mat1.shape[0], mat2.shape[1], mat1.shape[1]
-    may_use_transpose = torch._inductor.config.shape_pad_use_transpose and not any(
-        isinstance(d, torch.SymInt) for d in (m, n, k)
-    )
-    k_padded_length = get_padded_length(k, get_alignment_size(mat1))
-    n_padded_length = get_padded_length(n, get_alignment_size(mat2))
-    m_padded_length = get_padded_length(m, get_alignment_size(mat1))
-    explicit_transpose = 0
-    if may_use_transpose:
-        if m_padded_length == 0 and n_padded_length != 0 and len(input.shape) >= 2:
-            explicit_transpose = True
-            n_padded_length = 0
-            m_padded_length = 0
-        elif m_padded_length != 0 and n_padded_length == 0:
-            m_padded_length = 0
-    return pad_addmm(
-        input,
-        mat1,
-        mat2,
-        m_padded_length,
-        k_padded_length,
-        n_padded_length,
-        beta,
-        alpha,
-        explicit_transpose=explicit_transpose,
-    )
+        return addmm_replace(input, mat1, mat2, beta=beta, alpha=alpha)[
+            :-m_padded_length, :
+        ]
 
 
 def is_mm_compute_bound(M: int, K: int, N: int, dtype: torch.dtype) -> bool:
@@ -354,7 +282,6 @@ def should_pad_bench_key(
         op,
         input if input is None else tensor_key(input),
         tf32_key,
-        torch._inductor.config.force_shape_pad,
     )
 
     return str(key)
@@ -363,64 +290,35 @@ def should_pad_bench_key(
 def should_pad_bench(
     mat1: Tensor, mat2: Tensor, op, input: Optional[Tensor] = None
 ) -> bool:
+    if not has_triton():
+        return False
+
     do_bench = functools.partial(
         utils.do_bench,
         warmup=5,
     )
-    m_padded_length = 0
-    n_padded_length = 0
-    batchsize = 1
-    explicit_transpose = False
+
     with no_dispatch():
         if op is torch.ops.aten.mm or op is torch.ops.aten.addmm:
             m = mat1.shape[0]
             k = mat1.shape[1]
             n = mat2.shape[1]
+
+            m_padded_length = get_padded_length(m, get_alignment_size(mat1))
             k_padded_length = get_padded_length(k, get_alignment_size(mat1))
             n_padded_length = get_padded_length(n, get_alignment_size(mat2))
-            m_padded_length = get_padded_length(m, get_alignment_size(mat1))
         elif op is torch.ops.aten.bmm:
-            batchsize = mat1.shape[0]
             m = mat1.shape[1]
             k = mat1.shape[2]
             n = mat2.shape[2]
-            k_padded_length = get_padded_length(k, get_alignment_size(mat1))
+
             m_padded_length = get_padded_length(m, get_alignment_size(mat1))
+            k_padded_length = get_padded_length(k, get_alignment_size(mat1))
             n_padded_length = get_padded_length(n, get_alignment_size(mat2))
         else:
             return False
-        may_use_transpose = torch._inductor.config.shape_pad_use_transpose and not any(
-            isinstance(d, torch.SymInt) for d in (m, n, k)
-        )
-        if may_use_transpose:
-            if m_padded_length == 0 and n_padded_length != 0:
-                n_padded_length = 0
-                m_padded_length = 0
-                explicit_transpose = True
-            elif n_padded_length == 0 and m_padded_length != 0:
-                m_padded_length = 0
-        if (
-            m_padded_length == k_padded_length == n_padded_length == 0
-        ) and not explicit_transpose:
-            return False
 
-        if torch._inductor.config.force_shape_pad:
-            return True
-        try:
-            fake_layout = FixedLayout(
-                device=mat1.device,
-                dtype=mat1.dtype,
-                size=[batchsize, m, n],
-                stride=[n * m, n, 1],
-            )
-            if use_cutlass_template(fake_layout):
-                # We cannot use I/O efficient Cutlass templates if the alignment doesn't meet TMA requirements
-                return True
-        except AssertionError:
-            # dynamic shape not supported by cutlass backend, and cannot be used to construct FixedLayout
-            pass
-
-        if not has_triton():
+        if m_padded_length == k_padded_length == n_padded_length == 0:
             return False
 
         if not is_mm_compute_bound(m, k, n, mat1.dtype):
@@ -477,7 +375,6 @@ def should_pad_bench(
                     m_padded_length,
                     k_padded_length,
                     n_padded_length,
-                    explicit_transpose=explicit_transpose,
                 ),
             )
         elif op is torch.ops.aten.mm:
@@ -488,7 +385,6 @@ def should_pad_bench(
                     m_padded_length,
                     k_padded_length,
                     n_padded_length,
-                    explicit_transpose=explicit_transpose,
                 ),
             )
         else:
@@ -499,7 +395,6 @@ def should_pad_bench(
                     m_padded_length,
                     k_padded_length,
                     n_padded_length,
-                    explicit_transpose=explicit_transpose,
                 ),
             )
 
@@ -528,68 +423,32 @@ def should_pad_mm(match: Match) -> bool:
     )
 
 
+def mm_replace(mat1: Tensor, mat2: Tensor) -> Tensor:
+    m_padded_length = get_padded_length(mat1.shape[0], get_alignment_size(mat1))
+    k_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
+    n_padded_length = get_padded_length(mat2.shape[1], get_alignment_size(mat2))
+
+    return pad_mm(mat1, mat2, m_padded_length, k_padded_length, n_padded_length)
+
+
 def pad_mm(
     mat1: Tensor,
     mat2: Tensor,
     m_padded_length: int,
     k_padded_length: int,
     n_padded_length: int,
-    explicit_transpose: bool = False,
 ) -> Tensor:
-    if k_padded_length != 0 or m_padded_length != 0:
-        # dim order is reversed for constant_pad_nd, for every dim we specify right and left padding
-        mat1_padded = aten.constant_pad_nd(
-            mat1, [0, k_padded_length, 0, m_padded_length]
-        )
+    # mm_replace will go through pad_mm multiple times if multiple dimensions are needed to be padded
+    if k_padded_length != 0:
+        mat1 = pad_dim(mat1, k_padded_length, 1)
+        mat2 = pad_dim(mat2, k_padded_length, 0)
+        return torch.ops.aten.mm(mat1, mat2)
+    elif n_padded_length != 0:
+        mat2 = pad_dim(mat2, n_padded_length, 1)
+        return torch.ops.aten.mm(mat1, mat2)[:, :-n_padded_length]
     else:
-        mat1_padded = mat1
-    if k_padded_length != 0 or n_padded_length != 0:
-        # dim order is reversed for constant_pad_nd, for every dim we specify right and left padding
-        mat2_padded = aten.constant_pad_nd(
-            mat2, [0, n_padded_length, 0, k_padded_length]
-        )
-    else:
-        mat2_padded = mat2
-    if explicit_transpose:
-        # If M dimension is aligned but N is not, this is an alternative to a padding N
-        # which has the advantage of enabling downstream epilogue fusions
-        # padding on K dim, transpose and contiguous should be fuseable into a single op
-        res = call_mm(
-            mat2_padded.transpose(-1, -2).contiguous(), mat1_padded.transpose(-1, -2)
-        ).transpose(-1, -2)
-    else:
-        res = call_mm(mat1_padded, mat2_padded)
-    if m_padded_length != 0:
-        res = res[:-m_padded_length, :]
-    if n_padded_length != 0:
-        res = res[:, :-n_padded_length]
-    return res
-
-
-def mm_replace(mat1: Tensor, mat2: Tensor) -> Tensor:
-    m, n, k = mat1.shape[0], mat2.shape[1], mat1.shape[1]
-    may_use_transpose = torch._inductor.config.shape_pad_use_transpose and not any(
-        isinstance(d, torch.SymInt) for d in (m, n, k)
-    )
-    k_padded_length = get_padded_length(k, get_alignment_size(mat1))
-    explicit_transpose = False
-    m_padded_length = get_padded_length(m, get_alignment_size(mat1))
-    n_padded_length = get_padded_length(n, get_alignment_size(mat2))
-    if may_use_transpose:
-        if m_padded_length == 0 and n_padded_length != 0:
-            explicit_transpose = True
-            n_padded_length = 0
-            m_padded_length = 0
-        elif m_padded_length != 0 and n_padded_length == 0:
-            m_padded_length = 0
-    return pad_mm(
-        mat1,
-        mat2,
-        m_padded_length,
-        k_padded_length,
-        n_padded_length,
-        explicit_transpose=explicit_transpose,
-    )
+        mat1 = pad_dim(mat1, m_padded_length, 0)
+        return torch.ops.aten.mm(mat1, mat2)[:-m_padded_length, :]
 
 
 def bmm_pattern(mat1: Tensor, mat2: Tensor) -> Tensor:
@@ -608,67 +467,36 @@ def should_pad_bmm(match: Match) -> bool:
     )
 
 
+def bmm_replace(mat1: Tensor, mat2: Tensor) -> Tensor:
+    m_padded_length = get_padded_length(mat1.shape[1], get_alignment_size(mat1))
+    k_padded_length = get_padded_length(mat1.shape[2], get_alignment_size(mat1))
+    n_padded_length = get_padded_length(mat2.shape[2], get_alignment_size(mat2))
+
+    if m_padded_length != 0 or k_padded_length != 0 or n_padded_length != 0:
+        return pad_bmm(mat1, mat2, m_padded_length, k_padded_length, n_padded_length)
+
+    return aten.bmm(mat1, mat2)
+
+
 def pad_bmm(
     mat1: Tensor,
     mat2: Tensor,
     m_padded_length: int,
     k_padded_length: int,
     n_padded_length: int,
-    explicit_transpose: bool = False,
 ) -> Tensor:
-    if k_padded_length != 0 or m_padded_length != 0:
-        mat1_padded = aten.constant_pad_nd(
-            mat1, [0, k_padded_length, 0, m_padded_length, 0, 0]
-        )
-    else:
-        mat1_padded = mat1
-    if k_padded_length != 0 or n_padded_length != 0:
-        mat2_padded = aten.constant_pad_nd(
-            mat2, [0, n_padded_length, 0, k_padded_length, 0, 0]
-        )
-    else:
-        mat2_padded = mat2
-    if explicit_transpose:
-        # If M dimension is aligned but N is not, this is an alternative to a padding N
-        # which has the advantage of enabling downstream epilogue fusions
-        # padding on K dim, transpose and contiguous should be fuseable into a single op
-        res = call_bmm(
-            mat2_padded.transpose(-1, -2).contiguous(), mat1_padded.transpose(-1, -2)
-        ).transpose(-1, -2)
-    else:
-        res = call_bmm(mat1_padded, mat2_padded)
-    if m_padded_length != 0:
-        res = res[:, :-m_padded_length, :]
-    if n_padded_length != 0:
-        res = res[:, :, :-n_padded_length]
-    return res
+    # bmm_replace will go through pad_bmm multiple times if multiple dimensions are needed to be padded
+    if k_padded_length != 0:
+        mat1 = pad_dim(mat1, k_padded_length, 2)
+        mat2 = pad_dim(mat2, k_padded_length, 1)
 
-
-def bmm_replace(mat1: Tensor, mat2: Tensor) -> Tensor:
-    m, n, k = mat1.shape[1], mat2.shape[2], mat1.shape[2]
-    may_use_transpose = torch._inductor.config.shape_pad_use_transpose and not any(
-        isinstance(d, torch.SymInt) for d in (m, n, k)
-    )
-
-    k_padded_length = get_padded_length(k, get_alignment_size(mat1))
-    n_padded_length = get_padded_length(n, get_alignment_size(mat2))
-    m_padded_length = get_padded_length(m, get_alignment_size(mat1))
-    explicit_transpose = False
-    if may_use_transpose:
-        if m_padded_length == 0 and n_padded_length != 0:
-            explicit_transpose = True
-            n_padded_length = 0
-            m_padded_length = 0
-        elif m_padded_length != 0 and n_padded_length == 0:
-            m_padded_length = 0
-    return pad_bmm(
-        mat1,
-        mat2,
-        m_padded_length,
-        k_padded_length,
-        n_padded_length,
-        explicit_transpose=explicit_transpose,
-    )
+        return aten.bmm(mat1, mat2)
+    elif n_padded_length != 0:
+        mat2 = pad_dim(mat2, n_padded_length, 2)
+        return aten.bmm(mat1, mat2)[:, :, :-n_padded_length].contiguous()
+    else:
+        mat1 = pad_dim(mat1, m_padded_length, 1)
+        return aten.bmm(mat1, mat2)[:, :-m_padded_length, :].contiguous()
 
 
 @functools.lru_cache(None)
