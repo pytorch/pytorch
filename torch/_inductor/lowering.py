@@ -4396,17 +4396,17 @@ def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim):
     samples_loader = samples.make_loader()
 
     def load(prefix, i):
-        sample = ops.indirect_indexing(
-            samples_loader([*prefix, dim]), size=3, check=False
+        sample = samples_loader([*prefix, dim])
+        i_expr = ops.index_expr(i, samples.get_dtype())
+        alpha_expr = ops.index_expr(alpha, samples.get_dtype())
+        seq_i = ops.floor((i_expr + sample) * alpha_expr) - ops.floor(
+            sample * alpha_expr
         )
-
-        seq_i = ops.index_expr(
-            sympy.floor((i + sample) * alpha) - sympy.floor(sample * alpha), torch.int64
-        )
+        seq_i = ops.to_dtype(seq_i, torch.int64)
 
         mask = ops.lt(
-            ops.index_expr(i, torch.int64),
-            ops.sub(ops.index_expr(out_sz, torch.int64), ops.constant(1, torch.int64)),
+            i_expr,
+            ops.index_expr(out_sz - 1, torch.int64),
         )
         return ops.where(mask, seq_i, ops.index_expr(in_sz - kernel_sz, torch.int64))
 
@@ -4454,7 +4454,9 @@ def fractional_max_pool2d(x, kernel_size, output_size, random_samples):
                 if maxindex is None:
                     maxindex = index
                 else:
-                    maxindex = ops.where(ops.gt(val, maxval), index, maxindex)
+                    maxindex = ops.where(
+                        ops.or_(ops.gt(val, maxval), ops.isnan(val)), index, maxindex
+                    )
             if maxval is None:
                 maxval = val
             else:
