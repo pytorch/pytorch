@@ -1427,6 +1427,18 @@ void initJITBindings(PyObject* module) {
             return self.writeRecord(
                 name, reinterpret_cast<const char*>(data.data()), size);
           })
+      .def(
+          "write_record",
+          [](PyTorchStreamWriter& self,
+             const std::string& name,
+             uintptr_t data,
+             size_t size) {
+            TORCH_WARN_ONCE(
+                "write_record(): Passing Storage by data pointer is deprecated and will be an error in ",
+                "the future, please pass the Storage object instead.");
+            return self.writeRecord(
+                name, reinterpret_cast<const char*>(data), size);
+          })
       .def("write_end_of_file", &PyTorchStreamWriter::writeEndOfFile)
       .def("set_min_version", &PyTorchStreamWriter::setMinVersion)
       .def("archive_name", &PyTorchStreamWriter::archiveName)
