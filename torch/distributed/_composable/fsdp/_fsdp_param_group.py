@@ -160,8 +160,8 @@ class FSDPParamGroup:
         if isinstance(self.mesh_info, HSDPMeshInfo):
             data_parallel_world_size *= self.mesh_info.replicate_mesh_size
         if self._reduce_dtype == torch.float32:
-            # Use NCCL's AVG op to divide after reduction since fp32 has
-            # sufficient precision
+            # Use NCCL's AVG op to divide after reduction since it is more
+            # performant and fp32 has sufficient precision
             self._grad_divide_factors: Optional[Tuple[float, float]] = None
             return
         # For N data parallel workers, each worker computes g_i, and they
