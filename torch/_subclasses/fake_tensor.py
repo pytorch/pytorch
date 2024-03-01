@@ -14,11 +14,17 @@ from weakref import ReferenceType
 import torch
 import torch._custom_op
 import torch._logging
+from torch._C._functorch import is_functorch_wrapped_tensor
 
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import suggest_memory_format
-from torch._subclasses.meta_utils import assert_eq, assert_metadata_eq, MetaConverter
+from torch._subclasses.meta_utils import (
+    assert_eq,
+    assert_metadata_eq,
+    is_sparse_any,
+    MetaConverter,
+)
 from torch._utils import render_call
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -124,7 +130,7 @@ def is_fake(x):
         reapply_views = torch._C._functionalization_reapply_views_tls()
         unwrapped = torch._C._functorch._unwrap_functional_tensor(x, reapply_views)
         return is_fake(unwrapped)
-    elif isinstance(x, torch.Tensor) and torch._C._functorch.is_batchedtensor(x):
+    elif isinstance(x, torch.Tensor) and is_functorch_wrapped_tensor(x):
         unwrapped = torch._C._functorch.get_unwrapped(x)
         return is_fake(unwrapped)
     return False
@@ -145,7 +151,7 @@ def maybe_get_fake_mode(t):
         reapply_views = torch._C._functionalization_reapply_views_tls()
         unwrapped = torch._C._functorch._unwrap_functional_tensor(t, reapply_views)
         return maybe_get_fake_mode(unwrapped)
-    elif isinstance(t, torch.Tensor) and torch._C._functorch.is_batchedtensor(t):
+    elif isinstance(t, torch.Tensor) and is_functorch_wrapped_tensor(t):
         unwrapped = torch._C._functorch.get_unwrapped(t)
         return maybe_get_fake_mode(unwrapped)
     return None
@@ -166,8 +172,12 @@ def torch_decomp_decompositions(func):
     from torch._decomp import decomposition_table
 
     decompositions = torch._decomp.decompositions
-    decomp_attrs = [getattr(decompositions, attr) for attr in dir(decompositions)]
-    return decomposition_table[func] in decomp_attrs
+    # Note that the function in the decomposition table might be
+    # different from the one in the module because of the difference
+    # in out handling in aten API and torch public API
+    return decomposition_table[func].__module__.startswith(
+        "torch._decomp"
+    ) and decomposition_table[func].__name__ in dir(decompositions)
 
 
 def tree_flatten_only(ty: Type[T], tree: PyTree):
@@ -443,6 +453,13 @@ class FakeTensor(torch.Tensor):
     # that have dispatch keys which are higher than the "meta" key:
     # https://github.com/pytorch/pytorch/blob/main/c10/core/DispatchKey.h#L189
 
+    # We don't support named tensors; graph break
+    @property
+    def names(self):
+        raise UnsupportedFakeTensorException(
+            "torch.compile doesn't support named tensors"
+        )
+
     @staticmethod
     def __new__(cls, fake_mode, elem, device, constant=None):
         self = torch.Tensor._make_subclass(
@@ -673,7 +690,7 @@ class TensorMetadata:
     is_conj: bool
     is_neg: bool
     is_inference: bool
-    is_sparse: bool
+    is_sparse: bool  # read: is sparse COO
     is_coalesced: Optional[bool]
     dense_dim: Optional[int]
     sparse_dim: Optional[int]
@@ -684,7 +701,7 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
     Extract the TensorMetadata of a tensor.
     """
     memory_format = suggest_memory_format(t)
-    if not t.is_contiguous(memory_format=memory_format):
+    if is_sparse_any(t) or not t.is_contiguous(memory_format=memory_format):
         memory_format = None
 
     return TensorMetadata(
@@ -1208,7 +1225,7 @@ class FakeTensorMode(TorchDispatchMode):
             # NOTE: incr is intentionally unused for a RAII pattern
             incr = IncrementRecursionCount()
 
-        def _wrap_script_object(x):
+        def _fakify_script_object(x):
             # NOTE: Skip fakifying inputs to torch.ops.profiler because they only have c++ implementation
             # and are performance critical. The suggested workaround will cause non-eligible overhead.
             if func in {
@@ -1218,33 +1235,35 @@ class FakeTensorMode(TorchDispatchMode):
                 return x
 
             full_qualname = x._type().qualified_name()
-            if full_qualname not in torch.library.registered_class:
-                raise RuntimeError(
-                    f"Trying to fake tensor dispatch {func} that takes ScriptObject {full_qualname} "
-                    f" as input but the ScriptObject's class haven't registered a fake class. If {func} is supposed "
-                    f" to be exported as a node in graph and preserve the script obj as input to the node, "
-                    f" please use torch.library.impl_abstract_class to"
-                    f" register a fake class for the script obj. Otherwise, consider disabling proxy and"
-                    f" fake modes for the operator by e.g. wrappping it with maybe_disable_fake_tensor_mode()."
-                )
-            fake_class = torch.library.registered_class[full_qualname]
-            if not hasattr(fake_class, "from_metadata"):
-                raise RuntimeError(
-                    f"Trying to fake tensor dispatch {func} that takes ScriptObject {full_qualname} "
-                    f" as input but the fake class {fake_class} doesn't have a from_metadata method. "
-                    f" Please add a from_metadata method to the fake class to support fake tensor dispatch."
-                )
-
             if not hasattr(x, "__get_metadata__"):
                 raise RuntimeError(
                     f"Trying to fake tensor dispatch {func} that takes ScriptObject {full_qualname} "
                     f" as input but the script object doesn't have a __get_metadata__ method. "
-                    f" Please add a __get_metadata__ method to the script object with .def_meta() to support fake tensor dispatch."
+                    f" Please add a __get_metadata__ method to the script object with .def_meta()."
+                )
+
+            if not torch._library.abstract_impl_class.global_abstract_class_registry.has_impl(
+                full_qualname
+            ):
+                raise RuntimeError(
+                    f" ScriptObject's {full_qualname} haven't registered a fake class. If {func} is supposed "
+                    f" to be exported as a node in graph and preserve the script obj as input to the node, "
+                    f" please use torch.library.impl_abstract_class to"
+                    f" register a fake class for the script obj. Otherwise, consider disabling"
+                    f" fake modes for the operator by callig it with ctx manager maybe_disable_fake_tensor_mode."
+                )
+            fake_class = torch._library.abstract_impl_class.global_abstract_class_registry.get_impl(
+                full_qualname
+            )
+            if not hasattr(fake_class, "from_metadata"):
+                raise RuntimeError(
+                    f"ScriptObject {full_qualname}'s corresponding fake_class {fake_class}"
+                    f" doesn't implement a from_metadata classmethod. Please add it to the fake class."
                 )
             return fake_class.from_metadata(x.__get_metadata__())
 
         args, kwargs = pytree.tree_map_only(
-            torch.ScriptObject, lambda x: _wrap_script_object(x), (args, kwargs)
+            torch.ScriptObject, lambda x: _fakify_script_object(x), (args, kwargs)
         )
 
         # Some attribute queries that can be serviced directly

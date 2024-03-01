@@ -135,6 +135,9 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     # We should be able to graphbreak there.
     "doctr_det_predictor",
     "dlrm",
+    "pyhpc_isoneutral_mixing",
+    "pyhpc_equation_of_state",
+    "pyhpc_turbulent_kinetic_energy",
 }
 
 # These models currently fail accuracy with eager Adam optimizer
@@ -671,8 +674,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             with maybe_mark_profile(p=p, mark="actual"), maybe_enable_compiled_autograd(
                 args.compiled_autograd
             ):
+                compiled_model = kwargs.get("compiled_model", model)
                 timings[rep, 1], actual_output = timed(
-                    model,
+                    compiled_model,
                     frozen_model_iter_fn,
                     inputs,
                     return_result=True,
@@ -737,11 +741,16 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         for k, v in kwargs["dynamo_stats"].items():
             headers.append(k)
             row.append(v)
-    output_csv(
-        output_filename,
-        headers,
-        row,
-    )
+    if (
+        not torch.distributed.is_available()  # no distributed is built
+        or not torch.distributed.is_initialized()  # single gpu
+        or torch.distributed.get_rank() == 0  # distributed + rank0
+    ):
+        output_csv(
+            output_filename,
+            headers,
+            row,
+        )
     headers, data = torch._dynamo.utils.compile_times(repr="csv", aggregate=True)
     assert (
         output_filename.find(".csv") > 0
@@ -2640,10 +2649,15 @@ class BenchmarkRunner:
             return latency, peak_mem, dynamo_stats
 
         # Cast the model to float16/float32 as necessary
-        model, example_inputs = self.maybe_cast(model, example_inputs)
+        orig_model, example_inputs = self.maybe_cast(model, example_inputs)
 
         # Use distributed wrapping as necessary
-        model = self.deepcopy_and_maybe_parallelize(model)
+        model = self.deepcopy_and_maybe_parallelize(orig_model)
+        if experiment.func is speedup_experiment:
+            # If DDP + compiler is enabled, we need to use a different
+            compiled_model = self.deepcopy_and_maybe_parallelize(orig_model)
+        else:
+            compiled_model = model
 
         self.init_optimizer(name, current_device, model.parameters())
         with self.pick_grad(name, self.args.training):
@@ -2667,7 +2681,7 @@ class BenchmarkRunner:
 
             with maybe_enable_compiled_autograd(self.args.compiled_autograd):
                 dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
-                    optimized_model_iter_fn, model, example_inputs, "dynamo"
+                    optimized_model_iter_fn, compiled_model, example_inputs, "dynamo"
                 )
 
             compilation_time = dynamo_latency - eager_latency + aot_compilation_time
@@ -2693,10 +2707,10 @@ class BenchmarkRunner:
                 results = []
                 # run with torch._dynamo few times to populate the cache
                 for _ in range(3):
-                    optimized_model_iter_fn(model, example_inputs)
+                    optimized_model_iter_fn(compiled_model, example_inputs)
                 _, frames_second_pass = Stats.reset_counters()  # should be 0
                 if frames_second_pass > 0:
-                    optimized_model_iter_fn(model, example_inputs)
+                    optimized_model_iter_fn(compiled_model, example_inputs)
                     _, frames_third_pass = Stats.reset_counters()  # should be 0
                 else:
                     frames_third_pass = 0
@@ -2712,6 +2726,7 @@ class BenchmarkRunner:
 
             if not hasattr(model, name):
                 model.name = name
+            experiment_kwargs["compiled_model"] = compiled_model
             results.append(experiment(model, example_inputs, **experiment_kwargs))
             return " ".join(map(str, results))
 
@@ -3475,6 +3490,8 @@ def run(runner, args, original_dir=None):
             "Wav2Vec2ForCTC",
             "Wav2Vec2ForPreTraining",
             "sam",
+            "resnet50_quantized_qat",
+            "mobilenet_v2_quantized_qat",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)

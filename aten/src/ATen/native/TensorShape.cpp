@@ -1444,16 +1444,12 @@ static _permute_size_stride_estimation(const Tensor& self, IntArrayRef dims) {
 }
 
 Tensor permute(const Tensor& self, IntArrayRef dims) {
-  DimVector new_sizes, new_strides;
-  std::vector<int64_t> _;
-  std::tie(new_sizes, new_strides, _) = _permute_size_stride_estimation(self, dims);
+  auto [new_sizes, new_strides, _] = _permute_size_stride_estimation(self, dims);
   return self.as_strided(new_sizes, new_strides);
 }
 
 Tensor permute_sparse_coo(const Tensor& self, IntArrayRef dims) {
-  DimVector new_sizes, _;
-  std::vector<int64_t> wrapped_dims;
-  std::tie(new_sizes, _, wrapped_dims) = _permute_size_stride_estimation(self, dims);
+  auto [new_sizes, _, wrapped_dims] = _permute_size_stride_estimation(self, dims);
 
   const auto ndim = self.dim();
   const auto sparse_ndim = self.sparse_dim();
@@ -2023,15 +2019,13 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
             return std::make_tuple(dim_indices, at::arange(nnz, dim_indices.options()), nneg_index);
           }
           else {
-            Tensor sorted_dim_indices, sorted_dim_indices_idx;
-            std::tie(sorted_dim_indices, sorted_dim_indices_idx) = dim_indices.sort();
+            auto [sorted_dim_indices, sorted_dim_indices_idx] = dim_indices.sort();
             return std::make_tuple(sorted_dim_indices, sorted_dim_indices_idx, nneg_index);
           }
         }
         // sort nneg_index to binary search into it
         else {
-          Tensor sorted_nneg_index, sorted_nneg_index_idx;
-          std::tie(sorted_nneg_index, sorted_nneg_index_idx) = nneg_index.sort();
+          auto [sorted_nneg_index, sorted_nneg_index_idx] = nneg_index.sort();
           return std::make_tuple(sorted_nneg_index, sorted_nneg_index_idx, dim_indices);
         }
       }();
@@ -2072,7 +2066,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
             auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).data_ptr<int64_t>();
             auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).data_ptr<int64_t>();
             auto* ptr_tid_int_counts = int_counts.select(0, tid).data_ptr<int64_t>();
-            const auto* ptr_src = src.data_ptr<int64_t>() + start;
+            const auto* ptr_src = src.const_data_ptr<int64_t>() + start;
 
             for (const auto i : c10::irange(start, end)) {
               const auto src_val = *ptr_src++;
@@ -2130,9 +2124,9 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
             const auto start = tid * chunk_size_src;
             const auto end = std::min(start + chunk_size_src, src_len);
             const auto tid_offset = thread_offsets.const_data_ptr<int64_t>()[tid];
-            const auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).data_ptr<int64_t>();
-            const auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).data_ptr<int64_t>();
-            const auto* ptr_tid_int_counts = int_counts.select(0, tid).data_ptr<int64_t>();
+            const auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).const_data_ptr<int64_t>();
+            const auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).const_data_ptr<int64_t>();
+            const auto* ptr_tid_int_counts = int_counts.select(0, tid).const_data_ptr<int64_t>();
             auto* ptr_tid_selected_sorted = ptr_selected_sorted + tid_offset;
             auto* ptr_tid_selected_src = ptr_selected_src + tid_offset;
 
@@ -2330,9 +2324,9 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
             const auto end = std::min(start + chunk_size, src_len);
             auto* ptr_src_tid = ptr_src + start;
             const auto* ptr_src_counts_per_thread
-              = src_counts_per_thread.select(0, tid).data_ptr<int64_t>();
+              = src_counts_per_thread.select(0, tid).const_data_ptr<int64_t>();
             const auto* ptr_src_offset_counts_per_thread
-              = src_offset_counts_per_thread.select(0, tid).data_ptr<int64_t>();
+              = src_offset_counts_per_thread.select(0, tid).const_data_ptr<int64_t>();
             auto tid_counts = at::zeros({size}, src.options());
             auto* ptr_tid_counts = tid_counts.data_ptr<int64_t>();
 
@@ -2357,8 +2351,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         return std::make_tuple(src_idx, src_idx_offsets);
       }();
 
-      Tensor idx_selected, src_selected;
-      std::tie(idx_selected, src_selected) = [&](
+      auto [idx_selected, src_selected] = [&](
           int64_t grain_size = at::internal::GRAIN_SIZE
       ) -> std::tuple<Tensor, Tensor> {
         const auto thread_offset = [&]() {
@@ -2429,8 +2422,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
     const auto get_result_small_nnz_small_index = [&]()
       -> Tensor {
       const auto dim_indices_in_inner_loop = nnz >= index_len;
-      Tensor outer, inner;
-      std::tie(outer, inner) = [&]() -> std::tuple<Tensor, Tensor> {
+      auto [outer, inner] = [&]() -> std::tuple<Tensor, Tensor> {
         if (dim_indices_in_inner_loop) {
           return std::make_tuple(nneg_index, dim_indices);
         }
@@ -3211,13 +3203,11 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 // dim is present if squeezing a single dimension and absent if squeezing all dimensions
 Tensor squeeze_qtensor(const Tensor& self, c10::OptionalIntArrayRef dims) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
-  SymDimVector sizes;
-  SymDimVector strides;
   const auto ndim = self.dim();
   auto mask = dims.has_value()
       ? dim_list_to_bitset(dims, self.dim())
       : std::bitset<dim_bitset_size>((1ull << self.dim()) - 1);
-  std::tie(sizes, strides) = inferSqueezeGeometry(self, mask);
+  auto [sizes, strides] = inferSqueezeGeometry(self, mask);
   if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
     const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
     auto axis = per_channel_quantizer->axis();

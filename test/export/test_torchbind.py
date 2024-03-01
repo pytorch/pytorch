@@ -2,6 +2,7 @@
 import unittest
 
 import torch
+import torch.testing._internal.torchbind_impls  # noqa: F401
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.export import export
 from torch.testing._internal.common_utils import (
@@ -32,7 +33,24 @@ class TestExportTorchbind(TestCase):
             lib_file_path = find_library_location("libtorchbind_test.so")
             torch.ops.load_library(str(lib_file_path))
 
-        torch.ops.import_module("torchbind_impls")
+        @torch._library.impl_abstract_class("_TorchScriptTesting::_Foo")
+        class FakeFoo:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+            @staticmethod
+            def from_metadata(foo_meta):
+                x, y = foo_meta
+                return FakeFoo(x, y)
+
+            def add_tensor(self, z):
+                return (self.x + self.y) * z
+
+    def tearDown(self):
+        torch._library.abstract_impl_class.deregister_abstract_impl(
+            "_TorchScriptTesting::_Foo"
+        )
 
     def _test_export_same_as_eager(self, f, args, kwargs=None, strict=True):
         kwargs = kwargs or {}
