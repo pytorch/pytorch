@@ -521,7 +521,7 @@ def dequantize_per_tensor_tensor_decomp_impl(
     quant_max: int,
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    return (input.to(torch.float32) - zero_point) * scale.to(torch.float32)
+    return (input.to(torch.float32) - zero_point.to(torch.int32)) * scale.to(torch.float32)
 
 
 @register_decomposition(torch.ops.quantized.embedding_bag_byte_unpack)
