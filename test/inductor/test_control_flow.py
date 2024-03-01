@@ -267,6 +267,44 @@ class CondTests(TestCase):
         )
 
     @requires_cuda
+    @parametrize("device", ["cpu", "cuda"])
+    @parametrize("dynamic", [False, True])
+    def test_subgraphs_with_parameters(self, device, dynamic):
+        # nested Modules with parameters
+        class InnerModel1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer = torch.nn.Linear(20, 30, device=device)
+
+            def forward(self, x):
+                return self.layer(x + 1) * 3.14
+
+        class InnerModel2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer1 = torch.nn.Linear(20, 10, device=device)
+                self.layer2 = torch.nn.Linear(10, 30, device=device)
+
+            def forward(self, x):
+                return self.layer2(self.layer1(x - 2)) * 3.14
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.true_fn = InnerModel1()
+                self.false_fn = InnerModel2()
+
+            def forward(self, p, a):
+                return torch.cond(p, self.true_fn, self.false_fn, [a])
+
+        self._run_test(
+            model=Model(),
+            inputs=(torch.randn(10, 20),),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_cuda
     def test_aliasing_outputs(self):
         # output aliasing in subgraphs: not supported
         class Model(torch.nn.Module):
