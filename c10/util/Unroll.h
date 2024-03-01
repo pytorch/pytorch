@@ -1,5 +1,6 @@
 #pragma once
 #include <c10/macros/Macros.h>
+#include <type_traits>
 
 // Utility to guarantee complete unrolling of a loop where the bounds are known
 // at compile time. Various pragmas achieve similar effects, but are not as
