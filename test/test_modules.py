@@ -940,6 +940,7 @@ class TestModule(TestCase):
                         self.assertTrue(all(a == b for a, b in zip(g_cdatas_before, g_cdatas_after)))
                         self.assertTrue(all(a == b for a, b in zip(g_ids_before, g_ids_after)))
 
+
     @modules([module for module in module_db if not module.is_lazy], allowed_dtypes=[torch.float32])
     @parametrize('swap', [True, False])
     @wrapSwapTensorsTest()
