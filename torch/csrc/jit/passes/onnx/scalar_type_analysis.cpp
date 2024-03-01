@@ -299,14 +299,21 @@ static void UpdateScalarTypeForInputs(
     return;
   }
 
+  size_t input_idx = 0;
   for (auto input : n->inputs()) {
     auto input_tensor_type = input->type()->cast<TensorType>();
     auto input_scalar_type =
         input_tensor_type ? input_tensor_type->scalarType() : c10::nullopt;
 
+    // We skip the 'condition' input (i.e., the first input) in case of
+    // onnx:Where operator.
+    if (IsSelectorOp(n->kind()) && input_idx == 0) {
+      input_idx++;
+      continue;
+    }
+
     if ((input->node()->kind() == onnx::Constant) ||
-        (input_scalar_type && (*input_scalar_type != scalar_type) &&
-         !(IsSelectorOp(n->kind())))) {
+        (input_scalar_type && (*input_scalar_type != scalar_type))) {
       if (input->node()->kind() == onnx::Constant) {
         // Fix up the scalar directly instead of inserting a cast operator.
         // TODO: Keep only the else branch once constant_folding is enabled by
@@ -330,6 +337,8 @@ static void UpdateScalarTypeForInputs(
         n->replaceInputWith(input, cast_node->output());
       }
     }
+
+    input_idx++;
   }
 }
 
