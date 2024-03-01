@@ -130,7 +130,8 @@ f32 = torch.float32
 i64 = torch.int64
 i32 = torch.int32
 
-torch._inductor.config.fx_graph_cache = True
+# Test the FX graph code cache:
+config.fx_graph_cache = True
 
 
 def _large_cumprod_input(shape, dim, dtype, device):
@@ -4770,7 +4771,7 @@ class CommonTemplate:
                     dtype=torch.float32,
                     device=a.device,
                 ),
-                torch.zeros(2, 3, names=None),
+                torch.zeros(2, 3),
                 a + torch.ones(8, device=a.device),
                 torch.full((2, 3), 3.1416, device=a.device),
             )

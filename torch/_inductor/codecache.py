@@ -740,7 +740,7 @@ class FxGraphCache:
                 graph = candidate
                 break
 
-        # Increment the cached metrics by the amount srecorded when the FX
+        # Increment the cached metrics by the amounts recorded when the FX
         # graph was compiled for this cache entry. Pretending these counters
         # were incremented normally is useful for testing with the cache enabled.
         if graph is not None:
