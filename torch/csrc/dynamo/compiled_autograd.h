@@ -1,5 +1,7 @@
 #pragma once
+#include <ATen/core/ivalue.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
+#include <c10/util/flat_hash_map.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/variable_info.h>
 #include <torch/csrc/utils/python_stub.h>
@@ -222,6 +224,13 @@ class CompiledNodeArgs {
     }
   }
   template <typename T>
+  void collect(const std::unordered_set<T>& t) {
+    collect_size(t.size());
+    for (const T& i : t) {
+      collect(i);
+    }
+  }
+  template <typename T>
   void collect(const c10::OptionalArray<T>& t) {
     collect(t.list);
   }
@@ -235,6 +244,14 @@ class CompiledNodeArgs {
   void collect(const std::pair<A, B>& t) {
     collect(t.first);
     collect(t.second);
+  }
+  template <typename K, typename V>
+  void collect(ska::flat_hash_map<K, V>& m) {
+    for (auto& [k, v] : m) {
+      collect(k);
+      // TODO: we can't specialize on number of bytes here, need to break down further
+      specialize_on_bytes(v);
+    }
   }
   void collect(const c10::Scalar& t) {
     auto type = t.type();
@@ -520,6 +537,14 @@ class SwapSavedVariables {
     stashed_symints.restore(&t);
   }
 
+  void before(at::IValue& t) {
+    stashed_ivalues.save(&t, std::move(t));
+  }
+
+  void after(at::IValue& t) {
+    stashed_ivalues.restore(&t);
+  }
+
   void before(Edge& t) {
     if (t.is_valid()) {
       // need for symints used by validate_outputs
@@ -611,6 +636,36 @@ class SwapSavedVariables {
     }
   }
 
+  template <typename K, typename V>
+  void before(ska::flat_hash_map<K, V>& m) {
+    for (auto& [k, v] : m) {
+      before(k);
+      before(v);
+    }
+  }
+
+  template <typename K, typename V>
+  void after(ska::flat_hash_map<K, V>& m) {
+    for (auto& [k, v] : m) {
+      before(k);
+      before(v);
+    }
+  }
+
+  template <typename T>
+  void before(std::unordered_set<T>& s) {
+    for (auto& i : s) {
+      before(i);
+    }
+  }
+
+  template <typename T>
+  void after(std::unordered_set<T>& s) {
+    for (auto& i : s) {
+      after(i);
+    }
+  }
+
 #define NO_OP_VISIT(T)     \
   void before(const T&) {} \
   void after(const T&) {}
@@ -697,6 +752,7 @@ class SwapSavedVariables {
   StashedVars<SavedVariable> stashed_variables;
   StashedVars<at::Tensor> stashed_tensors;
   StashedVars<c10::SymInt> stashed_symints;
+  StashedVars<at::IValue> stashed_ivalues;
 };
 
 } // namespace torch::dynamo::autograd
