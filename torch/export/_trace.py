@@ -74,9 +74,23 @@ class ExportDynamoConfig:
     """
 
     allow_rnn: bool = True
+    reorderable_logging_functions: Set[Callable] = dataclasses.field(
+        default_factory=set
+    )
 
 
 DEFAULT_EXPORT_DYNAMO_CONFIG = ExportDynamoConfig()
+DEFAULT_EXPORT_DYNAMO_CONFIG.reorderable_logging_functions = {
+    logging.critical,
+    logging.debug,
+    logging.error,
+    logging.exception,
+    logging.info,
+    logging.log,
+    logging.warning,
+    print,
+    warnings.warn,
+}
 
 
 @contextmanager
@@ -323,7 +337,6 @@ def _export_to_torch_ir(
     if _log_export_usage:
         log_export_usage(event="export.private_api", flags={"_export_to_torch_ir"})
 
-    constraints = constraints or []
     kwargs = kwargs or {}
 
     if not isinstance(args, tuple):
@@ -583,6 +596,22 @@ def rewrite_non_persistent_buffers(
                 constants[spec.target] = orig_mod.get_buffer(spec.target)
 
 
+def get_ep_stats(ep: ExportedProgram) -> Dict[str, Any]:
+    op_count = 0
+    op_set = set()
+    for m in ep.graph_module.modules():
+        if not isinstance(m, torch.fx.GraphModule):
+            continue
+        for node in m.graph.nodes:
+            if node.op != "call_function":
+                continue
+            op_count += 1
+            assert hasattr(node.target, "__module__")
+            assert hasattr(node.target, "__name__")
+            op_set.add(f"{node.target.__module__}.{node.target.__name__}")
+    return {"op_count": op_count, "op_set": op_set}
+
+
 _EXPORT_FLAGS: Optional[Set[str]] = None
 
 
@@ -595,7 +624,10 @@ def _log_export_wrapper(fn):
             ep = fn(*args, **kwargs)
             end = time.time()
             log_export_usage(
-                event="export.time", metrics=end - start, flags=_EXPORT_FLAGS
+                event="export.time",
+                metrics=end - start,
+                flags=_EXPORT_FLAGS,
+                **get_ep_stats(ep),
             )
         except Exception as e:
             t = type(e)
@@ -621,7 +653,6 @@ def _export(
     f: torch.nn.Module,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
-    constraints: Optional[List[Constraint]] = None,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
     *,
     strict: bool = True,
@@ -638,15 +669,6 @@ def _export(
         args: example positional inputs.
 
         kwargs: optional example keyword inputs.
-
-        constraints: [DEPRECATED: use ``dynamic_shapes`` instead, see below]
-         An optional list of constraints on the dynamic arguments
-         that specify their possible range of shapes. By default, shapes of
-         input torch.Tensors are assumed to be static. If an input torch.Tensor
-         is expected to have dynamic shapes, please use :func:`dynamic_dim`
-         to define :class:`Constraint` objects that specify the dynamics and the possible
-         range of shapes. See :func:`dynamic_dim` docstring for examples on
-         how to use it.
 
         dynamic_shapes:
          An optional argument where the type should either be:
@@ -678,17 +700,7 @@ def _export(
     log_export_usage(event="export.enter", flags=flags)
     _EXPORT_FLAGS = flags
 
-    if constraints is not None:
-        log_export_usage(event="export.private_api", flags={"constraints"})
-        warnings.warn(
-            "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
-            "and will not be supported in the future. "
-            "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-    else:
-        constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes) or []
+    constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes) or []
 
     kwargs = kwargs or {}
 
