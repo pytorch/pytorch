@@ -2947,7 +2947,7 @@ class CPUReproTests(TestCase):
                     batch_size, seq_len, self.num_heads, self.head_size
                 ).permute(0, 2, 1, 3)
                 attention_weights = (
-                    torch.matmul(query, key).div(self.inv_scale).softmax(dim=-1)
+                    torch.matmul(query, key).mul(self.inv_scale).softmax(dim=-1)
                 )
                 output = torch.matmul(attention_weights, value)
                 return output
@@ -3408,6 +3408,17 @@ class CPUReproTests(TestCase):
                 torch.tensor(4.39, dtype=torch.float16),
             ),
         )
+
+    def test_masked_load_int64_vec(self):
+        # https://github.com/pytorch/pytorch/issues/120377
+        def fn(x):
+            return torch.nn.functional.pad(x, (0, 13))
+
+        x = torch.randint(0, 100, (819,), dtype=torch.int64)
+        metrics.reset()
+        self.common(fn, (x,))
+        # TODO: support vectorized int64 masked load
+        assert metrics.generated_cpp_vec_kernel_count == 0
 
 
 if __name__ == "__main__":

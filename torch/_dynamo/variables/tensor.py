@@ -10,6 +10,7 @@ from typing import Dict, List
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from ..bytecode_transformation import create_call_method
+from ..external_utils import call_hook_from_backward_state
 
 try:
     import numpy as np
@@ -322,7 +323,7 @@ class TensorVariable(VariableTracker):
         # For attributes (not methods) that were not caught in the special handling above,
         # (e.g. tensor.real), we handle these generically, assuming that the output type is
         # a tensor.
-        if result is None:
+        if result is None and name != "grad":
 
             def try_generic_attr_handling():
                 from .builder import wrap_fx_proxy
@@ -769,7 +770,7 @@ class TensorVariable(VariableTracker):
             "register_post_accumulate_grad_hook", *args, **kwargs
         )
 
-    def _method_register_hook(self, name, hook):
+    def _method_register_hook(self, name: str, hook: VariableTracker):
         # Note - do not arbitrarily add hooks here - make sure they match the same contract
         # see [On tensor.register_hook]
         from ..symbolic_convert import InstructionTranslator
@@ -797,14 +798,22 @@ class TensorVariable(VariableTracker):
                     "Compilation of intermediate hooks requires compiled autograd"
                 )
 
-            # This wraps our user provided fn with a function that intercedes and
-            # uses our `invoke` higher order op to record a hook invocation in bwd graph.
-            fn = functools.partial(trace_wrapped, fn=hook.guard_as_python_constant())
+            hook_name, bw_state_proxy = tx.output.add_backward_state_hook(hook)
 
-            def _register_hook_trampoline(tensor):
-                hook_callable = getattr(tensor, name)
-                hook_callable(fn)
-                return tensor
+            def _register_hook_trampoline(tensor, bw_state):
+                register_hook = getattr(tensor, name)
+                register_hook(
+                    functools.partial(
+                        trace_wrapped,
+                        fn=call_hook_from_backward_state,
+                        bw_state=bw_state,
+                        hook_name=hook_name,
+                    )
+                )
+                # TODO(jansel): returning None here is wrong, it should be
+                # RemovableHandle, but we need some extra work to support
+                # this properly.
+                return None
 
             from .builder import wrap_fx_proxy
 
@@ -813,7 +822,7 @@ class TensorVariable(VariableTracker):
                 tx.output.create_proxy(
                     "call_function",
                     _register_hook_trampoline,
-                    (self.as_proxy(),),
+                    (self.as_proxy(), bw_state_proxy),
                     {},
                 ),
             )
