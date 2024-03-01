@@ -664,12 +664,12 @@ void initDispatchBindings(PyObject* module) {
       .def("has", &c10::DispatchKeySet::has)
       .def("__repr__", [](c10::DispatchKeySet d) { return c10::toString(d); });
 
-  py::class_<c10::NestedIntUnionFind>(m, "NestedIntUnionFind")
+  py::class_<c10::UnionFind>(m, "UnionFind")
       .def(py::init<>())
-      .def("merge", &c10::NestedIntUnionFind::merge)
-      .def("find", &c10::NestedIntUnionFind::find);
+      .def("merge", &c10::UnionFind::merge)
+      .def("find", &c10::UnionFind::find);
 
-  m.def("_get_nested_int_union_find", []() -> c10::NestedIntUnionFind& {
+  m.def("_get_nested_int_union_find", []() -> c10::UnionFind& {
     return c10::get_nested_int_union_find();
   }, py::return_value_policy::reference);
 

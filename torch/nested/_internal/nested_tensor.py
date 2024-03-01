@@ -41,47 +41,44 @@ class TensorIntMap:
 
 class UnionFindWrapper:
     # Wrapper around an union-find data structure over ints that exposes an API
-    # for union-find over tensors. Also for each set, we
-    #
-    # 1) maintain a metadata dict that can hold arbitrary data. The data in the
-    #   metadata dicts are merged when two sets are merged.
-    #
-    # 2) maintain a set of weak ref to Tensors that are in it.
+    # for union-find over tensors. We also maintain extra state on canonical entries:
+    # 1) metadata dict that can hold arbitrary data.
+    # 2) a set of weak ref to Tensors that are in it.
     def __init__(self, union_find_int, tensor_int_map):
         self._union_find_int = union_find_int
         self._tensor_int_map = tensor_int_map
-
+        # Extra state to be stored on canonical entries
         self._metadata = DefaultWeakTensorKeyDictionary(dict)
         self._equiv_sets = DefaultWeakTensorKeyDictionary(set)
+        # Used to manage lifetime
         self._tensors = WeakTensorKeyDictionary()
-
+        # Sentinel value to indicate that an entry has been invalidated
         self._INVALID = object()
 
-    def merge(self, src, tgt):
-        canonical_src = self.find(src)
-        canonical_tgt = self.find(tgt)
-        # To satisfy (1) above:
-        # (i) maintain the invariant that for every valid entry in _metadata,
-        #     the key is the canonical tensor of some set.
-        # (ii) when two equiv sets are merged, since only one tensor remains
-        #     canonical, merge the metadata of the non-canonical set into that
-        #     of the canonical set, invalidate the non-canonical tensor's entry.
-        self._metadata[canonical_src].update(self._metadata[canonical_tgt])
-        self._metadata[canonical_tgt] = self._metadata[canonical_src]
-        self._metadata[canonical_src] = self._INVALID
+    def merge(self, x, y):
+        x_root = self.find(x)
+        y_root = self.find(y)
+        self._union_find_int.merge(
+            self._tensor_int_map.get_int(x),
+            self._tensor_int_map.get_int(y)
+        )
+        # src and tgt depend on which direction we merged in the actual impl
+        tgt, src = (x_root, y_root) if self.find(x_root) is x_root else (y_root, x_root)
 
-        # (2) operates the same way as (1)
-        self._equiv_sets[canonical_tgt].update(self._equiv_sets[canonical_src])
-        self._equiv_sets[canonical_src] = self._INVALID
+        # To maintain that for every valid entry in _metadata, the key is the
+        # canonical tensor of some set, when two equiv sets are merged, since
+        # only one tensor remains canonical, merge the metadata of the
+        # non-canonical set into that of the canonical set, invalidate the
+        # non-canonical tensor's entry.
+        self._metadata[src].update(self._metadata[tgt])
+        self._metadata[tgt] = self._metadata[src]
+        self._metadata[src] = self._INVALID
+        self._equiv_sets[tgt].update(self._equiv_sets[src])
+        self._equiv_sets[src] = self._INVALID
 
         # Maintains that the the canonical tensor and by extension the metadata
         # and equiv sets are kept alive by any tensors alive in the set.
-        self._tensors[canonical_src] = canonical_tgt
-
-        self._union_find_int.merge(
-            self._tensor_int_map.get_int(src),
-            self._tensor_int_map.get_int(tgt)
-        )
+        self._tensors[src] = tgt
 
     def find(self, tensor):
         canonical_id = self._union_find_int.find(

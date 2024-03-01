@@ -83,35 +83,10 @@ at::Tensor get_nested_int_vec(const c10::SymNodeImpl* node) {
   return at::Tensor(c10::intrusive_ptr<c10::TensorImpl>::reclaim_copy(node->nested_int_vec()));
 }
 
-NestedIntUnionFind& get_nested_int_union_find() {
-  static NestedIntUnionFind nested_int_union_find;
+UnionFind& get_nested_int_union_find() {
+  static UnionFind nested_int_union_find;
   return nested_int_union_find;
 }
 
-void NestedIntUnionFind::merge(int64_t src, int64_t tgt) {
-  if (map_.find(src) == map_.end()) {
-    map_[src] = src;
-  }
-  if (map_.find(tgt) == map_.end()) {
-    map_[tgt] = tgt;
-  }
-  map_[map_[src]] = map_[map_[tgt]];
-}
-
-int64_t NestedIntUnionFind::find(int64_t vec) {
-  if (map_.find(vec) == map_.end()) {
-    map_[vec] = vec;
-    return vec;
-  }
-  int64_t orig = vec;
-  int64_t prev = vec;
-  int64_t curr = map_[vec];
-  while (prev != curr) {
-    prev = curr;
-    curr = map_[curr];
-  }
-  map_[orig] = curr;
-  return curr;
-}
 
 } // namespace c10

@@ -251,20 +251,31 @@ class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
 
 TORCH_API at::Tensor get_nested_int_vec(const c10::SymNodeImpl* node);
 
-class TORCH_API NestedIntUnionFind {
- public:
-  NestedIntUnionFind() = default;
-  // The copy constructor is deleted
-  NestedIntUnionFind(const NestedIntUnionFind&) = delete;
-
-  void merge(int64_t src, int64_t tgt);
-
-  int64_t find(int64_t vec);
-
- private:
-  std::unordered_map<int64_t, int64_t> map_;
+// TODO: consider putting somewhere more central
+class TORCH_API UnionFind {
+    std::unordered_map<int64_t, std::pair<int64_t, size_t>> data;
+public:
+    int64_t find(int64_t x) {
+        if(data.count(x) == 0) data[x] = {x, 1};
+        if (data[x].first != x) {
+            data[x].first = find(data[x].first);
+        }
+        return data[x].first;
+    }
+    void merge(int64_t x, int64_t y) {
+        if(data.count(x) == 0) data[x] = {x, 1};
+        if(data.count(y) == 0) data[y] = {y, 1};
+        int64_t x_root = find(x), y_root = find(y);
+        if (x_root == y_root)
+            return;
+        if (data[x_root].second < data[y_root].second) {
+            std::swap(x_root, y_root);
+        }
+        data[y_root].first = x_root;
+        data[x_root].second += data[y_root].second;
+    }
 };
 
-TORCH_API NestedIntUnionFind& get_nested_int_union_find();
+TORCH_API UnionFind& get_nested_int_union_find();
 
 } // namespace c10
