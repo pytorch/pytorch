@@ -489,7 +489,6 @@ class ElasticLaunchTest(unittest.TestCase):
         # torch.distributed.is_torchelastic_launched() returns True
 
         out_file = f"{os.path.join(self.test_dir, 'out')}"
-
         launch.main(
             [
                 "--run-path",
