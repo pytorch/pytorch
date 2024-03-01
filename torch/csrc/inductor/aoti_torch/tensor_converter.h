@@ -16,6 +16,8 @@ TORCH_API at::Tensor* tensor_handle_to_tensor_pointer(AtenTensorHandle handle);
 // No ownership transfer, just pointer type conversion
 TORCH_API AtenTensorHandle tensor_pointer_to_tensor_handle(at::Tensor* tensor);
 
+TORCH_API AtenTensorHandle new_tensor_handle(at::Tensor&& tensor);
+
 // unsafe_alloc_new_handles_from_tensors is used for allocating new aten
 // tensor objects and return them as a vector of AtenTensorHandle (raw
 // pointers), and those pointers will be stolen by model.so.

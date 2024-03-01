@@ -8,13 +8,13 @@
 import sys
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Set
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch.distributed.elastic.rendezvous.registry as rdzv_registry
 from torch.distributed.elastic import events, metrics
 from torch.distributed.elastic.agent.server.api import WorkerSpec
 from torch.distributed.elastic.agent.server.local_elastic_agent import LocalElasticAgent
-from torch.distributed.elastic.multiprocessing import SignalException, Std
+from torch.distributed.elastic.multiprocessing import DefaultLogsSpecs, LogsSpecs, SignalException
 from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.utils import parse_rendezvous_endpoint
@@ -73,6 +73,7 @@ class LaunchConfig:
     min_nodes: int
     max_nodes: int
     nproc_per_node: int
+    logs_specs: Optional[LogsSpecs] = None
     run_id: str = ""
     role: str = "default_role"
     rdzv_endpoint: str = ""
@@ -82,13 +83,9 @@ class LaunchConfig:
     max_restarts: int = 3
     monitor_interval: float = 30
     start_method: str = "spawn"
-    log_dir: Optional[str] = None
     log_line_prefix_template: Optional[str] = None
-    redirects: Union[Std, Dict[int, Std]] = Std.NONE
-    tee: Union[Std, Dict[int, Std]] = Std.NONE
     metrics_cfg: Dict[str, str] = field(default_factory=dict)
     local_addr: Optional[str] = None
-    local_ranks_filter: Optional[Set[int]] = None
 
     def __post_init__(self):
         default_timeout = 900
@@ -96,6 +93,10 @@ class LaunchConfig:
             self.rdzv_configs["timeout"] = self.rdzv_timeout
         elif "timeout" not in self.rdzv_configs:
             self.rdzv_configs["timeout"] = default_timeout
+
+        # Post-processing to enable refactoring to introduce logs_specs due to non-torchrun API usage
+        if self.logs_specs is None:
+            self.logs_specs = DefaultLogsSpecs()
 
 
 class elastic_launch:
@@ -215,7 +216,7 @@ def launch_agent(
             "rdzv_configs": config.rdzv_configs,
             "max_restarts": config.max_restarts,
             "monitor_interval": config.monitor_interval,
-            "log_dir": config.log_dir,
+            "log_dir": config.logs_specs.root_log_dir,  # type: ignore[union-attr]
             "metrics_cfg": config.metrics_cfg
         }
     )
@@ -240,8 +241,6 @@ def launch_agent(
         rdzv_handler=rdzv_registry.get_rendezvous_handler(rdzv_parameters),
         max_restarts=config.max_restarts,
         monitor_interval=config.monitor_interval,
-        redirects=config.redirects,
-        tee=config.tee,
         master_addr=master_addr,
         master_port=master_port,
         local_addr=config.local_addr,
@@ -250,9 +249,8 @@ def launch_agent(
     agent = LocalElasticAgent(
         spec=spec,
         start_method=config.start_method,
-        log_dir=config.log_dir,
         log_line_prefix_template=config.log_line_prefix_template,
-        local_ranks_filter=config.local_ranks_filter,
+        logs_specs=config.logs_specs,  # type: ignore[arg-type]
     )
 
     shutdown_rdzv = True
