@@ -73,9 +73,23 @@ class ExportDynamoConfig:
     """
 
     allow_rnn: bool = True
+    reorderable_logging_functions: Set[Callable] = dataclasses.field(
+        default_factory=set
+    )
 
 
 DEFAULT_EXPORT_DYNAMO_CONFIG = ExportDynamoConfig()
+DEFAULT_EXPORT_DYNAMO_CONFIG.reorderable_logging_functions = {
+    logging.critical,
+    logging.debug,
+    logging.error,
+    logging.exception,
+    logging.info,
+    logging.log,
+    logging.warning,
+    print,
+    warnings.warn,
+}
 
 
 @contextmanager
