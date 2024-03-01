@@ -1750,6 +1750,38 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(16, 16, 16, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    def test_attr_mutation(self):
+        """
+        This is a regression test. Previously, we would drop a buffer mutation if the buffer were a module attribute
+        and the mutated buffer was not used as an output in the IR.
+        This is an AOTI-specific test since torch.compile lifts module attributes into parameters, but aot_compile does not.
+        """
+        device = self.device
+        if device == "cpu":
+            raise unittest.SkipTest("FIXME: Segfaults when device=cpu")
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.rand(16, 16, device=device))
+
+            def forward(self, x):
+                self.buf.mul_(2)
+                return x + self.buf
+
+        example_inputs = (torch.randn(16, 16, device=device),)
+        mod = Mod()
+        so_path = AOTIRunnerUtil.compile(mod, example_inputs)
+
+        # Sanity check: The graph should be unlifted and have only one parameter
+        runner = AOTIRunnerUtil.load_runner(device, so_path)
+        in_spec = pytree.treespec_loads(runner.get_call_spec()[0])
+        self.assertEquals(in_spec.num_leaves, 1)
+
+        aot_mod = AOTIRunnerUtil.load(device, so_path)
+        self.assertTrue(same(aot_mod(*example_inputs), mod(*example_inputs)))
+        self.assertTrue(same(aot_mod(*example_inputs), mod(*example_inputs)))
+
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)
 
