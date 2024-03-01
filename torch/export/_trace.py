@@ -74,9 +74,23 @@ class ExportDynamoConfig:
     """
 
     allow_rnn: bool = True
+    reorderable_logging_functions: Set[Callable] = dataclasses.field(
+        default_factory=set
+    )
 
 
 DEFAULT_EXPORT_DYNAMO_CONFIG = ExportDynamoConfig()
+DEFAULT_EXPORT_DYNAMO_CONFIG.reorderable_logging_functions = {
+    logging.critical,
+    logging.debug,
+    logging.error,
+    logging.exception,
+    logging.info,
+    logging.log,
+    logging.warning,
+    print,
+    warnings.warn,
+}
 
 
 @contextmanager
@@ -323,7 +337,6 @@ def _export_to_torch_ir(
     if _log_export_usage:
         log_export_usage(event="export.private_api", flags={"_export_to_torch_ir"})
 
-    constraints = constraints or []
     kwargs = kwargs or {}
 
     if not isinstance(args, tuple):
@@ -419,12 +432,22 @@ def _export_non_strict(
     grad_safe_guard = (
         AutogradStateOpsFailSafeguard() if is_grad_enabled else nullcontext()
     )
+
+    @contextmanager
+    def _compiling_state_context():
+        old_value = torch.compiler._is_compiling_flag
+        try:
+            torch.compiler._is_compiling_flag = True
+            yield
+        finally:
+            torch.compiler._is_compiling_flag = old_value
+
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
     with torch.nn.utils.stateless._reparametrize_module(
         mod, fake_params_buffers
-    ), grad_safe_guard, _ignore_backend_decomps():  # type: ignore[attr-defined]
+    ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
         gm, graph_signature = transform(aot_export_module)(
             mod,
             fake_args,
@@ -611,7 +634,6 @@ def _export(
     f: torch.nn.Module,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
-    constraints: Optional[List[Constraint]] = None,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
     *,
     strict: bool = True,
@@ -628,15 +650,6 @@ def _export(
         args: example positional inputs.
 
         kwargs: optional example keyword inputs.
-
-        constraints: [DEPRECATED: use ``dynamic_shapes`` instead, see below]
-         An optional list of constraints on the dynamic arguments
-         that specify their possible range of shapes. By default, shapes of
-         input torch.Tensors are assumed to be static. If an input torch.Tensor
-         is expected to have dynamic shapes, please use :func:`dynamic_dim`
-         to define :class:`Constraint` objects that specify the dynamics and the possible
-         range of shapes. See :func:`dynamic_dim` docstring for examples on
-         how to use it.
 
         dynamic_shapes:
          An optional argument where the type should either be:
@@ -668,17 +681,7 @@ def _export(
     log_export_usage(event="export.enter", flags=flags)
     _EXPORT_FLAGS = flags
 
-    if constraints is not None:
-        log_export_usage(event="export.private_api", flags={"constraints"})
-        warnings.warn(
-            "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
-            "and will not be supported in the future. "
-            "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-    else:
-        constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes) or []
+    constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes) or []
 
     kwargs = kwargs or {}
 

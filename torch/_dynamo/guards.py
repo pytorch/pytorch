@@ -105,7 +105,7 @@ CLOSURE_VARS = {
     "___tuple_iterator_len": tuple_iterator_len,
     "___tuple_iterator_getitem": tuple_iterator_getitem,
     "__math_isnan": math.isnan,
-    "__numpy_isnan": np.isnan,
+    "__numpy_isnan": None if np is None else np.isnan,
     "inf": float("inf"),
     "__load_module": importlib.import_module,
     "utils_device": torch.utils._device,

@@ -341,6 +341,21 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 self.jump(inst)
                 return
 
+            if isinstance(value, SymNodeVariable):
+                # if the assertion is normal shape expression.
+                # just install guard and bail out.
+                sym_expr = value.sym_num
+                if not isinstance(sym_expr, torch.SymBool):
+                    sym_expr = sym_expr != 0
+
+                result = torch.fx.experimental.symbolic_shapes.expect_true(sym_expr)
+                if not result:
+                    raise unimplemented(
+                        "Assertion failed on symbolic shapes. Did you make sure eager mode succeeds?"
+                    )
+                self.jump(inst)
+                return
+
             scalar_to_tensor_proxy = self.output.create_proxy(
                 "call_function", torch.scalar_tensor, *proxy_args_kwargs((value,), {})
             )
@@ -431,6 +446,10 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         elif isinstance(value, SymNodeVariable):
             eval_result = value.evaluate_expr(self.output)
             if truth_fn(eval_result):
+                push and self.push(value)
+                self.jump(inst)
+        elif isinstance(value, variables.BackwardHookVariable):
+            if truth_fn(True):
                 push and self.push(value)
                 self.jump(inst)
         else:
@@ -2135,6 +2154,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 for k in vars
                 if k in f_locals
             }
+            self.debug_locals: List[Tuple[VariableTracker, List[VariableTracker]]] = []
             if export:
                 # export gets confused if we never realize unused inputs
                 # in export mode just eagerly realize everything
