@@ -87,7 +87,7 @@ class _NormPartial(_Partial):
             return tensor
         elif self.reduce_op == c10d.ReduceOp.SUM:
             return tensor / mesh.size(mesh_dim=mesh_dim)
-        raise NotImplementedError(self)
+        raise NotImplementedError(self.reduce_op)
 
     def _reduce_shard_value(
         self,
