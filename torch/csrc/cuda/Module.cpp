@@ -584,6 +584,9 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
   result["num_alloc_retries"] = stats.num_alloc_retries;
   result["num_ooms"] = stats.num_ooms;
   result["max_split_size"] = stats.max_split_size;
+  result["num_sync_all_streams"] = stats.num_sync_all_streams;
+  result["num_device_alloc"] = stats.num_device_alloc;
+  result["num_device_free"] = stats.num_device_free;
   result["allocation"] = statArrayToDict(stats.allocation);
   result["segment"] = statArrayToDict(stats.segment);
   result["active"] = statArrayToDict(stats.active);
@@ -864,7 +867,7 @@ PyObject* THCPModule_cudaSetSyncDebugMode(PyObject* _unused, PyObject* arg) {
   TORCH_CHECK(
       debug_mode >= 0 && debug_mode <= 2,
       "invalid value of debug_mode, expected one of 0,1,2");
-  c10::cuda::SyncDebugMode l;
+  c10::cuda::SyncDebugMode l = c10::cuda::SyncDebugMode::L_DISABLED;
   switch (debug_mode) {
     case 0:
       l = c10::cuda::SyncDebugMode::L_DISABLED;
@@ -876,7 +879,6 @@ PyObject* THCPModule_cudaSetSyncDebugMode(PyObject* _unused, PyObject* arg) {
       l = c10::cuda::SyncDebugMode::L_ERROR;
       break;
     default:
-      l = c10::cuda::SyncDebugMode::L_DISABLED;
       break; // can't happen
   }
   c10::cuda::warning_state().set_sync_debug_mode(l);
@@ -940,7 +942,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
 #if USE_ROCM
                << ", gcnArchName='" << prop.gcnArchName << "'"
 #endif // USE_ROCM
-               << ", total_memory=" << prop.totalGlobalMem / (1024 * 1024)
+               << ", total_memory=" << prop.totalGlobalMem / (1024ull * 1024)
                << "MB, multi_processor_count=" << prop.multiProcessorCount
                << ")";
         return stream.str();
@@ -1016,6 +1018,7 @@ void addStorageDeleterFns(
 static void registerCudaPluggableAllocator(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       c10::cuda::CUDACachingAllocator::CUDAAllocator,
       std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>>(
@@ -1026,7 +1029,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
 
   m.def(
       "_cuda_changeCurrentAllocator",
-      [](std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
+      [](const std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>&
              allocator) {
         torch::cuda::CUDAPluggableAllocator::changeCurrentAllocator(allocator);
       });
@@ -1042,6 +1045,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
              uint64_t func_ptr) {
             using FuncType = void(int);
             std::function<FuncType> func =
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
                 reinterpret_cast<FuncType*>(func_ptr);
             self.set_init_fn(func);
           })
@@ -1051,6 +1055,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
              uint64_t func_ptr) {
             using FuncType = void();
             std::function<FuncType> func =
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
                 reinterpret_cast<FuncType*>(func_ptr);
             self.set_reset_fn(func);
           })
@@ -1060,6 +1065,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
              uint64_t func_ptr) {
             using FuncType = void(double, int);
             std::function<FuncType> func =
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
                 reinterpret_cast<FuncType*>(func_ptr);
             self.set_memory_fraction_fn(func);
           })
@@ -1069,6 +1075,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
              uint64_t func_ptr) {
             using FuncType = void*(void*, size_t*);
             std::function<FuncType> func =
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
                 reinterpret_cast<FuncType*>(func_ptr);
             self.set_base_alloc_fn(func);
           })
@@ -1078,6 +1085,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
              uint64_t func_ptr) {
             using FuncType = void(void*, cudaStream_t);
             std::function<FuncType> func =
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
                 reinterpret_cast<FuncType*>(func_ptr);
             self.set_record_stream_fn(func);
           })
@@ -1088,6 +1096,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             using FuncType = void(
                 int, c10::cuda::MempoolId_t, std::function<bool(cudaStream_t)>);
             std::function<FuncType> func =
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
                 reinterpret_cast<FuncType*>(func_ptr);
             self.set_begin_allocate_to_pool(func);
           })
@@ -1097,6 +1106,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
              uint64_t func_ptr) {
             using FuncType = void(int, c10::cuda::MempoolId_t);
             std::function<FuncType> func =
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
                 reinterpret_cast<FuncType*>(func_ptr);
             self.set_end_allocate_to_pool_fn(func);
           })
@@ -1106,6 +1116,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
              uint64_t func_ptr) {
             using FuncType = void(int, c10::cuda::MempoolId_t);
             std::function<FuncType> func =
+                // NOLINTNEXTLINE(performance-no-int-to-ptr)
                 reinterpret_cast<FuncType*>(func_ptr);
             self.set_release_pool(func);
           });
@@ -1113,13 +1124,16 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     using MallocFuncType = void*(size_t, int, cudaStream_t);
     using FreeFuncType = void(void*, size_t, int, cudaStream_t);
     std::function<MallocFuncType> malloc_fn =
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<MallocFuncType*>(malloc_ptr);
     std::function<FreeFuncType> free_fn =
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<FreeFuncType*>(free_ptr);
     return torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
         malloc_fn, free_fn);
   });
 
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       c10::cuda::CUDACachingAllocator::AllocatorState,
       std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState>>(
@@ -1132,6 +1146,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       });
 
   m.def("_free_And_Remove_DeleterFn", [](size_t storage_impl_ptr) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     auto alloc = c10::cuda::CUDACachingAllocator::get();
     auto data_ptr = storage_impl->data_ptr().get();
@@ -1141,12 +1156,14 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     c10::cuda::CUDACachingAllocator::raw_delete(data_ptr);
   });
 
-  m.def("_set_storage_access_error_msg", [](at::Tensor t, std::string s) {
-    t.unsafeGetTensorImpl()
-        ->release_storage_and_set_meta_custom_data_ptr_error_msg_(s);
-  });
+  m.def(
+      "_set_storage_access_error_msg", [](const at::Tensor& t, std::string s) {
+        t.unsafeGetTensorImpl()
+            ->release_storage_and_set_meta_custom_data_ptr_error_msg_(s);
+      });
 
   m.def("_has_Standard_Deleter", [](size_t storage_impl_ptr) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     auto alloc = c10::cuda::CUDACachingAllocator::get();
     return (storage_impl->data_ptr().get_deleter() == alloc->raw_deleter());
@@ -1169,6 +1186,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
   });
 
   m.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     return c10::raw::weak_intrusive_ptr::use_count(storage_impl);
   });
@@ -1222,6 +1240,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         std::unordered_set<void*> allocations;
         allocations.reserve(expected_live_allocations.size());
         for (auto& elem : expected_live_allocations) {
+          // NOLINTNEXTLINE(performance-no-int-to-ptr)
           allocations.insert(reinterpret_cast<void*>(py::cast<size_t>(elem)));
         }
         return c10::cuda::CUDACachingAllocator::checkPoolLiveAllocations(
@@ -1232,12 +1251,13 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       "_cuda_setCheckpointPoolState",
       [](c10::DeviceIndex device,
          std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps,
-         std::vector<size_t> stale_storages_ptr,
-         std::vector<size_t> storages_to_add_deleters_to_ptr = {}) {
+         const std::vector<size_t>& stale_storages_ptr,
+         const std::vector<size_t>& storages_to_add_deleters_to_ptr = {}) {
         std::unordered_set<c10::StorageImpl*> ptr_set;
         // iterate on std::vector for determinism
         std::vector<c10::StorageImpl*> ptrs;
         for (size_t ptr_int : stale_storages_ptr) {
+          // NOLINTNEXTLINE(performance-no-int-to-ptr)
           c10::StorageImpl* ptr = (c10::StorageImpl*)ptr_int;
           if (!ptr_set.count(ptr)) {
             ptrs.push_back(ptr);
@@ -1271,7 +1291,10 @@ static void registerCudaPluggableAllocator(PyObject* module) {
 
         removeStorageDeleterFns(ptrs, freed_pointer_set);
         std::vector<c10::StorageImpl*> storages_to_add_deleters_to;
+        storages_to_add_deleters_to.reserve(
+            storages_to_add_deleters_to_ptr.size());
         for (size_t ptr_int : storages_to_add_deleters_to_ptr) {
+          // NOLINTNEXTLINE(performance-no-int-to-ptr)
           storages_to_add_deleters_to.push_back((c10::StorageImpl*)ptr_int);
         }
 
@@ -1401,9 +1424,7 @@ PyObject* THCPModule_benchmarkLimitCuDNN(PyObject* _unused, PyObject* noargs) {
   return THPUtils_packInt32(at::globalContext().benchmarkLimitCuDNN());
 }
 
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,
-// cppcoreguidelines-avoid-non-const-global-variables,
-// cppcoreguidelines-avoid-c-arrays)
+// NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
 static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_init", THCPModule_initExtension, METH_NOARGS, nullptr},
     {"_cuda_setDevice", THCPModule_setDevice_wrap, METH_O, nullptr},
