@@ -2222,8 +2222,6 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
         _warn_not_in_group("all_reduce_coalesced")
         return
 
-    tensors = [t if not t.is_complex() else torch.view_as_real(t) for t in tensors]
-
     opts = AllreduceCoalescedOptions()
     opts.reduceOp = op
     if group is None:
