@@ -6,6 +6,7 @@ import logging
 import os
 import os.path
 import re
+import tempfile
 from dataclasses import dataclass, field
 from importlib import __import__
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
@@ -844,7 +845,6 @@ def _reset_logs():
         log.setLevel(logging.NOTSET)
         log.propagate = True
 
-    trace_log.setLevel(logging.WARNING)
     trace_log.propagate = False
     _clear_handlers(trace_log)
 
@@ -911,19 +911,26 @@ def _init_logs(log_file_name=None):
     handler: Optional[logging.Handler] = None
     if trace_file_name is not None:
         handler = logging.FileHandler(trace_file_name)
-    if handler is not None:
-        trace_log.setLevel(logging.DEBUG)
-        trace_log_handler = _track_handler(handler)
-        trace_log_handler.setFormatter(TorchLogsFormatter(trace=True))
-        trace_log.addHandler(trace_log_handler)
+    else:
+        # This handler may remove itself if we are not actually in an FB
+        # environment.  This allows us to defer actually initializing it until
+        # we actually need to log anything.  This is important because JK
+        # initializes a C++ singleton, which will pork our process if we
+        # subsequently fork.
+        handler = LazyFbTraceHandler()
+    # This log is ALWAYS at debug level.  We will additionally test if there
+    # are any handlers before deciding to actually call logging on this.  Do
+    # not manually call
+    trace_log.setLevel(logging.DEBUG)
+    trace_log_handler = _track_handler(handler)
+    trace_log_handler.setFormatter(TorchLogsFormatter(trace=True))
+    trace_log.addHandler(trace_log_handler)
 
 
-class FreshFileHandler(logging.StreamHandler):
+class LazyFbTraceHandler(logging.StreamHandler):
     """Like FileHandler, but the file is allocated lazily only upon the first log message"""
 
-    def __init__(self, filename_cb):
-        self.filename_cb = filename_cb
-        self.filename = None
+    def __init__(self):
         # This is implemented in the same way that delay is implemented on
         # FileHandler
         logging.Handler.__init__(self)
@@ -954,8 +961,50 @@ class FreshFileHandler(logging.StreamHandler):
 
     def emit(self, record):
         if self.stream is None:
+            # TODO: more robust is_fbcode test
+            import torch.version
+
+            TRACE_LOG_DIR = "/logs"
             open_func = self._builtin_open
-            self.stream = open_func(self.filename_cb(), "w")
+
+            ok = False
+            import torch.version as torch_version
+
+            if hasattr(torch_version, "git_version"):
+                log.info("LazyFbTraceHandler: disabled because not fbcode")
+            elif not torch._utils_internal.justknobs_check("pytorch/trace:enable"):
+                log.info(
+                    "LazyFbTraceHandler: disabled because justknobs_check('pytorch/trace:enable') returned False"
+                )
+            elif not os.path.exists(TRACE_LOG_DIR):
+                log.info(
+                    "LazyFbTraceHandler: disabled because %s does not exist",
+                    TRACE_LOG_DIR,
+                )
+            elif not os.access(TRACE_LOG_DIR, os.W_OK):
+                log.info(
+                    "LazyFbTraceHandler: disabled because %s is not writeable",
+                    TRACE_LOG_DIR,
+                )
+            else:
+                ok = True
+
+            if ok:
+                ranksuffix = ""
+                if dist.is_available() and dist.is_initialized():
+                    ranksuffix = f"rank_{dist.get_rank()}_"
+                self.stream = tempfile.NamedTemporaryFile(
+                    mode="w+",
+                    suffix=".log",
+                    prefix=f"dedicated_log_torch_trace_{ranksuffix}",
+                    dir=TRACE_LOG_DIR,
+                    delete=False,
+                )
+                log.info("LazyFbTraceHandler: logging to %s", self.stream.name)
+            else:
+                # We go poof, remove and no-op
+                trace_log.removeHandler(self)
+                return
         if self.stream:
             super().emit(record)
 
@@ -1004,7 +1053,9 @@ def trace_structured(
     assert callable(
         payload_fn
     ), f"payload_fn should be callable, but got {type(payload_fn)}"
-    if trace_log.isEnabledFor(logging.DEBUG):
+    # trace_log never propagates and is ALWAYS DEBUG, so also check that there
+    # are handlers instead of checking the log level
+    if trace_log.handlers:
         record: Dict[str, object] = {}
         record[name] = metadata_fn()
         if not suppress_context:

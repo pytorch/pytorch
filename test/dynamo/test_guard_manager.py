@@ -547,6 +547,33 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         del x
         self.assertFalse(guard_manager.check(None))
 
+    def test_lambda_manager(self):
+        a = (1, 1, 3, 4, 5, 6)
+
+        guard_manager = RootGuardManager()
+
+        # Check that we can use the same accessor
+        foo_mgr = guard_manager.lambda_manager(lambda x: x[2], None)
+        foo_mgr.add_lambda_guard(
+            lambda x: x == 3,
+            "Expected value 3",
+        )
+        self.assertTrue(guard_manager.check(a))
+
+        # test that exception works
+        guard_manager = RootGuardManager()
+
+        def fn(x):
+            raise AssertionError("Test")
+            return x
+
+        foo_mgr = guard_manager.lambda_manager(fn, None)
+
+        self.assertFalse(guard_manager.check(None))
+        debug_info = guard_manager.check_verbose(None)
+        self.assertFalse(debug_info.result)
+        self.assertTrue("Test" in debug_info.verbose_code_parts[0])
+
     def test_dict_guard_manager(self):
         root = RootGuardManager()
 
