@@ -5,8 +5,8 @@
 #include <ATen/record_function.h>
 #include <c10/core/MemoryFormat.h>
 
-#include "Attr.h"
-#include "Utils.h"
+#include <ATen/native/mkldnn/xpu/detail/Attr.h>
+#include <ATen/native/mkldnn/xpu/detail/Utils.h>
 
 #include <oneapi/dnnl/dnnl.hpp>
 
@@ -214,14 +214,14 @@ static at::Tensor convolution(
   dnnl::memory src_m, wgh_m, dst_m, bia_m;
   at::Tensor src_blocked, wgh_blocked, dst_blocked = dst;
 
-  src_m = xpu_onednn_memory(src_md, engine, src.data_ptr());
-  wgh_m = xpu_onednn_memory(wgh_md, engine, wgh.data_ptr());
-  dst_m = xpu_onednn_memory(dst_md, engine, dst.data_ptr());
+  src_m = make_onednn_memory(src_md, engine, src.data_ptr());
+  wgh_m = make_onednn_memory(wgh_md, engine, wgh.data_ptr());
+  dst_m = make_onednn_memory(dst_md, engine, dst.data_ptr());
 
 
   std::unordered_map<int, dnnl::memory> args;
   if (bia.defined()) {
-    bia_m = xpu_onednn_memory(bia_md, engine, bia.data_ptr());
+    bia_m = make_onednn_memory(bia_md, engine, bia.data_ptr());
     args.insert({DNNL_ARG_BIAS, bia_m});
   }
   auto expected_dst_md = conv_fwd_pd.dst_desc();
@@ -235,7 +235,7 @@ static at::Tensor convolution(
   size_t scratchpad_size = conv_fwd_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::empty(
       {static_cast<int64_t>(scratchpad_size)}, src.options().dtype(at::kByte), c10::nullopt);
-  auto scratchpad_m = xpu_onednn_memory(
+  auto scratchpad_m = make_onednn_memory(
       conv_fwd_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});
 
@@ -312,9 +312,9 @@ static void convolution_backward_weights(
   at::Tensor expected_src, expected_diff_dst, expected_diff_wgh;
   dnnl::memory src_m, diff_dst_m, diff_wgh_m;
 
-  src_m = xpu_onednn_memory(src_md, engine, src.data_ptr());
-  diff_dst_m = xpu_onednn_memory(dst_md, engine, diff_dst.data_ptr());
-  diff_wgh_m = xpu_onednn_memory(wgh_md, engine, diff_wgh.data_ptr());
+  src_m = make_onednn_memory(src_md, engine, src.data_ptr());
+  diff_dst_m = make_onednn_memory(dst_md, engine, diff_dst.data_ptr());
+  diff_wgh_m = make_onednn_memory(wgh_md, engine, diff_wgh.data_ptr());
 
   // insert args
   std::unordered_map<int, dnnl::memory> args;
@@ -323,14 +323,14 @@ static void convolution_backward_weights(
   args.insert({DNNL_ARG_DIFF_WEIGHTS, diff_wgh_m});
   if (diff_bia.defined()) {
     dnnl::memory diff_bia_m =
-        xpu_onednn_memory(bia_md, engine, diff_bia.data_ptr());
+        make_onednn_memory(bia_md, engine, diff_bia.data_ptr());
     args.insert({DNNL_ARG_DIFF_BIAS, diff_bia_m});
   }
 
   size_t scratchpad_size = conv_bwd_w_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::empty(
       {static_cast<int64_t>(scratchpad_size)}, src.options().dtype(at::kByte), c10::nullopt);
-  auto scratchpad_m = xpu_onednn_memory(
+  auto scratchpad_m = make_onednn_memory(
       conv_bwd_w_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});
 
@@ -404,9 +404,9 @@ static void convolution_backward_data(
   at::Tensor expected_src, expected_wei, expected_dst;
   dnnl::memory diff_dst_m, wei_m, diff_src_m;
 
-  diff_src_m = xpu_onednn_memory(src_md, engine, diff_src.data_ptr());
-  wei_m = xpu_onednn_memory(wgh_md, engine, weight.data_ptr());
-  diff_dst_m = xpu_onednn_memory(dst_md, engine, diff_dst.data_ptr());
+  diff_src_m = make_onednn_memory(src_md, engine, diff_src.data_ptr());
+  wei_m = make_onednn_memory(wgh_md, engine, weight.data_ptr());
+  diff_dst_m = make_onednn_memory(dst_md, engine, diff_dst.data_ptr());
 
 
   // insert args
@@ -414,7 +414,7 @@ static void convolution_backward_data(
   size_t scratchpad_size = conv_backward_data_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::empty(
       {static_cast<int64_t>(scratchpad_size)}, diff_dst.options().dtype(at::kByte), c10::nullopt);
-  auto scratchpad_memory = xpu_onednn_memory(
+  auto scratchpad_memory = make_onednn_memory(
       conv_backward_data_pd.scratchpad_desc(),
       engine,
       scratchpad_tensor.data_ptr());
