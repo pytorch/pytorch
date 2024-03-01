@@ -33,12 +33,14 @@ class TestExportTorchbind(TestCase):
         kwargs = kwargs or {}
         with enable_torchbind_tracing():
             exported_program = export(f, args, kwargs, strict=strict)
+        gm = exported_program.module()
         reversed_kwargs = {key: kwargs[key] for key in reversed(kwargs)}
-        self.assertEqual(exported_program.module()(*args, **kwargs), f(*args, **kwargs))
+        self.assertEqual(gm(*args, **kwargs), f(*args, **kwargs))
         self.assertEqual(
-            exported_program.module()(*args, **reversed_kwargs),
+            gm(*args, **reversed_kwargs),
             f(*args, **reversed_kwargs),
         )
+        return gm
 
     def test_none(self):
         class MyModule(torch.nn.Module):
@@ -49,9 +51,17 @@ class TestExportTorchbind(TestCase):
             def forward(self, x, n):
                 return x + self.attr.add_tensor(x)
 
-        self._test_export_same_as_eager(
+        gm = self._test_export_same_as_eager(
             MyModule(), (torch.ones(2, 3), None), strict=False
         )
+        self.assertExpectedInline(gm.code.strip("\n"), """\
+def forward(self, arg_0, arg_1):
+    arg0_1, arg1_1, = fx_pytree.tree_flatten_spec(([arg_0, arg_1], {}), self._in_spec)
+    attr_1 = self.attr
+    call_torchbind = torch.ops.higher_order.call_torchbind(attr_1, 'add_tensor', arg0_1);  attr_1 = None
+    add = torch.ops.aten.add.Tensor(arg0_1, call_torchbind);  arg0_1 = call_torchbind = None
+    return pytree.tree_unflatten((add,), self._out_spec)
+    """)
 
     def test_attribute(self):
         class MyModule(torch.nn.Module):
@@ -62,7 +72,15 @@ class TestExportTorchbind(TestCase):
             def forward(self, x):
                 return x + self.attr.add_tensor(x)
 
-        self._test_export_same_as_eager(MyModule(), (torch.ones(2, 3),), strict=False)
+        gm = self._test_export_same_as_eager(MyModule(), (torch.ones(2, 3),), strict=False)
+        self.assertExpectedInline(gm.code.strip("\n"), """\
+def forward(self, arg_0):
+    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    attr_1 = self.attr
+    call_torchbind = torch.ops.higher_order.call_torchbind(attr_1, 'add_tensor', arg0_1);  attr_1 = None
+    add = torch.ops.aten.add.Tensor(arg0_1, call_torchbind);  arg0_1 = call_torchbind = None
+    return pytree.tree_unflatten((add,), self._out_spec)
+    """)
 
     def test_attribute_as_custom_op_argument(self):
         class MyModule(torch.nn.Module):
@@ -73,7 +91,15 @@ class TestExportTorchbind(TestCase):
             def forward(self, x):
                 return x + torch.ops._TorchScriptTesting.takes_foo(self.attr, x)
 
-        self._test_export_same_as_eager(MyModule(), (torch.ones(2, 3),), strict=False)
+        gm = self._test_export_same_as_eager(MyModule(), (torch.ones(2, 3),), strict=False)
+        self.assertExpectedInline(gm.code.strip("\n"), """\
+def forward(self, arg_0):
+    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    attr_1 = self.attr
+    takes_foo = torch.ops._TorchScriptTesting.takes_foo.default(attr_1, arg0_1);  attr_1 = None
+    add = torch.ops.aten.add.Tensor(arg0_1, takes_foo);  arg0_1 = takes_foo = None
+    return pytree.tree_unflatten((add,), self._out_spec)
+    """)
 
     def test_input(self):
         class MyModule(torch.nn.Module):
@@ -84,9 +110,17 @@ class TestExportTorchbind(TestCase):
                 return x + cc.add_tensor(x)
 
         cc = torch.classes._TorchScriptTesting._Foo(10, 20)
-        self._test_export_same_as_eager(
+        gm = self._test_export_same_as_eager(
             MyModule(), (torch.ones(2, 3), cc), strict=False
         )
+        self.assertExpectedInline(gm.code.strip("\n"), """\
+def forward(self, arg_0, arg_1):
+    arg0_1, arg1_1, = fx_pytree.tree_flatten_spec(([arg_0, arg_1], {}), self._in_spec)
+    call_torchbind = torch.ops.higher_order.call_torchbind(arg1_1, 'add_tensor', arg0_1);  arg1_1 = None
+    add = torch.ops.aten.add.Tensor(arg0_1, call_torchbind);  arg0_1 = call_torchbind = None
+    return pytree.tree_unflatten((add,), self._out_spec)
+    """)
+
 
     def test_input_as_custom_op_argument(self):
         class MyModule(torch.nn.Module):
@@ -97,9 +131,16 @@ class TestExportTorchbind(TestCase):
                 return x + torch.ops._TorchScriptTesting.takes_foo(cc, x)
 
         cc = torch.classes._TorchScriptTesting._Foo(10, 20)
-        self._test_export_same_as_eager(
+        gm = self._test_export_same_as_eager(
             MyModule(), (torch.ones(2, 3), cc), strict=False
         )
+        self.assertExpectedInline(gm.code.strip("\n"), """\
+def forward(self, arg_0, arg_1):
+    arg0_1, arg1_1, = fx_pytree.tree_flatten_spec(([arg_0, arg_1], {}), self._in_spec)
+    takes_foo = torch.ops._TorchScriptTesting.takes_foo.default(arg1_1, arg0_1);  arg1_1 = None
+    add = torch.ops.aten.add.Tensor(arg0_1, takes_foo);  arg0_1 = takes_foo = None
+    return pytree.tree_unflatten((add,), self._out_spec)
+    """)
 
     def test_unlift_custom_obj(self):
         class MyModule(torch.nn.Module):
@@ -116,6 +157,14 @@ class TestExportTorchbind(TestCase):
             ep = torch.export.export(m, (input,), strict=False)
 
         unlifted = ep.module()
+        self.assertExpectedInline(unlifted.code.strip("\n"), """\
+def forward(self, arg_0):
+    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    attr_1 = self.attr
+    takes_foo = torch.ops._TorchScriptTesting.takes_foo.default(attr_1, arg0_1);  attr_1 = None
+    add = torch.ops.aten.add.Tensor(arg0_1, takes_foo);  arg0_1 = takes_foo = None
+    return pytree.tree_unflatten((add,), self._out_spec)
+    """)
         self.assertEqual(m(input), unlifted(input))
 
 
