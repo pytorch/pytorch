@@ -4,13 +4,6 @@
 #include <mutex>
 #include <sstream>
 
-#if defined(__linux__)
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
-#endif
-
 #ifdef USE_C10D_NCCL
 
 #include <exception>
@@ -1177,6 +1170,13 @@ void ProcessGroupNCCL::heartbeatMonitor() {
                                                : heartbeatTimeoutInSec_ * 1000;
   auto lastTimePollStore = std::chrono::steady_clock::now();
   auto lastTimeHeartBeatCheck = std::chrono::steady_clock::now();
+  c10::optional<DumpPipe> dumpPipe = c10::nullopt;
+  if (uid_ == 0) {
+    // DumpPipe is one per-trainer process, and its convenient to name them
+    // after 'global' ranks in the system, So we assume processgroup (uid)==0 is
+    // the global PG and has globally unique rank ids across trainers.
+    dumpPipe.emplace(rank_);
+  }
   while (true) {
     // This won't have any lock since this lock is only used here.
     // Please be aware that mutex `monitorMutex_` should not be used
@@ -1205,7 +1205,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       // set to true.
       // 2. other ranks detected the timeout and signal the local rank to dump
       // In addtion, monitor threads will dump if watchdog threads has no
-      // heartbeat.
+      // heartbeat or dumpPipe is not empty.
       if (shouldDump_.load()) {
         errorMsg = c10::str(
             logPrefix(),
@@ -1288,6 +1288,14 @@ void ProcessGroupNCCL::heartbeatMonitor() {
             "");
         break;
       }
+    }
+    // process a request to dump the trace. only PG uid 0 will respond to dump
+    // requests, but this is fine since all PG's feed into the same flight
+    // recorder and dump. After dump, the training should continue.
+    if (dumpPipe.has_value() && dumpPipe->shouldDump()) {
+      // best effort dump, not waiting for the dump here
+      std::future<bool> fut = std::async(
+          std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
     }
   }
   LOG(ERROR) << errorMsg;
@@ -1435,59 +1443,6 @@ std::string ProcessGroupNCCL::getNCCLWatchdogDebugInfo() {
   return retrieveDesyncReport(store_, "NCCL", rank_, size_);
 }
 
-#if defined(__linux__)
-struct DumpPipe {
-  DumpPipe(int rank) {
-    std::string fileStem =
-        getCvarString({"TORCH_NCCL_DEBUG_INFO_PIPE_FILE"}, "");
-    if (fileStem.empty() ||
-        getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) <= 0) {
-      return;
-    }
-    TORCH_CHECK(!fileStem.empty(), "TORCH_NCCL_DEBUG_INFO_TEMP_FILE is empty");
-    std::string filename = c10::str(fileStem, rank, ".pipe");
-    TORCH_CHECK(
-        unlink(filename.c_str()) != -1 || errno == ENOENT,
-        "Error removing existing named pipe ",
-        filename);
-    TORCH_CHECK(
-        mkfifo(filename.c_str(), 0666) != -1,
-        "Error creating named pipe ",
-        filename);
-    fd_ = open(filename.c_str(), O_RDONLY | O_NONBLOCK);
-    LOG(INFO) << "Pipe file " << filename
-              << " has been opened, write to it to trigger NCCL Debug Dump.";
-    TORCH_CHECK(fd_ != -1, "Error opening named pipe ", filename);
-  }
-  bool shouldDump() {
-    if (fd_ == -1) {
-      return false;
-    }
-    char buf[128];
-    // non-blocking from O_NONBLOCK above.
-    // Ignore EINTR because we already will poll this
-    // again later.
-    ssize_t bytesRead = read(fd_, &buf, 128);
-    return bytesRead > 0;
-  }
-  ~DumpPipe() {
-    if (fd_ != -1) {
-      close(fd_);
-    }
-  }
-
- private:
-  int fd_ = -1;
-};
-#else
-struct DumpPipe {
-  DumpPipe(int rank) {}
-  bool shouldDump() {
-    return false;
-  }
-};
-#endif
-
 std::string ProcessGroupNCCL::createLogPrefix() const {
   return c10::str("[PG ", uid_, " Rank ", rank_, "] ");
 }
@@ -1506,13 +1461,6 @@ void ProcessGroupNCCL::watchdogHandler() {
   lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
 
-  c10::optional<DumpPipe> dumpPipe = c10::nullopt;
-  if (uid_ == 0) {
-    // DumpPipe is one per-trainer process, and its convenient to name them
-    // after 'global' ranks in the system, So we assume processgroup (uid)==0 is
-    // the global PG and has globally unique rank ids across trainers.
-    dumpPipe.emplace(rank_);
-  }
   while (!done || !terminateProcessGroup_.load()) {
     std::unique_lock<std::mutex> lock(workMetaListMutex_);
     // We busy-poll the work vector every kWatchdogThreadSleepMillis
@@ -1644,14 +1592,6 @@ void ProcessGroupNCCL::watchdogHandler() {
       // Increment heartbeat after each work processed,
       // in case processing is slowed down (but not hung) by cuda api contention
       heartbeat_++;
-    }
-    // process a request to dump the trace. only PG uid 0 will respond to dump
-    // requests, but this is fine since all PG's feed into the same flight
-    // recorder and dump.
-    if (dumpPipe.has_value() && dumpPipe->shouldDump()) {
-      // best effort dump, watchdog is not waiting for the dump here
-      // signal the monitor thread to start dumping
-      shouldDump_.store(true);
     }
     done = workMetaList_.empty();
   }

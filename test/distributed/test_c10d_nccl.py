@@ -4093,9 +4093,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_dump_pipe(self):
-        # this is to disable monitor thread from crashing the process but still dump
-        os.environ['TORCH_NCCL_ENABLE_MONITORING'] = '0'
-
         def open_file_with_timeout(file_path, mode, timeout=1.0):
             start_time = time.time()
             while time.time() - start_time < timeout:
