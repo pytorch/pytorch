@@ -15,6 +15,7 @@ from ..pattern_matcher import (
     MatchContext,
     register_replacement,
 )
+from ..utils import is_view
 
 aten = torch.ops.aten
 
@@ -58,38 +59,6 @@ def check_dtype(a: Tensor, b: Tensor) -> bool:
     return a.is_floating_point() and b.is_floating_point()
 
 
-_LAYOUT_REPLACING_FUNCTIONS = {
-    aten.addmm,
-    aten.mm,
-    aten.bmm,
-    aten.baddbmm,
-    aten.constant_pad_nd,
-    aten.as_strided,
-    aten.argmax,
-    aten.max,
-    aten.argmin,
-    aten.min,
-    aten.align_to,
-    aten.align_as,
-    aten.contiguous,
-    aten.embedding,
-    aten.empty,
-    aten.new_empty,
-    aten.new_empty_strided,
-    aten.new_ones,
-    aten.new_zeros,
-    aten.new_full,
-    aten.empty_permuted,
-    aten.embedding_bag,
-    aten.empty_strided,
-    aten.linspace,
-    aten.convolution,
-    aten.conv1d,
-    aten.conv2d,
-    aten.conv3d,
-}
-
-
 def _result_layout_affects_graph_output(
     match: Match, max_depth=30, max_iters=200
 ) -> bool:
@@ -102,12 +71,10 @@ def _result_layout_affects_graph_output(
     cases. It tries to err on the side of caution, e.g. it's better to return True
     even if the match cannot affect output strides than to return False if it can.
     """
-    import collections
 
     if match.ctx is not None:
         assert isinstance(match.ctx, MatchContext)
         graph: torch.fx.Graph = match.ctx.graph
-        output_nodes: List[torch.fx.Node] = [n for n in graph.nodes if n.op == "output"]
         search_node: torch.fx.Node = match.output_node()
     else:
         return True
@@ -115,46 +82,22 @@ def _result_layout_affects_graph_output(
     assert search_node is not None
     assert graph is not None
 
-    def bfs_search_node(search_node, output_nodes, max_depth, max_iters):
-        seen: set[torch.fx.Node] = set()
-        visit_queue = collections.deque((onode, 0) for onode in output_nodes)
-        i = 0
-        while len(visit_queue) > 0:
-            i += 1
-            if i > max_iters:
-                return True
-            n, depth = visit_queue.popleft()
-            if n is search_node:
-                return True
-            if n in seen:
-                continue
-            if depth >= max_depth:
-                return True
-            seen.add(n)
-            if isinstance(n, (list, tuple)):
-                visit_queue.extend((subn, depth + 1) for subn in n)
-                continue
-            if not isinstance(n, torch.fx.Node):
-                continue
-            assert n.op not in {
-                "call_method",
-                "call_module",
-            }, f"The graph is not functionalized. node.op={n.op}"
-            if n.op != "call_function" and n.op != "output":
-                continue
-            if n.target in _LAYOUT_REPLACING_FUNCTIONS:
-                continue
-            if n.args is not None:
-                visit_queue.extend((subn, depth + 1) for subn in n.args)
-            if n.kwargs is not None:
-                visit_queue.extend((subn, depth + 1) for subn in n.kwargs.values())
+    def find_output(node: torch.fx.Node, is_start_node=False):
+        if not isinstance(node, torch.fx.Node):
+            return False
+        if node.op == "output":
+            return True
+        if node.op != "call_function":
+            return False
+        if not is_start_node and not is_view(node.target):
+            return False
+        if node.users is not None and len(node.users) > 0:
+            for n in node.users:
+                if find_output(n):
+                    return True
         return False
 
-    if len(output_nodes) > 0 and bfs_search_node(
-        search_node, output_nodes, max_depth=max_depth, max_iters=max_iters
-    ):
-        return True
-    return False
+    return find_output(search_node, True)
 
 
 def should_pad_common(
