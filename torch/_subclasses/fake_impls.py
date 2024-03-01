@@ -803,8 +803,9 @@ def meta__efficient_attention_forward(fake_mode, func, *args, **kwargs):
     value = kwargs["value"]
     cu_seqlens_q = kwargs["cu_seqlens_q"]
     max_seqlen_q = kwargs["max_seqlen_q"]
+    max_seqlen_k = kwargs["max_seqlen_k"]
     compute_log_sumexp = kwargs["compute_log_sumexp"]
-    # unused: bias, cu_seqlens_k, max_seqlen_k, dropout_p, custom_mask_type, scale, causal_diagonal, seqlen_k
+    # unused: bias, cu_seqlens_k, dropout_p, custom_mask_type, scale, causal_diagonal, seqlen_k
 
     def convert_tensor(t, device):
         return FakeTensor(fake_mode, t, device)
@@ -826,6 +827,7 @@ def meta__efficient_attention_forward(fake_mode, func, *args, **kwargs):
     if cu_seqlens_q is not None:
         assert max_seqlen_q is not None
         actual_max_seqlen_q = max_seqlen_q
+    actual_max_seqlen_k = max_seqlen_k if max_seqlen_k is not None else N
     logsumexp_dim = (
         math.ceil(actual_max_seqlen_q / 32) * 32 if compute_log_sumexp else 0
     )
@@ -846,7 +848,7 @@ def meta__efficient_attention_forward(fake_mode, func, *args, **kwargs):
         torch.empty((), dtype=torch.long, device="meta"), query.device
     )
 
-    return res, logsum_exp, seed, offset, M, N
+    return res, logsum_exp, seed, offset, actual_max_seqlen_q, actual_max_seqlen_k
 
 
 FAST_OP_IMPLEMENTATIONS = {}

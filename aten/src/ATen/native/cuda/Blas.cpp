@@ -17,6 +17,7 @@
 #include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/_scaled_mm_native.h>
 #include <ATen/ops/_unsafe_view_native.h>
+#include <ATen/ops/abs.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addmv_native.h>
 #include <ATen/ops/baddbmm_native.h>
@@ -25,6 +26,7 @@
 #include <ATen/ops/dot_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/gelu.h>
+#include <ATen/ops/max.h>
 #include <ATen/ops/mm_native.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/relu.h>
@@ -769,6 +771,23 @@ Tensor _int_mm_cuda(const Tensor& self, const Tensor& mat2) {
   return _int_mm_out_cuda(self, mat2, result);
 }
 
+static bool _scaled_mm_allowed_device() {
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+#ifdef USE_ROCM
+    std::string device_arch = dprops->gcnArchName;
+    static const std::vector<std::string> archs = {"gfx940", "gfx941", "gfx942"};
+    for (std::string arch : archs) {
+        size_t substring = device_arch.find(arch);
+        if (substring != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+#else
+    return dprops->major >= 9 || (dprops->major == 8 && dprops->minor == 9);
+#endif
+}
+
 // Computes matrix multiply + bias while applying scaling to input and output matrices and computes amax
 // Scales are only applicable when matrices are of Float8 type and assumbed to be equal to 1.0 by default.
 // If output matrix type is 16 or 32-bit type, neither scale_result is applied nor amax is computed.
@@ -798,9 +817,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           bool use_fast_accum,
           Tensor& out, Tensor& amax) {
   // Check sizes
-  auto dprops = at::cuda::getCurrentDeviceProperties();
-  bool allowed_device = dprops->major >= 9 || (dprops->major == 8 && dprops->minor == 9);
-  TORCH_CHECK(allowed_device, "torch._scaled_mm is only supported on devices with compute capability >= 9.0 or 8.9)");
+  bool allowed_device = _scaled_mm_allowed_device();
+  TORCH_CHECK(allowed_device, "torch._scaled_mm is only supported on CUDA devices with compute capability >= 9.0 or 8.9, or ROCm MI300+");
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   TORCH_CHECK(
@@ -858,7 +876,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   at::native::resize_output(out, {mat1_sizes[0], mat2_sizes[1]});
   at::native::resize_output(amax, {});
 
-#if !defined(USE_ROCM) && !defined(_MSC_VER)
+#if !defined(USE_ROCM) && !defined(_MSC_VER) || (defined(USE_ROCM) && ROCM_VERSION >= 60000)
   cublasCommonArgs args(mat1, mat2, out);
   const auto out_dtype_ = args.result->scalar_type();
   TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
@@ -886,6 +904,13 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       use_fast_accum);
 #else
   TORCH_CHECK(false, "_scaled_mm_out_cuda is not compiled for this platform.");
+#endif
+
+#if defined(USE_ROCM) && ROCM_VERSION >= 60000
+  // rocm's hipblaslt does not yet support amax, so calculate separately
+  auto out_float32 = out.to(kFloat);
+  out_float32.abs_();
+  amax = at::max(out_float32);
 #endif
 
   return {out, amax};
