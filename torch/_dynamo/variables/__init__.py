@@ -23,6 +23,7 @@ from .dicts import (
     DefaultDictVariable,
     SetVariable,
 )
+from .distributed import BackwardHookVariable
 from .functions import (
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,
@@ -91,6 +92,7 @@ from .user_defined import (
 __all__ = [
     "AutogradFunctionContextVariable",
     "AutogradFunctionVariable",
+    "BackwardHookVariable",
     "BaseListVariable",
     "BuiltinVariable",
     "ClosureVariable",
