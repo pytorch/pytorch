@@ -2593,6 +2593,218 @@ class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
         return wrapped_gm
 
     @config.patch(capture_func_transforms=True)
+    def test_vjp(self):
+        counters.clear()
+
+        def fn(x):
+            return x.sin().sum()
+
+        def wrapper_fn(x, v):
+            (out, vjpfunc) = torch.func.vjp(fn, x)
+            return out
+
+        x = torch.randn([5])
+        v = torch.randn(5)
+        wrapped_gm = self._compile_check(wrapper_fn, (x, v))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        child = L_x_
+
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+        _grad_increment_nesting = torch._C._functorch._grad_increment_nesting()
+
+        child_1 = torch._C._functorch._wrap_for_grad(child, 1);  child = None
+
+        set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
+
+        child_2 = torch._functorch.eager_transforms._set_tensor_requires_grad(child_1)
+
+        set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
+
+        sin = child_1.sin();  child_1 = None
+        primal_out = sin.sum();  sin = None
+
+        out = torch._C._functorch._unwrap_for_grad(primal_out, 1);  primal_out = None
+
+        _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting()
+        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
+        return (out,)
+""",
+        )
+
+    @config.patch(capture_func_transforms=True)
+    def test_vjp_multiple_outputs(self):
+        counters.clear()
+
+        def wrapper_fn(x, v):
+            fn = lambda x: (x.sin(), x.cos())  # noqa: E731
+            (out, vjpfunc) = torch.func.vjp(fn, x)
+            vjps = vjpfunc((v, v))
+            return out, vjps
+
+        x = torch.randn([5])
+        v = torch.randn(5)
+        wrapped_gm = self._compile_check(wrapper_fn, (x, v))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor, L_v_ : torch.Tensor):
+        child = L_x_
+        child_8 = L_v_
+
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+        _grad_increment_nesting = torch._C._functorch._grad_increment_nesting()
+
+        child_1 = torch._C._functorch._wrap_for_grad(child, 1);  child = None
+
+        set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
+
+        child_4 = torch._functorch.eager_transforms._set_tensor_requires_grad(child_1)
+
+        set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
+
+        primal_out = child_1.sin()
+        primal_out_1 = child_1.cos();  child_1 = None
+
+        _unwrap_for_grad = torch._C._functorch._unwrap_for_grad(primal_out, 1)
+        _unwrap_for_grad_1 = torch._C._functorch._unwrap_for_grad(primal_out_1, 1)
+
+        _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting()
+        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
+
+        _vjp_treespec_compare = torch._functorch.eager_transforms._vjp_treespec_compare((primal_out, primal_out_1), (child_8, child_8))
+
+        _autograd_grad = torch._functorch.eager_transforms._autograd_grad([primal_out, primal_out_1], [child_4], [child_8, child_8], retain_graph = True, create_graph = True);  primal_out = primal_out_1 = child_4 = child_8 = None
+        getitem = _autograd_grad[0];  _autograd_grad = None
+        return (_unwrap_for_grad, _unwrap_for_grad_1, getitem)
+""",
+        )
+
+    @config.patch(capture_func_transforms=True)
+    def test_vjp_multiple_outputs_python_struct(self):
+        counters.clear()
+
+        def wrapper_fn(x, v):
+            fn = lambda x: {"first": x.sin(), "second": x.cos()}  # noqa: E731
+            (out, vjpfunc) = torch.func.vjp(fn, x)
+            vjps = vjpfunc({"first": v, "second": v.sin()})
+            return out, vjps
+
+        x = torch.randn([5])
+        v = torch.randn(5)
+        wrapped_gm = self._compile_check(wrapper_fn, (x, v))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor, L_v_ : torch.Tensor):
+        child = L_x_
+        child_7 = L_v_
+
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+        _grad_increment_nesting = torch._C._functorch._grad_increment_nesting()
+
+        child_1 = torch._C._functorch._wrap_for_grad(child, 1);  child = None
+
+        set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
+
+        child_4 = torch._functorch.eager_transforms._set_tensor_requires_grad(child_1)
+
+        set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
+
+        primal_out = child_1.sin()
+        primal_out_1 = child_1.cos();  child_1 = None
+
+        _unwrap_for_grad = torch._C._functorch._unwrap_for_grad(primal_out, 1)
+        _unwrap_for_grad_1 = torch._C._functorch._unwrap_for_grad(primal_out_1, 1)
+
+        _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting()
+        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
+
+        child_8 = child_7.sin()
+
+        _vjp_treespec_compare = torch._functorch.eager_transforms._vjp_treespec_compare({'first': primal_out, 'second': primal_out_1}, {'first': child_7, 'second': child_8})
+
+        _autograd_grad = torch._functorch.eager_transforms._autograd_grad([primal_out, primal_out_1], [child_4], [child_7, child_8], retain_graph = True, create_graph = True);  primal_out = primal_out_1 = child_4 = child_7 = child_8 = None
+        getitem = _autograd_grad[0];  _autograd_grad = None
+        return (_unwrap_for_grad, _unwrap_for_grad_1, getitem)
+""",
+        )
+
+    @config.patch(capture_func_transforms=True)
+    def test_vjp_has_aux(self):
+        counters.clear()
+
+        def fn(x):
+            return x.sin().sum(), x
+
+        def wrapper_fn(x, v):
+            (out, vjpfunc, _) = torch.func.vjp(fn, x, has_aux=True)
+            return out
+
+        x = torch.randn([5])
+        v = torch.randn(5)
+        wrapped_gm = self._compile_check(wrapper_fn, (x, v))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        child = L_x_
+
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+        _grad_increment_nesting = torch._C._functorch._grad_increment_nesting()
+
+        aux = torch._C._functorch._wrap_for_grad(child, 1);  child = None
+
+        set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
+
+        child_2 = torch._functorch.eager_transforms._set_tensor_requires_grad(aux)
+
+        set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
+
+        sin = aux.sin()
+        primal_out = sin.sum();  sin = None
+
+        _ = torch._C._functorch._unwrap_for_grad(aux, 1);  aux = None
+
+        out = torch._C._functorch._unwrap_for_grad(primal_out, 1);  primal_out = None
+
+        _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting()
+        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
+        return (out,)
+""",
+        )
+
+    @config.patch(capture_func_transforms=True)
     def test_grad(self):
         counters.clear()
 
@@ -2624,7 +2836,7 @@ class GraphModule(torch.nn.Module):
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad = torch._functorch.eager_transforms._tensor_requires_grad(diff_args)
+        _set_tensor_requires_grad = torch._functorch.eager_transforms._set_tensor_requires_grad(diff_args)
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
 
@@ -2693,7 +2905,7 @@ class GraphModule(torch.nn.Module):
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad = torch._functorch.eager_transforms._tensor_requires_grad(diff_args)
+        _set_tensor_requires_grad = torch._functorch.eager_transforms._set_tensor_requires_grad(diff_args)
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
 
@@ -2751,7 +2963,7 @@ class GraphModule(torch.nn.Module):
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad = torch._functorch.eager_transforms._tensor_requires_grad(diff_args)
+        _set_tensor_requires_grad = torch._functorch.eager_transforms._set_tensor_requires_grad(diff_args)
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
 
@@ -2809,7 +3021,7 @@ class GraphModule(torch.nn.Module):
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad = torch._functorch.eager_transforms._tensor_requires_grad(diff_args)
+        _set_tensor_requires_grad = torch._functorch.eager_transforms._set_tensor_requires_grad(diff_args)
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
 
@@ -2864,7 +3076,7 @@ class GraphModule(torch.nn.Module):
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad = torch._functorch.eager_transforms._tensor_requires_grad(diff_args)
+        _set_tensor_requires_grad = torch._functorch.eager_transforms._set_tensor_requires_grad(diff_args)
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
 
@@ -2923,7 +3135,7 @@ class GraphModule(torch.nn.Module):
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad = torch._functorch.eager_transforms._tensor_requires_grad(diff_args)
+        _set_tensor_requires_grad = torch._functorch.eager_transforms._set_tensor_requires_grad(diff_args)
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
 
@@ -2993,12 +3205,12 @@ class GraphModule(torch.nn.Module):
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad = torch._functorch.eager_transforms._tensor_requires_grad(child_4)
+        _set_tensor_requires_grad = torch._functorch.eager_transforms._set_tensor_requires_grad(child_4)
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
         set_inplace_requires_grad_allowed_2 = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad_1 = torch._functorch.eager_transforms._tensor_requires_grad(child_5)
+        _set_tensor_requires_grad_1 = torch._functorch.eager_transforms._set_tensor_requires_grad(child_5)
 
         set_inplace_requires_grad_allowed_3 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
 
@@ -3039,12 +3251,12 @@ class GraphModule(torch.nn.Module):
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad = torch._functorch.eager_transforms._tensor_requires_grad(child_4)
+        _set_tensor_requires_grad = torch._functorch.eager_transforms._set_tensor_requires_grad(child_4)
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
         set_inplace_requires_grad_allowed_2 = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad_1 = torch._functorch.eager_transforms._tensor_requires_grad(child_5)
+        _set_tensor_requires_grad_1 = torch._functorch.eager_transforms._set_tensor_requires_grad(child_5)
 
         set_inplace_requires_grad_allowed_3 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
 
@@ -3101,7 +3313,7 @@ class GraphModule(torch.nn.Module):
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad = torch._functorch.eager_transforms._tensor_requires_grad(child_1)
+        _set_tensor_requires_grad = torch._functorch.eager_transforms._set_tensor_requires_grad(child_1)
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
         _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
@@ -3111,7 +3323,7 @@ class GraphModule(torch.nn.Module):
 
         set_inplace_requires_grad_allowed_2 = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad_1 = torch._functorch.eager_transforms._tensor_requires_grad(diff_args_1)
+        _set_tensor_requires_grad_1 = torch._functorch.eager_transforms._set_tensor_requires_grad(diff_args_1)
 
         set_inplace_requires_grad_allowed_3 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
 
@@ -3230,7 +3442,7 @@ class GraphModule(torch.nn.Module):
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
-        _tensor_requires_grad = torch._functorch.eager_transforms._tensor_requires_grad(diff_args)
+        _set_tensor_requires_grad = torch._functorch.eager_transforms._set_tensor_requires_grad(diff_args)
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False)
 
