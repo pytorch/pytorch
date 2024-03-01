@@ -179,18 +179,19 @@ uint32_t _getAlignment(uintptr_t address) {
 }
 #endif
 
-static size_t _parseChosenWorkspaceSize() {
+static size_t _parseChosenSize() {
   const char * val = getenv("CUBLASLT_WORKSPACE_SIZE");
+  size_t workspace_size = 1024;
 #ifdef USE_ROCM
   if (!val) {
     // accept either env var
     val = getenv("HIPBLASLT_WORKSPACE_SIZE");
   }
-  size_t workspace_size = 1024;
 #else
-  size_t workspace_size = 4096;
   cudaDeviceProp* p = at::cuda::getDeviceProperties(c10::cuda::current_device());
-  if (p->major >= 9) {
+  if (p->major == 8) {
+    workspace_size = 4096;
+  } else if (p->major >= 9) {
     workspace_size = 32768;
   }
 #endif
