@@ -1390,10 +1390,11 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_set_nccl_pg_timeout(self):
+    @parametrize("backend", [None, "nccl"])
+    def test_set_nccl_pg_timeout(self, backend):
         store = c10d.FileStore(self.file_name, self.world_size)
         opts = dict(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size, timeout=timedelta(seconds=123)
+            backend=backend, store=store, rank=self.rank, world_size=self.world_size, timeout=timedelta(seconds=123)
         )
         dist.init_process_group(**opts)
         pg = dist.distributed_c10d._get_default_group()
@@ -3021,6 +3022,32 @@ class WorkHookTest(MultiProcessTestCase):
         self.assertEqual(num_hook_fired[OpType.ALLGATHER], 2)
         self.assertTrue(all(duration > 0 for duration in durations[OpType.ALLGATHER]))
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_on_completion_hook_seq(self):
+        pg = self._get_process_group()
+        num_hook_fired = 0
+        seq: int = -1
+        work: int = 0
+
+        def hook(work_info: torch._C._distributed_c10d.WorkInfo):
+            nonlocal num_hook_fired, seq
+            num_hook_fired += 1
+            seq = work_info.seq
+
+        pg._register_on_completion_hook(hook)
+        tensor = torch.ones([2, 3]).cuda(self.rank) * self.rank
+        work_count = 3
+        for i in range(work_count):
+            work += 1
+            pg.broadcast([tensor]).wait()
+
+        # N.B.: destroy_process_group is necessary to wait for
+        # all pending works to finish.
+        c10d.destroy_process_group(pg)
+
+        self.assertEqual(num_hook_fired, work_count)
+        self.assertEqual(work, seq)
 
 class NcclErrorHandlingTest(MultiProcessTestCase):
     def setUp(self):
@@ -3971,7 +3998,7 @@ class NCCLTraceTestBase(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
         os.environ["TORCH_NCCL_ENABLE_TIMING"] = '0'  # see 'timing_enabled' parametrized tests
-        os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = '10'
+        os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = '1000'
         os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = '1'
         self.tempdir = tempfile.TemporaryDirectory()
         os.environ["TORCH_NCCL_DEBUG_INFO_TEMP_FILE"] = self._trace_basename()
@@ -4065,13 +4092,17 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         ver = t['version']
-        self.assertEqual(ver, "1.1")
+        self.assertEqual(ver, "1.3")
+        pg_config = t['pg_config']
+        self.assertEqual(len(pg_config), 1)
+        self.assertEqual(len(pg_config[0]), self.world_size)
         t = t['entries']
         self.assertEqual(len(t), 2)
         last = t[-1]
         self.assertEqual(last['state'], 'completed')
         s = last['time_discovered_started_ns']
         f = last['time_discovered_completed_ns']
+        self.assertEqual(last['record_id'], 1)
         self.assertIsNotNone(f)
         if timing_enabled:
             self.assertIsNotNone(s)
@@ -4129,6 +4160,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_long(self):
+        os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = '10'
         if self.rank == self.MAIN_PROCESS_RANK:
             return
         pg = self._create_process_group_nccl()
@@ -4257,6 +4289,132 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 pg.allreduce(a).wait()
             torch.cuda.synchronize(device=device)
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("op_sizes_per_coalesce", [
+        [(2, 3)],
+        [(2, 3), (5, 5), (1,)],
+    ])
+    @parametrize("timing_enabled", [True, False])
+    def test_batched_send_recv(self, op_sizes_per_coalesce, timing_enabled):
+        """
+        'WorkEnqueue' was skipped for isendirecv, leading to segfault on dump_entries when update_state tried to use
+        a destructed Work obj's cuda events
+        """
+
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+        pg = self._create_process_group_nccl()
+        if timing_enabled:
+            pg._enable_collectives_timing()
+
+        num_coalesced_ops = 20
+        ops_per_coalesce = len(op_sizes_per_coalesce)
+        for i in range(num_coalesced_ops):
+            ops = []
+            for input_sizes in op_sizes_per_coalesce:
+                tensor = torch.zeros(input_sizes).to(self.local_device)
+                if self.rank == 0:
+                    ops.append(dist.P2POp(dist.irecv, tensor, 1))
+                elif self.rank == 1:
+                    tensor *= 2
+                    ops.append(dist.P2POp(dist.isend, tensor, 0))
+
+            dist.batch_isend_irecv(ops).pop().wait()
+
+        torch.cuda.synchronize()
+
+        if timing_enabled:
+            # wait for watchdog thread to process the queue of works
+            time.sleep(1)
+
+        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
+        self.assertEqual(len(t['entries']), num_coalesced_ops * (ops_per_coalesce + 1))
+        expected_record_id = 0
+        for seq in range(num_coalesced_ops):
+            first_op = seq * (ops_per_coalesce + 1)
+            coalesced_op = first_op + ops_per_coalesce
+            expected_seq = seq + 1
+            for p2p_op_idx, input_sizes in zip(range(first_op, coalesced_op, 1), op_sizes_per_coalesce):
+                # the indivudal ops inside the coalescing group the individual op metadata,
+                # but not the timing info coming from the actual coalesced kernel
+                profiling_name = 'nccl:recv 0<-1' if self.rank == 0 else 'nccl:send 1->0'
+                self.assertEqual(t['entries'][p2p_op_idx]['record_id'], expected_record_id)
+                expected_record_id += 1
+                self.assertEqual(t['entries'][p2p_op_idx]['profiling_name'], profiling_name)
+                self.assertEqual(t['entries'][p2p_op_idx]['seq_id'], expected_seq)
+                self.assertEqual(t['entries'][p2p_op_idx]['input_sizes'], [input_sizes])
+                self.assertEqual(t['entries'][p2p_op_idx]['output_sizes'], [input_sizes])
+                # duration doesn't get tagged onto individual ops yet, nor is their state updated
+                self.assertEqual(t['entries'][p2p_op_idx]['state'], 'scheduled')
+                self.assertTrue('duration_ms' not in t['entries'][p2p_op_idx])
+
+            # the coalesced op has no metadata but indicates that coalescing was used,
+            # and accurately reflects the timing and state info for the whole group
+            self.assertEqual(t['entries'][coalesced_op]['record_id'], expected_record_id)
+            expected_record_id += 1
+            self.assertEqual(t['entries'][coalesced_op]['profiling_name'], 'nccl:coalesced')
+            self.assertEqual(t['entries'][coalesced_op]['seq_id'], expected_seq)
+            self.assertEqual(t['entries'][coalesced_op]['state'], 'completed')
+            self.assertEqual(t['entries'][coalesced_op]['input_sizes'], [])
+            self.assertEqual(t['entries'][coalesced_op]['output_sizes'], [])
+
+            if timing_enabled:
+                duration = t['entries'][coalesced_op]['duration_ms']
+                self.assertTrue(0.001 < duration < 10000, duration)
+            else:
+                self.assertTrue('duration_ms' not in t['entries'][coalesced_op])
+
+    @parametrize("op_sizes", [
+        [(2, 3)],
+        [(2, 3), (5, 5), (1,)],
+    ])
+    @parametrize("timing_enabled", [True, False])
+    def test_individual_send_recv(self, op_sizes, timing_enabled):
+        """
+        'WorkEnqueue' was skipped for isendirecv, leading to segfault on dump_entries when update_state tried to use
+        a destructed Work obj's cuda events
+        """
+
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+        pg = self._create_process_group_nccl()
+        if timing_enabled:
+            pg._enable_collectives_timing()
+        num_repeats = 10
+        ops_per_repeat = len(op_sizes)
+        for i in range(num_repeats):
+            for input_sizes in op_sizes:
+                tensor = torch.zeros(input_sizes).to(self.local_device)
+                if self.rank == 0:
+                    dist.recv(tensor, 1)
+                elif self.rank == 1:
+                    tensor *= 2
+                    dist.send(tensor, 0)
+
+        torch.cuda.synchronize()
+        if timing_enabled:
+            # wait for watchdog thread to process the queue of works
+            time.sleep(1)
+
+        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
+        self.assertEqual(len(t['entries']), num_repeats * (ops_per_repeat))
+        for seq in range(num_repeats * ops_per_repeat):
+            input_sizes = op_sizes[seq % ops_per_repeat]
+            profiling_name = 'nccl:recv 0<-1' if self.rank == 0 else 'nccl:send 1->0'
+            expected_seq = seq + 1
+            self.assertEqual(t['entries'][seq]['profiling_name'], profiling_name)
+            self.assertEqual(t['entries'][seq]['seq_id'], expected_seq)
+            self.assertEqual(t['entries'][seq]['input_sizes'], [input_sizes])
+            self.assertEqual(t['entries'][seq]['output_sizes'], [input_sizes])
+            self.assertEqual(t['entries'][seq]['state'], 'completed')
+
+            if timing_enabled:
+                duration = t['entries'][seq]['duration_ms']
+                self.assertTrue(0.001 < duration < 10000, duration)
+            else:
+                self.assertTrue('duration_ms' not in t['entries'][seq])
+
 class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
     timeout_sec = 1
 
@@ -4292,6 +4450,8 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
         # We need to completely disable the coordinated timeout dump to avoid rank 0
         # also timeout so that we set the check frequency to be very large (25 min).
         os.environ['TORCH_NCCL_COORD_CHECK_MILSEC'] = '1500000'
+        # need rank0 to crash before looking for its output file
+        os.environ['TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC'] = '1'
 
         if self.rank == self.MAIN_PROCESS_RANK:
             # wait for rank0 to crash before looking for its output file
@@ -4326,6 +4486,7 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
             # rank 0 will crash before it passes the sync, but rank1 will exit quickly and cleanly
             torch.cuda.synchronize()
 
+instantiate_parametrized_tests(ProcessGroupNCCLTest)
 instantiate_parametrized_tests(NCCLTraceTestDumpOnTimeout)
 instantiate_parametrized_tests(NCCLTraceTest)
 
@@ -4339,6 +4500,10 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_timeout_dumps_on_stuck_ranks(self):
+        # need rank0 to crash quicker after detecting timeout
+        os.environ['TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC'] = '1'
+        # restore this env var to its prior default in case another test changed it
+        os.environ['TORCH_NCCL_COORD_CHECK_MILSEC'] = '1000'
 
         if self.rank == self.MAIN_PROCESS_RANK:
             # wait for both rank0 and 1 to crash before looking for both ranks' output

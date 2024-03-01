@@ -24,11 +24,34 @@ _wait_all
 
 """
 
-_use_native_funcol = "_USE_NATIVE_C10D_FUNCTIONAL" in os.environ
+_use_native_funcol: Optional[bool] = None
 
 
-def native_funcol_enabled():
-    return _use_native_funcol
+if torch._running_with_deploy():
+
+    def native_funcol_enabled():
+        return False
+
+else:
+    from torch._dynamo import assume_constant_result
+
+    @assume_constant_result
+    def native_funcol_enabled():
+        global _use_native_funcol
+        if _use_native_funcol is None:
+            try:
+                # Disable native funcol when torch_xla is installed. This check
+                # will be removed once torch_xla adopts the native_funcol IR.
+                import torch_xla  # noqa: F401
+
+                _use_native_funcol = False
+            except Exception:
+                # When TORCH_DISABLE_NATIVE_FUNCOL is set, fallback to py funcol
+                _use_native_funcol = (
+                    os.environ.get("TORCH_DISABLE_NATIVE_FUNCOL") != "1"
+                )
+
+        return _use_native_funcol
 
 
 logger = logging.getLogger(__name__)

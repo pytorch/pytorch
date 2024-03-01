@@ -1,11 +1,14 @@
 # mypy: ignore-errors
-
+import functools
 import inspect
 from typing import Dict, List
 
 import torch
-from .. import variables
+from ...fx.experimental._backward_state import BackwardState
+from .. import compiled_autograd, variables
+from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import unimplemented
+from ..external_utils import call_module_hooks_from_backward_state
 from ..utils import istype
 from .base import VariableTracker
 from .constant import ConstantVariable
@@ -53,6 +56,7 @@ def is_constant_pg_functions(value):
         _get_group_size_by_name,
         _get_group_tag,
         _rank_not_in_group,
+        _resolve_group_name_by_ranks_and_tag,
         get_process_group_ranks,
     )
 
@@ -61,6 +65,7 @@ def is_constant_pg_functions(value):
         _get_group_tag,
         _rank_not_in_group,
         get_process_group_ranks,
+        _resolve_group_name_by_ranks_and_tag,
     ]
 
     return inspect.isfunction(value) and value in constant_processgroup_functions
@@ -253,3 +258,102 @@ class ProcessGroupVariable(DistributedVariable):
         from torch.testing._internal.distributed.fake_pg import FakeProcessGroup
 
         return istype(value, (ProcessGroup, FakeProcessGroup))
+
+
+class BackwardHookVariable(VariableTracker):
+    """
+    Handles torch.utils.hooks.BackwardHook for module-level backward
+    hooks.
+    """
+
+    @staticmethod
+    def create(
+        tx,
+        module: VariableTracker,
+        user_hooks: VariableTracker,
+        user_pre_hooks: VariableTracker,
+    ):
+        if not compiled_autograd.compiled_autograd_enabled:
+            unimplemented("module-level backwards hooks require compiled autograd")
+
+        def _in_graph_bw_hooks(bw_state: BackwardState):
+            """
+            Rather than installing the user hooks in the graph (which
+            don't survive AotAutograd), we install hooks that will call
+            trace_wrapped in the backward pass that CompiledAutograd
+            can turn into actual hook calls.
+            """
+            return torch.utils.hooks.BackwardHook(
+                None,
+                (
+                    functools.partial(
+                        trace_wrapped,
+                        fn=call_module_hooks_from_backward_state,
+                        bw_state=bw_state,
+                        hooks_name=user_hooks_name,
+                        module_name=module_name,
+                    ),
+                ),
+                (
+                    functools.partial(
+                        trace_wrapped,
+                        fn=call_module_hooks_from_backward_state,
+                        bw_state=bw_state,
+                        hooks_name=user_pre_hooks_name,
+                        module_name=module_name,
+                    ),
+                ),
+            )
+
+        module_name, bw_state_proxy = tx.output.add_backward_state_hook(module)
+        user_pre_hooks_name, _ = tx.output.add_backward_state_hook(user_pre_hooks)
+        user_hooks_name, _ = tx.output.add_backward_state_hook(user_hooks)
+        proxy = tx.output.create_proxy(
+            "call_function",
+            _in_graph_bw_hooks,
+            (bw_state_proxy,),
+            {},
+        )
+        proxy.node.meta["example_value"] = torch.utils.hooks.BackwardHook(None, (), ())
+        return BackwardHookVariable(proxy, module, user_hooks, user_pre_hooks)
+
+    def __init__(
+        self,
+        proxy: torch.fx.Proxy,
+        module: VariableTracker,
+        user_hooks: VariableTracker,
+        user_pre_hooks: VariableTracker,
+        **options,
+    ):
+        super().__init__(**options)
+        self.proxy = proxy
+        self.module = module
+        self.user_hooks = user_hooks
+        self.user_pre_hooks = user_pre_hooks
+
+    def as_proxy(self):
+        return self.proxy
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name in ("setup_input_hook", "setup_output_hook"):
+            return self._setup_hook(tx, name, *args, **kwargs)
+        return super().call_method(tx, name, args, kwargs)
+
+    def _setup_hook(self, tx, hook_method_name, args):
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_method",
+                hook_method_name,
+                (self.as_proxy(), args.as_proxy()),
+                {},
+            ),
+        )

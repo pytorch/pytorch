@@ -88,9 +88,9 @@ DLDataType getDLDataType(const Tensor& t) {
   return dtype;
 }
 
-static DLDevice getDLDevice(const Tensor& tensor, const int64_t& device_id) {
+static DLDevice getDLDevice(const Tensor& tensor, c10::DeviceIndex device_id) {
   DLDevice ctx;
-  ctx.device_id = device_id;
+  ctx.device_id = static_cast<int32_t>(device_id);
   switch (tensor.device().type()) {
     case DeviceType::CPU:
       ctx.device_type = DLDeviceType::kDLCPU;
@@ -148,7 +148,7 @@ static Device getATenDevice(const DLDevice& ctx, void* data) {
 }
 
 ScalarType toScalarType(const DLDataType& dtype) {
-  ScalarType stype;
+  ScalarType stype = ScalarType::Undefined;
   TORCH_CHECK(dtype.lanes == 1, "ATen does not support lanes != 1");
   switch (dtype.code) {
     case DLDataTypeCode::kDLUInt:
@@ -242,8 +242,7 @@ ScalarType toScalarType(const DLDataType& dtype) {
       }
       break;
     default:
-      TORCH_CHECK(
-          false, "Unsupported code " + c10::to_string(dtype.code));
+      TORCH_CHECK(false, "Unsupported code " + c10::to_string(dtype.code));
   }
   return stype;
 }
@@ -265,7 +264,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   // gh-83069
   auto shape = src.sizes();
   auto strides = src.strides().vec();
-  for (int i=0; i<src.dim(); i++) {
+  for (int i = 0; i < src.dim(); i++) {
     if (shape[i] < 2) {
       strides[i] = 1;
     }
@@ -277,7 +276,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   atDLMTensor->tensor.manager_ctx = atDLMTensor;
   atDLMTensor->tensor.deleter = &deleter;
   atDLMTensor->tensor.dl_tensor.data = view.data_ptr();
-  int64_t device_id = 0;
+  c10::DeviceIndex device_id = 0;
   if (src.is_cuda()) {
     device_id = src.get_device();
   }
@@ -313,7 +312,7 @@ Tensor fromDLPack(
     return at::from_blob(
         src->dl_tensor.data,
         IntArrayRef(src->dl_tensor.shape, src->dl_tensor.ndim),
-        deleter,
+        std::move(deleter),
         at::device(device).dtype(stype),
         {device});
   }
@@ -323,6 +322,6 @@ Tensor fromDLPack(
       IntArrayRef(src->dl_tensor.strides, src->dl_tensor.ndim),
       deleter,
       at::device(device).dtype(stype),
-      { device });
+      {device});
 }
 } // namespace at

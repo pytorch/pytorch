@@ -362,40 +362,35 @@ class OpDispatcher:
 
     @staticmethod
     def wrap(res: object, spec: OutputSpecType) -> object:
-        def to_dt(res, spec):
-            assert spec is not None and isinstance(
-                spec, DTensorSpec
-            ), f"output spec does not match with output! Expected DTensorSpec, got {spec}."
-            assert spec.tensor_meta is not None
-            return dtensor.DTensor(
-                res,
-                spec.mesh,
-                spec.placements,
-                shape=spec.tensor_meta.shape,
-                dtype=spec.tensor_meta.dtype,
-                requires_grad=res.requires_grad,
-                stride=spec.tensor_meta.stride,
-            )
-
         if isinstance(res, torch.Tensor):
-            return to_dt(res, spec)
+            if spec is not None:
+                assert isinstance(
+                    spec, DTensorSpec
+                ), f"output spec does not match with output! Expected DTensorSpec, got {spec}."
+                assert spec.tensor_meta is not None
+                return dtensor.DTensor(
+                    res,
+                    spec.mesh,
+                    spec.placements,
+                    shape=spec.tensor_meta.shape,
+                    dtype=spec.tensor_meta.dtype,
+                    requires_grad=res.requires_grad,
+                    stride=spec.tensor_meta.stride,
+                )
+            else:
+                # if output does not have a DTensorSpec due to specific ops, it must be a scalar tensor
+                assert res.ndim == 0, "output tensor should be scalar!"
+                return res
         elif isinstance(res, (list, tuple)):
             assert spec is not None and isinstance(
                 spec, (list, tuple)
             ), f"output spec does not match with output! Expected list/tuple, got {spec}."
             res_list = []
             for e, s in zip(res, spec):
-                # NOTE: local results might return Optional Tensor from ATen op, so we need
-                # to handle that case and make sure we don't wrap None with DTensor.
-                # (i.e. native_layer_norm.backward)
-                if isinstance(e, (list, tuple)) and isinstance(s, (list, tuple)):
-                    res_list.append(type(e)([to_dt(ee, ss) for ee, ss in zip(e, s)]))
-                elif e is not None and s is not None:
-                    res_list.append(to_dt(e, s))
-                else:
-                    res_list.append(None)  # type: ignore[arg-type]
+                res_list.append(OpDispatcher.wrap(e, s))
 
             return tuple(res_list) if isinstance(res, tuple) else res_list
         else:
-            # if the res contains only non tensor values, we simply return it without rewrapping
+            # if the res contains only non tensor values (i.e. int/float/none), we simply return it
+            # without rewrapping to DTensor.
             return res

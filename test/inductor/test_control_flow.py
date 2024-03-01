@@ -13,6 +13,54 @@ from torch.testing._internal.triton_utils import requires_cuda
 
 
 class CondTests(TestCase):
+    class SimpleCondModel(torch.nn.Module):
+        def forward(self, p, a, b):
+            def true_fn(x, y):
+                return x + y
+
+            def false_fn(x, y):
+                return x - y
+
+            return torch.cond(p, true_fn, false_fn, [a, b])
+
+    class NestedCondModel(torch.nn.Module):
+        def forward(self, p0, p1, p2, a, b, c):
+            def true_fn(x0, y0, z0):
+                def true_true_fn(x1, y1, z1):
+                    return (x1 - y1 * z1) * 3.14
+
+                def true_false_fn(x1, y1, z1):
+                    def true_false_true_fn(x2, y2, z2):
+                        return (x2 * y2 * z2) / 2.71
+
+                    def true_false_false_fn(x2, y2, z2):
+                        return (x2 + y2 + z2) * 1.23
+
+                    return torch.cond(
+                        p2, true_false_true_fn, true_false_false_fn, [x1, y1, z1]
+                    )
+
+                return torch.cond(p1, true_true_fn, true_false_fn, [x0, y0, z0])
+
+            def false_fn(x0, y0, z0):
+                def false_true_fn(x1, y1, z1):
+                    def false_true_true_fn(x2, y2, z2):
+                        return (x2 - y2 - z2) + 1.23
+
+                    def false_true_false_fn(x2, y2, z2):
+                        return (x2 / y2 / z2) - 3.14
+
+                    return torch.cond(
+                        p2, false_true_true_fn, false_true_false_fn, [x1, y1, z1]
+                    )
+
+                def false_false_fn(x1, y1, z1):
+                    return (x1 - y1 * z1) / 2.71
+
+                return torch.cond(p1, false_true_fn, false_false_fn, [x0, y0, z0])
+
+            return torch.cond(p0, true_fn, false_fn, [a, b, c])
+
     def _run_test(
         self,
         model,
@@ -53,18 +101,8 @@ class CondTests(TestCase):
     @parametrize("dynamic", [False, True])
     def test_simple_control_flow(self, device, dynamic):
         # cond control flow without nesting
-        class Model(torch.nn.Module):
-            def forward(self, p, a, b):
-                def true_fn(x, y):
-                    return x + y
-
-                def false_fn(x, y):
-                    return x - y
-
-                return torch.cond(p, true_fn, false_fn, [a, b])
-
         self._run_test(
-            model=Model(),
+            model=self.SimpleCondModel(),
             inputs=(
                 torch.randn(10, 20),
                 torch.randn(10, 20),
@@ -78,46 +116,8 @@ class CondTests(TestCase):
     @parametrize("dynamic", [False, True])
     def test_nested_control_flow(self, device, dynamic):
         # cond control flow with nesting
-        class Model(torch.nn.Module):
-            def forward(self, p0, p1, p2, a, b, c):
-                def true_fn(x0, y0, z0):
-                    def true_true_fn(x1, y1, z1):
-                        return (x1 - y1 * z1) * 3.14
-
-                    def true_false_fn(x1, y1, z1):
-                        def true_false_true_fn(x2, y2, z2):
-                            return (x2 * y2 * z2) / 2.71
-
-                        def true_false_false_fn(x2, y2, z2):
-                            return (x2 + y2 + z2) * 1.23
-
-                        return torch.cond(
-                            p2, true_false_true_fn, true_false_false_fn, [x1, y1, z1]
-                        )
-
-                    return torch.cond(p1, true_true_fn, true_false_fn, [x0, y0, z0])
-
-                def false_fn(x0, y0, z0):
-                    def false_true_fn(x1, y1, z1):
-                        def false_true_true_fn(x2, y2, z2):
-                            return (x2 - y2 - z2) + 1.23
-
-                        def false_true_false_fn(x2, y2, z2):
-                            return (x2 / y2 / z2) - 3.14
-
-                        return torch.cond(
-                            p2, false_true_true_fn, false_true_false_fn, [x1, y1, z1]
-                        )
-
-                    def false_false_fn(x1, y1, z1):
-                        return (x1 - y1 * z1) / 2.71
-
-                    return torch.cond(p1, false_true_fn, false_false_fn, [x0, y0, z0])
-
-                return torch.cond(p0, true_fn, false_fn, [a, b, c])
-
         self._run_test(
-            model=Model(),
+            model=self.NestedCondModel(),
             inputs=(
                 torch.randn(10, 20),
                 torch.randn(10, 20),
@@ -267,6 +267,44 @@ class CondTests(TestCase):
         )
 
     @requires_cuda
+    @parametrize("device", ["cpu", "cuda"])
+    @parametrize("dynamic", [False, True])
+    def test_subgraphs_with_parameters(self, device, dynamic):
+        # nested Modules with parameters
+        class InnerModel1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer = torch.nn.Linear(20, 30, device=device)
+
+            def forward(self, x):
+                return self.layer(x + 1) * 3.14
+
+        class InnerModel2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer1 = torch.nn.Linear(20, 10, device=device)
+                self.layer2 = torch.nn.Linear(10, 30, device=device)
+
+            def forward(self, x):
+                return self.layer2(self.layer1(x - 2)) * 3.14
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.true_fn = InnerModel1()
+                self.false_fn = InnerModel2()
+
+            def forward(self, p, a):
+                return torch.cond(p, self.true_fn, self.false_fn, [a])
+
+        self._run_test(
+            model=Model(),
+            inputs=(torch.randn(10, 20),),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_cuda
     def test_aliasing_outputs(self):
         # output aliasing in subgraphs: not supported
         class Model(torch.nn.Module):
@@ -288,6 +326,85 @@ class CondTests(TestCase):
                 torch.randn(10, 20),
                 torch.randn(10, 20),
             )
+
+    @requires_cuda
+    @parametrize("device", ["cpu", "cuda"])
+    def test_cond_decompose_ops_in_subgraph(self, device):
+        class Model(torch.nn.Module):
+            def forward(self, p, a):
+                def true_fn(x):
+                    return torch.zeros_like(x)
+
+                def false_fn(x):
+                    return torch.ones_like(x)
+
+                b = torch.ones_like(a)
+                c = torch.cond(p, true_fn, false_fn, [b])
+                return c
+
+        self._run_test(
+            model=Model(),
+            inputs=(torch.rand(10, 20),),
+            device=device,
+        )
+
+    @requires_cuda
+    @parametrize("device", ["cpu", "cuda"])
+    def test_cond_decompose_ops_in_subgraph_recursive(self, device):
+        def inner_fn1(x):
+            return torch.zeros_like(x)
+
+        def inner_fn2(x):
+            return torch.ones_like(x)
+
+        class Model(torch.nn.Module):
+            def forward(self, p, a):
+                def true_fn(x):
+                    return torch.cond(p, inner_fn2, inner_fn1, [x])
+
+                def false_fn(x):
+                    return torch.cond(p, inner_fn1, inner_fn2, [x])
+
+                b = torch.ones_like(a)
+                c = torch.cond(p, true_fn, false_fn, [b])
+                return c
+
+        self._run_test(
+            model=Model(),
+            inputs=(torch.rand(10, 20),),
+            device=device,
+        )
+
+    @requires_cuda
+    def test_inductor_fx_passes_recursively_applied(self):
+        counters = {"pre_grad": 0, "post_grad": 0}
+
+        def pre_grad_pass_counter(gm):
+            counters["pre_grad"] += 1
+
+        def post_grad_pass_counter(gm):
+            counters["post_grad"] += 1
+
+        with torch._inductor.config.patch(
+            {
+                "pre_grad_custom_pass": pre_grad_pass_counter,
+                "post_grad_custom_pre_pass": post_grad_pass_counter,
+            }
+        ):
+            self._run_test(
+                model=self.NestedCondModel(),
+                inputs=(
+                    torch.randn(10, 20),
+                    torch.randn(10, 20),
+                    torch.randn(10, 20),
+                ),
+                device="cuda",
+                dynamic=True,
+                num_predicates=3,
+            )
+
+        self.assertEqual(counters["pre_grad"], 11)
+        self.assertEqual(counters["post_grad"], 11)
 
 
 instantiate_parametrized_tests(CondTests)
