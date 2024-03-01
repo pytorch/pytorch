@@ -1,12 +1,10 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <detail/Utils.h>
-
 
 #include <oneapi/dnnl/dnnl.hpp>
-#include "Attr.h"
-
+#include <ATen/native/mkldnn/xpu/detail/Utils.h>
+#include <ATen/native/mkldnn/xpu/detail/Attr.h>
 
 namespace at::native {
 namespace xpu {
@@ -200,9 +198,9 @@ static void deconvolution(
   dnnl::memory src_m, wgh_m, dst_m, bia_m;
   at::Tensor src_blocked, wgh_blocked, dst_blocked = dst;
 
-  src_m = xpu_onednn_memory(src_md, engine, src.data_ptr());
-  wgh_m = xpu_onednn_memory(wgh_md, engine, wgh.data_ptr());
-  dst_m = xpu_onednn_memory(dst_md, engine, dst.data_ptr());
+  src_m = make_onednn_memory(src_md, engine, src.data_ptr());
+  wgh_m = make_onednn_memory(wgh_md, engine, wgh.data_ptr());
+  dst_m = make_onednn_memory(dst_md, engine, dst.data_ptr());
   
   std::unordered_map<int, dnnl::memory> args;
   args.insert({DNNL_ARG_SRC, src_m});
@@ -210,7 +208,7 @@ static void deconvolution(
   args.insert({DNNL_ARG_DST, dst_m});
 
   if (bia.defined()) {
-    auto bia_m = xpu_onednn_memory(bia_md, engine, bia.data_ptr());
+    auto bia_m = make_onednn_memory(bia_md, engine, bia.data_ptr());
     args.insert({DNNL_ARG_BIAS, bia_m});
   }
   if (attr.with_binary())
@@ -219,7 +217,7 @@ static void deconvolution(
   size_t scratchpad_size = deconv_fwd_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::empty(
       {static_cast<int64_t>(scratchpad_size)}, src.options().dtype(at::kByte), c10::nullopt);
-  auto scratchpad_m = xpu_onednn_memory(
+  auto scratchpad_m = make_onednn_memory(
       deconv_fwd_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});
 
@@ -291,16 +289,16 @@ static void deconvolution_backward_data(
   // create memory
   dnnl::memory diff_dst_m, wei_m, diff_src_m;
 
-  diff_src_m = xpu_onednn_memory(src_md, engine, diff_src.data_ptr());
-  wei_m = xpu_onednn_memory(wgh_md, engine, weight.data_ptr());
-  diff_dst_m = xpu_onednn_memory(dst_md, engine, diff_dst.data_ptr());
+  diff_src_m = make_onednn_memory(src_md, engine, diff_src.data_ptr());
+  wei_m = make_onednn_memory(wgh_md, engine, weight.data_ptr());
+  diff_dst_m = make_onednn_memory(dst_md, engine, diff_dst.data_ptr());
 
   // insert args
   std::unordered_map<int, dnnl::memory> args;
   size_t scratchpad_size = deconv_backward_data_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::empty(
       {static_cast<int64_t>(scratchpad_size)}, diff_dst.options().dtype(at::kByte), c10::nullopt);
-  auto scratchpad_memory = xpu_onednn_memory(
+  auto scratchpad_memory = make_onednn_memory(
       deconv_backward_data_pd.scratchpad_desc(),
       engine,
       scratchpad_tensor.data_ptr());
@@ -380,9 +378,9 @@ static void deconvolution_backward_weights(
   // create bwd dnnl::memory
   dnnl::memory src_m, diff_dst_m, diff_wgh_m;
 
-  src_m = xpu_onednn_memory(src_md, engine, src.data_ptr());
-  diff_dst_m = xpu_onednn_memory(dst_md, engine, diff_dst.data_ptr());
-  diff_wgh_m = xpu_onednn_memory(wgh_md, engine, diff_wgh.data_ptr());
+  src_m = make_onednn_memory(src_md, engine, src.data_ptr());
+  diff_dst_m = make_onednn_memory(dst_md, engine, diff_dst.data_ptr());
+  diff_wgh_m = make_onednn_memory(wgh_md, engine, diff_wgh.data_ptr());
 
   // insert args
   std::unordered_map<int, dnnl::memory> args;
@@ -392,14 +390,14 @@ static void deconvolution_backward_weights(
 
   if (diff_bia.defined()) {
     dnnl::memory diff_bia_m =
-        xpu_onednn_memory(bia_md, engine, diff_bia.data_ptr());
+        make_onednn_memory(bia_md, engine, diff_bia.data_ptr());
     args.insert({DNNL_ARG_DIFF_BIAS, diff_bia_m});
   }
 
   size_t scratchpad_size = deconv_bwd_w_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::empty(
       {static_cast<int64_t>(scratchpad_size)}, src.options().dtype(at::kByte), c10::nullopt);
-  auto scratchpad_m = xpu_onednn_memory(
+  auto scratchpad_m = make_onednn_memory(
       deconv_bwd_w_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});
 
