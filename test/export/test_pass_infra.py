@@ -7,7 +7,7 @@ from functorch.experimental import control_flow
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export import export
 from torch._export.pass_base import _ExportPassBase
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase, IS_WINDOWS
 
 
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
@@ -37,6 +37,7 @@ class TestPassInfra(TestCase):
             self.assertEqual(new_node.op, old_node.op)
             self.assertEqual(new_node.target, old_node.target)
 
+    @unittest.skipIf(IS_WINDOWS, "Windows not supported")
     def test_cond(self) -> None:
         class M(torch.nn.Module):
             def __init__(self):

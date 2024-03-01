@@ -20,7 +20,11 @@ from torch._export.utils import (
 )
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TestCase,
+    IS_WINDOWS,
+)
 from torch.utils._pytree import (
     LeafSpec,
     tree_flatten,
@@ -188,6 +192,7 @@ class TestUnflatten(TestCase):
             id(getattr(unflattened_module.sub_net, "2")),
         )
 
+    @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
     def test_unflatten_preserve_signature(self):
         class NestedChild(torch.nn.Module):
             def forward(self, zx, y):
