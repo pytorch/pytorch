@@ -218,6 +218,36 @@ class DistributedPatternTests(TestCase):
         self._assert_same_grad(r1, r2)
         self._assert_same_grad(p1, p2)
 
+    def test_nn_param_return3(self):
+        def fn(x):
+            p = torch.nn.Parameter(x + 123)
+            return p, p.sin()
+
+        opt = torch.compile(fn, fullgraph=True)
+        x1 = torch.randn(16)
+        x2 = x1.clone()
+
+        p1, r1 = fn(x1)
+        r1.sum().backward()
+        p2, r2 = opt(x2)
+        r2.sum().backward()
+        self._assert_same_grad(r1, r2)
+        self._assert_same_grad(p1, p2)
+
+    def test_nn_param_return4(self):
+        def fn(x):
+            p = torch.nn.Parameter(x + 123, requires_grad=False)
+            return p, x + 1
+
+        opt = torch.compile(fn, fullgraph=True)
+        x1 = torch.randn(16)
+        x2 = x1.clone()
+
+        p1, r1 = fn(x1)
+        p2, r2 = opt(x2)
+        self._assert_same_grad(r1, r2)
+        self._assert_same_grad(p1, p2)
+
 
 if __name__ == "__main__":
     if HAS_CPU and not IS_MACOS:

@@ -7,17 +7,6 @@ import math
 import re
 from typing import Dict, List
 
-from torch._streambase import _StreamBase
-from ..._guards import TracingContext
-from ..codegen import PyCodegen
-from ..guards import install_guard
-from ..source import LocalSource
-
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    np = None
-
 import torch._C
 import torch._refs
 import torch.fx
@@ -25,10 +14,15 @@ import torch.nn
 import torch.onnx.operators
 from torch._logging import warning_once
 
+from torch._streambase import _StreamBase
+from ..._guards import TracingContext
 from .. import config, polyfill, variables
+from ..codegen import PyCodegen
+from ..create_parameter_op import new_parameter_placeholder, tracable_create_parameter
 from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented
-from ..guards import GuardBuilder
+from ..guards import GuardBuilder, install_guard
+from ..source import LocalSource
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
@@ -48,6 +42,11 @@ from .ctx_manager import (
 from .distributed import is_constant_pg_functions, is_from_local, ProcessGroupVariable
 from .lists import ListVariable, TupleVariable
 from .torch_function import can_dispatch_torch_function, dispatch_torch_function
+
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
 
 log = logging.getLogger(__name__)
 
@@ -780,10 +779,29 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             unimplemented(f"Parameter(data={data}) not implemented")
 
         # this results in cleaner graphs, but only works for inputs
-        if data.source:
-            return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
+        # disabled for CI testing
+        # if data.source:
+        #     return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
 
-        unimplemented("Parameter() on non-input")
+        try:
+            shape = tuple(data.var_getattr(tx, "shape").as_python_constant())
+            dtype = data.var_getattr(tx, "dtype").as_python_constant()
+            device = data.var_getattr(tx, "device").as_python_constant()
+        except NotImplementedError as e:
+            unimplemented(f"Parameter not python_constant: {e}")
+
+        placeholder = tx.output.synthetic_graph_input(
+            new_parameter_placeholder, [shape, dtype, device, requires_grad]
+        )
+        if data.requires_grad:
+            data = data.call_method("tx", "detach", [], {})
+        result = TorchInGraphFunctionVariable(tracable_create_parameter).call_function(
+            tx, [data, placeholder], {}
+        )
+
+        # In reconstruct() should use the original parameter.  The one returned by the graph will be an alias.
+        result.source = placeholder.source
+        return result
 
     @staticmethod
     def _nn_param_via_prefix_insert(tx, data, requires_grad):

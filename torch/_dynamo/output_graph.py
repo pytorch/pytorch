@@ -434,6 +434,28 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.BACKEND_MATCH))
 
+    def synthetic_graph_input(self, fn, args):
+        """
+        call fn(*args) before the graph runs and turn the result into a fake input.
+        """
+        example_value = fn(*args)
+        varname = self.new_var()
+        cg = PyCodegen(self.root_tx)
+        cg.load_import_from(
+            fn.__module__,
+            fn.__name__,
+        )
+        cg.foreach(map(variables.ConstantVariable.create, args))
+        cg.call_function(len(args), True)
+        cg.store(varname)
+        self.pregraph_bytecode.extend(cg.get_instructions())
+        source = LocalSource(varname)
+        result = VariableBuilder(self.root_tx, source)(example_value)
+        TracingContext.get().guards_context.dynamo_guards.remove_guards_with_source(
+            source
+        )
+        return result
+
     def add_cleanup_hook(self, fn: Callable[[], Any]):
         self.cleanup_hooks.append(fn)
 
