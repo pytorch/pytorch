@@ -306,8 +306,7 @@ void cpu_kernel(TensorIteratorBase& iter, func_t&& op, int64_t grain_size = at::
   // this could be extended to work with void return types
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
-  // dynamic casting not currently supported on CPU
-  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
+  TORCH_CHECK(!needs_dynamic_casting<func_t>::check(iter), "Dynamic casting is not currently supported on CPU");
 
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
     // basic loop can handle 1d slices with arbitrary strides, and 1d slices is all that
@@ -346,7 +345,7 @@ void cpu_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& vop, int
   // dynamic casting not currently supported on CPU, but some kernels (like Fill)
   // explicitly dynamic_cast, so we give the opt-out of checking.
   if constexpr (check_dynamic_cast) {
-    TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
+    TORCH_CHECK(!needs_dynamic_casting<func_t>::check(iter), "Dynamic casting is not currently supported on CPU");
   }
 
   iter.for_each(make_vectorized_loop2d(op, vop), grain_size);
@@ -359,8 +358,7 @@ void cpu_serial_kernel(TensorIteratorBase& iter, func_t&& op, const Range& range
   constexpr bool result_void = std::is_void<typename traits::result_type>::value;
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity &&
                         ((result_void && iter.noutputs() == 0) || (!result_void && iter.noutputs() == 1)));
-  // dynamic casting not currently supported on CPU
-  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
+  TORCH_CHECK(!needs_dynamic_casting<func_t>::check(iter), "Dynamic casting is not currently supported on CPU");
 
   iter.serial_for_each([&](char** data, const int64_t* strides, int64_t n) {
     basic_loop(data, strides, 0, n, std::forward<func_t>(op));
@@ -379,8 +377,7 @@ void cpu_serial_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& v
   // this could be extended to work with void return types
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
-  // dynamic casting not currently supported on CPU
-  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
+  TORCH_CHECK(!needs_dynamic_casting<func_t>::check(iter), "Dynamic casting is not currently supported on CPU");
 
   iter.serial_for_each(make_vectorized_loop2d(op, vop), range);
   iter.cast_outputs();
