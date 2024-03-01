@@ -40,7 +40,7 @@ from torch.utils._triton import has_triton_package
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash, get_path, PyCodeCache
-from ..dependencies import Dep, MemoryDep, StarDep
+from ..dependencies import Dep, MemoryDep, StarDep, WeakDep
 from ..ir import IRNode, ReductionHint, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
@@ -904,6 +904,20 @@ class TritonKernelOverrides(TritonOverrides):
         return (
             f"tl.load({var} + {V.kernel.args.seed_offset('load_seed_offset', offset)})"
         )
+
+    @staticmethod
+    def frexp(x):
+        cache_key = f"frexp({x})"
+        if cache_key in V.kernel.cse.cache:
+            return V.kernel.cse.cache[cache_key]
+
+        mantissa = V.kernel.cse.newvar()
+        exponent = V.kernel.cse.newvar()
+        V.kernel.compute.writeline(
+            f"{mantissa}, {exponent} = triton_helpers.frexp({x})"
+        )
+        V.kernel.cse.cache[cache_key] = (mantissa, exponent)
+        return (mantissa, exponent)
 
 
 # Use mypy to check protocol implemented correctly
@@ -2219,7 +2233,7 @@ class TritonKernel(Kernel):
                     self.compute.splice(
                         f"""\
                     {accumulator}_next, {accumulator_m2}_next, {accumulator_weight}_next = triton_helpers.welford_reduce(
-                        {value}, {accumulator}, {accumulator_m2}, {accumulator_weight},
+                        {value}, {accumulator}, {accumulator_m2}, {accumulator_weight}, roffset == 0
                     )
                     """
                     )
@@ -2567,6 +2581,9 @@ class TritonKernel(Kernel):
         import AttrsDescriptor if the triton version is new enough to have this
         class defined.
         """
+        if not has_triton_package():
+            return ""
+
         import triton.compiler.compiler
 
         if hasattr(triton.compiler.compiler, "AttrsDescriptor"):
@@ -2620,9 +2637,14 @@ class TritonKernel(Kernel):
                 # This arg points to a buf that has been sliced.
                 # We need to count each individual slice to have
                 # a better estimation.
-                indices = set()
+                indices: Set[Any] = set()
+                no_index_dep_count = 0
                 for dep in self.buf_accesses[arg]:
-                    indices.add(dep.index)
+                    if isinstance(dep, (StarDep, WeakDep)):
+                        indices.add(f"no_index_dep_{no_index_dep_count}")
+                        no_index_dep_count += 1
+                    else:
+                        indices.add(dep.index)
                 numel = len(indices) * out_numel
             else:
                 numel = buf_size
@@ -2640,8 +2662,6 @@ class TritonKernel(Kernel):
         return "pointwise"
 
     def codegen_kernel(self, name=None):
-        from triton import next_power_of_2
-
         code = IndentedBuffer()
 
         size_hints = []
@@ -3505,7 +3525,9 @@ class TritonScheduling(BaseScheduling):
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
             compile_wrapper.splice(src_code, strip=True)
-            compile_wrapper.writeline("''')")
+            compile_wrapper.writeline(
+                f"''', device_str='{V.graph.scheduler.current_device.type}')"
+            )
 
             metadata_comment = f"# kernel path: {kernel_path}"
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)

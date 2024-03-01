@@ -756,7 +756,7 @@ class Module:
             "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml "
             "to report this bug.")
 
-    def set_extra_state(self, state: Any):
+    def set_extra_state(self, state: Any) -> None:
         """Set extra state contained in the loaded `state_dict`.
 
         This function is called from :func:`load_state_dict` to handle any extra state

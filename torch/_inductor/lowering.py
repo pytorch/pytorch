@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import sympy
 
 import torch
+import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._higher_order_ops.triton_kernel_wrap import (
@@ -69,6 +70,7 @@ needs_realized_inputs: Set[torch._ops.OpOverload] = set()
 foreach_ops: Set[torch._ops.OpOverload] = set()
 inplace_foreach_ops: Set[torch._ops.OpOverload] = set()
 inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = dict()
+quantized_decomposed = torch.ops.quantized_decomposed
 
 
 def assert_nyi(cond, msg):
@@ -201,7 +203,7 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
             promoting_args = [
                 a
                 for a in args
-                if isinstance(a, (Number, sympy.Expr)) or hasattr(a, "get_dtype")
+                if isinstance(a, (Number, sympy.Expr)) or hasattr(a, "dtype")
             ]
             dtype = get_promoted_dtype(
                 *promoting_args, type_promotion_kind=type_promotion_kind
@@ -643,6 +645,40 @@ def register_pointwise(
     return fn
 
 
+def register_frexp():
+    """A pointwise function that maps ops.frexp to inputs"""
+    name = "frexp"
+    frexp = ops_wrapper("frexp")
+
+    def frexp0(*args, **kwargs):
+        return frexp(*args, **kwargs)[0]
+
+    def frexp1(*args, **kwargs):
+        return frexp(*args, **kwargs)[1]
+
+    pw_fns = [
+        make_pointwise(frexp0),
+        make_pointwise(frexp1, override_return_dtype=torch.int32),
+    ]
+
+    def fn(*args, **kwargs):
+        return pw_fns[0](*args, **kwargs), pw_fns[1](*args, **kwargs)
+
+    fn = register_lowering(
+        aten.frexp,
+    )(fn)
+
+    if hasattr(prims, name):
+        register_lowering(
+            getattr(prims, name),
+            type_promotion_kind=None,
+        )(fn)
+    return fn
+
+
+register_frexp()
+
+
 def register_foreach_pointwise(
     aten_fn,
     pointwise_lowering_fn,
@@ -1001,6 +1037,96 @@ def pointwise_cat(inputs, dim=0):
         dtype=inputs[0].get_dtype(),
         inner_fn=inner_fn,
         ranges=new_size,
+    )
+
+
+@register_lowering(quantized_decomposed.quantize_per_channel, type_promotion_kind=None)
+def quantized_decomposed_quantize_per_channel(
+    input: TensorBox,
+    scales: TensorBox,
+    zero_points: TensorBox,
+    axis: int,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> TensorBox:
+    assert len(scales.get_size()) == 1, "expect scales 1 dim"
+    assert len(zero_points.get_size()) == 1, "expect zero_points 1 dim"
+
+    if input.get_dtype() == torch.bfloat16:
+        input = to_dtype(input, torch.float32)
+    assert (
+        input.get_dtype() == torch.float32
+    ), f"Expecting input to have dtype torch.float32, but got dtype: {input.get_dtype()}"
+    assert axis < len(
+        input.get_size()
+    ), f"Expecting axis to be < {len(input.get_size())}"
+
+    input_loader = input.make_loader()
+    scales_loader = scales.make_loader()
+    zero_points_loader = zero_points.make_loader()
+
+    def inner_fn(idx):
+        channel_idx = (idx[axis],)
+
+        input = input_loader(idx)
+        scale = scales_loader(channel_idx)
+        zero_point = zero_points_loader(channel_idx)
+        qmin, qmax = _create_constants(quant_min, quant_max, dtype=torch.float32)
+
+        inv_scale = ops.reciprocal(scale)
+        val = ops.round(input * inv_scale) + zero_point
+        clamped = ops.maximum(qmin, ops.minimum(qmax, val))
+        return ops.to_dtype(clamped, dtype)
+
+    return Pointwise.create(
+        device=input.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=input.get_size(),
+    )
+
+
+@register_lowering(
+    quantized_decomposed.dequantize_per_channel, type_promotion_kind=None
+)
+def quantized_decomposed_dequantize_per_channel(
+    input: TensorBox,
+    scales: TensorBox,
+    zero_points: TensorBox,
+    axis: int,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> TensorBox:
+    assert len(scales.get_size()) == 1, "expect scales 1 dim"
+    assert len(zero_points.get_size()) == 1, "expect zero_points 1 dim"
+    assert (
+        input.get_dtype() == dtype
+    ), f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
+    assert axis < len(
+        input.get_size()
+    ), f"Expecting axis to be < {len(input.get_size())}"
+
+    input_loader = input.make_loader()
+    scales_loader = scales.make_loader()
+    zero_points_loader = zero_points.make_loader()
+
+    def inner_fn(idx):
+        channel_idx = (idx[axis],)
+
+        input = input_loader(idx)
+        scale = scales_loader(channel_idx)
+        zero_point = zero_points_loader(channel_idx)
+
+        val = ops.sub(ops.to_dtype(input, torch.float32), zero_point) * scale
+        return val
+
+    return Pointwise.create(
+        device=input.get_device(),
+        dtype=torch.float32,
+        inner_fn=inner_fn,
+        ranges=input.get_size(),
     )
 
 
@@ -2186,7 +2312,6 @@ make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
 make_fallback(aten.fractional_max_pool2d)
 make_fallback(aten.fractional_max_pool3d)
-make_fallback(aten.frexp)
 make_fallback(aten.geqrf)
 make_fallback(aten.histc)
 make_fallback(aten.kthvalue)
@@ -5352,15 +5477,6 @@ def _realize(x):
     return clone(x)
 
 
-@register_lowering(torch.ops.inductor.accumulate_grad_)
-def accumulate_grad_(variable, new_grad):
-    # TODO(jansel): decompose into `variable.grad += new_grad` when variable.grad is defined
-    variable.realize()
-    new_grad.realize()
-    ir.AccumulateGrad(variable, new_grad)
-    return variable
-
-
 @register_lowering(torch.ops.inductor.resize_storage_bytes_)
 def resize_storage_bytes_(variable, new_size):
     variable.realize()
@@ -5403,6 +5519,18 @@ def triton_kernel_wrap(*, kernel_idx, grid, kwargs, tensors_to_clone):
         new_kwargs[name] = value
 
     return triton_kernel_wrap_(kernel_idx=kernel_idx, grid=grid, kwargs=new_kwargs)
+
+
+@register_lowering(torch.ops.higher_order.cond)
+def cond(pred, true_fn, false_fn, operands):
+    if is_triton(pred) or any(map(is_triton, operands)):
+        msg = "control flow operator: torch.cond."
+        if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
+            msg = f"{msg} Found from : \n {stack_trace}"
+        V.graph.disable_cudagraphs_reason = msg
+
+    result = ir.Conditional.create(pred, true_fn, false_fn, operands)
+    return list(map(TensorBox.create, result))
 
 
 try:
