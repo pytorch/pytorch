@@ -1538,8 +1538,8 @@ inline TensorIterator get_allany_iter(
     // `make_reduction`, which doesn't cast input to the result type i.e. kBool.,
     // otherwise we use the overload below which casts the input to kBool (which is
     // an extra operation).
-    TORCH_WARN("Dynamic type casting is leveraged for CUDA reduction operations. "
-               "Any non-zero value, including a pure imaginary number, will be considered as True.");
+    TORCH_WARN("Dynamic type casting is leveraged for CUDA reduction operations.
+               Any non-zero value, including a pure imaginary number, will be considered as True.");
     return meta::make_reduction(self, result, dims, keepdim, self.scalar_type());
   }
   return meta::make_reduction_from_out_ty(
