@@ -29,6 +29,8 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
 
   ~IntraNodeComm();
 
+  static bool isEnabled();
+
   /**
    * Performs rendezvous.
    * If rendezvous fails, the IntraNodeComm object will be in an invalid
