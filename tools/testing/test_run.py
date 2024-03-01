@@ -211,16 +211,19 @@ class TestRun:
         return (self | other) - (self - other) - (other - self)
 
     def to_json(self) -> Dict[str, Any]:
-        return {
+        r = {
             "test_file": self.test_file,
-            "included": list(self._included),
-            "excluded": list(self._excluded),
         }
+        if self._included:
+            r["included"] = list(self._included)
+        if self._excluded:
+            r["excluded"] = list(self._excluded)
+        return r
 
     @staticmethod
     def from_json(json: Dict[str, Any]) -> "TestRun":
         return TestRun(
-            json["test_file"], included=json["included"], excluded=json["excluded"]
+            json["test_file"], included=json.get("included", []), excluded=json.get("excluded", [])
         )
 
 

@@ -546,7 +546,8 @@ class TestJsonParsing(TestTD):
         tp = interface.TestPrioritizations(
             tests,
             {
-                TestRun("test3"): 0.8,
+                TestRun("test3", included=["ClassA"]): 0.8,
+                TestRun("test3", excluded=["ClassA"]): 0.2,
                 TestRun("test4"): 0.7,
                 TestRun("test5"): 0.6,
             },

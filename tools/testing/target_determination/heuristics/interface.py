@@ -157,7 +157,7 @@ class TestPrioritizations:
         """
         json_dict = {
             "_test_scores": [
-                (test.to_json(), score) for test, score in self._test_scores.items()
+                (test.to_json(), score) for test, score in self._test_scores.items() if score != 0
             ],
             "_original_tests": list(self._original_tests),
         }
