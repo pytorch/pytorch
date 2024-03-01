@@ -232,7 +232,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def test_rng_non_trees(self):
             self.check_rng()
 
-        def test_mutation_reinplaced(self, backend):
+        def test_mutation_reinplaced(self):
             import torch.nn as nn
 
             class Model(nn.Module):
