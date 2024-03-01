@@ -13,10 +13,10 @@ from torch import Tensor
 from torch._prims_common import (
     check_fp_or_complex,
     check_is_matrix,
-    IntLike,
     Dim,
     DimsType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    IntLike,
     NumberType,
     TensorLikeType,
 )
