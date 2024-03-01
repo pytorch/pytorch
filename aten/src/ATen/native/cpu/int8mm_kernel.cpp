@@ -8,6 +8,7 @@
 #include <ATen/native/cpu/int_mm_kernel.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
+#include <c10/util/Unroll.h>
 
 #if (defined(_WIN32) || defined(_WIN64))
 #define RESTRICT __restrict
@@ -52,12 +53,12 @@ inline void tinygemm_kernel(
     float ss = static_cast<float>(scales[i]);
     scale[i] = _mm512_set1_ps(ss);
   };
-  compile_time_for<COLS>::op(load_scale);
+  c10::ForcedUnroll<COLS>{}(load_scale);
 
   auto loadc = [&](auto i) {
     vc[i] = _mm512_setzero_ps();
   };
-  compile_time_for<ROWS * COLS>::op(loadc);
+  c10::ForcedUnroll<ROWS * COLS>{}(loadc);
 
   auto compute = [&](auto i, int k) {
     constexpr int row = i / COLS;
@@ -86,7 +87,7 @@ inline void tinygemm_kernel(
   };
 
   for (int k = 0; k < K; k += 16) {
-    compile_time_for<ROWS * COLS>::op(compute, k);
+      c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
   }
 
   auto storec = [&](auto i) {
@@ -94,7 +95,7 @@ inline void tinygemm_kernel(
     constexpr int col = i % COLS;
     C[row * ldc + col] = static_cast<BFloat16>(_mm512_reduce_add_ps(vc[i]));
   };
-  compile_time_for<ROWS * COLS>::op(storec);
+  c10::ForcedUnroll<ROWS * COLS>{}(storec);
 }
 
 #elif defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
@@ -134,12 +135,12 @@ inline void tinygemm_kernel(
     float ss = static_cast<float>(scales[i]);
     scale[i] = _mm256_set1_ps(ss);
   };
-  compile_time_for<COLS>::op(load_scale);
+  c10::ForcedUnroll<COLS>{}(load_scale);
 
   auto loadc = [&](auto i) {
     vc[i] = _mm256_setzero_ps();
   };
-  compile_time_for<ROWS * COLS>::op(loadc);
+  c10::ForcedUnroll<ROWS * COLS>{}(loadc);
 
   auto compute = [&](auto i, int k) {
     constexpr int row = i / COLS;
@@ -168,7 +169,7 @@ inline void tinygemm_kernel(
   };
 
   for (int k = 0; k < K; k += 8) {
-    compile_time_for<ROWS * COLS>::op(compute, k);
+    c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
   }
 
   auto storec = [&](auto i) {
@@ -176,7 +177,7 @@ inline void tinygemm_kernel(
     constexpr int col = i % COLS;
     C[row * ldc + col] = static_cast<BFloat16>(_mm256_reduce_add_ps(vc[i]));
   };
-  compile_time_for<ROWS * COLS>::op(storec);
+  c10::ForcedUnroll<ROWS * COLS>{}(storec);
 }
 
 #else
@@ -239,10 +240,10 @@ void int8pack_mm_kernel(
     const Tensor& B,
     const Tensor& scales) {
 
-  const BFloat16* A_data = A.data_ptr<BFloat16>();
-  const int8_t* B_data = B.data_ptr<int8_t>();
-  BFloat16* C_data = C.data_ptr<BFloat16>();
-  const BFloat16* S_data = scales.data_ptr<BFloat16>();
+  const auto* A_data = A.data_ptr<BFloat16>();
+  const auto* B_data = B.data_ptr<int8_t>();
+  auto* C_data = C.data_ptr<BFloat16>();
+  const auto* S_data = scales.data_ptr<BFloat16>();
 
   int M = A.size(0);
   int N = B.size(0);
@@ -266,10 +267,10 @@ void int8pack_mm_kernel(
       int nb_start = nb * BLOCK_N;
       int nb_size = std::min(BLOCK_N, N - nb_start);
 
-      const BFloat16* A_ptr = A_data + mb_start * K;
-      const int8_t* B_ptr = B_data + nb_start * K;
-      const BFloat16* S_ptr = S_data + nb_start;
-      BFloat16* C_ptr = C_data + mb_start * N + nb_start;
+      const auto* A_ptr = A_data + mb_start * K;
+      const auto* B_ptr = B_data + nb_start * K;
+      const auto* S_ptr = S_data + nb_start;
+      auto* C_ptr = C_data + mb_start * N + nb_start;
 
       switch (mb_size) {
         case 1:
