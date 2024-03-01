@@ -211,7 +211,7 @@ class TestRun:
         return (self | other) - (self - other) - (other - self)
 
     def to_json(self) -> Dict[str, Any]:
-        r = {
+        r: Dict[str, Any] = {
             "test_file": self.test_file,
         }
         if self._included:
@@ -223,7 +223,9 @@ class TestRun:
     @staticmethod
     def from_json(json: Dict[str, Any]) -> "TestRun":
         return TestRun(
-            json["test_file"], included=json.get("included", []), excluded=json.get("excluded", [])
+            json["test_file"],
+            included=json.get("included", []),
+            excluded=json.get("excluded", []),
         )
 
 

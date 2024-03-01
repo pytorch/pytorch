@@ -1,5 +1,5 @@
 import sys
-from typing import Any, Dict, List
+from typing import Any, List
 
 from tools.testing.target_determination.heuristics import (
     AggregatedHeuristics as AggregatedHeuristics,
