@@ -524,6 +524,7 @@ from a multi-output view call"
                 base_idx=base_idx,
                 dynamic_dims=dynamic_dims,
                 requires_grad=isinstance(o, torch.Tensor) and o.requires_grad,
+                functional_tensor=o.elem,
             )
             output_info.append(out_info)
 

@@ -84,6 +84,9 @@ class OutputAliasInfo:
     dynamic_dims: Optional[Set[int]]
     # requires_grad
     requires_grad: bool
+    # FunctionalTensorWrapper that represents this output.
+    # Provides us the means to replay views from it.
+    functional_tensor: Optional[torch.Tensor]
 
 
 class MutationType(Enum):
