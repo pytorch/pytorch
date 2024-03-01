@@ -6377,7 +6377,6 @@ def _internal_new_from_data(
     # TODO: test for numpy input with PyArray_Check
 
     device = device_opt if device_opt is not None else options["device"]
-    sizes = _compute_sizes(data, scalar_type)
     inferred_scalar_type = _infer_scalar_type(data) if type_inference else scalar_type
 
     # NB: Don't need to avoid tracing, as we aren't going to do any manual
