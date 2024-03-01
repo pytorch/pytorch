@@ -4,13 +4,6 @@
 #include <mutex>
 #include <sstream>
 
-#if defined(__linux__)
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
-#endif
-
 #ifdef USE_C10D_NCCL
 
 #include <exception>
@@ -301,6 +294,9 @@ inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
 static std::unordered_map<std::shared_ptr<NCCLComm>, int> ncclCommDevIdxMap;
 static std::mutex ncclCommDevIdxMapMutex;
 static bool allocatorHooksAttached = false;
+
+std::atomic<bool> ProcessGroupNCCL::shouldDump_(false);
+
 void cacheAllocatorRegisterHook(
     const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
   // Register after SEGMENT_ALLOC
@@ -1111,6 +1107,53 @@ void ProcessGroupNCCL::waitForDumpOrTimeout(
   std::this_thread::sleep_until(wakeUpTime);
 }
 
+// WHC - pulled this from https://github.com/pytorch/pytorch/commit/893dcac068f13542b1e00e3e55bca4530ab412cb to help
+// cherry-pick go through. did not cherry-pick entirety of the PR that provided this new util function.
+void ProcessGroupNCCL::waitForFutureOrTimeout(
+    std::future<bool>& fut,
+    const std::chrono::milliseconds& timeOutMilSec,
+    const std::string& futDescription) {
+  TORCH_CHECK(fut.valid(), "Expected a valid future");
+  std::future_status status = fut.wait_for(timeOutMilSec);
+  if (status == std::future_status::ready) {
+    // Calling .get() will re-raise any exception from the future, and we don't
+    // care about the retval
+    try {
+      bool result = fut.get();
+      if (result) {
+        LOG(INFO) << logPrefix()
+                  << "future is successfully executed for: " << futDescription;
+      }
+    } catch (const std::exception& e) {
+      C10_THROW_ERROR(
+          DistBackendError,
+          c10::str(
+              logPrefix(),
+              "Exception thrown when waitng for future ",
+              futDescription,
+              ": ",
+              e.what()));
+    } catch (...) {
+      C10_THROW_ERROR(
+          DistBackendError,
+          c10::str(
+              logPrefix(),
+              "Unknown exception thrown when waitng for future ",
+              futDescription));
+    }
+  } else {
+    C10_THROW_ERROR(
+        DistBackendError,
+        c10::str(
+            logPrefix(),
+            "Future for ",
+            futDescription,
+            " timed out after ",
+            timeOutMilSec.count(),
+            " ms"));
+  }
+}
+
 void ProcessGroupNCCL::abortCommsFromMap(
     std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>&
         ncclCommsMap,
@@ -1259,7 +1302,13 @@ void ProcessGroupNCCL::heartbeatMonitor() {
                                                : heartbeatTimeoutInSec_ * 1000;
   auto lastTimePollStore = std::chrono::steady_clock::now();
   auto lastTimeHeartBeatCheck = std::chrono::steady_clock::now();
-  std::future<bool> asyncDebugDump;
+  c10::optional<DumpPipe> dumpPipe = c10::nullopt;
+  if (uid_ == 0) {
+    // DumpPipe is one per-trainer process, and its convenient to name them
+    // after 'global' ranks in the system, So we assume processgroup (uid)==0 is
+    // the global PG and has globally unique rank ids across trainers.
+    dumpPipe.emplace(rank_);
+  }
   while (true) {
     // This won't have any lock since this lock is only used here.
     // Please be aware that mutex `monitorMutex_` should not be used
@@ -1283,6 +1332,27 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     // dump debugging info, and we avoid hammering the TCPStore from all PGs on
     // the same rank.
     if (checkTimeoutSignal) {
+      // There are two scenarios where monitor thread will dump on timeout:
+      // 1. The local rank is the first to observe a timeout.shouldDump_ will be
+      // set to true.
+      // 2. other ranks detected the timeout and signal the local rank to dump
+      // In addtion, monitor threads will dump if watchdog threads has no
+      // heartbeat or dumpPipe is not empty.
+      if (shouldDump_.load()) {
+        errorMsg = c10::str(
+            logPrefix(),
+            "Received a timeout signal from this local rank and will ",
+            "start to dump the debug info. ");
+        exitMsg = c10::str(
+            "ProcessGroupNCCL's watchdog detected a collective timeout from the local rank. ",
+            "This is most likely caused by incorrect usages of collectives, e.g., wrong ",
+            "sizes used across ranks, the order of collectives is not same for all ranks ",
+            "or the scheduled collective, for some reason, didn't run. Additionally, ",
+            "this can be caused by GIL deadlock or other reasons such as network errors or ",
+            "bugs in the communications library (e.g. NCCL), etc. We tried our best to ",
+            "dump the debug info into the storage to help you debug the issue.");
+        break;
+      }
       // We poll store to see if some ranks have flagged a timeout when
       // we haven't polled for `heartbeat_timeout` seconds and there haven't
       // any work added or removed for `watchdog_timeout` seconds.
@@ -1297,7 +1367,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
               "Received a global timeout from another rank and will ",
               "start to dump the debug info.");
           exitMsg = c10::str(
-              "ProcessGroupNCCL's watchdog detected a collective timeout and notified current rank. ",
+              "ProcessGroupNCCL's watchdog detected a collective timeout on some other rank and notified current rank. ",
               "This is most likely caused by incorrect usages of collectives, e.g., wrong ",
               "sizes used across ranks, the order of collectives is not same for all ranks ",
               "or the scheduled collective, for some reason, didn't run. Additionally, ",
@@ -1338,6 +1408,14 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         break;
       }
     }
+    // process a request to dump the trace. only PG uid 0 will respond to dump
+    // requests, but this is fine since all PG's feed into the same flight
+    // recorder and dump. After dump, the training should continue.
+    if (dumpPipe.has_value() && dumpPipe->shouldDump()) {
+      // best effort dump, not waiting for the dump here
+      std::future<bool> fut = std::async(
+          std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
+    }
   }
   LOG(ERROR) << errorMsg;
 
@@ -1346,10 +1424,16 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     LOG(INFO) << "Dumping c++ stacktraces: " << cpp_dumper.value()();
   }
 
-  auto wakeUpTime = getWakeupTime(waitTimeoutDumpInMilSec_);
   // Store debug info to storage if no other thread does it. (By default to
   // local disk)
-  asyncDebugDump = launchAsyncDebugDump();
+  std::future<bool> asyncDebugDump = std::async(
+      std::launch::async, [this]() { return this->dumpDebuggingInfo(); });
+
+  // wait for the dump until timeout
+  waitForFutureOrTimeout(
+      asyncDebugDump,
+      std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
+      "Flight recorder dump in heartbeatMonitor");
 
   if (get_gil_checker() != nullptr) {
     auto fut = launchAsyncGilCheck();
@@ -1392,7 +1476,6 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // We already log completion inside the thread, so it may not be necessary to
   // check the return value here.  We mainly use a future so we can exit early
   // if done.
-  waitForDumpOrTimeout(asyncDebugDump, wakeUpTime);
 
   if (!terminateHeartbeatMonitorThread_.load()) {
     // Create a error message reported from MonitorThread, so
@@ -1473,59 +1556,6 @@ std::string ProcessGroupNCCL::getNCCLWatchdogDebugInfo() {
   return retrieveDesyncReport(store_, "NCCL", rank_, size_);
 }
 
-#if defined(__linux__)
-struct DumpPipe {
-  DumpPipe(int rank) {
-    std::string fileStem =
-        getCvarString({"TORCH_NCCL_DEBUG_INFO_PIPE_FILE"}, "");
-    if (fileStem.empty() ||
-        getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) <= 0) {
-      return;
-    }
-    TORCH_CHECK(!fileStem.empty(), "TORCH_NCCL_DEBUG_INFO_TEMP_FILE is empty");
-    std::string filename = c10::str(fileStem, rank, ".pipe");
-    TORCH_CHECK(
-        unlink(filename.c_str()) != -1 || errno == ENOENT,
-        "Error removing existing named pipe ",
-        filename);
-    TORCH_CHECK(
-        mkfifo(filename.c_str(), 0666) != -1,
-        "Error creating named pipe ",
-        filename);
-    fd_ = open(filename.c_str(), O_RDONLY | O_NONBLOCK);
-    LOG(INFO) << "Pipe file " << filename
-              << " has been opened, write to it to trigger NCCL Debug Dump.";
-    TORCH_CHECK(fd_ != -1, "Error opening named pipe ", filename);
-  }
-  bool shouldDump() {
-    if (fd_ == -1) {
-      return false;
-    }
-    char buf[128];
-    // non-blocking from O_NONBLOCK above.
-    // Ignore EINTR because we already will poll this
-    // again later.
-    ssize_t bytesRead = read(fd_, &buf, 128);
-    return bytesRead > 0;
-  }
-  ~DumpPipe() {
-    if (fd_ != -1) {
-      close(fd_);
-    }
-  }
-
- private:
-  int fd_ = -1;
-};
-#else
-struct DumpPipe {
-  DumpPipe(int rank) {}
-  bool shouldDump() {
-    return false;
-  }
-};
-#endif
-
 std::string ProcessGroupNCCL::createLogPrefix() const {
   return c10::str("[PG ", uid_, " Rank ", rank_, "] ");
 }
@@ -1542,17 +1572,8 @@ const int& ProcessGroupNCCL::globalRank() const {
 void ProcessGroupNCCL::watchdogHandler() {
   bool done = false;
   lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
-  c10::optional<std::future<bool>> optAsyncDebugDump;
-
   std::list<ProcessGroupNCCL::WorkNCCL> completedWorkList;
 
-  c10::optional<DumpPipe> dumpPipe = c10::nullopt;
-  if (uid_ == 0) {
-    // DumpPipe is one per-trainer process, and its convenient to name them
-    // after 'global' ranks in the system, So we assume processgroup (uid)==0 is
-    // the global PG and has globally unique rank ids across trainers.
-    dumpPipe.emplace(rank_);
-  }
   while (!done || !terminateProcessGroup_.load()) {
     std::unique_lock<std::mutex> lock(workMetaListMutex_);
     // We busy-poll the work vector every kWatchdogThreadSleepMillis
@@ -1591,20 +1612,18 @@ void ProcessGroupNCCL::watchdogHandler() {
               globalStore_->set(std::string(TIMEOUT_DUMP), vec);
             }
 
-            auto wakeUpTime = getWakeupTime(waitTimeoutDumpInMilSec_);
-            if (dumpOnTimeout_ && !optAsyncDebugDump) {
-              // Store debug info to storage. (By default to local disk)
-              optAsyncDebugDump = launchAsyncDebugDump();
+            if (dumpOnTimeout_) {
+              // signal the monitor thread to start dumping
+              shouldDump_.store(true);
+              // This sleep is used to give time for dumping before throwing
+              // exeption
+              std::this_thread::sleep_for(
+                  std::chrono::seconds(heartbeatTimeoutInSec_));
             }
 
             if (desyncDebug_) {
               auto desyncMsg = getNCCLWatchdogDebugInfo();
               LOG(ERROR) << logPrefix() << desyncMsg;
-            }
-
-            if (dumpOnTimeout_) {
-              // Store debug info to storage. (By default to local disk)
-              waitForDumpOrTimeout(*optAsyncDebugDump, wakeUpTime);
             }
 
           } catch (const std::exception& e) {
@@ -1657,12 +1676,6 @@ void ProcessGroupNCCL::watchdogHandler() {
       // Increment heartbeat after each work processed,
       // in case processing is slowed down (but not hung) by cuda api contention
       heartbeat_++;
-    }
-    // process a request to dump the trace. only PG uid 0 will respond to dump
-    // requests, but this is fine since all PG's feed into the same flight
-    // recorder and dump.
-    if (dumpPipe.has_value() && dumpPipe->shouldDump()) {
-      launchAsyncDebugDump();
     }
     done = workMetaList_.empty();
   }
