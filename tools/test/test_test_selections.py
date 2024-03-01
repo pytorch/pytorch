@@ -108,18 +108,18 @@ class TestCalculateShards(unittest.TestCase):
     def test_some_times_with_not_sort_by_time(self) -> None:
         expected_shards = [
             (
-                4.0,
+                300.0,
                 [
                     ShardedTest(test="test_1", shard=1, num_shards=1, time=None),
-                    ShardedTest(test="test_2", shard=1, num_shards=1, time=4),
-                    ShardedTest(test="test_5", shard=1, num_shards=1, time=None),
+                    ShardedTest(test="test_3", shard=1, num_shards=1, time=300),
+                    ShardedTest(test="test_4", shard=1, num_shards=1, time=None),
                 ],
             ),
             (
-                3.0,
+                400.0,
                 [
-                    ShardedTest(test="test_3", shard=1, num_shards=1, time=3),
-                    ShardedTest(test="test_4", shard=1, num_shards=1, time=None),
+                    ShardedTest(test="test_2", shard=1, num_shards=1, time=400),
+                    ShardedTest(test="test_5", shard=1, num_shards=1, time=None),
                 ],
             ),
         ]
@@ -134,7 +134,7 @@ class TestCalculateShards(unittest.TestCase):
                     TestRun("test_4"),
                     TestRun("test_5"),
                 ],
-                {"test_2": 4, "test_3": 3},
+                {"test_2": 400, "test_3": 300},
                 {},
                 sort_by_time=False,
             ),
@@ -143,18 +143,18 @@ class TestCalculateShards(unittest.TestCase):
     def test_serial_parallel_interleaving(self) -> None:
         expected_shards = [
             (
-                3.0,
+                400.0,
                 [
                     ShardedTest(test="test_1", shard=1, num_shards=1, time=None),
-                    ShardedTest(test="test_3", shard=1, num_shards=1, time=3),
+                    ShardedTest(test="test_4", shard=1, num_shards=1, time=None),
                     ShardedTest(test="test_5", shard=1, num_shards=1, time=None),
+                    ShardedTest(test="test_2", shard=1, num_shards=1, time=400),
                 ],
             ),
             (
-                4.0,
+                300.0,
                 [
-                    ShardedTest(test="test_4", shard=1, num_shards=1, time=None),
-                    ShardedTest(test="test_2", shard=1, num_shards=1, time=4),
+                    ShardedTest(test="test_3", shard=1, num_shards=1, time=300),
                 ],
             ),
         ]
@@ -169,7 +169,7 @@ class TestCalculateShards(unittest.TestCase):
                     TestRun("test_4"),
                     TestRun("test_5"),
                 ],
-                {"test_2": 4, "test_3": 3},
+                {"test_2": 400, "test_3": 300},
                 {},
                 must_serial=lambda x: x in ["test_1", "test_3"],
                 sort_by_time=False,
@@ -278,12 +278,10 @@ class TestCalculateShards(unittest.TestCase):
                 22.0,
                 [
                     ShardedTest(test="long_test1", shard=1, num_shards=1, time=22),
-                    ShardedTest(
-                        test="super_long_test", shard=1, num_shards=1, time=None
-                    ),
-                    ShardedTest(test="normal_test2", shard=1, num_shards=1, time=None),
-                    ShardedTest(test="short_test2", shard=1, num_shards=1, time=None),
-                    ShardedTest(test="short_test4", shard=1, num_shards=1, time=None),
+                    ShardedTest(test="long_test2", shard=1, num_shards=1, time=None),
+                    ShardedTest(test="normal_test3", shard=1, num_shards=1, time=None),
+                    ShardedTest(test="short_test3", shard=1, num_shards=1, time=None),
+                    ShardedTest(test="short_test5", shard=1, num_shards=1, time=None),
                 ],
             ),
             (
@@ -291,10 +289,12 @@ class TestCalculateShards(unittest.TestCase):
                 [
                     ShardedTest(test="normal_test1", shard=1, num_shards=1, time=9),
                     ShardedTest(test="short_test1", shard=1, num_shards=1, time=1),
-                    ShardedTest(test="long_test2", shard=1, num_shards=1, time=None),
-                    ShardedTest(test="normal_test3", shard=1, num_shards=1, time=None),
-                    ShardedTest(test="short_test3", shard=1, num_shards=1, time=None),
-                    ShardedTest(test="short_test5", shard=1, num_shards=1, time=None),
+                    ShardedTest(
+                        test="super_long_test", shard=1, num_shards=1, time=None
+                    ),
+                    ShardedTest(test="normal_test2", shard=1, num_shards=1, time=None),
+                    ShardedTest(test="short_test2", shard=1, num_shards=1, time=None),
+                    ShardedTest(test="short_test4", shard=1, num_shards=1, time=None),
                 ],
             ),
         ]
@@ -317,18 +317,14 @@ class TestCalculateShards(unittest.TestCase):
                 22.0,
                 [
                     ShardedTest(test="long_test1", shard=1, num_shards=1, time=22),
-                    ShardedTest(
-                        test="super_long_test", shard=1, num_shards=1, time=None
-                    ),
-                    ShardedTest(test="short_test3", shard=1, num_shards=1, time=None),
+                    ShardedTest(test="short_test2", shard=1, num_shards=1, time=None),
                 ],
             ),
             (
                 9.0,
                 [
                     ShardedTest(test="normal_test1", shard=1, num_shards=1, time=9),
-                    ShardedTest(test="long_test2", shard=1, num_shards=1, time=None),
-                    ShardedTest(test="short_test4", shard=1, num_shards=1, time=None),
+                    ShardedTest(test="normal_test3", shard=1, num_shards=1, time=None),
                 ],
             ),
             (
@@ -342,13 +338,17 @@ class TestCalculateShards(unittest.TestCase):
             (
                 0.0,
                 [
-                    ShardedTest(test="normal_test3", shard=1, num_shards=1, time=None),
+                    ShardedTest(
+                        test="super_long_test", shard=1, num_shards=1, time=None
+                    ),
+                    ShardedTest(test="short_test3", shard=1, num_shards=1, time=None),
                 ],
             ),
             (
                 0.0,
                 [
-                    ShardedTest(test="short_test2", shard=1, num_shards=1, time=None),
+                    ShardedTest(test="long_test2", shard=1, num_shards=1, time=None),
+                    ShardedTest(test="short_test4", shard=1, num_shards=1, time=None),
                 ],
             ),
         ]
@@ -454,7 +454,7 @@ class TestCalculateShards(unittest.TestCase):
 
             times = [x[0] for x in shards]
             max_diff = max(times) - min(times)
-            self.assertTrue(max_diff <= THRESHOLD)
+            self.assertTrue(max_diff <= THRESHOLD + (num_tests - len(has_times)) * 60)
 
             all_sharded_tests: Dict[str, List[ShardedTest]] = defaultdict(list)
             for _, sharded_tests in shards:
