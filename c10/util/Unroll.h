@@ -11,18 +11,18 @@ namespace c10 {
 
 template <int n>
 struct ForcedUnroll {
-  template <typename Func>
-  C10_ALWAYS_INLINE void operator()(const Func& f) const {
-    ForcedUnroll<n - 1>{}(f);
-    f(n - 1);
+  template <typename Func, typename... Args>
+  C10_ALWAYS_INLINE void operator()(const Func& f, Args... args) const {
+    ForcedUnroll<n - 1>{}(f, args...);
+    f(std::integral_constant<int, n - 1>{}, args...);
   }
 };
 
 template <>
 struct ForcedUnroll<1> {
-  template <typename Func>
-  C10_ALWAYS_INLINE void operator()(const Func& f) const {
-    f(0);
+  template <typename Func, typename... Args>
+  C10_ALWAYS_INLINE void operator()(const Func& f, Args... args) const {
+    f(std::integral_constant<int, 0>{}, args...);
   }
 };
 
