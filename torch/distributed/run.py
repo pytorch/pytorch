@@ -380,7 +380,7 @@ from typing import Callable, List, Tuple, Union, Optional, Set
 
 import torch
 from torch.distributed.argparse_util import check_env, env
-from torch.distributed.elastic.multiprocessing import Std
+from torch.distributed.elastic.multiprocessing import Std, DefaultLogsSpecs
 from torch.distributed.elastic.multiprocessing.errors import record
 from torch.distributed.elastic.rendezvous.utils import _parse_rendezvous_config
 from torch.distributed.elastic.utils import macros
@@ -549,12 +549,12 @@ def get_args_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
-        "--filter-local-ranks",
-        "--filter_local_ranks",
+        "--local-ranks-filter",
+        "--local_ranks_filter",
         action=env,
         type=str,
         default="",
-        help="Only show logs from specified ranks in console (e.g. [--filter-local-ranks 0 1 2] will "
+        help="Only show logs from specified ranks in console (e.g. [--local_ranks_filter=0,1,2] will "
         "only show logs from rank 0, 1 and 2). This will only apply to stdout and stderr, not to"
         "log files saved via --redirect or --tee",
     )
@@ -633,7 +633,7 @@ def parse_min_max_nnodes(nnodes: str):
         min_nodes = int(arr[0])
         max_nodes = int(arr[1])
     else:
-        raise RuntimeError(f'nnodes={nnodes} is not in "MIN:MAX" format')
+        raise RuntimeError(f'nnodes={nnodes} is not in "MIN:MAX" format')  # noqa: E231
 
     return min_nodes, max_nodes
 
@@ -681,7 +681,7 @@ def determine_local_world_size(nproc_per_node: str):
 
 def get_rdzv_endpoint(args):
     if args.rdzv_backend == "static" and not args.rdzv_endpoint:
-        return f"{args.master_addr}:{args.master_port}"
+        return f"{args.master_addr}:{args.master_port}"  # noqa: E231
     return args.rdzv_endpoint
 
 
@@ -736,14 +736,21 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
     rdzv_endpoint = get_rdzv_endpoint(args)
 
     ranks: Optional[Set[int]] = None
-    if args.filter_local_ranks:
+    if args.local_ranks_filter:
         try:
-            ranks = set(map(int, args.filter_local_ranks.split(",")))
+            ranks = set(map(int, args.local_ranks_filter.split(",")))
             assert ranks
         except Exception as e:
             raise Exception(
-                "--filter_local_ranks must be a comma-separated list of integers e.g. --filter_local_ranks=0,1,2"
+                "--local_ranks_filter must be a comma-separated list of integers e.g. --local_ranks_filter=0,1,2"
             ) from e
+
+    logs_specs = DefaultLogsSpecs(
+        log_dir=args.log_dir,
+        redirects=Std.from_str(args.redirects),
+        tee=Std.from_str(args.tee),
+        local_ranks_filter=ranks,
+    )
 
     config = LaunchConfig(
         min_nodes=min_nodes,
@@ -757,12 +764,9 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
         max_restarts=args.max_restarts,
         monitor_interval=args.monitor_interval,
         start_method=args.start_method,
-        redirects=Std.from_str(args.redirects),
-        tee=Std.from_str(args.tee),
-        log_dir=args.log_dir,
         log_line_prefix_template=log_line_prefix_template,
         local_addr=args.local_addr,
-        filter_local_ranks=ranks,
+        logs_specs=logs_specs,
     )
 
     with_python = not args.no_python

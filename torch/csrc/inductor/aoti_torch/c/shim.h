@@ -278,6 +278,15 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch__embedding_bag(
     AtenTensorHandle* ret3 // returns new reference
 );
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__fft_c2c(
+    AtenTensorHandle self,
+    const int64_t* dim_ptr,
+    int64_t dim_size,
+    int64_t normalization,
+    int32_t forward,
+    AtenTensorHandle* ret // returns new reference
+);
+
 // This version is deprecated. We will remove it later
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
     AtenTensorHandle query,
@@ -368,6 +377,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_convolution(
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_new_uninitialized_tensor(AtenTensorHandle* ret);
 
+// WARNING: This will be deprecated. Use aoti_torch_copy_ instead.
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_tensor_copy_(AtenTensorHandle src, AtenTensorHandle dst);
 
@@ -396,6 +406,11 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_bmm_out(
     AtenTensorHandle out,
     AtenTensorHandle self,
     AtenTensorHandle mat2);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_copy_(
+    AtenTensorHandle self,
+    AtenTensorHandle src,
+    int32_t non_blocking);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mm_out(
     AtenTensorHandle out,
@@ -437,11 +452,20 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_index_put_out(
     const AtenTensorHandle values,
     bool accumulate);
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_view_as_real(
+    AtenTensorHandle self,
+    AtenTensorHandle* ret // returns new reference
+);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_view_dtype(
     AtenTensorHandle self,
     int32_t dtype,
     AtenTensorHandle* ret // returns new reference
 );
+
+AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
+    AtenTensorHandle self,
+    const char* msg);
 
 #ifdef USE_CUDA
 
@@ -466,6 +490,31 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_proxy_executor_call_function(
     int64_t* flatten_int_args,
     int num_tensors,
     AtenTensorHandle* flatten_tensor_args);
+
+AOTI_TORCH_EXPORT void aoti_torch_check(
+    bool cond,
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* msg);
+
+#ifdef STRIP_ERROR_MESSAGES
+#define AOTI_TORCH_CHECK(cond, ...)    \
+  aoti_torch_check(                    \
+      cond,                            \
+      __func__,                        \
+      __FILE__,                        \
+      static_cast<uint32_t>(__LINE__), \
+      TORCH_CHECK_MSG(cond, "", __VA_ARGS__));
+#else
+#define AOTI_TORCH_CHECK(cond, ...)    \
+  aoti_torch_check(                    \
+      cond,                            \
+      __func__,                        \
+      __FILE__,                        \
+      static_cast<uint32_t>(__LINE__), \
+      TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__));
+#endif
 
 #ifdef __cplusplus
 } // extern "C"

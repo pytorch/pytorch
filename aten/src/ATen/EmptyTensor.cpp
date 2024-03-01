@@ -91,7 +91,7 @@ size_t computeStorageNbytes(
       return 0;
     }
 
-    uint64_t strided_size;
+    uint64_t strided_size = 0;
     overflowed |= c10::mul_overflows(strides[i], sizes[i] - 1, &strided_size);
     overflowed |= c10::add_overflows(size, strided_size, &size);
   }
@@ -145,7 +145,7 @@ SymInt computeStorageNbytes(
   // of the last element according to stride
   SymInt size = 1;
   for (const auto i : c10::irange(sizes.size())) {
-    if (sizes[i] == 0) {
+    if (TORCH_GUARD_SIZE_OBLIVIOUS(sizes[i].sym_eq(0))) {
       return 0;
     }
 

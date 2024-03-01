@@ -127,7 +127,6 @@ class OnnxRegistry:
         ] = defaultdict(list)
         # FIXME: Avoid importing onnxscript into torch
         from onnxscript.function_libs.torch_lib import (  # type: ignore[import]  # noqa: F401
-            ops,  # TODO(titaiwang): get rid of this import
             registration,
         )
 
@@ -150,7 +149,6 @@ class OnnxRegistry:
 
         return self._opset_version
 
-    # TODO(titaiwang): subject to change if multiple opset_version is supported in torchlib
     def _initiate_registry_from_torchlib(
         self, torchlib_registry: torchlib_registry.Registry
     ):
@@ -421,7 +419,6 @@ class ResolvedExportOptions(ExportOptions):
                 )
             )
 
-            # TODO(titaiwang, bowbao): Better way to annotate `onnxscript` types in diagnostics.
             from torch.onnx._internal.fx import onnxfunction_dispatcher
 
             self.op_level_debug = resolve(options.op_level_debug, False)
@@ -802,9 +799,9 @@ class ONNXProgram:
                               target='my_buffer2', persistent=True),
                     InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='arg5_1'),
                               target='my_buffer1', persistent=True),
-                    InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='l_x_'),
+                    InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='arg6_1'),
                               target=None, persistent=None),
-                    InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='arg1'),
+                    InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='arg7_1'),
                               target=None, persistent=None)
                 ],
                 output_specs=[
@@ -1153,7 +1150,7 @@ class Exporter:
         self.model_args = model_args
         self.model_kwargs = model_kwargs
 
-        # TODO: Retire FXSymbolicTracer
+        # TODO: https://github.com/pytorch/pytorch/issues/107714
         # NOTE: FXSymbolicTracer would fail in this assert, as it does not use `enable_fake_mode`
         from torch.onnx._internal.fx import fx_symbolic_graph_extractor
 

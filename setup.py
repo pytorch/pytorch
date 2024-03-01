@@ -365,7 +365,7 @@ def get_submodule_folders():
     with open(git_modules_path) as f:
         return [
             os.path.join(cwd, line.split("=", 1)[1].strip())
-            for line in f.readlines()
+            for line in f
             if line.strip().startswith("path")
         ]
 
@@ -1130,7 +1130,7 @@ def main():
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
         long_description = f.read()
 
-    version_range_max = max(sys.version_info[1], 10) + 1
+    version_range_max = max(sys.version_info[1], 12) + 1
     torch_package_data = [
         "py.typed",
         "bin/*",
@@ -1166,6 +1166,7 @@ def main():
         "include/ATen/cuda/*.h",
         "include/ATen/cuda/detail/*.cuh",
         "include/ATen/cuda/detail/*.h",
+        "include/ATen/cuda/tunable/*.h",
         "include/ATen/cudnn/*.h",
         "include/ATen/functorch/*.h",
         "include/ATen/ops/*.h",
@@ -1174,6 +1175,7 @@ def main():
         "include/ATen/hip/detail/*.cuh",
         "include/ATen/hip/detail/*.h",
         "include/ATen/hip/impl/*.h",
+        "include/ATen/hip/tunable/*.h",
         "include/ATen/mps/*.h",
         "include/ATen/miopen/*.h",
         "include/ATen/detail/*.h",
@@ -1184,11 +1186,14 @@ def main():
         "include/ATen/native/hip/*.h",
         "include/ATen/native/hip/*.cuh",
         "include/ATen/native/mps/*.h",
+        "include/ATen/native/nested/*.h",
         "include/ATen/native/quantized/*.h",
         "include/ATen/native/quantized/cpu/*.h",
         "include/ATen/native/sparse/*.h",
         "include/ATen/native/utils/*.h",
         "include/ATen/quantized/*.h",
+        "include/ATen/xpu/*.h",
+        "include/ATen/xpu/detail/*.h",
         "include/caffe2/serialize/*.h",
         "include/c10/*.h",
         "include/c10/macros/*.h",
@@ -1204,6 +1209,7 @@ def main():
         "include/c10/hip/*.h",
         "include/c10/hip/impl/*.h",
         "include/c10/xpu/*.h",
+        "include/c10/xpu/impl/*.h",
         "include/torch/*.h",
         "include/torch/csrc/*.h",
         "include/torch/csrc/api/include/torch/*.h",

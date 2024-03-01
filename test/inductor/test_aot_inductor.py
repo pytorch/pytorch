@@ -73,7 +73,7 @@ def check_model(
 ):
     with torch.no_grad(), config.patch(
         {
-            "aot_inductor.abi_compatible": self.abi_compatible,
+            "abi_compatible": self.abi_compatible,
             "allow_stack_allocation": self.allow_stack_allocation,
             "use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
         }
@@ -107,7 +107,7 @@ def check_model_with_multiple_inputs(
 ):
     with torch.no_grad(), config.patch(
         {
-            "aot_inductor.abi_compatible": self.abi_compatible,
+            "abi_compatible": self.abi_compatible,
             "allow_stack_allocation": self.allow_stack_allocation,
         }
     ):
@@ -478,6 +478,23 @@ class AOTInductorTestsTemplate:
             options={"debug_check_inf_and_nan": True},
         )
 
+    def test_assert_async(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                u0 = x.item()
+                torch._check(u0 > 3)
+                return torch.ones(u0)[0]
+
+        x = torch.tensor(23, device=self.device)
+        example_inputs = (x,)
+        self.check_model(Model(), example_inputs)
+
     def test_simple_dynamic(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -732,13 +749,42 @@ class AOTInductorTestsTemplate:
                 d = (b + c) @ y
                 return d.sum()
 
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA")
         example_inputs = (
             torch.tensor([1, 1, 1], device=self.device),
             torch.randn((1, 32), dtype=torch.float16, device=self.device),
         )
         self.check_model(Repro(), example_inputs)
+
+    def test_zero_grid_with_backed_symbols(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, b):
+                return x + b
+
+        example_inputs = (
+            x := torch.randn((3, 2), device=self.device),
+            torch.randn((1, 2), device=self.device),
+        )
+        torch._dynamo.mark_dynamic(x, index=0)  # Create dynamic symbol
+
+        # Compile & run model where dynamic dim size > 0.
+        so_path: str = AOTIRunnerUtil.compile(
+            Repro(),
+            example_inputs,
+        )
+        aot_inductor_module = AOTIRunnerUtil.load("cuda", so_path)
+        aot_inductor_module(*example_inputs)
+
+        # Re-run where dynamic dim size is 0.
+        example_inputs = (
+            torch.randn((0, 2), device=self.device),
+            torch.randn((1, 2), device=self.device),
+        )
+        actual = aot_inductor_module(*example_inputs)
+        expected = Repro()(*example_inputs)
+        torch.testing.assert_close(actual, expected)
 
     def test_repeat_interleave(self):
         class Repro(torch.nn.Module):
@@ -790,9 +836,7 @@ class AOTInductorTestsTemplate:
         result_cpu = Model(w1, w2)(*inputs)
 
         # Compile model with AOTInductor
-        with torch.cuda.device(0), config.patch(
-            "aot_inductor.abi_compatible", self.abi_compatible
-        ):
+        with torch.cuda.device(0), config.patch("abi_compatible", self.abi_compatible):
             so_path = AOTIRunnerUtil.compile(
                 model=Model(w1.cuda(0), w2.cuda(0)),
                 example_inputs=tuple(t.cuda(0) for t in inputs),
@@ -841,14 +885,14 @@ class AOTInductorTestsTemplate:
         result_cpu = Model(weight)(*inputs)
 
         with torch.cuda.device(0), torch.no_grad(), config.patch(
-            "aot_inductor.abi_compatible", self.abi_compatible
+            "abi_compatible", self.abi_compatible
         ):
             result_cuda_0 = AOTIRunnerUtil.run(
                 "cuda", Model(weight.cuda(0)), tuple(t.cuda(0) for t in inputs)
             )
 
         with torch.cuda.device(1), torch.no_grad(), config.patch(
-            "aot_inductor.abi_compatible", self.abi_compatible
+            "abi_compatible", self.abi_compatible
         ):
             result_cuda_1 = AOTIRunnerUtil.run(
                 "cuda", Model(weight.cuda(1)), tuple(t.cuda(1) for t in inputs)
@@ -1122,9 +1166,6 @@ class AOTInductorTestsTemplate:
                 super().__init__()
 
             def forward(self, x, y):
-                # AOT export does not allow for input mutation
-                x = x.clone()
-                y = y.clone()
                 output = torch.zeros_like(x)
                 if autotune and num_dims == 2:
                     x_elements = output.size()[0]
@@ -1200,8 +1241,6 @@ class AOTInductorTestsTemplate:
                 super().__init__()
 
             def forward(self, x):
-                # AOT export does not allow for input mutation
-                x = x.clone()
                 num = x.numel() // 4
 
                 grid = lambda meta: (triton.cdiv(num, 16),)  # noqa: E731
@@ -1227,12 +1266,19 @@ class AOTInductorTestsTemplate:
                 super().__init__()
 
             def forward(self, x):
-                # AOT export does not allow for input mutation
-                x = x.clone()
-                pass_kernel[(1,)](x, torch.empty_like(x))
-                return x
+                out = torch.zeros_like(x[:, 4:])
+                # the slicing below creates two ReinterpretView
+                # instances: with offset=3 and offset=4
+                add_kernel[(10,)](
+                    in_ptr0=x[:, 3:-1],
+                    in_ptr1=x[:, 4:],
+                    out_ptr=out,
+                    n_elements=160,
+                    BLOCK_SIZE=16,
+                )
+                return out
 
-        example_inputs = (torch.randn(4, device=self.device),)
+        example_inputs = (torch.randn(10, 20, device=self.device),)
         self.check_model(Model(), example_inputs)
 
     @skipIfRocm
@@ -1245,12 +1291,9 @@ class AOTInductorTestsTemplate:
                 super().__init__()
 
             def forward(self, x, y):
-                # AOT export does not allow for input mutation
                 n_elements = x.size()[0]
                 BLOCK_SIZE = 1024
 
-                x = x.clone()
-                y = y.clone()
                 output_wo_y = torch.empty_like(x)
                 output_with_y = torch.empty_like(x)
 
@@ -1280,6 +1323,25 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), example_inputs)
 
+    @skipIfRocm
+    def test_triton_kernel_equal_to_1_arg(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.empty_like(x)
+                n_elements = x.numel()
+                add_kernel[(n_elements,)](x, y, out, n_elements, BLOCK_SIZE=16)
+                return out
+
+        example_inputs = (
+            torch.randn(1, device=self.device),
+            torch.randn(1, device=self.device),
+        )
+
+        self.check_model(Model(), example_inputs)
+
     def test_shifted_constraint_ranges(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1296,13 +1358,12 @@ class AOTInductorTestsTemplate:
         a = torch.randn((4, 5), device=self.device)
         b = torch.randn((5, 5), device=self.device)
         dim0_x = Dim("dim0_x", min=2, max=1024)
-        dim0_y = Dim("dim0_y", min=3, max=1025)
+        dim0_y = dim0_x + 1
         dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_y}}
         self.check_model(
             Model(),
             (a, b),
             dynamic_shapes=dynamic_shapes,
-            disable_constraint_solver=True,
         )
 
     def test_scatter_fallback(self):
@@ -1578,9 +1639,6 @@ class AOTInductorTestsTemplate:
 
         class Model(torch.nn.Module):
             def forward(self, x, y):
-                # AOT export does not allow for input mutation
-                x = x.clone()
-                y = y.clone()
                 out = torch.zeros_like(x)
                 # torch.mm is ExternKernelOut
                 add_kernel[(4,)](x, torch.mm(x, y), out, 4, 16)
@@ -1600,9 +1658,6 @@ class AOTInductorTestsTemplate:
 
         class Model(torch.nn.Module):
             def forward(self, x, y):
-                # AOT export does not allow for input mutation
-                x = x.clone()
-                y = y.clone()
                 out = torch.zeros_like(x)
                 # torch.sort creates fallback kernel and hence MultiOutput
                 add_kernel[(4,)](x, torch.sort(y).values, out, 4, 16)
@@ -1616,7 +1671,7 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     @skipIfRocm
-    @config.patch({"aot_inductor.abi_compatible": True})
+    @config.patch({"abi_compatible": True})
     def test_triton_kernel_reinterpret_view_mem_leak(self):
         # Check for memory leak when using user-defined Triton Kernel + AOTI.
         if self.device != "cuda":
@@ -1683,13 +1738,16 @@ class AOTInductorTestsTemplate:
             class Model(torch.nn.Module):
                 def forward(self, x, i1, i2, y):
                     return torch.ops.aten.index_put(
-                        x, (None, None, i1, i2), y, accumulate=True
+                        x,
+                        (None, None, i1, i2.transpose(0, 1)),
+                        y,
+                        accumulate=True,
                     )
 
             example_inputs = (
                 torch.rand(8, 192, 30, 30, device=self.device),
                 torch.zeros(3, 14, 1, 1, dtype=torch.int64, device=self.device),
-                torch.ones(3, 14, dtype=torch.int64, device=self.device),
+                torch.ones(14, 3, dtype=torch.int64, device=self.device),
                 torch.randn(8, 192, 3, 14, 3, 14, device=self.device),
             )
             self.check_model(Model(), example_inputs)
@@ -1717,6 +1775,14 @@ class AOTInductorTestsTemplate:
             torch.randint(10, [8], device=self.device),
             torch.tensor([0, 2, 6], device=self.device),
         )
+        self.check_model(Model(), example_inputs)
+
+    def test_fft_c2c(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.fft.fftn(x), torch.fft.fftn(x).real
+
+        example_inputs = (torch.randn(16, 16, 16, device=self.device),)
         self.check_model(Model(), example_inputs)
 
 
@@ -1781,10 +1847,10 @@ CPU_TEST_FAILURES = {
     "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
     "test_constant_folding": fail_with_and_without_stack_allocation(is_skip=True),
     "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(),
-    "test_dynamic_cat": fail_with_and_without_stack_allocation(),
+    "test_dynamic_cat": fail_minimal_arrayref_interface(),
     "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
     "test_dynamic_smem_above_default_limit": fail_with_and_without_stack_allocation(),
-    "test_foreach_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_fft_c2c": fail_stack_allocation(is_skip=True),
     # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
     #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
     "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
@@ -1794,7 +1860,6 @@ CPU_TEST_FAILURES = {
     # minimal arrayref interface only works with CPU; test crashes.
     "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
     "test_normal_functional": fail_with_and_without_stack_allocation(),
-    "test_poi_multiple_dynamic": fail_with_and_without_stack_allocation(),
     # There is a double-free issue which will be fixed in another PR
     "test_repeat_output": fail_with_and_without_stack_allocation(is_skip=True),
     # the test segfaults
@@ -1809,7 +1874,13 @@ CPU_TEST_FAILURES = {
     "test_shifted_constraint_ranges": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
-    "test_simple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_simple_dynamic": fail_minimal_arrayref_interface(),
+    "test_zero_grid_with_unbacked_symbols": fail_with_and_without_stack_allocation(
+        is_skip=True
+    ),
+    "test_zero_grid_with_backed_symbols": fail_with_and_without_stack_allocation(
+        is_skip=True
+    ),
 }
 
 CUDA_TEST_FAILURES = {
@@ -1839,6 +1910,7 @@ if TEST_WITH_ROCM:
             "test_foreach_multiple_dynamic": fail_cuda(is_skip=True),
             "test_reuse_kernel": fail_cuda(is_skip=True),
             "test_zero_grid_with_unbacked_symbols": fail_cuda(is_skip=True),
+            "test_zero_grid_with_backed_symbols": fail_cuda(is_skip=True),
         }
     )
 

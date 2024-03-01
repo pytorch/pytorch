@@ -2,6 +2,7 @@
 #include <torch/csrc/inductor/aoti_runtime/interface.h>
 #include <torch/csrc/inductor/aoti_runtime/model_container.h>
 #include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
+#include <torch/csrc/inductor/aoti_runtime/thread_local.h>
 
 #include <iostream>
 #include <sstream>
@@ -147,6 +148,15 @@ AOTIRuntimeError AOTInductorModelContainerGetConstantOriginalFQN(
           container_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE(
     { *original_fqn = container->constant_original_fqn(idx); })
+}
+
+AOTIRuntimeError AOTInductorModelContainerGetConstantFromFolded(
+    AOTInductorModelContainerHandle container_handle,
+    size_t idx,
+    bool* from_folded) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(container_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE({ *from_folded = container->constant_from_folded(idx); })
 }
 
 AOTIRuntimeError AOTInductorModelContainerGetConstantDtype(
@@ -341,8 +351,4 @@ AOTIRuntimeError AOTInductorModelUpdateConstantsMap(
   })
 }
 
-#define CACHE_TORCH_DTYPE(typename) static auto cached_torch_dtype_##typename = aoti_torch_dtype_##typename()
-
-  static auto cached_torch_device_type_cpu = aoti_torch_device_type_cpu();
-  static auto cached_torch_device_type_cuda = aoti_torch_device_type_cuda();
 } // extern "C"

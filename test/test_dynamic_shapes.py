@@ -29,6 +29,7 @@ from torch.fx.experimental.symbolic_shapes import (
     is_symbolic,
     StatelessSymbolicContext,
     statically_known_true,
+    _constrain_range_for_size,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -145,12 +146,12 @@ def create_symbolic_tensor(name, arg, shape_env):
         )
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, sym_storage_offset)
 
-def create_symtype(cls, pytype, shape_env, val):
+def create_symtype(cls, pytype, shape_env, val, duck=True):
     from torch._dynamo.source import ConstantSource
     symbol = shape_env.create_symbol(
         val,
         source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}"),
-        dynamic_dim=DimDynamic.DUCK,
+        dynamic_dim=DimDynamic.DUCK if duck else DimDynamic.DYNAMIC,
         constraint_dim=None,
     )
     return cls(SymNode(
@@ -160,8 +161,9 @@ def create_symtype(cls, pytype, shape_env, val):
         hint=val,
     ))
 
-def create_symint(shape_env, i: int):
-    return create_symtype(SymInt, int, shape_env, i)
+# TODO: default duck to False
+def create_symint(shape_env, i: int, duck=True):
+    return create_symtype(SymInt, int, shape_env, i, duck=duck)
 
 def create_symbool(shape_env, b: bool):
     return create_symtype(SymBool, bool, shape_env, b)
@@ -525,13 +527,26 @@ def forward(self, x_1):
         shape_env = ShapeEnv()
         i0 = shape_env.create_unbacked_symint()
         i1 = shape_env.create_unbacked_symint()
+        _constrain_range_for_size(i0)
+        _constrain_range_for_size(i1)
         self.assertTrue(expect_true(i0 == i1 * 4))
         self.assertExpectedInline(str(i0), """4*u1""")
 
         i2 = shape_env.create_unbacked_symint()
         i3 = shape_env.create_unbacked_symint()
+        _constrain_range_for_size(i2)
+        _constrain_range_for_size(i3)
         self.assertTrue(expect_true(i2 * 4 == i3))
         self.assertExpectedInline(str(i3), """4*u2""")
+
+    def test_avoid_unbacked_substitution(self):
+        shape_env = ShapeEnv()
+        i0 = shape_env.create_unbacked_symint()
+        _constrain_range_for_size(i0)
+        i1 = shape_env.create_unbacked_symint()
+        _constrain_range_for_size(i1)
+        self.assertTrue(expect_true(i0 == 10 - i1))
+        self.assertExpectedInline(str(i0), """u0""")
 
     def test_expect_true_double_digits(self):
         shape_env = ShapeEnv()
@@ -539,6 +554,76 @@ def forward(self, x_1):
         self.assertEqual(str(ia[-1]), "u10")
         self.assertTrue(expect_true(sum(ia) == 20))
         self.assertEqual(len(shape_env.deferred_runtime_asserts[ia[-1].node.expr]), 1)
+
+    def test_expect_true_refine_range(self):
+        shape_env = ShapeEnv()
+        for i, rel in enumerate([lambda x: x > 4, lambda x: 4 < x, lambda x: x >= 5, lambda x: 5 <= x]):
+            with self.subTest(f"i = {i}"):
+                i0 = shape_env.create_unbacked_symint()
+                self.assertTrue(expect_true(rel(i0)))
+                self.assertTrue(statically_known_true(i0 != 3))
+                self.assertTrue(statically_known_true(i0 != 4))
+                self.assertFalse(statically_known_true(i0 != 5))
+                self.assertFalse(statically_known_true(i0 != 6))
+                self.assertTrue(statically_known_true(i0 > 4))
+                self.assertTrue(statically_known_true(i0 >= 5))
+
+        for i, rel in enumerate([lambda x: x < 4, lambda x: 4 > x, lambda x: x <= 3, lambda x: 3 >= x]):
+            with self.subTest(f"i = {i}"):
+                i0 = shape_env.create_unbacked_symint()
+                self.assertTrue(expect_true(rel(i0)))
+                self.assertFalse(statically_known_true(i0 != 2))
+                self.assertFalse(statically_known_true(i0 != 3))
+                self.assertTrue(statically_known_true(i0 != 4))
+                self.assertTrue(statically_known_true(i0 != 5))
+                self.assertTrue(statically_known_true(i0 < 4))
+                self.assertTrue(statically_known_true(i0 <= 5))
+
+    def test_guard_refine_range(self):
+        shape_env = ShapeEnv()
+        for i, rel in enumerate([lambda x: x > 4, lambda x: 4 < x, lambda x: x >= 5, lambda x: 5 <= x]):
+            with self.subTest(f"i = {i}"):
+                i0 = create_symint(shape_env, 10, duck=False)
+                self.assertTrue(bool(rel(i0)))
+                self.assertTrue(statically_known_true(i0 != 3))
+                self.assertTrue(statically_known_true(i0 != 4))
+                self.assertFalse(statically_known_true(i0 != 5))
+                self.assertFalse(statically_known_true(i0 != 6))
+                self.assertTrue(statically_known_true(i0 > 4))
+                self.assertTrue(statically_known_true(i0 >= 5))
+
+        for i, rel in enumerate([lambda x: x > 4, lambda x: 4 < x, lambda x: x >= 5, lambda x: 5 <= x]):
+            with self.subTest(f"i = {i}"):
+                i0 = create_symint(shape_env, 2, duck=False)
+                self.assertFalse(bool(rel(i0)))
+                self.assertFalse(statically_known_true(i0 != 3))
+                self.assertFalse(statically_known_true(i0 != 4))
+                self.assertTrue(statically_known_true(i0 != 5))
+                self.assertTrue(statically_known_true(i0 != 6))
+                self.assertTrue(statically_known_true(i0 <= 4))
+                self.assertTrue(statically_known_true(i0 < 5))
+
+        for i, rel in enumerate([lambda x: x < 4, lambda x: 4 > x, lambda x: x <= 3, lambda x: 3 >= x]):
+            with self.subTest(f"i = {i}"):
+                i0 = create_symint(shape_env, 2, duck=False)
+                self.assertTrue(bool(rel(i0)))
+                self.assertFalse(statically_known_true(i0 != 2))
+                self.assertFalse(statically_known_true(i0 != 3))
+                self.assertTrue(statically_known_true(i0 != 4))
+                self.assertTrue(statically_known_true(i0 != 5))
+                self.assertTrue(statically_known_true(i0 < 4))
+                self.assertTrue(statically_known_true(i0 <= 3))
+
+        for i, rel in enumerate([lambda x: x < 4, lambda x: 4 > x, lambda x: x <= 3, lambda x: 3 >= x]):
+            with self.subTest(f"i = {i}"):
+                i0 = create_symint(shape_env, 10, duck=False)
+                self.assertFalse(bool(rel(i0)))
+                self.assertTrue(statically_known_true(i0 != 2))
+                self.assertTrue(statically_known_true(i0 != 3))
+                self.assertFalse(statically_known_true(i0 != 4))
+                self.assertFalse(statically_known_true(i0 != 5))
+                self.assertTrue(statically_known_true(i0 >= 4))
+                self.assertTrue(statically_known_true(i0 > 3))
 
     def test_non_overlapping_and_dense(self):
         shape_env = ShapeEnv()
@@ -835,10 +920,10 @@ class TestSymNumberMagicMethods(TestCase):
             with self.assertRaisesRegex(TypeError, "unhashable"):
                 hash(x)
 
-        # Singleton SymInt, constant SymBool, SymNode are hashable
-        j1 = torch._C._get_singleton_int(1, 1)
-        j1_copy = torch._C._get_singleton_int(1, 1)
-        j2 = torch._C._get_singleton_int(2, 1)
+        # NestedInt (SymInt), constant SymBool, SymNode are hashable
+        j1 = torch._C._get_nested_int(1, 1)
+        j1_copy = torch._C._get_nested_int(1, 1)
+        j2 = torch._C._get_nested_int(2, 1)
         t = self.get_constant_bool(True)
         t_copy = self.get_constant_bool(True)
         f = self.get_constant_bool(False)
@@ -858,14 +943,14 @@ class TestSymNumberMagicMethods(TestCase):
         hash(m)
 
     def test_non_symbolic_symnode(self):
-        j1 = torch._C._get_singleton_int(1, 1)
-        j2 = torch._C._get_singleton_int(1, 1)
-        j3 = torch._C._get_singleton_int(3, 1)
+        j1 = torch._C._get_nested_int(1, 1)
+        j2 = torch._C._get_nested_int(1, 1)
+        j3 = torch._C._get_nested_int(3, 1)
 
         self.assertIsInstance(j1, torch.SymInt)
         self.assertNotIsInstance(j1, int)
 
-        with self.assertRaisesRegex(RuntimeError, "add not supported by SingletonSymNode"):
+        with self.assertRaisesRegex(RuntimeError, "add not supported by NestedIntSymNode"):
             j1 + 3
 
         self.assertFalse(j1 == 3)
@@ -1128,7 +1213,7 @@ class TestDimConstraints(TestCase):
             s % 2,
             ((s / 16) + 2) % 4,
         }
-        congruences = dim_constraints.reduce_congruences()
+        congruences = dim_constraints._reduce_congruences()
         self.assertEqual(congruences[s], {(s + 32) % 64})
 
     def test_dim_constraints_reduce_inequalities_simple(self):

@@ -31,7 +31,8 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     make_tensor,
     NOTEST_CPU,
-    IS_WINDOWS
+    IS_WINDOWS,
+    TEST_WITH_TORCHDYNAMO,
 )
 from torch._dynamo.testing import CompileCounterWithBackend
 
@@ -40,7 +41,8 @@ from torch.testing._internal.common_methods_invocations import wrapper_set_seed
 from torch.testing._internal.common_cuda import (
     SM80OrLater, PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    PLATFORM_SUPPORTS_FUSED_ATTENTION
+    PLATFORM_SUPPORTS_FUSED_ATTENTION,
+    PLATFORM_SUPPORTS_CUDNN_ATTENTION
 )
 
 if TEST_FAIRSEQ:
@@ -121,6 +123,8 @@ def get_platform_specific_sdpa():
         ret.append(SDPBackend.FLASH_ATTENTION)
     if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
         ret.append(SDPBackend.EFFICIENT_ATTENTION)
+    if PLATFORM_SUPPORTS_CUDNN_ATTENTION:
+        ret.append(SDPBackend.CUDNN_ATTENTION)
     if not ret:
         # Add a placeholder, an empty list causes "An empty arg_values was passed to @parametrize"
         ret.append(SDPBackend.EFFICIENT_ATTENTION)
@@ -660,7 +664,7 @@ class TestTransformers(NNTestCase):
             torch.arange(3)[None, :].cpu() >= input_seq_len[:, None]
         )
 
-        with self.assertNoLogs(None):
+        with (self.assertNoLogs(None) if not TEST_WITH_TORCHDYNAMO else contextlib.nullcontext()):
             encoder(
                 inputs,
                 mask=src_mask,
@@ -1754,14 +1758,14 @@ class TestSDPA(NNTestCase):
         q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
         if type == "nested" \
                 or dropout > 0.0 \
-                or dtype not in [torch.float32, torch.float64, torch.bfloat16]:
+                or dtype not in [torch.float32, torch.float64, torch.bfloat16, torch.float16]:
             assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.MATH.value
         else:
             assert torch._fused_sdp_choice(q, k, v, dropout_p=dropout) == SDPBackend.FLASH_ATTENTION.value
 
     @onlyCPU
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
-    @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16])
+    @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16, torch.float16])
     @parametrize("batch_size", [2, 12])
     @parametrize("seq_len", [267, 1030])
     @parametrize("n_head", [1, 3])
@@ -1785,6 +1789,9 @@ class TestSDPA(NNTestCase):
         if dtype is torch.bfloat16:
             atol = 5e-2
             rtol = 5e-2
+        if dtype is torch.float16:
+            atol = 1e-2
+            rtol = 1e-2
 
         n_embd = n_head * head_dim
         make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, packed=True, requires_grad=False)
@@ -1799,7 +1806,7 @@ class TestSDPA(NNTestCase):
         q, k, v = x.split(n_embd, dim=2)
         q2, k2, v2 = x2.split(n_embd, dim=2)
 
-        if dtype is torch.bfloat16:
+        if dtype in [torch.bfloat16, torch.float16]:
             q2 = q2.float()
             k2 = k2.float()
             v2 = v2.float()
@@ -1819,8 +1826,8 @@ class TestSDPA(NNTestCase):
             math_ref = torch.nn.functional.scaled_dot_product_attention(
                 q2, k2, v2, attn_mask=None, dropout_p=0.0, is_causal=causal)
 
-        if dtype is torch.bfloat16:
-            math_ref = math_ref.bfloat16()
+        if dtype in [torch.bfloat16, torch.float16]:
+            math_ref = math_ref.to(dtype)
 
         self.assertEqual(actual, math_ref, atol=atol, rtol=rtol)
 
@@ -1838,7 +1845,7 @@ class TestSDPA(NNTestCase):
 
     @onlyCPU
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
-    @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16])
+    @parametrize("dtype", [torch.float64, torch.float32, torch.bfloat16, torch.float16])
     @parametrize("batch_size", [2, 12])
     @parametrize("q_seq_len", [267, 1030])
     @parametrize("kv_seq_len", [514, 1179])
@@ -1864,6 +1871,8 @@ class TestSDPA(NNTestCase):
         tol = Tolerances(1e-5, 5e-6)
         if dtype is torch.bfloat16:
             tol = Tolerances(5e-2, 5e-2)
+        if dtype is torch.float16:
+            tol = Tolerances(1e-2, 1e-2)
 
         make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype, requires_grad=False)
         q_shape = SdpaShape(batch_size, n_head, q_seq_len, head_dim)
@@ -1881,7 +1890,7 @@ class TestSDPA(NNTestCase):
             k2.requires_grad_(True)
             v2.requires_grad_(True)
 
-        if dtype is torch.bfloat16:
+        if dtype in [torch.bfloat16, torch.float16]:
             q2, k2, v2 = q2.float(), k2.float(), v2.float()
         # (B, nh, T, hs)
         q = q.view(batch_size, q_seq_len, n_head, head_dim).transpose(1, 2)
@@ -1903,13 +1912,13 @@ class TestSDPA(NNTestCase):
             actual = torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
         with sdpa_kernel(backends=[SDPBackend.MATH]):
-            if not bool_mask and dtype is torch.bfloat16:
+            if not bool_mask and dtype in [torch.bfloat16, torch.float16]:
                 attn_mask = attn_mask.float()
             math_ref = torch.nn.functional.scaled_dot_product_attention(
                 q2, k2, v2, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
 
-        if dtype is torch.bfloat16:
-            math_ref = math_ref.bfloat16()
+        if dtype in [torch.bfloat16, torch.float16]:
+            math_ref = math_ref.to(dtype)
 
         self.assertEqual(actual, math_ref, atol=tol.atol, rtol=tol.rtol)
 
@@ -2760,7 +2769,9 @@ class TestSDPACudaOnly(NNTestCase):
         query_fudge_factor = 4
         grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(query_ref.grad, query_ref_lp.grad, query_fudge_factor)
 
-        grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(key_ref.grad, key_ref_lp.grad)
+        key_fudge_factor = 2
+        grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(key_ref.grad, key_ref_lp.grad, key_fudge_factor)
+
         value_fudge_factor = 2
         grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
 
@@ -3296,6 +3307,9 @@ class TestAttnBias(NNTestCase):
         [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)],
     )
     @unittest.skipIf(IS_WINDOWS, "torch.compile is not supported on windows")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
     def test_causal_variants_compile(self, device, causal_variant: CausalVariant, shape: List[Tuple[int]]):
         cnts = CompileCounterWithBackend("aot_eager")
         make_tensor = partial(

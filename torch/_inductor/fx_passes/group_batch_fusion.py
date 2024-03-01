@@ -1,11 +1,22 @@
 import collections
 import logging
 import operator
-from typing import Any, DefaultDict, Deque, Dict, Iterator, List, Optional, Set, Tuple
+from collections import OrderedDict
+from typing import (
+    Any,
+    DefaultDict,
+    Deque,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Set,
+    Tuple,
+)
 
 import torch
 from torch._dynamo.utils import counters
-from torch._utils_internal import print_graph
 
 from .. import config
 from ..pattern_matcher import (
@@ -46,6 +57,15 @@ default_graph_search_options = {
 }
 
 graph_search_options = default_graph_search_options
+
+
+def update_stack_example_value(stack_node, metadata, dim=0):
+    """
+    Update the example value of the node in the graph to enable followup split cat opt.
+    """
+    if stack_node is not None and hasattr(stack_node, "meta"):
+        example_value = torch.stack(metadata, dim=dim)
+        stack_node.meta["example_value"] = example_value
 
 
 class GroupBatchFusionBase:
@@ -484,19 +504,31 @@ class PreGradBatchLinearFusion(BatchFusion):
         batch_inputs = []
         batch_weights = []
         batch_biases = []
+        batch_inputs_metadata = []
+        batch_weights_metadata = []
+        batch_biases_metadata = []
         for node in subset:
             batch_nodes.append(node)
-            batch_inputs.append(get_arg_value(node, 0, "input"))
-            batch_weights.append(get_arg_value(node, 1, "weight"))
-            batch_biases.append(get_arg_value(node, 2, "bias"))
+            input = get_arg_value(node, 0, "input")
+            batch_inputs.append(input)
+            batch_inputs_metadata.append(input.meta["example_value"])
+            weight = get_arg_value(node, 1, "weight")
+            batch_weights.append(weight)
+            batch_weights_metadata.append(weight.meta["example_value"])
+            bias = get_arg_value(node, 2, "bias")
+            batch_biases.append(bias)
+            if bias is not None and hasattr(bias, "meta"):
+                batch_biases_metadata.append(bias.meta["example_value"])
 
         with graph.inserting_before(subset[0]):
             stack_inputs = graph.call_function(
                 torch.stack, args=(batch_inputs,), kwargs={"dim": 0}
             )
+            update_stack_example_value(stack_inputs, batch_inputs_metadata)
             stack_weights = graph.call_function(
                 torch.stack, args=(batch_weights,), kwargs={"dim": 0}
             )
+            update_stack_example_value(stack_weights, batch_weights_metadata)
             transpose_weight = graph.call_function(
                 torch.transpose, args=(stack_weights, 1, 2)
             )
@@ -509,6 +541,7 @@ class PreGradBatchLinearFusion(BatchFusion):
                 stack_biases = graph.call_function(
                     torch.stack, args=(batch_biases,), kwargs={"dim": 0}
                 )
+                update_stack_example_value(stack_biases, batch_biases_metadata)
                 unsqueeze_biases = graph.call_function(
                     torch.unsqueeze, args=(stack_biases, 1)
                 )
@@ -564,12 +597,23 @@ class BatchLayernormFusion(BatchFusion):
         group_biases = []
         group_epss = []
         group_nodes = []
+        group_inputs_metadata = []
+        group_biases_metadata = []
+        group_weights_metadata = []
         for node in subset:
             group_nodes.append(node)
-            group_inputs.append(get_arg_value(node, 0, "input"))
+            input = get_arg_value(node, 0, "input")
+            group_inputs.append(input)
+            group_inputs_metadata.append(input.meta["example_value"])
             group_shapes.append(get_arg_value(node, 1, "normalized_shape"))
-            group_weights.append(get_arg_value(node, 2, "weight"))
-            group_biases.append(get_arg_value(node, 3, "bias"))
+            weight = get_arg_value(node, 2, "weight")
+            group_weights.append(weight)
+            if weight is not None and hasattr(weight, "meta"):
+                group_weights_metadata.append(weight.meta["example_value"])
+            bias = get_arg_value(node, 3, "bias")
+            group_biases.append(bias)
+            if bias is not None and hasattr(bias, "meta"):
+                group_biases_metadata.append(bias.meta["example_value"])
             eps = get_arg_value(node, 4, "eps")
             if eps is None:
                 eps = 1e-5
@@ -590,16 +634,19 @@ class BatchLayernormFusion(BatchFusion):
             stack_input = graph.call_function(
                 torch.stack, args=(group_inputs,), kwargs={"dim": stack_dim}
             )
+            update_stack_example_value(stack_input, group_inputs_metadata, stack_dim)
             if group_weights is not None:
                 stack_weight = graph.call_function(
                     torch.stack, args=(group_weights,), kwargs={"dim": 0}
                 )
+                update_stack_example_value(stack_weight, group_weights_metadata)
             else:
                 stack_weight = None
             if group_biases is not None:
                 stack_bias = graph.call_function(
                     torch.stack, args=(group_biases,), kwargs={"dim": 0}
                 )
+                update_stack_example_value(stack_bias, group_biases_metadata)
             else:
                 stack_bias = None
 
@@ -667,15 +714,19 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
     def fuse(self, graph: torch.fx.GraphModule, subset: List[torch.fx.Node]):
         batch_nodes = []
         batch_inputs = []
+        batch_inputs_metadata = []
 
         for node in subset:
             batch_nodes.append(node)
-            batch_inputs.append(get_arg_value(node, 0, "input"))
+            input = get_arg_value(node, 0, "input")
+            batch_inputs.append(input)
+            batch_inputs_metadata.append(input.meta["example_value"])
 
         with graph.inserting_before(subset[0]):
             stack_inputs = graph.call_function(
                 torch.stack, args=(batch_inputs,), kwargs={"dim": 0}
             )
+            update_stack_example_value(stack_inputs, batch_inputs_metadata)
             if self.op == torch.nn.functional.relu:
                 batch_op = graph.call_function(
                     self.op,
@@ -740,46 +791,105 @@ class BatchMulPostGradFusion(BatchPointwiseOpsPostGradFusion):
         super().__init__(aten.mul.Tensor, **kwargs)
 
 
+class _OrderedSet:
+    def __init__(self, param=None):
+        if param:
+            self.rep = OrderedDict({k: None for k in param})
+        else:
+            self.rep = OrderedDict()
+
+    def __contains__(self, o):
+        return o in self.rep
+
+    def __len__(self):
+        return self.rep.__len__()
+
+    def append(self, o):
+        self.rep[o] = None
+
+    def __iter__(self):
+        return self.rep.keys().__iter__()
+
+
 def find_independent_subset_greedy(
-    node_list: List[torch.fx.Node],
+    node_list: Iterable[torch.fx.Node],
     graph_search_options: Dict[str, Any],
-) -> Iterator[List[torch.fx.Node]]:
+) -> Iterator[Iterable[torch.fx.Node]]:
     """
-    Return a list of subset from node_list, all nodes in each subset are independent with each other and can be fused together.
-    The type of subset is list, so we can preserve node's order and benefit from split-cat elimination in later pass.
+    Yields a list of subsets of `node_list` where no element in the subset
+    depends on any other element in the subset. This results in a set of
+    independent nodes which can be fused together.
+
+    The order of `node_list` is preserved within each subset so we can benefit
+    from split-cat elimination in later passes.
+
+    During iteration it is only safe to mutate the graph by changing the nodes
+    that have been returned.
+
+    graph_search_options:
+      - min_fuse_set_size: Minimum size of the subset to consider. Subsets below
+        this size will be ignored.
+      - max_fuse_set_size: Maximum size of the subset to consider. Subsets will
+        be broken to be at most this size.
     """
-    visited_node_set: Set[torch.fx.Node] = set()
-    dep_set: Set[torch.fx.Node] = set()
 
-    def find_dependent_nodes(src_node, cur_node):
-        for input_node in cur_node.all_input_nodes:
-            if input_node in node_list:
-                dep_set.add(input_node)
+    # Compute all the children of `node` which are members of
+    # `interesting_nodes`.
+    def find_dependent_nodes(node, interesting_nodes):
+        visited_node_set: Set[torch.fx.Node] = {node}
+        dep_set: Set[torch.fx.Node] = set()
 
-            if input_node not in visited_node_set:
-                visited_node_set.add(input_node)
-                find_dependent_nodes(src_node, input_node)
+        work = [node]
+        while work:
+            node = work.pop()
+            for input_node in node.all_input_nodes:
+                if input_node in interesting_nodes:
+                    dep_set.add(input_node)
 
-    while len(node_list) > 0:
+                if input_node not in visited_node_set:
+                    visited_node_set.add(input_node)
+                    work.append(input_node)
+
+        return dep_set
+
+    min_fuse_set_size = graph_search_options["min_fuse_set_size"]
+    max_fuse_set_size = graph_search_options["max_fuse_set_size"]
+
+    # node_list needs to be a set because we only track the nodes that are left
+    # in it (and we want to do the `in` on a set, not a list). But we want to
+    # keep the correct order.
+    node_list = _OrderedSet(node_list)
+
+    cache: Dict[torch.fx.Node, Set[torch.fx.Node]] = {}
+    while node_list:
         subset: List[torch.fx.Node] = []
         subset_deps: Set[torch.fx.Node] = set()
 
+        next_round_node_list = _OrderedSet()
         for node in node_list:
-            if len(subset) >= graph_search_options["max_fuse_set_size"]:
-                break
+            if len(subset) >= max_fuse_set_size or node in subset_deps:
+                next_round_node_list.append(node)
+                continue
 
-            visited_node_set.clear()
-            dep_set.clear()
+            dep_set = cache.pop(node, None)
+            if dep_set is None:
+                dep_set = find_dependent_nodes(node, node_list)
 
-            find_dependent_nodes(node, node)
-            if not dep_set.intersection(subset) and node not in subset_deps:
+            if not dep_set.intersection(subset):
                 subset.append(node)
                 subset_deps.update(dep_set)
+            else:
+                next_round_node_list.append(node)
+                cache[node] = dep_set
 
-        if len(subset) >= graph_search_options["min_fuse_set_size"]:
+        if len(subset) >= min_fuse_set_size:
+            # Careful here - the caller uses the subsets to fuse nodes together
+            # so we need to clear any cache entry that contains one of the
+            # returned nodes because the dependency list could be different
+            # (larger) after the merge.
+            cache = {k: v for k, v in cache.items() if v.isdisjoint(subset)}
             yield subset
 
-        next_round_node_list = [node for node in node_list if node not in subset]
         node_list = next_round_node_list
 
 
@@ -849,8 +959,8 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
                 else:
                     counters["inductor"]["unknown_group_batch_fusion"] += 1
 
-                log.info(
-                    f"{rule.__class__.__name__}: key = {key}; subset size = {len(subset)}"  # noqa: G004
+                log.debug(
+                    f"{rule.__class__.__name__}: key = {key}; subset size = {len(list(subset))}"  # noqa: G004
                 )
 
 
@@ -865,7 +975,6 @@ def generate_fusion_from_config(config_options: Dict[str, Any], pre_grad=True):
 
 
 def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
-    print_graph(graph, "Before group_batch fusion in pre grad pass.")
     fusions: List[GroupBatchFusionBase] = []
     # we keep all current pre grad fusions to keep
     # current implementation, will remove this later
@@ -894,4 +1003,3 @@ def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
 
     for rule in fusions:
         apply_group_batch_fusion(graph, rule)  # type: ignore[arg-type]
-        print_graph(graph, f"Apply fusion {rule.__class__.__name__}.")

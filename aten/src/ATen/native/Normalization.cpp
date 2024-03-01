@@ -409,7 +409,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
           invstd = 1 / std::sqrt(running_var_a[f] + eps);
         }
 
-        // dot product of the Q(X) and gradOuput
+        // dot product of the Q(X) and gradOutput
         accscalar_t dotp = 0;
         reduce_iter_local.unsafe_replace_operand(
             0, in_data + f * in_channel_stride);
@@ -550,8 +550,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
     auto rmean_c = running_mean.defined() ? running_mean.contiguous() : running_mean;
     auto rvar_c = running_var.defined() ? running_var.contiguous() : running_var;
 
-    Tensor output, save_mean, save_var, reserve;
-    std::tie(output, save_mean, save_var, reserve) =
+    auto [output, save_mean, save_var, reserve] =
         at::cudnn_batch_norm(input_c, weight_c, bias_c, rmean_c, rvar_c,
                              training, momentum, eps);
 
