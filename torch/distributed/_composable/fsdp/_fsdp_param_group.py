@@ -173,10 +173,8 @@ class FSDPParamGroup:
             and data_parallel_world_size / factor > factor
         ):
             factor *= 2
-        self._grad_divide_factors = (
-            float(factor),
-            data_parallel_world_size / float(factor),
-        )
+        factor = float(factor)
+        self._grad_divide_factors = (factor, data_parallel_world_size / factor)
 
     def lazy_init(self):
         self._init_grad_divide_factors()
