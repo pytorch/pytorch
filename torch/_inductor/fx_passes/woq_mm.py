@@ -57,7 +57,7 @@ def _get_woq_mm_patterns():
     w = functools.partial(w_inp, dtype=torch.int8)
     s = functools.partial(s_inp, dtype=torch.bfloat16)
 
-    workaround: dict[str, any]
+    workaround: dict[str, float]
 
     for pattern, replacement, args, workaround, extra_check in [
         (
