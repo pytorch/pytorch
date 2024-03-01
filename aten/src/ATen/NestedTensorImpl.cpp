@@ -10,6 +10,7 @@
 
 #include <numeric>
 #include <functional>
+#include <utility>
 
 namespace {
 inline void validate_nested_tensor_metadata(
@@ -67,8 +68,8 @@ c10::DispatchKeySet get_view_key_set(const at::Tensor& base) {
 }
 
 } // namespace
-namespace at {
-namespace native {
+
+namespace at::native {
 
 inline std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
   // torch.tensor([]) is considered to have `dim() = 1` and `size(0) = 0`
@@ -188,7 +189,7 @@ NestedTensorImpl::NestedTensorImpl(
 }
 
 NestedTensorImpl::NestedTensorImpl(
-    at::Tensor buffer,
+    const at::Tensor& buffer,
     at::Tensor nested_sizes,
     at::Tensor nested_strides,
     at::Tensor storage_offsets)
@@ -196,9 +197,9 @@ NestedTensorImpl::NestedTensorImpl(
           buffer.storage(),
           generate_nested_key_set_from_buffer(buffer),
           buffer.dtype(),
-          nested_sizes,
-          nested_strides,
-          storage_offsets) {
+          std::move(nested_sizes),
+          std::move(nested_strides),
+          std::move(storage_offsets)) {
 
   TORCH_INTERNAL_ASSERT(
       buffer.dim() == 1,
@@ -210,8 +211,8 @@ NestedTensorImpl::NestedTensorImpl(
 // assume contiguous, `nested_strides` and `offsets`
 // can be infered from `nested_sizes`
 NestedTensorImpl::NestedTensorImpl(
-    at::Tensor buffer,
-    at::Tensor nested_sizes)
+    const at::Tensor& buffer,
+    const at::Tensor& nested_sizes)
     : NestedTensorImpl(
           buffer,
           nested_sizes,
@@ -359,5 +360,4 @@ int64_t get_numel_from_nested_size_tensor(const at::Tensor& tensor) {
   return static_cast<int64_t>(num_elements);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

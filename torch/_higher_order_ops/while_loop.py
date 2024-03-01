@@ -96,7 +96,7 @@ def while_loop(cond_fn, body_fn, operands):
         - 'while_loop' only supports **inference** right now. Autograd will be supported in the future.
 
     """
-    if torch._dynamo.is_compiling():
+    if torch.compiler.is_dynamo_compiling():
         return while_loop_op(cond_fn, body_fn, operands)
 
     def _validate_input(cond_fn, body_fn, operands):
