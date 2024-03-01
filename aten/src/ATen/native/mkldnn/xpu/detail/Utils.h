@@ -357,11 +357,6 @@ static inline bool binary_valid(
   return false;
 }
 
-enum MEMORY_LAYOUT_FOR_CONV {
-  ChannelsFirst = 0, // using channels_first for conv computation.
-  ChannelsLast = 1, /// using channels_last for conv computation.
-};
-
 } // namespace onednn
 } // namespace native::xpu
 } // namespace at
