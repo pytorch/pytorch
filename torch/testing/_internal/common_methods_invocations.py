@@ -28,8 +28,9 @@ from torch.testing._internal.common_device_type import \
      skipCPUIfNoMklSparse,
      toleranceOverride, tol)
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION, SM53OrLater, SM80OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN,
-    _get_torch_cuda_version, _get_torch_rocm_version,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_FUSED_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    SM53OrLater, SM80OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN, _get_torch_cuda_version,
+    _get_torch_rocm_version,
 )
 from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
@@ -14428,7 +14429,22 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_meta_outplace',
                          device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),
             DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_dispatch_symbolic_meta_outplace',
-                         device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),),
+                         device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),
+            # registered in fake_impls.py instead of _meta_registrations.py, so meta kernels will fail.
+            # However, for implementations that fall back to the constituent ops, the meta kernels may not
+            # fail. Fused kernels will fail, whereas unfused kernels will not fail.
+            # All fused kernels support bf16 and fp16 - so if fused attention is supported, the test will fail.
+            # mem_eff_attention also supports fp32 - so if it is supported the test will fail.
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
+                         dtypes=(torch.bfloat16, torch.float16), active_if=PLATFORM_SUPPORTS_FUSED_ATTENTION),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
+                         dtypes=(torch.float32,), active_if=PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
+                         dtypes=(torch.bfloat16, torch.float16), active_if=PLATFORM_SUPPORTS_FUSED_ATTENTION),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
+                         dtypes=(torch.float32,), active_if=PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),),
     ),
     OpInfo(
         'torch.ops.aten._flash_attention_forward',
@@ -14447,6 +14463,11 @@ op_db: List[OpInfo] = [
             # Device mismatch due to philox seed and offset
             DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast', device_type='cuda'),
             DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake', device_type='cuda'),
+            # meta implementation is in fake_impls.py instead of being a meta registration
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
             # Checking the scalar value of the philox seed and offset
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cuda'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
@@ -14481,6 +14502,11 @@ op_db: List[OpInfo] = [
             # Device mismatch due to philox seed and offset
             DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast', device_type='cuda'),
             DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake', device_type='cuda'),
+            # meta implementation is in fake_impls.py instead of being a meta registration
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
             # Checking the scaler value of the philox seed and offset
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cuda'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
@@ -14844,6 +14870,13 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"),
                 "TestNNCOpInfo",
                 "test_nnc_correctness",
+            ),
+            # Fails for unknown reason: https://github.com/pytorch/pytorch/issues/120783
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCompositeCompliance",
+                "test_cow_input",
+                device_type='cuda',
             ),
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1e-3)}),
@@ -19242,6 +19275,13 @@ op_db: List[OpInfo] = [
             #     return torch.nn.functional.nll_loss(i0, i1, weight=tensor([8.4784, 1.7658, 4.3228], dtype=torch.float32))
             #                                                        ~~~~~~ <--- HERE
             DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
+            # Fails for unknown reason: https://github.com/pytorch/pytorch/issues/120782
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestCompositeCompliance",
+                "test_cow_input",
+                device_type='cuda',
+            ),
         ),
     ),
     OpInfo(

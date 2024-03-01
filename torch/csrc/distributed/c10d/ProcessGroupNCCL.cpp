@@ -850,7 +850,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 
   RECORD_PARAM_COMMS(
       0, // seq
-      this->getID(),
+      static_cast<int>(uid_), // pg id
       rank, // rank
       "init", // colName
       0, // inNelems
@@ -1071,20 +1071,18 @@ bool ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
   return true;
 }
 
-void ProcessGroupNCCL::shutdown() {
+void ProcessGroupNCCL::shutdown(c10::optional<std::string> reason) {
   // Don't join threads here since the purpose of this method is to abort all
   // communicators and signal the threads to exit. Joining on the threads could
   // potentially block and hence avoid it in this method.
   terminateProcessGroup_.store(true);
   workMetaListCV_.notify_one();
 
-  std::string abortReason = c10::str("Process Group shutdown on rank ", rank_);
   // lauch abort asynchrounously and wait for it to complete or timeout
   LOG(INFO) << logPrefix()
             << "Launching ProcessGroupNCCL abort asynchrounously.";
-  std::future<bool> fut = std::async(std::launch::async, [this, abortReason]() {
-    return this->abort(abortReason);
-  });
+  std::future<bool> fut = std::async(
+      std::launch::async, [this, &reason]() { return this->abort(reason); });
 
   waitForFutureOrTimeout(fut, options_->timeout, "ProcessGroup abort", true);
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL aborts successfully.";
@@ -2974,7 +2972,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      static_cast<int>(uid_), // pg id
       tensors, // inputTensors
       tensors, // outputTensors
       rank_, // rank
@@ -3001,7 +2999,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      static_cast<int>(uid_), // pg id
       tensors, // inputTensors
       tensors, // outputTensors
       rank_, // rank
@@ -3051,7 +3049,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      static_cast<int>(uid_), // pg id
       tensors, // inputTensors
       tensors, // outputTensors
       opts.rootRank, // root rank
@@ -3137,7 +3135,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      static_cast<int>(uid_), // pg id
       tensors, // inputTensors
       tensors, // outputTensors
       opts.rootRank, // root rank
@@ -3471,7 +3469,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      static_cast<int>(uid_), // pg id
       inputTensor, // inputTensor
       outputTensor, // outputTensor
       rank_, // rank
@@ -3559,7 +3557,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   RECORD_PARAM_COMMS(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      static_cast<int>(uid_), // pg id
       rank_, // rank
       "barrier", // colName
       0, // inNelems
@@ -3628,7 +3626,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         static_cast<int>(
             this->getSequenceNumberForGroup() +
             1), // seq + 1 to match collective
-        this->getID(),
+        static_cast<int>(uid_), // pg id
         inputTensor, // inputTensor
         outputTensor, // outputTensor
         rank_, // rank
@@ -3670,7 +3668,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         static_cast<int>(
             this->getSequenceNumberForGroup() +
             1), // seq + 1 to match collective
-        this->getID(),
+        static_cast<int>(uid_), // pg id
         inputTensor, // inputTensor
         outputTensor, // outputTensor
         rank_, // rank
@@ -3748,7 +3746,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      static_cast<int>(uid_), // pg id
       inputTensors, // inputTensors
       outputTensors, // outputTensors
       rank_, // rank
@@ -3800,7 +3798,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      static_cast<int>(uid_), // pg id
       tensors, // inputTensors
       tensors, // outputTensors
       dstRank, // dst rank
@@ -3841,7 +3839,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      static_cast<int>(uid_), // pg id
       tensors, // inputTensors
       tensors, // outputTensors
       srcRank, // src rank
@@ -3941,7 +3939,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      static_cast<int>(uid_), // pg id
       inputTensors, // inputTensors
       outputTensors, // outputTensors
       opts.rootRank, // root rank
@@ -4028,7 +4026,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      static_cast<int>(uid_), // pg id
       inputTensors, // inputTensors
       outputTensors, // outputTensors
       opts.rootRank, // root rank
@@ -4098,7 +4096,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      static_cast<int>(uid_), // pg id
       input_tensor, // inputTensors
       output_tensor, // outputTensors
       rank_, // rank
