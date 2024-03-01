@@ -77,7 +77,6 @@ def export(
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
-    constraints: Optional[List[Constraint]] = None,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
@@ -129,15 +128,6 @@ def export(
 
         kwargs: Optional example keyword inputs.
 
-        constraints: [DEPRECATED: use ``dynamic_shapes`` instead, see below]
-         An optional list of constraints on the dynamic arguments
-         that specify their possible range of shapes. By default, shapes of
-         input torch.Tensors are assumed to be static. If an input torch.Tensor
-         is expected to have dynamic shapes, please use :func:`dynamic_dim`
-         to define :class:`Constraint` objects that specify the dynamics and the possible
-         range of shapes. See :func:`dynamic_dim` docstring for examples on
-         how to use it.
-
         dynamic_shapes:
          An optional argument where the type should either be:
          1) a dict from argument names of ``f`` to their dynamic shape specifications,
@@ -187,7 +177,6 @@ def export(
         mod,
         args,
         kwargs,
-        constraints,
         dynamic_shapes,
         strict=strict,
         preserve_module_call_signature=preserve_module_call_signature,
@@ -314,12 +303,19 @@ def load(
     )
 
 
-def register_dataclass(cls: Type[Any]) -> None:
+def register_dataclass(
+    cls: Type[Any],
+    *,
+    serialized_type_name: Optional[str] = None,
+) -> None:
     """
     Registers a dataclass as a valid input/output type for :func:`torch.export.export`.
 
     Args:
         cls: the dataclass type to register
+        serialized_type_name: The serialized name for the dataclass. This is
+        required if you want to serialize the pytree TreeSpec containing this
+        dataclass.
 
     Example::
 
@@ -345,4 +341,6 @@ def register_dataclass(cls: Type[Any]) -> None:
 
     from torch._export.utils import register_dataclass_as_pytree_node
 
-    return register_dataclass_as_pytree_node(cls)
+    return register_dataclass_as_pytree_node(
+        cls, serialized_type_name=serialized_type_name
+    )
