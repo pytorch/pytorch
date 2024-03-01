@@ -127,6 +127,12 @@ def tabulate(rows, headers):
         )
 
 
+def maybe_cprofile(func):
+    if config.cprofile:
+        return cprofile_wrapper(func)
+    return func
+
+
 def cprofile_wrapper(func):
     @wraps(func)
     def profile_wrapper(*args, **kwargs):
@@ -549,14 +555,27 @@ def is_function(value):
 
 
 def unwrap_if_wrapper(fn):
+    return unwrap_with_attr_name_if_wrapper(fn)[0]
+
+
+def unwrap_with_attr_name_if_wrapper(fn):
+    # unpack @functools.lru_cache wrapped function
     if isinstance(fn, functools._lru_cache_wrapper):
         fn = inspect.getattr_static(fn, "__wrapped__")
+        attr_name = "__wrapped__"
     # unpack @torch._dynamo.optimize()(fn) wrapped function
-    fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
+    elif is_function(fn) and inspect.getattr_static(fn, "_torchdynamo_inline", False):
+        fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
+        attr_name = "_torchdynamo_inline"
     # unpack torch.jit.script_if_tracing
-    if inspect.getattr_static(fn, "__script_if_tracing_wrapper", False):
+    elif is_function(fn) and inspect.getattr_static(
+        fn, "__script_if_tracing_wrapper", False
+    ):
         fn = inspect.getattr_static(fn, "__original_fn", fn)
-    return fn
+        attr_name = "__original_fn"
+    else:
+        attr_name = None
+    return fn, attr_name
 
 
 def is_numpy_ndarray(value):
@@ -794,7 +813,9 @@ def skip_frame_if_in_functorch_mode(val: torch.Tensor):
 
 @contextmanager
 def preserve_rng_state():
-    with torch.utils._python_dispatch._disable_current_modes():
+    disable_functorch = torch._C._DisableFuncTorch
+    disable_current_modes = torch.utils._python_dispatch._disable_current_modes
+    with disable_current_modes(), disable_functorch():
         rng_state = torch.clone(torch.random.get_rng_state())
         skip_frame_if_in_functorch_mode(rng_state)
         if torch.cuda.is_available():
@@ -2013,6 +2034,8 @@ def nnmodule_has_hooks(
 
 def to_numpy_helper(value):
     """Convert tensor and tnp.ndarray to numpy.ndarray."""
+    if is_fake(value):
+        return value
     if isinstance(value, tnp.ndarray):
         return to_numpy_helper(value.tensor)
     elif isinstance(value, torch.Tensor):
