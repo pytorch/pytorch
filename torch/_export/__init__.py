@@ -91,7 +91,7 @@ class ExportDynamoConfig:
 
 @compatibility(is_backward_compatible=False)
 def capture_pre_autograd_graph(
-    f: Callable,
+    f: torch.nn.Module,
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
     constraints: Optional[List[Constraint]] = None,
@@ -104,7 +104,7 @@ def capture_pre_autograd_graph(
     torch.export API.
 
     Args:
-      f: A callable to be traced
+      f: nn.Module to be traced
 
       args: example positional inputs.
 
@@ -141,6 +141,8 @@ def capture_pre_autograd_graph(
     from torch.export.dynamic_shapes import _process_dynamic_shapes
 
     log_export_usage(event="export.private_api", flags={"capture_pre_autograd_graph"})
+
+    assert isinstance(f, torch.nn.Module), "Expected an nn.Module instance."
 
     if kwargs is None:
         kwargs = {}
