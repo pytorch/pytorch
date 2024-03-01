@@ -686,10 +686,12 @@ class TestNamedTensor(TestCase):
 
             self.assertEqual(op(a, a).names, ('N', 'C'))
             self.assertEqual(op(a, c).names, ('N', 'C'))
-
-            with self.assertRaisesRegex(RuntimeError, "do not match"):
+            # TODO: dynamo will throw a slightly different
+            # error message because it's adding fake tensors
+            # `must match the size of` portion is the dynamo error
+            with self.assertRaisesRegex(RuntimeError, "do not match|must match the size of"):
                 op(a, d)
-            with self.assertRaisesRegex(RuntimeError, "do not match"):
+            with self.assertRaisesRegex(RuntimeError, "do not match|must match the size of"):
                 op(a, b)
 
         def test_wildcard(op):

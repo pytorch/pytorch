@@ -11,6 +11,8 @@ from torch._C._functorch import (
     current_level,
     get_unwrapped,
     is_batchedtensor,
+    is_functorch_wrapped_tensor,
+    is_gradtrackingtensor,
     maybe_get_bdim,
     maybe_get_level,
     peek_interpreter_stack,
@@ -84,6 +86,23 @@ def assert_metadata_eq(assert_eq, m1, m2, *, skip_symbolic=False):
     return go(m1, m2)
 
 
+def is_sparse_coo(t):
+    return isinstance(t, torch.Tensor) and t.layout is torch.sparse_coo
+
+
+def is_sparse_compressed(t):
+    return isinstance(t, torch.Tensor) and t.layout in {
+        torch.sparse_csr,
+        torch.sparse_csc,
+        torch.sparse_bsr,
+        torch.sparse_bsc,
+    }
+
+
+def is_sparse_any(t):
+    return is_sparse_coo(t) or is_sparse_compressed(t)
+
+
 # This is a class for converting multiple tensors into meta tensors which
 # share the same view/storage structure.  The operation model is you allocate
 # one of these, and then call it repeatedly on all the tensors you want to
@@ -133,7 +152,7 @@ class MetaConverter:
         # hold a weak ref to self, otherwise it will be kept alive
         # by the del_ten closure
         self_weak_ref = weakref.ref(self)
-        if t.is_sparse or t.is_mkldnn or is_batchedtensor(t):
+        if t.is_sparse or t.is_mkldnn or is_functorch_wrapped_tensor(t):
             weak_st = None
         else:
             weak_st = StorageWeakRef(t._typed_storage())
@@ -327,16 +346,36 @@ class MetaConverter:
                     if t.requires_grad and not is_leaf:
                         with torch.enable_grad():
                             r = r.clone()
-                elif is_batchedtensor(t):
-                    # Wraps a BatchedTensor in a FakeTensor
+                elif is_functorch_wrapped_tensor(t):
+                    if t._is_view():
+                        from torch._dynamo.exc import unimplemented
+
+                        unimplemented(
+                            "view functorch tensors are not supported by meta conversion"
+                        )
+
+                    # Wraps a functorch tensor class (BatchedTensor, GradTrackingTensor)
+                    # in a FakeTensor
                     def _to_fake_tensor(t):
                         if is_batchedtensor(t):
                             ft = _to_fake_tensor(get_unwrapped(t))
                             lvl = maybe_get_level(t)
                             bdim = maybe_get_bdim(t)
                             r = _add_batch_dim(ft, bdim, lvl)
+                        elif is_gradtrackingtensor(t):
+                            disable_functorch = torch._C._DisableFuncTorch
+                            with disable_functorch():
+                                ft = _to_fake_tensor(get_unwrapped(t))
+                            lvl = torch._C._functorch.maybe_get_level(t)
+                            r = torch._C._functorch._wrap_for_grad(ft, lvl)
+
+                            is_leaf = safe_is_leaf(t)
+                            if t.requires_grad and safe_is_leaf(r):
+                                r.requires_grad = True
+                            elif t.requires_grad and not is_leaf:
+                                with torch.enable_grad():
+                                    r = r.clone()
                         else:
-                            # regular tensor
                             sizes = t.size()
                             strides = t.stride()
                             r = callback(
@@ -537,6 +576,7 @@ class MetaConverter:
                                 device="meta",
                             )
                         )
+
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     if t.requires_grad:
                         r.requires_grad = t.requires_grad
@@ -549,8 +589,8 @@ class MetaConverter:
                                 r = r.clone(memory_format=torch.preserve_format)
 
                     # Graph-Break for wrapped tensors
-                    if not is_batchedtensor(
-                        t
+                    if not (
+                        is_batchedtensor(t) or is_gradtrackingtensor(t)
                     ) and torch._C._functorch.is_functorch_wrapped_tensor(t):
                         return NotImplemented
 
@@ -701,13 +741,16 @@ class MetaConverter:
                 return NotImplemented
             else:
                 self.hit += 1
-                r = self.meta_tensor(
-                    t,
-                    shape_env=shape_env,
-                    callback=callback,
-                    source=source,
-                    symbolic_context=symbolic_context,
-                )
+
+                disable_functorch = torch._C._DisableFuncTorch
+                with disable_functorch():
+                    r = self.meta_tensor(
+                        t,
+                        shape_env=shape_env,
+                        callback=callback,
+                        source=source,
+                        symbolic_context=symbolic_context,
+                    )
                 if type(t) is torch.nn.Parameter:
                     # NB: Cannot directly use Parameter constructor
                     # because that would force a detach, not desirable
