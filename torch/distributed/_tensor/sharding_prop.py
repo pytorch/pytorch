@@ -273,12 +273,15 @@ class ShardingPropagator:
                     needs_redistribute=needs_redistribute,
                 )
             elif isinstance(op_strategy, TupleStrategy):
-                # tuple strategy output sharding
+                # tuple strategy output sharding processing
+                # runtime selected placement strategy for each TupleStrategy input arg
+                selected_strategies: List[PlacementStrategy] = []
                 out_spec_list: List[DTensorSpec] = []
                 for strategy in op_strategy.childs:
                     assert isinstance(strategy, OpStrategy)
-                    output_strategy = self._select_strategy(strategy)
-                    out_spec_list.append(output_strategy.output_spec)
+                    selected_strategy = self._select_strategy(strategy)
+                    selected_strategies.append(selected_strategy)
+                    out_spec_list.append(selected_strategy.output_spec)
 
                 needs_redistribute = False
                 suggestion_args: List[object] = []
@@ -288,16 +291,27 @@ class ShardingPropagator:
                     ):
                         expected_input_spec_list = []
                         for idx, arg_spec in enumerate(arg):
-                            if arg_spec.placements != out_spec_list[idx].placements:
+                            expected_input_spec = selected_strategies[idx].input_spec
+                            expected_input_spec = (
+                                expected_input_spec.shallow_copy_with_tensor_meta(
+                                    arg_spec.tensor_meta
+                                )
+                            )
+                            if arg_spec.placements != expected_input_spec.placements:
                                 needs_redistribute = True
-                            expected_input_spec_list.append(out_spec_list[idx])
+                            expected_input_spec_list.append(expected_input_spec)
                         suggestion_args.append(
                             tuple(expected_input_spec_list)
                             if isinstance(arg, tuple)
                             else expected_input_spec_list
                         )
                     elif isinstance(arg, DTensorSpec):
-                        expected_input_spec = out_spec_list[0]
+                        expected_input_spec = selected_strategies[0].input_spec
+                        expected_input_spec = (
+                            expected_input_spec.shallow_copy_with_tensor_meta(
+                                arg.tensor_meta
+                            )
+                        )
                         if arg.placements != expected_input_spec.placements:
                             needs_redistribute = True
                         suggestion_args.append(expected_input_spec)
@@ -309,7 +323,6 @@ class ShardingPropagator:
                     reshard_schema = OpSchema(
                         op_schema.op, tuple(suggestion_args), op_schema.kwargs_schema
                     )
-                    # reshard_schema._inplace_rewrap_schema_suggestion(op_schema)
                     suggestion_schema = [reshard_schema]
 
                 output_sharding = OutputSharding(
