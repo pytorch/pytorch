@@ -4,7 +4,6 @@ import inspect
 import logging
 import re
 import time
-import warnings
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -323,7 +322,6 @@ def _export_to_torch_ir(
     if _log_export_usage:
         log_export_usage(event="export.private_api", flags={"_export_to_torch_ir"})
 
-    constraints = constraints or []
     kwargs = kwargs or {}
 
     if not isinstance(args, tuple):
@@ -621,7 +619,6 @@ def _export(
     f: torch.nn.Module,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
-    constraints: Optional[List[Constraint]] = None,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
     *,
     strict: bool = True,
@@ -638,15 +635,6 @@ def _export(
         args: example positional inputs.
 
         kwargs: optional example keyword inputs.
-
-        constraints: [DEPRECATED: use ``dynamic_shapes`` instead, see below]
-         An optional list of constraints on the dynamic arguments
-         that specify their possible range of shapes. By default, shapes of
-         input torch.Tensors are assumed to be static. If an input torch.Tensor
-         is expected to have dynamic shapes, please use :func:`dynamic_dim`
-         to define :class:`Constraint` objects that specify the dynamics and the possible
-         range of shapes. See :func:`dynamic_dim` docstring for examples on
-         how to use it.
 
         dynamic_shapes:
          An optional argument where the type should either be:
@@ -678,17 +666,7 @@ def _export(
     log_export_usage(event="export.enter", flags=flags)
     _EXPORT_FLAGS = flags
 
-    if constraints is not None:
-        log_export_usage(event="export.private_api", flags={"constraints"})
-        warnings.warn(
-            "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
-            "and will not be supported in the future. "
-            "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-    else:
-        constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes) or []
+    constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes) or []
 
     kwargs = kwargs or {}
 
