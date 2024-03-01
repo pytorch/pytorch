@@ -66,6 +66,21 @@ aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 aten = torch.ops.aten
 
 
+def _compute_output_meta_with_inductor_strides(fw_module, fwd_output_strides):
+    out = [n.meta["val"] for n in (list(fw_module.graph.nodes)[-1].args[0])]
+    # will only be set for inductor
+    if not fwd_output_strides:
+        return out
+    with TracingContext.get().fake_mode.shape_env.suppress_guards():
+        for i in range(len(out)):
+            if not isinstance(out[i], Tensor):
+                continue
+            if all(s1 == s2 for s1, s2 in zip(out[i].stride(), fwd_output_strides[i])):
+                continue
+            out[i] = out[i].as_strided(out[i].shape, fwd_output_strides[i])
+    return out
+
+
 def aot_dispatch_base(
     flat_fn,
     flat_args: List[Tensor],
@@ -79,6 +94,7 @@ def aot_dispatch_base(
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = torch._C._DisableAutocast if disable_amp else nullcontext
+    fakified_out = None
 
     with context(), track_graph_compiling(aot_config, "inference"):
         compiler = (
@@ -98,9 +114,16 @@ def aot_dispatch_base(
                 if maybe_subclass_meta is None
                 else maybe_subclass_meta.fw_metadata
             )
-        compiled_fw = compiler(fw_module, updated_flat_args)
 
-    # This boxed_call handling happens inside create_runtime_wrapper as well.
+        with TracingContext.report_output_strides() as fwd_output_strides:
+            compiled_fw = compiler(fw_module, updated_flat_args)
+
+        # see note: [Returning Fake Tensors on First AOT Autograd Call]
+        if tracing_context and tracing_context.fakify_first_call:
+            fakified_out = _compute_output_meta_with_inductor_strides(
+                fw_module, fwd_output_strides
+            )
+
     # However, create_runtime_wrapper does not expect the rng offsets in the
     # output. So, we have to create another wrapper and take out the offset. As
     # a result, we have to account for not boxed_call compilers as well.
@@ -110,6 +133,13 @@ def aot_dispatch_base(
     # Create a wrapper to set up the rng functionalize bits
     @wraps(compiled_fw)
     def rng_functionalization_wrapper(args):
+        # see note: [Returning Fake Tensors on First AOT Autograd Call]
+        nonlocal fakified_out
+        if fakified_out is not None:
+            out = fakified_out
+            fakified_out = None
+            return out
+
         # args is a list because compiled_fw is boxed_call
         if fw_metadata.is_rng_op_functionalized:
             # Add the seed and offset to args
@@ -168,6 +198,9 @@ def aot_dispatch_autograd(
             "aot_joint_graph",
             payload_fn=lambda: fx_g.print_readable(print_output=False),  # type: ignore[union-attr]
         )
+
+    fakify_first_call = False
+    fakified_out = None
 
     with torch.no_grad():
         inner_meta = (
@@ -317,6 +350,13 @@ def aot_dispatch_autograd(
             if not hasattr(compiled_fw_func, "_boxed_call"):
                 compiled_fw_func = make_boxed_func(compiled_fw_func)
 
+            # see note: [Returning Fake Tensors on First AOT Autograd Call]
+            if tracing_context and tracing_context.fakify_first_call:
+                fakified_out = _compute_output_meta_with_inductor_strides(
+                    fw_module, fwd_output_strides
+                )
+                fakify_first_call = True
+
             if maybe_subclass_meta is not None:
                 # Why do we need to pass in num_fw_outs_saved_for_bw?
                 # See Note: [Partitioner handling for Subclasses, Part 2]
@@ -427,6 +467,7 @@ def aot_dispatch_autograd(
         maybe_subclass_metadata: Optional[SubclassMeta] = maybe_subclass_meta
         num_symints_saved_for_bw = _num_symints_saved_for_bw
         _compiled_autograd_should_lift = False
+        _fakify_first_call = fakify_first_call
 
         @staticmethod
         def _compiled_autograd_key(ctx):
@@ -445,20 +486,28 @@ def aot_dispatch_autograd(
                 ctx.mark_dirty(deduped_flat_tensor_args[i])
                 marked_dirty_inps.append(deduped_flat_tensor_args[i])
 
-            if CompiledFunction.metadata.is_rng_op_functionalized:
-                # Add the seed and offset to args
-                seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
-                args = (*args, seed, offset)
-            # There is a pretty complicated calling convention around what the compiled fw returns.
-            # The full list of outputs and their relative order is:
-            # (*mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
-            # - Note that in the synthetic bases case, mutated_inputs will correspond to an updated version
-            #   of the original view, and not the synthetic base
-            fw_outs = call_func_at_runtime_with_args(
-                CompiledFunction.compiled_fw,
-                args,
-                disable_amp=disable_amp,
-            )
+            if not CompiledFunction._fakify_first_call:
+                if CompiledFunction.metadata.is_rng_op_functionalized:
+                    # Add the seed and offset to args
+                    seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
+                    args = (*args, seed, offset)
+                # There is a pretty complicated calling convention around what the compiled fw returns.
+                # The full list of outputs and their relative order is:
+                # (*mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
+                # - Note that in the synthetic bases case, mutated_inputs will correspond to an updated version
+                #   of the original view, and not the synthetic base
+
+                fw_outs = call_func_at_runtime_with_args(
+                    CompiledFunction.compiled_fw,
+                    args,
+                    disable_amp=disable_amp,
+                )
+            else:
+                nonlocal fakified_out
+                assert fakified_out is not None
+                CompiledFunction._fakify_first_call = False
+                fw_outs = fakified_out
+                fakified_out = None
 
             num_outputs = CompiledFunction.metadata.num_outputs
             num_outputs_aliased = CompiledFunction.metadata.num_outputs_aliased
