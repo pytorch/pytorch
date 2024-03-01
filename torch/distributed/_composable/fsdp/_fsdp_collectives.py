@@ -200,7 +200,7 @@ def _reduce_scatter(
     input: torch.Tensor,
     group: dist.ProcessGroup,
     divide_factors: Optional[Tuple[float, float]],
-):
+) -> None:
     if divide_factors:
         predivide_factor, postdivide_factor = divide_factors
         _div_if_needed(input, predivide_factor)
