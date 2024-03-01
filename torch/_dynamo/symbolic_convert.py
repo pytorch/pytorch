@@ -890,7 +890,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.push(self.symbolic_locals[inst.argval])
 
     def STORE_FAST(self, inst):
-        # print("STORE_FAST()", inst, self.stack[-1], inst.argval)
         loaded_vt = self.pop()
         name = inst.argval
         # Only rename at the top-level scope, this is to avoid the confusion between
