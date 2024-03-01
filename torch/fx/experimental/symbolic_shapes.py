@@ -282,7 +282,7 @@ def _iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Basic]:
     elif isinstance(val, (tuple, list)):
         for s in val:
             yield from _iterate_exprs(s)
-    elif isinstance(val, None):
+    elif val is None:
         pass
     else:
         raise AssertionError(f"cannot extract sympy expressions from {val} {type(val)}")
