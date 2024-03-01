@@ -66,7 +66,13 @@ def filtered_configs(
         # each warp computes 16x16 tile = 256
         num_warps = min(num_warps, block_m * block_n // 256)
         if torch.version.hip:
-            for matrix_instr_nonkdim in [16, 32]:
+            for matrix_instr_nonkdim in [0, 16]:
+                if matrix_instr_nonkdim != 0 and (
+                    block_m % matrix_instr_nonkdim != 0
+                    or block_n % matrix_instr_nonkdim != 0
+                ):
+                    #  block_m and block_n must be a multiple of matrix_instr_nonkdim
+                    continue
                 if (
                     block_m,
                     block_n,
