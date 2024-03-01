@@ -100,6 +100,7 @@ class InputAliasInfo:
     mutates_metadata: bool
     mutations_hidden_from_autograd: bool
     mutations_under_no_grad_or_inference_mode: bool
+    mutation_inductor_storage_resize: bool
     mutates_storage_metadata: bool
     requires_grad: bool
     keep_input_mutations: bool
@@ -123,6 +124,7 @@ class InputAliasInfo:
             self.mutates_metadata,
             self.mutations_hidden_from_autograd,
             self.mutations_under_no_grad_or_inference_mode,
+            self.mutation_inductor_storage_resize,
             self.requires_grad,
         ):
             return MutationType.MUTATED_IN_GRAPH

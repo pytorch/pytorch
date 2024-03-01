@@ -63,15 +63,25 @@ def boxed_nop(fx_g, example_inputs):
     run._boxed_call = True
     return run
 
+# Hack needed to get aot_eager backend to work (because the impl for the "functional_resize_storage"
+# inductor op segfaults when trying to clone a tensor input with a zero-sized storage).
+# We can fix the actual op, this is just a hack
+def get_inductor_needed_decomps():
+    from torch._inductor.decomposition import inductor_op_decompositions
+    return inductor_op_decompositions
 
 # Useful for debugging purpose
 # aot_eager uses AOT Autograd backend with nop compiler. It is helpful in debugging.
 aot_eager = aot_autograd(
-    fw_compiler=boxed_nop, partition_fn=min_cut_rematerialization_partition
+    fw_compiler=boxed_nop, partition_fn=min_cut_rematerialization_partition,
+    decompositions=get_inductor_needed_decomps,
 )
 register_backend(name="aot_eager", compiler_fn=aot_eager)
 
-aot_eager_default_partitioner = aot_autograd(fw_compiler=boxed_nop)
+aot_eager_default_partitioner = aot_autograd(fw_compiler=boxed_nop,
+    decompositions=get_inductor_needed_decomps,
+)
+
 register_backend(
     name="aot_eager_default_partitioner", compiler_fn=aot_eager_default_partitioner
 )

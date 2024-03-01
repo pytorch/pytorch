@@ -99,6 +99,50 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
     frozen_ = true;
   }
 
+  uint64_t mutation_counter_no_grad_or_inference_mode_ = 0;
+  uint64_t mutation_counter_ = 0;
+  uint64_t mutation_counter_hidden_from_autograd_ = 0;
+
+  void bump_mutation_counter() {
+    mutation_counter_++;
+  }
+  void bump_mutation_counter_no_grad_or_inference_mode() {
+    mutation_counter_no_grad_or_inference_mode_++;
+  }
+  void mark_mutation_hidden_from_autograd() {
+    mutation_counter_hidden_from_autograd_++;
+  }
+
+  bool are_all_mutations_under_no_grad_or_inference_mode() const {
+    auto non_autograd_mutations = mutation_counter_no_grad_or_inference_mode_ + mutation_counter_hidden_from_autograd_;
+    // The <= is because both counters will technically be incremented, if we perform e.g. a triton kernel mutation under no_grad
+    return mutation_counter_ <= non_autograd_mutations;
+  }
+
+  // TODO: consolidate this method and the one above it (really all we care about is whether or not the autograd needs to care
+  // about these mutations. Triton-kernel/storage-resize mutations and no_grad mutations both fall into this bucket).
+  bool are_all_mutations_hidden_from_autograd() const {
+    return are_all_mutations_under_no_grad_or_inference_mode();
+  }
+
+  void mark_inductor_storage_resize() {
+    inductor_storage_resized_ = true;
+  }
+
+  bool was_inductor_storage_resized() {
+    return inductor_storage_resized_;
+  }
+
+  uint64_t get_mutation_counter() {
+    return mutation_counter_;
+  }
+  uint64_t get_mutation_counter_no_grad_or_inference_mode() {
+    return mutation_counter_no_grad_or_inference_mode_;
+  }
+  uint64_t get_mutation_counter_hidden_from_autograd() {
+    return mutation_counter_hidden_from_autograd_;
+  }
+
   ~FunctionalStorageImpl() override = default;
 
  private:
@@ -119,6 +163,8 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   // If frozen, no more mutations are allowed on this storage.  Once frozen, a
   // storage cannot be unfrozen.
   bool frozen_ = false;
+  // Hack for inductor storage resize checking
+  bool inductor_storage_resized_ = false;
 };
 
 } // namespace at::functionalization

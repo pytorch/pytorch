@@ -643,6 +643,10 @@ class MetaConverter:
                 torch._C._set_neg(r, t.is_neg())
             # This can be skipped if necessary for performance reasons
             assert_metadata_eq(assert_eq, t, r, skip_symbolic=True)
+            # HACK: neeed to think more about this.
+            # FakeTensor doesn't properly handle fakeifying tensors with secretly-different storage sizes today.
+            if t.untyped_storage().size() == 0:
+                r.untyped_storage().resize_(0)
             self.set_tensor_memo(t, r)
 
         return self.get_tensor_memo(t)

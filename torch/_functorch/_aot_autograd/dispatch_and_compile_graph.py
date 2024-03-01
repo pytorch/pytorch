@@ -17,6 +17,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 
 from .functional_utils import (
     assert_functional_graph,
+    reorder_views_before_resize,
     propagate_input_mutation_stacktraces,
 )
 from .schemas import AOTConfig, SubclassMeta, ViewAndMutationMeta
@@ -95,15 +96,16 @@ def aot_dispatch_base_graph(
 
     # As long as we opted to remove input mutations, then
     # there should be *NO* mutating ops in the graph at this point.
-    copy_count = assert_functional_graph(fw_module.graph)
+    mutation_count = assert_functional_graph(fw_module.graph)
+    reorder_views_before_resize(fw_module.graph)
 
     fw_module.graph.eliminate_dead_code()
     fw_module.recompile()
 
-    copy_count2 = assert_functional_graph(fw_module.graph)
+    mutation_count2 = assert_functional_graph(fw_module.graph)
     propagate_input_mutation_stacktraces(fw_module.graph)
 
-    assert copy_count == copy_count2
+    assert mutation_count == mutation_count2
 
     if aot_config.enable_log:
         aot_graphs_log.info(

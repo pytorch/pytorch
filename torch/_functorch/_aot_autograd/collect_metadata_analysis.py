@@ -157,6 +157,7 @@ def run_functionalized_fw_and_collect_metadata(
                 mutates_data
                 and are_all_mutations_under_no_grad_or_inference_mode(f_arg)
             )
+            mutation_inductor_storage_resize = isinstance(f_arg, FunctionalTensor) and torch._functionalize_was_inductor_storage_resized(f_arg.elem)
 
             # Here, we're saying that if an input experienced a set call, inp.set_(other),
             # then we can effectively not have to worry about whether its data was mutated.
@@ -185,6 +186,7 @@ def run_functionalized_fw_and_collect_metadata(
                     mutations_hidden_from_autograd=mutations_hidden_from_autograd,
                     mutates_storage_metadata=mutates_storage_metadata,
                     mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
+                    mutation_inductor_storage_resize=mutation_inductor_storage_resize,
                     requires_grad=requires_grad,
                     keep_input_mutations=keep_input_mutations,
                 )

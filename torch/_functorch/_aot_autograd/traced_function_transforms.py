@@ -439,6 +439,27 @@ def create_functionalized_fn(
                 assert is_fun(inpt_f)
                 inpt_new = from_fun(inpt_f)
                 if meta.input_info[i].mutation_type == MutationType.MUTATED_IN_GRAPH:
+                    if meta.input_info[i].mutation_inductor_storage_resize:
+                        # TODO: add this optimization in later!
+                        # When the net result of the param is that its storage size is unchanged by graph execution (zero before and after),
+                        # we can hide the resize_() completely from inductor.
+                        # Instead, inductor can do all of its forward compute on a temp buffer that it allocates and resizes itself (and controls the lifetime of)
+#                        if inpt_old.untyped_storage().nbytes() == inpt_new.untyped_storage().nbytes():
+#                            continue
+                        nbytes = inpt_new.untyped_storage().nbytes()
+                        # The detach is to make aot_eager backend happy.
+                        # Otherwise, the autograd engine sees a mutable op on a leaf tensor,
+                        # and errors at runtime.
+                        # Alternatively we could figure out how to proxy `inpt_old.untyped_storage().resize_()` into the graph.
+                        torch.ops.inductor.resize_storage_bytes_(inpt_old, nbytes)
+                        # In theory, if you do a resize_() and you also perform a data mutation,
+                        # both a copy_() and a resize_storage_() will show up in the graph.
+                        # the copy_() is probably not actually what you want if we resized_() down to zero bytes,
+                        # but inductor can probably optimize this away.
+                        if nbytes == 0:
+                            continue
+                        raise AssertionError()
+
                     # We found an input that had a (data-only) mutation.
                     # Since keep_input_mutations is set, we need to faithfully apply a copy_()
                     # so the compiler will see the input mutation in the graph.

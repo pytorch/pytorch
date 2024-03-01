@@ -1009,6 +1009,8 @@ class FakeTensorMode(TorchDispatchMode):
             func.name(), torch._C.DispatchKey.CompositeImplicitAutograd
         ):
             raise _BypassDispatchCache("CompositeImplicitAutograd")
+        if func.is_view:
+            raise _BypassDispatchCache("view caching is broken when we have storage resizing")
 
         key_values = (
             func,
@@ -1449,9 +1451,10 @@ class FakeTensorMode(TorchDispatchMode):
         except NotImplementedError as not_implemented_error:
             return maybe_run_unsafe_fallback(not_implemented_error)
 
-        return self.wrap_meta_outputs_with_default_device_logic(
+        out = self.wrap_meta_outputs_with_default_device_logic(
             r, func, flat_args, device=kwargs.get("device")
         )
+        return out
 
     # WARNING: DO NOT add any additional namespaces/operators here if they refer to operators
     # outside of the pytorch/pytorch library! Any pre-existing things here

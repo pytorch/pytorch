@@ -54,7 +54,8 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
       c10::DispatchKeySet(DispatchKey::Functionalize) | value.key_set(),
       value.dtype()
     ),
-    value_(value)
+    value_(value),
+    orig_value_(value)
 {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(value_));
   TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
@@ -136,6 +137,7 @@ FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const
       view_value.device()
     ),
     value_(view_value),
+    orig_value_(view_value),
     is_multi_output_view_(base->is_multi_output_view_ || meta.is_multi_output),
     was_storage_changed_(base->was_storage_changed_)
 {
@@ -212,7 +214,7 @@ void FunctionalTensorWrapper::mutate_view_meta(const at::functionalization::View
 // In the above, tmp is a batched tensor (because adding a normal tensor to a batched tensor does broadcasting and creates a batched tensor).
 // But we can't just replace the underlying memory backing `tensor` with `tmp` - a batched tensor takes up more space!
 // Instead, every input, intermediate and output of the program is wrapped in a FunctionalTensorImpl, which wraps the underlying tensor.
-void FunctionalTensorWrapper::replace_(const Tensor& other) {
+void FunctionalTensorWrapper::replace_(const Tensor& other, bool from_lazy_regenerate, bool hidden_from_autograd) {
   // TODO: going to need to change this if we want nested functionalize() transforms.
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(other));
   value_ = other;
@@ -231,10 +233,22 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
     value_ = at::_to_copy(value_, c10::TensorOptions().dtype(dtype()).layout(layout()));
     TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
   }
-  mutation_counter_++;
-  if (!at::GradMode::is_enabled() || InferenceMode::is_enabled()) {
-    // This mutation happened under no_grad or inference_mode
-    mark_mutation_during_no_grad_or_inference_mode();
+
+  // TODO: rationalize where the mutation_counter_ state should be (on the tensor vs. the storage)
+  // Technically, we should only be tracking mutations on storages, not on tensors.
+  // if a mutation happens to a view under a no_grad,
+  // we won't call replace_() on the other alias until the alias is later used, which
+  // might not be until after the no_grad region is exited.
+  // Therefore, replace_() is not unconditionally safe to check the current no_grad state.
+  if (!from_lazy_regenerate) {
+    bump_mutation_counter();
+    if (!at::GradMode::is_enabled() || InferenceMode::is_enabled()) {
+      // This mutation happened under no_grad or inference_mode
+      bump_mutation_counter_no_grad_or_inference_mode();
+    }
+    if (hidden_from_autograd) {
+      mark_mutation_hidden_from_autograd();
+    }
   }
 }
 
@@ -338,7 +352,7 @@ void FunctionalTensorWrapper::regenerate_from_base() {
     t = view_meta.forward_fn(t, view_meta.out_index);
   }
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
-  replace_(t);
+  replace_(t, /*from_lazy_regenerate=*/true);
   generation_ = storage_impl->generation();
 }
 
@@ -366,9 +380,6 @@ void FunctionalTensorWrapper::copy_tensor_metadata(
     // FunctionalTensorWrapper-specific fields.
     dest_impl->value_ = src_impl->value_;
     dest_impl->level_ = src_impl->level_;
-    dest_impl->mutation_counter_ = src_impl->mutation_counter_;
-    dest_impl->mutation_hidden_from_autograd_counter_ = src_impl->mutation_hidden_from_autograd_counter_;
-    dest_impl->mutation_during_no_grad_or_inference_mode_ = src_impl->mutation_during_no_grad_or_inference_mode_;
     dest_impl->has_metadata_mutation_ = src_impl->has_metadata_mutation_;
     dest_impl->is_multi_output_view_ = src_impl->is_multi_output_view_;
     dest_impl->was_storage_changed_ = src_impl->was_storage_changed_;

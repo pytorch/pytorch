@@ -49,6 +49,8 @@ from .subclass_utils import (
     wrap_tensor_subclasses,
 )
 
+from .functional_utils import reorder_views_before_resize
+
 from .utils import (
     _get_symint_hints,
     call_func_at_runtime_with_args,
@@ -226,6 +228,8 @@ def aot_dispatch_autograd(
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
+            reorder_views_before_resize(fw_module.graph)
+            fw_module.recompile()
 
             fw_outs = next(n for n in fw_module.graph.nodes if n.op == "output").args[0]
             # we only need to bookkeep the symints that are saved for bw, not any symints

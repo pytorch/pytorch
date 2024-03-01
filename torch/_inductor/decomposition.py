@@ -67,7 +67,41 @@ inductor_decompositions = get_decompositions(
         aten.upsample_bilinear2d.vec,
     ]
 )
-decompositions = {**core_aten_decompositions(), **inductor_decompositions}
+
+def resize_storage_bytes_decomp(self, size_bytes):
+    # Note: this technically returns a FakeTensor with an INCORRECT storage size.
+    # Assumption is that the resize_() fits one of these two cases
+    # (1) We are resizing down to zero
+    #     Here, we return a tensor that advertises as having shape of size (0), which is wrong (different from eager)
+    #     Assumption: this tensor will never be used in FSDP after resizing down to zero, so nothing will break.
+    #     Alternative: get the as_strided call above to work, so we get the accurate shape from eager
+    #     (this breaks because as_strided is unhappy with the tensor having zero storage)
+    # (2) We are resizing up from zero
+    #     Here, we asserted above that the storage size (in bytes) maps to the actual size that the input tensor advertised already
+    storage_bytes = int(size_bytes / self.itemsize)
+    import math
+    size_bytes_of_tensor = math.prod(self.shape) * self.itemsize
+    if size_bytes == 0:
+        # Note [Hack: decomposition of functional resize op]
+        # We carefully make sure that storage size here is zero, as it determines what the final
+        # output storage size of the input mutation is.
+        # We also carefully make sure that the "tensor size" reports the same as the original input,
+        # because this tensor will be saved for backward by the autograd engine and used when we trace the joint (param.untyped_storage().resize_(0).t() is passed to mm_backward)
+        # Later, however, we can reorder the transpose() to happen on param directly (not sure if this is necessary long term though)
+        return torch.empty(0, dtype=self.dtype, device=self.device).as_strided(self.shape, self.stride(), self.storage_offset())
+    elif self.untyped_storage().size() == 0 and size_bytes_of_tensor == size_bytes:
+        return torch.empty(self.shape, dtype=self.dtype, device=self.device)
+    else:
+        assert False, f"invalid resize case. self.shape={self.shape}, self.untyped_storage().size()={self.untyped_storage().size()}, size_bytes={size_bytes}"
+
+inductor_op_decompositions = {
+  # Right now this is required for all backends, because the default impl (clone() + storage().resize())
+  # segfaults when you have an input tensor with a zero-sized storage.
+  # We can fix the impl so this decomp can be optional
+#  torch.ops.inductor.resize_storage_bytes.default: resize_storage_bytes_decomp,
+}
+
+decompositions = {**core_aten_decompositions(), **inductor_decompositions, **inductor_op_decompositions}
 
 # Remove unwanted decompositions included via the core ATen decompositions from
 # the Inductor decomp table.

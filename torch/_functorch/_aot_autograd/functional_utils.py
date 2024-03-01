@@ -310,28 +310,58 @@ def was_tensor_metadata_updated(arg, new_arg):
         ) == StorageWeakRef(new_arg.untyped_storage())
 
 
+# TODO: explain why we need this (tldr: the autograd saves the transpose of weight in the backward of mm,
+# meaning the weight.t() call happens **after** the resize_(0) call during tracing)
+def reorder_views_before_resize(fx_g: torch.fx.Graph) -> None:
+    # TODO: I originally added this to "fix" the above problem,
+    # but as a hack I later removed the sanity assert in as_strided(), which makes this pass unnecesary (but maybe we'll need it, to remove that hack...)
+    return
+    mutation_nodes = [x for x in fx_g.nodes if isinstance(x.target, torch._ops.OpOverload) and x.target._schema.is_mutable]
+    output_node = [x for x in fx_g.nodes if x.op == 'output'][0]  # assume 1 output node
+    for n in fx_g.nodes:
+        if isinstance(n.target, torch._ops.OpOverload):
+            if n.target.is_view and n.args[0].target is torch.ops.inductor.resize_storage_bytes.default:
+                if n.args[0].meta['val'].untyped_storage().size() == 0:
+                    with fx_g.inserting_before(n):
+                        base_node_before_resize = n.args[0].args[0]
+                        new_args = tuple([base_node_before_resize] + list(n.args[1:]))
+                        # generate the new view, on the node before the resize
+                        new_view = fx_g.call_function(n.target, new_args, n.kwargs)
+                    # replace the old view with new view node
+                    n.replace_all_uses_with(new_view, propagate_meta=True)
+                    fx_g.erase_node(n)
+
 # Returns the number of detected copy_
 def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
-    placeholders = set()
-    copy_count = 0
+    placeholder_mutations = {}
+    mutation_count = 0
     # NB: It would also be nice to verify that the mutations all happen at the
     # end, but we also do some administrative views after mutations so this
     # isn't actually true.  (TODO: Could this cause problems for Inductor?)
     for n in fx_g.nodes:
         if n.op == "placeholder":
-            placeholders.add(n)
+            placeholder_mutations[n] = {
+                torch.ops.aten.copy_.default: 0,
+                torch.ops.inductor.resize_storage_bytes_.default: 0,
+            }
         if isinstance(n.target, torch._ops.OpOverload):
-            if n.target is torch.ops.aten.copy_.default:
+            if n.target in [
+                torch.ops.aten.copy_.default,
+                torch.ops.inductor.resize_storage_bytes_.default,
+            ]:
                 suffix = True
-                # Can only copy_ into an input, and can only do so once
-                assert n.args[0] in placeholders
-                placeholders.remove(n.args[0])
-                copy_count += 1
+                # Can only copy_ (or resize_) into an input, and can only do so once
+                mutated_arg = n.args[0]
+                assert mutated_arg in placeholder_mutations
+                assert placeholder_mutations[mutated_arg][n.target] == 0
+
+                placeholder_mutations[mutated_arg][n.target] += 1
+                mutation_count += 1
             else:
                 assert (
                     not n.target._schema.is_mutable
                 ), f"aot_autograd expected to have an entirely functional graph, but found {n.format_node()}"
-    return copy_count
+    return mutation_count
 
 
 def propagate_input_mutation_stacktraces(fx_g: torch.fx.Graph) -> None:
@@ -359,12 +389,18 @@ def _check_if_mutation_can_be_in_graph(
     mutates_metadata,
     mutations_hidden_from_autograd,
     mutations_under_no_grad_or_inference_mode,
+    mutation_inductor_storage_resize,
     requires_grad,
 ):
     if keep_input_mutations:
-        return mutates_data and (
+        can_be_in_graph = mutates_data and (
             (not mutates_metadata and not requires_grad)
             or mutations_hidden_from_autograd
             or mutations_under_no_grad_or_inference_mode
         )
-    return False
+    else:
+        can_be_in_graph = False
+
+    if mutation_inductor_storage_resize:
+        assert can_be_in_graph, "If the graph contained an inductor storage_resize, we expect all mutations to be in the graph but this was not the case!"
+    return can_be_in_graph

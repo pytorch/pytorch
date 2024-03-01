@@ -9,6 +9,9 @@
 #include <torch/library.h>
 
 #include <ATen/native/Resize.h>
+#include <ATen/FunctionalTensorWrapper.h>
+#include <ATen/FunctionalTensorWrapper.h>
+#include <ATen/ops/empty.h>
 
 #ifdef USE_CUDA
 #include <ATen/native/cuda/Resize.h>
@@ -100,6 +103,51 @@ static void resize_storage_bytes_(const Tensor& variable, SymInt new_size) {
   }
 }
 
+static Tensor resize_storage_bytes_functional(const Tensor& variable, SymInt new_size) {
+  auto tensor_impl = variable.unsafeGetTensorImpl();
+  auto storage_impl = tensor_impl->unsafe_storage().unsafeGetStorageImpl();
+  auto storage_nbytes = storage_impl->sym_nbytes();
+  TORCH_CHECK(storage_nbytes == 0 || new_size == 0, "torch.compile does not support storage resizing, unless either the input or the target storage size is zero (this is the case for fsdp)");
+  // The above checks make it safe for us to return a tensor with uninitialized memory.
+  // The expectation is that there are only two things that can be done with this tensor, before it can be validly used again:
+  // (1) We resize_() it to a proper size
+  // (2) We copy_() real data into it
+  auto itemsize = tensor_impl->itemsize();
+  auto new_bytes = new_size / itemsize;
+  auto storage_size = std::vector<c10::SymInt>({new_bytes});
+  return at::empty_symint(storage_size, variable.options()).as_strided_symint(variable.sym_sizes(), variable.sym_strides(), variable.sym_storage_offset());
+}
+
+static void resize_storage_bytes__functionalize(const Tensor& variable, SymInt new_size) {
+  if (!at::functionalization::impl::isFunctionalTensor(variable)) {
+    // Functionalization not active: nop
+    at::AutoDispatchSkipFunctionalize guard;
+    static auto op = c10::Dispatcher::singleton()
+      .findSchemaOrThrow("inductor::resize_storage_bytes_", "")
+      .typed<void(const Tensor&, SymInt)>();
+    op.call(variable, new_size);
+    return;
+  }
+
+  at::functionalization::impl::sync(variable);
+  auto variable_ = at::functionalization::impl::from_functional_tensor(variable);
+
+  at::Tensor tmp_output;
+  {
+    at::AutoDispatchSkipFunctionalize guard;
+    static auto op = c10::Dispatcher::singleton()
+      .findSchemaOrThrow("inductor::resize_storage_bytes", "")
+      .typed<Tensor(const Tensor&, SymInt)>();
+    tmp_output = op.call(variable_, new_size);
+  }
+  auto functional_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(variable);
+  functional_impl->replace_(tmp_output, /*from_lazy_regenerate=*/false, /*hidden_from_autograd=*/true);
+  functional_impl->mark_inductor_storage_resize();
+  at::functionalization::impl::commit_update(variable);
+  at::functionalization::impl::sync(variable);
+  return;
+}
+
 TORCH_LIBRARY_FRAGMENT(inductor, m) {
   m.def(
       "_mm_plus_mm(Tensor a, Tensor b, Tensor c, Tensor d, Tensor(t!) out) -> Tensor(t!)",
@@ -119,10 +167,26 @@ TORCH_LIBRARY_FRAGMENT(inductor, m) {
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, accumulate_grad_),
       {at::Tag::pt2_compliant_tag});
   m.def(
-      "resize_storage_bytes_(Tensor variable, SymInt new_size) -> ()",
-      dispatch(
-          c10::DispatchKey::CompositeExplicitAutograd, resize_storage_bytes_),
+      "resize_storage_bytes_(Tensor(a!) variable, SymInt new_size) -> ()",
       {at::Tag::pt2_compliant_tag});
+  m.def(
+      "resize_storage_bytes(Tensor variable, SymInt new_size) -> Tensor",
+      {at::Tag::pt2_compliant_tag});
+}
+
+TORCH_LIBRARY_IMPL(inductor, CompositeExplicitAutograd, m) {
+  m.impl("resize_storage_bytes_", TORCH_FN(resize_storage_bytes_));
+  m.impl("resize_storage_bytes", TORCH_FN(resize_storage_bytes_functional));
+}
+
+TORCH_LIBRARY_IMPL(inductor, Meta, m) {
+  // Can reuse the actual impls
+  m.impl("resize_storage_bytes_", TORCH_FN(resize_storage_bytes_));
+  m.impl("resize_storage_bytes", TORCH_FN(resize_storage_bytes_functional));
+}
+
+TORCH_LIBRARY_IMPL(inductor, Functionalize, m) {
+  m.impl("resize_storage_bytes_", TORCH_FN(resize_storage_bytes__functionalize));
 }
 
 } // namespace inductor

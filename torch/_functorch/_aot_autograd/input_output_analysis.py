@@ -147,6 +147,10 @@ def create_synthetic_base_metadata(
             m.input_info[x].mutations_under_no_grad_or_inference_mode
             for x in outer_indices
         )
+        mutation_inductor_storage_resize = all(
+            m.input_info[x].mutation_inductor_storage_resize
+            for x in outer_indices
+        )
 
         inpt_info = InputAliasInfo(
             # If len(outer_indices) > 1, then this input is a synthetic base.
@@ -162,6 +166,7 @@ def create_synthetic_base_metadata(
             if len(outer_indices) > 1
             else m.input_info[outer_indices[0]].mutates_storage_metadata,
             mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
+            mutation_inductor_storage_resize=mutation_inductor_storage_resize,
             is_leaf=any_leaf,
             requires_grad=requires_grad,
             keep_input_mutations=m.keep_input_mutations,

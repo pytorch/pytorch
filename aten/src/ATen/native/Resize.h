@@ -162,8 +162,18 @@ inline void setStrided(
   }
 
   auto* self_ = self.unsafeGetTensorImpl();
-  checkInBoundsForStorage(
-      size, stride, storage_offset, self_->dtype(), self_->storage());
+  // See Note [Hack: decomposition of functional resize op]
+  // We need to call as_strided() on the empty tensor in that decomposition, so that it properly:
+  // (1) reports as having a proper size (since that tensor gets plumbed into the backward during tracing and must have valid size)
+  // (2) reports as having a zero-size storage (since we rely on this info to know what the final storage size our inputs should have at the end of graph execution)
+  // That fails this check, which I comment out.
+  // One alternative would be:
+  // (1) Treat `inductor.resize_storage_functional` as a primitive of during tracing, that secretly performs untyped_storage().resize_(...) inside of its meta,
+  //     which avoids the problem above
+  // (2) Have inductor lower the above op into an empty() call, **after** we have lowered from the ATen graph, so we no long need to use FakeTensor shape prop
+  //     (and we don't have to worry about properly maintaining fsdp's behavior of tensor size storage size differences)
+  //checkInBoundsForStorage(
+  //    size, stride, storage_offset, self_->dtype(), self_->storage());
 
   /* storage offset */
   TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);

@@ -61,6 +61,28 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // Get the underlying, actual tensor, that doesn't know anything about
   // functionalization.
   const Tensor& value() const {
+    // This is pretty interesting and horrible. What's going on? (not landable, needs discussion)
+    // (1) We have a repro where we take a parameter, resize its storage, and then perform a matmul on it
+    // (2) In eager mode, the autograd engine would save the actual parameter for backward.
+    // (3) When running functionalization, however, we end up with something like:
+    //     param_storage_size_0 =... # the param itself
+    //     param__updated = functional_resize(param_storage_size_0, ALL_GATHER_SIZE)
+    //     matmul(param__updated, param__updated)
+    //     param__updated2 = functional_resize(param_updated, 0)
+    // (4) This means that the autograd engine saves the "updated parameter" for backward,
+    //     which is a **different tensor** from the original parameter (even though inductor might reinplace this later)
+    // (5) When compiled backward runs, it traces a hook that resizes the storage of the parameter directly (the hook closed over the module param)
+    // (6) In eager, we expect the autograd engine to also have saved the param itself, so that the saved tensor will have been automatically resized when the hook runs
+    // (7) But in the traced backward graph, we end with the saved activation being a "fresh" tensor, that also has storage size zero, and NEVER gets resized
+    // The fix here definitely needs design. The idea is that functionalization can see when autograd is trying to access the "updated" tensor (the param post-resize),
+    // and when it detects that both the current updated tensor and the original tensor have zero storage size,
+    // it is theoretically safe to return the original tensor (since they are both the same logical tensor, and their data is the same in this specific case: there is no data, their storage sizes are zero)
+    auto orig_storage_size = orig_value_.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl()->sym_nbytes();
+    auto curr_storage_size = value_.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl()->sym_nbytes();
+    // Also when it's not a view (not sure if this is actually necessary)
+    if (orig_storage_size == 0 && curr_storage_size == 0 && view_metas_.size() == 0) {
+      return orig_value_;
+    }
     return value_;
   };
   // The concept of "level" is only ever important to functorch; it's exposed
@@ -77,22 +99,34 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
 
   // Denotes a mutation that's hidden from autograd,
   // e.g. for the purposes of passing a tensor to a triton kernel
+  void bump_mutation_counter() {
+    functional_storage_impl()->bump_mutation_counter();
+  }
+  void bump_mutation_counter_no_grad_or_inference_mode() {
+    functional_storage_impl()->bump_mutation_counter_no_grad_or_inference_mode();
+  }
   void mark_mutation_hidden_from_autograd() {
-    mutation_hidden_from_autograd_counter_++;
+    return functional_storage_impl()->mark_mutation_hidden_from_autograd();
   }
-  void mark_mutation_during_no_grad_or_inference_mode() {
-    mutation_during_no_grad_or_inference_mode_++;
+
+  uint64_t get_mutation_counter() {
+    return functional_storage_impl()->get_mutation_counter();
   }
+  uint64_t get_mutation_counter_no_grad_or_inference_mode() {
+    return functional_storage_impl()->get_mutation_counter_no_grad_or_inference_mode();
+  }
+  uint64_t get_mutation_counter_hidden_from_autograd() {
+    return functional_storage_impl()->get_mutation_counter_hidden_from_autograd();
+  }
+
   // Are all the mutations happening to the tensor hidden from autograd
   bool are_all_mutations_hidden_from_autograd() const {
-    return mutation_hidden_from_autograd_counter_ == mutation_counter_;
+    return functional_storage_impl()->are_all_mutations_hidden_from_autograd();
   }
   // Did all mutations happen under no_grad or inference_mode
   // (We also need to ignore mutations fully hidden from autograd here)
   bool are_all_mutations_under_no_grad_or_inference_mode() const {
-    return mutation_hidden_from_autograd_counter_ +
-        mutation_during_no_grad_or_inference_mode_ ==
-        mutation_counter_;
+    return functional_storage_impl()->are_all_mutations_under_no_grad_or_inference_mode();
   }
 
   // Sync's the underlying tensor with its alias, if it's out of date. This
@@ -156,7 +190,15 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // a.replace_(tmp)
   //
   // replace_() swaps out the wrapped tensor, value_, with tmp.
-  void replace_(const Tensor& other);
+  void replace_(const Tensor& other, bool from_lazy_regenerate = false, bool hidden_from_autograd = false);
+
+  void mark_inductor_storage_resize() {
+    functional_storage_impl()->mark_inductor_storage_resize();
+  }
+
+  bool was_inductor_storage_resized() {
+    return functional_storage_impl()->was_inductor_storage_resized();
+  }
 
   bool is_multi_output_view() {
     return is_multi_output_view_;
@@ -221,15 +263,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // Note that value is not taken by reference: internally, the wrapper will
   // change the value tensor that it points to over time.
   Tensor value_;
+  Tensor orig_value_;
   int64_t level_{};
-  // These two counters are used for identifying
-  // whether all the mutations on a given tensor are hidden from autograd or
-  // not. If we have an input mutation that is hidden from autograd, then once
-  // we convert the input mutation to a copy_() we know it will be safe to hide
-  // the copy_() from autograd as well.
-  uint64_t mutation_counter_ = 0;
-  uint64_t mutation_hidden_from_autograd_counter_ = 0;
-  uint64_t mutation_during_no_grad_or_inference_mode_ = 0;
   bool has_metadata_mutation_ = false;
   bool is_multi_output_view_ = false;
   // Did the tensor experience a set_() call.
