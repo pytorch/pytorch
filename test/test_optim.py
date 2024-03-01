@@ -9,8 +9,8 @@ from copy import deepcopy
 import torch
 from torch.optim import Optimizer, SGD
 from torch.optim.optimizer import register_optimizer_step_pre_hook, register_optimizer_step_post_hook
-# from optim.test_optim import TestOptim, TestDifferentiableOptimizer  # noqa: F401
-# from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
+from optim.test_optim import TestOptim, TestDifferentiableOptimizer  # noqa: F401
+from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
 from optim.test_swa_utils import TestSWAUtils  # noqa: F401
 from torch.nn import Parameter
 from torch.testing._internal.common_cuda import TEST_MULTIGPU

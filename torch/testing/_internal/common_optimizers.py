@@ -2063,6 +2063,13 @@ optim_db: List[OptimizerInfo] = [
                 "test_state_dict_deterministic",
             ),
             DecorateInfo(
+                unittest.skip(
+                    "SparseAdam does not support dense gradients, see #116507"
+                ),
+                "TestOptimRenewed",
+                "test_save_load_state_dict",
+            ),
+            DecorateInfo(
                 skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
                 "TestOptimRenewed",
                 "test_param_groups_lr",
