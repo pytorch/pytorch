@@ -6333,10 +6333,10 @@ def _infer_scalar_type(obj):
 # Analogous to recursive_store
 # xref: recursive_store in torch/csrc/utils/tensor_new.cpp
 def _recursive_build(scalarType, obj):
-    if isinstance(obj, TensorLike) and obj.ndim <= 1:
+    if isinstance(obj, Tensor) and obj.ndim <= 1:
         obj = obj.item()
         # fall through into next case
-    if isinstance(obj, (bool, int, float, complex)):
+    if isinstance(obj, Number):
         return torch.scalar_tensor(obj, dtype=scalarType)
 
     seq = obj
