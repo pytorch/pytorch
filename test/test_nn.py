@@ -1467,6 +1467,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(ValueError, 'Unknown nonlinearity'):
             rnn = torch.nn.RNN(1, 10, nonlinearity='garbage')
 
+    def test_RNN_nonlinearity_passed_as_arg(self):
+        rnn = torch.nn.RNN(2, 3, 1, 'relu')
+        self.assertEqual(rnn.nonlinearity, 'relu')
+
     def test_module_apply_inplace_op(self):
         def add_one_inplace(t):
             return t.add_(1.0)

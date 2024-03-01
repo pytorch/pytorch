@@ -1068,7 +1068,7 @@ def forward(self, x_1, y_1):
         self.assertTrue(eval_guards(gm, torch.randn(4, 5)))
         self.assertEqual(repr(bind_symbols(gm, torch.randn(4, 5))), "{s0: 4, s1: 5}")
         self.assertFalse(eval_guards(gm, torch.randn(25, 5)))
-        self.assertExpectedInline(show_guards(gm), """L['x'].size()[0] < 20""")
+        self.assertExpectedInline(show_guards(gm), """L['x'].size()[0] <= 19""")
 
     def test_repeat_interleave(self):
         def f(src_tokens, beam_size_src):
@@ -1714,14 +1714,14 @@ def forward(self, x_1):
             assert a.shape[0] > 5 and a.shape[0] > 12
             return a.cos()
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(15))
-        self.assertExpectedInline(show_guards(tensor), """L['a'].size()[0] > 12""")
+        self.assertExpectedInline(show_guards(tensor), """13 <= L['a'].size()[0]""")
 
     def test_guard_lowerbound_range_refinement(self):
         def f(a):
             assert a.shape[0] < 20 and a.shape[0] < 30
             return a.cos()
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(15))
-        self.assertExpectedInline(show_guards(tensor), """L['a'].size()[0] < 20""")
+        self.assertExpectedInline(show_guards(tensor), """L['a'].size()[0] <= 19""")
 
     def test_guard_upperbound_range_refinement_multivariate(self):
         def f(a):
@@ -1731,7 +1731,8 @@ def forward(self, x_1):
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn((15, 20)))
         self.assertExpectedInline(show_guards(tensor), """\
 L['a'].size()[1] > L['a'].size()[0]
-L['a'].size()[0] > 12""")
+13 <= L['a'].size()[0]
+14 <= L['a'].size()[1]""")
 
     def test_guard_lowerbound_range_refinement_multivariate(self):
         def f(a):
@@ -1743,7 +1744,8 @@ L['a'].size()[0] > 12""")
             show_guards(tensor),
             """\
 L['a'].size()[1] < L['a'].size()[0]
-L['a'].size()[0] < 20""")
+L['a'].size()[0] <= 19
+L['a'].size()[1] <= 18""")
 
     def test_sym_storage_offset(self):
         def f(x, y):
