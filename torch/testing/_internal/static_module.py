@@ -2,6 +2,7 @@
 
 import torch
 
+
 class StaticModule:
     def __init__(self, scripted):
         # this is an nn.Module
