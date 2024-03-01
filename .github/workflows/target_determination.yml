@@ -16,7 +16,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
-          submmodules: false
+          submodules: false
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
