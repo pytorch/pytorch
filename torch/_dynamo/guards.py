@@ -495,7 +495,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def CONSTANT_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if istype(val, (bool, type(None))):
+        if istype(val, (bool, type(None), types.CodeType)):
             self.ID_MATCH(guard)
         else:
             self.EQUALS_MATCH(guard)
