@@ -12,18 +12,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._composable import checkpoint, replicate
 from torch.distributed._composable.fsdp import fully_shard
-from torch.distributed._composable.fsdp import _fsdp_param_group
-# from torch.distributed._composable.fsdp._fsdp_param_group import (
-#     RegisterPostBackwardFunction,
-# )
+from torch.distributed._composable.fsdp._fsdp_param_group import (
+    RegisterPostBackwardFunction,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_1d_sharded_parity,
     FSDPTest,
     MLP,
     patch_reduce_scatter,
-    # patch_register_post_backward_hook_backward,
-    patch_fsdp_param_group_post_backward_hook,
+    patch_register_post_backward_hook_backward,
     reduce_scatter_with_assert,
 )
 from torch.testing._internal.common_utils import run_tests
@@ -104,27 +102,19 @@ class TestFullyShardFrozen(FSDPTest):
         reduce_scatter = functools.partial(
             reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
         )
-        # orig_backward = RegisterPostBackwardFunction.backward
-        # backward_count = 0
-
-        # def backward_with_count(*args, **kwargs):
-        #     nonlocal backward_count
-        #     backward_count += 1
-        #     return orig_backward(*args, **kwargs)
-
-        orig_post_backward_hook = _fsdp_param_group._fsdp_param_group_post_backward_hook
+        orig_backward = RegisterPostBackwardFunction.backward
         backward_count = 0
 
-        def post_backward_hook_with_count(*args, **kwargs):
+        def backward_with_count(*args, **kwargs):
             nonlocal backward_count
             backward_count += 1
-            return orig_post_backward_hook(*args, **kwargs)
+            return orig_backward(*args, **kwargs)
 
         torch.manual_seed(42 + self.rank + 1)
         device = torch.device("cuda")
         with patch_reduce_scatter(
             reduce_scatter
-        ), patch_fsdp_param_group_post_backward_hook(post_backward_hook_with_count):
+        ), patch_register_post_backward_hook_backward(backward_with_count):
             for iter_idx in range(10):
                 inp = torch.randn((8, lin_dim), device=device)
                 losses: List[torch.Tensor] = []
@@ -176,8 +166,8 @@ class TestFullyShardFrozen(FSDPTest):
                 fully_shard(module, reshard_after_forward=reshard_after_forward)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-        # orig_backward = RegisterPostBackwardFunction.backward
-        # backward_count = 0
+        orig_backward = RegisterPostBackwardFunction.backward
+        backward_count = 0
 
         def _set_requires_grad(seq: nn.Module, requires_grad: bool):
             for i in range(num_linears):
@@ -186,25 +176,17 @@ class TestFullyShardFrozen(FSDPTest):
                     for param in seq[i % 2].parameters():
                         param.requires_grad_(requires_grad)
 
-        # def backward_with_count(*args, **kwargs):
-        #     nonlocal backward_count
-        #     backward_count += 1
-        #     return orig_backward(*args, **kwargs)
-
-        orig_post_backward_hook = _fsdp_param_group._fsdp_param_group_post_backward_hook
-        backward_count = 0
-
-        def post_backward_hook_with_count(*args, **kwargs):
+        def backward_with_count(*args, **kwargs):
             nonlocal backward_count
             backward_count += 1
-            return orig_post_backward_hook(*args, **kwargs)
+            return orig_backward(*args, **kwargs)
 
         _set_requires_grad(model, False)
         _set_requires_grad(ref_model, False)
         num_iters, no_grad_iter_idx = (3, 1)
         torch.manual_seed(42 + self.rank)
         inp = torch.randn((8, lin_dim), device="cuda")
-        with patch_fsdp_param_group_post_backward_hook(post_backward_hook_with_count):
+        with patch_register_post_backward_hook_backward(backward_with_count):
             for iter_idx in range(num_iters):
                 losses: List[torch.Tensor] = []
                 for _model, _optim in ((ref_model, ref_optim), (model, optim)):
