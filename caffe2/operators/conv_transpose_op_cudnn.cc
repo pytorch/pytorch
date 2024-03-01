@@ -394,32 +394,6 @@ bool CudnnConvTransposeOp<T>::RunOnDevice() {
         top_desc_,
         Y_data));
   });
-  const int X_HxW = H * W;
-  const int Y_HxW = H_out * W_out;
-  const int group_offset_X =
-      order_ == StorageOrder::NCHW ? M / group_ * X_HxW : M / group_;
-  const int group_offset_Y =
-      order_ == StorageOrder::NCHW ? C / group_ * Y_HxW : C / group_;
-  const int group_offset_filter = filter.numel() / group_;
-  for (int i = 0; i < group_; ++i) {
-    cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
-      CUDNN_ENFORCE(
-          cudnnConvolutionBackwardData(state->cudnn_handle(),
-                                       cudnnTypeWrapper<T>::kOne(),
-                                       filter_desc_,
-                                       filter_data + i * group_offset_filter,
-                                       bottom_desc_,
-                                       X_data + i * group_offset_X;
-                                       conv_desc_,
-                                       bwd_data_algo_,
-                                       state->workspace().get(cudnn_ws_nbytes_),
-                                       cudnn_ws_nbytes_,
-                                       cudnnTypeWrapper<T_DX>::kZero(),
-                                       top_desc_,
-                                       Y_data + i * group_offset_Y));
-    });
-  }
-#endif
   // Bias
   if (InputSize() == 3) {
     CUDNN_ENFORCE(cudnnAddTensor(
