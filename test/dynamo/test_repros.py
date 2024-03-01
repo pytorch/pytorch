@@ -4217,6 +4217,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         T = IncByTwo
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_code_id_match(self):
+        def nothing():
+            pass
+
+        def fn(x):
+            code = nothing.__code__
+            torch._dynamo.graph_break()
+            exec(code)
+            return x * 2
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
