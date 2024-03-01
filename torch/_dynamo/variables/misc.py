@@ -11,7 +11,6 @@ from typing import Dict, List
 
 import torch._C
 import torch._numpy as tnp
-import torch.utils._pytree as pytree
 from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
@@ -818,58 +817,3 @@ class StringFormatVariable(VariableTracker):
         }
         codegen(variables.ConstDictVariable(kwargs))
         codegen.append_output(create_instruction("CALL_FUNCTION_EX", arg=1))
-
-
-class DebuggingVariable(VariableTracker):
-    """
-    Represents a call to a debugging function like print(), or something
-    registered to config.reorderable_logging_functions.
-    """
-
-    def __init__(self, value, **kwargs):
-        super().__init__(**kwargs)
-        self.value = value
-
-    @staticmethod
-    def is_reorderable_logging_function(obj):
-        return (
-            callable(obj)
-            and isinstance(obj, (types.FunctionType, types.BuiltinFunctionType))
-            and obj in torch._dynamo.config.reorderable_logging_functions
-        )
-
-    def call_function(self, tx, args, kwargs):
-        if tx.export:
-            # For export cases, we can just make debugging functions no-ops
-            return
-
-        if not self.can_reorder_logs(self.value, args, kwargs):
-            unimplemented(
-                f"Reordering debugging function {self.value} "
-                f"with inputs {args} {kwargs} is not yet implemented."
-            )
-
-        tx.debug_locals.append((self, list(args)))
-
-    def reconstruct(self, codegen):
-        return self.source.reconstruct(codegen)
-
-    @staticmethod
-    def can_reorder_logs(fn, args, kwargs) -> True:
-        """
-        Run some additional checks for what sort of function calls can we
-        actually reorder.
-        """
-
-        allowed_input_types = (
-            variables.TensorVariable,
-            variables.ConstantVariable,
-            StringFormatVariable,
-        )
-
-        flat_args = pytree.tree_leaves([args, kwargs])
-        for arg in flat_args:
-            if not isinstance(arg, allowed_input_types):
-                return False
-
-        return True
