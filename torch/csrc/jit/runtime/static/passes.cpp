@@ -209,14 +209,14 @@ C10_UNUSED void ClipRangesGather(std::shared_ptr<torch::jit::Graph>& graph) {
 C10_UNUSED void PrecomputeMultiplierShiftForSigridHash(
     std::shared_ptr<torch::jit::Graph>& graph) {
   std::string pattern = R"IR(
-    graph(%a, %b, %c, %d, %e):
-        %y0 : Tensor = fb::sigrid_hash(%a, %b, %c, %d, %e)
+    graph(%a, %b, %c, %d):
+        %y0 : Tensor = fb::sigrid_hash(%a, %b, %c, %d)
         return (%y0)
   )IR";
   std::string split_pattern = R"IR(
-    graph(%a, %b, %c, %d, %e):
+    graph(%a, %b, %c, %d):
         %y0 : Tensor = fb::sigrid_hash_compute_multipler_shift(%c)
-        %y2 : Tensor = fb::sigrid_hash_precompute(%a, %b, %c, %y0, %d, %e)
+        %y2 : Tensor = fb::sigrid_hash_precompute(%a, %b, %c, %y0, %d)
         return (%y2)
   )IR";
   SubgraphRewriter fuse;
