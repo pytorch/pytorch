@@ -101,6 +101,8 @@ manual_torch_name_rule_map = {
     "torch.overrides.get_default_nowrap_functions": TorchInGraphFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_tracing": TorchInGraphFunctionVariable,
     "torch._dynamo.external_utils.is_compiling": TorchInGraphFunctionVariable,
+    "torch.compiler.is_compiling": TorchInGraphFunctionVariable,
+    "torch.compiler.is_dynamo_compiling": TorchInGraphFunctionVariable,
     "torch.autograd._profiler_enabled": SkipFunctionVariable,
     # We graph break on RNG state setters or getters like
     # `torch.get_rng_state` or `torch.set_rng_state`. These functions
@@ -192,6 +194,10 @@ manual_torch_name_rule_map = {
     "torch._functorch.eager_transforms._validate_and_wrap_argnums": UserFunctionVariable,
     "torch._functorch.eager_transforms._wrap_all_tensors": UserFunctionVariable,
     "torch._functorch.eager_transforms._wrap_tensor_for_grad": UserFunctionVariable,
+    # functorch/vjp
+    "torch._functorch.eager_transforms.vjp": UserFunctionVariable,
+    "torch._functorch.eager_transforms._vjp_with_argnums": UserFunctionVariable,
+    "torch._functorch.eager_transforms.assert_non_empty_tensor_output": UserFunctionVariable,
     "torch._constrain_as_size": UserFunctionVariable,
     "torch._constrain_as_value": UserFunctionVariable,
     "torch._tensor._convert": UserFunctionVariable,
@@ -205,6 +211,7 @@ manual_torch_name_rule_map = {
     "torch._dynamo.mark_static": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
     "torch.cuda._get_device_properties": TorchInGraphFunctionVariable,
+    "torch.utils.hooks.BackwardHook": TorchInGraphFunctionVariable,
 }
 
 
@@ -2149,7 +2156,8 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.eager_transforms._autograd_grad",
         "torch._functorch.eager_transforms._chunked_standard_basis_for_",
         "torch._functorch.eager_transforms._construct_standard_basis_for",
-        "torch._functorch.eager_transforms._tensor_requires_grad",
+        "torch._functorch.eager_transforms._vjp_treespec_compare",
+        "torch._functorch.eager_transforms._set_tensor_requires_grad",
         "torch._functorch.eager_transforms._is_differentiable",
         "torch._functorch.eager_transforms._jvp_with_argnums",
         "torch._functorch.eager_transforms._maybe_unwrap_functional_tensor",
@@ -2157,11 +2165,9 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.eager_transforms._replace_args",
         "torch._functorch.eager_transforms._safe_zero_index",
         "torch._functorch.eager_transforms._unwrap_all_tensors_from_functional",
-        "torch._functorch.eager_transforms._vjp_with_argnums",
         "torch._functorch.eager_transforms._wrap_all_tensors_to_functional",
         "torch._functorch.eager_transforms.assert_flat_tuple_of_tensors",
         "torch._functorch.eager_transforms.assert_non_empty_list_of_tensors",
-        "torch._functorch.eager_transforms.assert_non_empty_tensor_output",
         "torch._functorch.eager_transforms.assert_output_is_tensor_or_tensors",
         "torch._functorch.eager_transforms.error_if_complex",
         "torch._functorch.eager_transforms.functionalize",
@@ -2174,7 +2180,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.eager_transforms.noop",
         "torch._functorch.eager_transforms.safe_unflatten",
         "torch._functorch.eager_transforms.safe_unpack_dual",
-        "torch._functorch.eager_transforms.vjp",
         "torch._functorch.functional_call.construct_stacked_leaf",
         "torch._functorch.functional_call.functional_call",
         "torch._functorch.functional_call.stack_module_state",
@@ -3193,6 +3198,7 @@ MOD_INLINELIST = {
     "torch.utils._contextlib",
     "torch.utils._foreach_utils",
     "torch.utils._pytree",
+    "torch.utils.hooks",
     "torch._tensor",
     "torch._higher_order_ops.strict_mode",
     "torch._higher_order_ops.while_loop",

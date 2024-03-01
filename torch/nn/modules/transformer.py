@@ -132,6 +132,13 @@ class Transformer(Module):
                 memory_is_causal: bool = False) -> Tensor:
         r"""Take in and process masked source/target sequences.
 
+        .. note::
+
+            If a boolean tensor is provided for any of the [src/tgt/memory]_mask arguments, positions with a ``True`` value are
+            not allowed to participate in the attention,
+            which is the opposite of the definition for :attr:`attn_mask`
+            in :func:`torch.nn.functional.scaled_dot_product_attention`.
+
         Args:
             src: the sequence to the encoder (required).
             tgt: the sequence to the decoder (required).
