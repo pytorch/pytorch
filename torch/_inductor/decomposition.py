@@ -239,10 +239,14 @@ def mm(self, input2):
         gso = guard_size_oblivious
         # Corresponds to BS=1 cases morally. If it's contiguous we can decompose it
         # and generate efficiently kernels without autotuning. Otherwise we need coordinate descent tuning
-        if gso(self.shape[0] == 1) and coordesc_or(gso(input2.stride(0) == 1)):
+        if definitely_true(self.shape[0] == 1) and coordesc_or(
+            definitely_true(input2.stride(0) == 1)
+        ):
             return mul_sum_decomp(self, input2)
 
-        if gso(input2.shape[1] == 1) and coordesc_or(gso(self.stride(1) == 1)):
+        if definitely_true(input2.shape[1] == 1) and coordesc_or(
+            definitely_true(self.stride(1) == 1)
+        ):
             return mul_sum_decomp(self, input2)
 
     if self.device.type == "cpu":
