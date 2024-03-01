@@ -188,8 +188,16 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
         }
       };
 
+  size_t input_idx = 0;
   std::for_each(
       n->inputs().begin(), n->inputs().end(), [&](const Value* input) {
+        // We skip the 'condition' input (i.e., the first input) in case of
+        // onnx::Where operator.
+        if (IsSelectorOp(n->kind()) && input_idx == 0) {
+          input_idx++;
+          return;
+        }
+
         auto nkind = input->node()->kind();
         if (nkind == onnx::Gather &&
             input->node()->input(0)->node()->kind() == onnx::Shape) {
@@ -239,6 +247,8 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
           } else {
             typesFromTensors.emplace_back(scalar_type.value());
           }
+
+          input_idx++;
         }
       });
 
