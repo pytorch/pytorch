@@ -674,20 +674,6 @@ class BuiltinVariable(VariableTracker):
 
         handler = getattr(self, f"call_{self.fn.__name__}", None)
 
-        # Saves ~1.5 second because inspect.signature .. bind is expensive
-        # if handler:
-        #     try:
-        #         inspect.signature(handler).bind(tx, *args, **kwargs)
-        #     except TypeError as exc:
-        #         has_constant_handler = self.has_constant_handler(args, kwargs)
-        #         if not has_constant_handler:
-        #             log.warning(
-        #                 "incorrect arg count %s %s and no constant handler",
-        #                 handler,
-        #                 exc,
-        #             )
-        #         handler = None
-
         if handler:
             try:
                 result = handler(tx, *args, **kwargs)
@@ -695,6 +681,19 @@ class BuiltinVariable(VariableTracker):
                     return result
             except Exception as exc:
                 has_constant_handler = self.has_constant_handler(args, kwargs)
+
+                # Check if binding is bad. inspect signature bind is expensive.
+                # So check only when handler call fails.
+                try:
+                    inspect.signature(handler).bind(tx, *args, **kwargs)
+                except TypeError as e:
+                    if not has_constant_handler:
+                        log.warning(
+                            "incorrect arg count %s %s and no constant handler",
+                            handler,
+                            e,
+                        )
+                    handler = None
                 if not has_constant_handler:
                     raise
                 # Actually, we will handle this just fine
