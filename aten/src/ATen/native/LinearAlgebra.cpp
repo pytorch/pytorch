@@ -3425,25 +3425,26 @@ Tensor _weight_int4pack_mm_cpu(
   auto K = A.size(1);
 
   TORCH_CHECK(A.dtype() == kBFloat16,
-      "_weight_int4pack_mm: expect A to be bfloat16 tensor.");
+      __func__, " : expect A to be bfloat16 tensor.");
   TORCH_CHECK(A.is_contiguous(),
-      "_weight_int4pack_mm: expect A to be contiguous.");
+      __func__, " : expect A to be contiguous.");
   TORCH_CHECK(A.dim() == 2,
-      "_weight_int4pack_mm: expect A to be 2D tensor.");
+      __func__, " : expect A to be 2D tensor.");
 
   TORCH_CHECK(B.dtype() == kByte,
-      "_weight_int4pack_mm: expect B to be uint8 tensor.");
+      __func__, " : expect B to be uint8 tensor.");
   TORCH_CHECK(B.is_contiguous(),
-      "_weight_int4pack_mm: expect B to be contiguous.");
-  TORCH_CHECK(B.size(1) == K / 2);
+      __func__, " : expect B to be contiguous.");
+  TORCH_CHECK(B.size(1) == K / 2,
+      __func__, " : expect B.size(1) to be K/2, got ", B.size(1));
 
-  TORCH_CHECK(
-      qGroupSize == 32 || qGroupSize == 64 || qGroupSize == 128 ||
-      qGroupSize == 256);
+  TORCH_CHECK(qGroupSize == 32 || qGroupSize == 64 || qGroupSize == 128
+      || qGroupSize == 256,
+      __func__, ": expect qGroupSize to be 32, 64, 128 or 256, got ", qGroupSize);
 
-  TORCH_CHECK(qScaleAndZeros.dim() == 3);
-  TORCH_CHECK(qScaleAndZeros.size(1) == N);
-  TORCH_CHECK(qScaleAndZeros.size(2) == 2);
+  TORCH_CHECK(qScaleAndZeros.dim() == 3 && qScaleAndZeros.size(1) == N
+      && qScaleAndZeros.size(2) == 2,
+      __func__, ": expect qScaleAndZeros to be 3d tensor with sizes [:, ", N, ", 2]");
 
   auto C = at::empty({M, N}, A.options());
   int4pack_mm_stub(kCPU, C, A, B, qGroupSize, qScaleAndZeros);
