@@ -3095,7 +3095,7 @@ def index_put_fallback(self, indices, values, accumulate):
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-    ir.IndexPutFallback(self, indices, values, accumulate)
+    ir.IndexPutFallback(V.graph.current_node.target, self, indices, values, accumulate)
     return self
 
 
@@ -3283,7 +3283,14 @@ def scatter_fallback(
         or torch.are_deterministic_algorithms_enabled()
     ):
         ir.ScatterFallback(
-            fn, self, dim, index, src, reduce=reduce, include_self=include_self
+            V.graph.current_node.target,
+            fn,
+            self,
+            dim,
+            index,
+            src,
+            reduce=reduce,
+            include_self=include_self,
         )
         return self
 
