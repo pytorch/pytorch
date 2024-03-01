@@ -14,6 +14,9 @@
 #include <c10/util/irange.h>
 
 #ifdef USE_ROCM
+#if ROCM_VERSION >= 60000
+#include <hipblaslt/hipblaslt-ext.hpp>
+#endif
 // until hipblas has an API to accept flags, we must use rocblas here
 #include <hipblas/hipblas.h>
 #include <rocblas/rocblas.h>
@@ -787,7 +790,7 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 #endif
 
 // hipblaslt custom types were a temporary work-around
-#if defined(USE_ROCM) && ROCM_VERSION >= 60000 && HIPBLASLT_CUSTOM_DATA_TYPE
+#if defined(USE_ROCM) && ROCM_VERSION >= 60000 && defined(HIPBLASLT_CUSTOM_DATA_TYPE)
 hipblasltDatatype_t hipToLt(hipDataType type) {
     switch (type) {
         case HIP_R_32F: return HIPBLASLT_R_32F;
@@ -806,7 +809,7 @@ hipblasltDatatype_t hipToLt(hipDataType type) {
         case HIP_C_32U: return HIPBLASLT_C_32U;
         case HIP_R_16BF: return HIPBLASLT_R_16B;
         case HIP_C_16BF: return HIPBLASLT_C_16B;
-        default: TORCH_CHECK(false);
+        default: TORCH_CHECK(false, "unknown hipDataType");
     }
 }
 #define HIPTOLT(type) hipToLt(type)
@@ -814,7 +817,7 @@ hipblasltDatatype_t hipToLt(hipDataType type) {
 #define HIPTOLT(type) type
 #endif
 
-#if defined(USE_ROCM) && ROCM_VERSION >= 60000 && HIPBLASLT_CUSTOM_COMPUTE_TYPE
+#if defined(USE_ROCM) && ROCM_VERSION >= 60000 && defined(HIPBLASLT_CUSTOM_COMPUTE_TYPE)
 hipblasLtComputeType_t hipblasToLt(hipblasComputeType_t type) {
     switch (type) {
         case HIPBLAS_COMPUTE_32F: return HIPBLASLT_COMPUTE_F32;
@@ -822,7 +825,7 @@ hipblasLtComputeType_t hipblasToLt(hipblasComputeType_t type) {
         case HIPBLAS_COMPUTE_32F_FAST_TF32: return HIPBLASLT_COMPUTE_F32_FAST_XF32;
         case HIPBLAS_COMPUTE_64F: return HIPBLASLT_COMPUTE_F64;
         case HIPBLAS_COMPUTE_32I: return HIPBLASLT_COMPUTE_I32;
-        default: TORCH_CHECK(false);
+        default: TORCH_CHECK(false, "unknown hipblasComputeType_t");
     }
 }
 #define HIPCOMPTOLT(type) hipblasToLt(type)
@@ -1144,21 +1147,30 @@ void scaled_gemm(
     ScalarType result_dtype,
     void* amax_ptr,
     bool use_fast_accum) {
-  #if CUDA_VERSION >= 11080
+#if CUDA_VERSION >= 11080 || (defined(USE_ROCM) && ROCM_VERSION >= 60000)
   const auto computeType = CUBLAS_COMPUTE_32F;
   const auto scaleType = CUDA_R_32F;
   const int8_t fastAccuMode = use_fast_accum ? 1 : 0;
+  const float alpha_val = 1.0;
+  const float beta_val = 0.0;
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, _cublasOpFromChar(transa));
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, _cublasOpFromChar(transb));
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
+#ifndef USE_ROCM
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_AMAX_D_POINTER, amax_ptr);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fastAccuMode);
+#endif
   CuBlasLtMatrixLayout Adesc(ScalarTypeToCudaDataType(mat1_dtype), m, k, mat1_ld, transa == 't');
   CuBlasLtMatrixLayout Bdesc(ScalarTypeToCudaDataType(mat2_dtype), k, n, mat2_ld, transb == 't');
+#ifdef USE_ROCM
+  // Cdesc is unused, beta is 0. But hipblaslt needs this set to something reasonable.
+  CuBlasLtMatrixLayout Cdesc(ScalarTypeToCudaDataType(result_dtype), m, n, result_ld);
+#else
   CuBlasLtMatrixLayout Cdesc(ScalarTypeToCudaDataType(bias_dtype), m, n, result_ld);
+#endif
   CuBlasLtMatrixLayout Ddesc(ScalarTypeToCudaDataType(result_dtype), m, n, result_ld);
   if (bias_ptr) {
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias_ptr);
@@ -1186,10 +1198,53 @@ void scaled_gemm(
       &heuristicResult,
       &returnedResult));
   if (returnedResult == 0) {
+#ifndef USE_ROCM
     TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
+#else
+    // hipblaslt might be able to recover by returning all algos
+    std::vector<hipblasLtMatmulHeuristicResult_t> all_algos;
+    TORCH_CUDABLAS_CHECK(hipblaslt_ext::getAllAlgos(
+        ltHandle,
+        hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
+        _cublasOpFromChar(transa),
+        _cublasOpFromChar(transb),
+        HIPTOLT(ScalarTypeToCudaDataType(mat1_dtype)),
+        HIPTOLT(ScalarTypeToCudaDataType(mat2_dtype)),
+        // C is nullptr and beta=0, so set to something reasonable. See above.
+        //HIPTOLT(ScalarTypeToCudaDataType(bias_dtype)),
+        HIPTOLT(ScalarTypeToCudaDataType(result_dtype)),
+        HIPTOLT(ScalarTypeToCudaDataType(result_dtype)),
+        HIPCOMPTOLT(CUBLAS_COMPUTE_32F),
+        all_algos));
+    if (all_algos.size() == 0) {
+      TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
+    }
+    // pick first valid solution
+    bool found = false;
+    for (size_t i = 0; i < all_algos.size(); i++) {
+        size_t ret_workspace_size = 0;
+        auto is_valid_status = hipblaslt_ext::matmulIsAlgoSupported(
+                ltHandle,
+                computeDesc.descriptor(),
+                &alpha_val,
+                Adesc.descriptor(),
+                Bdesc.descriptor(),
+                &beta_val,
+                Cdesc.descriptor(),
+                Ddesc.descriptor(),
+                all_algos[i].algo,
+                ret_workspace_size);
+        if (is_valid_status == HIPBLAS_STATUS_SUCCESS) {
+            if (ret_workspace_size <= workspaceSize) {
+                heuristicResult = all_algos[i];
+                found = true;
+                break;
+            }
+        }
+    }
+    TORCH_CHECK(found, "could not find valid hipblaslt solution");
+#endif
   }
-  float alpha_val = 1.0;
-  float beta_val = 0.0;
   cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
@@ -1199,7 +1254,11 @@ void scaled_gemm(
       mat2_ptr,
       Bdesc.descriptor(),
       &beta_val,
+#ifdef USE_ROCM
+      result_ptr, // unused, since beta_val is 0, but hipblaslt can't handle nullptr
+#else
       nullptr,
+#endif
       Cdesc.descriptor(),
       result_ptr,
       Ddesc.descriptor(),
@@ -1232,7 +1291,7 @@ void scaled_gemm(
       " scaleType ",
       scaleType);
   return;
-  #endif // CUDA_VERSION >= 11080
+#endif // CUDA_VERSION >= 11080 || (defined(USE_ROCM) && ROCM_VERSION >= 60000)
   TORCH_CHECK(false, "scaled_gemm is only supported for CUDA 11.8 and above");
 }
 

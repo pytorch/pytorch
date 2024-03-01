@@ -6,10 +6,11 @@ import torch
 from torch._dynamo.external_utils import call_backward, call_hook
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import counters, lazy_format_graph_code
-from torch._logging import getArtifactLogger
+from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses import FakeTensorMode
 from torch.fx import GraphModule
+from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import (
     decompose,
     disable_autocast_cache,
@@ -88,7 +89,6 @@ class AutogradCompilerInstance:
         self.stack.enter_context(self.proxy_mode.sym_mode)
         self.stack.enter_context(self.proxy_mode)
         self.stack.enter_context(disable_autocast_cache())
-        self.stack.enter_context(disable_proxy_modes_tracing(enable_current=True))
         return inputs, sizes
 
     def proxy_call_backward(
@@ -201,6 +201,10 @@ class AutogradCompilerInstance:
         compiled_autograd_log.info(
             "%s", lazy_format_graph_code("Compiled autograd graph", graph)
         )
+        trace_structured(
+            "compiled_autograd_graph",
+            payload_fn=lambda: graph.print_readable(print_output=False),
+        )
         return self.compiler_fn(graph)
 
     def to_proxy(self, t):
@@ -218,6 +222,13 @@ class AutogradCompilerInstance:
             proxies = [proxies[i] for i in range(len(tensors))]
         assert len(tensors) == len(proxies)
         track_tensor_tree(tensors, proxies, constant=None, tracer=self.fx_tracer)
+
+    def bind_backward_state(self, index: int):
+        assert self.hooks_proxy is not None
+        proxy = self.hooks_proxy[index]  # type: ignore[index]
+        bw_state = BackwardState()
+        track_tensor_tree(bw_state, proxy, constant=None, tracer=self.fx_tracer)
+        return bw_state
 
 
 compiled_autograd_enabled = False
