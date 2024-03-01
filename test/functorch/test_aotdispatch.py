@@ -2989,6 +2989,7 @@ def forward(self, arg0_1, arg1_1):
     _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
     return (add_3,)""")
 
+    @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
     @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "TorchDynamo is not supported")
     def test_aot_export_predispatch_with_cond_nested(self):
         class M(torch.nn.Module):
@@ -3052,6 +3053,7 @@ def forward(self, arg0_1):
     sin_1 = torch.ops.aten.sin.default(add);  add = None
     return (sin_1,)""")
 
+    @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
     @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "TorchDynamo is not supported")
     def test_aot_export_predispatch_with_cond(self):
         class M(torch.nn.Module):
