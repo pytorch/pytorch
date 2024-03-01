@@ -137,8 +137,7 @@
       AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND4(      \
           kComplexHalf, kHalf, kBool, kBFloat16, __VA_ARGS__))
 
-namespace at {
-namespace sparse_csr {
+namespace at::sparse_csr {
 
 using SparseCsrTensor = Tensor;
 
@@ -366,12 +365,12 @@ inline bool only_sparse_compressed_add_trivial_cases(
       });
 }
 
-inline Tensor to_type(Tensor input, ScalarType dtype) {
+inline Tensor to_type(const Tensor& input, ScalarType dtype) {
   auto [compressed_indices, plain_indices] =
       at::sparse_csr::getCompressedPlainIndices(input);
   return at::_sparse_compressed_tensor_unsafe(
-      std::move(compressed_indices),
-      std::move(plain_indices),
+      compressed_indices,
+      plain_indices,
       std::move(input.values()).to(dtype),
       input.sizes(),
       dtype,
@@ -386,7 +385,7 @@ inline std::tuple<Tensor, Tensor> create_acc_buffer(
     ScalarType type,
     int64_t nnz = -1) {
   Tensor new_values, new_values_acc;
-  constexpr bool need_acc = !std::is_same<scalar_t, acc_t>::value;
+  constexpr bool need_acc = !std::is_same_v<scalar_t, acc_t>;
   bool is_integral = at::isIntegralType(type, /*includeBool=*/true);
   if constexpr (need_acc) {
     auto acc_dtype = CppTypeToScalarType<acc_t>::value;
@@ -409,5 +408,4 @@ inline void copy_from_acc_buffer(Tensor& new_values, Tensor& new_values_acc) {
   }
 }
 
-} // namespace sparse_csr
-} // namespace at
+} // namespace at::sparse_csr
