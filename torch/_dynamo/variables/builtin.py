@@ -15,13 +15,7 @@ import torch
 from torch import sym_float, sym_int
 
 from .. import config, polyfill, variables
-from ..exc import (
-    AttributeMutationError,
-    unimplemented,
-    Unsupported,
-    UserError,
-    UserErrorType,
-)
+from ..exc import AttributeMutationError, unimplemented, UserError, UserErrorType
 from ..guards import GuardBuilder, install_guard
 from ..replay_record import DummyModule
 from ..source import AttrSource, GetItemSource, is_constant_source, TypeSource
