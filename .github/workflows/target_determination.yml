@@ -15,6 +15,8 @@ jobs:
       # checkout. In other cases you should prefer a local checkout.
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submmodules: false
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
