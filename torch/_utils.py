@@ -848,9 +848,13 @@ def classproperty(func):
     return _ClassPropertyDescriptor(func)
 
 
-# Whether we are compiling with torch.compile or not
-def is_compiling():
-    return False
+def is_compiling() -> bool:
+    """
+    Indicates whether we are tracing/compiling with torch.compile() or torch.export().
+
+    TODO(khabinov): we should deprecate this function and use torch.compiler.is_compiling().
+    """
+    return torch.compiler.is_compiling()
 
 
 def _functionalize_sync(t):
