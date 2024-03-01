@@ -384,7 +384,7 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
             return guard_size_oblivious(self.stride <= other.stride)
 
         def __ge__(self, other):
-            return guard_size_oblivious(self.stride <= other.stride)
+            return guard_size_oblivious(self.stride >= other.stride)
 
         def __eq__(self, other):
             return guard_size_oblivious(self.stride == other.stride)
