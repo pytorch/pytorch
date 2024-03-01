@@ -586,7 +586,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl_xnnp(
       status,
       ")");
 
-  // Run the opeator
+  // Run the operator
   status = xnn_run_operator(
       xnnp_linear_op.get(), // Linear op
       caffe2::pthreadpool_() // threadpool

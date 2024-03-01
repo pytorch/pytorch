@@ -1,48 +1,59 @@
 import torch
 import inspect
 import functools
+import re
+import sys
+from typing import Dict, List
+import torch._inductor
+from torch._inductor.decomposition import register_decomposition
+from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
+
 
 """
 These are changes that we'll add to PyTorch
 """
 
 
-class OpDef:
-    @classmethod
-    def build(cls):
-        return register(cls)
+API = "torch.Operator"
+# We support the following impl_<device_type> methods. Feel free to add more.
+SUPPORTED_DEVICE_TYPES = {"cpu", "cuda"}
+# Decorators (like @traceable) set this field on methods
+ANNOTATION_FIELD = "__torch_properties__"
+# Maps qualname to the Library initially used to def/impl the Operator
+OP_TO_LIB: Dict[str, torch.library.Library] = {}
+OP_TO_TRACEABLE_IMPL = {}
 
 
-OPERATOR_REGS = {}
+def infer_namespace(stacklevel=2):
+    frame = sys._getframe(stacklevel + 1)
+    mod = inspect.getmodule(frame)
+    if mod is None:
+        raise RuntimeError("{API}: can't infer module")
+
+    assert mod is not None
+    ns = mangle_module(mod.__name__)
+    return ns
 
 
-def register(opdef):
+def register(opdef: "Operator"):
     name = opdef.__name__
 
-    frm = inspect.stack()[2]
-    mod = inspect.getmodule(frm[0])
-    ns = mangle_module(mod.__name__)
-
-    check_allowed_attrs(opdef)
+    ns = infer_namespace(2)
     qualname = f"{ns}::{name}"
+
+    check_nameless_schema(opdef.schema)
+    check_supported_schema(opdef, qualname)
+    check_allowed_attrs(opdef)
     lib = get_library_allowing_overwrite(ns, name)
     lib.define(f"{name}{opdef.schema}")
     op = torch._library.utils.lookup_op(qualname)
 
-    impl_method = getattr(opdef, "impl", None)
-    if impl_method is not None:
-        # TODO: Don't allow the meta to be reused for FakeTensor.
-        register_backend(lib, name, impl_method, "CompositeExplicitAutograd")
+    impl_method = register_device_impls(lib, name, opdef, qualname)
+    properties = get_properties(impl_method)
+    if properties.get("traceable", False):
+        OP_TO_TRACEABLE_IMPL[qualname] = impl_method
+        register_inductor_decomp(qualname, impl_method, lib, name)
 
-    impl_cpu_method = getattr(opdef, "impl_cpu", None)
-    if impl_cpu_method is not None:
-        register_backend(lib, name, impl_cpu_method, "CPU")
-
-    impl_cuda_method = getattr(opdef, "impl_cuda", None)
-    if impl_cuda_method is not None:
-        register_backend(lib, name, impl_cuda_method, "CUDA")
-
-    properties = getattr(impl_method, "__properties__", {}) if impl_method is not None else {}
     if getattr(opdef, "abstract", None):
         torch.library.impl_abstract(qualname, opdef.abstract, lib=lib)
     elif impl_method and properties.get('traceable', False):
@@ -50,32 +61,102 @@ def register(opdef):
 
     register_autograd(lib, name, opdef, op)
 
+    ophandle = torch._C._dispatch_find_schema_or_throw(qualname, "")
+    torch._C._dispatch_set_report_error_callback(
+        ophandle, functools.partial(report_error_callback, name)
+    )
+
     return op
+
+
+def get_properties(impl_method):
+    properties = getattr(impl_method, ANNOTATION_FIELD, {})
+    return properties
+
+
+def register_inductor_decomp(qualname, decomp, lib, name):
+    # overload = torch._library.utils.lookup_op(qualname)
+    # register_decomposition([overload])(decomp)
+
+    # Super sketch
+    lib.impl(name, decomp, "Functionalize")
+
+
+def register_device_impls(lib, name, opdef, qualname):
+    check_either_single_or_split_impl(opdef)
+    impl_method = getattr(opdef, "impl", None)
+    if impl_method is not None:
+        # TODO: Don't allow the meta to be reused for FakeTensor.
+        register_backend(lib, name, impl_method, "CompositeExplicitAutograd")
+        return impl_method
+
+    for device_type in SUPPORTED_DEVICE_TYPES:
+        impl_device_method = getattr(opdef, f"impl_{device_type}", None)
+        if impl_device_method is not None:
+            dk = torch._C._dispatch_key_for_device(device_type)
+            register_backend(lib, name, impl_device_method, dk)
+            properties = get_properties(impl_device_method)
+            if properties.get("inlinable", False):
+                OP_TO_TRACEABLE_IMPL[qualname] = impl_device_method
+                register_inductor_decomp(qualname, impl_device_method, lib, name)
+
+
+
+
+def check_either_single_or_split_impl(opdef):
+    has_impl = getattr(opdef, "impl", None)
+    device_impls: List[str] = []
+    for device_type in SUPPORTED_DEVICE_TYPES:
+        device_impl = getattr(opdef, "impl_{device_type}", None)
+        if device_impl is not None:
+            device_impls.append(device_impl)
+
+    if has_impl and len(device_impls) > 0:
+        raise ValueError(
+            f"{API}: Expected there to be either a single `impl` method or "
+            f"any number of `impl_<device>` methods. Found both an `impl` method "
+            f"and {device_impls} methods.")
+
+
+def check_nameless_schema(schema):
+    """E.g. "(Tensor x) -> Tensor" instead of sin(Tensor x) -> Tensor"""
+    match = re.match(r'\(.*\) -> .*$', schema)
+    if match is not None:
+        return
+    raise ValueError(
+        f"{API}: expected .schema to look like \"(<args>) -> <rets>\" "
+        f"but got {schema}")
 
 
 def check_allowed_attrs(op):
     return
     attrs = set(dir(op)) - set(dir(object))
     allowed_attrs = {
+        "namespace",
+        "schema",
         "impl_cpu",
         "impl_cuda",
+        "abstract"
         "setup_backward",
         "backward",
     }
     if attrs.issubset(allowed_attrs):
         return
-    raise RuntimeError("not subset")
+    raise ValueError(
+        f"{API}: Subclasses are only allowed to have the following attributes: "
+        f"attrs. Got unknown attribute {attrs - allowed_attrs}; please delete "
+        f"them.")
 
 
 def get_library_allowing_overwrite(ns, name):
     qualname = f"{ns}::{name}"
 
-    if qualname in OPERATOR_REGS:
-        OPERATOR_REGS[qualname]._destroy()
-        del OPERATOR_REGS[qualname]
+    if qualname in OP_TO_LIB:
+        OP_TO_LIB[qualname]._destroy()
+        del OP_TO_LIB[qualname]
 
     lib = torch.library.Library(ns, "FRAGMENT")
-    OPERATOR_REGS[qualname] = lib
+    OP_TO_LIB[qualname] = lib
     return lib
 
 
@@ -84,22 +165,19 @@ def traceable(f):
     def wrapper(*args, **kwargs):
         return f(*args, **kwargs)
 
-    wrapper.__properties__ = {**getattr(f, "__properties__", {})} 
-    wrapper.__properties__['traceable'] = True
+    setattr(wrapper, ANNOTATION_FIELD, {**getattr(f, ANNOTATION_FIELD, {})})
+    getattr(wrapper, ANNOTATION_FIELD)['traceable'] = True
     return wrapper
 
 
-def device_types(*devs):
-    def inner(f):
-        @functools.wraps(f)
-        def wrapper(*args, **kwargs):
-            return f(*args, **kwargs)
+def inlinable(f):
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        return f(*args, **kwargs)
 
-        wrapper.__properties__ = {**getattr(f, "__properties__", {})} 
-        wrapper.__properties__["device_types"] = devs
-        return wrapper
-
-    return inner
+    setattr(wrapper, ANNOTATION_FIELD, {**getattr(f, ANNOTATION_FIELD, {})})
+    getattr(wrapper, ANNOTATION_FIELD)['inlinable'] = True
+    return wrapper
 
 
 def dispatch_keyset_before(dk):
@@ -117,11 +195,39 @@ def register_backend(lib, name, kernel, key):
                 "{name}.{key.lowercase}_impl was not defined")
     else:
         def wrapped(*args, **kwargs):
-            before_dense = dispatch_keyset_before(torch._C.DispatchKey.Dense)
-            with torch._C._ExcludeDispatchKeyGuard(before_dense):
-                return kernel(*args, **kwargs)
+            # before_dense = dispatch_keyset_before(torch._C.DispatchKey.Dense)
+            # with torch._C._ExcludeDispatchKeyGuard(before_dense):
+            return kernel(*args, **kwargs)
 
     lib.impl(name, wrapped, key)
+
+
+def report_error_callback(op, key: str) -> None:
+    if key == "Undefined":
+        raise NotImplementedError(
+            f"{op}: There were no Tensor inputs to this operator "
+            f"(e.g. you passed an empty list of Tensors). If your operator is a "
+            f"factory function (that is, it takes no Tensors and constructs "
+            f"a new one), then please file an issue on GitHub."
+        )
+    if key == "Meta":
+        raise NotImplementedError(
+            f"{op}: when running with device='Meta' tensors: there is no "
+            f"abstract impl registered for this op. Please register one by "
+            f"defining the {op}.abstract staticmethod."
+        )
+    if key in ("CPU", "CUDA"):
+        device = key.lower()
+        raise NotImplementedError(
+            f"{op}: when running with device='{device}' tensors: there is no "
+            f"{device} impl registered for this {API}. Please register one by "
+            f"defining the {op}.impl_{device} staticmethod."
+        )
+    raise NotImplementedError(
+        f"{op}: No implementation for dispatch key {key}. It is likely "
+        f"that we have not added this functionality yet, please either open an "
+        f"issue or use the low-level torch.library APIs."
+    )
 
 
 def mangle_module(module):
@@ -156,39 +262,53 @@ def unique_underscoring(s: str):
         i += 1
 
 
-def check_supported_schema(opdef):
-    return
-    # TODO: figure out what to do with torchgen FunctionSchema vs C++ FunctionSchema
-
+def check_supported_schema(opdef, qualname):
     # We only support the following schemas, for now.
     # - functional
     # - auto_functionalizable.
     # For all others, we ask the user to go use the raw torch.library API.
-    schema = opdef._schema
+    schema = qualname + opdef.schema
+    import torch
     if torch._library.utils.is_functional_schema(schema):
         return
-    if torch._higher_order_ops.auto_functionalized.auto_functionalizable_schema(schema):
+    # TODO(rzou):a put in final version
+    import torch._higher_order_ops.auto_functionalize
+    if torch._higher_order_ops.auto_functionalize.auto_functionalizable_schema(torch._C.parse_schema(schema)):
         return
-    raise NotImplementedError("")
+    raise NotImplementedError(
+        f"{API}: Tried to create an operator with unsupported schema "
+        f"'{str(schema)}'. We support functional ops and mutable ops "
+        f"where the outputs do not alias the inputs.")
 
 
-def register_autograd(lib, name, opdef, op):
+def impl_autograd(lib, qualname, setup_context, backward, list_out=False):
+    op = torch._library.utils.lookup_op(qualname)
+    ns, name = qualname.split("::")
+
+    # TODO: (1) autograd not found, (2) only support autograd for functional ops
     class MyFunction(torch.autograd.Function):
         @staticmethod
-        def forward(ctx, *inputs):
+        def forward(ctx, *args):
             # TODO: mark-dirty things
             with torch._C._AutoDispatchBelowAutograd():
-                output = op(*inputs)
-            if hasattr(opdef, "setup_backward"):
-                opdef.setup_backward(ctx, inputs, output)
+                output = op(*args)
+            if setup_context is not None:
+                setup_context(ctx, args, output)
+            if list_out:
+                return tuple(output)
             return output
 
         @staticmethod
         def backward(ctx, *grads):
-            return opdef.backward(ctx, *grads)
+            assert backward is not None
+            grad_inputs = backward(ctx, *grads)
+            return grad_inputs
 
     lib.impl(name, MyFunction.apply, "Autograd")
 
+
+def register_autograd(lib, name, opdef, op):
+    impl_autograd(lib, op.__qualname__, getattr(opdef, "setup_backward", None), getattr(opdef, "backward", None))
 
 class RegistersSubclassOnDefinition(type):
     def __new__(cls, name, bases, dct):
@@ -197,11 +317,142 @@ class RegistersSubclassOnDefinition(type):
         if name == "Operator":
             return result
         opoverload = register(result)
-        result._opoverload = opoverload
+        result.opoverload = opoverload
         return result
 
 
 class Operator(metaclass=RegistersSubclassOnDefinition):
     @classmethod
-    def call(cls, *args, **kwargs):
-        return cls._opoverload(*args, **kwargs)
+    def apply(cls, *args, **kwargs):
+        return cls.opoverload(*args, **kwargs)
+
+from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_call, triton_wrapper
+import torch.utils._pytree as pytree
+
+
+BackendImpl = Operator
+
+# Must be a Pure Function
+class Function:
+    cache = {}
+
+    @staticmethod
+    def forward(*args):
+        pass
+
+    # @staticmethod
+    # def post_forward(ctx, args, result):
+    #     pass
+
+    # @staticmethod
+    # def backward(ctx, *grads):
+    #     pass
+
+    @classmethod
+    def apply(cls, *args):
+        if cls not in cls.cache:
+            cls.cache[cls] = []
+        flat_args, spec = pytree.tree_flatten(*args)
+        for cached_spec, cached_run in cls.cache[cls]:
+            if cached_spec == spec:
+                return cached_run(*args)
+
+        run = construct_run(cls, args)
+        cls.cache[cls].append((spec, run))
+        return run(*args)
+
+
+def construct_run(cls, args):
+    flat_args, spec = pytree.tree_flatten(*args)
+    if any([a is None for a in flat_args]):
+        raise NotImplementedError("NYI: Nones")
+    schema_args = []
+    for i, a in enumerate(flat_args):
+        assert type(a) in SCHEMA_TYPE
+        schema_args.append(f"{SCHEMA_TYPE[type(a)]} _{i}")
+    # Assume only Tensors can be outputs
+    schema = f'({", ".join(schema_args)}) -> Tensor[]'
+    ns = mangle_module(cls.__module__)
+    name = cls.__name__ + str(len(cls.cache))
+    qualname = f"{ns}::{name}"
+    lib = get_library_allowing_overwrite(ns, name)
+    lib.define(f"{name}{schema}")
+
+    input_spec = None
+    output_spec = None
+    single_return = False
+
+    def forward(*args):
+        nonlocal input_spec
+        args = pytree.tree_unflatten(args, input_spec)
+        result = cls.forward(*args)
+        nonlocal single_return
+        single_return = not isinstance(result, tuple)
+        nonlocal output_spec
+        flat_result, output_spec = pytree.tree_flatten(result)
+        return flat_result
+
+    lib.impl(name, forward, "CompositeExplicitAutograd")
+
+    if hasattr(cls, "post_forward"):
+        def post_forward(ctx, args, output):
+            args = pytree.tree_unflatten(args, input_spec)
+            output = pytree.tree_unflatten(output, output_spec)
+            cls.post_forward(ctx, args, output)
+    else:
+        post_forward = None
+
+    if hasattr(cls, "backward"):
+        def backward(ctx, *grad_outputs):
+            grad_outputs = pytree.tree_unflatten(grad_outputs, output_spec)
+            if single_return:
+                result = cls.backward(ctx, grad_outputs)
+            else:
+                result = cls.backward(ctx, *grad_outputs)
+            flat_result, _ = pytree.tree_flatten(result)
+            return tuple(flat_result)
+    else:
+        backward = None
+
+    impl_autograd(lib, qualname, post_forward, backward, list_out=True)
+    op = torch._library.utils.lookup_op(qualname)
+
+    def run(*args):
+        nonlocal input_spec
+        flat_args, input_spec = pytree.tree_flatten(args)
+        flat_outs = op(*flat_args)
+        result = pytree.tree_unflatten(flat_outs, output_spec)
+        return result
+
+    return run
+
+
+def flatten_outputs(f):
+    output_spec = None
+    input_spec = None
+
+    def inner(*args):
+        if input_spec is not None:
+            args = pytree.tree_unflatten(args, input_spec)
+        result = f(*args)
+        nonlocal output_spec
+        flat_result, output_spec = pytree.tree_flatten(result)
+        return flat_result
+
+    def get_output_spec():
+        return output_spec
+
+    def set_input_spec(spec):
+        nonlocal input_spec
+        input_spec = spec
+
+    return get_output_spec, inner, set_input_spec
+
+
+SCHEMA_TYPE = {
+    torch.Tensor: "Tensor",
+    int: "SymInt",
+    float: "Scalar",
+    bool: "Scalar",
+    str: "str",
+}

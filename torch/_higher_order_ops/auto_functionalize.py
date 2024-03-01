@@ -79,7 +79,10 @@ def can_auto_functionalize(op: torch._ops.OperatorBase) -> bool:
     if not schema.is_mutable:
         return False
     schema = op._schema
+    return schema
 
+
+def auto_functionalizable_schema(schema):
     for arg in schema.arguments:
         if arg.alias_info is None:
             continue

@@ -77,25 +77,21 @@ def is_functional_schema(schema: Any) -> bool:
     - it does not return a view on any of its inputs
     - it has at least one return
     """
+    if isinstance(schema, (str, torch.FunctionSchema)):
+        if isinstance(schema, str):
+            schema = torch._C.parse_schema(schema)
+        if schema.is_mutable:
+            return False
+        rets = schema.returns
+        for ret in rets:
+            if ret.alias_info is not None:
+                return False
+        return True
 
     # Lazy import because not all PyTorch builds have torchgen
     from torchgen.model import FunctionSchema, SchemaKind
-
-    assert isinstance(schema, (str, FunctionSchema))
-    if isinstance(schema, str):
-        schema = FunctionSchema.parse(schema)
-
-    if schema.kind() != SchemaKind.functional:
-        return False
-    rets = schema.returns
-    is_non_mutating_view = len(rets) > 0 and any(
-        r.annotation is not None and not r.annotation.is_write for r in rets
-    )
-    if is_non_mutating_view:
-        return False
-    if not schema.returns:
-        return False
-    return True
+    assert isinstance(schema, FunctionSchema)
+    return is_functional_schema(str(schema))
 
 
 def mutates_and_returns_first_arg(op: torch._ops.OpOverload):
@@ -156,3 +152,12 @@ def zip_schema(schema, args, kwargs):
             continue
         yield info, args[i]
     return
+
+
+# def as_torchgen_schema(schema):
+#     # Lazy import because not all PyTorch builds have torchgen
+#     from torchgen.model import FunctionSchema, SchemaKind
+# 
+#     if isinstance(schema, FunctionSchema):
+#         return ...
+#     if isinstance(schema, 
