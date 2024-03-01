@@ -559,7 +559,7 @@ for_each_linearity_ops = [
 ]
 
 
-def foreach_list_strategy(
+def foreach_list_pointwise_strategy(
     mesh: DeviceMesh, op_schema: OpSchema, linearity: bool = False
 ) -> StrategyType:
     """
@@ -584,7 +584,7 @@ def foreach_list_strategy(
 
     args_strategies = args_tuple_strategies(op_schema.args_schema)
 
-    # foreach op should follow the first arg strategy
+    # foreach op should follow the first arg's TupleStrategy
     follow_strategy = args_strategies[0]
 
     foreach_strategy_list = []
@@ -599,39 +599,48 @@ def foreach_list_strategy(
                     spec_to_follow
                 ), f"{op_schema.op} does not support operation on partial tensor!"
 
+            # new expected input spec is the same as the output spec
+            expected_input_spec = DTensorSpec(
+                mesh=mesh,
+                placements=spec_to_follow.placements,
+            )
             redistribute_costs: List[List[float]] = []
 
             for arg_strtgy in args_strategies:
-                child_strtgy = arg_strtgy.childs[idx]
-                assert isinstance(child_strtgy, OpStrategy)
+                # only check the corresponding idx of each TupleStrategy
+                idx_op_strtgy = arg_strtgy.childs[idx]
+                assert isinstance(idx_op_strtgy, OpStrategy)
                 redistribute_costs.append(
-                    generate_redistribute_costs(child_strtgy, spec_to_follow)
+                    generate_redistribute_costs(idx_op_strtgy, expected_input_spec)
                 )
             strategies.append(
                 PlacementStrategy(
-                    output_specs=spec_to_follow, redistribute_cost=redistribute_costs
+                    output_specs=spec_to_follow,
+                    input_specs=(expected_input_spec,),
+                    redistribute_cost=redistribute_costs,
                 )
             )
 
         foreach_strategy_list.append(OpStrategy(strategies))
 
-    tup_strategy = TupleStrategy(foreach_strategy_list)
-    return tup_strategy
+    return TupleStrategy(foreach_strategy_list)
 
 
-def foreach_list_linear_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+def foreach_list_linear_pointwise_strategy(
+    mesh: DeviceMesh, op_schema: OpSchema
+) -> StrategyType:
     """
     for each list op stratgy that supports linearity
     """
-    return foreach_list_strategy(mesh, op_schema, linearity=True)
+    return foreach_list_pointwise_strategy(mesh, op_schema, linearity=True)
 
 
 for op in for_each_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
-        foreach_list_strategy
+        foreach_list_pointwise_strategy
     )
 
 for op in for_each_linearity_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
-        foreach_list_linear_strategy
+        foreach_list_linear_pointwise_strategy
     )

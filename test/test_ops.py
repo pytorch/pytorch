@@ -1540,6 +1540,56 @@ class TestCompositeCompliance(TestCase):
                 op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual)
 
     @ops(op_db, allowed_dtypes=(torch.float,))
+    def test_cow_input(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype)
+
+        def is_strided_tensor(arg):
+            return torch.is_tensor(arg) and arg.layout == torch.strided
+
+        for sample in samples:
+            args_raw = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+            args_copy = []
+            args = []
+
+            # Convert strided tensor inputs to COW tensors
+            for idx, arg in enumerate(args_raw):
+                if is_strided_tensor(arg):
+                    args_copy.append(arg.clone().detach())
+                    args.append(torch._lazy_clone(arg))
+                else:
+                    if torch.is_tensor(arg):
+                        args_copy.append(arg.clone().detach())
+                    else:
+                        args_copy.append(copy.deepcopy(arg))
+                    args.append(arg)
+
+            res = op.get_op()(*args, **kwargs)
+
+            # Check that COW inputs remain COW after the op is executed
+            for idx, arg in enumerate(args):
+                if is_strided_tensor(arg):
+                    is_cow = torch._C._is_cow_tensor(arg)
+
+                    if op.supports_cow_input_no_materialize:
+                        self.assertTrue(
+                            is_cow,
+                            msg=(
+                                f"Argument {idx} unexpectedly materializes. "
+                                "Either set `supports_cow_input_no_materialize=False` "
+                                "in this operation's OpInfo or change the "
+                                "implementation to avoid materialization."))
+
+                    if is_cow:
+                        orig = args_copy[idx]
+                        self.assertTrue(
+                            torch.allclose(arg, orig, rtol=0, atol=0, equal_nan=True),
+                            msg=(
+                                f"Argument {idx} avoided materialization, "
+                                "but the operation mutated its data."
+                            ))
+
+    @ops(op_db, allowed_dtypes=(torch.float,))
     def test_view_replay(self, device, dtype, op):
         def _assert_match_metadata(a, b):
             self.assertEqual(a.size(), b.size())
@@ -1790,7 +1840,7 @@ def check_inplace_view(func, input, rs, input_size, input_strides):
 
 # A mode that when enabled runs correctness checks to ensure
 # that operators have expected tags based on their input and
-# ouput tensor properties
+# output tensor properties
 class TestTagsMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if isinstance(args[0], torch.Tensor):
@@ -1978,7 +2028,12 @@ class TestRefsOpsInfo(TestCase):
         '_refs.imag',
         '_refs.reshape_as',
         '_refs.view_as',
-        '_refs.view_as_complex'  # TorchInductor does not support complex at the moment.
+        '_refs.view_as_complex',  # TorchInductor does not support complex at the moment.
+        # the decompositions for these ops are slightly different
+        # because of out handling
+        '_refs.var_mean',
+        '_refs.std_mean',
+        '_refs.native_layer_norm',
     }
 
     @parametrize("op", ref_ops_names)
@@ -2157,6 +2212,7 @@ class TestFakeTensor(TestCase):
                 ):
                     if not isinstance(fake_out, torch.Tensor):
                         self.assertTrue(not isinstance(real_out, torch.Tensor))
+                        self.assertEqual(fake_out, real_out)
                         continue
 
                     self.assertTrue(isinstance(fake_out, FakeTensor))
