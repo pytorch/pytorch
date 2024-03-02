@@ -33,6 +33,7 @@ from .functional_utils import (
     to_fun,
 )
 from .schemas import (
+    FunctionalTensorWithViewMetaEq,
     InputAliasInfo,
     MutationType,
     OutputAliasInfo,
@@ -524,7 +525,7 @@ from a multi-output view call"
                 base_idx=base_idx,
                 dynamic_dims=dynamic_dims,
                 requires_grad=isinstance(o, torch.Tensor) and o.requires_grad,
-                functional_tensor=o.elem,
+                functional_tensor=FunctionalTensorWithViewMetaEq(o.elem) if isinstance(o, FunctionalTensor) else None,
             )
             output_info.append(out_info)
 

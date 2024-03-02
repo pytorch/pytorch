@@ -61,6 +61,7 @@ def remove_dupe_metadata(
                 dynamic_dims=o.dynamic_dims,
                 base_idx=None if o.base_idx is None else add_dupe_map[o.base_idx],
                 requires_grad=o.requires_grad,
+                functional_tensor=o.functional_tensor,
             )
             for o in m.output_info
         ],

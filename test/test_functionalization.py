@@ -1934,5 +1934,57 @@ def forward(self, arg0_1):
 class TestCrossRefFunctionalization(TestFunctionalization):
     crossref = True
 
+
+@unittest.skipIf(TEST_WITH_TORCHDYNAMO, "dynamo-ing code with FunctionalTensorWrapper tensors")
+class TestFunctionalizeAPI(TestCase):
+    def _get_wrapped_tensors(self):
+        a = torch.arange(10)
+        b = a.clone().detach()
+
+        fa = torch._to_functional_tensor(a)
+        fb = torch._to_functional_tensor(b)
+        return ((a, fa), (b, fb))
+
+    def test_view_metas_equal(self):
+        (a, fa), (_, fb) = self._get_wrapped_tensors()
+
+        def foo(x):
+            x = x[2:]
+            x = x.view(2, 4)
+            return x.as_strided((5, 8), (0, 1))
+
+        fa = foo(fa)
+        fa_tensor = torch._from_functional_tensor(fa)
+
+        fb = foo(fb)
+        fb_tensor = torch._from_functional_tensor(fb)
+
+        self.assertEqual(fa_tensor, fb_tensor)
+        self.assertEqual(foo(a), fa_tensor)
+        self.assertTrue(torch._functionalize_are_view_metas_equal(fa, fb))
+
+
+    def test_view_metas_not_equal(self):
+        (a, fa), (_, fb) = self._get_wrapped_tensors()
+
+        def foo(x):
+            x = x[2:]
+            x = x.view(2, 4)
+            return x.as_strided((5, 8), (0, 1))
+
+        def bar(x):
+            return x.as_strided((5, 8), (0, 1), 2)
+
+        fa = foo(fa)
+        fa_tensor = torch._from_functional_tensor(fa)
+
+        fb = bar(fb)
+        fb_tensor = torch._from_functional_tensor(fb)
+
+        self.assertEqual(fa_tensor, fb_tensor)
+        self.assertEqual(foo(a), fa_tensor)
+        self.assertFalse(torch._functionalize_are_view_metas_equal(fa, fb))
+
+
 if __name__ == '__main__':
     run_tests()

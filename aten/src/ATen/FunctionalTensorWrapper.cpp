@@ -350,6 +350,26 @@ void FunctionalTensorWrapper::regenerate_from_base() {
   generation_ = storage_impl->generation();
 }
 
+bool FunctionalTensorWrapper::are_view_metas_equal(const Tensor& other) {
+  TORCH_CHECK(at::functionalization::impl::isFunctionalTensor(other));
+  auto other_functional_tensor = at::functionalization::impl::unsafeGetFunctionalWrapper(other);
+
+  // First, check if sizes are equal.
+  if (view_metas_.size() != other_functional_tensor->view_metas_.size()) {
+    return false;
+  }
+
+  // Then, check if the name of each ViewMeta matches with other.
+  // This ensures the order and actual view operations are the same.
+  for (int i = 0; i < view_metas_.size(); i++) {
+    if (view_metas_[i].name != other_functional_tensor->view_metas_[i].name) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 bool FunctionalTensorWrapper::apply_updates() {
   // Apply all updates on alias_
   auto storage_impl = functional_storage_impl();

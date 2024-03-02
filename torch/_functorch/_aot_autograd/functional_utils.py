@@ -214,7 +214,7 @@ def gen_alias_from_base(
     # to replay them (view functions) on the aliased_base_tensor.
     if target_functional_tensor is not None:
         out = torch._functionalize_apply_view_metas(
-            target_functional_tensor, aliased_base_tensor
+            target_functional_tensor.tensor, aliased_base_tensor
         )
         assert out is not None and out.shape == target_meta_tensor.shape
         return patch_requires_grad(out)

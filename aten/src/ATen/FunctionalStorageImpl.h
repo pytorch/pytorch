@@ -29,17 +29,23 @@ namespace at::functionalization {
 // View Inverses] for details.
 struct ViewMeta {
   ViewMeta(
+      c10::string_view opname,
       std::function<Tensor(const Tensor&, int64_t)> forward,
       std::function<Tensor(const Tensor&, const Tensor&, int64_t)> reverse,
       bool is_multi_output = false,
       int64_t out_idx = 0)
-      : forward_fn(std::move(forward)),
+      : name(opname),
+        forward_fn(std::move(forward)),
         reverse_fn(std::move(reverse)),
         out_index(out_idx),
         is_multi_output(is_multi_output) {}
 
+  // Actual name of the operation.
+  c10::string_view name;
+
   std::function<Tensor(const Tensor&, int64_t)> forward_fn;
   std::function<Tensor(const Tensor&, const Tensor&, int64_t)> reverse_fn;
+
   // See Note [out_idx in ViewMeta]
   int64_t out_index;
 
