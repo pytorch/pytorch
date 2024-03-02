@@ -704,7 +704,7 @@ torch::Tensor custom_op_backed_by_autograd_fn(torch::Tensor x) {
   return CustomOpAutogradFunction::apply(x);
 }
 
-TORCH_LIBRARY(mylib, m) {
+TORCH_LIBRARY(mylib1, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
@@ -720,7 +720,7 @@ TORCH_LIBRARY(mylib, m) {
             for i in [10, 100, 10, 20, 10]:
                 print(f"iteration for {i}")
                 x = torch.ones(i, i, requires_grad=True)
-                out = torch.ops.mylib.custom_op_backed_by_autograd_fn(x)
+                out = torch.ops.mylib1.custom_op_backed_by_autograd_fn(x)
                 loss = out.sum()
                 loss.backward()
                 yield x.grad
@@ -750,8 +750,8 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
     assert(saved_variables.size() == 2);
     torch::Tensor x = saved_variables[0];
     torch::Tensor y = saved_variables[1];
-    assert(ctx->saved_data["bool"].isSymBool());
-    c10::SymInt i = ctx->saved_data["int"].toSymInt();
+    assert(ctx->saved_data["bool"].isBool());
+    int i = ctx->saved_data["int"].toInt();
 
     torch::autograd::variable_list grad_inputs(2);
     grad_inputs[0] = x + y + i;
@@ -763,7 +763,7 @@ torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x, const torc
   return CustomOpAutogradFunction::apply(x, y);
 }
 
-TORCH_LIBRARY(mylib, m) {
+TORCH_LIBRARY(mylib2, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
@@ -779,7 +779,7 @@ TORCH_LIBRARY(mylib, m) {
             for i in [10, 100, 10, 20, 10]:
                 x = torch.ones(i, i, requires_grad=True)
                 y = torch.randn(i, i)
-                out = torch.ops.mylib.custom_op_backed_by_autograd_fn(x, y)
+                out = torch.ops.mylib2.custom_op_backed_by_autograd_fn(x, y)
                 loss = out.sum()
                 loss.backward()
                 yield x.grad
@@ -853,25 +853,25 @@ void reset() {
     CustomOpAutogradFunction::iteration = 0;
 }
 
-TORCH_LIBRARY(mylib, m) {
+TORCH_LIBRARY(mylib3, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
     m.def("reset", reset);
 }
         """
 
         module = torch.utils.cpp_extension.load_inline(
-            name="mylib",
+            name="mylib3",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
         )
 
         def fn():
-            torch.ops.mylib.reset()
+            torch.ops.mylib3.reset()
             for i in [10, 10, 10, 10]:
                 x = torch.ones(i, i, requires_grad=True)
                 y = torch.randn(i, i)
-                out1, out2 = torch.ops.mylib.custom_op_backed_by_autograd_fn(x, y)
+                out1, out2 = torch.ops.mylib3.custom_op_backed_by_autograd_fn(x, y)
                 loss = (out1 + out2).sum()
                 loss.backward()
                 yield x.grad
