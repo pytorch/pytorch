@@ -174,44 +174,14 @@ def _log_softmax_handler(
 
 # NOTE: As explained below at _nll_loss_and_log_softmax_backward, the
 # _log_softmax_backward_handler does not actually do any computation.
-def _log_softmax_backward_no_computation(
-    grad_output: Tensor, output: Tensor, dim: int, input_dtype: torch.dtype
-):
-    # The log_softmax backward computation has been performed during
-    # nll_loss backward in _nll_loss_and_log_softmax_backward.
-    grad_input = grad_output
-
-    if grad_output.dtype != input_dtype:
-        grad_input = grad_input.to(input_dtype)
-    return grad_input
-
-
 def _log_softmax_backward_handler(
     op_call: torch._ops.OpOverload,
     args: Tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> object:
     grad_output = cast(DTensor, args[0])
-    output = cast(DTensor, args[1])
-    dim = cast(int, args[2])
     input_dtype = cast(torch.dtype, args[3])
-
-    spec = grad_output._spec
-
-    res = _log_softmax_backward_no_computation(
-        grad_output._local_tensor, output._local_tensor, dim, input_dtype
-    )
-
-    assert spec.tensor_meta is not None
-    return DTensor(
-        res,
-        spec.mesh,
-        spec.placements,
-        shape=spec.tensor_meta.shape,
-        dtype=input_dtype,
-        requires_grad=res.requires_grad,
-        stride=spec.tensor_meta.stride,
-    )
+    return grad_output.to(input_dtype)
 
 
 # NOTE: The implementation follows torch._decomp.decomposition._nll_loss_forward,
