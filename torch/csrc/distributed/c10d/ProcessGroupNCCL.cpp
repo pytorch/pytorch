@@ -2631,8 +2631,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   To ensure we do not enqueue a work object to the watchdog when cuda graph
   capture is active, we use a one-way sync. We increment a flag pre-emptively,
   indicating our intent to enqueue a work object. Then we check capture_status
-  to see if (a) capturing is already in progress, so we can not enqueue, (b)
-  capturing hasn't started yet, so we can trust that no capture will start
+  to see if (a) capturing is already in progress (we cannot enqueue in this case),
+  (b) capturing hasn't started yet, so we can trust that no capture will start
   (since a pre-condition of starting a capture is to check the event query count
   is 0).
 
@@ -2643,8 +2643,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   we also change the semantic of workEnqueue to 'maybeWorkEnqueue'.
 
   TODO:
-   - Are these assumptions correct? (just pieced this together following
-  comments on #110665 - cc @eqy)
    - Is our design for flight recorder safe in this context?  are we recording
   any FR events during cudagraph capture? if so, they won't be safe to poll for
   completion status.
