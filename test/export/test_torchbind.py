@@ -16,10 +16,10 @@ class TestExportTorchbind(TestCase):
                 self.x = x
                 self.y = y
 
-            @staticmethod
-            def from_metadata(foo_meta):
-                x, y = foo_meta
-                return FakeFoo(x, y)
+            @classmethod
+            def from_real(cls, foo):
+                x, y = foo.__get_metadata__()
+                return cls(x, y)
 
             def add_tensor(self, z):
                 return (self.x + self.y) * z
