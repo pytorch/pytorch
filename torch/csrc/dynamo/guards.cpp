@@ -1459,10 +1459,6 @@ class GuardManager {
     _leaf_guards.emplace_back(std::move(leaf_guard));
   }
 
-  virtual GuardManager* get_key_value_manager(const py::object& accessor_key) {
-    throw std::runtime_error("Not implemented");
-  }
-
   virtual GuardManager* get_key_manager(py::handle example_value) {
     throw std::runtime_error("Not implemented");
   }
@@ -1927,8 +1923,7 @@ class DictGuardManager : public GuardManager {
    * Adds a new KeyDictGuardAccessor. If the accessor is already present, we
    * just return the guard manager.
    */
-  virtual GuardManager* get_key_value_manager(
-      const py::object& accessor_key) override {
+  GuardManager* get_index_manager(const py::object& accessor_key) {
     // Check if the accessor is already present.
     Py_ssize_t index = py::cast<Py_ssize_t>(accessor_key);
     auto it = _key_value_managers.find(index);
@@ -2937,12 +2932,6 @@ PyObject* torch_c_dynamo_guards_init() {
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
       .def(
-          "get_key_value_manager",
-          &GuardManager::get_key_value_manager,
-          py::return_value_policy::reference)
-      // return by reference because GuardManager has the ownership of accessors
-      // and guard managers
-      .def(
           "get_key_manager",
           &GuardManager::get_key_manager,
           py::return_value_policy::reference)
@@ -3033,8 +3022,8 @@ PyObject* torch_c_dynamo_guards_init() {
       // return by reference because GuardManager has the ownership of leaf
       // guards
       .def(
-          "get_key_value_manager",
-          &DictGuardManager::get_key_value_manager,
+          "get_index_manager",
+          &DictGuardManager::get_index_manager,
           py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of leaf
       // guards
