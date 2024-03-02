@@ -60,7 +60,7 @@ __all__ = [
     'isend', 'monitored_barrier', 'new_group', 'new_subgroups',
     'new_subgroups_by_enumeration', 'recv', 'reduce',
     'reduce_scatter', 'scatter',
-    'scatter_object_list', 'send',
+    'scatter_object_list', 'send', 'supports_complex',
     'AllreduceCoalescedOptions', 'AllreduceOptions', 'AllToAllOptions',
     'BarrierOptions', 'BroadcastOptions', 'GatherOptions', 'PrefixStore',
     'ProcessGroup', 'ReduceOp', 'ReduceOptions', 'ReduceScatterOptions',
@@ -133,6 +133,26 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 PG_WRAPPER_STORE_PREFIX = "pg_wrapper"
+
+
+# Some reduce ops are not supported by complex numbers and will result in an error.
+# We currently provide complex support to the distributed API by viewing
+# complex tensors as real (torch.view_as_real), meaning that calling
+# these unsupported ops will return garbage values rather than error out.
+# (e.g. max(2+3i, 3+2i) = 3+3i)
+# We'd like calls to unsupported ops to error out accordingly,
+# rather than returning garbage values.
+def supports_complex(reduceOp: ReduceOp) -> bool:
+    """Return true if reduce ops is supported. False otherwise."""
+    denyList = [
+        ReduceOp.MAX,
+        ReduceOp.MIN,
+        ReduceOp.PRODUCT,
+        ReduceOp.BAND,
+        ReduceOp.BOR,
+        ReduceOp.BXOR,
+    ]
+    return reduceOp not in denyList
 
 
 class Backend(str):
@@ -2153,6 +2173,11 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
         _warn_not_in_group("all_reduce")
         return
 
+    if tensor.is_complex():
+        if not supports_complex(op):
+            raise ValueError(f"all_reduce does not support {op} on complex tensors")
+        tensor = torch.view_as_real(tensor)
+
     opts = AllreduceOptions()
     opts.reduceOp = op
     if group is None:
@@ -2221,6 +2246,11 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
     if _rank_not_in_group(group):
         _warn_not_in_group("all_reduce_coalesced")
         return
+
+    if any(t.is_complex() for t in tensors) and not supports_complex(op):
+        raise ValueError(f"all_reduce does not support {op} on complex tensors")
+
+    tensors = [t if not t.is_complex() else torch.view_as_real(t) for t in tensors]
 
     opts = AllreduceCoalescedOptions()
     opts.reduceOp = op
