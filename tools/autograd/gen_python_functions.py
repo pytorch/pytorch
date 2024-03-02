@@ -1364,10 +1364,10 @@ def emit_single_dispatch(
                 return f"""\
 {schema_comment}
 {inits}
-auto dispatch_{name} = []({lambda_formals}) -> ::std::vector<at::Tensor> {{
+auto dispatch_{name} = []({lambda_formals}) -> at::TensorList {{
   pybind11::gil_scoped_release no_gil;
   {dispatch_callee}({dispatch_args});
-  return self.vec();
+  return self;
 }};
 return wrap(dispatch_{name}({lambda_args}){set_requires_grad});
 """
