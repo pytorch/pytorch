@@ -61,6 +61,16 @@ pass_patterns = [
 inference_patterns = PatternMatcherPass()
 decompose_mm_pass = PatternMatcherPass()
 
+def move_views_below_pointwise(graph: fx.GraphModule):
+    return
+    # pass
+    for node in graph.nodes:
+        if node.target == aten.view.default:
+            if len(node.users) == 1 and node.users[0].target == aten.add.Tensor:
+                # move view after the pointwise op
+                user = node.users[0]
+                node.args[0] = user.args[0]
+
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     """
@@ -80,7 +90,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     if config.post_grad_custom_pre_pass is not None:
         config.post_grad_custom_pre_pass(gm.graph)
-
+    move_views_below_pointwise(gm.graph)
     if config.pattern_matcher:
         lazy_init()
         inductor_before_change = copy.deepcopy(counters["inductor"])
@@ -811,6 +821,28 @@ def is_valid_addmm_fusion(match):
         return False  # Shape mismatch
 
     return not should_prefer_unfused_addmm(match)
+
+# if you land this optimization as a pattern-match I will be sad :'(
+# I think the right thing to do is to "lift" reshapes/views into a more
+# normalized form to not be in the middle of compute ops whenever possible
+@register_graph_pattern(
+    CallFunction(
+        aten.add,
+        CallFunction(
+            aten.reshape,
+            CallFunction(aten.mm, Arg(), Arg()),
+            Ignored(),
+        ),
+        KeywordArg("inp"),
+    ),
+    pass_dict=pass_patterns[2],
+)
+def addmm(match, mat1, mat2, *, inp):
+    def repl(inp, mat1, mat2):
+        return aten.addmm(inp, mat1, mat2).reshape(match.nodes[1].args[1])
+
+    with V.fake_mode:
+        match.replace_by_example(repl, [inp, mat1, mat2])
 
 
 @register_graph_pattern(
