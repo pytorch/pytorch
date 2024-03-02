@@ -10,7 +10,7 @@ namespace at::functionalization {
 
 ViewMeta ViewMeta::to_out_idx(int64_t out_idx) {
   if (out_idx == this->out_index) return *this;
-  return ViewMeta(forward_fn, reverse_fn, is_multi_output, out_idx);
+  return ViewMeta(name, forward_fn, reverse_fn, is_multi_output, out_idx);
 }
 
 // Note [Functionalization: Alias Removal Part 2]

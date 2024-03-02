@@ -157,6 +157,7 @@ static const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatch
   // We have to emulate this "slicing" with an as_strided call.
   auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
   at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
+    "resize_",
     [reapply_views = reapply_views, size = size.vec()](const at::Tensor & base, int64_t mutated_view_idx) -> at::Tensor {
       if (reapply_views) {
         return base.as_strided(size, c10::contiguous_strides(size));
@@ -281,6 +282,7 @@ static at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymInt
   }
 
   at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
+    "_unsafe_view",
     [size = size.vec()](const at::Tensor & base, int64_t mutated_view_idx) -> at::Tensor {
       return at::_unsafe_view_symint(base, size);
     },
