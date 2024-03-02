@@ -367,7 +367,7 @@ static __device__ __inline__ void copy_chunk_with_pad_cast_bfloat16_to_float(
   while (elem_index < actual_num_elems) {
 #if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
     reinterpret_cast<float*>(dst)[elem_index] = static_cast<at::BFloat16>(
-      reinterpret_cast<at::BFloat16*>(src)[elem_index]
+      reinterpret_cast<const at::BFloat16*>(src)[elem_index]
     );
 #else
     reinterpret_cast<float*>(dst)[elem_index] = __bfloat162float(
