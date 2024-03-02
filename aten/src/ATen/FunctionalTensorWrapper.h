@@ -95,6 +95,10 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
         mutation_counter_;
   }
 
+  // Is the recorded ViewMeta sequence of this instance equal to the sequence
+  // on the other FunctionalTensorWrapper instance?
+  bool are_view_metas_equal(const Tensor& other);
+
   // Sync's the underlying tensor with its alias, if it's out of date. This
   // involves two steps: 1) Apply any pending updates/mutations to the alias 2)
   // Replay the views (if any) to regenerate the current tensor off of the

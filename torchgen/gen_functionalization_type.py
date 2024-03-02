@@ -349,6 +349,7 @@ def emit_view_functionalization_body(
             : at::functionalization::InverseReturnMode::NeverView
       );
       at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
+         "{noop_api_name}",
         {forward_lambda.decl()} {{
           if (reapply_views) {{
             return {forward_lambda.inner_call(reapply_views=True)}
@@ -421,6 +422,7 @@ def emit_view_functionalization_body(
         }}
       }}
       at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
+        "{noop_api_name}",
         {forward_lambda.decl()} {{
           if (reapply_views) {{
             return {forward_lambda.inner_call(reapply_views=True)}
