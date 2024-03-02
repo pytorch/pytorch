@@ -155,7 +155,7 @@ def _pop_mode(k: Optional[Union[DispatchKey, torch._C._TorchDispatchModeKey]] = 
         return _pop_torch_dispatch_stack(k)
 
 @contextlib.contextmanager
-def _pop_mode_temporarily():
+def _pop_mode_temporarily(k: Optional[DispatchKey] = None):
     old = _pop_mode(k)
     try:
         yield old
