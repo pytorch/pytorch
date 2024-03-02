@@ -345,7 +345,6 @@ class AOTInductorTestsTemplate:
             example_inputs,
             options={
                 "max_autotune": True,
-                "decompose_mm_to_mv": False,
                 "max_autotune_gemm_backends": "TRITON",
             },
         )
