@@ -483,8 +483,10 @@ def aot_dispatch_autograd(
 
             marked_dirty_inps = []
             for i in fw_metadata.mutated_graph_handled_indices_seen_by_autograd:
-                ctx.mark_dirty(deduped_flat_tensor_args[i])
-                marked_dirty_inps.append(deduped_flat_tensor_args[i])
+                arg = deduped_flat_tensor_args[i]
+                if not (arg.requires_grad and arg.is_leaf):  # would error
+                    ctx.mark_dirty()
+                marked_dirty_inps.append(arg)
 
             if not CompiledFunction._fakify_first_call:
                 if CompiledFunction.metadata.is_rng_op_functionalized:

@@ -286,6 +286,13 @@ class TensorVariable(VariableTracker):
     def method_attr_data(self, tx):
         return self.call_method(tx, "detach", [], {})
 
+    def method_attr__version(self, tx):
+        from ..tensor_version_op import _tensor_version
+
+        return variables.TorchInGraphFunctionVariable(_tensor_version).call_function(
+            tx, [self], {}
+        )
+
     def var_getattr(self, tx, name):
         from . import UserDefinedClassVariable
 
