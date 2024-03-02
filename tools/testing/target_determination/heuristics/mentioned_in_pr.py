@@ -17,6 +17,9 @@ class MentionedInPR(HeuristicInterface):
     def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
 
+    def _search_for_linked_issues(self, s: str) -> List[str]:
+        return re.findall(r"#(\d+)", s) + re.findall(r"/pytorch/pytorch/(\d+)", s)
+
     def get_prediction_confidence(self, tests: List[str]) -> TestPrioritizations:
         try:
             commit_messages = get_git_commit_info()
@@ -24,14 +27,37 @@ class MentionedInPR(HeuristicInterface):
             print(f"Can't get commit info due to {e}")
             commit_messages = ""
         try:
-            pr_body = get_pr_body()
+            pr_number = os.environ.get("PR_NUMBER", "")
+            if pr_number == "":
+                re_match = re.match(
+                    r"^refs/tags/.*/(\d+)$", os.environ.get("GITHUB_REF", "")
+                )
+                if re_match is not None:
+                    pr_number = re_match.group(1)
+            pr_body = get_issue_or_pr_body(int(pr_number))
         except Exception as e:
             print(f"Can't get PR body due to {e}")
             pr_body = ""
+
+        # Search for linked issues or PRs
+        additional_issue_bodies: List[str] = []
+        for issue in self._search_for_linked_issues(
+            commit_messages
+        ) + self._search_for_linked_issues(pr_body):
+            try:
+                additional_issue_bodies.append(get_issue_or_pr_body(int(issue)))
+            except Exception as e:
+                pass
+
         mentioned = []
         for test in tests:
-            if test in commit_messages or test in pr_body:
+            if (
+                test in commit_messages
+                or test in pr_body
+                or any(test in body for body in additional_issue_bodies)
+            ):
                 mentioned.append(test)
+
         return TestPrioritizations(tests, {TestRun(test): 1 for test in mentioned})
 
 
@@ -61,23 +87,8 @@ def get_git_commit_info() -> str:
     )
 
 
-def get_pr_body() -> str:
-    """Uses GitHub API to get the body of the PR, based on the PR_NUMBER or
-    GITHUB_REF environment variables."""
-    body = ""
-    pr_number = os.environ.get("PR_NUMBER", "")
-    if pr_number != "":
-        body += requests.get(
-            f"https://api.github.com/repos/pytorch/pytorch/pulls/{pr_number}"
-        ).json()["body"]
-    else:
-        re_match = re.match(r"^refs/tags/.*/(\d+)$", os.environ.get("GITHUB_REF", ""))
-        print(re_match)
-        print(os.environ.get("GITHUB_REF", ""))
-        if re_match is not None:
-            print(re_match.group(1))
-            body += requests.get(
-                f"https://api.github.com/repos/pytorch/pytorch/pulls/{re_match.group(1)}"
-            ).json()["body"]
-    print(body)
+def get_issue_or_pr_body(number: int) -> str:
+    body: str = requests.get(
+        f"https://api.github.com/repos/pytorch/pytorch/issues/{number}"
+    ).json()["body"]
     return body
