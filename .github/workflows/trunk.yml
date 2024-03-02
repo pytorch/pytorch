@@ -105,9 +105,9 @@ jobs:
       environment-file: .github/requirements/conda-env-macOS-ARM64
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "macos-m1-12" },
-          { config: "default", shard: 2, num_shards: 3, runner: "macos-m1-12" },
-          { config: "default", shard: 3, num_shards: 3, runner: "macos-m1-12" },
+          { config: "default", shard: 1, num_shards: 3, runner: "macos-m1-stable" },
+          { config: "default", shard: 2, num_shards: 3, runner: "macos-m1-stable" },
+          { config: "default", shard: 3, num_shards: 3, runner: "macos-m1-stable" },
         ]}
 
   macos-12-py3-arm64-mps-test:
@@ -122,7 +122,7 @@ jobs:
       python-version: 3.9.12
       test-matrix: |
         { include: [
-          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-12" },
+          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-stable" },
         ]}
 
   macos-12-py3-arm64-test:
