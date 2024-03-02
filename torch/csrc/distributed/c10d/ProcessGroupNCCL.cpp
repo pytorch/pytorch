@@ -1071,20 +1071,18 @@ bool ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
   return true;
 }
 
-void ProcessGroupNCCL::shutdown() {
+void ProcessGroupNCCL::shutdown(c10::optional<std::string> reason) {
   // Don't join threads here since the purpose of this method is to abort all
   // communicators and signal the threads to exit. Joining on the threads could
   // potentially block and hence avoid it in this method.
   terminateProcessGroup_.store(true);
   workMetaListCV_.notify_one();
 
-  std::string abortReason = c10::str("Process Group shutdown on rank ", rank_);
   // lauch abort asynchrounously and wait for it to complete or timeout
   LOG(INFO) << logPrefix()
             << "Launching ProcessGroupNCCL abort asynchrounously.";
-  std::future<bool> fut = std::async(std::launch::async, [this, abortReason]() {
-    return this->abort(abortReason);
-  });
+  std::future<bool> fut = std::async(
+      std::launch::async, [this, &reason]() { return this->abort(reason); });
 
   waitForFutureOrTimeout(fut, options_->timeout, "ProcessGroup abort", true);
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL aborts successfully.";
@@ -2185,7 +2183,6 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     r->trace_id_ = NCCLTraceBuffer::get()->record(
         uid_,
         seq_,
-        op_id_,
         profilingTitle ? profilingTitle : "",
         inputs,
         outputs,
@@ -2254,9 +2251,6 @@ void ProcessGroupNCCL::startCoalescing() {
   // start, which has one minor downside- we burn a seq_ if someone ever does a
   // 'start' and 'end' coalescing region without doing an operation inbetween.
   seq_++;
-
-  // Don't bump op_id_ here, becuase startCoalescing isn't a logical operation.
-  // Bump it for each logical op inside the coalescing group.
 }
 
 // `optype` is for specifying a composite optype, such as ALLGATHER and
@@ -2348,7 +2342,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 
   // Bump collective counter
   seq_++;
-  op_id_++;
 
   auto device = getDevice(input);
   const auto key = getKeyFromDevice(device);
@@ -2494,12 +2487,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
 
   // Bump collective counter
   seq_++;
-  // For coalescingManager collectives, there is no individual c++ call per
-  // collective so there is no flight record and we increment seq_ and op_id_
-  // together. Compare this to startCoalesing/endCoalescing flow where we
-  // increment seq_ once per group and increment op_id_ once per indvidual
-  // operation within the group
-  op_id_++;
 
   // Currently, the API permits one scenario where inputs.size() and
   // outputs.size() are > 0.
@@ -2687,10 +2674,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     }
   }
 
-  // Bump the logical operation counter regardless of whether this op is
-  // coalesced or individual
-  op_id_++;
-
   auto ncclComm = getNCCLComm(key, device, opType, p2pRank, isSendRecvSelf);
 
   if (coalescing_state_ & CoalActive) {
@@ -2713,14 +2696,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // timing/state updates via watchdog thread, but lacks op metadata such as
     // input/output sizes and profilingTitle per-op in the group.
     auto trace_id = NCCLTraceBuffer::get()->record(
-        uid_,
-        seq_,
-        op_id_,
-        profilingTitle,
-        {tensor},
-        {tensor},
-        nullptr,
-        nullptr);
+        uid_, seq_, profilingTitle, {tensor}, {tensor}, nullptr, nullptr);
     // TODO(whc) if we want to make the per-p2p-op flightrecorder entries get
     // their timings/states updated by proxy when the Work obj representing the
     // coalesce group gets its update, we could accumulate these trace_ids
@@ -2745,7 +2721,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     work->trace_id_ = NCCLTraceBuffer::get()->record(
         uid_,
         seq_,
-        op_id_,
         profilingTitle,
         {tensor},
         {tensor},
