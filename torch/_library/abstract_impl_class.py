@@ -1,5 +1,7 @@
 from typing import Any, Dict
 
+import torch
+
 from torch._library.utils import parse_namespace
 
 
@@ -15,11 +17,18 @@ class AbstractClassRegistry:
         return self._registered_class[full_qualname]
 
     def register(self, full_qualname: str, fake_class=None) -> None:
+        if self.has_impl(full_qualname):
+            raise RuntimeError(
+                f"{full_qualname} is already registered. Please use deregister to deregister it first."
+            )
         self._registered_class[full_qualname] = fake_class
 
     def deregister(self, full_qualname: str) -> Any:
         self._check_registered(full_qualname)
         return self._registered_class.pop(full_qualname)
+
+    def clear(self):
+        self._registered_class.clear()
 
     def _check_registered(self, full_qualname: str):
         if full_qualname not in self._registered_class:
@@ -37,8 +46,89 @@ def _full_qual_class_name(qualname: str):
 
 
 def impl_abstract_class(qualname, fake_class=None):
+    r"""Register an abstract implementation for this class.
+
+    It's in the same spirit of registering an abstract implementation for
+    an operator with impl_abstract but with the difference that it
+    associates a fake class with the original torch bind class (registered
+    with torch::class_).  In this way, PyTorch can track the computations on
+    script object of this class without modifying original script object.
+
+    This API may be used as a decorator (see examples).
+
+    Examples:
+        >>> import torch
+        >>> # For a torch Bind class Foo defined in test_custom_class_registration.cpp:
+        >>> # TORCH_LIBRARY(_TorchScriptTesting, m) {
+        >>> #     m.class_<Foo>("_Foo")
+        >>> #         .def(torch::init<int64_t, int64_t>())
+        >>> #         // .def(torch::init<>())
+        >>> #         .def("info", &Foo::info)
+        >>> #         .def("increment", &Foo::increment)
+        >>> #         .def("add", &Foo::add)
+        >>> #         .def("add_tensor", &Foo::add_tensor)
+        >>> #         .def("__eq__", &Foo::eq)
+        >>> #         .def("combine", &Foo::combine)
+        >>> #         .def_pickle(
+        >>> #             [](c10::intrusive_ptr<Foo> self) { // __getstate__
+        >>> #               return std::vector<int64_t>{self->x, self->y};
+        >>> #             },
+        >>> #             [](std::vector<int64_t> state) { // __setstate__
+        >>> #               return c10::make_intrusive<Foo>(state[0], state[1]);
+        >>> #             })
+        >>> #         .def_meta([](c10::intrusive_ptr<Foo> self) { // __get_metadata__
+        >>> #           return std::vector<int64_t>{self->x, self->y};
+        >>> #         });
+        >>> # We could register a fake class FakeFoo in Python as follows:
+        >>> @impl_abstract_class("_TorchScriptTesting::_Foo")
+        >>> class FakeFoo:
+        >>>     def __init__(self, x, y):
+        >>>         self.x = x
+        >>>         self.y = y
+        >>>
+        >>>     @classmethod
+        >>>     def from_real(cls, foo_obj):
+        >>>         # __get_metadata__ is defined by .def_meta in C++
+        >>>         x, y = foo_obj.__get_metadata__()
+        >>>         return cls(x, y)
+        >>>
+        >>>     def add_tensor(self, z):
+        >>>         return (self.x + self.y) * z1
+        >>>
+        >>> # After we have registered a fake class for _Foo, object of _Foo class can be properly
+        >>> # tracked and handled in PT2 stack (e.g. Dynamo, AOTAutograd).
+
+    Temporal Limitations:
+        - We don't support method call on the script object yet. Please use custom op to manipulate them. Please
+          implement a custom op that takes the script object as input and call the method in the custom op.
+
+    Examples:
+        >>> # CPU impl in test_custom_class_registration.cpp:
+        >>> # at::Tensor takes_foo(c10::intrusive_ptr<Foo> foo, at::Tensor x) {
+        >>> #   return foo->add_tensor(x);
+        >>> # }
+        >>> # TORCH_LIBRARY_IMPL(_TorchScriptTesting, CPU, m) {
+        >>> #   m.impl("takes_foo", takes_foo);
+        >>> # }
+        >>>
+        >>> # abstract impl in torchbind_impls.py:
+        >>> @torch.library.impl_abstract("_TorchScriptTesting::takes_foo")
+        >>> def foo_add_tensor(foo, z):
+        >>>     return foo.add_tensor(z)
+    """
+
     def inner(fake_class):
         global global_abstract_class_registry
+        ns, name = parse_namespace(qualname)
+
+        # Check whether the refered torch::class_ exists.
+        torch._C._get_custom_class_python_wrapper(ns, name)
+
+        if not isinstance(fake_class.__dict__.get("from_real", None), classmethod):
+            raise RuntimeError(
+                f"{fake_class} must define a classmethod from_real that converts the real object to the fake object."
+            )
+
         global_abstract_class_registry.register(
             _full_qual_class_name(qualname), fake_class
         )
