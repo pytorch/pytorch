@@ -32,6 +32,7 @@ from torch.overrides import TorchFunctionMode
 from torch.utils._python_dispatch import (
     _push_mode,
     TorchDispatchMode,
+    _disable_infra_mode,
 )
 
 from ._backward_state import BackwardState
@@ -562,15 +563,6 @@ def dispatch_trace(
     return fx._lazy_graph_module._make_graph_module(tracer.root, graph, name)
 
 
-@contextlib.contextmanager
-def _pop_proxy_mode_temporarily():
-    old = _unset_proxy_mode()
-    try:
-        yield old
-    finally:
-        _set_proxy_mode(old)
-
-
 def wrap_key(f, tensors, tracer, pre_dispatch: bool):
     flat_tensors, tensors_spec = pytree.tree_flatten(tensors)
 
@@ -578,7 +570,7 @@ def wrap_key(f, tensors, tracer, pre_dispatch: bool):
     def wrapped(*proxies):
         flat_proxies, proxies_spec = pytree.tree_flatten(proxies)
         assert len(flat_proxies) == len(flat_tensors)
-        with _pop_proxy_mode_temporarily() as m:
+        with disable_proxy_modes_tracing() as m:
             assert isinstance(m, ProxyTorchDispatchMode)
             track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
 
@@ -1121,35 +1113,10 @@ def get_torch_dispatch_modes():
 def get_innermost_proxy_mode():
     return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
 
-# TODO (tmanlaibaatar) unify this with FunctionalTensorMode logic
+
 @contextlib.contextmanager
 def disable_proxy_modes_tracing():
-    from torch._ops import unset_mode_pre_dispatch
-
-    old_mode_from_aot_dispatch = torch._C._unset_dispatch_mode(
-        torch._C._TorchDispatchModeKey.PROXY
-    )
-    old_mode_from_pre_dispatch = unset_mode_pre_dispatch(
-        torch._C._TorchDispatchModeKey.PROXY
-    )
-
-    if old_mode_from_aot_dispatch:
-        assert old_mode_from_pre_dispatch is None, "Can only have one mode available"
-    if old_mode_from_pre_dispatch:
-        assert old_mode_from_aot_dispatch is None, "Can only have one mode available"
-
-    try:
-        if old_mode_from_aot_dispatch:
-            yield old_mode_from_aot_dispatch
-        elif old_mode_from_pre_dispatch:
-            yield old_mode_from_pre_dispatch
-        else:
-            yield
-    finally:
-        if old_mode_from_aot_dispatch is not None:
-            torch._C._set_dispatch_mode(old_mode_from_aot_dispatch)
-        if old_mode_from_pre_dispatch is not None:
-            _push_mode(old_mode_from_aot_dispatch, torch._C.DispatchKey.PreDispatch)
+    return _disable_infra_mode(torch._C._TorchDispatchModeKey.PROXY)
 
 
 def maybe_handle_decomp(proxy_mode, op, args, kwargs):

@@ -55,7 +55,7 @@ class TorchDispatchMode:
         raise NotImplementedError()
 
     def __enter__(self):
-        _push_mode(self, self.__dict__.get("_dispatch_key", None))
+        _push_mode(self)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -93,12 +93,44 @@ def _detect_functional_mode():
     return pre_dispatch_functional_mode
 
 
+def _disable_infra_mode(key):
+    assert key in (torch._C._TorchDispatchModeKey.FUNCTIONAL, torch._C._TorchDispatchModeKey.PROXY)
+
+    from torch._ops import unset_mode_pre_dispatch
+
+    old_mode_from_aot_dispatch = torch._C._unset_dispatch_mode(
+        key
+    )
+    old_mode_from_pre_dispatch = unset_mode_pre_dispatch(
+        key
+    )
+
+    if old_mode_from_aot_dispatch:
+        assert old_mode_from_pre_dispatch is None, "Can only have one mode available"
+    if old_mode_from_pre_dispatch:
+        assert old_mode_from_aot_dispatch is None, "Can only have one mode available"
+
+    try:
+        if old_mode_from_aot_dispatch:
+            yield old_mode_from_aot_dispatch
+        elif old_mode_from_pre_dispatch:
+            yield old_mode_from_pre_dispatch
+        else:
+            yield
+    finally:
+        if old_mode_from_aot_dispatch is not None:
+            torch._C._set_dispatch_mode(old_mode_from_aot_dispatch)
+        if old_mode_from_pre_dispatch is not None:
+            _push_mode(old_mode_from_pre_dispatch)
+
+
 def _get_current_dispatch_mode_stack():
     stack_len = _len_torch_dispatch_stack()
     return [_get_dispatch_stack_at(i) for i in range(stack_len)]
 
-# TODO (tmanlaibaatar) it doesn't need to take in dispatch key
-def _push_mode(mode, k: Optional[DispatchKey] = None):
+
+def _push_mode(mode):
+    k = mode._dispatch_key
     assert k is None or k == torch._C.DispatchKey.PreDispatch
     if k is None:
         _push_on_torch_dispatch_stack(mode)
@@ -123,12 +155,12 @@ def _pop_mode(k: Optional[Union[DispatchKey, torch._C._TorchDispatchModeKey]] = 
         return _pop_torch_dispatch_stack(k)
 
 @contextlib.contextmanager
-def _pop_mode_temporarily(k: Optional[DispatchKey] = None):
+def _pop_mode_temporarily():
     old = _pop_mode(k)
     try:
         yield old
     finally:
-        _push_mode(old, k)
+        _push_mode(old)
 
 @contextlib.contextmanager
 def _disable_current_modes():
@@ -163,7 +195,7 @@ def _disable_current_modes():
         for mode in reversed(old_modes):
             _push_mode(mode)
         for mode in reversed(old_pre_dispatch_modes):
-            _push_mode(mode, torch._C.DispatchKey.PreDispatch)
+            _push_mode(mode)
 
 
 class BaseTorchDispatchMode(TorchDispatchMode):
