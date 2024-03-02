@@ -1248,19 +1248,18 @@ class FakeTensorMode(TorchDispatchMode):
                 raise RuntimeError(
                     f" ScriptObject's {full_qualname} haven't registered a fake class. If {func} is supposed "
                     f" to be exported as a node in graph and preserve the script obj as input to the node, "
-                    f" please use torch.library.impl_abstract_class to"
-                    f" register a fake class for the script obj. Otherwise, consider disabling"
-                    f" fake modes for the operator by callig it with ctx manager maybe_disable_fake_tensor_mode."
+                    f" please use impl_abstract_class to register a fake class for the script obj. Otherwise,"
+                    f" consider disabling fake modes for the operator by callig it with ctx manager maybe_disable_fake_tensor_mode."
                 )
             fake_class = torch._library.abstract_impl_class.global_abstract_class_registry.get_impl(
                 full_qualname
             )
-            if not hasattr(fake_class, "from_metadata"):
+            if not hasattr(fake_class, "from_real"):
                 raise RuntimeError(
                     f"ScriptObject {full_qualname}'s corresponding fake_class {fake_class}"
-                    f" doesn't implement a from_metadata classmethod. Please add it to the fake class."
+                    f" doesn't implement a from_real classmethod. Please add it to the fake class."
                 )
-            return fake_class.from_metadata(x.__get_metadata__())
+            return fake_class.from_real(x)
 
         args, kwargs = pytree.tree_map_only(
             torch.ScriptObject, lambda x: _fakify_script_object(x), (args, kwargs)
