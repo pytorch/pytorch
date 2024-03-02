@@ -230,7 +230,10 @@ def mm(self, input2):
     )
 
     def mul_sum_decomp(self, input2):
-        return (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1)
+        out = (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1)
+        assert self.dtype == input2.dtype
+        assert out.dtype == self.dtype
+        return out
 
     def coordesc_or(cond):
         return config.coordinate_descent_tuning or cond
