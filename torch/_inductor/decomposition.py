@@ -238,7 +238,7 @@ def mm(self, input2):
     if config.decompose_mm_to_mv:
         gso = guard_size_oblivious
         # Corresponds to BS=1 cases morally. If it's contiguous we can decompose it
-        # and generate efficiently kernels without autotuning. Otherwise we need coordinate descent tuning
+        # and generate efficient kernels without autotuning. Otherwise we need coordinate descent tuning
         if definitely_true(self.shape[0] == 1) and coordesc_or(
             definitely_true(input2.stride(0) == 1)
         ):
