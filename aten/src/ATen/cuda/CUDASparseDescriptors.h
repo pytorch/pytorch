@@ -130,6 +130,12 @@ class TORCH_CUDA_CPP_API CuSparseDnMatDescriptor
   explicit CuSparseDnMatDescriptor(const Tensor& input, int64_t batch_offset = -1);
 };
 
+class TORCH_CUDA_CPP_API CuSparseConstDnMatDescriptor
+    : public CuSparseDescriptor<const cusparseDnMatDescr, &cusparseDestroyDnMat> {
+ public:
+  explicit CuSparseConstDnMatDescriptor(const Tensor& input, int64_t batch_offset = -1);
+};
+
 class TORCH_CUDA_CPP_API CuSparseDnVecDescriptor
     : public CuSparseDescriptor<cusparseDnVecDescr, &cusparseDestroyDnVec> {
  public:
@@ -146,6 +152,16 @@ class TORCH_CUDA_CPP_API CuSparseSpMatDescriptor
             &cusparseDestroyDnMat> {
    public:
     explicit CuSparseDnMatDescriptor(
+        const Tensor& input,
+        int64_t batch_offset = -1);
+  };
+
+  class TORCH_CUDA_CPP_API CuSparseConstDnMatDescriptor
+      : public ConstCuSparseDescriptor<
+            const cusparseDnMatDescr,
+            &cusparseDestroyDnMat> {
+   public:
+    explicit CuSparseConstDnMatDescriptor(
         const Tensor& input,
         int64_t batch_offset = -1);
   };
