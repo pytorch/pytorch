@@ -110,6 +110,8 @@ tracing_state_functions = {
     torch.onnx.is_in_onnx_export: False,
     torch._dynamo.external_utils.is_compiling: True,
     torch._utils.is_compiling: True,
+    torch.compiler.is_compiling: True,
+    torch.compiler.is_dynamo_compiling: True,
 }
 
 
@@ -304,6 +306,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if self.value in (
                 torch._utils.is_compiling,
                 torch._dynamo.external_utils.is_compiling,
+                torch.compiler.is_compiling,
+                torch.compiler.is_dynamo_compiling,
             ):
                 tx.mark_inconsistent_side_effects()
             return ConstantVariable.create(tracing_state_functions[self.value])
@@ -448,6 +452,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return ConstantVariable.create(
                 torch.backends.cudnn.is_acceptable(tensor_inp)
             )
+        elif self.value is torch.utils.hooks.BackwardHook:
+            return variables.BackwardHookVariable.create(tx, *args, **kwargs)
         elif (
             self.value == torch.numel
             and len(args) == 1

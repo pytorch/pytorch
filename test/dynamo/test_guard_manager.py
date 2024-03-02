@@ -621,7 +621,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(root.check(f_locals_prime))
 
         # Add key-value manager ("a" : 1)
-        mgr0 = dict_mgr.get_key_value_manager(0)
+        mgr0 = dict_mgr.get_index_manager(0)
         self.assertTrue(root.check(f_locals))
         mgr0.get_key_manager("a").add_equals_match_guard("a", ["dict.keys()[0] == a"])
         self.assertTrue(root.check(f_locals))
@@ -629,7 +629,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(root.check(f_locals))
 
         # Add key-value manager (nothing : {"z" : 3})
-        mgr1 = dict_mgr.get_key_value_manager(1)
+        mgr1 = dict_mgr.get_index_manager(1)
         self.assertTrue(root.check(f_locals))
         mgr1.get_key_manager(nothing).add_lambda_guard(
             lambda x: x is nothing, ["x is nothing"]
