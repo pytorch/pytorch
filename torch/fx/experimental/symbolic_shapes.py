@@ -3103,6 +3103,7 @@ class ShapeEnv:
                             f"{self._debug_name(symbol_to_source[expr][0])} = {symbol_to_source[expr][0].name()} "
                             "must always be equal."
                         )
+                        breakpoint()
                         record_constraint_violation(equalities_inputs.warn_only, self._debug_name(source), msg)
 
                     if (
@@ -3116,6 +3117,7 @@ class ShapeEnv:
                             f"the values of {self._debug_name(src)} = {src.name()} by "
                             f"{self._debug_name(source)} = {expr.subs(symbol, sympy.sympify(self._debug_name(src)))}."
                         )
+                        breakpoint()
                         record_constraint_violation(equalities_inputs.warn_only, self._debug_name(source), msg)
 
                 # NB: Not necessary to report constraint violations here:
