@@ -1335,7 +1335,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     if (
                         isinstance(symint, torch.SymInt)
                         and isinstance(symint.node, SymNode)
-                        and isinstance(s := symint.node.expr, sympy.Symbol)
+                        # NB: look at the expression pre-simplification,
+                        # because we're looking for binding sites, and if
+                        # a replacement is learned after, we would "lose"
+                        # track of it if we consulted expr
+                        and isinstance(s := symint.node._expr, sympy.Symbol)
                         and s not in symbol_to_proxy
                         and s in needed_symbols
                     ):
@@ -1427,6 +1431,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                                 convert(vr.upper),
                             ),
                         )
+
+                    # TODO: need to insert runtime asserts for replacements
 
                     for ra in ras:
                         log.debug("inserting runtime assert %s", ra.expr)
