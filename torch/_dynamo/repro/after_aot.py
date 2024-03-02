@@ -702,9 +702,10 @@ def repro_run(options, mod, load_args):
             if isinstance(arg, torch.Tensor) and arg.is_cuda:
                 need_sync = True
                 break
-        ref = compiled(args)
+        ref = compiled(list(args))
         if need_sync:
             synchronize()  # ensure segfaults are surfaced
+    return lambda: compiled(list(args))
 
 
 # TODO: lazily load the inputs or something, rather than cloning them
@@ -928,4 +929,4 @@ divergences--you just might not end up with a useful repro in the end.""",
         "minifier-query": repro_minifier_query,
         "run": repro_run,
     }
-    COMMAND_FNS[options.command](options, mod, load_args)
+    return COMMAND_FNS[options.command](options, mod, load_args)
