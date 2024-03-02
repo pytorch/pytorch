@@ -353,7 +353,7 @@ bool FunctionalTensorWrapper::are_view_metas_equal(const Tensor& other) {
 
   // Then, check if the name of each ViewMeta matches with other.
   // This ensures the order and actual view operations are the same.
-  for (int i = 0; i < view_metas_.size(); i++) {
+  for (int64_t i = 0; i < view_metas_.size(); i++) {
     if (view_metas_[i].name != other_functional_tensor->view_metas_[i].name) {
       return false;
     }
