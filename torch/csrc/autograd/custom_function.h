@@ -189,8 +189,8 @@ struct CppNode : public Node {
           name());
     }
 
-    // Don't need to autograd function id
-    // since we already collect NodeCall::id
+    args.collect(typeid(T).hash_code());
+    args.collect(std::string(typeid(T).name()));
     args.collect(ctx_.saved_data);
     args.collect(ctx_.non_differentiable_);
     args.collect(ctx_.dirty_inputs_);
