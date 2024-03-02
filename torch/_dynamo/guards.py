@@ -268,7 +268,9 @@ def get_verbose_code_part(code_part: str, guard: Guard) -> str:
     return f"{code_part:<60}{extra}"
 
 
-def get_verbose_code_parts(code_parts: List[str], guard: Guard) -> List[str]:
+def get_verbose_code_parts(
+    code_parts: Union[str | List[str]], guard: Guard
+) -> List[str]:
     if not isinstance(code_parts, list):
         code_parts = [code_parts]
     return [get_verbose_code_part(code_part, guard) for code_part in code_parts]
@@ -308,7 +310,7 @@ def handle_dict_mananger(source, base_guard_manager, base_example_value, example
         # invariant that index is always ConstDictKeySource
         assert isinstance(base_example_value, dict)
         index = list(base_example_value.keys()).index(source.index)
-    index_manager = base_guard_manager.get_key_value_manager(index)
+    index_manager = base_guard_manager.get_index_manager(index)
 
     if not isinstance(source.index, ConstDictKeySource):
         # We have to insert a key manager guard here
@@ -436,14 +438,18 @@ class GuardBuilder(GuardBuilderBase):
                 # List of sources that don't need accessors are put at the root
                 return root_guard_manager
             elif istype(source, TypeSource):
+                assert base_guard_manager
                 return base_guard_manager.type_manager(example_value)
             elif istype(
                 source, (NNModuleSource, NotNNModuleSource, FSDPNNModuleSource)
             ):
+                assert base_guard_manager
                 return base_guard_manager
             elif istype(source, AttrSource):
+                assert base_guard_manager
                 return base_guard_manager.getattr_manager(source.member, example_value)
             elif istype(source, GetItemSource):
+                assert base_guard_manager
                 if isinstance(base_guard_manager, DictGuardManager):
                     # TODO(janimesh) - Consider isolation GetItemSource and
                     # DictGetItemSource (or maybe use ODictGetItemSource for
@@ -463,6 +469,7 @@ class GuardBuilder(GuardBuilderBase):
                     source, base_guard_manager, base_example_value, example_value
                 )
             elif istype(source, DefaultsSource):
+                assert base_guard_manager
                 if not source.is_kw:
                     return base_guard_manager.getattr_manager(
                         "__defaults__", None
@@ -472,15 +479,17 @@ class GuardBuilder(GuardBuilderBase):
                         "__kwdefaults__", None
                     ).getitem_manager(str(source.idx_key), example_value)
             elif istype(source, NumpyTensorSource):
+                assert base_guard_manager
                 return base_guard_manager.lambda_manager(from_numpy, example_value)
             elif istype(source, TupleIteratorGetItemSource):
+                assert base_guard_manager
                 return base_guard_manager.tuple_iterator_getitem_manager(
                     source.index, example_value
                 )
             elif isinstance(source, ConstDictKeySource):
                 if not isinstance(base_guard_manager, DictGuardManager):
                     raise AssertionError("DictGuardManager should not be here")
-                return base_guard_manager.get_key_value_manager(
+                return base_guard_manager.get_index_manager(
                     source.index
                 ).get_key_manager(example_value)
             else:
@@ -932,7 +941,7 @@ class GuardBuilder(GuardBuilderBase):
             dict_mgr = self.get_guard_manager(guard)
             assert isinstance(dict_mgr, DictGuardManager)
             for idx, key in enumerate(value.keys()):
-                index_mgr = dict_mgr.get_key_value_manager(idx)
+                index_mgr = dict_mgr.get_index_manager(idx)
                 if key_is_id(key):
                     id_val = self.id_ref(key)
                     index_mgr.get_key_manager(key).add_id_match_guard(
@@ -995,7 +1004,7 @@ class GuardBuilder(GuardBuilderBase):
             dict_mgr = self.get_guard_manager(guard)
             assert isinstance(dict_mgr, DictGuardManager)
             for idx, key in enumerate(list(value.keys())):
-                key_manager = dict_mgr.get_key_value_manager(idx).get_key_manager(key)
+                key_manager = dict_mgr.get_index_manager(idx).get_key_manager(key)
                 key_manager.add_equals_match_guard(
                     key, get_verbose_code_parts(code, guard)
                 )
@@ -1649,10 +1658,8 @@ class CheckFunctionManager:
             if isinstance(guard, DuplicateInputs):
                 source_a = guard.input_source_a
                 source_b = guard.input_source_b
-                add_code_part(f"{source_a.name()} is {source_b.name()}", None)
-
-                if config.enable_cpp_guard_manager:
-                    assert False, "AOT Autograd guard is getting added"
+                code_part = f"{source_a.name()} is {source_b.name()}"
+                add_code_part(code_part, None)
             else:
                 raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")
 
