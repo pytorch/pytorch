@@ -1357,10 +1357,10 @@ def emit_single_dispatch(
             if (
                 str(f.func.name).startswith("_foreach_")
                 and f.func.kind() == SchemaKind.inplace
-                and (
-                    self_arg is not None and is_tensor_list_type(self_arg.argument.type)
-                )
             ):
+                # note(crcrpar): `_foreach_pow.ScalarAndTensor` does NOT have its in-place
+                # variant and it unlikely to have it in the future. Thus it's safe to have the following assert.
+                assert self_arg is not None and is_tensor_list_type(self_arg.argument.type)
                 return f"""\
 {schema_comment}
 {inits}
