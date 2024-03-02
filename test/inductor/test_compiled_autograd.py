@@ -704,13 +704,13 @@ torch::Tensor custom_op_backed_by_autograd_fn(torch::Tensor x) {
   return CustomOpAutogradFunction::apply(x);
 }
 
-TORCH_LIBRARY(mylib1, m) {
+TORCH_LIBRARY(test_autograd_cpp_node, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
 
         module = torch.utils.cpp_extension.load_inline(
-            name="mylib",
+            name="test_autograd_cpp_node",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
@@ -720,7 +720,7 @@ TORCH_LIBRARY(mylib1, m) {
             for i in [10, 100, 10, 20, 10]:
                 print(f"iteration for {i}")
                 x = torch.ones(i, i, requires_grad=True)
-                out = torch.ops.mylib1.custom_op_backed_by_autograd_fn(x)
+                out = torch.ops.test_autograd_cpp_node.custom_op_backed_by_autograd_fn(x)
                 loss = out.sum()
                 loss.backward()
                 yield x.grad
@@ -763,13 +763,13 @@ torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x, const torc
   return CustomOpAutogradFunction::apply(x, y);
 }
 
-TORCH_LIBRARY(mylib2, m) {
+TORCH_LIBRARY(test_autograd_cpp_node_saved, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
 
         module = torch.utils.cpp_extension.load_inline(
-            name="mylib",
+            name="test_autograd_cpp_node_saved",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
@@ -779,13 +779,12 @@ TORCH_LIBRARY(mylib2, m) {
             for i in [10, 100, 10, 20, 10]:
                 x = torch.ones(i, i, requires_grad=True)
                 y = torch.randn(i, i)
-                out = torch.ops.mylib2.custom_op_backed_by_autograd_fn(x, y)
+                out = torch.ops.test_autograd_cpp_node_saved.custom_op_backed_by_autograd_fn(x, y)
                 loss = out.sum()
                 loss.backward()
                 yield x.grad
 
-        # can bring this down to 2 if we collect dynamic shapes properly
-        self.check_output_and_recompiles(fn, 3)
+        self.check_output_and_recompiles(fn, 2)
 
     def test_autograd_cpp_node_dynamic(self):
         cpp_source = """
@@ -853,25 +852,25 @@ void reset() {
     CustomOpAutogradFunction::iteration = 0;
 }
 
-TORCH_LIBRARY(mylib3, m) {
+TORCH_LIBRARY(test_autograd_cpp_node_dynamic, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
     m.def("reset", reset);
 }
         """
 
         module = torch.utils.cpp_extension.load_inline(
-            name="mylib3",
+            name="test_autograd_cpp_node_dynamic",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
         )
 
         def fn():
-            torch.ops.mylib3.reset()
+            torch.ops.test_autograd_cpp_node_dynamic.reset()
             for i in [10, 10, 10, 10]:
                 x = torch.ones(i, i, requires_grad=True)
                 y = torch.randn(i, i)
-                out1, out2 = torch.ops.mylib3.custom_op_backed_by_autograd_fn(x, y)
+                out1, out2 = torch.ops.test_autograd_cpp_node_dynamic.custom_op_backed_by_autograd_fn(x, y)
                 loss = (out1 + out2).sum()
                 loss.backward()
                 yield x.grad
