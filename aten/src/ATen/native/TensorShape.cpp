@@ -2726,7 +2726,7 @@ static void check_stack_inputs(TensorList tensors, int64_t dim) {
 }
 
 // Pads each tensor on `dim`-th dimension such that padded_dim % num_chunks == 0.
-std::vector<Tensor> _pad_chunk(TensorList tensors, int64_t dim, int64_t num_chunks) {
+static std::vector<Tensor> _pad_chunk(TensorList tensors, int64_t dim, int64_t num_chunks) {
   TORCH_CHECK(!tensors.empty(),
            "chunk_cat expects a non-empty TensorList");
   auto num_tensors = tensors.size();

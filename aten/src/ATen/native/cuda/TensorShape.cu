@@ -589,6 +589,15 @@ void _chunk_cat_out_cuda_contiguous(
   int64_t src_elem_size = tensors[0].element_size();
   int64_t dst_elem_size = out.element_size();
   auto [chunk_size, leading_dim, num_blocks_per_chunk, slice_size, device_ptrs] = get_chunk_cat_metadata(tensors, dim, num_chunks, src_elem_size, dst_elem_size);
+  auto first_tensor_sizes = tensors[0].sizes();
+  std::vector<int64_t> view_sizes = std::vector<int64_t>(first_tensor_sizes.begin(), first_tensor_sizes.begin()+dim);
+  view_sizes.insert(view_sizes.end(), {num_chunks, chunk_size / dst_elem_size});
+  if(out.sizes() != view_sizes) {
+    if(out.numel() > 0) {
+      TORCH_WARN("An output with one or more elements has been resized");
+    }
+    out.resize_(view_sizes);
+  }
   dim3 blocks(num_blocks_per_chunk, num_chunks, leading_dim);
   dim3 threads(detail::BLOCK_SIZE, 1, 1);
   detail::chunk_cat_cuda_kernel<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -795,7 +804,8 @@ Tensor& _chunk_cat_out_cuda(
   bool is_bfloat16_to_float32 =
     (tensors[0].dtype() == at::ScalarType::BFloat16) &&
     (out.dtype() == at::ScalarType::Float);
-  if(detail::all_contiguous(tensors) && (is_same_type || is_bfloat16_to_float32)) {
+  bool both_input_output_contiguous = detail::all_contiguous(tensors) && out.is_non_overlapping_and_dense();
+  if(both_input_output_contiguous && (is_same_type || is_bfloat16_to_float32)) {
     detail::_chunk_cat_out_cuda_contiguous(tensors, dim, num_chunks, out);
   } else {
     at::native::_chunk_cat_out(tensors, dim, num_chunks, out);

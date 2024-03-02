@@ -1212,12 +1212,11 @@ def prod(x: List[int]):
     return r
 
 
-@register_decomposition(aten._chunk_cat)
-def _chunk_cat(
+def _pad_chunk(
     tensors: List[Tensor],
     dim: int,
     num_chunks: int,
-) -> Tensor:
+) -> List[Tensor]:
     padded_tensors = []
     for tensor in tensors:
         tensor_size = tensor.size()
@@ -1237,7 +1236,24 @@ def _chunk_cat(
             tensor = padded_tensor
         view_size = tensor_size[:dim] + torch.Size([num_chunks, -1])
         padded_tensors.append(tensor.view(view_size))
-    return torch.cat(padded_tensors, dim + 1)
+    return padded_tensors
+
+
+@register_decomposition(
+    [aten._chunk_cat.default, aten._chunk_cat.out]
+)
+def _chunk_cat(
+    tensors: List[Tensor],
+    dim: int,
+    num_chunks: int,
+    out: Optional[Tensor] = None,
+) -> Tensor:
+    padded_tensors = _pad_chunk(tensors, dim, num_chunks)
+    if out is None:
+        return torch.cat(padded_tensors, dim + 1)
+    else:
+        torch.cat(padded_tensors, dim + 1, out=out)
+        return out
 
 
 @register_decomposition(aten.split_with_sizes)
