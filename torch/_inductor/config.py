@@ -1,6 +1,6 @@
 import os  # noqa: C101
 import sys
-from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 import torch
 
@@ -167,6 +167,13 @@ reorder_for_compute_comm_overlap_passes = [
     "sink_waits",
     "raise_comms",
 ]
+
+# passes (in execution order) for collective communication function fusion (Experimental)
+# e.g., fuse allreduce + split into a single reducescatter)
+# (if pattern_matcher is False, passes will be ignored)
+# NOTE: rules in the unsafe list don't universally apply in all scenarios, we rely on the
+# user to know which passes to choose and check accuracy on their own.
+comm_fusion_passes_unsafe: List[str] = []
 
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle

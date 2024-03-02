@@ -44,6 +44,7 @@ from ..pattern_matcher import (
 )
 from ..utils import decode_device, is_pointwise_use
 from ..virtualized import V
+from .comm_fusion_unsafe import comm_fusion_unsafe_passes
 from .group_batch_fusion import group_batch_fusion_passes
 from .reinplace import reinplace_inplaceable_ops
 
@@ -90,6 +91,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         remove_noop_ops(gm.graph)
         for patterns in pass_patterns:
             patterns.apply(gm.graph)  # type: ignore[arg-type]
+        if len(config.comm_fusion_passes_unsafe) > 0:
+            comm_fusion_unsafe_passes(gm.graph, config.comm_fusion_passes_unsafe)
         if is_inference:
             inference_patterns.apply(gm.graph)  # type: ignore[arg-type]
         decompose_mm_pass.apply(gm.graph)  # type: ignore[arg-type]

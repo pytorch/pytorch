@@ -8,7 +8,7 @@ from torch._C import FileCheck
 import torch.distributed._functional_collectives as _functional_collectives
 import torch._dynamo
 import torch._dynamo.test_case
-from torch._dynamo.utils import same
+from torch._dynamo.utils import same, counters
 from torch._dynamo.testing import CompileCounter
 from torch.distributed.distributed_c10d import GroupMember
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -125,6 +125,87 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             compiled_matmul_cat_col = compile(matmul_cat_col, inputs)
             inductor_out = compiled_matmul_cat_col(*inputs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    @patch.object(torch._inductor.config, "comm_fusion_passes_unsafe", ["allreduce_split_to_reducescatter",])
+    def test_comm_fusion_inductor(self):
+        """Test that inductor fx pass fuses comm_fusion patterns."""
+
+        def allreduce_split_fuse(a, idx, split_size, *, tag, ranks, group_size):
+            ar = torch.ops.c10d_functional.all_reduce(a, "sum", tag, ranks, group_size)
+            ar = torch.ops.c10d_functional.wait_tensor(ar)
+            s = torch.ops.aten.split.Tensor(ar, split_size)
+            return s[idx]
+
+        def allreduce_split_multiple_getitems(a, *, tag, ranks, group_size):
+            ar = torch.ops.c10d_functional.all_reduce(a, "sum", tag, ranks, group_size)
+            ar = torch.ops.c10d_functional.wait_tensor(ar)
+            s = torch.ops.aten.split.Tensor(ar, 2)
+            return s[0] + s[1]
+
+        def allreduce_split_idx_mismatch(a, idx, split_size, *, tag, ranks, group_size):
+            ar = torch.ops.c10d_functional.all_reduce(a, "sum", tag, ranks, group_size)
+            ar = torch.ops.c10d_functional.wait_tensor(ar)
+            s = torch.ops.aten.split.Tensor(ar, split_size)
+            getitem_idx = (idx + 1) % len(s)
+            return s[getitem_idx]
+
+        def compile(func, example_inputs):
+            graph = make_fx(func)(*example_inputs)
+            return inductor_compile_fx(graph, example_inputs)
+
+        counters.clear()
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            # Pattern match and fused successfully
+            allreduce_split_fuse = functools.partial(
+                allreduce_split_fuse,
+                **self.get_world_trs(),
+            )
+            inputs = (
+                torch.ones(16, 16, device="cuda") + self.rank,
+                self.rank,
+                int(16 / self.world_size),
+            )
+            eager_out = allreduce_split_fuse(*inputs)
+            compiled_allreduce_split_fuse = compile(allreduce_split_fuse, inputs)
+            inductor_fused_out = compiled_allreduce_split_fuse(*inputs)
+            self.assertTrue(same(eager_out, inductor_fused_out, tol=0.001))
+            self.assertEqual(counters["inductor"]["comm_fusion_unsafe"], 1)
+
+            # Fail to fuse when > 1 getitems are called downstream
+            counters.clear()
+            allreduce_split_multiple_getitems = functools.partial(
+                allreduce_split_multiple_getitems,
+                **self.get_world_trs(),
+            )
+            inputs_1 = (
+                torch.ones(16, 16, device="cuda") + self.rank,
+            )
+            eager_out = allreduce_split_multiple_getitems(*inputs_1)
+            compiled_allreduce_split_fuse = compile(allreduce_split_multiple_getitems, inputs_1)
+            inductor_fused_out = compiled_allreduce_split_fuse(*inputs_1)
+            self.assertTrue(same(eager_out, inductor_fused_out, tol=0.001))
+            self.assertEqual(counters["inductor"]["comm_fusion_unsafe"], 0)
+
+            # Fail to fuse when idx doesn't match
+            counters.clear()
+            allreduce_split_idx_mismatch = functools.partial(
+                allreduce_split_idx_mismatch,
+                **self.get_world_trs(),
+            )
+            inputs_2 = (
+                torch.ones(16, 16, device="cuda") + self.rank,
+                self.rank,
+                int(16 / self.world_size),
+            )
+            eager_out = allreduce_split_idx_mismatch(*inputs_2)
+            compiled_allreduce_split_fuse = compile(allreduce_split_idx_mismatch, inputs_2)
+            inductor_fused_out = compiled_allreduce_split_fuse(*inputs_2)
+            self.assertTrue(same(eager_out, inductor_fused_out, tol=0.001))
+            self.assertEqual(counters["inductor"]["comm_fusion_unsafe"], 0)
 
     def test_c10d_functional_tagged_pt2_compliant(self):
         op = torch.ops._c10d_functional.all_reduce.default
