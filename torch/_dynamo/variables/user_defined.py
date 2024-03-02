@@ -697,9 +697,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def _getattr_static(self, name):
         if (
-            isinstance(
-                self.value, (torch.nn.Module, torch.utils._cxx_pytree.PyTreeSpec)
-            )
+            isinstance(self.value, torch.nn.Module)
             or "__slots__" in self.value.__class__.__dict__
             or type(self.value) == threading.local
         ):
