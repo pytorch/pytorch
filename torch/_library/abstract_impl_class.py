@@ -51,8 +51,8 @@ def impl_abstract_class(qualname, fake_class=None):
     It's in the same spirit of registering an abstract implementation for
     an operator with impl_abstract but with the difference that it
     associates a fake class with the original torch bind class (registered
-    with torch::class_).  In this way, PyTorch can track the computations on
-    script object of this class without modifying original script object.
+    with torch::class_).  In this way, , object of the class can be properly
+    guarded and tracked by components in PT2 stack such as Dynamo and AOTAutograd.
 
     This API may be used as a decorator (see examples).
 
@@ -94,9 +94,6 @@ def impl_abstract_class(qualname, fake_class=None):
         >>>
         >>>     def add_tensor(self, z):
         >>>         return (self.x + self.y) * z1
-        >>>
-        >>> # After we have registered a fake class for _Foo, object of _Foo class can be properly
-        >>> # tracked and handled in PT2 stack (e.g. Dynamo, AOTAutograd).
 
     Temporal Limitations:
         - We don't support method call on the script object yet. Please use custom op to manipulate them. Please
