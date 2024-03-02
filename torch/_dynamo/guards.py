@@ -115,6 +115,17 @@ class GuardManager:
     def __init__(self):
         self.root = RootGuardManager()
 
+        # TODO(anijain2305) - Better document where these are useful.
+        self.closure_vars = None
+        self.args = None
+        self.code_parts = None
+        self.verbose_code_parts = None
+        self.global_scope = None
+        self.guard_fail_fn = None
+        self.cache_entry = None
+        self.extra_state = None
+        self.id_matched_objs = None
+
     def pretty_print_leaf_guard(self, prefix, guard):
         guard_name = guard.__class__.__name__
         parts = guard.verbose_code_parts()
@@ -337,7 +348,7 @@ class GuardBuilder(GuardBuilderBase):
         lookup_weakrefs: Callable[[object], ReferenceType[object]],
         local_scope: Dict[str, object],
         global_scope: Dict[str, object],
-        guard_manager: GuardManager,
+        guard_manager: Optional[GuardManager],
         check_fn_manager: CheckFunctionManager,
     ):
         self.id_ref = id_ref
@@ -392,6 +403,7 @@ class GuardBuilder(GuardBuilderBase):
     def _get_guard_manager_from_source(self, originating_source):
         # eval_frame calls check_fn with f_locals dict, which is then later
         # wrapped up into a "L" dict.
+        assert self.guard_manager  # to make mypy happy
         root_guard_manager = self.guard_manager.root
         global_manager = root_guard_manager.globals_dict_manager(self.scope["G"], None)
 
@@ -438,18 +450,18 @@ class GuardBuilder(GuardBuilderBase):
                 # List of sources that don't need accessors are put at the root
                 return root_guard_manager
             elif istype(source, TypeSource):
-                assert base_guard_manager
+                assert base_guard_manager  # to make mypy happy
                 return base_guard_manager.type_manager(example_value)
             elif istype(
                 source, (NNModuleSource, NotNNModuleSource, FSDPNNModuleSource)
             ):
-                assert base_guard_manager
+                assert base_guard_manager  # to make mypy happy
                 return base_guard_manager
             elif istype(source, AttrSource):
-                assert base_guard_manager
+                assert base_guard_manager  # to make mypy happy
                 return base_guard_manager.getattr_manager(source.member, example_value)
             elif istype(source, GetItemSource):
-                assert base_guard_manager
+                assert base_guard_manager  # to make mypy happy
                 if isinstance(base_guard_manager, DictGuardManager):
                     # TODO(janimesh) - Consider isolation GetItemSource and
                     # DictGetItemSource (or maybe use ODictGetItemSource for
@@ -469,7 +481,7 @@ class GuardBuilder(GuardBuilderBase):
                     source, base_guard_manager, base_example_value, example_value
                 )
             elif istype(source, DefaultsSource):
-                assert base_guard_manager
+                assert base_guard_manager  # to make mypy happy
                 if not source.is_kw:
                     return base_guard_manager.getattr_manager(
                         "__defaults__", None
@@ -479,10 +491,10 @@ class GuardBuilder(GuardBuilderBase):
                         "__kwdefaults__", None
                     ).getitem_manager(str(source.idx_key), example_value)
             elif istype(source, NumpyTensorSource):
-                assert base_guard_manager
+                assert base_guard_manager  # to make mypy happy
                 return base_guard_manager.lambda_manager(from_numpy, example_value)
             elif istype(source, TupleIteratorGetItemSource):
-                assert base_guard_manager
+                assert base_guard_manager  # to make mypy happy
                 return base_guard_manager.tuple_iterator_getitem_manager(
                     source.index, example_value
                 )
@@ -516,6 +528,7 @@ class GuardBuilder(GuardBuilderBase):
         globals_for_guard_fn = {"G": self.scope["G"]}
         exec(pycode, globals_for_guard_fn, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
+        assert self.guard_manager  # to make mypy happy
         if is_epilogue:
             self.guard_manager.root.add_epilogue_lambda_guard(
                 guard_fn, verbose_code_parts
@@ -707,6 +720,7 @@ class GuardBuilder(GuardBuilderBase):
             def fn(x):
                 return torch._functorch.pyfunctorch.compare_functorch_state(states)
 
+            assert self.guard_manager  # to make mypy happy
             self.guard_manager.root.add_lambda_guard(
                 fn, get_verbose_code_parts(code, guard)
             )
@@ -1520,6 +1534,7 @@ class CheckFunctionManager:
                 guards_log.debug("%s", self.guard_manager)
                 # print(self.guard_manager)
             # breakpoint()
+            assert self.guard_manager  # to make mypy happy
             self.guard_manager.id_matched_objs = builder.id_matched_objs
             self.check_fn = self.guard_manager
 
@@ -1547,6 +1562,7 @@ class CheckFunctionManager:
         structured_guard_fns = []
 
         if config.enable_cpp_guard_manager:
+            assert self.guard_manager  # to make mypy happy
             self.guard_manager.root.add_global_state_guard(["___check_global_state()"])
 
         def add_code_part(code_part, guard, log_only=False):
@@ -1691,6 +1707,7 @@ class CheckFunctionManager:
 
         if config.enable_cpp_guard_manager:
             # Guard manager construction is complete
+            assert self.guard_manager  # to make mypy happy
             guard_fn = self.guard_manager
         else:
             unique_code_parts = list(unique(code_parts))
@@ -1839,7 +1856,7 @@ def get_guard_fail_reason(
     verbose_code_parts: List[str] = []
     if config.enable_cpp_guard_manager:
         guard_manager = guard_fn
-        guard_debug_info = guard_manager.check_verbose(f_locals)
+        guard_debug_info = guard_manager.check_verbose(f_locals)  # type: ignore[attr-defined]
         # For test_export_with_map_cond, the check_verbose fail. We need to fix
         # the issue in that test to remove this workaround.
         # assert not guard_debug_info.result
