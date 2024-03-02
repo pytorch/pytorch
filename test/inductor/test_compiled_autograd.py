@@ -682,6 +682,202 @@ class TestCompiledAutograd(TestCase):
 
         self.check_output_and_recompiles(fn, 1)
 
+    def test_autograd_cpp_node(self):
+        cpp_source = """
+struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
+  static constexpr bool is_traceable = true;
+
+  static torch::Tensor forward(
+      torch::autograd::AutogradContext* ctx,
+      const torch::Tensor& x) {
+    return x;
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext *ctx,
+      torch::autograd::variable_list grad_output) {
+    return grad_output;
+  }
+};
+
+torch::Tensor custom_op_backed_by_autograd_fn(torch::Tensor x) {
+  return CustomOpAutogradFunction::apply(x);
+}
+
+TORCH_LIBRARY(mylib, m) {
+    m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
+}
+        """
+
+        module = torch.utils.cpp_extension.load_inline(
+            name="mylib",
+            cpp_sources=cpp_source,
+            functions="custom_op_backed_by_autograd_fn",
+            verbose=True,
+        )
+
+        def fn():
+            for i in [10, 100, 10, 20, 10]:
+                print(f"iteration for {i}")
+                x = torch.ones(i, i, requires_grad=True)
+                out = torch.ops.mylib.custom_op_backed_by_autograd_fn(x)
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        # compiles for 10 (static) and 100 (dynamic)
+        self.check_output_and_recompiles(fn, 2)
+
+    def test_autograd_cpp_node_saved(self):
+        cpp_source = """
+struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
+  static constexpr bool is_traceable = true;
+
+  static torch::Tensor forward(
+      torch::autograd::AutogradContext* ctx,
+      const torch::Tensor& x,
+      const torch::Tensor& y) {
+    ctx->save_for_backward({x, y});
+    ctx->saved_data["bool"] = true;
+    ctx->saved_data["int"] = 1;
+    return x;
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext *ctx,
+      torch::autograd::variable_list grad_output) {
+    const auto& saved_variables = ctx->get_saved_variables();
+    assert(saved_variables.size() == 2);
+    torch::Tensor x = saved_variables[0];
+    torch::Tensor y = saved_variables[1];
+    assert(ctx->saved_data["bool"].isSymBool());
+    c10::SymInt i = ctx->saved_data["int"].toSymInt();
+
+    torch::autograd::variable_list grad_inputs(2);
+    grad_inputs[0] = x + y + i;
+    return grad_inputs;
+  }
+};
+
+torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x, const torch::Tensor& y) {
+  return CustomOpAutogradFunction::apply(x, y);
+}
+
+TORCH_LIBRARY(mylib, m) {
+    m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
+}
+        """
+
+        module = torch.utils.cpp_extension.load_inline(
+            name="mylib",
+            cpp_sources=cpp_source,
+            functions="custom_op_backed_by_autograd_fn",
+            verbose=True,
+        )
+
+        def fn():
+            for i in [10, 100, 10, 20, 10]:
+                x = torch.ones(i, i, requires_grad=True)
+                y = torch.randn(i, i)
+                out = torch.ops.mylib.custom_op_backed_by_autograd_fn(x, y)
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        # can bring this down to 2 if we collect dynamic shapes properly
+        self.check_output_and_recompiles(fn, 3)
+
+    def test_autograd_cpp_node_dynamic(self):
+        cpp_source = """
+struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
+  static constexpr bool is_traceable = true;
+  static int iteration;
+
+  static torch::autograd::variable_list forward(
+      torch::autograd::AutogradContext* ctx,
+      const torch::Tensor& x,
+      const torch::Tensor& y) {
+    ctx->save_for_backward({x, y});
+    ctx->saved_data["bool"] = true;
+    ctx->saved_data["int"] = 1;
+
+    switch (iteration) {
+        case 0: {
+            ctx->saved_data["forces_recompile"] = iteration;
+            break;
+        }
+        case 1: {
+            ctx->mark_dirty({y});
+            break;
+        }
+        case 2: {
+            ctx->mark_non_differentiable({y});
+            break;
+        }
+        case 3: {
+            ctx->set_materialize_grads(false);
+            break;
+        }
+        default: {
+            throw std::runtime_error("unexpected iteration");
+        }
+    }
+    iteration++;
+    return {x, y};
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext *ctx,
+      torch::autograd::variable_list grad_output) {
+    const auto& saved_variables = ctx->get_saved_variables();
+    assert(saved_variables.size() == 2);
+    torch::Tensor x = saved_variables[0];
+    torch::Tensor y = saved_variables[1];
+    assert(ctx->saved_data["bool"].isBool());
+    assert(ctx->saved_data["int"].isInt());
+    int i = ctx->saved_data["int"].toInt();
+
+    torch::autograd::variable_list grad_inputs(2);
+    grad_inputs[0] = x + y + i;
+    return grad_inputs;
+  }
+};
+
+int CustomOpAutogradFunction::iteration = 0;
+
+torch::autograd::variable_list custom_op_backed_by_autograd_fn(const torch::Tensor& x, const torch::Tensor& y) {
+  return CustomOpAutogradFunction::apply(x, y);
+}
+
+void reset() {
+    CustomOpAutogradFunction::iteration = 0;
+}
+
+TORCH_LIBRARY(mylib, m) {
+    m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
+    m.def("reset", reset);
+}
+        """
+
+        module = torch.utils.cpp_extension.load_inline(
+            name="mylib",
+            cpp_sources=cpp_source,
+            functions="custom_op_backed_by_autograd_fn",
+            verbose=True,
+        )
+
+        def fn():
+            torch.ops.mylib.reset()
+            for i in [10, 10, 10, 10]:
+                x = torch.ones(i, i, requires_grad=True)
+                y = torch.randn(i, i)
+                out1, out2 = torch.ops.mylib.custom_op_backed_by_autograd_fn(x, y)
+                loss = (out1 + out2).sum()
+                loss.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(fn, 4)
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
@@ -691,26 +887,32 @@ def load_test_module(name):
         ).load_module()
 
 
-test_autograd = load_test_module("test_autograd")
+def make_wrapped(fn):
+    @functools.wraps(fn)
+    def wrapped(self):
+        torch._dynamo.reset()
+        with compiled_autograd.enable(compiler_fn):
+            return fn(self)
+
+    return wrapped
 
 
-class EagerAutogradTests(TestCase):
-    @classmethod
-    def add_test(cls, name, fn):
-        @functools.wraps(fn)
-        def wrapped(self: EagerAutogradTests):
-            torch._dynamo.reset()
-            with compiled_autograd.enable(compiler_fn):
-                return fn(self)
-
+def wrap_test_class(orig_cls):
+    dct = orig_cls.__dict__.copy()
+    for name in list(dct.keys()):
+        fn = dct[name]
         if not callable(fn):
-            return
+            continue
         elif known_failures_re.match(name) or name in known_failing_tests:
-            setattr(cls, name, unittest.expectedFailure)
-        elif name.startswith("test"):
-            setattr(cls, name, wrapped)
-        else:
-            setattr(cls, name, fn)
+            dct[name] = unittest.expectedFailure
+        elif name.startswith("test_"):
+            dct[name] = make_wrapped(fn)
+
+    return type(
+        orig_cls.__name__ + "WithCompiledAutograd",
+        orig_cls.__bases__,
+        dct,
+    )
 
 
 # These groups of tests aren't supported yet
@@ -834,15 +1036,28 @@ known_failing_tests = {
     "test_simple_reentrant",  # torch._dynamo.exc.Unsupported: call_method SkipFunctionVariable() sum [] {}
     "test_tensor_hooks_inplace_multiple_outputs",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
     "test_lobpcg",  # torch._dynamo.exc.Unsupported: 'call_function LOBPCGAutogradFunction.backward in skip_files
+    "test_backward_dict_grad_for_nontensor",  # AssertionError: "non-Tensor-like types" does not match "'skip function
+    "test_backward_dict_invalid_keys",  # AssertionError: "to have keys {'x'}" does not match "'skip function
+    "test_backward_dict_requires_keys_for_input_optional_tensors",  # AssertionError: "to have keys {.*'y'.*}"
+    "test_backward_dict_requires_keys_for_input_tensors",  # AssertionError: "to have keys {.*'y'.*}" does not
+    "test_backward_grads_are_tensor_or_none",  # AssertionError: "either None or a Tensor" does not match "'
+    "test_backward_impl_on_existing_op",  # torch._dynamo.exc.Unsupported: 'skip function
+    "test_backward_returns_dict",  # AssertionError: "to be a dict" does not match "'skip function
+    "test_backward_tensorlist_input_requires_list_grads",  # AssertionError: "list of gradients" does not
+    "test_backward_tensorlist_input_requires_list_grads_none_or_Tensor",  # AssertionError: "None or Tensor"
+    "test_backward_tensorlist_input_requires_list_grads_with_same_numel",  # AssertionError: "3 gradients
+    "test_save_for_backward_inputs_are_namedtuple",  # torch._dynamo.exc.Unsupported: 'skip function
 }
 
 if not HAS_CUDA:
     # Found Tesla M60 which is too old to be supported by the triton GPU compiler
     known_failing_tests.add("test_type_conversions")
 
-for name, fn in test_autograd.TestAutograd.__dict__.items():
-    EagerAutogradTests.add_test(name, fn)
+test_autograd = load_test_module("test_autograd")
+test_custom_ops = load_test_module("test_custom_ops")
 
+TestAutogradWithCompiledAutograd = wrap_test_class(test_autograd.TestAutograd)
+TestCustomOpWithCompiledAutograd = wrap_test_class(test_custom_ops.TestCustomOp)
 
 if __name__ == "__main__":
     if HAS_CPU:

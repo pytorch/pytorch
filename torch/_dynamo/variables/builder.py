@@ -129,6 +129,7 @@ from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     ComptimeVariable,
+    DebuggingVariable,
     GetAttrVariable,
     GetSetDescriptorVariable,
     InspectSignatureVariable,
@@ -496,6 +497,11 @@ class VariableBuilder:
         elif isinstance(value, enum.Enum):
             self.install_guards(GuardBuilder.ID_MATCH)
             return EnumVariable(value=value, source=self.source)
+        elif DebuggingVariable.is_reorderable_logging_function(value):
+            # Put this above builtin_callable so that print() can be handled
+            # along with other builtin debugging functions
+            self.install_guards(GuardBuilder.BUILTIN_MATCH)
+            return DebuggingVariable(value, source=self.source)
         elif is_utils_checkpoint(value):
             return build_checkpoint_variable(source=self.source)
         elif isinstance(value, functools.partial):

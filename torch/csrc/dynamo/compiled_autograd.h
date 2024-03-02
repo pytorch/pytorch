@@ -559,7 +559,7 @@ class SwapSavedVariables {
   }
 
   void before(at::IValue& t) {
-    stashed_ivalues.save(&t, std::move(t));
+    stashed_ivalues.save(&t, at::IValue(t));
   }
 
   void after(at::IValue& t) {

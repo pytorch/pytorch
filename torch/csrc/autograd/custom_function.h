@@ -101,9 +101,9 @@ struct TORCH_API Function {
       -> std::enable_if_t<std::is_same_v<X, T>, forward_t<X, Args...>>;
 
   // Flag overriden by user to enable compiled autograd tracing for custom
-  // function <T>. To set this flag to true, you need to ensure that all
-  // operations within <T> happen on tensors, and that there are no side
-  // effects.
+  // function <T>. Before you can set this flag to true, you need to ensure
+  // that all additional static variables used in the forward and backward
+  // are captured in compiled_args and apply_wih_saved.
   static constexpr bool is_traceable = false;
 };
 
