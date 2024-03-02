@@ -239,7 +239,8 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 #define AT_DISPATCH_CASE_FLOATING_TYPES_AND_HALF(...)   \
   AT_DISPATCH_CASE(at::ScalarType::Double, __VA_ARGS__) \
   AT_DISPATCH_CASE(at::ScalarType::Float, __VA_ARGS__)  \
-  AT_DISPATCH_CASE(at::ScalarType::Half, __VA_ARGS__)
+  AT_DISPATCH_CASE(at::ScalarType::Half, __VA_ARGS__) \
+  AT_DISPATCH_CASE(at::ScalarType::BFloat16, __VA_ARGS__)
 
 #define AT_DISPATCH_FLOATING_TYPES_AND_HALF(TYPE, NAME, ...) \
   AT_DISPATCH_SWITCH(                                        \
