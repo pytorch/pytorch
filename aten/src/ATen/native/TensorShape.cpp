@@ -2725,10 +2725,10 @@ static void check_stack_inputs(TensorList tensors, int64_t dim) {
   }
 }
 
-Tensor _chunk_cat(TensorList tensors, int64_t dim, int64_t num_chunks) {
+// Pads each tensor on `dim`-th dimension such that padded_dim % num_chunks == 0.
+std::vector<Tensor> _pad_chunk(TensorList tensors, int64_t dim, int64_t num_chunks) {
   TORCH_CHECK(!tensors.empty(),
            "chunk_cat expects a non-empty TensorList");
-  auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].dim());
   auto num_tensors = tensors.size();
   std::vector<Tensor> tensor_views;
   std::vector<Tensor> tensors_to_copy;
@@ -2739,21 +2739,32 @@ Tensor _chunk_cat(TensorList tensors, int64_t dim, int64_t num_chunks) {
   for (const auto & tensor : tensors) {
     auto tensor_size = tensor.sizes();
     std::vector<int64_t> padded_size(tensor_size.vec());
-    padded_size[wrapped_dim] = (tensor_size[wrapped_dim] + num_chunks - 1) / num_chunks * num_chunks;
+    padded_size[dim] = (tensor_size[dim] + num_chunks - 1) / num_chunks * num_chunks;
     Tensor padded_tensor = tensor;
     if (padded_size != tensor_size) {
       padded_tensor = tensor.new_zeros(padded_size);
-      padded_tensor_slices.push_back(padded_tensor.narrow(wrapped_dim, 0, tensor_size[wrapped_dim]));
+      padded_tensor_slices.push_back(padded_tensor.narrow(dim, 0, tensor_size[dim]));
       tensors_to_copy.push_back(tensor);
     }
-    std::vector<int64_t> view_sizes = std::vector<int64_t>(tensor_size.begin(), tensor_size.begin()+wrapped_dim);
+    std::vector<int64_t> view_sizes = std::vector<int64_t>(tensor_size.begin(), tensor_size.begin()+dim);
     view_sizes.insert(view_sizes.end(), {num_chunks, -1});
     tensor_views.push_back(padded_tensor.view(view_sizes));
   }
   if (padded_tensor_slices.size() > 0) {
     at::_foreach_copy_(padded_tensor_slices, tensors_to_copy);
   }
-  return at::cat(tensor_views, wrapped_dim+1);
+  return tensor_views;
+}
+
+Tensor _chunk_cat(TensorList tensors, int64_t dim, int64_t num_chunks) {
+  auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].dim());
+  return at::cat(_pad_chunk(tensors, wrapped_dim, num_chunks), wrapped_dim+1);
+}
+
+Tensor& _chunk_cat_out(TensorList tensors, int64_t dim, int64_t num_chunks, Tensor& out) {
+  auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].dim());
+  at::cat_out(out, _pad_chunk(tensors, wrapped_dim, num_chunks), wrapped_dim+1);
+  return out;
 }
 
 // TODO(msubkhankulov): refactor to use _stack
