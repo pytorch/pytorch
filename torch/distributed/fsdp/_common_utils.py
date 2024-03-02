@@ -28,7 +28,7 @@ import torch.distributed as dist
 import torch.distributed.fsdp._flat_param as flat_param_file
 import torch.nn as nn
 from torch.distributed._composable_state import _get_module_state, _State
-from torch.distributed._tensor.device_mesh import DeviceMesh
+from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
