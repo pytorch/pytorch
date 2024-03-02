@@ -422,9 +422,6 @@ use_minimal_arrayref_interface: bool = False
 # decompose some memory bound matmul/bmm to mul
 decompose_mem_bound_mm: bool = False
 
-# decomposes mm to mv when either M or N is 1
-decompose_mm_to_mv: bool = True
-
 
 # config specific to codegen/cpp.py
 class cpp:
