@@ -1593,13 +1593,14 @@ def ensure_graph_fake(e, tx):
 def get_fake_values_from_nodes(tx, nodes, allow_non_graph_fake):
     def visit(n: torch.fx.Node):
         if n.op == "call_function" and "example_value" not in n.meta:
-            # fake tensor validity is checked inside get_fake_value using
-            # ensure_graph_fake
             return get_fake_value(n, tx, allow_non_graph_fake)
 
-        return ensure_graph_fake(n.meta["example_value"], tx)
+        return n.meta["example_value"]
 
-    return torch.fx.node.map_arg(nodes, visit)
+    args_kwargs = torch.fx.node.map_arg(nodes, visit)
+    return tree_map_only(
+        torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), args_kwargs
+    )
 
 
 def get_fake_value(node, tx, allow_non_graph_fake=False):
