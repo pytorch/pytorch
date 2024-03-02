@@ -1212,6 +1212,48 @@ def prod(x: List[int]):
     return r
 
 
+def _pad_chunk(
+    tensors: List[Tensor],
+    dim: int,
+    num_chunks: int,
+) -> List[Tensor]:
+    padded_tensors = []
+    for tensor in tensors:
+        tensor_size = tensor.size()
+        pad_along_dim = (tensor_size[dim] + num_chunks - 1) // num_chunks * num_chunks
+        padded_size = (
+            tensor_size[:dim]
+            + torch.Size(
+                [
+                    pad_along_dim,
+                ]
+            )
+            + tensor_size[dim + 1 :]
+        )
+        if padded_size != tensor_size:
+            padded_tensor = tensor.new_zeros(padded_size)
+            padded_tensor.narrow(dim, 0, tensor_size[dim]).copy_(tensor)
+            tensor = padded_tensor
+        view_size = tensor_size[:dim] + torch.Size([num_chunks, -1])
+        padded_tensors.append(tensor.view(view_size))
+    return padded_tensors
+
+
+@register_decomposition([aten._chunk_cat.default, aten._chunk_cat.out])
+def _chunk_cat(
+    tensors: List[Tensor],
+    dim: int,
+    num_chunks: int,
+    out: Optional[Tensor] = None,
+) -> Tensor:
+    padded_tensors = _pad_chunk(tensors, dim, num_chunks)
+    if out is None:
+        return torch.cat(padded_tensors, dim + 1)
+    else:
+        torch.cat(padded_tensors, dim + 1, out=out)
+        return out
+
+
 @register_decomposition(aten.split_with_sizes)
 def split_with_sizes(
     self: Tensor, split_sizes: List[int], dim: int = 0
