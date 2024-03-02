@@ -3699,6 +3699,7 @@ class CppScheduling(BaseScheduling):
                     _right_loop_nest_root,
                     _loop_fusion_depth,
                 ):
+                    # Check if can out loop fusion at this loop level
                     if not (
                         _left_loop_nest_root.var == _right_loop_nest_root.var
                         and _left_loop_nest_root.size == _right_loop_nest_root.size
@@ -3707,6 +3708,10 @@ class CppScheduling(BaseScheduling):
                         and (
                             _left_loop_nest_root.kernel is None
                             and _right_loop_nest_root.kernel is None
+                        )
+                        and (
+                            _left_loop_nest_root.reduction_var_map is None
+                            and _right_loop_nest_root.reduction_var_map is None
                         )
                     ):
                         return (False, _loop_fusion_depth)
