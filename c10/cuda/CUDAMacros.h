@@ -47,5 +47,5 @@ o */
 // fbcode depends on this value being 16
 #define C10_COMPILE_TIME_MAX_GPUS 16
 #else
-#define C10_COMPILE_TIME_MAX_GPUS 128
+#define C10_COMPILE_TIME_MAX_GPUS 128l
 #endif
