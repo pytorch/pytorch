@@ -365,9 +365,15 @@ static __device__ __inline__ void copy_chunk_with_pad_cast_bfloat16_to_float(
   const int64_t actual_num_elems = actual_chunk_size / src_elem_size;
   int64_t elem_index = thread_idx;
   while (elem_index < actual_num_elems) {
+#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
+    reinterpret_cast<float*>(dst)[elem_index] = static_cast<at::BFloat16>(
+      reinterpret_cast<at::BFloat16*>(src)[elem_index]
+    );
+#else
     reinterpret_cast<float*>(dst)[elem_index] = __bfloat162float(
       reinterpret_cast<const __nv_bfloat16*>(src)[elem_index]
     );
+#endif
     elem_index += num_threads;
   }
   while (elem_index < max_num_elems) {
