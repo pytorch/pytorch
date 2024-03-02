@@ -266,8 +266,25 @@ class CompiledNodeArgs {
     std::stable_sort(keys.begin(), keys.end());
     for (const auto& k : keys) {
       collect(k);
-      // TODO: we can't specialize on number of bytes here
-      specialize_on_bytes(m.at(k));
+      collect(m.at(k));
+    }
+  }
+  void collect(const at::IValue& iv) {
+    if (iv.isList()) {
+      c10::List<at::IValue> list = iv.toList();
+      collect_size(list.size());
+      for (const auto& i : list) {
+        collect(i);
+      }
+    } else if (iv.isGenericDict()) {
+      c10::Dict<at::IValue, at::IValue> ordered_dict = iv.toGenericDict();
+      collect_size(ordered_dict.size());
+      for (const auto& entry : ordered_dict) {
+        collect(entry.key());
+        collect(entry.value());
+      }
+    } else {
+      collect(at::IValue::hash(iv));
     }
   }
   void collect(const c10::Scalar& t) {

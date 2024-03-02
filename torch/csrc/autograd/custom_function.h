@@ -189,8 +189,11 @@ struct CppNode : public Node {
           name());
     }
 
+    // although neither of the 2 methods below have uniqueness guarantees
+    // it is unlikely for them to collide at the same time
     args.collect(typeid(T).hash_code());
     args.collect(std::string(typeid(T).name()));
+
     args.collect(ctx_.saved_data);
     args.collect(ctx_.non_differentiable_);
     args.collect(ctx_.dirty_inputs_);

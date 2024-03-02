@@ -719,7 +719,9 @@ TORCH_LIBRARY(test_autograd_cpp_node, m) {
         def fn():
             for i in [10, 100, 10, 20, 10]:
                 x = torch.ones(i, i, requires_grad=True)
-                out = torch.ops.test_autograd_cpp_node.custom_op_backed_by_autograd_fn(x)
+                out = torch.ops.test_autograd_cpp_node.custom_op_backed_by_autograd_fn(
+                    x
+                )
                 loss = out.sum()
                 loss.backward()
                 yield x.grad
@@ -785,15 +787,19 @@ TORCH_LIBRARY(test_autograd_cpp_node_id, m) {
         def same_autograd_fn():
             def fn():
                 x = torch.ones(10, 10, requires_grad=True)
-                out = torch.ops.test_autograd_cpp_node_id.custom_op_backed_by_autograd_fn(x)
+                out = (
+                    torch.ops.test_autograd_cpp_node_id.custom_op_backed_by_autograd_fn(
+                        x
+                    )
+                )
                 loss = out.sum()
                 loss.backward()
                 yield x.grad
 
-            yield from fn() # compile
-            yield from fn() # reuse
-            yield from fn() # reuse
-            yield from fn() # reuse
+            yield from fn()  # compile
+            yield from fn()  # reuse
+            yield from fn()  # reuse
+            yield from fn()  # reuse
 
         self.check_output_and_recompiles(same_autograd_fn, 1)
 
@@ -807,10 +813,10 @@ TORCH_LIBRARY(test_autograd_cpp_node_id, m) {
 
             op1 = torch.ops.test_autograd_cpp_node_id.custom_op_backed_by_autograd_fn
             op2 = torch.ops.test_autograd_cpp_node_id.custom_op_backed_by_autograd_fn2
-            yield from fn(op1) # compile
-            yield from fn(op2) # compile
-            yield from fn(op1) # reuse
-            yield from fn(op2) # reuse
+            yield from fn(op1)  # compile
+            yield from fn(op2)  # compile
+            yield from fn(op1)  # reuse
+            yield from fn(op2)  # reuse
 
         self.check_output_and_recompiles(different_autograd_fn, 2)
 
@@ -865,7 +871,9 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved, m) {
             for i in [10, 100, 10, 20, 10]:
                 x = torch.ones(i, i, requires_grad=True)
                 y = torch.randn(i, i)
-                out = torch.ops.test_autograd_cpp_node_saved.custom_op_backed_by_autograd_fn(x, y)
+                out = torch.ops.test_autograd_cpp_node_saved.custom_op_backed_by_autograd_fn(
+                    x, y
+                )
                 loss = out.sum()
                 loss.backward()
                 yield x.grad
@@ -956,7 +964,12 @@ TORCH_LIBRARY(test_autograd_cpp_node_dynamic, m) {
             for i in [10, 10, 10, 10]:
                 x = torch.ones(i, i, requires_grad=True)
                 y = torch.randn(i, i)
-                out1, out2 = torch.ops.test_autograd_cpp_node_dynamic.custom_op_backed_by_autograd_fn(x, y)
+                (
+                    out1,
+                    out2,
+                ) = torch.ops.test_autograd_cpp_node_dynamic.custom_op_backed_by_autograd_fn(
+                    x, y
+                )
                 loss = (out1 + out2).sum()
                 loss.backward()
                 yield x.grad
