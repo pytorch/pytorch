@@ -2966,6 +2966,7 @@ class CppVecKernelChecker(CppVecKernel):
                                 torch.float16,
                                 torch.bfloat16,
                                 torch.float,
+                                torch.float64,
                                 torch.uint8,
                                 torch.int8,
                                 torch.int32,
