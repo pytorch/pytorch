@@ -220,7 +220,13 @@ def foreach_reduce_scatter_copy_in(
         grad_views.append(grad.view(world_size, -1))
     if padded_grad_slices:
         torch._foreach_copy_(padded_grad_slices, grads_to_copy)
-    torch.cat(grad_views, dim=-1, out=reduce_scatter_input.view(world_size, -1))
+    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        torch.cat(grad_views, dim=-1, out=reduce_scatter_input.view(world_size, -1))
+    else:
+        cat_out = torch.cat(grad_views, dim=-1)
+        reduce_scatter_input_view = reduce_scatter_input.view(world_size, -1)
+        with torch.no_grad():
+            reduce_scatter_input_view.copy_(cat_out)
 
 
 def _div_if_needed(tensor: torch.Tensor, div_factor: float) -> None:
