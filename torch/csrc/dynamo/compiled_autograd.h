@@ -287,7 +287,9 @@ class CompiledNodeArgs {
       try {
         collect(at::IValue::hash(iv));
       } catch (const std::runtime_error& e) {
-        std::string msg = "Compiled autograd can not trace unhashable IValues, error: " + std::string(e.what());
+        std::string msg =
+            "Compiled autograd can not trace unhashable IValues, error: " +
+            std::string(e.what());
         TORCH_CHECK_NOT_IMPLEMENTED(false, msg);
       }
     }
