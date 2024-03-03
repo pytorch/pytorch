@@ -206,8 +206,10 @@ class PackedSequenceTest(TestCase):
         lengths = torch.as_tensor([v.size(0) for v in sequences])
         for batch_first in [True, False]:
             padded_sequences = rnn_utils.pad_sequence(sequences, batch_first=batch_first)
+            padded_sequences_copy = padded_sequences.clone()
             unpadded_sequences = rnn_utils.unpad_sequence(padded_sequences, lengths, batch_first=batch_first)
             self.assertEqual(sequences, unpadded_sequences)
+            self.assertEqual(padded_sequences, padded_sequences_copy)
 
         # more dimensions
         maxlen = 9

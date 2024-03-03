@@ -435,7 +435,7 @@ def unpad_sequence(
     unpadded_sequences = []
 
     if not batch_first:
-        padded_sequences.transpose_(0, 1)
+        padded_sequences = padded_sequences.transpose(0, 1)
 
     max_length = padded_sequences.shape[1]
     idx = torch.arange(max_length, device=lengths.device)
