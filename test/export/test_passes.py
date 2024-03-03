@@ -254,7 +254,6 @@ class TestPasses(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[1] to be >= 2, but got 1")):
             gm_result_for_1_size = ep.module()(torch.ones(3, 1, 3), torch.ones(5, 5, 5))
-
         eager_result_for_1_size = M().forward(torch.ones(3, 1, 3), torch.ones(5, 5, 5))
 
     def test_runtime_assert_some_inps_not_used(self) -> None:
