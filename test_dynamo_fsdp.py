@@ -3,9 +3,15 @@ Adapted from fsdp.py in https://github.com/pytorch/pytorch/pull/110609.
 """
 
 """
-CUDA_VISIBLE_DEVICES=6,7 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >output.txt 2>&1
+CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6,7 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >output.txt 2>&1
 
 CUDA_VISIBLE_DEVICES=6,7 TORCH_LOGS_RANKS=0 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >output.txt 2>&1
+
+CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6 TORCH_LOGS_RANKS=0 torchrun --standalone --nproc_per_node=1 test_dynamo_fsdp.py
+
+CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=1 test_dynamo_fsdp.py >output.txt 2>&1
+
+CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6 TORCH_LOGS_RANKS=0 gdb --args python3 /data/users/willfeng/miniconda3/bin/torchrun --standalone --nproc_per_node=1 test_dynamo_fsdp.py
 """
 import contextlib
 import logging
@@ -135,8 +141,6 @@ def printing_eager(gm, inputs):
 
 
 local_rank = int(os.environ["LOCAL_RANK"])
-world_size = 2
-
 
 def create_input():
     inp = torch.randn((2, hidden_dim), device=device_type, requires_grad=False)
@@ -176,7 +180,7 @@ def main_compiled(n_iter):
 
     def compiler_fn(gm):
         torch_log.warning("Compiling autograd?")
-        return torch.compile(gm, backend="aot_eager", fullgraph=True, dynamic=dynamic)
+        return torch.compile(gm, backend="inductor", fullgraph=True, dynamic=dynamic)
 
     torch._dynamo.config.trace_distributed = True
 
@@ -184,7 +188,7 @@ def main_compiled(n_iter):
     #     # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
     #     import time
     #     time.sleep(600)
-    model = torch.compile(model, backend="aot_eager", fullgraph=True, dynamic=dynamic)
+    model = torch.compile(model, backend="inductor", fullgraph=True, dynamic=dynamic)
     with compiled_autograd.enable(compiler_fn):
         for _ in range(n_iter):
             res = run(model, optim)
@@ -218,9 +222,13 @@ def execute_and_profile(callable, profiler_trace_path):
 
 if __name__ == "__main__":
     assert device_type == "cuda"
-    dist.init_process_group(backend="nccl")
     device = f"{device_type}:{local_rank}"
-    torch.cuda.set_device(device)
+    if device_type == "cuda":
+        dist.init_process_group(backend="nccl")
+        torch.cuda.set_device(device)
+    else:
+        dist.init_process_group(backend="gloo")
+        # torch.set_device(device)
 
     n_iter = 5
     losses_compiled = execute_and_profile(
