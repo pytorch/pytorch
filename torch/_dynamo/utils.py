@@ -1598,7 +1598,7 @@ def get_fake_values_from_nodes(tx, nodes, allow_non_graph_fake):
             return get_fake_value(n, tx, allow_non_graph_fake)
 
         out = n.meta["example_value"]
-        if not allow_non_graph_fake:
+        if not allow_non_graph_fake and isinstance(out, torch.Tensor):
             return ensure_graph_fake(out, tx)
         return out
 
