@@ -1238,6 +1238,7 @@ def _pad_chunk(
         padded_tensors.append(tensor.view(view_size))
     return padded_tensors
 
+
 @register_decomposition([aten._chunk_cat.default, aten._chunk_cat.out])
 def _chunk_cat(
     tensors: List[Tensor],
