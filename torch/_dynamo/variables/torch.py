@@ -803,7 +803,8 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         result = TorchInGraphFunctionVariable(tracable_create_parameter).call_function(
             tx, [data, placeholder], {}
         )
-
+        assert isinstance(result, variables.TensorVariable)
+        result.class_type = torch.nn.Parameter
         # In reconstruct() should use the original parameter.  The one returned by the graph will be an alias.
         result.source = placeholder.source
         return result
