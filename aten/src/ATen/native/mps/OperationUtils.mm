@@ -3,6 +3,7 @@
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <c10/util/strides.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -40,6 +41,13 @@ size_t compute_storage_numel_distance(const at::Tensor& t) {
     rc += (t.size(i) - 1) * t.stride(i);
   }
   return rc;
+}
+
+/**
+ * Set contiguous strides to given tensor in-place.
+ */
+void restride_contiguous_(const at::Tensor& t) {
+  t.as_strided_(t.sizes(), c10::contiguous_strides(t.sizes()));
 }
 
 void runMPSGraph(MPSStream* mpsStream, MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results) {

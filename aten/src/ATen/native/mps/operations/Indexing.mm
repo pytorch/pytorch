@@ -822,6 +822,7 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
   namedinference::propagate_names_if_nonempty(self, maybe_outnames);
+  restride_contiguous_(self);
   return self;
 }
 

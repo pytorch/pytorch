@@ -2018,7 +2018,7 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(dst.to("cpu"), dst2, atol=0, rtol=0)
 
             # test non-contiguous case
-            dst = ((torch.randn(num_dest, num_dest, num_dest) * 10).to(dtype)).permute((2, 0, 1))
+            dst = ((torch.randn(num_dest, num_dest, num_dest, device=device) * 10).to(dtype)).permute((2, 0, 1))
             dst2 = dst.contiguous()
             if dtype.is_complex:
                 mask = dst.abs() > 0
