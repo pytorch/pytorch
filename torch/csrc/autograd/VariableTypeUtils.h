@@ -58,6 +58,26 @@ inline void check_inplace(const at::Tensor& tensor, bool requires_grad) {
   }
 }
 
+// Same as check_inplace but returns false instead of raising an error
+inline bool can_mutate_inplace(const at::Tensor& tensor, bool requires_grad) {
+  if (!requires_grad || !GradMode::is_enabled()) {
+    return true;
+  }
+  auto diff_view_meta = impl::get_view_autograd_meta(tensor);
+  if (diff_view_meta && diff_view_meta->has_bw_view()) {
+    if (diff_view_meta->get_creation_meta() != CreationMeta::DEFAULT) {
+      return false;
+    }
+    if (tensor.requires_grad() && tensor._base().is_leaf()) {
+      return false;
+    }
+  }
+  if (tensor.requires_grad() && tensor.is_leaf()) {
+    return false;
+  }
+  return true;
+}
+
 inline void check_inplace(at::ITensorListRef tensors, bool requires_grad) {
   for (const auto& tensor : tensors) {
     check_inplace(tensor, requires_grad);
