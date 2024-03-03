@@ -462,6 +462,7 @@ class WrapperCodeGen(CodeGen):
                 import tempfile
                 from math import inf, nan
                 from torch._inductor.hooks import run_intermediate_hooks
+                # from torch._inductor.utils import maybe_profile, cuda_sync_and_print
                 from torch._inductor.utils import maybe_profile
                 from torch._inductor.codegen.memory_planning import _align as align
 

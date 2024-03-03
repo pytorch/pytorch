@@ -55,6 +55,8 @@ log = logging.getLogger(__name__)
 _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
+yf225_debug_comment_count = 0
+
 
 def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float:
     """
@@ -502,8 +504,15 @@ def get_fused_kernel_name(node_schedule, descriptive_names):
     sources = sources
     return "_".join(["fused"] + sources)
 
+# def cuda_sync_and_print(msg):
+#     torch.cuda.synchronize()
+#     import time
+#     time.sleep(0.5)
+#     print(msg)
 
 def get_kernel_metadata(node_schedule, wrapper):
+    global yf225_debug_comment_count
+
     all_origins = aggregate_origins(node_schedule)
     inductor_nodes = [origin for origin in all_origins if origin.op == "call_function"]
 
@@ -516,6 +525,8 @@ def get_kernel_metadata(node_schedule, wrapper):
         if "from_node" in node.meta:
             key = node.meta["from_node"][0][0]
             from_node_dict[key].append(node.name)
+    # metadata = f"print_and_cuda_sync('yf225_here{yf225_debug_comment_count}')"
+    # yf225_debug_comment_count += 1
     metadata = (
         f"{wrapper.comment} Source Nodes: [{', '.join(sorted(from_node_dict.keys()))}], "
         f"Original ATen: [{', '.join(sorted(original_aten_dict.keys()))}]"

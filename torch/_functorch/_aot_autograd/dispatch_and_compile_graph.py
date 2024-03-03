@@ -93,12 +93,52 @@ def aot_dispatch_base_graph(
         aot_config=aot_config,
     )
 
+    def if_tensor_is_resized_to_full_resize_it_to_0_at_end_of_graph(mod):
+        # FSDP graph has this invariant that if a tensor needs to be resized to full during execution of the graph, it *will* be resized to 0 again before exit of graph.
+        tensors_resized = set()
+        for n in mod.graph.nodes:
+            if n.target is torch.ops.inductor.resize_storage_bytes_.default and n.args[1] > 0:
+                tensors_resized.add(n.args[0])
+        for tensor in list(tensors_resized):
+            return_op = None
+            for n in mod.graph.nodes:
+                if n.op == "output":
+                    return_op = n
+                    break
+            with mod.graph.inserting_before(return_op):
+                tensor_resized_to_0 = mod.graph.call_function(torch.ops.inductor.resize_storage_bytes_, (tensor, 0), {})
+            mod.graph.lint()
+            mod.recompile()
+
+    def move_resize_to_0_to_end_of_graph(mod):
+        # This pass is always a good idea to do so to avoid any use-after-free issues.
+        resize_to_0_nodes = set()
+        for n in mod.graph.nodes:
+            if n.target is torch.ops.inductor.resize_storage_bytes_.default and n.args[1] == 0:
+                resize_to_0_nodes.add(n)
+        for resize_to_0_node in list(resize_to_0_nodes):
+            return_op = None
+            for n in mod.graph.nodes:
+                if n.op == "output":
+                    return_op = n
+                    break
+            with mod.graph.inserting_before(return_op):
+                tensor_resized_to_0 = mod.graph.call_function(torch.ops.inductor.resize_storage_bytes_, (resize_to_0_node.args[0], 0), {})
+            mod.graph.erase_node(resize_to_0_node)
+            mod.graph.lint()
+            mod.recompile()
+
+
     # As long as we opted to remove input mutations, then
     # there should be *NO* mutating ops in the graph at this point.
     copy_count = assert_functional_graph(fw_module.graph)
 
     fw_module.graph.eliminate_dead_code()
     fw_module.recompile()
+
+    if_tensor_is_resized_to_full_resize_it_to_0_at_end_of_graph(fw_module)
+    move_resize_to_0_to_end_of_graph(fw_module)
+    print(f"aot_dispatch_base_graph: fw_module.graph: {fw_module.graph}")
 
     copy_count2 = assert_functional_graph(fw_module.graph)
     propagate_input_mutation_stacktraces(fw_module.graph)

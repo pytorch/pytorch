@@ -622,7 +622,7 @@ def fx_codegen_and_compile(
         f"{'BACKWARDS' if is_backward else 'FORWARDS'} "
         f"graph {graph_id}",
     )
-    V.debug.fx_graph(gm, example_inputs)
+    # V.debug.fx_graph(gm, example_inputs)
     # TODO: Should we actually dump this?  It should be redundant with the aot
     # structured logs...
     # trace_structured("inductor_input_graph", payload_fn=lambda: gm.print_readable(print_output=False))
