@@ -2730,12 +2730,8 @@ static std::vector<Tensor> _pad_chunk(TensorList tensors, int64_t dim, int64_t n
   TORCH_CHECK(!tensors.empty(),
            "chunk_cat expects a non-empty TensorList");
   auto num_tensors = tensors.size();
-  std::vector<Tensor> tensor_views;
-  std::vector<Tensor> tensors_to_copy;
-  std::vector<Tensor> padded_tensor_slices;
-  tensor_views.reserve(num_tensors);
-  tensors_to_copy.reserve(num_tensors);
-  padded_tensor_slices.reserve(num_tensors);
+  std::vector<Tensor> padded_tensors;
+  padded_tensors.reserve(num_tensors);
   for (const auto & tensor : tensors) {
     auto tensor_size = tensor.sizes();
     std::vector<int64_t> padded_size(tensor_size.vec());
@@ -2743,17 +2739,13 @@ static std::vector<Tensor> _pad_chunk(TensorList tensors, int64_t dim, int64_t n
     Tensor padded_tensor = tensor;
     if (padded_size != tensor_size) {
       padded_tensor = tensor.new_zeros(padded_size);
-      padded_tensor_slices.push_back(padded_tensor.narrow(dim, 0, tensor_size[dim]));
-      tensors_to_copy.push_back(tensor);
+      padded_tensor.narrow(dim, 0, tensor_size[dim]).copy_(tensor);
     }
     std::vector<int64_t> view_sizes = std::vector<int64_t>(tensor_size.begin(), tensor_size.begin()+dim);
     view_sizes.insert(view_sizes.end(), {num_chunks, -1});
-    tensor_views.push_back(padded_tensor.view(view_sizes));
+    padded_tensors.push_back(padded_tensor.view(view_sizes));
   }
-  if (padded_tensor_slices.size() > 0) {
-    at::_foreach_copy_(padded_tensor_slices, tensors_to_copy);
-  }
-  return tensor_views;
+  return padded_tensors;
 }
 
 Tensor _chunk_cat(TensorList tensors, int64_t dim, int64_t num_chunks) {

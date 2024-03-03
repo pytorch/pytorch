@@ -2285,6 +2285,7 @@ def sample_inputs_stack(op_info, device, dtype, requires_grad, **kwargs):
         for dim in range(-1, len(shape) - 1):
             yield SampleInput(tensors, args=(dim,))
 
+
 def sample_inputs_chunk_cat(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     sizes = [
@@ -2300,6 +2301,7 @@ def sample_inputs_chunk_cat(op_info, device, dtype, requires_grad, **kwargs):
         for size in sizes:
             tensors.append(make_arg(size))
         yield SampleInput(tensors, args=(dim, num_chunks))
+
 
 def sample_inputs_cat_concat(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
