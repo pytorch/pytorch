@@ -284,7 +284,12 @@ class CompiledNodeArgs {
         collect(entry.value());
       }
     } else {
-      collect(at::IValue::hash(iv));
+      try {
+        collect(at::IValue::hash(iv));
+      } catch (const std::runtime_error& e) {
+        std::string msg = "Compiled autograd can not trace unhashable IValues, error: " + std::string(e.what());
+        TORCH_CHECK_NOT_IMPLEMENTED(false, msg);
+      }
     }
   }
   void collect(const c10::Scalar& t) {
@@ -685,8 +690,8 @@ class SwapSavedVariables {
   template <typename K, typename V>
   void after(ska::flat_hash_map<K, V>& m) {
     for (auto& [k, v] : m) {
-      before(k);
-      before(v);
+      after(k);
+      after(v);
     }
   }
 

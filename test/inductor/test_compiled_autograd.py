@@ -828,10 +828,17 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
   static torch::Tensor forward(
       torch::autograd::AutogradContext* ctx,
       const torch::Tensor& x,
-      const torch::Tensor& y) {
+      const torch::Tensor& y,
+      const torch::Tensor& fixed) {
     ctx->save_for_backward({x, y});
+    ctx->saved_data["fixed_tensor"] = fixed;
     ctx->saved_data["bool"] = true;
     ctx->saved_data["int"] = 1;
+    c10::List<std::string> list({"string"});
+    ctx->saved_data["list"] = std::move(list);
+    c10::Dict<std::string, double> dict;
+    dict.insert("string", 1.0);
+    ctx->saved_data["dict"] = std::move(dict);
     return x;
   }
 
@@ -842,17 +849,24 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
     assert(saved_variables.size() == 2);
     torch::Tensor x = saved_variables[0];
     torch::Tensor y = saved_variables[1];
+    torch::Tensor fixed = ctx->saved_data["fixed_tensor"].toTensor();
     assert(ctx->saved_data["bool"].isBool());
     int i = ctx->saved_data["int"].toInt();
+    c10::List<c10::IValue> list = ctx->saved_data["list"].toList();
+    assert(list.size() == 1);
+    assert(list.get(0).toStringRef() == "string");
+    c10::Dict<c10::IValue, c10::IValue> dict = ctx->saved_data["dict"].toGenericDict();
+    assert(dict.size() == 1);
+    assert(dict.at("string") == 1.0);
 
-    torch::autograd::variable_list grad_inputs(2);
-    grad_inputs[0] = x + y + i;
+    torch::autograd::variable_list grad_inputs(3);
+    grad_inputs[0] = x + y + torch::sum(fixed) + i;
     return grad_inputs;
   }
 };
 
-torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x, const torch::Tensor& y) {
-  return CustomOpAutogradFunction::apply(x, y);
+torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x, const torch::Tensor& y, const torch::Tensor& fixed) {
+  return CustomOpAutogradFunction::apply(x, y, fixed);
 }
 
 TORCH_LIBRARY(test_autograd_cpp_node_saved, m) {
@@ -868,11 +882,12 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved, m) {
         )
 
         def fn():
+            fixed = torch.ones(2, 2)
             for i in [10, 100, 10, 20, 10]:
                 x = torch.ones(i, i, requires_grad=True)
                 y = torch.randn(i, i)
                 out = torch.ops.test_autograd_cpp_node_saved.custom_op_backed_by_autograd_fn(
-                    x, y
+                    x, y, fixed
                 )
                 loss = out.sum()
                 loss.backward()
