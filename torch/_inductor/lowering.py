@@ -203,7 +203,7 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
             promoting_args = [
                 a
                 for a in args
-                if isinstance(a, (Number, sympy.Expr)) or hasattr(a, "get_dtype")
+                if isinstance(a, (Number, sympy.Expr)) or hasattr(a, "dtype")
             ]
             dtype = get_promoted_dtype(
                 *promoting_args, type_promotion_kind=type_promotion_kind
@@ -643,6 +643,40 @@ def register_pointwise(
             convert_input_to_bool=convert_input_to_bool,
         )(fn)
     return fn
+
+
+def register_frexp():
+    """A pointwise function that maps ops.frexp to inputs"""
+    name = "frexp"
+    frexp = ops_wrapper("frexp")
+
+    def frexp0(*args, **kwargs):
+        return frexp(*args, **kwargs)[0]
+
+    def frexp1(*args, **kwargs):
+        return frexp(*args, **kwargs)[1]
+
+    pw_fns = [
+        make_pointwise(frexp0),
+        make_pointwise(frexp1, override_return_dtype=torch.int32),
+    ]
+
+    def fn(*args, **kwargs):
+        return pw_fns[0](*args, **kwargs), pw_fns[1](*args, **kwargs)
+
+    fn = register_lowering(
+        aten.frexp,
+    )(fn)
+
+    if hasattr(prims, name):
+        register_lowering(
+            getattr(prims, name),
+            type_promotion_kind=None,
+        )(fn)
+    return fn
+
+
+register_frexp()
 
 
 def register_foreach_pointwise(
@@ -2258,12 +2292,9 @@ make_fallback(aten.view_as_complex, require_contiguous)
 
 # The following were added as a result of https://github.com/pytorch/pytorch/pull/94039 to pass tests
 # It's not necessarily a priority to implement these
-make_fallback(aten.upsample_linear1d)
-make_fallback(aten.upsample_trilinear3d)
 make_fallback(aten.upsample_linear1d_backward)
 make_fallback(aten.upsample_trilinear3d_backward)
 make_fallback(aten._adaptive_avg_pool3d)
-make_fallback(aten.adaptive_max_pool2d)
 make_fallback(aten.adaptive_max_pool3d)
 make_fallback(aten.addbmm)
 make_fallback(aten.addmv, warn=False)
@@ -2276,9 +2307,7 @@ make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
-make_fallback(aten.fractional_max_pool2d)
 make_fallback(aten.fractional_max_pool3d)
-make_fallback(aten.frexp)
 make_fallback(aten.geqrf)
 make_fallback(aten.histc)
 make_fallback(aten.kthvalue)
@@ -2623,6 +2652,14 @@ def _local_scalar_dense(data):
     buffer = ir.DynamicScalar(sym, data)
     buffer.name = V.graph.register_buffer(buffer)
     return sym
+
+
+@register_lowering(aten._assert_scalar)
+def _assert_scalar(data, msg):
+    buffer = ir.AssertScalar(data, msg)
+    # This buffer isn't used by anyone (it returns None), so we must explicitly register it
+    buffer.name = V.graph.register_buffer(buffer)
+    return buffer
 
 
 def _full(fill_value, device, dtype, size):
@@ -3066,7 +3103,7 @@ def index_put_fallback(self, indices, values, accumulate):
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-    ir.IndexPutFallback(self, indices, values, accumulate)
+    ir.IndexPutFallback(V.graph.current_node.target, self, indices, values, accumulate)
     return self
 
 
@@ -3254,7 +3291,14 @@ def scatter_fallback(
         or torch.are_deterministic_algorithms_enabled()
     ):
         ir.ScatterFallback(
-            fn, self, dim, index, src, reduce=reduce, include_self=include_self
+            V.graph.current_node.target,
+            fn,
+            self,
+            dim,
+            index,
+            src,
+            reduce=reduce,
+            include_self=include_self,
         )
         return self
 
@@ -4097,7 +4141,7 @@ def max_pool2d_with_indices_backward(
     )
 
 
-def pad_adaptive_loader(x):
+def pad_adaptive_loader(x, pad_val=0.0):
     *_, h, w = x.get_size()
     x_loader = x.make_loader()
 
@@ -4120,7 +4164,7 @@ def pad_adaptive_loader(x):
         return ops.masked(
             mask,
             lambda: x_loader([*prefix, h_start_index + ih, w_start_index + iw]),
-            0.0,
+            pad_val,
         )
 
     return load
@@ -4229,6 +4273,229 @@ def _adaptive_avg_pool2d(x, output_size):
     )
     # TODO: should we force these to be realized?
     return rv
+
+
+def _adaptive_pooling_idx_max(kernel_maxes, in_sizes, out_sizes, return_index, loader):
+    # NOTE: There is some duplication between this and addaptive_avg_pool2d and max_pool2d
+    # Look into refactoring/deduplication after #116418 is merged.
+    h_in, w_in = in_sizes
+    h_out, w_out = out_sizes
+
+    def start_index(index, out_dim, inp_dim):
+        return FloorDiv((index * inp_dim), out_dim)
+
+    def end_index(index, out_dim, inp_dim):
+        return FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
+
+    h_start_index_fn = functools.partial(start_index, out_dim=h_out, inp_dim=h_in)
+    h_end_index_fn = functools.partial(end_index, out_dim=h_out, inp_dim=h_in)
+    w_start_index_fn = functools.partial(start_index, out_dim=w_out, inp_dim=w_in)
+    w_end_index_fn = functools.partial(end_index, out_dim=w_out, inp_dim=w_in)
+
+    def fn_max(idx):
+        *prefix, bh, bw = idx
+
+        h_start_index = h_start_index_fn(bh)
+        h_end_index = h_end_index_fn(bh)
+
+        w_start_index = w_start_index_fn(bw)
+        w_end_index = w_end_index_fn(bw)
+        maxval = None
+        maxindex = None
+        for ih, iw in itertools.product(range(kernel_maxes[0]), range(kernel_maxes[1])):
+            val = loader(
+                prefix,
+                [ih, iw],
+                [h_start_index, w_start_index],
+                [h_end_index, w_end_index],
+            )
+            index = ops.index_expr(
+                (h_start_index + ih) * w_in + w_start_index + iw, torch.int64
+            )
+            if return_index:
+                if maxindex is None:
+                    maxindex = index
+                else:
+                    maxindex = ops.where(ops.gt(val, maxval), index, maxindex)
+            if maxval is None:
+                maxval = val
+            else:
+                maxval = ops.maximum(val, maxval)
+        if return_index:
+            return maxindex
+        else:
+            return maxval
+
+    return fn_max
+
+
+fallback_adaptive_max_pool2d = fallback_handler(
+    aten.adaptive_max_pool2d.default, add_to_fallback_set=False
+)
+
+
+@register_lowering(aten.adaptive_max_pool2d)
+def adaptive_max_pool2d(x, output_size):
+    assert isinstance(x, TensorBox)
+    assert len(output_size) == 2
+    x.realize_hint()
+
+    *batch, h_in, w_in = x.get_size()
+
+    h_in = V.graph.sizevars.evaluate_static_shape(h_in)
+    w_in = V.graph.sizevars.evaluate_static_shape(w_in)
+
+    h_out, w_out = output_size
+
+    if h_out == 0 or w_out == 0:
+        o_size = [*batch, h_out, w_out]
+        return empty(o_size, dtype=x.get_dtype(), device=x.get_device()), empty(
+            o_size, dtype=torch.int64, device=x.get_device()
+        )
+    if h_in % h_out == 0 and w_in % w_out == 0:
+        kernel_size = [h_in // h_out, w_in // w_out]
+        return max_pool2d_with_indices(x, kernel_size)
+
+    h_kernel_max = ceildiv((h_in + h_out - 1), h_out)
+    w_kernel_max = ceildiv((w_in + w_out - 1), w_out)
+
+    new_size = list(batch) + [h_out, w_out]
+    dtype = x.get_dtype()
+
+    window_size = h_kernel_max * w_kernel_max
+    if window_size > 25:
+        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
+        return fallback_adaptive_max_pool2d(x, output_size)
+
+    inner_func_max_val = _adaptive_pooling_idx_max(
+        kernel_maxes=[h_kernel_max, w_kernel_max],
+        in_sizes=[h_in, w_in],
+        out_sizes=[h_out, w_out],
+        return_index=False,
+        loader=pad_adaptive_loader(x, float("-inf")),
+    )
+
+    inner_func_max_idx = _adaptive_pooling_idx_max(
+        kernel_maxes=[h_kernel_max, w_kernel_max],
+        in_sizes=[h_in, w_in],
+        out_sizes=[h_out, w_out],
+        return_index=True,
+        loader=pad_adaptive_loader(x, float("-inf")),
+    )
+
+    rv = Pointwise.create(
+        device=x.get_device(),
+        dtype=dtype,
+        inner_fn=inner_func_max_val,
+        ranges=new_size,
+    )
+    ri = Pointwise.create(
+        device=x.get_device(),
+        dtype=torch.int64,
+        inner_fn=inner_func_max_idx,
+        ranges=new_size,
+    )
+    return rv, ri
+
+
+fallback_fractional_max_pool2d = fallback_handler(
+    aten.fractional_max_pool2d.default, add_to_fallback_set=False
+)
+
+
+def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim):
+    out_sz = out_sz[dim]
+    in_sz = in_sz[dim]
+    kernel_sz = kernel_sz[dim]
+    alpha = (in_sz - kernel_sz) / (out_sz - 1)
+    samples_loader = samples.make_loader()
+
+    def load(prefix, i):
+        sample = samples_loader([*prefix, dim])
+        i_expr = ops.index_expr(i, samples.get_dtype())
+        alpha_expr = ops.index_expr(alpha, samples.get_dtype())
+        seq_i = ops.floor((i_expr + sample) * alpha_expr) - ops.floor(
+            sample * alpha_expr
+        )
+        seq_i = ops.to_dtype(seq_i, torch.int64)
+
+        mask = ops.lt(
+            i_expr,
+            ops.index_expr(out_sz - 1, torch.int64),
+        )
+        return ops.where(mask, seq_i, ops.index_expr(in_sz - kernel_sz, torch.int64))
+
+    return load
+
+
+@register_lowering(aten.fractional_max_pool2d)
+def fractional_max_pool2d(x, kernel_size, output_size, random_samples):
+    x.realize_hint()
+    *batch, inp_h, inp_w = x.get_size()
+    kernel_h, kernel_w = kernel_size
+    h_out, w_out = output_size
+
+    if kernel_h * kernel_w >= 25:
+        return fallback_fractional_max_pool2d(
+            x, kernel_size, output_size, random_samples
+        )
+
+    gen_offsets_for_dim = functools.partial(
+        _fractional_pooling_offsets,
+        samples=random_samples,
+        in_sz=[inp_h, inp_w],
+        out_sz=output_size,
+        kernel_sz=kernel_size,
+    )
+
+    h_index_fn = gen_offsets_for_dim(dim=0)
+    w_index_fn = gen_offsets_for_dim(dim=1)
+    x_loader = x.make_loader()
+
+    def fn(idx, return_index):
+        *prefix, bh, bw = idx
+
+        h_start_index = ops.indirect_indexing(h_index_fn(prefix, bh), inp_h)
+        w_start_index = ops.indirect_indexing(w_index_fn(prefix, bw), inp_w)
+
+        maxval = None
+        maxindex = None
+        for ih, iw in itertools.product(range(kernel_size[0]), range(kernel_size[1])):
+            val = x_loader([*prefix, h_start_index + ih, w_start_index + iw])
+            if return_index:
+                index = ops.index_expr(
+                    (h_start_index + ih) * inp_w + w_start_index + iw, torch.int64
+                )
+                if maxindex is None:
+                    maxindex = index
+                else:
+                    maxindex = ops.where(
+                        ops.or_(ops.gt(val, maxval), ops.isnan(val)), index, maxindex
+                    )
+            if maxval is None:
+                maxval = val
+            else:
+                maxval = ops.maximum(val, maxval)
+        if return_index:
+            return maxindex
+        else:
+            return maxval
+
+    new_size = list(batch) + [h_out, w_out]
+    rv = Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=functools.partial(fn, return_index=False),
+        ranges=new_size,
+    )
+
+    ri = Pointwise.create(
+        device=x.get_device(),
+        dtype=torch.int64,
+        inner_fn=functools.partial(fn, return_index=True),
+        ranges=new_size,
+    )
+    return rv, ri
 
 
 @register_lowering(aten.upsample_nearest2d_backward.default)
@@ -5442,15 +5709,6 @@ def foobar(self, *args, **kwargs):
 def _realize(x):
     x.realize()
     return clone(x)
-
-
-@register_lowering(torch.ops.inductor.accumulate_grad_)
-def accumulate_grad_(variable, new_grad):
-    # TODO(jansel): decompose into `variable.grad += new_grad` when variable.grad is defined
-    variable.realize()
-    new_grad.realize()
-    ir.AccumulateGrad(variable, new_grad)
-    return variable
 
 
 @register_lowering(torch.ops.inductor.resize_storage_bytes_)

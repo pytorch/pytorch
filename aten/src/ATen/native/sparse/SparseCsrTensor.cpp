@@ -258,22 +258,24 @@ static void _validate_sparse_compressed_tensor_args_worker(const Tensor& compres
       compressed_indices_name, " and ", plain_indices_name, " dtype must be Int or Long, but got ",
       compressed_indices_type);
 
-  // Indices invariants
-  at::_validate_compressed_sparse_indices(
-      /*is_crow = */layout == kSparseCsr || layout == kSparseBsr,
-      compressed_indices,
-      plain_indices,
-      compressed_dim_size,
-      plain_dim_size,
-      values_nnz);
+  if (!compressed_indices.is_meta()) {
+    // Indices invariants
+    at::_validate_compressed_sparse_indices(
+        /*is_crow = */layout == kSparseCsr || layout == kSparseBsr,
+        compressed_indices,
+        plain_indices,
+        compressed_dim_size,
+        plain_dim_size,
+        values_nnz);
+  }
 
   // Device Invariants
   // 4.1
   TORCH_CHECK(
-      values.device().type() == kCPU || values.device().type() == kCUDA,
+      values.device().type() == kCPU || values.device().type() == kCUDA || values.device().type() == kMeta,
       "device type of values (",
       values.device().type(),
-      ") must be CPU or CUDA");
+      ") must be CPU or CUDA or Meta");
   // 4.2, 4.3, 4.4
   TORCH_CHECK(
       compressed_indices.get_device() == values.get_device(),
@@ -333,14 +335,18 @@ static SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
   Layout layout = AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(options.layout(), "new_compressed_tensor", [&] { return the_layout; });
   DispatchKey dispatch_key;
 
-  TORCH_CHECK_NOT_IMPLEMENTED(
-    options.device().type() == kCPU || options.device().type() == kCUDA,
-     "Could not run 'new_compressed_tensor' from the '", options.device(), "' device.)");
-
-  if (options.device().is_cuda()) {
-    dispatch_key = DispatchKey::SparseCsrCUDA;
-  } else {
+  switch(options.device().type()) {
+  case kCPU:
     dispatch_key = DispatchKey::SparseCsrCPU;
+    break;
+  case kCUDA:
+    dispatch_key = DispatchKey::SparseCsrCUDA;
+    break;
+  case kMeta:
+    dispatch_key = DispatchKey::SparseCsrMeta;
+    break;
+  default:
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Could not run 'new_compressed_tensor' from the '", options.device(), "' device.)");
   }
 
   return detail::make_tensor<SparseCsrTensorImpl>(DispatchKeySet(dispatch_key), options.device(), layout, options.dtype());
@@ -878,9 +884,7 @@ Tensor select_sparse_csr_worker(const Tensor& self, int64_t dim, int64_t index) 
   new_sizes.erase(new_sizes.begin() + dim);
   auto options = self.options();
 
-  Tensor plain_indices;
-  Tensor compressed_indices;
-  std::tie(compressed_indices, plain_indices) =
+  auto [compressed_indices, plain_indices] =
       AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
           self.layout(),
           "select",

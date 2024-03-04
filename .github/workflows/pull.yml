@@ -20,6 +20,13 @@ concurrency:
 permissions: read-all
 
 jobs:
+  target-determination:
+    name: before-test
+    uses: ./.github/workflows/target_determination.yml
+    permissions:
+      id-token: write
+      contents: read
+
   linux-jammy-py3_8-gcc11-build:
     name: linux-jammy-py3.8-gcc11
     uses: ./.github/workflows/_linux-build.yml
@@ -41,7 +48,9 @@ jobs:
   linux-jammy-py3_8-gcc11-test:
     name: linux-jammy-py3.8-gcc11
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-py3_8-gcc11-build
+    needs:
+      - linux-jammy-py3_8-gcc11-build
+      - target-determination
     with:
       build-environment: linux-jammy-py3.8-gcc11
       docker-image: ${{ needs.linux-jammy-py3_8-gcc11-build.outputs.docker-image }}
@@ -97,7 +106,9 @@ jobs:
   linux-jammy-py3_10-clang15-asan-test:
     name: linux-jammy-py3.10-clang15-asan
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-py3_10-clang15-asan-build
+    needs:
+      - linux-jammy-py3_10-clang15-asan-build
+      - target-determination
     with:
       build-environment: linux-jammy-py3.10-clang15-asan
       docker-image: ${{ needs.linux-jammy-py3_10-clang15-asan-build.outputs.docker-image }}
@@ -119,7 +130,9 @@ jobs:
   linux-focal-py3_8-clang10-onnx-test:
     name: linux-focal-py3.8-clang10-onnx
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-py3_8-clang10-onnx-build
+    needs:
+      - linux-focal-py3_8-clang10-onnx-build
+      - target-determination
     with:
       build-environment: linux-focal-py3.8-clang10-onnx
       docker-image: ${{ needs.linux-focal-py3_8-clang10-onnx-build.outputs.docker-image }}
@@ -146,7 +159,9 @@ jobs:
   linux-focal-py3_8-clang10-test:
     name: linux-focal-py3.8-clang10
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-py3_8-clang10-build
+    needs:
+      - linux-focal-py3_8-clang10-build
+      - target-determination
     with:
       build-environment: linux-focal-py3.8-clang10
       docker-image: ${{ needs.linux-focal-py3_8-clang10-build.outputs.docker-image }}
@@ -173,7 +188,9 @@ jobs:
   linux-focal-py3_11-clang10-test:
     name: linux-focal-py3.11-clang10
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-py3_11-clang10-build
+    needs:
+      - linux-focal-py3_11-clang10-build
+      - target-determination
     with:
       build-environment: linux-focal-py3.11-clang10
       docker-image: ${{ needs.linux-focal-py3_11-clang10-build.outputs.docker-image }}
@@ -218,7 +235,9 @@ jobs:
   linux-focal-cuda11_8-py3_10-gcc9-test:
     name: linux-focal-cuda11.8-py3.10-gcc9
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-cuda11_8-py3_10-gcc9-build
+    needs:
+      - linux-focal-cuda11_8-py3_10-gcc9-build
+      - target-determination
     with:
       timeout-minutes: 360
       build-environment: linux-focal-cuda11.8-py3.10-gcc9
@@ -244,7 +263,9 @@ jobs:
   linux-focal-cuda12_1-py3_10-gcc9-test:
     name: linux-focal-cuda12.1-py3.10-gcc9
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-cuda12_1-py3_10-gcc9-build
+    needs:
+      - linux-focal-cuda12_1-py3_10-gcc9-build
+      - target-determination
     with:
       timeout-minutes: 360
       build-environment: linux-focal-cuda12.1-py3.10-gcc9
@@ -415,7 +436,9 @@ jobs:
   linux-focal-cuda12_1-py3_10-gcc9-sm86-test:
     name: linux-focal-cuda12.1-py3.10-gcc9-sm86
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-cuda12_1-py3_10-gcc9-sm86-build
+    needs:
+      - linux-focal-cuda12_1-py3_10-gcc9-sm86-build
+      - target-determination
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-sm86-build.outputs.docker-image }}
