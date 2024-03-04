@@ -1194,8 +1194,13 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.scheduler = Scheduler(self.buffers)
         V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
-        self.scheduler.codegen()
-        return self.wrapper_code.generate(self.is_inference)
+
+        try:
+            self.wrapper_code.push_codegened_graph(self)
+            self.scheduler.codegen()
+            return self.wrapper_code.generate(self.is_inference)
+        finally:
+            assert self.wrapper_code.pop_codegened_graph() == self
 
     def codegen_subgraph(self, parent_graph):
         """
@@ -1213,7 +1218,12 @@ class GraphLowering(torch.fx.Interpreter):
         self.device_ops = parent_graph.device_ops
 
         self.scheduler = Scheduler(self.buffers)
-        self.scheduler.codegen()
+
+        try:
+            self.wrapper_code.push_codegened_graph(self)
+            self.scheduler.codegen()
+        finally:
+            assert self.wrapper_code.pop_codegened_graph() == self
 
     def count_bytes(self):
         from .scheduler import Scheduler

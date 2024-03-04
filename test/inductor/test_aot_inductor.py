@@ -755,6 +755,133 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Repro(), example_inputs)
 
+    def test_conditional_simple(self):
+        class SimpleCondModel(torch.nn.Module):
+            def forward(self, p, a, b):
+                def true_fn(x, y):
+                    return x + y
+
+                def false_fn(x, y):
+                    return x - y
+
+                return torch.cond(p, true_fn, false_fn, [a, b]) + a.sum()
+
+        multiple_inputs = (
+            (
+                torch.tensor(True, device=self.device),
+                torch.randn((10, 20), device=self.device),
+                torch.randn((10, 20), device=self.device),
+            ),
+            (
+                torch.tensor(False, device=self.device),
+                torch.randn((10, 20), device=self.device),
+                torch.randn((10, 20), device=self.device),
+            ),
+        )
+
+        dim0_ab = Dim("s0", min=2, max=1024)
+        dynamic_shapes = {
+            "p": {},
+            "a": {0: dim0_ab, 1: None},
+            "b": {0: dim0_ab, 1: None},
+        }
+
+        self.check_model_with_multiple_inputs(
+            SimpleCondModel(),
+            multiple_inputs,
+            dynamic_shapes=dynamic_shapes,
+        )
+
+    def test_conditional_nested(self):
+        class NestedCondModel(torch.nn.Module):
+            def forward(self, p0, p1, p2, a, b, c):
+                def true_fn(x0, y0, z0):
+                    def true_true_fn(x1, y1, z1):
+                        return (x1 - y1 * z1) * 3.14
+
+                    def true_false_fn(x1, y1, z1):
+                        def true_false_true_fn(x2, y2, z2):
+                            return (x2 * y2 * z2) / 2.71
+
+                        def true_false_false_fn(x2, y2, z2):
+                            return (x2 + y2 + z2) * 1.23
+
+                        return torch.cond(
+                            p2, true_false_true_fn, true_false_false_fn, [x1, y1, z1]
+                        )
+
+                    return torch.cond(p1, true_true_fn, true_false_fn, [x0, y0, z0])
+
+                def false_fn(x0, y0, z0):
+                    def false_true_fn(x1, y1, z1):
+                        def false_true_true_fn(x2, y2, z2):
+                            return (x2 - y2 - z2) + 1.23
+
+                        def false_true_false_fn(x2, y2, z2):
+                            return (x2 / y2 / z2) - 3.14
+
+                        return torch.cond(
+                            p2, false_true_true_fn, false_true_false_fn, [x1, y1, z1]
+                        )
+
+                    def false_false_fn(x1, y1, z1):
+                        return (x1 - y1 * z1) / 2.71
+
+                    return torch.cond(p1, false_true_fn, false_false_fn, [x0, y0, z0])
+
+                return torch.cond(p0, true_fn, false_fn, [a, b, c]) + a.sum() * b.mean()
+
+        multiple_inputs = (
+            (
+                torch.tensor(True, device=self.device),
+                torch.tensor(True, device=self.device),
+                torch.tensor(True, device=self.device),
+                torch.randn((10, 20), device=self.device),
+                torch.randn((10, 20), device=self.device),
+                torch.randn((10, 20), device=self.device),
+            ),
+            (
+                torch.tensor(False, device=self.device),
+                torch.tensor(False, device=self.device),
+                torch.tensor(False, device=self.device),
+                torch.randn((10, 20), device=self.device),
+                torch.randn((10, 20), device=self.device),
+                torch.randn((10, 20), device=self.device),
+            ),
+            (
+                torch.tensor(True, device=self.device),
+                torch.tensor(False, device=self.device),
+                torch.tensor(True, device=self.device),
+                torch.randn((10, 20), device=self.device),
+                torch.randn((10, 20), device=self.device),
+                torch.randn((10, 20), device=self.device),
+            ),
+            (
+                torch.tensor(False, device=self.device),
+                torch.tensor(True, device=self.device),
+                torch.tensor(False, device=self.device),
+                torch.randn((10, 20), device=self.device),
+                torch.randn((10, 20), device=self.device),
+                torch.randn((10, 20), device=self.device),
+            ),
+        )
+
+        dim0_abc = Dim("s0", min=2, max=1024)
+        dynamic_shapes = {
+            "p0": {},
+            "p1": {},
+            "p2": {},
+            "a": {0: dim0_abc, 1: None},
+            "b": {0: dim0_abc, 1: None},
+            "c": {0: dim0_abc, 1: None},
+        }
+
+        self.check_model_with_multiple_inputs(
+            NestedCondModel(),
+            multiple_inputs,
+            dynamic_shapes=dynamic_shapes,
+        )
+
     def test_zero_grid_with_backed_symbols(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -1880,6 +2007,12 @@ CPU_TEST_FAILURES = {
     ),
     "test_zero_grid_with_backed_symbols": fail_with_and_without_stack_allocation(
         is_skip=True
+    ),
+    "test_conditional_simple": fail_stack_allocation(
+        is_skip=True,
+    ),
+    "test_conditional_nested": fail_stack_allocation(
+        is_skip=True,
     ),
 }
 

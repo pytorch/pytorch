@@ -296,6 +296,20 @@ AOTITorchError aoti_torch_empty_strided(
   });
 }
 
+// this is needed mostly for transferring the inputs
+// into codegened nested subgraph in ABI-compatible mode
+AOTITorchError aoti_torch_copy_tensor(
+    AtenTensorHandle old_tensor_handle,
+    AtenTensorHandle* ret_new_tensor_handle) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* old_tensor_ptr =
+        tensor_handle_to_tensor_pointer(old_tensor_handle);
+    at::Tensor new_tensor =
+        *old_tensor_ptr; // make at::Tensor copy (same storage)
+    *ret_new_tensor_handle = new_tensor_handle(std::move(new_tensor));
+  });
+}
+
 AOTITorchError aoti_torch_create_tensor_from_blob(
     void* data,
     int64_t ndim,

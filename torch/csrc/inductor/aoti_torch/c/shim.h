@@ -250,6 +250,10 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_empty_strided(
     AtenTensorHandle* ret_new_tensor // returns new reference
 );
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_copy_tensor(
+    AtenTensorHandle old_tensor,
+    AtenTensorHandle* ret_new_tensor);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob(
     void* data,
     int64_t ndim,

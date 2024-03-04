@@ -223,13 +223,22 @@ class WrapperLine:
     pass
 
 
-class EnterScopeLine(WrapperLine):
+@dataclasses.dataclass
+class EnterSubgraphLine(WrapperLine):
+    wrapper: "WrapperCodeGen"
+    graph: "GraphLowering"
+
     def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper.push_codegened_graph(self.graph)
         code.do_indent()
 
 
-class ExitScopeLine(WrapperLine):
+@dataclasses.dataclass
+class ExitSubgraphLine(WrapperLine):
+    wrapper: "WrapperCodeGen"
+
     def codegen(self, code: IndentedBuffer) -> None:
+        self.wrapper.pop_codegened_graph()
         code.do_unindent()
 
 
@@ -421,6 +430,7 @@ class WrapperCodeGen(CodeGen):
         self.allow_stack_allocation: Optional[bool] = None
         self.stack_allocated_buffers: Dict[BufferName, ir.Buffer] = {}
         self.computed_sizes: Set[sympy.Symbol] = set()
+        self.graph_stack = []
 
         self.write_header()
         self.write_prefix()
@@ -568,6 +578,15 @@ class WrapperCodeGen(CodeGen):
         self.writeline(f"{name} = get_raw_stream({device_idx})")
         return name
 
+    def get_codegened_graph(self):
+        return self.graph_stack[-1]
+
+    def push_codegened_graph(self, graph):
+        self.graph_stack.append(graph)
+
+    def pop_codegened_graph(self):
+        return self.graph_stack.pop()
+
     def next_kernel_suffix(self) -> str:
         return f"{next(self._names_iter)}"
 
@@ -713,6 +732,9 @@ class WrapperCodeGen(CodeGen):
             if config.profile_bandwidth:
                 self.generate_end_graph()
 
+            if config.triton.store_cubin:
+                self.generate_store_remaining_kernels()
+
             self.generate_return(output_refs)
 
         self.finalize_prefix()
@@ -754,9 +776,9 @@ class WrapperCodeGen(CodeGen):
             line = self.lines[i]
             if isinstance(line, MemoryPlanningLine):
                 self.lines[i] = line.plan(planning_states[-1])
-            elif isinstance(line, EnterScopeLine):
+            elif isinstance(line, EnterSubgraphLine):
                 planning_states.append(MemoryPlanningState())
-            elif isinstance(line, ExitScopeLine):
+            elif isinstance(line, ExitSubgraphLine):
                 past_planning_states.append(planning_states.pop())
         past_planning_states.append(planning_states.pop())
         assert len(planning_states) == 0
@@ -1189,6 +1211,30 @@ class WrapperCodeGen(CodeGen):
     def generate_end_graph(self):
         self.wrapper_call.writeline("end_graph()")
 
+    def generate_store_remaining_kernels(self):
+        """
+        Precompile and store the CUBINs of the Triton kernels
+        that haven't been precompiled and stored during the
+        run of the generated model. This can happen when the
+        model contains control flow, only one pass through
+        which covers the kernels that are stored.
+        """
+        pass
+        self.wrapper_call.splice(
+            """
+            for name, kernel in globals().items():
+                if isinstance(kernel, torch._inductor.triton_heuristics.CachingAutotuner):
+                    if not kernel.saved_cuda_kernel:
+                        if len(kernel.launchers) == 0:
+                            kernel.precompile()
+                        kernel.save_cuda_kernel(
+                            grid=(0, 0, 0),
+                            stream="stream",
+                            launcher=kernel.launchers[0],
+                        )
+            """
+        )
+
     def generate_default_grid(self, name: str, grid_args: List[Any]):
         return grid_args
 
@@ -1413,7 +1459,7 @@ class WrapperCodeGen(CodeGen):
             return self.declare + name
 
     def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
-        self.writeline(f"# subgraph: {subgraph.name}")
+        self.writeline(f"{self.comment} subgraph: {subgraph.name}")
         for inner_input, outer_input in zip(subgraph.graph.graph_inputs, outer_inputs):
             self.writeline(f"{self.declare}{inner_input} = {outer_input}{self.ending}")
         parent_graph = V.graph
@@ -1425,7 +1471,7 @@ class WrapperCodeGen(CodeGen):
             subgraph.graph.graph_outputs, outer_outputs
         ):
             self.writeline(
-                f"{self.declare}{outer_output} = {inner_output.codegen_reference()}{self.ending}"
+                f"{outer_output} = {inner_output.codegen_reference()}{self.ending}"
             )
 
     def codegen_conditional(self, conditional):
@@ -1437,13 +1483,13 @@ class WrapperCodeGen(CodeGen):
         # TODO(aakhundov): make this work for C++ wrapper codegen (and ABI mode)
         self.writeline(f"{name} = [None] * {len(conditional.outputs)}")
         self.writeline(f"if {conditional.predicate.codegen_reference()}.item():")
-        self.writeline(EnterScopeLine())
+        self.writeline(EnterSubgraphLine(self, conditional.true_subgraph.graph))
         self.codegen_subgraph(conditional.true_subgraph, outer_inputs, outer_outputs)
-        self.writeline(ExitScopeLine())
+        self.writeline(ExitSubgraphLine(self))
         self.writeline("else:")
-        self.writeline(EnterScopeLine())
+        self.writeline(EnterSubgraphLine(self, conditional.false_subgraph.graph))
         self.codegen_subgraph(conditional.false_subgraph, outer_inputs, outer_outputs)
-        self.writeline(ExitScopeLine())
+        self.writeline(ExitSubgraphLine(self))
 
     @staticmethod
     def statically_known_int_or_none(x):
