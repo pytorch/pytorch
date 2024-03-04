@@ -8,7 +8,6 @@ import types
 from typing import Dict, List
 
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-from ..._guards import GuardSource
 
 from ..bytecode_transformation import create_call_method
 from ..external_utils import call_hook_from_backward_state
@@ -308,7 +307,9 @@ class TensorVariable(VariableTracker):
             result is not None
             and self.source
             and self.source.subguards_allowed()
-            and not result.is_python_constant()
+            and not (
+                name not in ("grad", "requires_grad") and result.is_python_constant()
+            )
         ):
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
             result.source = AttrSource(self.source, name)
