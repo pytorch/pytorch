@@ -7,12 +7,12 @@ from enum import Enum
 from typing import List, Optional
 
 import torch
-from jit.myfunction_a import my_function_a
 from torch.testing._internal.jit_utils import JitTestCase
+
+from jit.myfunction_a import my_function_a
 
 
 class TestDecorator(JitTestCase):
-
     def test_decorator(self):
         # Note: JitTestCase.checkScript() does not work with decorators
         # self.checkScript(my_function_a, (1.0,))
