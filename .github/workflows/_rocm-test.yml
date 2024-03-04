@@ -103,6 +103,10 @@ jobs:
         with:
           name: ${{ inputs.build-environment }}
 
+      - name: Download TD artifacts
+        continue-on-error: true
+        uses: ./.github/actions/download-td-artifacts
+
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
