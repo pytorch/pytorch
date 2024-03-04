@@ -3441,9 +3441,7 @@ def _unsafe_masked_index(x, mask, indices, fill):
         if index is not None:
             indices[i] = index.clamp(min=0, max=x.size(i) - 1)
 
-    result = aten._unsafe_index(x, indices)
-    result.masked_fill_(~mask, fill)
-    return result
+    return aten._unsafe_index(x, indices).masked_fill(~mask, fill)
 
 
 @register_decomposition([aten._unsafe_masked_index_put])
