@@ -736,7 +736,6 @@ class Tensor(torch._C.TensorBase):
             )
 
         if not assign:
-            # In the default case, swap_tensors becomes a no-op
             return self.copy_(other).detach()
         return other.detach()
 
