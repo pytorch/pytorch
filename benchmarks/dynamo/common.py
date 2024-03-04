@@ -2053,6 +2053,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_models_for_freezing(self):
+        return set()
+
+    @property
     def slow_models(self):
         return set()
 
@@ -3577,6 +3581,9 @@ def run(runner, args, original_dir=None):
 
     if not args.multiprocess:
         runner.skip_models.update(runner.skip_multiprocess_models)
+
+    if args.freezing:
+        runner.skip_models.update(runner.skip_models_for_freezing)
 
     if args.no_skip:
         runner.skip_models.clear()
