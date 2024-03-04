@@ -26,6 +26,8 @@
 #include <ATen/ops/_print_native.h>
 #include <ATen/ops/_assert_scalar_native.h>
 #include <ATen/ops/_functional_assert_scalar_native.h>
+#include <ATen/ops/_record_scalar.h>
+#include <ATen/ops/_functional_record_scalar.h>
 #include <ATen/ops/_make_per_tensor_quantized_tensor.h>
 #include <ATen/ops/_unique.h>
 #include <ATen/ops/allclose_native.h>
@@ -432,6 +434,15 @@ void _assert_scalar(const Scalar& scalar, c10::string_view assert_msg) {
 
 Tensor _functional_assert_scalar(const Scalar& scalar, c10::string_view assert_msg, const Tensor& dep_token) {
   _assert_scalar(scalar, assert_msg);
+  return dep_token.clone();
+}
+
+void _record_scalar(const Scalar& scalar, c10::string_view prefix, c10::string_view filename) {
+  std::cout << prefix << ": " << scalar.toDouble() << "\n";
+}
+
+Tensor _functional_record_scalar(const Scalar& scalar, c10::string_view prefix, c10::string_view filename, const Tensor& dep_token) {
+  _record_scalar(scalar, prefix, filename);
   return dep_token.clone();
 }
 

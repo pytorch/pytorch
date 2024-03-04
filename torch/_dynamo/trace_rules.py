@@ -2095,6 +2095,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.slice_inverse",
         "torch._assert_scalar",
         "torch._functional_assert_scalar",
+        "torch._record_scalar",
+        "torch._functional_record_scalar",
     ],
     TorchInGraphFunctionVariable,
 )

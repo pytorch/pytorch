@@ -183,6 +183,14 @@
   dispatch:
     CompositeExplicitAutograd: _functional_assert_scalar
 
+- func: _record_scalar(Scalar self, str prefix, str filename) -> ()
+  dispatch:
+    CompositeExplicitAutograd: _record_scalar
+
+- func: _functional_record_scalar(Scalar self, str prefix, str filename, Tensor dep_token) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: _functional_record_scalar
+
 - func: _functional_assert_async.msg(Tensor self, str assert_msg, Tensor dep_token) -> Tensor
   dispatch:
     CPU: _functional_assert_async_msg_cpu

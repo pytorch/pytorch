@@ -654,6 +654,7 @@ def has_incompatible_cudagraph_ops(gm):
         # with CUDA graphs, but the operator is also pointless with
         # constant arguments, so might as well ban
         "aten._assert_scalar",
+        "aten._record_scalar",
     }
     if torch.are_deterministic_algorithms_enabled():
         forbidden_set.update(

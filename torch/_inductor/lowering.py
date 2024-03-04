@@ -2663,6 +2663,13 @@ def _assert_scalar(data, msg):
     return buffer
 
 
+@register_lowering(aten._record_scalar)
+def _record_scalar(data, prefix, filename):
+    buffer = ir.RecordScalar(data, prefix, filename)
+    buffer.name = V.graph.register_buffer(buffer)
+    return buffer
+
+
 def _full(fill_value, device, dtype, size):
     value = fill_value
     if not isinstance(fill_value, (int, float)) and hasattr(value, "value"):
