@@ -199,9 +199,8 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
   using accscalar_t = at::acc_type<scalar_t, false>;
 
   int64_t n_input = input.size(1);
-  int64_t n = input.numel() / n_input;
-
   TORCH_CHECK(n_input > 0 && input.numel() > 0, "both input.size(1) and input.numel() need to be greater than 0, got input.size(1) = ", n_input, ", input.numel() = ", input.numel());
+  int64_t n = input.numel() / n_input;
 
   bool all_contiguous = is_contiguous(input);
   constexpr bool mixed_type = !std::is_same<scalar_t, param_t>::value;
