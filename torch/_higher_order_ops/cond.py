@@ -103,7 +103,7 @@ def cond(pred, true_fn, false_fn, operands):
 
     """
 
-    if torch._dynamo.is_compiling():
+    if torch.compiler.is_dynamo_compiling():
         return cond_op(pred, true_fn, false_fn, operands)
 
     def _validate_input(pred, true_fn, false_fn, operands):
@@ -280,13 +280,18 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
     with ctx.redispatch_to_next() as m:
         functional_true = ctx.functionalize(true_fn)
         functional_false = ctx.functionalize(false_fn)
+        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         for branch in [functional_true, functional_false]:
-            if _has_potential_branch_input_mutation(branch, unwrapped_inputs):
+            if _has_potential_branch_input_mutation(
+                branch, unwrapped_inputs, pre_dispatch=pre_dispatch
+            ):
                 raise UnsupportedAliasMutationException(
                     "One of torch.cond branch might be modifying the input!"
                 )
         for branch in [true_fn, false_fn]:
-            if _has_potential_branch_input_alias(branch, unwrapped_inputs):
+            if _has_potential_branch_input_alias(
+                branch, unwrapped_inputs, pre_dispatch=pre_dispatch
+            ):
                 raise UnsupportedAliasMutationException(
                     "One of torch.cond branch might be aliasing the input!"
                 )
