@@ -7659,6 +7659,7 @@ def fn():
     )
     def test_record_scalar(self):
         with tempfile.NamedTemporaryFile(mode="w+b") as f:
+            torch.manual_seed(0)
 
             class MockModule(torch.nn.Module):
                 def __init__(self):
@@ -7667,20 +7668,18 @@ def fn():
                     self.linear = torch.nn.Linear(10, 10)
                     self.register_buffer("buf0", torch.randn(10, 10))
 
-                def forward(self, x, y):
+                def forward(self, x):
                     x = self.relu(self.linear(x) + self.buf0)
-                    y = y.item()
-                    # TODO: make y.item() work well with _record_scalar
-                    torch._record_scalar(1.5, "y: ", f.name)
+                    y = x.sum().item()
+                    torch._record_scalar(y, "x:sum: ", f.name)
                     return x + 1, y + 1
 
             x = torch.randn(10, 10, device="cuda")
-            y = torch.tensor(20, device="cuda")
             mod = MockModule().to("cuda")
             opt_mod = torch.compile(fullgraph=True)(mod)
-            self.assertTrue(same(mod(x, y), opt_mod(x, y)))
+            self.assertTrue(same(mod(x), opt_mod(x)))
             f.flush()
-            self.assertEqual(f.read(), b"y: 1.5\n")
+            self.assertEqual(f.read(), b"x:sum: 30.21811866760254\n")
 
     @dataclasses.dataclass
     class CSETestCase:

@@ -438,7 +438,7 @@ Tensor _functional_assert_scalar(const Scalar& scalar, c10::string_view assert_m
 }
 
 void _record_scalar(const Scalar& scalar, c10::string_view prefix, c10::string_view filename) {
-  std::cout << prefix << ": " << scalar.toDouble() << "\n";
+  std::cout << prefix << ": " << scalar << "\n";
 }
 
 Tensor _functional_record_scalar(const Scalar& scalar, c10::string_view prefix, c10::string_view filename, const Tensor& dep_token) {
