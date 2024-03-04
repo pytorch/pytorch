@@ -896,6 +896,12 @@ int64_t _nested_get_ragged_idx(const Tensor& self) {
   return 0;
 }
 
+Tensor _nested_get_jagged_dummy(const Tensor& any) {
+  TORCH_INTERNAL_ASSERT(
+      false, "_nested_get_jagged_dummy(): expected to be implemented from Python");
+  return Tensor();
+}
+
 std::tuple<Tensor, Tensor> _nested_compute_contiguous_strides_offsets(const Tensor& nested_size) {
   return std::make_tuple(
       construct_nested_strides(nested_size),

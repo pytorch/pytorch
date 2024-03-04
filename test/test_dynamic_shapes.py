@@ -149,12 +149,12 @@ def create_symbolic_tensor(name, arg, shape_env, source=None, dynamic_dims=None)
         )
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, sym_storage_offset)
 
-def create_symtype(cls, pytype, shape_env, val):
+def create_symtype(cls, pytype, shape_env, val, duck=True):
     from torch._dynamo.source import ConstantSource
     symbol = shape_env.create_symbol(
         val,
         source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}"),
-        dynamic_dim=DimDynamic.DUCK,
+        dynamic_dim=DimDynamic.DUCK if duck else DimDynamic.DYNAMIC,
         constraint_dim=None,
     )
     return cls(SymNode(
@@ -164,8 +164,9 @@ def create_symtype(cls, pytype, shape_env, val):
         hint=val,
     ))
 
-def create_symint(shape_env, i: int):
-    return create_symtype(SymInt, int, shape_env, i)
+# TODO: default duck to False
+def create_symint(shape_env, i: int, duck=True):
+    return create_symtype(SymInt, int, shape_env, i, duck=duck)
 
 def create_symbool(shape_env, b: bool):
     return create_symtype(SymBool, bool, shape_env, b)
@@ -557,6 +558,76 @@ def forward(self, x_1):
         self.assertTrue(expect_true(sum(ia) == 20))
         self.assertEqual(len(shape_env.deferred_runtime_asserts[ia[-1].node.expr]), 1)
 
+    def test_expect_true_refine_range(self):
+        shape_env = ShapeEnv()
+        for i, rel in enumerate([lambda x: x > 4, lambda x: 4 < x, lambda x: x >= 5, lambda x: 5 <= x]):
+            with self.subTest(f"i = {i}"):
+                i0 = shape_env.create_unbacked_symint()
+                self.assertTrue(expect_true(rel(i0)))
+                self.assertTrue(statically_known_true(i0 != 3))
+                self.assertTrue(statically_known_true(i0 != 4))
+                self.assertFalse(statically_known_true(i0 != 5))
+                self.assertFalse(statically_known_true(i0 != 6))
+                self.assertTrue(statically_known_true(i0 > 4))
+                self.assertTrue(statically_known_true(i0 >= 5))
+
+        for i, rel in enumerate([lambda x: x < 4, lambda x: 4 > x, lambda x: x <= 3, lambda x: 3 >= x]):
+            with self.subTest(f"i = {i}"):
+                i0 = shape_env.create_unbacked_symint()
+                self.assertTrue(expect_true(rel(i0)))
+                self.assertFalse(statically_known_true(i0 != 2))
+                self.assertFalse(statically_known_true(i0 != 3))
+                self.assertTrue(statically_known_true(i0 != 4))
+                self.assertTrue(statically_known_true(i0 != 5))
+                self.assertTrue(statically_known_true(i0 < 4))
+                self.assertTrue(statically_known_true(i0 <= 5))
+
+    def test_guard_refine_range(self):
+        shape_env = ShapeEnv()
+        for i, rel in enumerate([lambda x: x > 4, lambda x: 4 < x, lambda x: x >= 5, lambda x: 5 <= x]):
+            with self.subTest(f"i = {i}"):
+                i0 = create_symint(shape_env, 10, duck=False)
+                self.assertTrue(bool(rel(i0)))
+                self.assertTrue(statically_known_true(i0 != 3))
+                self.assertTrue(statically_known_true(i0 != 4))
+                self.assertFalse(statically_known_true(i0 != 5))
+                self.assertFalse(statically_known_true(i0 != 6))
+                self.assertTrue(statically_known_true(i0 > 4))
+                self.assertTrue(statically_known_true(i0 >= 5))
+
+        for i, rel in enumerate([lambda x: x > 4, lambda x: 4 < x, lambda x: x >= 5, lambda x: 5 <= x]):
+            with self.subTest(f"i = {i}"):
+                i0 = create_symint(shape_env, 2, duck=False)
+                self.assertFalse(bool(rel(i0)))
+                self.assertFalse(statically_known_true(i0 != 3))
+                self.assertFalse(statically_known_true(i0 != 4))
+                self.assertTrue(statically_known_true(i0 != 5))
+                self.assertTrue(statically_known_true(i0 != 6))
+                self.assertTrue(statically_known_true(i0 <= 4))
+                self.assertTrue(statically_known_true(i0 < 5))
+
+        for i, rel in enumerate([lambda x: x < 4, lambda x: 4 > x, lambda x: x <= 3, lambda x: 3 >= x]):
+            with self.subTest(f"i = {i}"):
+                i0 = create_symint(shape_env, 2, duck=False)
+                self.assertTrue(bool(rel(i0)))
+                self.assertFalse(statically_known_true(i0 != 2))
+                self.assertFalse(statically_known_true(i0 != 3))
+                self.assertTrue(statically_known_true(i0 != 4))
+                self.assertTrue(statically_known_true(i0 != 5))
+                self.assertTrue(statically_known_true(i0 < 4))
+                self.assertTrue(statically_known_true(i0 <= 3))
+
+        for i, rel in enumerate([lambda x: x < 4, lambda x: 4 > x, lambda x: x <= 3, lambda x: 3 >= x]):
+            with self.subTest(f"i = {i}"):
+                i0 = create_symint(shape_env, 10, duck=False)
+                self.assertFalse(bool(rel(i0)))
+                self.assertTrue(statically_known_true(i0 != 2))
+                self.assertTrue(statically_known_true(i0 != 3))
+                self.assertFalse(statically_known_true(i0 != 4))
+                self.assertFalse(statically_known_true(i0 != 5))
+                self.assertTrue(statically_known_true(i0 >= 4))
+                self.assertTrue(statically_known_true(i0 > 3))
+
     def test_non_overlapping_and_dense(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)
@@ -684,7 +755,11 @@ class f(torch.nn.Module):
     def test_ephemeral_source_simplification(self):
         from torch._dynamo.source import EphemeralSource
 
-        for x_first_in_check in [False, True]:
+        # For full robustness, ensure the ephemeral source symbols are simplified out regardless
+        # of construction order or check order.
+        for construct_ephemeral_first, x_first_in_check in (
+            itertools.product([False, True], [False, True])
+        ):
             shape_env = ShapeEnv()
             shape = (5, 10)
             dynamic_dims = [DimDynamic.DYNAMIC for _ in shape]
@@ -692,27 +767,30 @@ class f(torch.nn.Module):
                 "x",
                 torch.randn(*shape),
                 shape_env,
-                source=EphemeralSource(),
+                source=(EphemeralSource() if construct_ephemeral_first else None),
                 dynamic_dims=dynamic_dims,
             )
             y = create_symbolic_tensor(
                 "y",
                 torch.randn(*shape),
                 shape_env,
+                source=(EphemeralSource() if not construct_ephemeral_first else None),
                 dynamic_dims=dynamic_dims,
             )
+            t_with_ephemeral = x if construct_ephemeral_first else y
 
             def _get_ephemeral_source_symbols(t):
                 return [
-                    s.node._expr for s in (*t.shape, *t.stride(), t.storage_offset())
-                    if isinstance(s, torch.SymInt) and s.node._expr in shape_env.var_to_sources
+                    s.node.expr for s in itertools.chain(t.shape, t.stride(), (t.storage_offset(),))
+                    if isinstance(s, torch.SymInt) and s.node.expr in shape_env.var_to_sources
                     and any(
-                        source.is_ephemeral() for source in shape_env.var_to_sources[s.node._expr]
+                        source.is_ephemeral() for source in shape_env.var_to_sources[s.node.expr]
                     )
                 ]
 
             # these checks should simplify out the ephemeral symbols, regardless of the
             # ordering x == y or y == x
+            self.assertTrue(len(_get_ephemeral_source_symbols(t_with_ephemeral)) > 0)
             if x_first_in_check:
                 torch._check(x.size() == y.size())
                 torch._check(x.stride() == y.stride())
@@ -721,10 +799,7 @@ class f(torch.nn.Module):
                 torch._check(y.size() == x.size())
                 torch._check(y.stride() == x.stride())
                 torch._check(y.storage_offset() == x.storage_offset())
-
-            self.assertTrue(
-                all(sym in shape_env.replacements for sym in _get_ephemeral_source_symbols(x))
-            )
+            self.assertEqual(len(_get_ephemeral_source_symbols(t_with_ephemeral)), 0)
 
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")

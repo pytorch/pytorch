@@ -364,7 +364,7 @@ def jagged_from_tensor_and_lengths(
 # This arg is otherwise unused.
 _nt_view_dummy = NestedTensor(
     values=torch.randn(3, 3, device="meta"), offsets=torch.randn(2, device="meta")
-)
+).detach()
 
 
 def nested_view_from_values_offsets(values, offsets, ragged_idx=1):
