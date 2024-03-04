@@ -305,7 +305,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
           auto stream = at::cuda::getCurrentCUDAStream();
 
           const size_t num_kernels = ceil_div(ntensors, MAX_TENSORS_PER_KERNEL);
-          for (auto i = 0; i < num_kernels; i++) {
+          for (const auto i : c10::irange(num_kernels)) {
             const size_t num_tensors_this_kernel =
                 (i < num_kernels - 1 || ntensors % MAX_TENSORS_PER_KERNEL == 0)
                 ? MAX_TENSORS_PER_KERNEL
