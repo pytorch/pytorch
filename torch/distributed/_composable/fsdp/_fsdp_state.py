@@ -248,11 +248,13 @@ class FSDPState(_State):
             else:
                 grad_fns = []
             pre_backward = functools.partial(_fsdp_state_pre_backward, self, grad_fns)
-            # handle = register_multi_grad_hook(tensors, pre_backward, mode="any")
-            # self._pre_backward_hook_handles.append(handle)
-            for tensor in tensors:
-                handle = tensor.register_hook(pre_backward)
+            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+                handle = register_multi_grad_hook(tensors, pre_backward, mode="any")
                 self._pre_backward_hook_handles.append(handle)
+            else:
+                for tensor in tensors:
+                    handle = tensor.register_hook(pre_backward)
+                    self._pre_backward_hook_handles.append(handle)
             if self._fsdp_param_group:
                 if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
                     self._fsdp_param_group.all_forward_output_grad_fns.add(grad_fns)
