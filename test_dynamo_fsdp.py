@@ -5,9 +5,11 @@ Adapted from fsdp.py in https://github.com/pytorch/pytorch/pull/110609.
 """
 CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6,7 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >output.txt 2>&1
 
+CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=1 test_dynamo_fsdp.py >output.txt 2>&1
+
 CUDA_VISIBLE_DEVICES=6,7 TORCH_LOGS_RANKS=0 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >output.txt 2>&1
 
-CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6 TORCH_LOGS_RANKS=0 torchrun --standalone --nproc_per_node=1 test_dynamo_fsdp.py
+CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6 TORCH_LOGS_RANKS=0 torchrun --standalone --nproc_per_node=1 test_dynamo_fsdp.py >output.txt 2>&1
 
 CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=1 test_dynamo_fsdp.py >output.txt 2>&1
 
@@ -114,8 +116,8 @@ def init():
     # - BWD: 2 all-gathers + 2 reduce-scatters
     model = nn.Sequential(
         nn.Linear(hidden_dim, hidden_dim, device=device_type),
-        # nn.ReLU(),
-        # nn.Linear(hidden_dim, hidden_dim, device=device_type),
+        nn.ReLU(),
+        nn.Linear(hidden_dim, hidden_dim, device=device_type),  # FC->RELU->FC is a good test
         # nn.ReLU(),
         # nn.Linear(hidden_dim, hidden_dim, device=device_type),
     )
@@ -143,14 +145,15 @@ def printing_eager(gm, inputs):
 local_rank = int(os.environ["LOCAL_RANK"])
 
 def create_input():
+    torch.manual_seed(0)
     inp = torch.randn((2, hidden_dim), device=device_type, requires_grad=False)
     return inp
 
 
-def run(model, optim):
+def run(model, optim, n_iter):
     torch.manual_seed(42)
     losses = []
-    for _ in range(1):
+    for _ in range(n_iter):
         optim.zero_grad(set_to_none=True)
         inp = create_input()
         torch.storage.resize_count_and_loc = {}
@@ -173,7 +176,7 @@ def run(model, optim):
 def main_compiled(n_iter):
     model, optim = init()
     # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
-    run(model, optim)
+    run(model, optim, 1)
     print("done eager 1st run!")
 
     dynamic = False
@@ -190,23 +193,21 @@ def main_compiled(n_iter):
     #     time.sleep(600)
     model = torch.compile(model, backend="inductor", fullgraph=True, dynamic=dynamic)
     with compiled_autograd.enable(compiler_fn):
-        for _ in range(n_iter):
-            res = run(model, optim)
+        res = run(model, optim, n_iter)
+    print(f"res: {res}")
     return res
 
 
 def main_eager(n_iter):
     model, optim = init()
     # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
-    run(model, optim)
+    run(model, optim, 1)
 
-    for _ in range(n_iter):
-        res = run(model, optim)
+    res = run(model, optim, n_iter)
     return res
 
 
 def execute_and_profile(callable, profiler_trace_path):
-    profiler_trace_path = "eager_trace.json"
     from torch.profiler import profile, ProfilerActivity
     with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
         ret = callable()
@@ -235,9 +236,11 @@ if __name__ == "__main__":
         lambda: main_compiled(n_iter=n_iter),
         "compiled_trace.json",
     )
+    print(f"losses_compiled: {losses_compiled}")
     losses_eager = execute_and_profile(
         lambda: main_eager(n_iter=n_iter),
         "eager_trace.json",
     )
+    print(f"losses_eager: {losses_eager}")
     for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
         assert torch.allclose(loss_compiled, loss_eager, rtol=1e-3), f"{loss_compiled} vs {loss_eager}"

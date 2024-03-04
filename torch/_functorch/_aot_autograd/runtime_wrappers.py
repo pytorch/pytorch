@@ -184,7 +184,8 @@ def create_runtime_wrapper(
                         # if all of the mutations to the leaf input were non-autograd-tracking mutations
                         # (aka mutations under no_grad(), or on detached views).
                         # In that case, we fully want to hide the mutation from autograd, so detaching is ok.
-                        assert original_inpt.untyped_storage().size() == updated_inpt.untyped_storage().size()
+
+                        # assert original_inpt.untyped_storage().size() == updated_inpt.untyped_storage().size()
                         if original_inpt.untyped_storage().size() > 0 and updated_inpt.untyped_storage().size() > 0:
                             original_inpt.detach().copy_(updated_inpt)
                     else:

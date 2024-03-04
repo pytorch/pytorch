@@ -21,6 +21,8 @@ from typing import List, Optional, Set, Tuple, Union
 from .compile_utils import fx_graph_cse, get_aten_target
 from . import config
 import functools
+from torch._functorch._aot_autograd import fsdp_fx_passes
+from torch._dynamo.utils import lazy_format_graph_code
 
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
@@ -678,6 +680,15 @@ def min_cut_rematerialization_partition(
     if config.cse:
         cse_graph = fx_graph_cse(fx_g)
         joint_module.graph = cse_graph
+
+    # Apply FSDP-specific passes
+    fsdp_fx_passes.replace_primal_clone_at_beginning_of_graph_with_primal(joint_module)
+    fsdp_fx_passes.replace_primal_noop_as_strided_with_primal(joint_module)
+    fsdp_fx_passes.reinplace_foreach_copy_if_input_has_no_other_use_in_graph(joint_module)
+    fsdp_fx_passes.replace_as_strided_scatter_with_primal_if_primal_has_no_other_use_after_this_op(joint_module)
+
+    # print(lazy_format_graph_code("Joint graph after FSDP-specific passes", joint_module))
+
     full_bw_graph = joint_module.graph
 
     graph_has_recomputable_ops = has_recomputable_ops(joint_module)
@@ -844,74 +855,123 @@ def min_cut_rematerialization_partition(
         else:
             return mem_sz * 2
 
-    nx_graph = nx.DiGraph()
-    for node in full_bw_graph.nodes:
-        if node.op == 'output':
-            continue
-
-        if node in required_bw_nodes:
-            if node not in inputs:
-                nx_graph.add_edge(node.name + "_in", "sink", capacity=math.inf)
+    def min_cut():
+        nx_graph = nx.DiGraph()
+        for node in full_bw_graph.nodes:
+            if node.op == 'output':
                 continue
-            # If someone saves a input for backward as-is and backward
-            # returns that tensor as-is as a grad input, then the node x would
-            # be both a required_bw_node and an input. In this case we
-            # (1) connect x_in to to the source, (2) x_out to the sink, and
-            # (3) assign the proper weight to the x_in-x_out edge, so that
-            # x would be part of cut nodes. A case where this happens is if
-            # NestedTensor saves a offset tensor as part of the singleton int
-            # in sizes.
-            nx_graph.add_edge(node.name + "_out", "sink", capacity=math.inf)
 
-        if _is_primal(node) or _is_fwd_seed_offset(node):
-            nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
+            if node in required_bw_nodes:
+                if node not in inputs:
+                    nx_graph.add_edge(node.name + "_in", "sink", capacity=math.inf)
+                    continue
+                # If someone saves a input for backward as-is and backward
+                # returns that tensor as-is as a grad input, then the node x would
+                # be both a required_bw_node and an input. In this case we
+                # (1) connect x_in to to the source, (2) x_out to the sink, and
+                # (3) assign the proper weight to the x_in-x_out edge, so that
+                # x would be part of cut nodes. A case where this happens is if
+                # NestedTensor saves a offset tensor as part of the singleton int
+                # in sizes.
+                nx_graph.add_edge(node.name + "_out", "sink", capacity=math.inf)
 
-        # If a node can't be recomputed (too expensive or involves randomness),
-        # we prevent it from being recomputed by adding an inf edge to the source
-        # We only need to ban nodes in the fw pass, as those are the only ones that would be recomputed.
-        if ban_recomputation(node) and node in required_fw_nodes:
-            nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
+            if _is_primal(node) or _is_fwd_seed_offset(node):
+                nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
 
-        # Checks if a node is actually a tuple. Can be simplified to just an isinstance check if we always use faketensors.
-        is_non_tensor_node = (('val' not in node.meta and 'tensor_meta' not in node.meta) or
-                              ('val' in node.meta and not isinstance(node.meta['val'], torch.Tensor)))
+            # If a node can't be recomputed (too expensive or involves randomness),
+            # we prevent it from being recomputed by adding an inf edge to the source
+            # We only need to ban nodes in the fw pass, as those are the only ones that would be recomputed.
+            if ban_recomputation(node) and node in required_fw_nodes:
+                nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
 
-        if is_sym_node(node):
-            weight = sym_node_size(node)
-        elif is_non_tensor_node:
-            weight = 0 if isinstance(node.meta.get("val"), BackwardState) else math.inf
-        else:
-            weight = get_node_weight(node)
+            # Checks if a node is actually a tuple. Can be simplified to just an isinstance check if we always use faketensors.
+            is_non_tensor_node = (('val' not in node.meta and 'tensor_meta' not in node.meta) or
+                                ('val' in node.meta and not isinstance(node.meta['val'], torch.Tensor)))
 
-        # Creates the weights on the "node" edge
-        nx_graph.add_edge(node.name + "_in", node.name + "_out", capacity=weight)
-        for user in node.users:
-            nx_graph.add_edge(node.name + "_out", user.name + "_in", capacity=math.inf)
+            if is_sym_node(node):
+                weight = sym_node_size(node)
+            elif is_non_tensor_node:
+                weight = 0 if isinstance(node.meta.get("val"), BackwardState) else math.inf
+            else:
+                weight = get_node_weight(node)
 
-    try:
-        cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
-    except Exception:
-        print('Failed to compute min-cut on following graph:')
-        print('\n'.join(nx.readwrite.edgelist.generate_edgelist(nx_graph)))
-        raise
+            # Creates the weights on the "node" edge
+            nx_graph.add_edge(node.name + "_in", node.name + "_out", capacity=weight)
+            for user in node.users:
+                nx_graph.add_edge(node.name + "_out", user.name + "_in", capacity=math.inf)
 
-    reachable, non_reachable = partition
-    cutset = set()
-    for u, nbrs in ((n, nx_graph[n]) for n in reachable):
-        cutset.update((u, v) for v in nbrs if v in non_reachable)
+        try:
+            cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
+        except Exception:
+            print('Failed to compute min-cut on following graph:')
+            print('\n'.join(nx.readwrite.edgelist.generate_edgelist(nx_graph)))
+            raise
 
-    cut_nodes = set()
-    for node_in, node_out in cutset:
-        assert node_in[:-3] == node_out[:-4]
-        node_name = node_in[:-3]
-        cut_nodes.add(node_name)
+        reachable, non_reachable = partition
+        cutset = set()
+        for u, nbrs in ((n, nx_graph[n]) for n in reachable):
+            cutset.update((u, v) for v in nbrs if v in non_reachable)
 
-    # To make this stuff deterministic
-    node_idx = {node: idx for idx, node in enumerate(joint_module.graph.nodes)}
-    saved_values = sorted((name_to_node[node] for node in cut_nodes), key=lambda x: node_idx[x])
-    # save_for_backward on tensors and stashes symints in autograd .ctx
-    saved_sym_nodes = list(filter(is_sym_node, saved_values))
-    saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
+        cut_nodes = set()
+        for node_in, node_out in cutset:
+            assert node_in[:-3] == node_out[:-4]
+            node_name = node_in[:-3]
+            cut_nodes.add(node_name)
+
+        # To make this stuff deterministic
+        node_idx = {node: idx for idx, node in enumerate(joint_module.graph.nodes)}
+        saved_values = sorted((name_to_node[node] for node in cut_nodes), key=lambda x: node_idx[x])
+        # save_for_backward on tensors and stashes symints in autograd .ctx
+        saved_sym_nodes = list(filter(is_sym_node, saved_values))
+        saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
+        return saved_sym_nodes, saved_values
+
+    saved_sym_nodes, saved_values = min_cut()
+
+    def flatten_arg_list(args):
+        flat_args = []
+        for arg in args:
+            if isinstance(arg, (list, tuple)):
+                flat_args.extend(flatten_arg_list(arg))
+            else:
+                flat_args.append(arg)
+        return flat_args
+
+    def is_alias_of_primal_input(full_bw_graph, primal_inputs, node):
+        if hasattr(node, "target") and node.target in [
+            # List of view ops. TODO add more
+            torch.ops.aten.t.default,
+            torch.ops.aten.as_strided.default,
+            torch.ops.aten.permute.default,
+        ]:
+            view_chain = [node]
+            flattened_arg_list = flatten_arg_list(node.args)
+            for arg in flattened_arg_list:
+                if arg in primal_inputs:
+                    return True, view_chain
+                else:
+                    upstream_is_alias, upstream_view_chain = is_alias_of_primal_input(full_bw_graph, primal_inputs, arg)
+                    if upstream_is_alias:
+                        view_chain.extend(upstream_view_chain)
+                        return True, view_chain
+        return False, []
+
+    # TODO: rename
+    def if_primal_input_alias_is_saved_then_move_the_view_chain_to_bwd_graph(saved_values):
+        # Trace lineage of saved nodes that are aliases of primals. Move the entire view chain to BWD graph
+        # so that only primals (along with non-view op output intermediates) are saved as FWD graph output.
+        primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
+        for saved_value in saved_values:
+            is_alias, view_chain = is_alias_of_primal_input(full_bw_graph, primal_inputs, saved_value)
+            if is_alias:
+                required_bw_nodes.update(set(view_chain))
+
+    # TODO(yf225): if any saved nodes is an alias of primal input, save the primal input instead of the alias.
+    # We do this by updating `required_bw_nodes` and then redo min-cut algorithm.
+    if_primal_input_alias_is_saved_then_move_the_view_chain_to_bwd_graph(saved_values)
+
+    saved_sym_nodes, saved_values = min_cut()
+
     # NB: saved_sym_nodes will be mutated to reflect the actual saved symbols
     fw_module, bw_module = _extract_fwd_bwd_modules(
         joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
