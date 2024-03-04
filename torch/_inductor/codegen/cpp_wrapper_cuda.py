@@ -149,7 +149,7 @@ class CppWrapperCuda(CppWrapperCpu):
         self, name: str, kernel: str, metadata: Optional[str] = None, cuda=True
     ):
         if not cuda:
-            return super().define_kernel(name, kernel, metadata, cuda)
+            raise RuntimeError(f"Calling define_kernel with non_cuda: {name=}")
 
     def generate(self, is_inference):
         self.prefix.writeline("\n")
@@ -219,7 +219,7 @@ class CppWrapperCuda(CppWrapperCpu):
         function from triton_heuristics.
         """
         if not cuda:
-            return grid
+            raise RuntimeError(f"Calling generate_default_grid with non_cuda: {name=}")
         assert isinstance(grid, list), f"expected {grid=} to be a list"
         grid = [e.inner_expr if isinstance(e, SymbolicCallArg) else e for e in grid]
         grid_fn = default_grid(*grid)
@@ -248,9 +248,7 @@ class CppWrapperCuda(CppWrapperCpu):
     ):
         if not cuda:
             # Even in CppWrapperCuda, we may see cpp kernels
-            return super().generate_kernel_call(
-                name, call_args, grid, device_index, cuda, triton, arg_types
-            )
+            raise RuntimeError(f"Calling generate_kernel_call with non_cuda: {name=}")
 
         params = CudaKernelParamCache.get(name)
         assert (
