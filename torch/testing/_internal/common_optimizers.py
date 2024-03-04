@@ -1369,7 +1369,7 @@ optim_db: List[OptimizerInfo] = [
                     "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
                 ),
                 "TestOptimRenewed",
-                "test_save_load_equality_with_weights_only_state_dict",
+                "test_save_load_equality_with_weights_only",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1804,7 +1804,7 @@ optim_db: List[OptimizerInfo] = [
                     "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
                 ),
                 "TestOptimRenewed",
-                "test_save_load_equality_with_weights_only_state_dict",
+                "test_save_load_equality_with_weights_only",
             ),
         ),
     ),
