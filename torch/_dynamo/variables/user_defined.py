@@ -65,7 +65,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def as_proxy(self):
         return self.value
 
-    def __repr__(self):
+    def __str__(self):
         return f"UserDefinedClassVariable({self.value})"
 
     @staticmethod
@@ -697,9 +697,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def _getattr_static(self, name):
         if (
-            isinstance(
-                self.value, (torch.nn.Module, torch.utils._cxx_pytree.PyTreeSpec)
-            )
+            isinstance(self.value, torch.nn.Module)
             or "__slots__" in self.value.__class__.__dict__
             or type(self.value) == threading.local
         ):
