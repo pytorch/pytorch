@@ -13026,6 +13026,8 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
+           # TODO: Avoid COW materialize
+           supports_cow_input_no_materialize=False,
            sample_inputs_func=sample_inputs__batch_norm_with_update,
            skips=(
                # NotImplementedError: Could not run
