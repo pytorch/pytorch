@@ -87,6 +87,7 @@ class GuardSource(enum.Enum):
     LOCAL_FSDP_MODULE = 7
     GLOBAL_FSDP_MODULE = 8
     BACKWARD_STATE = 9
+    SYNTHETIC_LOCAL = 10
 
     def is_fsdp_module(self) -> bool:
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
@@ -796,6 +797,10 @@ class Source:
 
     def is_nn_module(self) -> bool:
         return self.guard_source().is_nn_module()
+
+    def subguards_allowed(self):
+        """ True if you can guard on attributes of this """
+        return self.guard_source() != GuardSource.SYNTHETIC_LOCAL
 
 
 # Subclasses can be found in torch/_dynamo/source.py

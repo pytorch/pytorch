@@ -49,17 +49,6 @@ def is_constant_source(source):
     return False
 
 
-def is_input_source(source):
-    return source.guard_source() in [
-        GuardSource.LOCAL,
-        GuardSource.GLOBAL,
-        GuardSource.LOCAL_NN_MODULE,
-        GuardSource.GLOBAL_NN_MODULE,
-        GuardSource.LOCAL_FSDP_MODULE,
-        GuardSource.GLOBAL_FSDP_MODULE,
-    ]
-
-
 def reconstruct_getitem(
     source: Union["GetItemSource", "ODictGetItemSource"], codegen, index_is_slice
 ):
@@ -87,6 +76,20 @@ class LocalSource(Source):
 
     def name(self):
         return f"L[{repr(self.local_name)}]"
+
+
+@dataclasses.dataclass(frozen=True)
+class SyntheticLocalSource(Source):
+    local_name: str
+
+    def reconstruct(self, codegen):
+        codegen.append_output(codegen.create_load(self.local_name))
+
+    def guard_source(self):
+        return GuardSource.SYNTHETIC_LOCAL
+
+    def name(self):
+        return f"SYNTHETIC_LOCAL[{self.local_name!r}]"
 
 
 @dataclasses.dataclass(frozen=True)

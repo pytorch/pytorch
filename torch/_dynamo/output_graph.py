@@ -69,6 +69,7 @@ from .source import (
     LocalSource,
     ParamBufferSource,
     ShapeEnvSource,
+    SyntheticLocalSource,
     TensorProperty,
     TensorPropertySource,
 )
@@ -449,7 +450,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         cg.call_function(len(args), True)
         cg.store(varname)
         self.pregraph_bytecode.extend(cg.get_instructions())
-        source = LocalSource(varname)
+        source = SyntheticLocalSource(varname)
         result = VariableBuilder(self.root_tx, source)(example_value)
         TracingContext.get().guards_context.dynamo_guards.remove_guards_with_source(
             source
