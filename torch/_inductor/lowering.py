@@ -4338,7 +4338,6 @@ def avg_pool2d(
         ones_like(x), 0.0, padding if count_include_pad else None
     )
 
-    # TODO: verify CSE handles when 2nd return is never used for anything
     def getter(idx, increments):
         *prefix, bh, bw = idx
         ih, iw = increments
