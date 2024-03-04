@@ -699,7 +699,8 @@ class BuiltinVariable(VariableTracker):
                             e,
                         )
                         unimplemented(f"invalid handler args {handler} {args} {kwargs}")
-                raise
+                else:
+                    raise
             except Unsupported as exc:
                 has_constant_handler = self.has_constant_handler(args, kwargs)
                 if not has_constant_handler:
