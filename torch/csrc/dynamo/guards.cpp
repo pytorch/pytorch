@@ -39,6 +39,13 @@ typedef struct {
 
 #endif // IS_PYTHON_3_12_PLUS
 
+// Macro to skip addition of duplicate guards like EQUALS_MATCH
+#define SKIP_IF_GUARD_ALREADY_PRESENT(name) \
+  if (self.is_leaf_guard_present(name)) {   \
+    return;                                 \
+  }                                         \
+  self.insert_leaf_guard(name);
+
 namespace {
 
 struct LocalState {
@@ -1464,14 +1471,6 @@ class GuardManager {
   }
 
   virtual void add_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) {
-    // TODO(anijain2305) - Currently we can have redundant guards in the guard
-    // manager. For example, one can have two EQUAL_MATCH guard from two
-    // different lines of python code but for the same object. We might need a
-    // small optimization here to skip adding specific type of guards if they
-    // are already present (like EQUALS_MATCH, ID_MATCH etc).
-    // One such example is this
-    // TORCH_LOGS="guards,recompiles" PYTORCH_TEST_WITH_DYNAMO=1 python
-    // test/test_torch.py -k test_grad_scaling_penalty_cpu
     _leaf_guards.emplace_back(std::move(leaf_guard));
   }
 
@@ -1621,6 +1620,15 @@ class GuardManager {
     return ret;
   }
 
+  bool is_leaf_guard_present(const std::string& guard_name) {
+    return _inserted_leaf_guards.find(guard_name) !=
+        _inserted_leaf_guards.end();
+  }
+
+  void insert_leaf_guard(const std::string& guard_name) {
+    _inserted_leaf_guards.insert(guard_name);
+  }
+
  protected:
   // Keeps a count of how many times this guard manager check function returns
   // False. This is used for sorting optimization.
@@ -1634,6 +1642,10 @@ class GuardManager {
   // A string that can be used to eval on f_locals or f_globals to get the
   // value. This is used only to pass on debugging information.
   std::string _source;
+
+  // A map of which leaf guards are inserted. This is to prevent duplicate
+  // guards like TYPE_MATCH.
+  std::unordered_set<std::string> _inserted_leaf_guards;
 
   // Leaf guards are the terminal guards on this object, e.g, type check on a
   // list. These guards have to be run before any children are run.
@@ -2788,6 +2800,7 @@ PyObject* torch_c_dynamo_guards_init() {
           [](GuardManager& self,
              py::object value,
              py::object verbose_code_parts) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("TYPE_MATCH");
             self.add_leaf_guard(
                 std::make_shared<TYPE_MATCH>(value, verbose_code_parts));
           })
@@ -2796,6 +2809,7 @@ PyObject* torch_c_dynamo_guards_init() {
           [](GuardManager& self,
              py::object value,
              py::object verbose_code_parts) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("ID_MATCH");
             self.add_leaf_guard(
                 std::make_shared<ID_MATCH>(value, verbose_code_parts));
           })
@@ -2804,6 +2818,7 @@ PyObject* torch_c_dynamo_guards_init() {
           [](GuardManager& self,
              py::object value,
              py::object verbose_code_parts) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("EQUALS_MATCH");
             self.add_leaf_guard(
                 std::make_shared<EQUALS_MATCH>(value, verbose_code_parts));
           })
@@ -2812,6 +2827,7 @@ PyObject* torch_c_dynamo_guards_init() {
           [](GuardManager& self,
              py::object value,
              py::object verbose_code_parts) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("LENGTH_CHECK");
             self.add_leaf_guard(
                 std::make_shared<LENGTH_CHECK>(value, verbose_code_parts));
           })
@@ -2821,6 +2837,7 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object length,
              py::object type_id,
              py::object verbose_code_parts) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("TUPLE_ITERATOR_LEN");
             self.add_leaf_guard(std::make_shared<TUPLE_ITERATOR_LEN>(
                 length, type_id, verbose_code_parts));
           })
@@ -2847,6 +2864,7 @@ PyObject* torch_c_dynamo_guards_init() {
           [](GuardManager& self,
              py::object data_ptr,
              py::object verbose_code_parts) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("DATA_PTR_MATCH");
             self.add_leaf_guard(
                 std::make_shared<DATA_PTR_MATCH>(data_ptr, verbose_code_parts));
           })
@@ -2892,6 +2910,7 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object strides,
              py::object tensor_name,
              py::object verbose_code_parts) -> void {
+            SKIP_IF_GUARD_ALREADY_PRESENT("TENSOR_MATCH");
             self.add_leaf_guard(std::make_shared<TENSOR_MATCH>(
                 self.get_root(),
                 value,
