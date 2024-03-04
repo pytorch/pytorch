@@ -741,6 +741,39 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.assertTrue(torch.allclose(result, data.view(ref_data.shape)))
 
+    def test_no_input(self):
+        def reshape_wrapper():
+            # A model without input.
+            ones = torch.ones(4, 8)
+            zeros = torch.zeros(4, 8)
+            return ones + zeros
+
+        recorded_models = []
+
+        def record_onnx_model_transform(onnx_model):
+            # Record the ONNX model seen by the transform.
+            recorded_models.append(onnx_model)
+
+        compiled_model = torch.compile(
+            reshape_wrapper,
+            backend="onnxrt",
+            dynamic=True,
+            options=torch.onnx._OrtBackendOptions(
+                pre_ort_model_transforms=[
+                    record_onnx_model_transform,
+                ]
+            ),
+        )
+
+        result = compiled_model()
+
+        self.assertEqual(len(recorded_models), 1)
+        self.assertTrue(
+            "aten_add" in [node.op_type for node in recorded_models[0].graph.node]
+        )
+
+        self.assertEqual(result, torch.ones(4, 8))
+
     def test_custom_onnx_transform(self):
         # This test consists of 2 parts:
         # 1. If a registered ONNX transform is called and recorded a model.
