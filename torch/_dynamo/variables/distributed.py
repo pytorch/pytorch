@@ -8,12 +8,9 @@ from ...fx.experimental._backward_state import BackwardState
 from .. import compiled_autograd, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import unimplemented
-<<<<<<< HEAD
 from ..external_utils import call_module_hooks_from_backward_state
-=======
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalSource
->>>>>>> a7e340bc0ff ([dynamo] support group=None when rewriting collectives)
 from ..utils import istype
 from .base import VariableTracker
 from .constant import ConstantVariable
