@@ -878,9 +878,7 @@ def is_namedtuple_cls(cls):
             bases = getattr(cls, "__bases__", []) or [None]
             module = getattr(cls, "__module__", None)
             return module == "torch.return_types" or (
-                issubclass(bases[0], tuple)
-                and hasattr(cls, "_make")
-                and hasattr(cls, "_fields")
+                bases[0] is tuple and hasattr(cls, "_make") and hasattr(cls, "_fields")
             )
     except TypeError:
         pass
