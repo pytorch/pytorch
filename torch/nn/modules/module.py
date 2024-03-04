@@ -2046,16 +2046,9 @@ class Module:
 
                 try:
                     with torch.no_grad():
-                        if assign_to_params_buffers:
-                            # Shape checks are already done above
-                            if (isinstance(param, torch.nn.Parameter) and
-                                    not isinstance(input_param, torch.nn.Parameter)):
-                                setattr(self, name, torch.nn.Parameter(input_param, requires_grad=param.requires_grad))
-                            else:
-                                setattr(self, name, input_param)
-                        elif use_swap_tensors:
+                        if use_swap_tensors:
                             param_requires_grad = param.requires_grad
-                            new_input_param = param.module_load(input_param)
+                            new_input_param = param.module_load(input_param, assign=assign_to_params_buffers)
                             if id(new_input_param) == id(input_param) or id(new_input_param) == id(param):
                                 raise RuntimeError("module_load returned one of self or other, please .detach() "
                                                    "the result if returning one of the inputs in module_load")
@@ -2064,6 +2057,13 @@ class Module:
                                 new_input_param = torch.nn.Parameter(new_input_param, requires_grad=param_requires_grad)
                             torch.utils.swap_tensors(param, new_input_param)
                             del new_input_param
+                        elif assign_to_params_buffers:
+                            # Shape checks are already done above
+                            if (isinstance(param, torch.nn.Parameter) and
+                                    not isinstance(input_param, torch.nn.Parameter)):
+                                setattr(self, name, torch.nn.Parameter(input_param, requires_grad=param.requires_grad))
+                            else:
+                                setattr(self, name, input_param)
                         else:
                             param.copy_(input_param)
                 except Exception as ex:
@@ -2103,7 +2103,8 @@ class Module:
 
         .. warning::
             If :attr:`assign` is ``True`` the optimizer must be created after
-            the call to :attr:`load_state_dict`.
+            the call to :attr:`load_state_dict` unless
+            :func:`~torch.__future__.get_swap_module_params_on_conversion` is ``True``.
 
         Args:
             state_dict (dict): a dict containing parameters and

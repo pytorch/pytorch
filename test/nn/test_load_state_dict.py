@@ -261,6 +261,7 @@ class TestLoadStateDict(NNTestCase):
             def forward(self, input):
                 return self.x + self.bn(self.fc1(input))
 
+        swap = torch.__future__.get_swap_module_params_on_conversion()
         net = MyModule()
         state_dict = net.state_dict(keep_vars=keep_vars)
 
@@ -274,16 +275,20 @@ class TestLoadStateDict(NNTestCase):
         net_meta_state_dict = net_meta.state_dict(keep_vars=True)
         for key in state_dict.keys():
             if key in net_meta._parameters:
-                if keep_vars:
+                if keep_vars and not swap:
                     # state_dict[key] is an nn.Parameter
                     self.assertTrue(state_dict[key] is net_meta_state_dict[key])
                 else:
-                    # state_dict[key] is not an nn.Parameter so it will be detached when wrapping with a Parameter
-                    self.assertTrue(net_meta_state_dict[key] is not net_meta_state_dict_old[key])
-                    self.assertEqual(net_meta_state_dict_old[key].requires_grad, net_meta_state_dict[key].requires_grad)
-                    self.assertEqual(state_dict[key], net_meta_state_dict[key])
+                    if swap:
+                        self.assertTrue(net_meta_state_dict[key] is net_meta_state_dict_old[key])
+                    else:
+                        # state_dict[key] is not an nn.Parameter so it will be detached when wrapping with a Parameter
+                        self.assertTrue(net_meta_state_dict[key] is not net_meta_state_dict_old[key])
+                        self.assertEqual(net_meta_state_dict_old[key].requires_grad, net_meta_state_dict[key].requires_grad)
+                self.assertEqual(state_dict[key], net_meta_state_dict[key])
             elif key in net_meta._buffers and key not in net_meta._non_persistent_buffers_set:
                 self.assertTrue(state_dict[key] is net_meta_state_dict[key])
+                self.assertEqual(state_dict[key], net_meta_state_dict[key])
 
         # Make sure that ordering of parameters and buffers is preserved
         net_named_parameters = net.named_parameters()
@@ -389,7 +394,7 @@ class TestLoadStateDict(NNTestCase):
 def load_torch_function_handler(cls, func, types, args=(), kwargs=None):
     kwargs = {} if kwargs is None else kwargs
 
-    def module_load(dest, src):
+    def module_load(dest, src, assign=False):
         # always convert src to cls
         if isinstance(dest, cls):
             if type(src) is torch.Tensor:
