@@ -31,7 +31,10 @@ class DataPtr;
  */
 enum class EventFlag {
   PYTORCH_DEFAULT,
+  PYTORCH_DISABLE_TIMING,
+  // backend flags
   BACKEND_DEFAULT,
+  BACKEND_DISABLE_TIMING,  
   // CUDA flags
   CUDA_EVENT_DEFAULT,
   CUDA_EVENT_DISABLE_TIMING, // PyTorch-default for CUDA
