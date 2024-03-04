@@ -749,25 +749,30 @@ if torch._C._has_mkldnn:
             assert isinstance(reshape_1, list)
             assert isinstance(reshape_2, list)
             assert len(reshape_1) == 2
-            dynamic_shapes = not all(
-                isinstance(x, int) for x in ([reshape_1[0]] + reshape_2[:-1])
-            )
 
             graph = match.graph
             reshape_2_node = match.output_node()
             linear_input_node = reshape_2_node.args[0].args[0].args[0]
             # check linear's input's shape[:-1] == reshape_2[:-1]
             # and check product(reshape_2[:-1]) == reshape_1[0]
-            if dynamic_shapes:
-                # TODO: Haozhe investigate how add guard here
-                return
-            else:
-                can_remove_reshape = linear_input_node.meta.get("val").shape[
-                    :-1
-                ] == torch.Size(reshape_2[:-1])
-                can_remove_reshape = can_remove_reshape and (
-                    reduce(operator.mul, reshape_2[:-1]) == reshape_1[0]
+            can_remove_reshape = linear_input_node.meta.get("val").shape[
+                :-1
+            ] == torch.Size(
+                [
+                    val if isinstance(val, int) else val.meta.get("val")
+                    for val in reshape_2[:-1]
+                ]
+            )
+            can_remove_reshape = can_remove_reshape and (
+                reduce(
+                    operator.mul,
+                    [
+                        val if isinstance(val, int) else val.meta.get("val")
+                        for val in reshape_2[:-1]
+                    ],
                 )
+                == reshape_1[0].meta.get("val")
+            )
 
             if can_remove_reshape:
                 repl = graph.call_function(mkldnn._linear_pointwise.default, args)
