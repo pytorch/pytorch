@@ -27,13 +27,13 @@ def _woq_mm_params_check(match):
     assert all(k in match.kwargs for k in ("x", "weight"))
     x = match.kwargs["x"].meta["val"]
     weight = match.kwargs["weight"].meta["val"]
-    if (
-        x.dtype != torch.bfloat16
-        or weight.dtype != torch.int8
-        or x.device != weight.device
-    ):
-        return False
-    return True
+    # For now, we only support woq mm kernels
+    # with x.type=bfloat16 and w.type=int8
+    return (
+        x.dtype == torch.bfloat16
+        and weight.dtype == torch.int8
+        and x.device == weight.device
+    )
 
 
 def _get_woq_mm_patterns():
