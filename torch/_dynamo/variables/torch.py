@@ -21,7 +21,7 @@ from ..codegen import PyCodegen
 from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import LocalSource
+from ..source import SyntheticLocalSource
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
@@ -800,7 +800,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         tx.output.pregraph_bytecode.extend(cg.get_instructions())
 
         # add the newly constructed nn.Parameter as a graph input
-        source = LocalSource(varname)
+        source = SyntheticLocalSource(varname)
         example_value = torch.nn.Parameter(
             tx.output.example_value_from_input_node(data.as_proxy().node)
         )
