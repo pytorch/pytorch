@@ -2050,7 +2050,7 @@ class Module:
                             # Shape checks are already done above
                             if (isinstance(param, torch.nn.Parameter) and
                                     not isinstance(input_param, torch.nn.Parameter)):
-                                setattr(self, name, torch.nn.Parameter(input_param))
+                                setattr(self, name, torch.nn.Parameter(input_param, requires_grad=param.requires_grad))
                             else:
                                 setattr(self, name, input_param)
                         elif use_swap_tensors:
