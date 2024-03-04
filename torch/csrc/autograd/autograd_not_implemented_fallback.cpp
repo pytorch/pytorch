@@ -302,7 +302,7 @@ static void autogradNotImplementedFallbackImpl(
 
   const bool any_requires_grad = !tensors_requiring_grad_on_stack.empty();
   bool has_out_arg = false;
-  for (const auto &arg: schema.arguments()) {
+  for (const auto& arg : schema.arguments()) {
     if (arg.is_out()) {
       has_out_arg = true;
     }
