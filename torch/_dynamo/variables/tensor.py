@@ -305,7 +305,9 @@ class TensorVariable(VariableTracker):
         if (
             result is not None
             and self.source is not None
-            and not result.is_python_constant()
+            and not (
+                name not in ("grad", "requires_grad") and result.is_python_constant()
+            )
         ):
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
             result.source = AttrSource(self.source, name)

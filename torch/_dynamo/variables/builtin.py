@@ -686,21 +686,20 @@ class BuiltinVariable(VariableTracker):
                 if result is not None:
                     return result
             except TypeError:
-                has_constant_handler = self.has_constant_handler(args, kwargs)
-
                 # Check if binding is bad. inspect signature bind is expensive.
                 # So check only when handler call fails.
                 try:
                     inspect.signature(handler).bind(tx, *args, **kwargs)
                 except TypeError as e:
+                    has_constant_handler = self.has_constant_handler(args, kwargs)
                     if not has_constant_handler:
                         log.warning(
                             "incorrect arg count %s %s and no constant handler",
                             handler,
                             e,
                         )
-                if not has_constant_handler:
-                    raise
+                        unimplemented(f"invalid handler args {handler} {args} {kwargs}")
+                raise
             except Unsupported as exc:
                 has_constant_handler = self.has_constant_handler(args, kwargs)
                 if not has_constant_handler:
