@@ -387,7 +387,12 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         )
         # Check leaf guards on child managers
         self.assertEqual(
-            len(guard_manager.getattr_manager("x", None).get_leaf_guards()), 1
+            len(
+                guard_manager.getattr_manager(
+                    attr="x", example_value=None
+                ).get_leaf_guards()
+            ),
+            1,
         )
         self.assertEqual(
             len(guard_manager.getattr_manager("y", None).get_leaf_guards()), 1

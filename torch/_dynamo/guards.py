@@ -405,7 +405,9 @@ class GuardBuilder(GuardBuilderBase):
         # wrapped up into a "L" dict.
         assert self.guard_manager  # to make mypy happy
         root_guard_manager = self.guard_manager.root
-        global_manager = root_guard_manager.globals_dict_manager(self.scope["G"], None)
+        global_manager = root_guard_manager.globals_dict_manager(
+            f_globals=self.scope["G"], example_value=None
+        )
 
         def build(source):
             example_value = None
@@ -424,7 +426,7 @@ class GuardBuilder(GuardBuilderBase):
                 # DictGuardManager. One reason not to do that is that we will
                 # have to undo it if we use fastlocals.
                 return root_guard_manager.dict_getitem_manager(
-                    source.local_name, example_value
+                    key=source.local_name, example_value=example_value
                 )
             elif istype(source, GlobalSource):
                 # TODO(anijain2305) - Maybe make global manager a dict guard
@@ -435,11 +437,11 @@ class GuardBuilder(GuardBuilderBase):
                 # dicts and more specifically where we expect to cover many keys
                 # and values.
                 return global_manager.dict_getitem_manager(
-                    source.global_name, example_value
+                    key=source.global_name, example_value=example_value
                 )
             elif istype(source, GlobalWeakRefSource):
                 return global_manager.global_weakref_manager(
-                    source.global_name, example_value
+                    global_name=source.global_name, example_value=example_value
                 )
             elif istype(source, GlobalStateSource):
                 # TODO(anijain2305) - Revisit this how to insert the global state
@@ -451,7 +453,7 @@ class GuardBuilder(GuardBuilderBase):
                 return root_guard_manager
             elif istype(source, TypeSource):
                 assert base_guard_manager  # to make mypy happy
-                return base_guard_manager.type_manager(example_value)
+                return base_guard_manager.type_manager(example_value=example_value)
             elif istype(
                 source, (NNModuleSource, NotNNModuleSource, FSDPNNModuleSource)
             ):
@@ -459,7 +461,9 @@ class GuardBuilder(GuardBuilderBase):
                 return base_guard_manager
             elif istype(source, AttrSource):
                 assert base_guard_manager  # to make mypy happy
-                return base_guard_manager.getattr_manager(source.member, example_value)
+                return base_guard_manager.getattr_manager(
+                    attr=source.member, example_value=example_value
+                )
             elif istype(source, GetItemSource):
                 assert base_guard_manager  # to make mypy happy
                 if isinstance(base_guard_manager, DictGuardManager):
@@ -484,19 +488,21 @@ class GuardBuilder(GuardBuilderBase):
                 assert base_guard_manager  # to make mypy happy
                 if not source.is_kw:
                     return base_guard_manager.getattr_manager(
-                        "__defaults__", None
-                    ).getitem_manager(source.idx_key, example_value)
+                        attr="__defaults__", example_value=None
+                    ).getitem_manager(key=source.idx_key, example_value=example_value)
                 else:
                     return base_guard_manager.getattr_manager(
-                        "__kwdefaults__", None
+                        attr="__kwdefaults__", example_value=None
                     ).getitem_manager(str(source.idx_key), example_value)
             elif istype(source, NumpyTensorSource):
                 assert base_guard_manager  # to make mypy happy
-                return base_guard_manager.lambda_manager(from_numpy, example_value)
+                return base_guard_manager.lambda_manager(
+                    python_lambda=from_numpy, example_value=example_value
+                )
             elif istype(source, TupleIteratorGetItemSource):
                 assert base_guard_manager  # to make mypy happy
                 return base_guard_manager.tuple_iterator_getitem_manager(
-                    source.index, example_value
+                    index=source.index, example_value=example_value
                 )
             elif isinstance(source, ConstDictKeySource):
                 if not isinstance(base_guard_manager, DictGuardManager):
