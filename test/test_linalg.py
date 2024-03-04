@@ -5989,6 +5989,92 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         mean_err = ((res - ref).abs() / ref).mean()
         self.assertTrue(mean_err < 0.05)
 
+    def _dynamically_quantize_per_channel(self, x, quant_min, quant_max, target_dtype):
+        # source: https://github.com/pytorch-labs/gpt-fast/blob/main/quantize.py
+        # default setup for affine quantization of activations
+        x_dtype = x.dtype
+        x = x.float()
+        eps = torch.finfo(torch.float32).eps
+
+        # get min and max
+        min_val, max_val = torch.aminmax(x, dim=1)
+
+        # calculate scales and zero_points based on min and max
+        # reference: https://fburl.com/code/srbiybme
+        min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
+        max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
+        device = min_val_neg.device
+
+        # reference: https://fburl.com/code/4wll53rk
+        max_val_pos = torch.max(-min_val_neg, max_val_pos)
+        scales = max_val_pos / (float(quant_max - quant_min) / 2)
+        # ensure scales is the same dtype as the original tensor
+        scales = torch.clamp(scales, min=eps).to(x.dtype)
+        zero_points = torch.zeros(min_val_neg.size(), dtype=torch.int64, device=device)
+
+        # quantize based on qmin/qmax/scales/zp
+        x_div = x / scales.unsqueeze(-1)
+        x_round = torch.round(x_div)
+        x_zp = x_round + zero_points.unsqueeze(-1)
+        quant = torch.clamp(x_zp, quant_min, quant_max).to(target_dtype)
+
+        return quant, scales.to(x_dtype), zero_points
+
+    @onlyCPU
+    @parametrize("m", [32, 64])
+    @parametrize("k", [32, 64])
+    @parametrize("n", [48, 64])
+    def test__int8_mm(self, device, m, k, n):
+        torch.manual_seed(1)
+        a = torch.rand((m, k), dtype=torch.bfloat16, device=device)
+        b = torch.rand((n, k), dtype=torch.bfloat16, device=device)
+
+        def convert_weight_to_int8pack(b):
+            b_int8pack, b_scales, _ = self._dynamically_quantize_per_channel(
+                b, -128, 127, torch.int8
+            )
+            return b_int8pack, b_scales
+
+        def weight_int8pack_mm(a, b_int8pack, b_scales):
+            return torch._weight_int8pack_mm(
+                a, b_int8pack, b_scales
+            )
+
+        b_int8pack, b_scales = convert_weight_to_int8pack(b)
+        res = weight_int8pack_mm(a, b_int8pack, b_scales)
+        ref = torch.mm(a, b.transpose(0, 1))
+
+        mean_err = ((res - ref).abs() / ref).mean()
+        self.assertTrue(mean_err < 0.05)
+
+    @onlyCPU
+    @parametrize("m", [32, 64])
+    @parametrize("k", [32, 64])
+    @parametrize("n", [48, 64])
+    def test_compile_int8_mm(self, device, m, k, n):
+        if sys.version_info >= (3, 12):
+            self.skipTest("Dynamo is not supported on Python 3.12+")
+
+        torch.manual_seed(1)
+        a = torch.rand((m, k), dtype=torch.bfloat16, device=device)
+        b = torch.rand((n, k), dtype=torch.bfloat16, device=device)
+
+        b_int8pack, b_scales, _ = self._dynamically_quantize_per_channel(
+            b, -128, 127, torch.int8
+        )
+
+        @torch.compile
+        def int8_mm(a, b_int8pack, b_scales):
+            return torch._weight_int8pack_mm(
+                a, b_int8pack, b_scales
+            )
+
+        res = int8_mm(a, b_int8pack, b_scales)
+        ref = torch.mm(a, b.transpose(0, 1))
+
+        mean_err = ((res - ref).abs() / ref).mean()
+        self.assertTrue(mean_err < 0.05)
+
     @slowTest
     @onlyNativeDeviceTypes
     # bfloat16 doesn't have sufficient precision to pass this test
