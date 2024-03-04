@@ -230,6 +230,7 @@ void mkldnn_matmul(
               "mkldnn_matmul:  unsupported dims for mat and mat2");
 
 #if defined(__aarch64__)
+  std::cout <<"MKLDNN Matmul acceleration for aarch64" << std::endl;
   // oneDNN fast-maths mode (enabled by setting the environment variable ONEDNN_DEFAULT_FPMATH_MODE=BF16) will dispatch
   // fp32 inputs to bf16 kernels where HW permits. So, both fp32 and bf16 inputs are permitted.
   TORCH_CHECK((mat1.scalar_type() == mat2.scalar_type()) && (mat1.scalar_type() == result.scalar_type()) &&
