@@ -152,7 +152,7 @@ class MetaConverter:
         # hold a weak ref to self, otherwise it will be kept alive
         # by the del_ten closure
         self_weak_ref = weakref.ref(self)
-        if t.is_sparse or t.is_mkldnn or is_functorch_wrapped_tensor(t):
+        if is_sparse_any(t) or t.is_mkldnn or is_functorch_wrapped_tensor(t):
             weak_st = None
         else:
             weak_st = StorageWeakRef(t._typed_storage())
@@ -298,6 +298,10 @@ class MetaConverter:
             with torch.inference_mode(t.is_inference()):
                 if t.is_sparse:
                     is_leaf = safe_is_leaf(t)
+
+                    # The lambda function below is similar to
+                    # `t.to(device='meta')` except the latter
+                    # preserves nnz value
                     r = callback(
                         lambda: torch.ops.aten._sparse_coo_tensor_with_dims(
                             t.sparse_dim(),
@@ -321,6 +325,64 @@ class MetaConverter:
                         with torch.enable_grad():
                             r = r.clone()
                             r._coalesced_(t.is_coalesced())
+                elif is_sparse_compressed(t):
+                    is_leaf = safe_is_leaf(t)
+
+                    def mk_meta():
+                        nnz = 0
+                        batch_dim = t.ndim - t.sparse_dim() - t.dense_dim()
+                        batch_size = t.shape[:batch_dim]
+                        if t.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                            index_dtype = t.crow_indices().dtype
+                            compressed_indices = torch.empty(
+                                t.crow_indices().shape, device="meta", dtype=index_dtype
+                            )
+                            plain_indices = torch.empty(
+                                (*t.col_indices().shape[:-1], nnz),
+                                device="meta",
+                                dtype=index_dtype,
+                            )
+                        else:
+                            index_dtype = t.ccol_indices().dtype
+                            compressed_indices = torch.empty(
+                                t.ccol_indices().shape, device="meta", dtype=index_dtype
+                            )
+                            plain_indices = torch.empty(
+                                (*t.row_indices().shape[:-1], nnz),
+                                device="meta",
+                                dtype=index_dtype,
+                            )
+                        values_shape = t.values().shape
+                        values = torch.empty(
+                            (
+                                *values_shape[:batch_dim],
+                                nnz,
+                                *values_shape[batch_dim + 1 :],
+                            ),
+                            dtype=t.dtype,
+                            device="meta",
+                        )
+                        return torch.ops.aten.sparse_compressed_tensor(
+                            compressed_indices,
+                            plain_indices,
+                            values,
+                            t.shape,
+                            layout=t.layout,
+                            dtype=t.dtype,
+                            device="meta",
+                        )
+
+                    # `mk_meta()` is similar to `t.to(device='meta'))`
+                    # except `to('meta')` preserves nnz value while
+                    # `mk_meta` result has nnz == 0.
+                    r = callback(mk_meta)
+
+                    assert safe_is_leaf(r), "the callback you passed in doesn't detach"
+                    if t.requires_grad:
+                        r.requires_grad = True
+                    if t.requires_grad and not is_leaf:
+                        with torch.enable_grad():
+                            r = r.clone()
                 elif t.is_nested and not is_traceable_wrapper_subclass(t):
                     # TODO: Handle this better in Dynamo?
                     # There are checks there now, but this can still be triggered by a dense
@@ -679,8 +741,6 @@ class MetaConverter:
         if isinstance(t, torch.Tensor) or is_traceable_wrapper_subclass(t):
             if t.device.type != "xla" and any(
                 [
-                    t.is_sparse_csr,
-                    t.layout in [torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc],
                     t.is_quantized,
                     t._is_view() and t._base is not None and t._base.is_sparse,
                     torch._is_functional_tensor(t),
