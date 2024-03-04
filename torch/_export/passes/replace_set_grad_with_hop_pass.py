@@ -1,4 +1,5 @@
 import copy
+
 import torch
 from torch._higher_order_ops.wrap import wrap_with_set_grad_enabled
 
@@ -54,7 +55,9 @@ def _replace_with_hop(node: torch.fx.Node):
         enable_grad_val = set_grad_node.args[0]
         with graph.inserting_before(node):
             get_attr_node = graph.get_attr(node.target)
-            get_attr_node.meta["nn_module_stack"] = copy.copy(set_grad_node.meta["nn_module_stack"])
+            get_attr_node.meta["nn_module_stack"] = copy.copy(
+                set_grad_node.meta["nn_module_stack"]
+            )
             output_node = next(iter(reversed(sub_gm.graph.nodes)), None)
             if output_node is not None:
                 assert len(output_node.args) == 1
@@ -69,7 +72,9 @@ def _replace_with_hop(node: torch.fx.Node):
                     call_func_node.meta["val"] = tuple(
                         arg.meta["val"] for arg in output_args
                     )
-                    call_func_node.meta["nn_module_stack"] = copy.copy(set_grad_node.meta["nn_module_stack"])
+                    call_func_node.meta["nn_module_stack"] = copy.copy(
+                        set_grad_node.meta["nn_module_stack"]
+                    )
                     node_replace_(node, call_func_node, delete_old=True)
 
                     # Rename the name of getitem nodes to the actual name of its contents
