@@ -106,11 +106,6 @@ def functional_assert_async_msg_decomp(tensor, msg):
     return
 
 
-@register_decomposition([aten._assert_scalar.default])
-def assert_scalar_decomp(tensor, msg):
-    return
-
-
 @register_decomposition([aten.sym_constrain_range_for_size.default])
 def sym_constrain_range_for_size(symbol, *, min=None, max=None):
     return
@@ -526,7 +521,9 @@ def dequantize_per_tensor_tensor_decomp_impl(
     quant_max: int,
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    return (input.to(torch.float32) - zero_point) * scale
+    return (input.to(torch.float32) - zero_point.to(torch.int32)) * scale.to(
+        torch.float32
+    )
 
 
 @register_decomposition(torch.ops.quantized.embedding_bag_byte_unpack)
@@ -651,3 +648,15 @@ def masked_scatter(self, mask, source):
         source_idx = mask.reshape(-1).cumsum(0) - 1
         return inductor_prims.masked_scatter_with_index(self, mask, source_idx, source)
     return NotImplemented
+
+
+@register_decomposition(quantized_decomposed.choose_qparams.tensor)
+def choose_qparams_tensor(
+    input: torch.Tensor, quant_min: int, quant_max: int, eps: float, dtype: torch.dtype
+):
+    min_val, max_val = torch.aminmax(input)
+    scale = (max_val - min_val) / float(quant_max - quant_min)
+    scale = torch.max(scale, torch.Tensor([eps]))
+    zero_point = quant_min - torch.round(min_val / scale).to(torch.int)
+    zero_point = torch.clamp(zero_point, quant_min, quant_max)
+    return scale.to(torch.float64), zero_point.to(torch.int64)

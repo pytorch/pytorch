@@ -65,7 +65,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def as_proxy(self):
         return self.value
 
-    def __repr__(self):
+    def __str__(self):
         return f"UserDefinedClassVariable({self.value})"
 
     @staticmethod
@@ -307,7 +307,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
-            field_defaults = self.value._field_defaults
+            # check if this a quasi-namedtuple or a real one
+            if self.value.__module__ == "torch.return_types":
+                # create pseudo-defaults from values of the quasi-namedtuple
+                field_defaults = dict(zip(fields, args[0].items))
+            else:
+                field_defaults = self.value._field_defaults
 
             items = list(args)
             items.extend([None] * (len(fields) - len(items)))
