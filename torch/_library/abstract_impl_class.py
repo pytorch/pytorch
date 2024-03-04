@@ -57,30 +57,31 @@ def impl_abstract_class(qualname, fake_class=None):
     This API may be used as a decorator (see examples).
 
     Examples:
-        import torch
         # For a torch Bind class Foo defined in test_custom_class_registration.cpp:
-        # TORCH_LIBRARY(_TorchScriptTesting, m) {
-        #     m.class_<Foo>("_Foo")
-        #         .def(torch::init<int64_t, int64_t>())
-        #         // .def(torch::init<>())
-        #         .def("info", &Foo::info)
-        #         .def("increment", &Foo::increment)
-        #         .def("add", &Foo::add)
-        #         .def("add_tensor", &Foo::add_tensor)
-        #         .def("__eq__", &Foo::eq)
-        #         .def("combine", &Foo::combine)
-        #         .def_pickle(
-        #             [](c10::intrusive_ptr<Foo> self) { // __getstate__
-        #               return std::vector<int64_t>{self->x, self->y};
-        #             },
-        #             [](std::vector<int64_t> state) { // __setstate__
-        #               return c10::make_intrusive<Foo>(state[0], state[1]);
-        #             })
-        #         .def_meta([](c10::intrusive_ptr<Foo> self) { // __get_metadata__
-        #           return std::vector<int64_t>{self->x, self->y};
-        #         });
+        TORCH_LIBRARY(_TorchScriptTesting, m) {
+            m.class_<Foo>("_Foo")
+                .def(torch::init<int64_t, int64_t>())
+                // .def(torch::init<>())
+                .def("info", &Foo::info)
+                .def("increment", &Foo::increment)
+                .def("add", &Foo::add)
+                .def("add_tensor", &Foo::add_tensor)
+                .def("__eq__", &Foo::eq)
+                .def("combine", &Foo::combine)
+                .def_pickle(
+                    [](c10::intrusive_ptr<Foo> self) { // __getstate__
+                      return std::vector<int64_t>{self->x, self->y};
+                    },
+                    [](std::vector<int64_t> state) { // __setstate__
+                      return c10::make_intrusive<Foo>(state[0], state[1]);
+                    })
+                .def_meta([](c10::intrusive_ptr<Foo> self) { // __get_metadata__
+                  return std::vector<int64_t>{self->x, self->y};
+                });
         # We could register a fake class FakeFoo in Python as follows:
-        @impl_abstract_class("_TorchScriptTesting::_Foo")
+        import torch
+
+        @torch._library.impl_abstract_class("_TorchScriptTesting::_Foo")
         class FakeFoo:
             def __init__(self, x, y):
                 self.x = x
@@ -101,12 +102,13 @@ def impl_abstract_class(qualname, fake_class=None):
 
     Examples:
         # CPU impl in test_custom_class_registration.cpp:
-        # at::Tensor takes_foo(c10::intrusive_ptr<Foo> foo, at::Tensor x) {
-        #   return foo->add_tensor(x);
-        # }
-        # TORCH_LIBRARY_IMPL(_TorchScriptTesting, CPU, m) {
-        #   m.impl("takes_foo", takes_foo);
-        # }
+
+        at::Tensor takes_foo(c10::intrusive_ptr<Foo> foo, at::Tensor x) {
+          return foo->add_tensor(x);
+        }
+        TORCH_LIBRARY_IMPL(_TorchScriptTesting, CPU, m) {
+          m.impl("takes_foo", takes_foo);
+        }
 
         # abstract impl in torchbind_impls.py:
         @torch.library.impl_abstract("_TorchScriptTesting::takes_foo")
