@@ -799,7 +799,7 @@ class Source:
         return self.guard_source().is_nn_module()
 
     def subguards_allowed(self):
-        """ True if you can guard on attributes of this """
+        """True if you can guard on attributes of this"""
         return self.guard_source() != GuardSource.SYNTHETIC_LOCAL
 
 
