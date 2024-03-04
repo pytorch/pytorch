@@ -835,7 +835,9 @@ def cached_autotune(
         if config.use_autotune_remote_cache:
             backend_hash = inductor_meta.get("backend_hash", None)
             if backend_hash is not None:
-                key = backend_hash + "autotune-best-config"
+                key = backend_hash + configs_hash + "autotune-best-config"
+                key = hashlib.sha256(key.encode("utf-8")).hexdigest()
+
                 if config.is_fbcode():
                     remote_cache = (
                         triton.runtime.fb_memcache.FbMemcacheRemoteCacheBackend(
