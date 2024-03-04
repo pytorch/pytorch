@@ -23,6 +23,7 @@ from torch._subclasses.meta_utils import (
     assert_eq,
     assert_metadata_eq,
     is_sparse_any,
+    is_sparse_compressed,
     MetaConverter,
 )
 from torch._utils import render_call
@@ -1057,6 +1058,8 @@ class FakeTensorMode(TorchDispatchMode):
                     raise _BypassDispatchCache("constant attribute")
                 if arg.is_sparse:
                     raise _BypassDispatchCache("sparse tensor")
+                if is_sparse_compressed(arg):
+                    raise _BypassDispatchCache("sparse compressed tensor")
                 result.append(extract_tensor_metadata(arg))
             elif isinstance(arg, torch.Tensor):
                 raise _BypassDispatchCache("non-fake tensor")
@@ -1098,6 +1101,9 @@ class FakeTensorMode(TorchDispatchMode):
         # TODO: support caching sparse outputs?
         if output.is_sparse:
             raise _BypassDispatchCache("sparse output")
+
+        if is_sparse_compressed(output):
+            raise _BypassDispatchCache("sparse compressed output")
 
         # Can an in-place op really reference a kwarg? If so, then we need
         # to extend the implementation to handle it.
@@ -1242,18 +1248,16 @@ class FakeTensorMode(TorchDispatchMode):
                     f" Please add a __get_metadata__ method to the script object with .def_meta()."
                 )
 
-            if not torch._library.abstract_impl_class.global_abstract_class_registry.has_impl(
+            fake_class = torch._library.abstract_impl_class.find_fake_impl(
                 full_qualname
-            ):
+            )
+            if fake_class is None:
                 raise RuntimeError(
                     f" ScriptObject's {full_qualname} haven't registered a fake class. If {func} is supposed "
                     f" to be exported as a node in graph and preserve the script obj as input to the node, "
                     f" please use impl_abstract_class to register a fake class for the script obj. Otherwise,"
                     f" consider disabling fake modes for the operator by callig it with ctx manager maybe_disable_fake_tensor_mode."
                 )
-            fake_class = torch._library.abstract_impl_class.global_abstract_class_registry.get_impl(
-                full_qualname
-            )
             if not hasattr(fake_class, "from_real"):
                 raise RuntimeError(
                     f"ScriptObject {full_qualname}'s corresponding fake_class {fake_class}"
