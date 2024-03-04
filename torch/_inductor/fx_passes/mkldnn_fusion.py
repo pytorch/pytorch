@@ -771,7 +771,9 @@ if torch._C._has_mkldnn:
                         for val in reshape_2[:-1]
                     ],
                 )
-                == reshape_1[0].meta.get("val")
+                == reshape_1[0]
+                if isinstance(reshape_1[0], int)
+                else reshape_1[0].meta.get("val")
             )
 
             if can_remove_reshape:
