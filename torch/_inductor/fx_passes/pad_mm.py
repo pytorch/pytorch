@@ -90,7 +90,10 @@ def _result_layout_affects_graph_output(
             return True
         if node.op != "call_function":
             return False
-        if not is_start_node and not is_view(node.target):
+        if not is_start_node and (
+            (not isinstance(node.target, torch._ops.OpOverload))
+            or (not is_view(node.target))
+        ):
             return False
         if node.users is not None and len(node.users) > 0:
             for n in node.users:
