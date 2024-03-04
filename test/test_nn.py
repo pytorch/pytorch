@@ -5025,11 +5025,11 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         running_var = torch.rand(1)
         with self.assertRaisesRegex(RuntimeError,
                                     re.escape("both input.size(1) and input.numel() need to be greater than 0, "
-                                              "got input.size(1) =  0 , input.numel() =  0")):
+                                              "got input.size(1) = 0, input.numel() = 0")):
             torch.batch_norm_update_stats(input=input1, momentum=0.0, running_mean=running_mean, running_var=running_var)
         with self.assertRaisesRegex(RuntimeError,
                                     re.escape("both input.size(1) and input.numel() need to be greater than 0, "
-                                              "got input.size(1) =  1 , input.numel() =  0")):
+                                              "got input.size(1) = 1, input.numel() = 0")):
             torch.batch_norm_update_stats(input=input2, momentum=0.0, running_mean=running_mean, running_var=running_var)
 
     def test_pairwise_distance(self):
