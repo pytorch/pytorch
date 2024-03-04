@@ -10935,10 +10935,6 @@ op_db: List[OpInfo] = [
                    promotes_int_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    skips=(
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                    active_if=TEST_WITH_ROCM, device_type='cuda', dtypes=[torch.complex64, torch.complex128]),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                    active_if=TEST_WITH_ROCM, device_type='cuda', dtypes=[torch.complex128]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
@@ -10996,8 +10992,6 @@ op_db: List[OpInfo] = [
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                    active_if=TEST_WITH_ROCM, device_type='cuda', dtypes=[torch.complex128]),
                    )),
     OpInfo('allclose',
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
@@ -18477,9 +18471,6 @@ op_db: List[OpInfo] = [
                          dtypes=[torch.bool]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                          dtypes=[torch.bool]),
-            # ROCm generates -inf+infj instead of nan+infj for complex64 for some of the results
-            DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                         dtypes=[torch.complex64], active_if=TEST_WITH_ROCM),
             # Expected failure: torch.jiterator_unary is not a valid op
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # Skip Nvfuser
@@ -20275,14 +20266,6 @@ python_ref_db = [
         decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
-                         'test_reference_numerics_small',
-                         active_if=TEST_WITH_ROCM, device_type='cuda',
-                         dtypes=[torch.complex64, torch.complex128]),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
-                         'test_reference_numerics_extremal',
-                         active_if=TEST_WITH_ROCM, device_type='cuda',
-                         dtypes=[torch.complex128]),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
                          device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
@@ -20323,10 +20306,6 @@ python_ref_db = [
                          'test_reference_numerics_large',
                          device_type='cuda', dtypes=[torch.cfloat],
                          active_if=IS_WINDOWS),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
-                         'test_reference_numerics_extremal',
-                         active_if=TEST_WITH_ROCM, device_type='cuda',
-                         dtypes=[torch.complex128]),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
