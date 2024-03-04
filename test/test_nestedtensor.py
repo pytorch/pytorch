@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     skipIfSlowGradcheckEnv,
     markDynamoStrictTest,
     xfailIfTorchDynamo,
+    skipIfTorchDynamo,
     subtest,
     TEST_WITH_ROCM,
     TestCase,
@@ -3714,6 +3715,7 @@ class TestNestedTensorSubclass(TestCase):
 
     # Note 1: Math fallback doesn't work with bfloat16 on CUDA
     # Note 2: ROCm doesn't support flash attention or mem_efficient attention for NT
+    @xfailIfTorchDynamo
     @unittest.skipIf(
         TEST_WITH_ROCM,
         "ROCm doesn't support flash attention or mem_efficient attention for NT",
@@ -3831,6 +3833,7 @@ class TestNestedTensorSubclass(TestCase):
             if not (str(device).startswith("cuda") and dtype == torch.bfloat16):
                 check_forward_backward()
 
+    @skipIfTorchDynamo("skipped until proper view support for NT")
     @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     # Guarding with sqrt() doesn't work on ROCm?
@@ -3904,6 +3907,7 @@ class TestNestedTensorSubclass(TestCase):
         output_dense = F.scaled_dot_product_attention(query._values, key._values, value._values)
         self.assertEqual(output._values, output_dense)
 
+    @skipIfTorchDynamo("skipped until proper view support for NT")
     @onlyCUDA
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,

@@ -75,7 +75,7 @@ DescriptorSet Context::submit_compute_prologue(
 void Context::submit_compute_epilogue(
     CommandBuffer& command_buffer,
     const DescriptorSet& descriptors,
-    const PipelineBarrier& pipeline_barrier,
+    PipelineBarrier& pipeline_barrier,
     const utils::uvec3& global_workgroup_size) {
   command_buffer.bind_descriptors(descriptors.get_bind_handle());
   command_buffer.insert_barrier(pipeline_barrier);
@@ -98,6 +98,11 @@ void Context::flush() {
 
   command_pool_.flush();
   descriptor_pool_.flush();
+
+  // If there is an existing command buffer, invalidate it
+  if (cmd_) {
+    cmd_.invalidate();
+  }
 
   std::lock_guard<std::mutex> bufferlist_lock(buffer_clearlist_mutex_);
   std::lock_guard<std::mutex> imagelist_lock(image_clearlist_mutex_);

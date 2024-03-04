@@ -174,7 +174,14 @@ class ParamBufferSource(AttrSource):
 
 
 # This source is intended to be used in places where a source is needed but it is expected
-# that the symbol will be simplified out later on. Guarding on this is an error.
+# that the symbol will be simplified out later on. Symbols with ephemeral sources are
+# prioritized to be simplified out when e.g. compared against a symbol without an ephemeral
+# source. Guarding on this source is an error.
+#
+# Example: During subclass view fake-ification, any close-over ViewFunc state should be
+# symbolicized / fake-ified to avoid invalid specialization during view replay. This source
+# is useful for symbols utilized in the middle of the view chain that are not expected to be
+# present within the final view shape metadata.
 @dataclasses.dataclass(frozen=True)
 class EphemeralSource(Source):
     desc: Optional[str] = None
@@ -502,6 +509,15 @@ class ShapeEnvSource(Source):
 
     def guard_source(self):
         return GuardSource.SHAPE_ENV
+
+
+@dataclasses.dataclass(frozen=True)
+class BackwardStateSource(Source):
+    def name(self):
+        return ""
+
+    def guard_source(self):
+        return GuardSource.BACKWARD_STATE
 
 
 def is_from_local_source(source: Source, *, allow_cell_or_freevar=True):
