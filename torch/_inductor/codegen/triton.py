@@ -905,6 +905,20 @@ class TritonKernelOverrides(TritonOverrides):
             f"tl.load({var} + {V.kernel.args.seed_offset('load_seed_offset', offset)})"
         )
 
+    @staticmethod
+    def frexp(x):
+        cache_key = f"frexp({x})"
+        if cache_key in V.kernel.cse.cache:
+            return V.kernel.cse.cache[cache_key]
+
+        mantissa = V.kernel.cse.newvar()
+        exponent = V.kernel.cse.newvar()
+        V.kernel.compute.writeline(
+            f"{mantissa}, {exponent} = triton_helpers.frexp({x})"
+        )
+        V.kernel.cse.cache[cache_key] = (mantissa, exponent)
+        return (mantissa, exponent)
+
 
 # Use mypy to check protocol implemented correctly
 def _typecheck_TritonKernelOverrides(h: TritonKernelOverrides) -> OpsHandler[str]:
@@ -1277,6 +1291,7 @@ class TritonKernel(Kernel):
 
         self.simplify_indexing = simplify_indexing
         self.code_hash = None
+        self.triton_meta: Optional[Dict[str, object]] = None
 
     def need_numel_args(self):
         r"""
@@ -2755,6 +2770,16 @@ class TritonKernel(Kernel):
             # argdefs.append(f"{tree.prefix}numel: tl.constexpr")
         triton_meta["configs"] = [config_of(signature)]
 
+        # Triton compiler includes equal_to_1 args into constants even
+        # when they are not constexpr. otherwise there may be a segfault
+        # during launching the Inductor-compiled Triton kernel.
+        # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
+        # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
+        for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
+            triton_meta["constants"][arg_num] = 1  # type: ignore[index]
+
+        self.triton_meta = triton_meta
+
         for tree in self.range_trees:
             if tree.prefix == "r" and self.persistent_reduction:
                 # RBLOCK for persistent_reduction is defined in codegen_static_numels
@@ -2917,6 +2942,7 @@ class TritonKernel(Kernel):
             cuda=True,
             triton=True,
             grid_fn=self._get_grid_fn(),
+            triton_meta=self.triton_meta,
         )
 
         if self.args.workspace_arg is not None:
