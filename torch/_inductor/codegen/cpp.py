@@ -3860,7 +3860,7 @@ class CppScheduling(BaseScheduling):
         pass
 
     def flush(self):
-        # finalize the remaining kernels lazily
+        # finalize the remaining lazy kernels
         self.finalize_lazy_kernels()
 
         self.kernel_group.codegen_define_and_call(V.graph.wrapper_code)
