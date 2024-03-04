@@ -528,8 +528,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
 
   const bool use_cudnn = (
       input.is_cuda()
-      && input.scalar_type() != at::kBFloat16 && weight.scalar_type() != at::kBFloat16
-      && (input.scalar_type() != at::kHalf
+      && weight.scalar_type() != at::kBFloat16
+      && ((input.scalar_type() != at::kHalf && input.scalar_type() != at::kBFloat16)
         || weight.scalar_type() == at::kFloat)
       && weight.defined() && bias.defined()
       && ((running_mean.defined() && running_var.defined())
