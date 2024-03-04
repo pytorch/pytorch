@@ -4,6 +4,7 @@ import math
 import numbers
 import operator
 import pickle
+import copy
 import sys
 import sympy
 import tempfile
@@ -638,6 +639,15 @@ class TestFXExperimental(JitTestCase):
 
                 torch.testing.assert_close(loaded(x), mttm(x))
 
+                # Test serialization/deserialization of copy
+                gm_copy = copy.deepcopy(gm)
+                with open(f'{tmp_dir}/meta_module_copy.pkl', 'wb') as f:
+                    pickle.dump(gm_copy, f)
+
+                with open(f'{tmp_dir}/meta_module_copy.pkl', 'rb') as f:
+                    loaded_copy = pickle.load(f)
+
+                torch.testing.assert_close(loaded_copy(x), mttm(x))
 
     def test_call_to_assert_with_msg(self):
         class M(torch.nn.Module):

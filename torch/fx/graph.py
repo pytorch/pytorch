@@ -866,7 +866,7 @@ class Graph:
         nodes or other parts of the Graph from a custom GraphModule implementation.
         """
         memo = memo if memo else {}
-        g = Graph(tracer_cls=self._tracer_cls)
+        g = Graph(tracer_cls=self._tracer_cls, tracer_extras=copy.deepcopy(self._tracer_extras))
         output_vals = g.graph_copy(self, val_map=memo, return_output_node=True)
         g._codegen = copy.deepcopy(self._codegen)
         assert isinstance(output_vals, tuple)
