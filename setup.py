@@ -1092,7 +1092,7 @@ def main():
         "networkx",
         "jinja2",
         "fsspec",
-        'mkl>=2021.1.1,<=2021.4.0; platform_system == "Windows" and platform_machine == "x86_64"',
+        'mkl>=2021.1.1,<=2021.4.0; platform_system == "Windows"',
     ]
 
     # Parse the command line and check the arguments before we proceed with
