@@ -92,36 +92,28 @@ def _detect_functional_mode():
 
     return pre_dispatch_functional_mode
 
+def _unset_infra_mode(key):
+    from torch._ops import unset_mode_pre_dispatch, _get_dispatch_mode_pre_dispatch
+    pre_dispatch_mode = _get_dispatch_mode_pre_dispatch(key)
+    post_dispatch_mode = torch._C._get_dispatch_mode(key)
+    if pre_dispatch_mode and post_dispatch_mode:
+        raise AssertionError("Can't have active infra mode on both pre and post dispatch mode stack")
+
+    if pre_dispatch_mode:
+        mode = unset_mode_pre_dispatch(key)
+        return mode
+    if post_dispatch_mode:
+        return torch._C._unset_dispatch_mode(key)
+
 
 def _disable_infra_mode(key):
     assert key in (torch._C._TorchDispatchModeKey.FUNCTIONAL, torch._C._TorchDispatchModeKey.PROXY)
-
-    from torch._ops import unset_mode_pre_dispatch
-
-    old_mode_from_aot_dispatch = torch._C._unset_dispatch_mode(
-        key
-    )
-    old_mode_from_pre_dispatch = unset_mode_pre_dispatch(
-        key
-    )
-
-    if old_mode_from_aot_dispatch:
-        assert old_mode_from_pre_dispatch is None, "Can only have one mode available"
-    if old_mode_from_pre_dispatch:
-        assert old_mode_from_aot_dispatch is None, "Can only have one mode available"
-
+    mode_unset = _unset_infra_mode(key)
     try:
-        if old_mode_from_aot_dispatch:
-            yield old_mode_from_aot_dispatch
-        elif old_mode_from_pre_dispatch:
-            yield old_mode_from_pre_dispatch
-        else:
-            yield
+        yield mode_unset
     finally:
-        if old_mode_from_aot_dispatch is not None:
-            torch._C._set_dispatch_mode(old_mode_from_aot_dispatch)
-        if old_mode_from_pre_dispatch is not None:
-            _push_mode(old_mode_from_pre_dispatch)
+        if mode_unset is not None:
+            _push_mode(mode_unset)
 
 
 def _get_current_dispatch_mode_stack():

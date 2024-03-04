@@ -33,6 +33,7 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
     _disable_infra_mode,
     _push_mode,
+    _unset_infra_mode,
 )
 
 from ._backward_state import BackwardState
@@ -42,7 +43,6 @@ from torch.fx import Proxy
 import torch.fx.traceback as fx_traceback
 from torch import SymInt, SymFloat, SymBool
 from torch.utils.weak import WeakTensorKeyDictionary, WeakIdKeyDictionary, _WeakHashRef
-from torch._ops import unset_mode_pre_dispatch, _set_mode_pre_dispatch, _get_dispatch_mode_pre_dispatch
 
 __all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "py_sym_types", "get_innermost_proxy_mode"]
 
@@ -261,17 +261,6 @@ def maybe_disable_fake_tensor_mode():
     # TODO: figure out if this API generally makes sense and bake it into the
     # library
     return unset_fake_temporarily()
-
-def _unset_proxy_mode():
-    pre_dispatch_proxy = _get_dispatch_mode_pre_dispatch(torch._C._TorchDispatchModeKey.PROXY)
-    post_dispatch_proxy = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
-    if pre_dispatch_proxy and post_dispatch_proxy:
-        raise AssertionError("Can't have active proxy mode on both pre and post dispatch mode stack")
-
-    if pre_dispatch_proxy:
-        mode = unset_mode_pre_dispatch(torch._C._TorchDispatchModeKey.PROXY)
-        return mode
-    return torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
 
 
 @dataclass
@@ -654,7 +643,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self._managers.append(m)
         m.__enter__()
         # Stash and store the previous proxy mode (there may or may not be one)
-        maybe_prev_proxy_mode = _unset_proxy_mode()
+        maybe_prev_proxy_mode = _unset_infra_mode(torch._C._TorchDispatchModeKey.PROXY)
         self.enter_stack.append(maybe_prev_proxy_mode)
         return super().__enter__()
 
