@@ -2946,18 +2946,24 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "getitem_manager",
           &GuardManager::get_child_manager<GetItemGuardAccessor>,
+          py::arg("key"),
+          py::arg("example_value"),
           py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
       .def(
           "dict_getitem_manager",
           &GuardManager::get_child_manager<DictGetItemGuardAccessor>,
+          py::arg("key"),
+          py::arg("example_value"),
           py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
       .def(
           "globals_dict_manager",
           &GuardManager::get_child_manager<GlobalsGuardAccessor>,
+          py::arg("f_globals"),
+          py::arg("example_value"),
           py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
@@ -2969,30 +2975,39 @@ PyObject* torch_c_dynamo_guards_init() {
             return self.get_child_manager<TypeGuardAccessor>(
                 unique_key, example_value);
           },
+          py::arg("example_value"),
           py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
       .def(
           "tuple_iterator_getitem_manager",
           &GuardManager::get_child_manager<TupleIteratorGetItemAccessor>,
+          py::arg("index"),
+          py::arg("example_value"),
           py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
       .def(
           "global_weakref_manager",
           &GuardManager::get_child_manager<GlobalWeakRefGuardAccessor>,
+          py::arg("global_name"),
+          py::arg("example_value"),
           py::return_value_policy::reference)
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
       .def(
           "lambda_manager",
           &GuardManager::get_child_manager<PythonLambdaGuardAccessor>,
+          py::arg("python_lambda"),
+          py::arg("example_value"),
           py::return_value_policy::reference)
       // return by reference because C++ GuardManager has the ownership of
       // accessors and guard managers
       .def(
           "getattr_manager",
           &GuardManager::get_child_manager<GetAttrGuardAccessor>,
+          py::arg("attr"),
+          py::arg("example_value"),
           py::return_value_policy::reference);
 
   // Root Guard Manager
@@ -3071,6 +3086,8 @@ PyObject* torch_c_dynamo_guards_init() {
             return self.get_child_manager<GetAttrGuardAccessor>(
                 attr_name, example_value);
           },
+          py::arg("attr"),
+          py::arg("example_value"),
           py::return_value_policy::reference);
 
   // Dict key value guard Manager
