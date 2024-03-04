@@ -187,7 +187,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
   const size_t ntensors = tensors.size();
   int max_chunks_per_tensor = -1;
 
-  for (int t = 0; t < ntensors; t++) {
+  for (size_t t = 0; t < ntensors; t++) {
     int max_chunks_this_tensor =
         (tensors[t].numel() + kChunkSize - 1) / kChunkSize;
     if (max_chunks_this_tensor > max_chunks_per_tensor) {
@@ -201,7 +201,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
 
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(ntensors);
-  for (int i = 0; i < ntensors; i++) {
+  for (size_t i = 0; i < ntensors; i++) {
     vec_res.push_back(at::empty({}, options));
   }
 
@@ -225,14 +225,14 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
           auto stream = at::cuda::getCurrentCUDAStream();
 
           const size_t num_kernels = ceil_div(ntensors, MAX_TENSORS_PER_KERNEL);
-          for (auto i = 0; i < num_kernels; i++) {
+          for (size_t i = 0; i < num_kernels; i++) {
             const size_t num_tensors_this_kernel =
                 (i < num_kernels - 1 || ntensors % MAX_TENSORS_PER_KERNEL == 0)
                 ? MAX_TENSORS_PER_KERNEL
                 : (ntensors % MAX_TENSORS_PER_KERNEL);
 
             TensorListAddresses addr_struct;
-            for (auto j = 0; j < num_tensors_this_kernel; j++) {
+            for (size_t j = 0; j < num_tensors_this_kernel; j++) {
               addr_struct.addresses[j] = vec_res[i * MAX_TENSORS_PER_KERNEL + j]
                                              .mutable_data_ptr<scalar_t>();
             }
