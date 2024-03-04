@@ -316,7 +316,8 @@ Tensor FunctionalInverses::_nested_get_values_inverse(const Tensor& base, const 
   auto offsets = at::_nested_get_offsets(base);
   auto lengths = at::_nested_get_lengths(base);
   auto ragged_idx = at::_nested_get_ragged_idx(base);
-  auto nt = at::_nested_view_from_jagged(mutated_view, offsets, base, lengths, ragged_idx);
+  auto dummy = at::_nested_get_jagged_dummy(base);
+  auto nt = at::_nested_view_from_jagged(mutated_view, offsets, dummy, lengths, ragged_idx);
 
   if (inverse_return_mode != InverseReturnMode::NeverView) {
     return nt;

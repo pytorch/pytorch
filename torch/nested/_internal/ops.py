@@ -1,6 +1,7 @@
 import functools
 import math
 import operator
+import warnings
 
 import torch
 from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
@@ -1074,3 +1075,19 @@ def _nested_get_ragged_idx(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
     return inp._ragged_idx
+
+
+# Make the dummy available on the C++ side.
+@register_jagged_func(torch.ops.aten._nested_get_jagged_dummy.default, "self: any")
+def _nested_get_jagged_dummy(func, *args, **kwargs):
+    from torch.nested._internal.nested_tensor import _nt_view_dummy
+
+    return _nt_view_dummy
+
+
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=UserWarning)
+    aten = torch.library.Library("aten", "IMPL")
+    aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "CPU")
+    aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "CUDA")
+    aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "Meta")
