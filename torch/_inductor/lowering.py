@@ -3890,6 +3890,92 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
     return x_out, ceil_mode
 
 
+def make_pooling_inner_func(update_val, window_size):
+    def inner_func(idx):
+        retval = None
+        window_ranges = [range(ws) for ws in window_size]
+        for increments in itertools.product(*window_ranges):
+            retval = update_val(retval, idx, increments)
+        return retval
+
+    return inner_func
+
+
+def make_pooling_inner_func_multi_return(update_all, window_size, n_returns):
+    inner_all = make_pooling_inner_func(update_all, window_size)
+
+    def wrap_with_getitem(f, item):
+        def wrapped(idx):
+            return f(idx)[item]
+
+        return wrapped
+
+    inner_functions = [wrap_with_getitem(inner_all, i) for i in range(n_returns)]
+
+    return inner_functions
+
+
+def make_max_pool(device, dtype, ranges, getter, window_size):
+    def update(maxes, idx, increments):
+        val, index = getter(idx, increments)
+        if maxes is None:
+            return val, index
+        max_val, max_index = maxes
+        r_index = ops.where(
+            ops.or_(ops.gt(val, max_val), ops.isnan(val)), index, max_index
+        )
+        r_val = ops.maximum(val, max_val)
+        return r_val, r_index
+
+    inner_val, inner_index = make_pooling_inner_func_multi_return(
+        update, window_size, 2
+    )
+    return (
+        Pointwise.create(
+            device=device,
+            dtype=dtype,
+            inner_fn=inner_val,
+            ranges=ranges,
+        ),
+        Pointwise.create(
+            device=device,
+            dtype=torch.int64,
+            inner_fn=inner_index,
+            ranges=ranges,
+        ),
+    )
+
+
+def make_avg_pool(*, device, dtype, ranges, getter, window_size, divisor_override=None):
+    def update_total(totals, idx, increments):
+        v, c = getter(idx, increments)
+        if totals is None:
+            return v, c
+        total_v, total_c = totals
+        return ops.add(total_v, v), ops.add(total_c, c)
+
+    sum_val, sum_count = make_pooling_inner_func_multi_return(
+        update_total, window_size, 2
+    )
+    if divisor_override is not None:
+
+        def avg_func(idx):
+            scale = ops.constant(divisor_override, dtype)
+            return ops.truediv(sum_val(idx), scale)
+
+    else:
+
+        def avg_func(idx):
+            return ops.truediv(sum_val(idx), sum_count(idx))
+
+    return Pointwise.create(
+        device=device,
+        dtype=dtype,
+        inner_fn=avg_func,
+        ranges=ranges,
+    )
+
+
 fallback_max_pool2d_with_indices = fallback_handler(
     aten.max_pool2d_with_indices.default,
     add_to_fallback_set=False,
@@ -3919,15 +4005,10 @@ def max_pool2d_with_indices(
     assert len(x.get_size()) in (3, 4)
 
     x.realize_hint()
-    *batch, h, w = x.get_size()
+    *batch, in_h, in_w = x.get_size()
 
-    h_out, ceil_mode1 = pooling_size(h, 0, kernel_size, stride, padding, ceil_mode)
-    w_out, ceil_mode2 = pooling_size(w, 1, kernel_size, stride, padding, ceil_mode)
-
-    if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
-        x_loader = constant_boundary_condition_2d(x, float("-inf"))
-    else:
-        x_loader = x.make_loader()
+    h_out, ceil_mode1 = pooling_size(in_h, 0, kernel_size, stride, padding, ceil_mode)
+    w_out, ceil_mode2 = pooling_size(in_w, 1, kernel_size, stride, padding, ceil_mode)
 
     new_size = list(batch) + [h_out, w_out]
     window_size = kernel_size[0] * kernel_size[1]
@@ -3938,43 +4019,352 @@ def max_pool2d_with_indices(
             x, kernel_size, stride, padding, dilation, ceil_mode
         )
 
-    def fn(idx, return_index):
-        *prefix, bh, bw = idx
-        maxval = None
-        maxindex = None
-        for ih, iw in itertools.product(range(kernel_size[0]), range(kernel_size[1])):
-            ih = bh * stride[0] + ih - padding[0]
-            iw = bw * stride[1] + iw - padding[1]
-            val = x_loader([*prefix, ih, iw])
-            if return_index:
-                index = ops.index_expr(ih * w + iw, torch.int64)
-                if maxindex is None:
-                    maxindex = index
-                else:
-                    maxindex = ops.where(ops.gt(val, maxval), index, maxindex)
-            if maxval is None:
-                maxval = val
-            else:
-                maxval = ops.maximum(val, maxval)
-        if return_index:
-            return maxindex
-        else:
-            return maxval
+    if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
+        x_loader = constant_boundary_condition_2d(x, float("-inf"))
+    else:
+        x_loader = x.make_loader()
 
-    r1 = Pointwise.create(
+    # logic for loading the value and computing the index within the loop over
+    # the pool range, make_max_pool builds everything else around it
+    def getter(idx, increments):
+        *prefix, bh, bw = idx
+        ih, iw = increments
+        h = bh * stride[0] + ih - padding[0]
+        w = bw * stride[1] + iw - padding[1]
+        return x_loader([*prefix, h, w]), ops.index_expr(h * in_w + w, torch.int64)
+
+    return make_max_pool(
         device=x.get_device(),
         dtype=x.get_dtype(),
-        inner_fn=functools.partial(fn, return_index=False),
         ranges=new_size,
+        getter=getter,
+        window_size=kernel_size,
     )
-    r2 = Pointwise.create(
+
+
+def pad_adaptive_loader(x, pad_val=0.0):
+    *_, h, w = x.get_size()
+    x_loader = x.make_loader()
+
+    def load(prefix, increments, start_indices, end_indices):
+        ih, iw = increments
+        h_start_index, w_start_index = start_indices
+        h_end_index, w_end_index = end_indices
+
+        mask = ops.and_(
+            ops.lt(
+                ops.index_expr(h_start_index + ih, torch.int64),
+                ops.index_expr(h_end_index, torch.int64),
+            ),
+            ops.lt(
+                ops.index_expr(w_start_index + iw, torch.int64),
+                ops.index_expr(w_end_index, torch.int64),
+            ),
+        )
+
+        return ops.masked(
+            mask,
+            lambda: x_loader([*prefix, h_start_index + ih, w_start_index + iw]),
+            pad_val,
+        )
+
+    return load
+
+
+def make_adaptive_pooling_limits(out_size, in_size):
+    def start_indices(idx):
+        *_, bh, bw = idx
+        in_h, in_w = in_size
+        out_h, out_w = out_size
+        h = FloorDiv((bh * in_h), out_h)
+        w = FloorDiv((bw * in_w), out_w)
+        return h, w
+
+    def end_indices(idx):
+        *_, bh, bw = idx
+        in_h, in_w = in_size
+        out_h, out_w = out_size
+        h = FloorDiv((bh + 1) * in_h + out_h - 1, out_h)
+        w = FloorDiv((bw + 1) * in_w + out_w - 1, out_w)
+        return h, w
+
+    return start_indices, end_indices
+
+
+fallback_adaptive_avg_pool2d = fallback_handler(
+    aten._adaptive_avg_pool2d.default, add_to_fallback_set=False
+)
+
+
+@register_lowering(aten._adaptive_avg_pool2d)
+def _adaptive_avg_pool2d(x, output_size):
+    assert isinstance(x, TensorBox)
+    assert len(output_size) == 2
+    x.realize_hint()
+
+    *batch, h_in, w_in = x.get_size()
+    # needed to compute the condition for fallback
+    h_in = V.graph.sizevars.evaluate_static_shape(h_in)
+    w_in = V.graph.sizevars.evaluate_static_shape(w_in)
+
+    h_out, w_out = output_size
+
+    # no-op if the same input and output
+    if h_in == h_out and w_in == w_out:
+        return clone(x)
+
+    if h_out == 0 or w_out == 0:
+        o_size = [*batch, h_out, w_out]
+        return empty(o_size, dtype=x.get_dtype(), device=x.get_device())
+
+    if h_in % h_out == 0 and w_in % w_out == 0:
+        kernel_size = [h_in // h_out, w_in // w_out]
+        return avg_pool2d(x, kernel_size)
+
+    h_kernel_max = ceildiv((h_in + h_out - 1), h_out)
+    w_kernel_max = ceildiv((w_in + w_out - 1), w_out)
+    window_size = h_kernel_max * w_kernel_max
+    if window_size > 25:
+        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
+        return fallback_adaptive_avg_pool2d(x, output_size)
+
+    start_indices, end_indices = make_adaptive_pooling_limits(
+        [h_out, w_out], [h_in, w_in]
+    )
+
+    x_loader = pad_adaptive_loader(x)
+    count_loader = pad_adaptive_loader(ones_like(x), 0.0)
+
+    def getter(idx, increments):
+        *prefix, bh, bw = idx
+        val = x_loader(prefix, increments, start_indices(idx), end_indices(idx))
+        count = count_loader(prefix, increments, start_indices(idx), end_indices(idx))
+        return val, count
+
+    return make_avg_pool(
+        dtype=x.get_dtype(),
         device=x.get_device(),
-        dtype=torch.int64,
-        inner_fn=functools.partial(fn, return_index=True),
-        ranges=new_size,
+        ranges=[*batch, h_out, w_out],
+        getter=getter,
+        window_size=[h_kernel_max, w_kernel_max],
     )
+
+
+fallback_adaptive_max_pool2d = fallback_handler(
+    aten.adaptive_max_pool2d.default, add_to_fallback_set=False
+)
+
+
+@register_lowering(aten.adaptive_max_pool2d)
+def adaptive_max_pool2d(x, output_size):
+    assert isinstance(x, TensorBox)
+    assert len(output_size) == 2
+    x.realize_hint()
+
+    *batch, h_in, w_in = x.get_size()
+    h_in = V.graph.sizevars.evaluate_static_shape(h_in)
+    w_in = V.graph.sizevars.evaluate_static_shape(w_in)
+
+    h_out, w_out = output_size
+
+    if h_out == 0 or w_out == 0:
+        o_size = [*batch, h_out, w_out]
+        return (
+            empty(o_size, dtype=x.get_dtype(), device=x.get_device()),
+            empty(o_size, dtype=torch.int64, device=x.get_device()),
+        )
+    if h_in % h_out == 0 and w_in % w_out == 0:
+        kernel_size = [h_in // h_out, w_in // w_out]
+        return max_pool2d_with_indices(x, kernel_size)
+
+    h_kernel_max = ceildiv((h_in + h_out - 1), h_out)
+    w_kernel_max = ceildiv((w_in + w_out - 1), w_out)
+
+    window_size = h_kernel_max * w_kernel_max
+    if window_size > 25:
+        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
+        return fallback_adaptive_max_pool2d(x, output_size)
+
+    start_indices, end_indices = make_adaptive_pooling_limits(
+        [h_out, w_out], [h_in, w_in]
+    )
+    loader = pad_adaptive_loader(x, pad_val=float("-inf"))
+
+    def getter(idx, increments):
+        *prefix, _, _ = idx
+        h_start, w_start = start_indices(idx)
+        ih, iw = increments
+        val = loader(prefix, increments, (h_start, w_start), end_indices(idx))
+        index = ops.index_expr((h_start + ih) * w_in + w_start + iw, torch.int64)
+        return val, index
+
+    return make_max_pool(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        ranges=[*batch, h_out, w_out],
+        getter=getter,
+        window_size=[h_kernel_max, w_kernel_max],
+    )
+
+
+fallback_fractional_max_pool2d = fallback_handler(
+    aten.fractional_max_pool2d.default, add_to_fallback_set=False
+)
+
+
+@register_lowering(aten.fractional_max_pool2d)
+def fractional_max_pool2d(x, kernel_size, output_size, random_samples):
+    x.realize_hint()
+    *batch, h_in, w_in = x.get_size()
+    in_size = [h_in, w_in]
+    h_kernel, w_kernel = kernel_size
+    h_out, w_out = output_size
+
+    if h_kernel * w_kernel >= 25:
+        return fallback_fractional_max_pool2d(
+            x, kernel_size, output_size, random_samples
+        )
+
+    def make_fractional_pooling_limits():
+        samples_loader = random_samples.make_loader()
+        samples_dtype = random_samples.get_dtype()
+
+        def pool_start_index(idx, dim):
+            *prefix, bh, bw = idx
+            sample = samples_loader([*prefix, dim])
+            i = ops.index_expr(bh if dim == 0 else bw, samples_dtype)
+            alpha = ops.index_expr(
+                (in_size[dim] - kernel_size[dim]) / (output_size[dim] - 1),
+                samples_dtype,
+            )
+            seq = ops.to_dtype(
+                ops.floor((i + sample) * alpha) - ops.floor(sample * alpha), torch.int64
+            )
+            seq_limit = ops.index_expr(output_size[dim] - 1, torch.int64)
+            mask = ops.lt(i, seq_limit)
+            default = ops.index_expr(in_size[dim] - kernel_size[dim], torch.int64)
+            return ops.indirect_indexing(
+                ops.where(mask, seq, default), in_size[dim], check=False
+            )
+
+        def start_indices(idx):
+            return pool_start_index(idx, 0), pool_start_index(idx, 1)
+
+        def end_indices(idx):
+            return (
+                pool_start_index(idx, 0) + kernel_size[0],
+                pool_start_index(idx, 1) + kernel_size[1],
+            )
+
+        return start_indices, end_indices
+
+    start_indices, end_indices = make_fractional_pooling_limits()
+
+    loader = pad_adaptive_loader(x, float("-inf"))
+
+    def getter(idx, increments):
+        *prefix, bh, bw = idx
+        h_start, w_start = start_indices(idx)
+        ih, iw = increments
+        val = loader(prefix, increments, (h_start, w_start), end_indices(idx))
+        index = ops.index_expr((h_start + ih) * w_in + w_start + iw, torch.int64)
+        return val, index
+
+    return make_max_pool(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        ranges=[*batch, h_out, w_out],
+        getter=getter,
+        window_size=[h_kernel, w_kernel],
+    )
+
+
+fallback_avg_pool2d = fallback_handler(
+    aten.avg_pool2d.default, add_to_fallback_set=False
+)
+
+
+@register_lowering(aten.avg_pool2d, type_promotion_kind=None)
+def avg_pool2d(
+    x,
+    kernel_size,
+    stride=(),
+    padding=0,
+    ceil_mode=False,
+    count_include_pad=True,
+    divisor_override=None,
+):
+    if not stride:
+        stride = kernel_size
+    if not padding:
+        padding = [0, 0]
+    kernel_size = pad_listlike(kernel_size, 2)
+    stride = pad_listlike(stride, 2)
+    padding = pad_listlike(padding, 2)
+
+    assert isinstance(x, TensorBox)
+    assert len(kernel_size) == 2
+    assert len(stride) == 2
+    assert len(padding) == 2
+    assert len(x.get_size()) in (3, 4)
+
+    window_size = kernel_size[0] * kernel_size[1]
+    if window_size > 25:
+        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
+        return fallback_avg_pool2d(
+            x,
+            kernel_size,
+            stride,
+            padding,
+            ceil_mode,
+            count_include_pad,
+            divisor_override,
+        )
+
+    x.realize_hint()
+    *batch, h, w = x.get_size()
+
+    h_out, ceil_mode1 = pooling_size(h, 0, kernel_size, stride, padding, ceil_mode)
+    w_out, ceil_mode2 = pooling_size(w, 1, kernel_size, stride, padding, ceil_mode)
+
+    if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
+        x_loader = constant_boundary_condition_2d(x, 0.0)
+        had_padding = True
+    else:
+        x_loader = x.make_loader()
+        had_padding = False
+
+    ones_loader = constant_boundary_condition_2d(
+        ones_like(x), 0.0, padding if count_include_pad else None
+    )
+
+    # TODO: verify CSE handles when 2nd return is never used for anything
+    def getter(idx, increments):
+        *prefix, bh, bw = idx
+        ih, iw = increments
+        ih = bh * stride[0] + ih - padding[0]
+        iw = bw * stride[1] + iw - padding[1]
+        return x_loader([*prefix, ih, iw]), ones_loader([*prefix, ih, iw])
+
+    # default to a constant denomenator (1/window_size)
+    scale = window_size
+    if had_padding:
+        # 2nd return of getter is built into a sum function to compute the denominator
+        scale = None
+
+    # Highest priority
+    if divisor_override:
+        scale = divisor_override
+
     # TODO(jansel): should we force these to be realized?
-    return r1, r2
+    return make_avg_pool(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        ranges=[*batch, h_out, w_out],
+        getter=getter,
+        divisor_override=scale,
+        window_size=kernel_size,
+    )
 
 
 fallback_max_pool2d_with_indices_backward = fallback_handler(
@@ -4141,363 +4531,6 @@ def max_pool2d_with_indices_backward(
     )
 
 
-def pad_adaptive_loader(x, pad_val=0.0):
-    *_, h, w = x.get_size()
-    x_loader = x.make_loader()
-
-    def load(prefix, increments, start_indices, end_indices):
-        ih, iw = increments
-        h_start_index, w_start_index = start_indices
-        h_end_index, w_end_index = end_indices
-
-        mask = ops.and_(
-            ops.lt(
-                ops.index_expr(h_start_index + ih, torch.int64),
-                ops.index_expr(h_end_index, torch.int64),
-            ),
-            ops.lt(
-                ops.index_expr(w_start_index + iw, torch.int64),
-                ops.index_expr(w_end_index, torch.int64),
-            ),
-        )
-
-        return ops.masked(
-            mask,
-            lambda: x_loader([*prefix, h_start_index + ih, w_start_index + iw]),
-            pad_val,
-        )
-
-    return load
-
-
-def _adaptive_pooling_idx_sum(kernel_maxes, start_index_fns, end_index_fns):
-    h_start_index_fn, w_start_index_fn = start_index_fns
-    h_end_index_fn, w_end_index_fn = end_index_fns
-
-    def fn_sum(idx, loader):
-        *prefix, bh, bw = idx
-
-        h_start_index = h_start_index_fn(bh)
-        h_end_index = h_end_index_fn(bh)
-
-        w_start_index = w_start_index_fn(bw)
-        w_end_index = w_end_index_fn(bw)
-
-        total = None
-        for ih, iw in itertools.product(range(kernel_maxes[0]), range(kernel_maxes[1])):
-            val = loader(
-                prefix,
-                [ih, iw],
-                [h_start_index, w_start_index],
-                [h_end_index, w_end_index],
-            )
-            if total is None:
-                total = val
-            else:
-                total = ops.add(val, total)
-        return total
-
-    return fn_sum
-
-
-fallback_adaptive_avg_pool2d = fallback_handler(
-    aten._adaptive_avg_pool2d.default, add_to_fallback_set=False
-)
-
-
-@register_lowering(aten._adaptive_avg_pool2d)
-def _adaptive_avg_pool2d(x, output_size):
-    assert isinstance(x, TensorBox)
-    assert len(output_size) == 2
-    x.realize_hint()
-
-    *batch, h_in, w_in = x.get_size()
-
-    h_in = V.graph.sizevars.evaluate_static_shape(h_in)
-    w_in = V.graph.sizevars.evaluate_static_shape(w_in)
-
-    h_out, w_out = output_size
-
-    # no-op if the same input and output
-    if h_in == h_out and w_in == w_out:
-        return clone(x)
-
-    if h_out == 0 or w_out == 0:
-        o_size = [*batch, h_out, w_out]
-        return empty(o_size, dtype=x.get_dtype(), device=x.get_device())
-    if h_in % h_out == 0 and w_in % w_out == 0:
-        kernel_size = [h_in // h_out, w_in // w_out]
-        return avg_pool2d(x, kernel_size)
-
-    h_kernel_max = ceildiv((h_in + h_out - 1), h_out)
-    w_kernel_max = ceildiv((w_in + w_out - 1), w_out)
-
-    new_size = list(batch) + [h_out, w_out]
-    dtype = x.get_dtype()
-
-    def start_index(index, out_dim, inp_dim):
-        return FloorDiv((index * inp_dim), out_dim)
-
-    def end_index(index, out_dim, inp_dim):
-        return FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
-
-    h_start_index = functools.partial(start_index, out_dim=h_out, inp_dim=h_in)
-    h_end_index = functools.partial(end_index, out_dim=h_out, inp_dim=h_in)
-
-    w_start_index = functools.partial(start_index, out_dim=w_out, inp_dim=w_in)
-    w_end_index = functools.partial(end_index, out_dim=w_out, inp_dim=w_in)
-
-    window_size = h_kernel_max * w_kernel_max
-    if window_size > 25:
-        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
-        return fallback_adaptive_avg_pool2d(x, output_size)
-
-    fn_sum = _adaptive_pooling_idx_sum(
-        [h_kernel_max, w_kernel_max],
-        [h_start_index, w_start_index],
-        [h_end_index, w_end_index],
-    )
-
-    ones_loader = pad_adaptive_loader(ones_like(x))
-
-    def fn(idx):
-        return ops.truediv(
-            fn_sum(idx, pad_adaptive_loader(x)), fn_sum(idx, ones_loader)
-        )
-
-    rv = Pointwise.create(
-        device=x.get_device(),
-        dtype=dtype,
-        inner_fn=fn,
-        ranges=new_size,
-    )
-    # TODO: should we force these to be realized?
-    return rv
-
-
-def _adaptive_pooling_idx_max(kernel_maxes, in_sizes, out_sizes, return_index, loader):
-    # NOTE: There is some duplication between this and addaptive_avg_pool2d and max_pool2d
-    # Look into refactoring/deduplication after #116418 is merged.
-    h_in, w_in = in_sizes
-    h_out, w_out = out_sizes
-
-    def start_index(index, out_dim, inp_dim):
-        return FloorDiv((index * inp_dim), out_dim)
-
-    def end_index(index, out_dim, inp_dim):
-        return FloorDiv((index + 1) * inp_dim + out_dim - 1, out_dim)
-
-    h_start_index_fn = functools.partial(start_index, out_dim=h_out, inp_dim=h_in)
-    h_end_index_fn = functools.partial(end_index, out_dim=h_out, inp_dim=h_in)
-    w_start_index_fn = functools.partial(start_index, out_dim=w_out, inp_dim=w_in)
-    w_end_index_fn = functools.partial(end_index, out_dim=w_out, inp_dim=w_in)
-
-    def fn_max(idx):
-        *prefix, bh, bw = idx
-
-        h_start_index = h_start_index_fn(bh)
-        h_end_index = h_end_index_fn(bh)
-
-        w_start_index = w_start_index_fn(bw)
-        w_end_index = w_end_index_fn(bw)
-        maxval = None
-        maxindex = None
-        for ih, iw in itertools.product(range(kernel_maxes[0]), range(kernel_maxes[1])):
-            val = loader(
-                prefix,
-                [ih, iw],
-                [h_start_index, w_start_index],
-                [h_end_index, w_end_index],
-            )
-            index = ops.index_expr(
-                (h_start_index + ih) * w_in + w_start_index + iw, torch.int64
-            )
-            if return_index:
-                if maxindex is None:
-                    maxindex = index
-                else:
-                    maxindex = ops.where(ops.gt(val, maxval), index, maxindex)
-            if maxval is None:
-                maxval = val
-            else:
-                maxval = ops.maximum(val, maxval)
-        if return_index:
-            return maxindex
-        else:
-            return maxval
-
-    return fn_max
-
-
-fallback_adaptive_max_pool2d = fallback_handler(
-    aten.adaptive_max_pool2d.default, add_to_fallback_set=False
-)
-
-
-@register_lowering(aten.adaptive_max_pool2d)
-def adaptive_max_pool2d(x, output_size):
-    assert isinstance(x, TensorBox)
-    assert len(output_size) == 2
-    x.realize_hint()
-
-    *batch, h_in, w_in = x.get_size()
-
-    h_in = V.graph.sizevars.evaluate_static_shape(h_in)
-    w_in = V.graph.sizevars.evaluate_static_shape(w_in)
-
-    h_out, w_out = output_size
-
-    if h_out == 0 or w_out == 0:
-        o_size = [*batch, h_out, w_out]
-        return empty(o_size, dtype=x.get_dtype(), device=x.get_device()), empty(
-            o_size, dtype=torch.int64, device=x.get_device()
-        )
-    if h_in % h_out == 0 and w_in % w_out == 0:
-        kernel_size = [h_in // h_out, w_in // w_out]
-        return max_pool2d_with_indices(x, kernel_size)
-
-    h_kernel_max = ceildiv((h_in + h_out - 1), h_out)
-    w_kernel_max = ceildiv((w_in + w_out - 1), w_out)
-
-    new_size = list(batch) + [h_out, w_out]
-    dtype = x.get_dtype()
-
-    window_size = h_kernel_max * w_kernel_max
-    if window_size > 25:
-        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
-        return fallback_adaptive_max_pool2d(x, output_size)
-
-    inner_func_max_val = _adaptive_pooling_idx_max(
-        kernel_maxes=[h_kernel_max, w_kernel_max],
-        in_sizes=[h_in, w_in],
-        out_sizes=[h_out, w_out],
-        return_index=False,
-        loader=pad_adaptive_loader(x, float("-inf")),
-    )
-
-    inner_func_max_idx = _adaptive_pooling_idx_max(
-        kernel_maxes=[h_kernel_max, w_kernel_max],
-        in_sizes=[h_in, w_in],
-        out_sizes=[h_out, w_out],
-        return_index=True,
-        loader=pad_adaptive_loader(x, float("-inf")),
-    )
-
-    rv = Pointwise.create(
-        device=x.get_device(),
-        dtype=dtype,
-        inner_fn=inner_func_max_val,
-        ranges=new_size,
-    )
-    ri = Pointwise.create(
-        device=x.get_device(),
-        dtype=torch.int64,
-        inner_fn=inner_func_max_idx,
-        ranges=new_size,
-    )
-    return rv, ri
-
-
-fallback_fractional_max_pool2d = fallback_handler(
-    aten.fractional_max_pool2d.default, add_to_fallback_set=False
-)
-
-
-def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim):
-    out_sz = out_sz[dim]
-    in_sz = in_sz[dim]
-    kernel_sz = kernel_sz[dim]
-    alpha = (in_sz - kernel_sz) / (out_sz - 1)
-    samples_loader = samples.make_loader()
-
-    def load(prefix, i):
-        sample = samples_loader([*prefix, dim])
-        i_expr = ops.index_expr(i, samples.get_dtype())
-        alpha_expr = ops.index_expr(alpha, samples.get_dtype())
-        seq_i = ops.floor((i_expr + sample) * alpha_expr) - ops.floor(
-            sample * alpha_expr
-        )
-        seq_i = ops.to_dtype(seq_i, torch.int64)
-
-        mask = ops.lt(
-            i_expr,
-            ops.index_expr(out_sz - 1, torch.int64),
-        )
-        return ops.where(mask, seq_i, ops.index_expr(in_sz - kernel_sz, torch.int64))
-
-    return load
-
-
-@register_lowering(aten.fractional_max_pool2d)
-def fractional_max_pool2d(x, kernel_size, output_size, random_samples):
-    x.realize_hint()
-    *batch, inp_h, inp_w = x.get_size()
-    kernel_h, kernel_w = kernel_size
-    h_out, w_out = output_size
-
-    if kernel_h * kernel_w >= 25:
-        return fallback_fractional_max_pool2d(
-            x, kernel_size, output_size, random_samples
-        )
-
-    gen_offsets_for_dim = functools.partial(
-        _fractional_pooling_offsets,
-        samples=random_samples,
-        in_sz=[inp_h, inp_w],
-        out_sz=output_size,
-        kernel_sz=kernel_size,
-    )
-
-    h_index_fn = gen_offsets_for_dim(dim=0)
-    w_index_fn = gen_offsets_for_dim(dim=1)
-    x_loader = x.make_loader()
-
-    def fn(idx, return_index):
-        *prefix, bh, bw = idx
-
-        h_start_index = ops.indirect_indexing(h_index_fn(prefix, bh), inp_h)
-        w_start_index = ops.indirect_indexing(w_index_fn(prefix, bw), inp_w)
-
-        maxval = None
-        maxindex = None
-        for ih, iw in itertools.product(range(kernel_size[0]), range(kernel_size[1])):
-            val = x_loader([*prefix, h_start_index + ih, w_start_index + iw])
-            if return_index:
-                index = ops.index_expr(
-                    (h_start_index + ih) * inp_w + w_start_index + iw, torch.int64
-                )
-                if maxindex is None:
-                    maxindex = index
-                else:
-                    maxindex = ops.where(
-                        ops.or_(ops.gt(val, maxval), ops.isnan(val)), index, maxindex
-                    )
-            if maxval is None:
-                maxval = val
-            else:
-                maxval = ops.maximum(val, maxval)
-        if return_index:
-            return maxindex
-        else:
-            return maxval
-
-    new_size = list(batch) + [h_out, w_out]
-    rv = Pointwise.create(
-        device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=functools.partial(fn, return_index=False),
-        ranges=new_size,
-    )
-
-    ri = Pointwise.create(
-        device=x.get_device(),
-        dtype=torch.int64,
-        inner_fn=functools.partial(fn, return_index=True),
-        ranges=new_size,
-    )
-    return rv, ri
-
-
 @register_lowering(aten.upsample_nearest2d_backward.default)
 def upsample_nearest2d_backward(
     x, output_size=None, input_size=None, scales_h=None, scales_w=None
@@ -4505,10 +4538,7 @@ def upsample_nearest2d_backward(
     x.realize_hint()
 
     *batch, inp_h, inp_w = x.get_size()
-    inp_h = V.graph.sizevars.evaluate_static_shape(inp_h)
-    inp_w = V.graph.sizevars.evaluate_static_shape(inp_w)
-
-    *batch, out_h, out_w = input_size
+    *_, out_h, out_w = input_size
 
     if inp_h % out_h == 0 and inp_w % out_w == 0:
         return avg_pool2d(x, [inp_h // out_h, inp_w // out_w], divisor_override=1)
@@ -4522,128 +4552,32 @@ def upsample_nearest2d_backward(
     def end_index(index, out_dim, inp_dim):
         return start_index((index + 1), out_dim, inp_dim)
 
-    h_start_index = functools.partial(start_index, out_dim=out_h, inp_dim=inp_h)
-    h_end_index = functools.partial(end_index, out_dim=out_h, inp_dim=inp_h)
+    def start_indices(idx):
+        *_, h, w = idx
+        return start_index(h, out_h, inp_h), start_index(w, out_w, inp_w)
 
-    w_start_index = functools.partial(start_index, out_dim=out_w, inp_dim=inp_w)
-    w_end_index = functools.partial(end_index, out_dim=out_w, inp_dim=inp_w)
+    def end_indices(idx):
+        *_, h, w = idx
+        return end_index(h, out_h, inp_h), end_index(w, out_w, inp_w)
 
-    fn_sum = _adaptive_pooling_idx_sum(
-        [h_kernel_max, w_kernel_max],
-        [h_start_index, w_start_index],
-        [h_end_index, w_end_index],
-    )
+    x_loader = pad_adaptive_loader(x)
 
-    def fn(idx):
-        return fn_sum(idx, pad_adaptive_loader(x))
+    def get_val(idx, increments):
+        *prefix, _, _ = idx
+        val = x_loader(prefix, increments, start_indices(idx), end_indices(idx))
+        # 2nd return ignored by `make_avg_pool` since divisor_override is not None
+        # so we can just return 0, bonus divide by zero protects us from bad codegen
+        _ = ops.constant(0, x.get_dtype())
+        return val, _
 
-    rv = Pointwise.create(
-        device=x.get_device(),
+    return make_avg_pool(
         dtype=x.get_dtype(),
-        inner_fn=fn,
-        ranges=list(input_size),
-    )
-
-    return rv
-
-
-fallback_avg_pool2d = fallback_handler(
-    aten.avg_pool2d.default, add_to_fallback_set=False
-)
-
-
-@register_lowering(aten.avg_pool2d, type_promotion_kind=None)
-def avg_pool2d(
-    x,
-    kernel_size,
-    stride=(),
-    padding=0,
-    ceil_mode=False,
-    count_include_pad=True,
-    divisor_override=None,
-):
-    if not stride:
-        stride = kernel_size
-    if not padding:
-        padding = [0, 0]
-    kernel_size = pad_listlike(kernel_size, 2)
-    stride = pad_listlike(stride, 2)
-    padding = pad_listlike(padding, 2)
-
-    assert isinstance(x, TensorBox)
-    assert len(kernel_size) == 2
-    assert len(stride) == 2
-    assert len(padding) == 2
-    assert len(x.get_size()) in (3, 4)
-
-    x.realize_hint()
-    *batch, h, w = x.get_size()
-
-    h_out, ceil_mode1 = pooling_size(h, 0, kernel_size, stride, padding, ceil_mode)
-    w_out, ceil_mode2 = pooling_size(w, 1, kernel_size, stride, padding, ceil_mode)
-
-    if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
-        x_loader = constant_boundary_condition_2d(x, 0.0)
-        had_padding = True
-    else:
-        x_loader = x.make_loader()
-        had_padding = False
-
-    new_size = list(batch) + [h_out, w_out]
-    dtype = x.get_dtype()
-
-    window_size = kernel_size[0] * kernel_size[1]
-    if window_size > 25:
-        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
-        return fallback_avg_pool2d(
-            x,
-            kernel_size,
-            stride,
-            padding,
-            ceil_mode,
-            count_include_pad,
-            divisor_override,
-        )
-
-    def fn_sum(idx, loader):
-        *prefix, bh, bw = idx
-        total = None
-        for ih, iw in itertools.product(range(kernel_size[0]), range(kernel_size[1])):
-            ih = bh * stride[0] + ih - padding[0]
-            iw = bw * stride[1] + iw - padding[1]
-            val = loader([*prefix, ih, iw])
-            if total is None:
-                total = val
-            else:
-                total = ops.add(val, total)
-        return total
-
-    if not had_padding or divisor_override:
-        if divisor_override:
-            scale = 1 / divisor_override
-        else:
-            scale = 1.0 / (kernel_size[0] * kernel_size[1])
-
-        def fn(idx):
-            return ops.mul(fn_sum(idx, x_loader), ops.constant(scale, dtype))
-
-    else:
-        ones_loader = constant_boundary_condition_2d(
-            ones_like(x), 0.0, padding if count_include_pad else None
-        )
-
-        def fn(idx):
-            # TODO(jansel): optimize to do `int(x<h)` rather than `x<h?1:0`
-            return ops.truediv(fn_sum(idx, x_loader), fn_sum(idx, ones_loader))
-
-    rv = Pointwise.create(
         device=x.get_device(),
-        dtype=dtype,
-        inner_fn=fn,
-        ranges=new_size,
+        ranges=list(input_size),
+        getter=get_val,
+        window_size=[h_kernel_max, w_kernel_max],
+        divisor_override=1,
     )
-    # TODO(jansel): should we force these to be realized?
-    return rv
 
 
 fallback_avg_pool2d_backward = fallback_handler(
