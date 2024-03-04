@@ -1,5 +1,8 @@
 import contextlib
 from typing import Optional, Union, List, Set, Dict, Any
+import functools
+import importlib
+import inspect
 
 import warnings
 from dataclasses import dataclass
@@ -493,3 +496,59 @@ def return_and_correct_aliasing(func, args, kwargs, out):
         for ((i, r), o) in zip(enumerate(schema_info.outs), out)
     ])
     return outs_to_return
+
+@functools.cache
+def _get_cls_name(cls):
+    return f"""{inspect.getmodule(cls)}.{cls.__name__}"""
+
+@functools.cache
+def _get_cls_object(cls_s):
+    mod_s, name = cls_s.rsplit(".", 1)
+    mod = importlib.import_module(mod_s)
+
+    return getattr(mod, name, None)
+
+@functools.cache
+def _known_lower_priority(cls1_s, cls2_s):
+    print(cls1_s, cls2_s)
+    cls1 = _get_cls_object(cls1_s)
+    cls2 = _get_cls_object(cls2_s)
+    print(cls1, cls2)
+    if cls1 is None or cls2 is None:
+        return False
+
+    # Walk up the mro? Is that enough?
+    if cls1_s in getattr(cls2, "__lower_priority", []):
+        return True
+
+    if issubclass(cls2, cls1):
+        return True
+
+    return False
+
+def check_wrapped_ordering(self, other):
+    self_s = _get_cls_name(type(self))
+    other_s = _get_cls_name(type(other))
+    if _known_lower_priority(other_s, self_s):
+        raise RuntimeError(f"Wrapping an instance of {other_s} in an instance of {self_s} is not allowed")
+
+
+def handle_subclass_ordering(user_fn):
+    if not isinstance(user_fn, classmethod):
+        raise RuntimeError("handle_subclass_ordering wrapper must be above @classmethod")
+
+    if user_fn.__func__.__name__ not in ["__torch_dispatch__", "__torch_function__"]:
+        raise RuntimeError("handle_priority can only be used around torch_dispatch or torch_function")
+
+    @functools.wraps(user_fn)
+    def wrapped_dispatch(cls, func, types, args, kwargs=None):
+        cls_s = _get_cls_name(cls)
+
+        for t in types:
+            if _known_lower_priority(_get_cls_name(t), cls_s):
+                return NotImplemented
+
+        # Direct call into the subclass to avoid infinite recursion
+        return user_fn.__func__(cls, func, types, args, kwargs)
+
+    return wrapped_dispatch

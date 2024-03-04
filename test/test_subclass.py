@@ -15,6 +15,7 @@ from torch.nn.utils.parametrize import (
 from torch.testing._internal.common_subclass import (
     DiagTensorBelow,
     subclass_db,
+    WrapperTensor,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -26,6 +27,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.logging_tensor import LoggingTensor
 from torch.utils._pytree import tree_map
+from torch.utils._python_dispatch import handle_subclass_ordering, check_wrapped_ordering
 
 # The current test methodology in this file is to test a variety of real use cases
 # with a set of fully-fledged tensor subclasses. In the future, this may change
@@ -271,6 +273,44 @@ class TestSubclass(TestCase):
             storage.fill_(0)
         with self.assertRaisesRegex(RuntimeError, "on an invalid python storage"):
             storage._write_file("file")
+
+    def test_priority(self):
+        order = []
+        class BaseUnwrapper(WrapperTensor):
+            @classmethod
+            def get_wrapper_properties(cls, t, requires_grad=False):
+                return t, {}
+
+            def __init__(self, t):
+                check_wrapped_ordering(self, t)
+                self._t = t
+
+            @handle_subclass_ordering
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs=None):
+                order.append(cls)
+                rs = tree_map_only(torch.Tensor, lambda t: cls(t), func(*tree_map_only(cls, lambda t: t._t, args), **tree_map_only(cls, lambda t: t._t, kwargs or {})))
+                return rs
+
+        class A(BaseUnwrapper):
+            pass
+
+        class B(BaseUnwrapper):
+            pass
+
+        class C(BaseUnwrapper):
+            __lower_priority = ("__main__.TestSubclass.test_priority.<locals>.A")
+
+        class D(C):
+            pass
+
+        class E(D):
+            __lower_priority = ("__main__.TestSubclass.test_priority.<locals>.A")
+
+        tensor = torch.rand(2)
+        with self.assertRaisesRegex(RuntimeError, "A"):
+            A(C(tensor))
+
 
 
 instantiate_parametrized_tests(TestSubclass)
