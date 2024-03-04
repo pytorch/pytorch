@@ -113,6 +113,10 @@ def justknobs_check(name: str) -> bool:
     a knob once at process start, and then use it consistently for the
     rest of the process.  Future functionality will codify these patterns
     into a better high level API.
+
+    WARNING: Do NOT call this function at module import time, JK is not
+    fork safe and you will break anyone who forks the process and then
+    hits JK again.
     """
     return True
 

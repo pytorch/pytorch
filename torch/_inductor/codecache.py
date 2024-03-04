@@ -2508,7 +2508,7 @@ def shutdown_compile_workers() -> None:
     global _pool_set
     for pool in _pool_set:
         pool.shutdown()
-    _pool_set = set()
+    _pool_set.clear()
 
 
 class AsyncCompile:
@@ -2661,4 +2661,10 @@ class AsyncCompile:
         _compile_end()
 
 
-AsyncCompile.warm_pool()
+if os.environ.get("TORCH_TNT_IN_USE", "0") == "1":
+    # When TorchTNT is used, calling warm_pool() here will cause the
+    # compile workers created not being able to be shut down inside
+    # shutdown_compile_workers(). This may cause significant QPS drop.
+    log.info("Do not call AsyncCompile.warm_pool() because TorchTNT is in use.")
+else:
+    AsyncCompile.warm_pool()
