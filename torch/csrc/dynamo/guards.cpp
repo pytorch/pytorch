@@ -1981,7 +1981,10 @@ class DictGuardManager : public GuardManager {
     // skip adding guards. This makes the python side easy.
   }
 
-  void fail_on_get_child_manager(py::object a, std::string source, py::object b) {
+  void fail_on_get_child_manager(
+      py::object a,
+      std::string source,
+      py::object b) {
     throw std::runtime_error("Can not add an accessor to DictGuardManager");
   }
 

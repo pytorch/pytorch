@@ -455,9 +455,9 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
     def test_globals(self):
         global global_pair, Pair
         guard_manager = RootGuardManager()
-        gpair_mgr = guard_manager.globals_dict_manager(globals(), "", None).getitem_manager(
-            "global_pair", "", global_pair
-        )
+        gpair_mgr = guard_manager.globals_dict_manager(
+            globals(), "", None
+        ).getitem_manager("global_pair", "", global_pair)
 
         gpair_mgr.add_lambda_guard(
             lambda x: isinstance(x, Pair)
