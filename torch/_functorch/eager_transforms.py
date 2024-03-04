@@ -1003,7 +1003,7 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
                 # Note for the reviewer: This is extremely odd but it passes the
                 # assertion "len(self.block_stack) == 1" on symbolic_convert.py
                 # The equivalent "if argnums is not None" fails for some reason
-                if isinstance(argnums, int):
+                if isinstance(argnums, (int, tuple)):
                     primals = _wrap_all_tensors(primals, level)
                     duals = _replace_args(primals, duals, argnums)
                 result_duals = func(*duals)
