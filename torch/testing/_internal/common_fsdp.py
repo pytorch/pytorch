@@ -1388,8 +1388,8 @@ def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
                 ):
                     func(*args, **kwargs)
                 # mock.patch.__exit__ does not work with multi-thread
-                # thread 1 set func.__module__[fully_shard]
-                # thread 2 read func.__module__[fully_shard] and thought it is original
+                # thread 1 set {func.__module__}.fully_shard
+                # thread 2 read {func.__module__}.fully_shard and thought it is original
                 # hence we manually reset them after __exit__
                 import_path, _ = mock._get_target(imported_fully_shard)  # type: ignore[attr-defined]
                 setattr(
