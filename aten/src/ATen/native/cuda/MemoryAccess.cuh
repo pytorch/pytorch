@@ -197,7 +197,7 @@ struct unroll {
     data(data), remaining(remaining), input_offset_calculator(ic), output_offset_calculator(oc), loader(l), storer(s) {}
 
   __device__ inline bool check_inbounds(int thread_work_elem) {
-    return ((threadIdx.x  + thread_work_elem*num_threads()) < remaining);
+    return ((int)(threadIdx.x  + thread_work_elem*num_threads()) < remaining);
   }
 
   template<typename args_t>
@@ -219,7 +219,6 @@ struct unroll {
   template<typename scalar_t>
   __device__ inline void store(scalar_t *from, int idx) {
     int thread_idx = threadIdx.x;
-    scalar_t *to = reinterpret_cast<scalar_t *>(data[0]) + block_work_size() * idx;
     #pragma unroll
     for (int i = 0; i < thread_work_size(); i++) {
       if (thread_idx >= remaining) {
@@ -305,7 +304,7 @@ struct multi_outputs_unroll {
   data(data), remaining(remaining), input_offset_calculator(ic), output_offset_calculator(oc) {}
 
   __device__ inline bool check_inbounds(int thread_work_elem) {
-    return ((threadIdx.x  + thread_work_elem*num_threads()) < remaining);
+    return ((int)(threadIdx.x  + thread_work_elem*num_threads()) < remaining);
   }
 
   template<typename args_t>
