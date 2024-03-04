@@ -41,7 +41,6 @@ def check_nn_module_stack(graph_module: torch.fx.GraphModule) -> None:
         For submodule graphs:
         - None for 'placeholder', output'
 
-    TODO(pianpwk): extend this check to get_attr & call_module nodes.
     TODO(pianpwk): make this a consistent node-level check once nn_module_stack is populated for cond submodules.
     '''
     # Check top-level graph for all nodes, all graphs for placeholder & output nodes
@@ -277,6 +276,7 @@ class Verifier(metaclass=_VerifierMeta):
                 # elif node.op == "output":
                 #     _check_flattened_outputs()
 
+        check_nn_module_stack(gm)
         self.check_additional(gm)
 
 
