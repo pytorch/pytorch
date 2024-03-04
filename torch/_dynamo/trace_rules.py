@@ -34,8 +34,6 @@ import weakref
 from collections import defaultdict
 from typing import Any, Callable, cast, Dict, List, Optional, Set, Union
 
-import hypothesis
-
 np: Optional[types.ModuleType] = None
 try:
     import numpy as np
@@ -1486,6 +1484,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._validate_sparse_csr_tensor_args",
         "torch._values_copy",
         "torch._weight_int4pack_mm",
+        "torch._weight_int8pack_mm",
         "torch._weight_norm_interface",
         "torch._weight_norm",
         "torch.abs_",
@@ -3097,13 +3096,13 @@ BUILTIN_SKIPLIST = (
     weakref,
     _collections_abc,
     _weakrefset,
-    hypothesis,
 )
 
 # third party libraries skiplist is defined by str, because users may not use these libraries.
 # we should use lazy import & skip in the future.
 THIRDPARTY_SKIPLIST = (
     "fx2trt_oss",
+    "hypothesis",
     "networkx",
     "numpy",
     "omegaconf",
