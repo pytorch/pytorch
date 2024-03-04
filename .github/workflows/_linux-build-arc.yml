@@ -83,19 +83,6 @@ jobs:
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install packages
-        run: |
-          set -eux
-
-          sudo apt-get update
-          sudo apt-get install -y git curl unzip build-essential dnsutils python3-pip zip dnsutils
-
-          python3 -m pip --version
-          docker --version
-
-          nslookup raw.githubusercontent.com
-        shell: bash
-
       # [pytorch repo ref]
       # Use a pytorch/pytorch reference instead of a reference to the local
       # checkout because when we run this action we don't *have* a local
@@ -156,7 +143,6 @@ jobs:
           test-matrix: ${{ inputs.test-matrix }}
           job-name: ${{ steps.get-job-id.outputs.job-name }}
 
-#      TODO - rollback it after we're done with S3 setup
       - name: Download pytest cache
         uses: ./.github/actions/pytest-cache-download
         continue-on-error: true
