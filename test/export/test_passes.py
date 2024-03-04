@@ -252,11 +252,9 @@ class TestPasses(TestCase):
         ):
             ep.module()(torch.zeros(4, 2, 3), torch.ones(2, 5, 5))
 
-        # Since we didn't insert the constraint for x[1] >= 2, it should work for case where x[1] == 1
-        gm_result_for_1_size = ep.module()(torch.ones(3, 1, 3), torch.ones(5, 5, 5))
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[1] to be >= 2, but got 1")):
+            gm_result_for_1_size = ep.module()(torch.ones(3, 1, 3), torch.ones(5, 5, 5))
         eager_result_for_1_size = M().forward(torch.ones(3, 1, 3), torch.ones(5, 5, 5))
-
-        self.assertEqual(gm_result_for_1_size, eager_result_for_1_size)
 
     def test_runtime_assert_some_inps_not_used(self) -> None:
         class M(torch.nn.Module):

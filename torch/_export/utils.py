@@ -108,13 +108,11 @@ def _check_input_constraints_for_graph(
                         min_val, max_val = _convert_range_to_int(
                             range_constraints[node_dim.node.expr]
                         )
-                        # NOTE: we allow dimensions to be 0/1 at runtime
-                        if min_val > 2:
-                            if arg_dim < min_val:
-                                raise RuntimeError(
-                                    f"Expected input at {get_keystr(key_path)}.shape[{j}] to be >= "
-                                    f"{min_val}, but got {arg_dim}",
-                                )
+                        if arg_dim < min_val:
+                            raise RuntimeError(
+                                f"Expected input at {get_keystr(key_path)}.shape[{j}] to be >= "
+                                f"{min_val}, but got {arg_dim}",
+                            )
                         if max_val < math.inf:
                             if arg_dim > max_val:
                                 raise RuntimeError(
