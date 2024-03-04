@@ -3419,6 +3419,10 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
 }
 
 Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim, Dimname out_dim) {
+  start_dim = maybe_wrap_dim(start_dim, self.dim());
+  end_dim = maybe_wrap_dim(end_dim, self.dim());
+  TORCH_CHECK(start_dim <= end_dim, "flatten() has invalid args: start_dim cannot come after end_dim");
+
   auto outnames = self.names().vec();
   outnames.erase(outnames.begin() + start_dim, outnames.begin() + end_dim + 1);
   outnames.insert(outnames.begin() + start_dim, out_dim);
