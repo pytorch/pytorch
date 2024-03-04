@@ -209,38 +209,46 @@ uint16_t get_autocast_backend() {
   return autocast_backend_bitset;
 }
 
-void set_autocast_backend(BackendComponent backend, bool enable) {
-  set_autocast_backend(1 << static_cast<uint8_t>(backend), enable);
-}
-
 // DispatchKey::AutocastFunctionality can be removed when only no backend is set.
-void set_autocast_backend(uint16_t backends, bool enable) {
+void set_autocast_backend(BackendComponent backend, bool enable) {
   if (enable) {
-    if (!is_any_autocast_enabled())
+    if (!is_any_autocast_enabled()) {
       c10::impl::tls_set_dispatch_key_excluded(
           DispatchKey::AutocastFunctionality, false);
-    autocast_backend_bitset |= backends;
+    }
+    autocast_backend_bitset |= 1 << static_cast<uint8_t>(backend);
 
   } else {
-    autocast_backend_bitset &= ~backends;
-    if (!is_any_autocast_enabled())
+    autocast_backend_bitset &= ~(1 << static_cast<uint8_t>(backend));
+    if (!is_any_autocast_enabled()) {
       c10::impl::tls_set_dispatch_key_excluded(
           DispatchKey::AutocastFunctionality, true);
+    }
   }
 }
 
 ExcludeAutocastGuard::ExcludeAutocastGuard() {
   backend_ = get_autocast_backend();
-  set_autocast_backend(backend_, false);
+  autocast_backend_bitset &= ~backend_;
+
+  if (!is_any_autocast_enabled()) {
+    c10::impl::tls_set_dispatch_key_excluded(
+        DispatchKey::AutocastFunctionality, true);
+  }
 }
 
 ExcludeAutocastGuard::ExcludeAutocastGuard(BackendComponent backend)
     : backend_(1 << static_cast<uint8_t>(backend)) {
-  set_autocast_backend(backend_, false);
+  set_autocast_backend(backend, false);
 }
 
 ExcludeAutocastGuard::~ExcludeAutocastGuard() {
-  set_autocast_backend(backend_, true);
+  if (!is_any_autocast_enabled()) {
+    c10::impl::tls_set_dispatch_key_excluded(
+        DispatchKey::AutocastFunctionality, false);
+  }
+
+  autocast_backend_bitset |= backend_;
 }
 
 // If the backend located on the leftmost side of ks is not in autocast_backend_bitset,

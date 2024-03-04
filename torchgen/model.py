@@ -70,7 +70,15 @@ BACKEND_COMPONENTS = [
     "PrivateUse2",
     "PrivateUse3",
 ]
-FUNCTIONALITY_KEYS = ["", "Quantized", "Sparse", "SparseCsr", "NestedTensor", "Autograd", "Autocast"]
+FUNCTIONALITY_KEYS = [
+    "",
+    "Quantized",
+    "Sparse",
+    "SparseCsr",
+    "NestedTensor",
+    "Autograd",
+    "Autocast",
+]
 
 # This list guards dispatches that can be used in derivatives.yaml
 # For now we omit AutogradFunctionality and AutogradOther
