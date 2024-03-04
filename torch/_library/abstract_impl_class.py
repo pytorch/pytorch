@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import torch
 
@@ -141,3 +141,13 @@ def impl_abstract_class(qualname, fake_class=None):
 def deregister_abstract_impl(qualname):
     global global_abstract_class_registry
     return global_abstract_class_registry.deregister(_full_qual_class_name(qualname))
+
+
+def has_fake_impl(full_qualname):
+    return global_abstract_class_registry.has_impl(full_qualname)
+
+
+def find_fake_impl(full_qualname) -> Optional[Any]:
+    if not has_fake_impl(full_qualname):
+        return None
+    return global_abstract_class_registry.get_impl(full_qualname)
