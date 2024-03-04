@@ -49,17 +49,6 @@ def is_constant_source(source):
     return False
 
 
-def is_input_source(source):
-    return source.guard_source() in [
-        GuardSource.LOCAL,
-        GuardSource.GLOBAL,
-        GuardSource.LOCAL_NN_MODULE,
-        GuardSource.GLOBAL_NN_MODULE,
-        GuardSource.LOCAL_FSDP_MODULE,
-        GuardSource.GLOBAL_FSDP_MODULE,
-    ]
-
-
 def reconstruct_getitem(
     source: Union["GetItemSource", "ODictGetItemSource"], codegen, index_is_slice
 ):
