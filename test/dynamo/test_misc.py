@@ -7657,6 +7657,7 @@ def fn():
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_record_scalar(self):
         with tempfile.NamedTemporaryFile(mode="w+b") as f:
             torch.manual_seed(0)
