@@ -54,15 +54,6 @@ runs:
           fi
         fi
 
-    - name: Install AWS CLI v2
-      if: ${{ inputs.is_arc == 'true' }}
-      run: |
-        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-        unzip awscliv2.zip
-        sudo ./aws/install
-        aws --version
-      shell: bash
-
     - name: Log in to ECR
       uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
       env:
