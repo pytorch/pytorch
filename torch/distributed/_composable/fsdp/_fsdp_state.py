@@ -84,7 +84,7 @@ def _fsdp_state_post_forward(self, module: nn.Module, input: Any, output: Any) -
             )
     return output
 
-def _fsdp_state_pre_backward(self, forward_grad_fns: Tuple[Node, ...], grad) -> None:
+def _fsdp_state_pre_backward_compile_only(self, forward_grad_fns: Tuple[Node, ...], grad) -> None:
     """
     NOTE(yf225): since under compile we use `register_hook` to call pre_backward, to mimic `multi_grad_hook` "any" mode behavior
     we only want to call pre_backward once, so doing this check here to early return if already called.
@@ -225,6 +225,12 @@ class FSDPState(_State):
             if module in module_to_fsdp_param_group:
                 module_to_fsdp_param_group[module]._module_fqn = module_name
 
+    def _pre_backward(self, forward_grad_fns: Tuple[Node, ...], *unused: Any) -> None:
+        self._training_state = TrainingState.PRE_BACKWARD
+        self._register_root_post_backward_final_callback()
+        if self._fsdp_param_group:
+            self._fsdp_param_group.pre_backward(forward_grad_fns, *unused)
+
     def _finalize_backward(self) -> None:
         self._training_state = TrainingState.IDLE
         if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
@@ -247,11 +253,12 @@ class FSDPState(_State):
                 grad_fns = tuple(t.grad_fn for t in tensors if t.grad_fn is not None)
             else:
                 grad_fns = []
-            pre_backward = functools.partial(_fsdp_state_pre_backward, self, grad_fns)
             if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+                pre_backward = functools.partial(self._pre_backward, grad_fns)
                 handle = register_multi_grad_hook(tensors, pre_backward, mode="any")
                 self._pre_backward_hook_handles.append(handle)
             else:
+                pre_backward = functools.partial(_fsdp_state_pre_backward_compile_only, self, grad_fns)
                 for tensor in tensors:
                     handle = tensor.register_hook(pre_backward)
                     self._pre_backward_hook_handles.append(handle)
