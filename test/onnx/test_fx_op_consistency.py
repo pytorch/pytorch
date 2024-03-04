@@ -894,16 +894,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("GroupNormalization", "float16"),
     ),
     xfail(
-        "nn.functional.instance_norm",
-        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
-        reason="fixme: Assertion error: result mismatch",
-    ),
-    xfail(
-        "nn.functional.instance_norm",
-        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
-        reason="Functionalize pass failed",
-    ),
-    xfail(
         "nn.functional.local_response_norm",
         dtypes=(torch.int64,),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("avgpool", "int64"),
@@ -1549,6 +1539,13 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         ),
     ),
     xfail(
+        "nn.functional.instance_norm",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        matcher=lambda sample: sample.kwargs.get("running_mean") is not None
+        or sample.input.dtype in (torch.float16,),
+        reason="fixme: KeyError: 'self___kwargs__running_mean'",
+    ),
+    xfail(
         "nn.functional.max_pool3d",
         matcher=lambda sample: sample.kwargs.get("ceil_mode") is True
         and sample.kwargs.get("padding") == 1,
@@ -1962,6 +1959,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "nn.functional.hardsigmoid": [1e-3, 5e-3],
         "nn.functional.hardswish": [1e-3, 5e-3],
         "nn.functional.hinge_embedding_loss": [4e-1, 3e-3],
+        "nn.functional.instance_norm": [1e-2, 1e-3],
         "nn.functional.interpolate": [1e-2, 1e-3],
         "nn.functional.kl_div": [2e-3, 2e-4],
         "nn.functional.multilabel_soft_margin_loss": [4e-2, 5e-3],
