@@ -3101,6 +3101,7 @@ BUILTIN_SKIPLIST = (
 # we should use lazy import & skip in the future.
 THIRDPARTY_SKIPLIST = (
     "fx2trt_oss",
+    "hypothesis",
     "networkx",
     "numpy",
     "omegaconf",
@@ -3194,6 +3195,7 @@ MOD_INLINELIST = {
     "torch.random",
     "torch.sparse",
     "torch.testing",
+    "torch.testing._internal.hypothesis_utils",
     "torch.utils._content_store",
     "torch.utils._contextlib",
     "torch.utils._foreach_utils",
