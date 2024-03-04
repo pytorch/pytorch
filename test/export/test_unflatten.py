@@ -563,6 +563,20 @@ class TestUnflatten(TestCase):
             lib_file_path = find_library_location("libtorchbind_test.so")
             torch.ops.load_library(str(lib_file_path))
 
+        @torch._library.impl_abstract_class("_TorchScriptTesting::_Foo")
+        class FakeFoo:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+            @classmethod
+            def from_real(cls, foo):
+                x, y = foo.__get_metadata__()
+                return cls(x, y)
+
+            def add_tensor(self, z):
+                return (self.x + self.y) * z
+
         class SubMod(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -584,6 +598,11 @@ class TestUnflatten(TestCase):
         unflattened = unflatten(export_module)
 
         self.compare_outputs(export_module, unflattened, (torch.randn((2, 3)),))
+
+        torch._library.abstract_impl_class.deregister_abstract_impl(
+            "_TorchScriptTesting::_Foo"
+        )
+
 
     def test_nested_leaf_non_strict(self):
         class Leaf(torch.nn.Module):
