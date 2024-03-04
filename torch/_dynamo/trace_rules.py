@@ -1484,6 +1484,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._validate_sparse_csr_tensor_args",
         "torch._values_copy",
         "torch._weight_int4pack_mm",
+        "torch._weight_int8pack_mm",
         "torch._weight_norm_interface",
         "torch._weight_norm",
         "torch.abs_",
