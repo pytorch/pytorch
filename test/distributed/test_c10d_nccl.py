@@ -1390,10 +1390,11 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    def test_set_nccl_pg_timeout(self):
+    @parametrize("backend", [None, "nccl"])
+    def test_set_nccl_pg_timeout(self, backend):
         store = c10d.FileStore(self.file_name, self.world_size)
         opts = dict(
-            backend="nccl", store=store, rank=self.rank, world_size=self.world_size, timeout=timedelta(seconds=123)
+            backend=backend, store=store, rank=self.rank, world_size=self.world_size, timeout=timedelta(seconds=123)
         )
         dist.init_process_group(**opts)
         pg = dist.distributed_c10d._get_default_group()
@@ -4368,6 +4369,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
             else:
                 self.assertTrue('duration_ms' not in t['entries'][coalesced_op])
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("op_sizes", [
         [(2, 3)],
         [(2, 3), (5, 5), (1,)],
@@ -4454,9 +4457,8 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("timing_enabled", [True, False])
     def test_timeout_dumps(self, timing_enabled):
-        # We need to completely disable the coordinated timeout dump to avoid rank 0
-        # also timeout so that we set the check frequency to be very large (25 min).
-        os.environ['TORCH_NCCL_COORD_CHECK_MILSEC'] = '1500000'
+        # dump on heartbeatmonitor thread
+        os.environ['TORCH_NCCL_COORD_CHECK_MILSEC'] = '1000'
         # need rank0 to crash before looking for its output file
         os.environ['TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC'] = '1'
 
@@ -4493,6 +4495,7 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
             # rank 0 will crash before it passes the sync, but rank1 will exit quickly and cleanly
             torch.cuda.synchronize()
 
+instantiate_parametrized_tests(ProcessGroupNCCLTest)
 instantiate_parametrized_tests(NCCLTraceTestDumpOnTimeout)
 instantiate_parametrized_tests(NCCLTraceTest)
 
