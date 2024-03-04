@@ -3225,6 +3225,42 @@ class TestCudaMallocAsync(TestCase):
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
+    def test_memory_plots_history_context(self):
+        try:
+            torch.cuda.memory.empty_cache()
+            x = None
+
+            def should_capture1():
+                nonlocal x
+                x = torch.rand(4, 4, device='cuda')
+
+            def should_not_capture():
+                nonlocal x
+                x = torch.rand(3, 4, device='cuda')
+
+            def should_capture2():
+                nonlocal x
+                x = torch.rand(4, 4, device='cuda')
+
+            # Recording with context and python call stacks should capture the call stack.
+            torch.cuda.memory._record_memory_history(context="all", stacks="python")
+            should_capture1()
+            # Recording with context=None should not capture the call stack.
+            torch.cuda.memory._record_memory_history(context=None)
+            should_not_capture()
+            # Recording with context and python call stacks should capture the call stack.
+            torch.cuda.memory._record_memory_history(context="all", stacks="python")
+            should_capture2()
+
+            ss = json.dumps(torch.cuda.memory._snapshot())
+            self.assertTrue('should_capture1' in ss)
+            self.assertTrue('should_not_capture' not in ss)
+            self.assertTrue('should_capture2' in ss)
+        finally:
+            torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
     def test_memory_plots_free_segment_stack(self):
         for context in ["alloc", "all", "state"]:
             try:

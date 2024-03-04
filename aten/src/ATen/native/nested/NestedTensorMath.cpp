@@ -896,6 +896,12 @@ int64_t _nested_get_ragged_idx(const Tensor& self) {
   return 0;
 }
 
+Tensor _nested_get_jagged_dummy(const Tensor& any) {
+  TORCH_INTERNAL_ASSERT(
+      false, "_nested_get_jagged_dummy(): expected to be implemented from Python");
+  return Tensor();
+}
+
 // See Note [Special size rule for nested tensor]
 Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   TORCH_CHECK(
