@@ -2888,13 +2888,12 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
 
         # For all testing, mock the tmp directory populated by the inductor
         # FxGraphCache, both for test isolation and to avoid filling up disk.
-        if "torch.inductor_" in sys.modules:
-            self._inductor_cache_tmp_dir = tempfile.TemporaryDirectory()
-            self._inductor_cache_get_tmp_dir_patch = unittest.mock.patch(
-                "torch._inductor.codecache.FxGraphCache._get_tmp_dir"
-            )
-            mock_get_dir = self._inductor_cache_get_tmp_dir_patch.start()
-            mock_get_dir.return_value = self._inductor_cache_tmp_dir.name
+        self._inductor_cache_tmp_dir = tempfile.TemporaryDirectory()
+        self._inductor_cache_get_tmp_dir_patch = unittest.mock.patch(
+            "torch._inductor.codecache.FxGraphCache._get_tmp_dir"
+        )
+        mock_get_dir = self._inductor_cache_get_tmp_dir_patch.start()
+        mock_get_dir.return_value = self._inductor_cache_tmp_dir.name
 
     def tearDown(self):
         # There exists test cases that override TestCase.setUp
