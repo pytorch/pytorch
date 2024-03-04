@@ -7,6 +7,10 @@
 
 namespace at::cuda::sparse {
 
+cusparseStatus_t destroyConstDnMat(const cusparseDnMatDescr* dnMatDescr) {
+  return cusparseDestroyDnMat(const_cast<cusparseDnMatDescr*>(dnMatDescr));
+}
+
 #if AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
 namespace {
@@ -52,8 +56,7 @@ cusparseIndexType_t getCuSparseIndexType(const c10::ScalarType& scalar_type) {
 }
 
 #if AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
-
-std::tuple<int64_t, int64_t, int64_t, cudaDataType, cusparseOrder_t, int64_t> getCreateDnMatArgs(const Tensor& input, int64_t batch_offset) {
+cusparseDnMatDescr_t createRawDnMatDescriptor(const Tensor& input, int64_t batch_offset, bool is_const=false) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.layout() == kStrided);
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();
@@ -80,18 +83,16 @@ std::tuple<int64_t, int64_t, int64_t, cudaDataType, cusparseOrder_t, int64_t> ge
 #endif
 
   auto batch_stride = ndim > 2 && batch_offset >= 0 ? input_strides[ndim - 3] : 0;
+  void* data_ptr = is_const ? const_cast<void*>(input.const_data_ptr()) : input.data_ptr();
+  void* values_ptr = static_cast<char*>(data_ptr) +
+      batch_offset * batch_stride * input.itemsize();
 
   cudaDataType value_type = ScalarTypeToCudaDataType(input.scalar_type());
   check_supported_cuda_type(value_type);
 
-  return {rows, cols, leading_dimension, value_type, order, batch_stride};
-}
-
-CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input, int64_t batch_offset) {
-  auto [rows, cols, leading_dimension, value_type, order, batch_stride] = getCreateDnMatArgs(input, batch_offset);
-  void* values_ptr = static_cast<char*>(input.data_ptr()) +
-      batch_offset * batch_stride * input.itemsize();
-
+  // NOTE: Ideally, in the const case, we would use cusparseConstDnMatDescr_t
+  // and cusparseCreateConstDnMat, but those were introduced in CUDA 12, and we
+  // still need to support CUDA 11
   cusparseDnMatDescr_t raw_descriptor;
   TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
       &raw_descriptor,
@@ -102,52 +103,21 @@ CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input, int64_t ba
       value_type,
       order));
 
-  if (input.dim() >= 3 && batch_offset == -1) {
+  if (ndim >= 3 && batch_offset == -1) {
     int batch_count =
         at::native::cuda_int_cast(at::native::batchCount(input), "batch_count");
     TORCH_CUDASPARSE_CHECK(cusparseDnMatSetStridedBatch(
-        raw_descriptor, batch_count, input.strides()[input.dim() - 3]));
+        raw_descriptor, batch_count, input_strides[ndim - 3]));
   }
+  return raw_descriptor;
+}
 
-  descriptor_.reset(raw_descriptor);
+CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input, int64_t batch_offset) {
+  descriptor_.reset(createRawDnMatDescriptor(input, batch_offset));
 }
 
 CuSparseConstDnMatDescriptor::CuSparseConstDnMatDescriptor(const Tensor& input, int64_t batch_offset) {
-  auto [rows, cols, leading_dimension, value_type, order, batch_stride] = getCreateDnMatArgs(input, batch_offset);
-  const void* values_ptr = static_cast<const char*>(input.const_data_ptr()) +
-      batch_offset * batch_stride * input.itemsize();
-
-  cusparseConstDnMatDescr_t raw_descriptor;
-  TORCH_CUDASPARSE_CHECK(cusparseCreateConstDnMat(
-      &raw_descriptor,
-      rows,
-      cols,
-      leading_dimension,
-      values_ptr,
-      value_type,
-      order));
-
-  if (input.dim() >= 3 && batch_offset == -1) {
-    int batch_count =
-        at::native::cuda_int_cast(at::native::batchCount(input), "batch_count");
-    // NOTE: cuSPARSE does not offer a way to set the batch size of a
-    // cusparseConstDnMatDescr_t upon initialization. However, casting it to
-    // non-const and then setting the batch size seems to be acceptable because:
-    //
-    //  1. cusparseDnMatDescr_t and cusparseConstDnMatDescr_t are pointers to
-    //  the same desriptor object type, aside from the const-ness.
-    //
-    //  2. The cuSPARSE docs only mention that cusparseDnMatSetStridedBatch
-    //  modifies the descriptor object itself, not the values in the matrix.
-    //  Presumably, the values are not modified.
-    //
-    //  3. Because of 2., the underlying data of a COW tensor will not be
-    //  accidentally modified when we call cusparseDnMatSetStridedBatch.
-    TORCH_CUDASPARSE_CHECK(cusparseDnMatSetStridedBatch(
-        const_cast<cusparseDnMatDescr_t>(raw_descriptor), batch_count, input.strides()[input.dim() - 3]));
-  }
-
-  descriptor_.reset(raw_descriptor);
+  descriptor_.reset(createRawDnMatDescriptor(input, batch_offset, /*is_const*/true));
 }
 #endif // AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
