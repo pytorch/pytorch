@@ -8214,6 +8214,28 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.empty([1, 1, 1, 0], dtype=dtype, device=device)
             weight = torch.empty([1, 0, 1], dtype=dtype, device=device)
             torch._C._nn.slow_conv3d(inp, weight, 1)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            re.escape("kernel_size should be at least 3-dimensional"),
+        ):
+            inp = torch.empty([1, 1, 1, 0], dtype=dtype, device=device)
+            weight = torch.empty([1, 0, 1], dtype=dtype, device=device)
+            torch._C._nn.slow_conv3d(inp, weight, kernel_size=[1], stride=[1, 1, 1], padding=[1, 1, 1])
+        with self.assertRaisesRegex(
+            RuntimeError,
+            re.escape("padding should be at least 3-dimensional"),
+        ):
+            inp = torch.empty([1, 1, 1, 0], dtype=dtype, device=device)
+            weight = torch.empty([1, 0, 1], dtype=dtype, device=device)
+            torch._C._nn.slow_conv3d(inp, weight, kernel_size=[1, 1, 1], stride=[1, 1, 1], padding=[1])
+        with self.assertRaisesRegex(
+            RuntimeError,
+            re.escape("stride should be at least 3-dimensional"),
+        ):
+            inp = torch.empty([1, 1, 1, 0], dtype=dtype, device=device)
+            weight = torch.empty([1, 0, 1], dtype=dtype, device=device)
+            torch._C._nn.slow_conv3d(inp, weight, kernel_size=[1, 1, 1], stride=[1], padding=[1, 1, 1])
+
 
         with self.assertRaisesRegex(RuntimeError, re.escape("2D kernel_size expected")):
             torch._C._nn.thnn_conv2d(torch.rand([1, 1, 1, 1]), kernel_size=[], padding=[1, 1], stride=[1, 1],
