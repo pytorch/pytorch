@@ -968,7 +968,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmapvjp', vmapvjp_fail.union({
         xfail('as_strided'),
         xfail('as_strided', 'partial_views'),
-        xfail("_unsafe_masked_index"),  # inplace arithmetic(self, *extra_args) is not possible because there exists a Tensor `other`
     }))
     def test_vmapvjp(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1233,7 +1232,6 @@ class TestOperators(TestCase):
         xfail("_native_batch_norm_legit"),
         xfail("native_dropout_backward"),
         xfail("index_fill"),  # aten::_unique hit the vmap fallback which is currently disabled
-        xfail("_unsafe_masked_index"),  # inplace arithmetic(self, *extra_args) is not possible because there exists a Tensor `other`
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1309,7 +1307,6 @@ class TestOperators(TestCase):
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
         xfail('as_strided', 'partial_views'),
-        xfail("_unsafe_masked_index"),  # inplace arithmetic(self, *extra_args) is not possible because there exists a Tensor `other`
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost

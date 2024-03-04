@@ -684,8 +684,7 @@ Tensor _unsafe_masked_index(const Tensor& self, const Tensor& mask, const torch:
   std::transform(indices.begin(), indices.end(), self.sizes().begin(), clamped_indices.begin(), clamp);
 
   auto result = at::_unsafe_index(self, clamped_indices);
-  result.masked_fill_(at::logical_not(mask), fill);
-  return result;
+  return result.masked_fill(at::logical_not(mask), fill);
 }
 
 Tensor _unsafe_masked_index_put(const Tensor& self, const Tensor& mask, const torch::List<c10::optional<Tensor>>& indices, const Tensor& values, bool accumulate) {
