@@ -258,6 +258,7 @@ class TestNumPyInterop(TestCase):
         x.strides = (3,)
         self.assertRaises(ValueError, lambda: torch.from_numpy(x))
 
+    @skipIfTorchDynamo("No need to test invalid dtypes that should fail by design.")
     def test_from_numpy_no_leak_on_invalid_dtype(self):
         # This used to leak memory as the `from_numpy` call raised an exception and didn't decref the temporary
         # object. See https://github.com/pytorch/pytorch/issues/121138
