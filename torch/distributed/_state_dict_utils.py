@@ -91,14 +91,12 @@ def _iterate_state_dict(
     ):
         ret = iter_object
     elif isinstance(iter_object, dict):
-        if companion_obj is None:
-            companion_obj = {k: None for k in iter_object}
-        elif not isinstance(companion_obj, dict) or set(companion_obj.keys()) != set(
-            iter_object.keys()
+        if companion_obj is not None and (
+            not isinstance(companion_obj, dict)
+            or set(companion_obj.keys()) != set(iter_object.keys())
         ):
             raise CompanionMismatch()
 
-        assert isinstance(companion_obj, dict)
         ret = {
             key: _iterate_state_dict(
                 value,
@@ -108,17 +106,16 @@ def _iterate_state_dict(
                 pg=pg,
                 device=device,
                 cpu_offload=cpu_offload,
-                companion_obj=companion_obj[key],
+                companion_obj=companion_obj[key] if companion_obj is not None else None,
                 ranks_only=ranks_only,
                 type_check=type_check,
             )
             for key, value in iter_object.items()
         }
     elif isinstance(iter_object, (list, tuple)):
-        if companion_obj is None:
-            companion_obj = [None for _ in iter_object]
-        elif not isinstance(companion_obj, (list, tuple)) or len(companion_obj) != len(
-            iter_object
+        if companion_obj is not None and (
+            not isinstance(companion_obj, (list, tuple))
+            or len(companion_obj) != len(iter_object)
         ):
             raise CompanionMismatch()
 
@@ -131,11 +128,11 @@ def _iterate_state_dict(
                 pg=pg,
                 device=device,
                 cpu_offload=cpu_offload,
-                companion_obj=cpu_v,
+                companion_obj=companion_obj[idx] if companion_obj is not None else None,
                 ranks_only=ranks_only,
                 type_check=type_check,
             )
-            for (v, cpu_v) in zip(iter_object, companion_obj)
+            for idx, v in enumerate(iter_object)
         ]
         if isinstance(iter_object, tuple):
             ret = tuple(ret)
