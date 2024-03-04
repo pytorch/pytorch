@@ -66,16 +66,16 @@ class LocalElasticAgent(SimpleElasticAgent):
     user code deal with ensuring that workers are terminated in a synchronous
     manner rather than relying on the exit_barrier_timeout.
 
-    A named pipe based watchdog can be enabled in ```LocalElasticAgent``` if an
+    A file based watchdog can be enabled in ```LocalElasticAgent``` if an
     environment variable ``TORCHELASTIC_ENABLE_FILE_TIMER`` with value 1 has
     been defined in the ```LocalElasticAgent``` process.
     Optionally, another environment variable ```TORCHELASTIC_TIMER_FILE```
-    can be set with a unique file name for the named pipe. If the environment
-    variable ```TORCHELASTIC_TIMER_FILE``` is not set, ```LocalElasticAgent```
+    can be set with a unique file name. If the environment variable
+    ```TORCHELASTIC_TIMER_FILE``` is not set, ```LocalElasticAgent```
     will internally create a unique file name and set it to the environment
     variable ```TORCHELASTIC_TIMER_FILE```, and this environment variable will
     be propagated to the worker processes to allow them to connect to the same
-    named pipe that ```LocalElasticAgent``` uses.
+    file that ```LocalElasticAgent``` uses.
 
     Logs are written to the specified log directory. Each log line will be by default
     prefixed by ``[${role_name}${local_rank}]:`` (e.g. ``[trainer0]: foobar``).
@@ -152,24 +152,26 @@ class LocalElasticAgent(SimpleElasticAgent):
         enable_watchdog_env_name = TORCHELASTIC_ENABLE_FILE_TIMER
         watchdog_enabled = os.getenv(enable_watchdog_env_name)
         watchdog_file_env_name = TORCHELASTIC_TIMER_FILE
-        watchdog_file_path = os.getenv(watchdog_file_env_name)
+        watchdog_dir_path = os.getenv(watchdog_file_env_name)
         if watchdog_enabled is not None and str(watchdog_enabled) == "1":
-            if watchdog_file_path is None:
-                watchdog_file_path = "/tmp/watchdog_timer_" + str(uuid.uuid4())
-            log.info("Starting a FileTimerServer with %s ...", watchdog_file_path)
+            if watchdog_dir_path is None:
+                watchdog_dir_path = tempfile.mkdtemp(prefix="pytorch-watchdog-timer-")
+            log.info("Starting a FileTimerServer with %s ...", watchdog_dir_path)
             self._worker_watchdog = timer.FileTimerServer(
-                file_path=watchdog_file_path,
-                max_interval=0.1,
+                dir_path=watchdog_dir_path,
+                num_clients=len(envs),
+                max_interval=10,
                 daemon=True,
-                log_event=self._log_watchdog_event)
+                log_event=self._log_watchdog_event,
+            )
             self._worker_watchdog.start()
             log.info("FileTimerServer started")
         else:
             log.info("Environment variable '%s' not found. Do not start FileTimerServer.", enable_watchdog_env_name)
         # Propagate the watchdog file env to worker processes
-        if watchdog_file_path is not None:
-            for worker_env in envs.values():
-                worker_env[watchdog_file_env_name] = watchdog_file_path
+        if watchdog_dir_path is not None:
+            for (local_rank, worker_env) in envs.items():
+                worker_env[watchdog_file_env_name] = f"{watchdog_dir_path}/rank{local_rank}"
 
 
     def _get_fq_hostname(self) -> str:
