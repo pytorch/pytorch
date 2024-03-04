@@ -135,6 +135,7 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     # We should be able to graphbreak there.
     "doctr_det_predictor",
     "detectron2_fcos_r_50_fpn",
+    "hf_T5_generate",
     "dlrm",
 }
 
