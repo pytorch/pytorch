@@ -88,7 +88,7 @@ def _fsdp_state_pre_backward(self, forward_grad_fns: Tuple[Node, ...], grad) -> 
     """
     NOTE(yf225): since under compile we use `register_hook` to call pre_backward, to mimic `multi_grad_hook` "any" mode behavior
     we only want to call pre_backward once, so doing this check here to early return if already called.
-    
+
     Comment from Andrew:
     one more thing to note is that the hook should run once per call to register_multi_grad_hook, where there is one call per forward
     so if we run multiple forward before backward, we should run the pre-backward hook multiple times (one per forward)
@@ -191,10 +191,11 @@ class FSDPState(_State):
         # NOTE(yf225): I believe this causes issue during compile
         # (post_forward hook thinks that `post_forward_mesh_info` is None thus not doing resharding and not doing .resize_(0). Is it expected eager behavior?)
         # Need to understand why.
-        # if self._fsdp_param_group:
-        #     # For the root, do not reshard after forward since for training,
-        #     # the parameters would be freed and all-gathered immediately
-        #     self._fsdp_param_group.post_forward_mesh_info = None
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            if self._fsdp_param_group:
+                # For the root, do not reshard after forward since for training,
+                # the parameters would be freed and all-gathered immediately
+                self._fsdp_param_group.post_forward_mesh_info = None
         self._init_fqns()
         self._init_shared_state()
 
