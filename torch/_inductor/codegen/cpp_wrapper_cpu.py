@@ -1786,7 +1786,12 @@ class CppWrapperCpu(WrapperCodeGen):
             if config.abi_compatible:
                 static = self.is_statically_known_list_of_ints(val)
                 # Need to pass the array length because we can't use std::vector
-                return f"{self.codegen_int_array_var(result, known_statically=static, graph=self.get_codegened_graph())}, {len(val)}"
+                int_var_array = self.codegen_int_array_var(
+                    result,
+                    known_statically=static,
+                    graph=self.get_codegened_graph(),
+                )
+                return f"{int_var_array}, {len(val)}"
             else:
                 return result
         else:

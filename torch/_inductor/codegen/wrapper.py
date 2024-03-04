@@ -47,6 +47,8 @@ from .triton_utils import config_of, signature_to_meta
 if TYPE_CHECKING:
     import triton
 
+    from ..graph import GraphLowering
+
 
 pexpr = PythonPrinter().doprint
 
