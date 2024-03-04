@@ -1692,10 +1692,17 @@ class CppWrapperCpu(WrapperCodeGen):
                 return f"&{var_name}"
             elif config.c_shim_version == "2":
                 # Similar to other data type, use pointer to denote optional tensor arg in v2 C shim
+                base_handle = self.val_to_arg_str(val)
+                if "wrap_with_raii_handle_if_needed" in base_handle:
+                    # wrap_with_raii_handle_if_needed creates a temp RAIIAtenTensorHandle, so we need to
+                    # explicitly store it. Otherwise, it will be destroyed before the fallback kernel call.
+                    tmp_var_name = f"var_{next(self.arg_var_id)}"
+                    self.writeline(
+                        f"RAIIAtenTensorHandle {tmp_var_name} = {base_handle};"
+                    )
+                    base_handle = tmp_var_name
                 var_name = f"var_{next(self.arg_var_id)}"
-                self.writeline(
-                    f"AtenTensorHandle {var_name} = {self.val_to_arg_str(val)}.get();"
-                )
+                self.writeline(f"AtenTensorHandle {var_name} = {base_handle}.get();")
                 return f"&{var_name}"
 
         return self.val_to_arg_str(val)

@@ -312,6 +312,11 @@ def get_backend_index_for_aoti(
     dispatch_key: DispatchKey,
     backend_indices: Dict[DispatchKey, BackendIndex],
 ) -> Optional[BackendIndex]:
+    if "pointwise" in f.tags:
+        # TODO: No need to generate C shim for Inductor lowered ops.
+        # Only skip pointwise kernels for now, and we can add more tags later.
+        return None
+
     backend_index = None
     if backend_indices[dispatch_key].has_kernel(f):
         backend_index = backend_indices[dispatch_key]
