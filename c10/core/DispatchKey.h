@@ -542,7 +542,8 @@ constexpr bool isPerBackendFunctionalityKey(DispatchKey k) {
   if (k == DispatchKey::Dense || k == DispatchKey::Quantized ||
       k == DispatchKey::Sparse || k == DispatchKey::SparseCsr ||
       k == DispatchKey::AutogradFunctionality ||
-      k == DispatchKey::NestedTensor || k == DispatchKey::AutocastFunctionality) {
+      k == DispatchKey::NestedTensor ||
+      k == DispatchKey::AutocastFunctionality) {
     return true;
   } else {
     return false;

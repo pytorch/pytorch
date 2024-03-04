@@ -47,7 +47,6 @@ TORCH_API bool is_any_autocast_enabled();
 TORCH_API bool is_backend_autocast_enabled(BackendComponent backend);
 TORCH_API uint16_t get_autocast_backend();
 TORCH_API void set_autocast_backend(BackendComponent backend, bool enable);
-TORCH_API void set_autocast_backend(uint16_t backends, bool enable);
 TORCH_API DispatchKeySet get_ks_by_autocast(c10::DispatchKeySet ks);
 
 class C10_API ExcludeAutocastGuard final {
