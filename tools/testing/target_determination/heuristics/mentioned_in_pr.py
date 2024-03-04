@@ -1,14 +1,17 @@
+import json
 import os
 import re
 import subprocess
 from typing import Any, List
+from urllib.request import Request, urlopen
 
-import requests
 from tools.testing.target_determination.heuristics.interface import (
     HeuristicInterface,
     TestPrioritizations,
 )
 from tools.testing.test_run import TestRun
+
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 
 
 # This heuristic gives a test a rating of 1 if it is mentioned in the PR or a
@@ -18,7 +21,7 @@ class MentionedInPR(HeuristicInterface):
         super().__init__(**kwargs)
 
     def _search_for_linked_issues(self, s: str) -> List[str]:
-        return re.findall(r"#(\d+)", s) + re.findall(r"/pytorch/pytorch/(\d+)", s)
+        return re.findall(r"#(\d+)", s) + re.findall(r"/pytorch/pytorch/.*/(\d+)", s)
 
     def get_prediction_confidence(self, tests: List[str]) -> TestPrioritizations:
         try:
@@ -40,12 +43,12 @@ class MentionedInPR(HeuristicInterface):
             pr_body = ""
 
         # Search for linked issues or PRs
-        additional_issue_bodies: List[str] = []
+        linked_issue_bodies: List[str] = []
         for issue in self._search_for_linked_issues(
             commit_messages
         ) + self._search_for_linked_issues(pr_body):
             try:
-                additional_issue_bodies.append(get_issue_or_pr_body(int(issue)))
+                linked_issue_bodies.append(get_issue_or_pr_body(int(issue)))
             except Exception as e:
                 pass
 
@@ -54,7 +57,7 @@ class MentionedInPR(HeuristicInterface):
             if (
                 test in commit_messages
                 or test in pr_body
-                or any(test in body for body in additional_issue_bodies)
+                or any(test in body for body in linked_issue_bodies)
             ):
                 mentioned.append(test)
 
@@ -88,7 +91,12 @@ def get_git_commit_info() -> str:
 
 
 def get_issue_or_pr_body(number: int) -> str:
-    body: str = requests.get(
-        f"https://api.github.com/repos/pytorch/pytorch/issues/{number}"
-    ).json()["body"]
-    return body
+    headers = {
+        "Accept": "application/vnd.github.v3+json",
+        "Authorization": f"token {GITHUB_TOKEN}",
+    }
+    # Despite the 'issues' in the link, this also works for PRs
+    url = f"https://api.github.com/repos/pytorch/pytorch/issues/{number}"
+    with urlopen(Request(url, headers=headers)) as conn:
+        body: str = json.loads(conn.read().decode())["body"]
+        return body
