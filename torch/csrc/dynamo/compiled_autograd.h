@@ -227,17 +227,6 @@ class CompiledNodeArgs {
     }
   }
   template <typename T>
-  void collect(const std::unordered_set<T>& s) {
-    collect_size(s.size());
-
-    std::vector<T> v(s.begin(), s.end());
-    // stable sort over keys to ensure deterministic collect order
-    std::stable_sort(v.begin(), v.end());
-    for (const T& i : v) {
-      collect(i);
-    }
-  }
-  template <typename T>
   void collect(const c10::OptionalArray<T>& t) {
     collect(t.list);
   }
@@ -262,8 +251,7 @@ class CompiledNodeArgs {
         m.begin(), m.end(), std::back_inserter(keys), [](const auto& entry) {
           return entry.first;
         });
-    // stable sort to ensure deterministic collect order
-    std::stable_sort(keys.begin(), keys.end());
+    std::sort(keys.begin(), keys.end());
     for (const auto& k : keys) {
       collect(k);
       collect(m.at(k));
@@ -681,33 +669,24 @@ class SwapSavedVariables {
     }
   }
 
-  template <typename K, typename V>
-  void before(ska::flat_hash_map<K, V>& m) {
-    for (auto& [k, v] : m) {
-      before(k);
-      before(v);
+  template <typename V>
+  void before(ska::flat_hash_map<std::string, V>& m) {
+    std::vector<std::string> keys;
+    keys.reserve(m.size());
+    std::transform(
+        m.begin(), m.end(), std::back_inserter(keys), [](const auto& entry) {
+          return entry.first;
+        });
+    std::sort(keys.begin(), keys.end());
+    for (auto& k : keys) {
+      before(m.at(k));
     }
   }
 
-  template <typename K, typename V>
-  void after(ska::flat_hash_map<K, V>& m) {
-    for (auto& [k, v] : m) {
-      after(k);
+  template <typename V>
+  void after(ska::flat_hash_map<std::string, V>& m) {
+    for (auto& [_, v] : m) {
       after(v);
-    }
-  }
-
-  template <typename T>
-  void before(std::unordered_set<T>& s) {
-    for (auto& i : s) {
-      before(i);
-    }
-  }
-
-  template <typename T>
-  void after(std::unordered_set<T>& s) {
-    for (auto& i : s) {
-      after(i);
     }
   }
 

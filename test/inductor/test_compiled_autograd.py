@@ -895,7 +895,64 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved, m) {
 
         self.check_output_and_recompiles(fn, 2)
 
-    def test_autograd_cpp_node_dynamic(self):
+    def test_autograd_cpp_node_saved_dynamic(self):
+        cpp_source = """
+struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
+  static constexpr bool is_traceable = true;
+
+  static torch::Tensor forward(
+      torch::autograd::AutogradContext* ctx,
+      const torch::Tensor& x) {
+    ctx->save_for_backward({x});
+    ctx->saved_data["dynamic"] = x.view(-1);
+    return x;
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext *ctx,
+      torch::autograd::variable_list grad_output) {
+    const auto& saved_variables = ctx->get_saved_variables();
+    assert(saved_variables.size() == 1);
+    torch::Tensor x = saved_variables[0];
+    torch::Tensor z = ctx->saved_data["dynamic"].toTensor();
+
+    torch::autograd::variable_list grad_inputs(1);
+    grad_inputs[0] = x + torch::sum(z);
+    return grad_inputs;
+  }
+};
+
+torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x) {
+  return CustomOpAutogradFunction::apply(x);
+}
+
+TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic, m) {
+    m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
+}
+        """
+
+        module = torch.utils.cpp_extension.load_inline(
+            name="test_autograd_cpp_node_saved_dynamic",
+            cpp_sources=cpp_source,
+            functions="custom_op_backed_by_autograd_fn",
+            verbose=True,
+        )
+
+        def fn():
+            for i in [10, 100, 10, 20, 10]:
+                x = torch.ones(i, i, requires_grad=True)
+                out = torch.ops.test_autograd_cpp_node_saved_dynamic.custom_op_backed_by_autograd_fn(
+                    x
+                )
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        # can bring this down to 2 if we support dynamic shapes
+        # instead of collecting the saved_data's tensor hash
+        self.check_output_and_recompiles(fn, 5)
+
+    def test_autograd_cpp_node_data_dependent(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -911,19 +968,20 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
 
     switch (iteration) {
         case 0: {
-            ctx->saved_data["forces_recompile"] = iteration;
             break;
         }
         case 1: {
-            ctx->mark_dirty({y});
+            // recompile
+            ctx->saved_data["forces_recompile"] = iteration;
             break;
         }
         case 2: {
-            ctx->mark_non_differentiable({y});
+            // recompile
+            ctx->set_materialize_grads(false);
             break;
         }
         case 3: {
-            ctx->set_materialize_grads(false);
+            // reuse
             break;
         }
         default: {
@@ -961,35 +1019,35 @@ void reset() {
     CustomOpAutogradFunction::iteration = 0;
 }
 
-TORCH_LIBRARY(test_autograd_cpp_node_dynamic, m) {
+TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
     m.def("reset", reset);
 }
         """
 
         module = torch.utils.cpp_extension.load_inline(
-            name="test_autograd_cpp_node_dynamic",
+            name="test_autograd_cpp_node_data_dependent",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
         )
 
         def fn():
-            torch.ops.test_autograd_cpp_node_dynamic.reset()
+            torch.ops.test_autograd_cpp_node_data_dependent.reset()
             for i in [10, 10, 10, 10]:
                 x = torch.ones(i, i, requires_grad=True)
                 y = torch.randn(i, i)
                 (
                     out1,
                     out2,
-                ) = torch.ops.test_autograd_cpp_node_dynamic.custom_op_backed_by_autograd_fn(
+                ) = torch.ops.test_autograd_cpp_node_data_dependent.custom_op_backed_by_autograd_fn(
                     x, y
                 )
                 loss = (out1 + out2).sum()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 4)
+        self.check_output_and_recompiles(fn, 3)
 
 
 def load_test_module(name):

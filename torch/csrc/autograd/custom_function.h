@@ -195,8 +195,8 @@ struct CppNode : public Node {
     args.collect(std::string(typeid(T).name()));
 
     args.collect(ctx_.saved_data);
-    args.collect(ctx_.non_differentiable_);
-    args.collect(ctx_.dirty_inputs_);
+    TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
+    TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
     args.collect(ctx_.saved_variables_);
     args.collect(ctx_.materialize_grads_);
     args.collect(ctx_.has_freed_buffers_);
@@ -209,8 +209,8 @@ struct CppNode : public Node {
       const variable_list& inputs,
       SwapSavedVariables& saved) override {
     saved.before(ctx_.saved_data);
-    saved.before(ctx_.non_differentiable_);
-    saved.before(ctx_.dirty_inputs_);
+    TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
+    TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
     saved.before(ctx_.saved_variables_);
     saved.before(ctx_.to_save_);
     saved.before(ctx_.materialize_grads_);
@@ -219,8 +219,8 @@ struct CppNode : public Node {
     saved.before(output_info_);
     auto results = apply(variable_list(inputs));
     saved.after(ctx_.saved_data);
-    saved.after(ctx_.non_differentiable_);
-    saved.after(ctx_.dirty_inputs_);
+    TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
+    TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
     saved.after(ctx_.saved_variables_);
     saved.after(ctx_.to_save_);
     saved.after(ctx_.materialize_grads_);
