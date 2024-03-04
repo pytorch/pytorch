@@ -123,10 +123,14 @@ def impl_abstract_class(qualname, fake_class=None):
         # Check whether the refered torch::class_ exists.
         torch._C._get_custom_class_python_wrapper(ns, name)
 
-        if not isinstance(fake_class.__dict__.get("from_real", None), classmethod):
+        name = "from_real"
+        from_real_method = fake_class.__dict__.get(name, None)
+        if not from_real_method:
             raise RuntimeError(
-                f"{fake_class} must define a classmethod from_real that converts the real object to the fake object."
+                f"{fake_class} must define a classmethod {name} that converts the real object to the fake object."
             )
+        if not isinstance(from_real_method, classmethod):
+            raise RuntimeError(f"{name} have to be a classmethod.")
 
         global_abstract_class_registry.register(
             _full_qual_class_name(qualname), fake_class

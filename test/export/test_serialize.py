@@ -813,6 +813,23 @@ class TestSerializeCustomClass(TestCase):
                 lib_file_path = find_library_location('torchbind_test.dll')
             torch.ops.load_library(str(lib_file_path))
 
+        @torch._library.impl_abstract_class("_TorchScriptTesting::_ContainsTensor")
+        class FakeContainsTensor:
+            def __init__(self, tensor):
+                self.tensor = tensor
+
+            @classmethod
+            def from_real(cls, real):
+                return cls(real.get())
+
+            def get(self):
+                return self.tensor
+
+    def tearDown(self):
+        torch._library.abstract_impl_class.deregister_abstract_impl(
+            "_TorchScriptTesting::_ContainsTensor"
+        )
+
     def test_custom_class(self):
         custom_obj = torch.classes._TorchScriptTesting._PickleTester([3, 4])
 

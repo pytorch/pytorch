@@ -813,6 +813,9 @@ class DispatchCacheInfo:
 
 def _fakify_script_object(x):
     full_qualname = x._type().qualified_name()
+    splits = full_qualname.split(".")
+    assert len(splits) == 5, breakpoint()
+    _torch, torch_ns, classes, ns, class_name = splits
     if not hasattr(x, "__get_metadata__"):
         raise RuntimeError(
             f"Trying to fakify ScriptObject {full_qualname} "
@@ -824,7 +827,12 @@ def _fakify_script_object(x):
     if fake_class is None:
         raise RuntimeError(
             f" ScriptObject's {full_qualname} haven't registered a fake class."
-            f" Please use impl_abstract_class to register a fake class for the script obj."
+            f" Please use impl_abstract_class({ns}::{class_name}) to annotate a fake class for the script obj."
+            f" Specifically, create a python class that implements a fake version for all the methods"
+            f" that're used in the program and put annotated class in the program e.g. after loading the library."
+            f" The fake methods can be written in the same way as a meta kernel for an operator but need to also"
+            f" simulate the object's states when necessary. Be sure to add a from_real classmethod to enable creating"
+            f" a fake obj from a real one."
         )
     if not hasattr(fake_class, "from_real"):
         raise RuntimeError(

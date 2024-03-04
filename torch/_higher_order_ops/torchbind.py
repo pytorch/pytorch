@@ -88,6 +88,10 @@ def call_torchbind_fake(mode, *args, **kwargs):
         fake_script_obj = _fakify_script_object(script_object)
         torch.ScriptMethod.__call__ = torchbind_method_redispatch  # type: ignore[method-assign]
         pos_args, kwargs = _maybe_fakify_script_object(pos_args, kwargs)
+        if not hasattr(fake_script_obj, method_name):
+            raise RuntimeError(
+                f"Do you forget to fakify `{method_name}` method for fake object {type(fake_script_obj)}?"
+            )
         return getattr(fake_script_obj, method_name)(*pos_args, **kwargs)
 
 
