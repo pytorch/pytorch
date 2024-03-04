@@ -160,7 +160,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         ):
             make_fx(f)(torch.tensor([]), torch.tensor(4))
 
-    @skipIfTorchDynamo
+    @skipIfTorchDynamo()
     def test_compile_aot_eager(self):
         def f(x):
             torch.ops.aten._print("moo")
@@ -191,7 +191,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res = torch.compile(f, backend="inductor")(*inputs)
         self.assertTrue(torch.allclose(res, f(*inputs)))
 
-    @skipIfTorchDynamo
+    @skipIfTorchDynamo()
     def test_compile_aot_eager_requires_grad(self):
         def f(x):
             torch.ops.aten._print("moo")
