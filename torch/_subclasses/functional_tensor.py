@@ -1,6 +1,6 @@
 import contextlib
 from abc import ABC, abstractmethod
-from typing import Any, Callable, ContextManager, Optional, Tuple
+from typing import Any, Callable, ContextManager, Optional, List, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -213,6 +213,13 @@ class FunctionalTensor(torch.Tensor):
     def mark_mutation_hidden_from_autograd(self) -> None:
         torch._functionalize_mark_mutation_hidden_from_autograd(self.elem)
 
+    def tolist(self) -> List[int]:
+        if self.elem.dim() == 0:
+            return self.elem.item()
+        elif self.elem.dim() == 1:
+            return [elem.item() for elem in self.elem]
+        else:
+            return [elem.tolist() for elem in self.elem]
 
 class FunctionalTensorMode(TorchDispatchMode):
     def __init__(self, pre_dispatch=False, export=False):
