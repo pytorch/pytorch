@@ -442,6 +442,9 @@ allow_stack_allocation: bool = True
 # but performance for that interface may be degraded.
 use_minimal_arrayref_interface: bool = False
 
+# decompose some memory bound matmul/bmm to mul
+decompose_mem_bound_mm: bool = False
+
 
 # config specific to codegen/cpp.py
 class cpp:
@@ -740,6 +743,8 @@ class trace:
     # Upload the .tar.gz file
     # Needs to be overriden based on specific environment needs
     upload_tar: Optional[Callable[[str], None]] = None
+
+    log_autotuning_results: bool = False
 
 
 _save_config_ignore = {

@@ -19,6 +19,8 @@ from torch.distributed.algorithms.ddp_comm_hooks import (
 )
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
+    run_with_both_funcol_impls,
+    run_with_native_funcol,
     skip_if_lt_x_gpu,
     skip_if_rocm,
 )
@@ -246,6 +248,7 @@ class ReplicateTest(MultiProcessTestCase):
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         return code
 
+    @run_with_native_funcol
     def test_bucketing_coalesced_op(self):
         torch._inductor.config.fuse_ddp_communication_passes = [
             "fuse_ddp_with_coalesced_op",
@@ -253,12 +256,18 @@ class ReplicateTest(MultiProcessTestCase):
         ]
 
         code = self._test_bucketing()
+        self.assertEquals(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
         for i in range(3):
-            fc.check("cpp_fused_").check("dist.all_reduce_coalesced(")
+            fc.check("cpp_fused_").check(
+                "torch.ops._c10d_functional.all_reduce_coalesced_.default("
+            )
         for i in range(3):
-            fc.check("_wait_tensor(").check("cpp_fused_").run(code)
+            fc.check("torch.ops._c10d_functional.wait_tensor.default").check(
+                "cpp_fused_"
+            ).run(code)
 
+    @run_with_native_funcol
     def test_bucketing_concat_op(self):
         torch._inductor.config.fuse_ddp_communication_passes = [
             "fuse_ddp_with_concat_op",
@@ -266,13 +275,16 @@ class ReplicateTest(MultiProcessTestCase):
         ]
 
         code = self._test_bucketing()
+        self.assertEquals(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
         for i in range(3):
             fc.check("aten.flatten.using_ints(").check("cpp_fused_").check(
-                "dist.all_reduce("
+                "torch.ops._c10d_functional.all_reduce_.default("
             )
         for i in range(3):
-            fc.check("_wait_tensor(").check("cpp_fused_")
+            fc.check("torch.ops._c10d_functional.wait_tensor.default").check(
+                "cpp_fused_"
+            )
         fc.run(code)
 
 

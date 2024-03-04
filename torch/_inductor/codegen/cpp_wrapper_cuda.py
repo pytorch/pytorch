@@ -11,7 +11,7 @@ from .. import config
 from ..codecache import CudaKernelParamCache
 from ..triton_heuristics import grid as default_grid
 from ..virtualized import V
-from .cpp_wrapper_cpu import CppWrapperCodeGen
+from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import SymbolicCallArg
 
 
@@ -37,7 +37,7 @@ def is_float(s: str) -> bool:
     return True
 
 
-class CudaWrapperCodeGen(CppWrapperCodeGen):
+class CppWrapperCuda(CppWrapperCpu):
     """
     Generates cpp wrapper for running on GPU and calls CUDA kernels
     """
@@ -155,7 +155,8 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         self.prefix.writeline("\n")
         if not V.graph.aot_mode:
             for kernel in chain(
-                self.src_to_kernel.values(), self.user_defined_kernel_cache.values()
+                self.src_to_kernel.values(),
+                [entry[0] for entry in self.user_defined_kernel_cache.values()],
             ):
                 self.prefix.writeline(f"static CUfunction {kernel} = nullptr;")
             self.prefix.writeline("\n")
@@ -243,9 +244,10 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         triton=True,
         arg_types=None,
         grid_fn: str = "grid",
+        triton_meta=None,
     ):
         if not cuda:
-            # Even in CudaWrapperCodeGen, we may see cpp kernels
+            # Even in CppWrapperCuda, we may see cpp kernels
             return super().generate_kernel_call(
                 name, call_args, grid, device_index, cuda, triton, arg_types
             )
@@ -263,6 +265,17 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         shared_mem = params.get("shared_mem", 0)
 
         self.generate_load_kernel_once(name, mangled_name, cubin_path, shared_mem)
+
+        # args with value 1 are added into equal_to_1 and constants
+        # in triton_meta (in the Python codegen) which makes them
+        # inlined in the PTX and compiled CUBIN
+        if (
+            triton_meta is not None
+            and "configs" in triton_meta
+            and triton_meta["configs"]
+        ):
+            equal_to_1 = triton_meta["configs"][0].equal_to_1
+            call_args = [arg for i, arg in enumerate(call_args) if i not in equal_to_1]
 
         call_args = self.generate_args_decl(call_args)
         kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"

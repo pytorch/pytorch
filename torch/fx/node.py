@@ -45,7 +45,6 @@ _side_effectful_functions: Set[Callable] = {
     _ops.aten._assert_async.msg,
     _ops.aten._assert_scalar.default,
     _ops.aten.copy_.default,
-    _ops.aten._foreach_div,
     _ops.aten.sym_constrain_range.default,
     _ops.aten.sym_constrain_range_for_size.default,
     _ops.profiler._record_function_enter,

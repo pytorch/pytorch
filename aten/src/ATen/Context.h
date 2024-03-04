@@ -24,7 +24,6 @@
 #include <c10/util/irange.h>
 
 #include <cstdint>
-#include <memory>
 #include <mutex>
 
 namespace at {
@@ -507,6 +506,19 @@ static inline void manual_seed(uint64_t seed) {
         // See Note [Acquire lock when using random generators]
         std::lock_guard<std::mutex> lock(cuda_gen.mutex());
         cuda_gen.set_current_seed(seed);
+      }
+    }
+  }
+
+  const auto xpu_num_gpus = detail::getXPUHooks().getNumGPUs();
+  if (hasXPU() && xpu_num_gpus) {
+    for (const auto i : c10::irange(xpu_num_gpus)) {
+      auto xpu_gen = globalContext().defaultGenerator(
+          Device(at::kXPU, static_cast<c10::DeviceIndex>(i)));
+      {
+        // See Note [Acquire lock when using random generators]
+        std::lock_guard<std::mutex> lock(xpu_gen.mutex());
+        xpu_gen.set_current_seed(seed);
       }
     }
   }

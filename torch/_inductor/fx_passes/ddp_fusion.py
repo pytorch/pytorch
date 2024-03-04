@@ -261,7 +261,7 @@ def _fuse_with_coalesced_op(
         flatten_args[0] = input_node
         args, kwargs = tree_unflatten(flatten_args, spec)
         fused_comm_node = call_function(
-            graph, torch.ops.c10d_functional.all_reduce_coalesced.default, args, kwargs
+            graph, torch.ops._c10d_functional.all_reduce_coalesced.default, args, kwargs
         )
 
     # Create a new wait node.
@@ -490,7 +490,10 @@ def _fuse_ddp_communication(
 
         return True
 
-    ops = (torch.ops.c10d_functional.all_reduce.default,)
+    ops = (
+        torch.ops._c10d_functional.all_reduce_.default,
+        torch.ops._c10d_functional.all_reduce.default,
+    )
     comm_blocks = get_all_comm_blocks(graph, ops, comm_filter=ddp_reducer_filter)
     node_indices = {node: i for i, node in enumerate(graph.nodes)}
 
@@ -523,8 +526,10 @@ def schedule_comm_wait(graph: fx.Graph) -> None:
     This will result in a better overlapping result.
     """
     ops = (
-        torch.ops.c10d_functional.all_reduce.default,
-        torch.ops.c10d_functional.all_reduce_coalesced.default,
+        torch.ops._c10d_functional.all_reduce_.default,
+        torch.ops._c10d_functional.all_reduce.default,
+        torch.ops._c10d_functional.all_reduce_coalesced.default,
+        torch.ops._c10d_functional.all_reduce_coalesced_.default,
     )
     comm_blocks = get_all_comm_blocks(graph, ops)
     if not comm_blocks:
