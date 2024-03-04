@@ -30,9 +30,9 @@ import logging
 from torch.overrides import TorchFunctionMode
 
 from torch.utils._python_dispatch import (
-    _push_mode,
     TorchDispatchMode,
     _disable_infra_mode,
+    _push_mode,
 )
 
 from ._backward_state import BackwardState
@@ -272,13 +272,6 @@ def _unset_proxy_mode():
         mode = unset_mode_pre_dispatch(torch._C._TorchDispatchModeKey.PROXY)
         return mode
     return torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
-
-def _set_proxy_mode(mode):
-    assert isinstance(mode, ProxyTorchDispatchMode)
-    if mode.pre_dispatch:
-        _set_mode_pre_dispatch(mode)
-    else:
-        torch._C._set_dispatch_mode(mode)
 
 
 @dataclass
@@ -673,7 +666,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # Re-enable the previous proxy mode, if there was one.
         mb_previous_proxy_mode = self.enter_stack.pop()
         if mb_previous_proxy_mode is not None:
-            _set_proxy_mode(mb_previous_proxy_mode)
+            _push_mode(mb_previous_proxy_mode)
 
         if not b:
             return m.__exit__(exc_type, exc_value, traceback)

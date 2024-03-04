@@ -130,7 +130,7 @@ def _get_current_dispatch_mode_stack():
 
 
 def _push_mode(mode):
-    k = mode._dispatch_key
+    k = mode._dispatch_key if hasattr(mode, "_dispatch_key") else None
     assert k is None or k == torch._C.DispatchKey.PreDispatch
     if k is None:
         _push_on_torch_dispatch_stack(mode)

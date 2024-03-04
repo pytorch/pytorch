@@ -13,8 +13,8 @@ from torch._higher_order_ops.utils import (
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import (
-    FunctionalTensor,
     disable_functional_mode,
+    FunctionalTensor,
 )
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,

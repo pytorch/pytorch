@@ -8,10 +8,9 @@ from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch._ops import _get_dispatch_mode_pre_dispatch
 from torch.utils._python_dispatch import (
     _detect_functional_mode,
-    _push_mode,
+    _disable_infra_mode,
     return_and_correct_aliasing,
     TorchDispatchMode,
-    _disable_infra_mode,
 )
 
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
