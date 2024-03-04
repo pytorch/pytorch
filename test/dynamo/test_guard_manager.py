@@ -10,7 +10,6 @@ from torch.testing._internal.common_utils import set_default_dtype
 
 RootGuardManager = guards.RootGuardManager
 DictGuardManager = guards.DictGuardManager
-KeyValueDictGuardManager = guards.KeyValueDictGuardManager
 GetAttrGuardAccessor = guards.GetAttrGuardAccessor
 GetItemGuardAccessor = guards.GetItemGuardAccessor
 TypeGuardAccessor = guards.TypeGuardAccessor
@@ -621,32 +620,28 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(root.check(f_locals_prime))
 
         # Add key-value manager ("a" : 1)
-        mgr0 = dict_mgr.get_index_manager(0)
         self.assertTrue(root.check(f_locals))
-        mgr0.get_key_manager("a").add_equals_match_guard("a", ["dict.keys()[0] == a"])
+        dict_mgr.get_key_manager(0, "a").add_equals_match_guard(
+            "a", ["dict.keys()[0] == a"]
+        )
         self.assertTrue(root.check(f_locals))
-        mgr0.get_value_manager(1).add_equals_match_guard(1, ["d[0] == 1"])
+        dict_mgr.get_value_manager(0, 1).add_equals_match_guard(1, ["d[0] == 1"])
         self.assertTrue(root.check(f_locals))
 
         # Add key-value manager (nothing : {"z" : 3})
-        mgr1 = dict_mgr.get_index_manager(1)
         self.assertTrue(root.check(f_locals))
-        mgr1.get_key_manager(nothing).add_lambda_guard(
+        dict_mgr.get_key_manager(1, nothing).add_lambda_guard(
             lambda x: x is nothing, ["x is nothing"]
         )
         self.assertTrue(root.check(f_locals))
-        value_mgr = mgr1.get_value_manager(f_locals["d"][nothing])
+        value_mgr = dict_mgr.get_value_manager(1, f_locals["d"][nothing])
         self.assertTrue(isinstance(value_mgr, DictGuardManager))
         self.assertTrue(root.check(f_locals))
 
         # Check structure
         # Check that we are only guarding on two keys. This is common in
         # LazyVariableTracker.
-        self.assertEqual(len(dict_mgr.get_index_managers()), 2)
-        self.assertTrue(isinstance(mgr0, KeyValueDictGuardManager))
-        self.assertTrue(isinstance(mgr1, KeyValueDictGuardManager))
-        self.assertEqual(len(mgr0.get_key_value_managers()), 2)
-        self.assertEqual(len(mgr1.get_key_value_managers()), 2)
+        self.assertEqual(len(dict_mgr.get_key_value_managers()), 2)
 
         f_locals["d"]["a"] = 2
         self.assertFalse(root.check(f_locals))
