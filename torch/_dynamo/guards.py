@@ -142,19 +142,40 @@ class GuardManager:
                 key_manager = kv_mgr[0]
                 if key_manager:
                     suffix = " key_manager at index=" + str(dict_key_index) + "\n"
-                    s += prefix + "+- " + key_manager.__class__.__name__ + " source =" + key_manager.get_source() + suffix
+                    s += (
+                        prefix
+                        + "+- "
+                        + key_manager.__class__.__name__
+                        + " source ="
+                        + key_manager.get_source()
+                        + suffix
+                    )
                     s += self._debug_print(key_manager, prefix + "|  ")
 
                 value_manager = kv_mgr[1]
                 if value_manager:
                     suffix = " value_manager at index=" + str(dict_key_index) + "\n"
-                    s += prefix + "+- " + value_manager.__class__.__name__ + " source =" + value_manager.get_source() + suffix
+                    s += (
+                        prefix
+                        + "+- "
+                        + value_manager.__class__.__name__
+                        + " source ="
+                        + value_manager.get_source()
+                        + suffix
+                    )
                     s += self._debug_print(value_manager, prefix + "|  ")
 
         # Now handle the general case of GuardManager/RootGuardManager
         for accessor, child_mgr in zip(mgr.get_accessors(), mgr.get_child_managers()):
             suffix = " with " + accessor.repr() + "\n"
-            s += prefix + "+- " + child_mgr.__class__.__name__ + ", source=" + child_mgr.get_source() + suffix
+            s += (
+                prefix
+                + "+- "
+                + child_mgr.__class__.__name__
+                + ", source="
+                + child_mgr.get_source()
+                + suffix
+            )
             s += self._debug_print(child_mgr, prefix + "|  ")
         return s
 
