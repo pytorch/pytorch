@@ -395,18 +395,31 @@ def load_torch_function_handler(cls, func, types, args=(), kwargs=None):
     kwargs = {} if kwargs is None else kwargs
 
     def module_load(dest, src, assign=False):
-        # always convert src to cls
         if isinstance(dest, cls):
-            if type(src) is torch.Tensor:
-                return cls(src)
-            elif type(src) is cls:
+            if assign:
+                return src.detach()
+            else:
+                if type(src) is torch.Tensor:
+                    return cls(src)
+                elif type(src) is cls:
+                    return src.detach()
+                else:
+                    if isinstance(src, MyWrapperLoadTensor):
+                        return cls(src._data)
+                    return cls(src)
+        else:
+            assert isinstance(src, cls), f"Expected isinstance(src, {cls}) but got {type(src)}"
+            assert type(dest) == torch.Tensor or type(dest) == torch.nn.Parameter or issubclass(cls, type(dest))
+            if assign:
                 return src.detach()
             else:
                 if isinstance(src, MyWrapperLoadTensor):
-                    return cls(src._data)
-                return cls(src)
-        else:
-            return src.detach()
+                    if type(dest) not in {torch.Tensor, torch.nn.Parameter}:
+                        return type(dest)(src._data)
+                    else:
+                        return src._data.detach()
+                else:
+                    return torch.Tensor(src)
 
     if func is torch.Tensor.module_load:
         return module_load(*args, **kwargs)
@@ -481,11 +494,12 @@ class TestLoadStateDictSwap(TestCase):
     @skipIfCrossRef
     @skipIfTorchDynamo("Can't swap with dynamo as dynamo installs weakrefs")
     @swap([True])
-    def test_swap_subclass(self):
+    @parametrize("assign", [True, False])
+    def test_swap_subclass(self, assign):
 
         def _create_model(subclass=None):
-            m = torch.nn.Linear(2, 3, bias=False)
-            m.register_buffer('buf', torch.randn(2, 3))
+            m = torch.nn.Linear(2, 1, bias=False)
+            m.register_buffer('buf', torch.randn(2, 1))
             if subclass is not None:
                 m.weight = torch.nn.Parameter(subclass(m.weight))
                 m.buf = subclass(m.buf)
@@ -495,23 +509,20 @@ class TestLoadStateDictSwap(TestCase):
             m = _create_model(m_subclass)
             sd = _create_model(sd_subclass).state_dict()
             sd = sd
-            m.load_state_dict(sd)
+            m.load_state_dict(sd, assign=assign)
             self.assertEqual(m.weight, sd['weight'])
             self.assertEqual(m.buf, sd['buf'])
             self.assertTrue(isinstance(m.weight, torch.nn.Parameter))
             self.assertTrue(not isinstance(m.buf, torch.nn.Parameter))
 
             weight_type, buf_type = (torch.nn.Parameter, torch.Tensor)
-            if m_subclass is not None and sd_subclass is not None:
-                # handler of subclass takes precedence over superclass
-                if issubclass(sd_subclass, m_subclass):
+            if assign:
+                if sd_subclass is not None:
                     weight_type, buf_type = (sd_subclass, sd_subclass)
-                else:
+            else:
+                if m_subclass is not None:
                     weight_type, buf_type = (m_subclass, m_subclass)
-            elif m_subclass is not None:
-                weight_type, buf_type = (m_subclass, m_subclass)
-            elif sd_subclass is not None:
-                weight_type, buf_type = (sd_subclass, sd_subclass)
+
             self.assertTrue(type(m.weight) is weight_type)
             self.assertTrue(type(m.buf) is buf_type)
 
