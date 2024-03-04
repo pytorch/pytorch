@@ -784,7 +784,12 @@ Got grad_output types: {str(grad_output_types)}"""
             # Make the tangents contiguous. Note that we must do this after subclass desugaring
             # because inputs to inductor have to be contiguous
             all_args = [
-                t.contiguous() if tangents_start_idx <= i < tangents_end_idx else t
+                t.contiguous()
+                if (
+                    (tangents_start_idx <= i < tangents_end_idx)
+                    and (not t.is_contiguous())
+                )
+                else t
                 for i, t in enumerate(all_args)
             ]
 
