@@ -67,19 +67,28 @@ def inner(mode, *args, **kwargs):
             proxy_args,
             proxy_kwargs,
         )
-        out = call_torchbind_impl(*args, **kwargs)
+        out = call_torchbind(*args, **kwargs)
 
         return track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
     else:
         return call_torchbind(*args, **kwargs)
 
 
-# TODO: currently we just run the C++ implementation with fake tensors.
-# But we should make it possible to register a fake torchbind implementation.
 @call_torchbind.py_impl(FakeTensorMode)
 def call_torchbind_fake(mode, *args, **kwargs):
     with mode:
-        return call_torchbind_impl(*args, **kwargs)
+        from torch._subclasses.fake_tensor import (
+            _fakify_script_object,
+            _maybe_fakify_script_object,
+        )
+
+        assert len(args) >= 2
+        script_object, method_name, *pos_args = args
+        torch.ScriptMethod.__call__ = _orig_scriptmethod_call  # type: ignore[method-assign]
+        fake_script_obj = _fakify_script_object(script_object)
+        torch.ScriptMethod.__call__ = torchbind_method_redispatch  # type: ignore[method-assign]
+        pos_args, kwargs = _maybe_fakify_script_object(pos_args, kwargs)
+        return getattr(fake_script_obj, method_name)(*pos_args, **kwargs)
 
 
 call_torchbind.py_impl(DispatchKey.Autograd)(

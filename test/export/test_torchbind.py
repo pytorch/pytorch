@@ -216,8 +216,7 @@ def forward(self, arg0_1, arg1_1):
 
         m = MyModule()
         input = torch.ones(2, 3)
-        with enable_torchbind_tracing():
-            ep = torch.export.export(m, (input,), strict=False)
+        ep = self._test_export_same_as_eager(m, (input,), strict=False)
 
         unlifted = ep.module()
         self.assertExpectedInline(
