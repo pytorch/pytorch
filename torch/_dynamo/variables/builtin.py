@@ -15,7 +15,13 @@ import torch
 from torch import sym_float, sym_int
 
 from .. import config, polyfill, variables
-from ..exc import AttributeMutationError, unimplemented, UserError, UserErrorType
+from ..exc import (
+    AttributeMutationError,
+    unimplemented,
+    Unsupported,
+    UserError,
+    UserErrorType,
+)
 from ..guards import GuardBuilder, install_guard
 from ..replay_record import DummyModule
 from ..source import AttrSource, GetItemSource, is_constant_source, TypeSource
@@ -679,7 +685,7 @@ class BuiltinVariable(VariableTracker):
                 result = handler(tx, *args, **kwargs)
                 if result is not None:
                     return result
-            except Exception as exc:
+            except TypeError:
                 has_constant_handler = self.has_constant_handler(args, kwargs)
 
                 # Check if binding is bad. inspect signature bind is expensive.
@@ -693,7 +699,10 @@ class BuiltinVariable(VariableTracker):
                             handler,
                             e,
                         )
-                    handler = None
+                if not has_constant_handler:
+                    raise
+            except Unsupported as exc:
+                has_constant_handler = self.has_constant_handler(args, kwargs)
                 if not has_constant_handler:
                     raise
                 # Actually, we will handle this just fine
