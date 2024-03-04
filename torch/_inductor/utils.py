@@ -638,6 +638,8 @@ def any_is_symbolic(*args: Any) -> bool:
 
 
 def has_incompatible_cudagraph_ops(gm):
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
     forbidden_set = {
         "aten._fused_moving_avg_obs_fq_helper.default",
         "aten._fused_moving_avg_obs_fq_helper_functional.default",
@@ -671,6 +673,8 @@ def has_incompatible_cudagraph_ops(gm):
         )
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
+            return True
+        if (val := node.meta.get("val")) is not None and free_unbacked_symbols(val):
             return True
     return False
 
