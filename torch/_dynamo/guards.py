@@ -104,7 +104,6 @@ dict_version = torch._C._dynamo.guards.dict_version
 # GuardManager = torch._C._dynamo.guards.GuardManager
 RootGuardManager = torch._C._dynamo.guards.RootGuardManager
 DictGuardManager = torch._C._dynamo.guards.DictGuardManager
-KeyValueDictGuardManager = torch._C._dynamo.guards.KeyValueDictGuardManager
 install_tensor_aliasing_guard = torch._C._dynamo.guards.install_tensor_aliasing_guard
 install_no_tensor_aliasing_guard = (
     torch._C._dynamo.guards.install_no_tensor_aliasing_guard
@@ -139,16 +138,19 @@ class GuardManager:
             s += self.pretty_print_leaf_guard(prefix + "+- ", guard)
 
         if istype(mgr, DictGuardManager):
-            for kv_mgr in mgr.get_index_managers():
-                s += prefix + "+- " + kv_mgr.__class__.__name__ + "\n"
-                s += self._debug_print(kv_mgr, prefix + "|  ")
-        elif istype(mgr, KeyValueDictGuardManager):
-            for idx, child_mgr in enumerate(mgr.get_key_value_managers()):
-                if child_mgr is None:
-                    continue
-                suffix = " for key\n" if idx == 0 else "value\n"
-                s += prefix + "+- " + child_mgr.__class__.__name__ + suffix
-                s += self._debug_print(child_mgr, prefix + "|  ")
+            for dict_key_index, kv_mgr in sorted(mgr.get_key_value_managers().items()):
+                key_manager = kv_mgr[0]
+                if key_manager:
+                    suffix = " key_manager at index=" + str(dict_key_index) + "\n"
+                    s += prefix + "+- " + key_manager.__class__.__name__ + suffix
+                    s += self._debug_print(key_manager, prefix + "|  ")
+
+                value_manager = kv_mgr[1]
+                if value_manager:
+                    suffix = " value_manager at index=" + str(dict_key_index) + "\n"
+                    s += prefix + "+- " + value_manager.__class__.__name__ + suffix
+                    s += self._debug_print(value_manager, prefix + "|  ")
+
         # Now handle the general case of GuardManager/RootGuardManager
         for accessor, child_mgr in zip(mgr.get_accessors(), mgr.get_child_managers()):
             suffix = " with " + accessor.repr() + "\n"
@@ -321,15 +323,16 @@ def handle_dict_mananger(source, base_guard_manager, base_example_value, example
         # invariant that index is always ConstDictKeySource
         assert isinstance(base_example_value, dict)
         index = list(base_example_value.keys()).index(source.index)
-    index_manager = base_guard_manager.get_index_manager(index)
 
     if not isinstance(source.index, ConstDictKeySource):
         # We have to insert a key manager guard here
-        index_manager.get_key_manager(source.index).add_equals_match_guard(
-            source.index, [f"key=={source.index}"]
-        )
+        base_guard_manager.get_key_manager(
+            index=index, example_value=source.index
+        ).add_equals_match_guard(source.index, [f"key=={source.index}"])
 
-    return index_manager.get_value_manager(example_value)
+    return base_guard_manager.get_value_manager(
+        index=index, example_value=example_value
+    )
 
 
 # The ready to eval generated code (possibly multiple parts) for a guard, plus
@@ -507,9 +510,9 @@ class GuardBuilder(GuardBuilderBase):
             elif isinstance(source, ConstDictKeySource):
                 if not isinstance(base_guard_manager, DictGuardManager):
                     raise AssertionError("DictGuardManager should not be here")
-                return base_guard_manager.get_index_manager(
-                    source.index
-                ).get_key_manager(example_value)
+                return base_guard_manager.get_key_manager(
+                    index=source.index, example_value=example_value
+                )
             else:
                 raise AssertionError(
                     f"missing guard manager builder {source} - {source.name()}"
@@ -965,14 +968,14 @@ class GuardBuilder(GuardBuilderBase):
             dict_mgr = self.get_guard_manager(guard)
             assert isinstance(dict_mgr, DictGuardManager)
             for idx, key in enumerate(value.keys()):
-                index_mgr = dict_mgr.get_index_manager(idx)
+                key_manager = dict_mgr.get_key_manager(index=idx, example_value=key)
                 if key_is_id(key):
                     id_val = self.id_ref(key)
-                    index_mgr.get_key_manager(key).add_id_match_guard(
+                    key_manager.add_id_match_guard(
                         id_val, get_verbose_code_parts(code, guard)
                     )
                 else:
-                    index_mgr.get_key_manager(key).add_equals_match_guard(
+                    key_manager.add_equals_match_guard(
                         key, get_verbose_code_parts(code, guard)
                     )
 
@@ -1028,7 +1031,7 @@ class GuardBuilder(GuardBuilderBase):
             dict_mgr = self.get_guard_manager(guard)
             assert isinstance(dict_mgr, DictGuardManager)
             for idx, key in enumerate(list(value.keys())):
-                key_manager = dict_mgr.get_index_manager(idx).get_key_manager(key)
+                key_manager = dict_mgr.get_key_manager(index=idx, example_value=key)
                 key_manager.add_equals_match_guard(
                     key, get_verbose_code_parts(code, guard)
                 )
