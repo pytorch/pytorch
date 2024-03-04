@@ -30,7 +30,7 @@ call %INSTALLER_DIR%\activate_miniconda3.bat
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 
-call pip install mkl-include==2021.4.0 mkl-devel==2021.4.0
+call pip install mkl-include==2022.2.1 mkl-devel==2022.2.1
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 
