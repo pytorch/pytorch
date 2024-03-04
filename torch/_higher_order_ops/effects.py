@@ -60,6 +60,9 @@ def has_aliasing(op: torch._ops.OpOverload):
     for arg in op._schema.arguments:
         if arg.alias_info is not None:
             return True
+    for arg in op._schema.returns:
+        if arg.alias_info is not None:
+            return True
     return False
 
 
@@ -169,7 +172,7 @@ def handle_effects(
     key = get_effect_key(op, args, kwargs)
     assert key is not None
     if key not in tokens:
-        assert not allow_token_discovery, f"Could not find a token for effect {key}"
+        assert allow_token_discovery, f"Could not find a token for effect {key}"
         tokens[key] = torch.tensor([])
     token = tokens[key]
 
