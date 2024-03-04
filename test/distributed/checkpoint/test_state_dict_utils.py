@@ -136,7 +136,6 @@ class TestStateDictUtils(DTensorTestBase):
             "nested": {"list": [1, 2, 3, 4]},
         }
 
-
         def _verify(cpu_state_dict):
             # Verify the correctness of _check_state_dict_similarity()
             self.assertTrue(_check_state_dict_similarity(state_dict, cpu_state_dict))
@@ -157,7 +156,9 @@ class TestStateDictUtils(DTensorTestBase):
             self.assertEqual(cpu_state_dict["tensor2"], torch.ones(10))
             buffer.seek(0)
             cpu_state_dict["non_tensor_bytes_io"].seek(0)
-            self.assertEqual(cpu_state_dict["non_tensor_bytes_io"].read(), buffer.read())
+            self.assertEqual(
+                cpu_state_dict["non_tensor_bytes_io"].read(), buffer.read()
+            )
             buffer.seek(0)
             self.assertEqual(cpu_state_dict["non_tensor_bytes"], buffer.read())
             self.assertEqual(cpu_state_dict["lr"], 1.5)
