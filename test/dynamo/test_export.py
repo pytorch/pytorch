@@ -120,7 +120,11 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         for guard in out_guards:
             if guard.source == GuardSource.SHAPE_ENV:
                 hit = True
-                self.assertTrue("L['x'].size()[0] <= 10" in guard.code_list)
+                self.assertExpectedInline(
+                    guard.code_list,
+                    """["L['x'].stride()[0] == L['x'].size()[1]", "L['x'].stride()[1] == 1", "L['x'].storage_offset() == 0", "2 <= L['x'].size()[0] <= 10", "2 <= L['x'].size()[1]"]""",  # noqa: B950
+                )
+                break
 
         self.assertTrue(hit)
 
@@ -2361,7 +2365,8 @@ def forward(self, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             "Not all values.*valid.*inferred to be equal to(.*\n)*.*"
-            "must be specialized.*guards generated.*too complex",
+            "The values of.*must always be related to the values of.*"
+            "by dim0 = 2\\*dim1",
         ):
             torch.export.export(foo, (t,), dynamic_shapes=dynamic_shapes)
 
@@ -2412,12 +2417,6 @@ def forward(self, x):
 
         x = torch.randn(2)
         y = torch.randn(5, 4)
-        constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0)]
-
-        example_inputs = (copy(x), y)
-        ep = torch.export.export(foo, example_inputs, constraints=constraints)
-        with self.assertRaisesRegex(RuntimeError, "input.*shape.*to be equal to 2"):
-            ep(torch.randn(3), y)
 
         dim0_x, dim0_y = torch.export.dims("dim0_x", "dim0_y")
         dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_y}}
@@ -2922,11 +2921,11 @@ def forward(self, x):
     @config.patch(assume_static_by_default=False)
     def test_export_persist_assert(self):
         def f(x):
-            assert x.shape[0] > 4, "Shape must be more than 4"
+            assert x[0].sum() > 4, "Shape must be more than 4"
             return x.cos() + x.sin()
 
         gm, guard = torch._dynamo.export(f, aten_graph=True, tracing_mode="symbolic")(
-            torch.randn(5, 4, 6)
+            torch.ones(5, 4, 6)
         )
 
         def has_aten_op(gm, op):
@@ -2942,7 +2941,7 @@ def forward(self, x):
         self.assertTrue(has_aten_op(gm, torch.ops.aten._assert_async.msg))
 
         with self.assertRaisesRegex(RuntimeError, "Shape must be more than 4"):
-            gm(torch.randn(3, 4, 5))
+            gm(torch.zeros(3, 4, 5))
 
     @common_utils.parametrize(
         "type_fn",
