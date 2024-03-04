@@ -338,11 +338,6 @@ def _export_to_torch_ir(
             f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}",
         )
 
-    # We convert to nn.Module because __call__ of ExportedProgram
-    # is untracable right now.
-    if isinstance(f, ExportedProgram):
-        f = f.module()
-
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
         try:
             module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
