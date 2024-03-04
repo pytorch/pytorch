@@ -1369,7 +1369,7 @@ optim_db: List[OptimizerInfo] = [
                     "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
                 ),
                 "TestOptimRenewed",
-                "test_save_load_state_dict",
+                "test_save_load_equality_with_weights_only_state_dict",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1804,7 +1804,7 @@ optim_db: List[OptimizerInfo] = [
                     "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
                 ),
                 "TestOptimRenewed",
-                "test_save_load_state_dict",
+                "test_save_load_equality_with_weights_only_state_dict",
             ),
         ),
     ),
@@ -2075,13 +2075,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
-            ),
-            DecorateInfo(
-                unittest.skip(
-                    "SparseAdam does not support dense gradients, see #116507"
-                ),
-                "TestOptimRenewed",
-                "test_save_load_state_dict",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),

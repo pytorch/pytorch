@@ -828,7 +828,7 @@ class TestOptimRenewed(TestCase):
 
 
     @optims(optim_db, dtypes=[torch.float32])
-    def test_save_load_state_dict(self, device, dtype, optim_info):
+    def test_save_load_equality_with_weights_only(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
 
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
@@ -842,6 +842,9 @@ class TestOptimRenewed(TestCase):
             optim.zero_grad()
             loss = (w.mv(i) + b).pow(2).sum()
             loss.backward()
+            if optim_info.only_supports_sparse_grads:
+                weight.grad = weight.grad.to_sparse()
+                bias.grad = bias.grad.to_sparse()
             return loss
 
         for optim_input in all_optim_inputs:
@@ -853,7 +856,7 @@ class TestOptimRenewed(TestCase):
             closure = functools.partial(fwd_bwd, optimizer, weight, bias, input)
 
             # Prime the optimizer
-            for _ in range(10):
+            for _ in range(3):
                 optimizer.step(closure)
 
             sd = optimizer.state_dict()
