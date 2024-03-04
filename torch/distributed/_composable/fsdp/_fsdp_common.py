@@ -109,28 +109,28 @@ def _get_dim0_chunked_size(
     return cast(torch.Size, torch.Size([0]) + unchunked_size[1:])
 
 
-# def _from_local_no_grad(
-#     local_tensor: torch.Tensor,
-#     device_mesh: DeviceMesh,
-#     placements: Tuple[Placement, ...],
-#     global_size: torch.Size,
-#     global_stride: Tuple[int, ...],
-# ) -> DTensor:
-#     """
-#     This method is similar to ``DTensor.from_local()`` except it avoids some
-#     CPU overhead by avoiding default args and not being differentiable.
-#     """
-#     return DTensor(
-#         # Use the local tensor directly instead of constructing a new tensor
-#         # variable, e.g. with `view_as()`, since this is not differentiable
-#         local_tensor,
-#         device_mesh,
-#         placements,
-#         shape=global_size,
-#         dtype=local_tensor.dtype,
-#         requires_grad=local_tensor.requires_grad,
-#         stride=global_stride,
-#     )
+def _from_local_no_grad(
+    local_tensor: torch.Tensor,
+    device_mesh: DeviceMesh,
+    placements: Tuple[Placement, ...],
+    global_size: torch.Size,
+    global_stride: Tuple[int, ...],
+) -> DTensor:
+    """
+    This method is similar to ``DTensor.from_local()`` except it avoids some
+    CPU overhead by avoiding default args and not being differentiable.
+    """
+    return DTensor(
+        # Use the local tensor directly instead of constructing a new tensor
+        # variable, e.g. with `view_as()`, since this is not differentiable
+        local_tensor,
+        device_mesh,
+        placements,
+        shape=global_size,
+        dtype=local_tensor.dtype,
+        requires_grad=local_tensor.requires_grad,
+        stride=global_stride,
+    )
 
 
 def _to_dtype_if_needed(

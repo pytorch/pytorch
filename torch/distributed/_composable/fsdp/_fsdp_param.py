@@ -13,7 +13,7 @@ from torch.distributed._tensor.placement_types import DTensorSpec
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import (
     _chunk_with_empty,
-    # _from_local_no_grad,
+    _from_local_no_grad,
     _get_dim0_chunked_size,
     _raise_assert_with_print,
     _to_dtype_if_needed,
@@ -246,9 +246,8 @@ class FSDPParam:
         if self.all_gather_output.numel() > 0:
             return  # already initialized
         all_gather_output_size = torch.Size([all_gather_input_numel * world_size])
-        # NOTE(yf225): here we explicitly make fsdp_param.all_gather_output the leaf tensor (instead of unsharded_param being leaf tensor)
         self.all_gather_output = torch.empty(
-            all_gather_output_size, dtype=dtype, device=device, requires_grad=self.sharded_param.requires_grad
+            all_gather_output_size, dtype=dtype, device=device
         )
 
     def init_unsharded_param(self):
@@ -263,15 +262,24 @@ class FSDPParam:
             storage_offset=0,
         )
         if self.is_dtensor:
-            unsharded_param = DTensor.from_local(
-                unsharded_param,
-                self._tp_spec.mesh,
-                self._tp_spec.placements,
-                shape=self._global_size,
-                stride=self._global_stride,
-            )
-        self._unsharded_param = unsharded_param
-        # self._unsharded_param.requires_grad_(self.sharded_param.requires_grad)
+            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+                unsharded_param = _from_local_no_grad(
+                    unsharded_param,
+                    self._tp_spec.mesh,
+                    self._tp_spec.placements,
+                    self._global_size,
+                    self._global_stride,
+                )
+            else:
+                unsharded_param = DTensor.from_local(
+                    unsharded_param,
+                    self._tp_spec.mesh,
+                    self._tp_spec.placements,
+                    shape=self._global_size,
+                    stride=self._global_stride,
+                )
+        self._unsharded_param = nn.Parameter(unsharded_param)
+        self._unsharded_param.requires_grad_(self.sharded_param.requires_grad)
 
     def to_sharded(self) -> None:
         self._setattr_on_modules(self.sharded_param)
@@ -311,8 +319,7 @@ class FSDPParam:
 
     def to_unsharded(self) -> None:
         # Assume that the data has been allocated and all-gathered
-        # set_requires_grad_if_needed(self.sharded_param, self._unsharded_param)
-        assert self.all_gather_output.requires_grad == self.sharded_param.requires_grad  # NOTE: should already be set to be the same in init_all_gather_output()
+        set_requires_grad_if_needed(self.sharded_param, self._unsharded_param)
         self._setattr_on_modules(self._unsharded_param)
         if self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             # The data is allocated in the default stream via the post-forward
@@ -341,13 +348,23 @@ class FSDPParam:
             _raise_assert_with_print(
                 f"Expects size {self.sharded_size} but got {tensor.shape}"
             )
-        return DTensor.from_local(
-            tensor,
-            self._global_mesh,
-            self._global_placements,
-            shape=self._global_size,
-            stride=self._global_stride,
-        )
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            ret = _from_local_no_grad(
+                tensor,
+                self._global_mesh,
+                self._global_placements,
+                self._global_size,
+                self._global_stride,
+            )
+        else:
+            ret = DTensor.from_local(
+                tensor,
+                self._global_mesh,
+                self._global_placements,
+                shape=self._global_size,
+                stride=self._global_stride,
+            )
+        return ret
 
     def to_sharded_post_forward_dtensor(self, tensor: torch.Tensor) -> DTensor:
         if tensor.shape != self.sharded_post_forward_size:
@@ -357,20 +374,28 @@ class FSDPParam:
         assert isinstance(self.post_forward_mesh_info, HSDPMeshInfo)
         # TODO: Prefer this DTensor to be read-only and generalize the
         # placement once we support TP.
-        return DTensor.from_local(
-            tensor,
-            self.post_forward_mesh_info.mesh,
-            (Replicate(), Shard(0)),
-            shape=self._global_size,
-            stride=self._global_stride,
-        )
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            ret = _from_local_no_grad(
+                tensor,
+                self.post_forward_mesh_info.mesh,
+                (Replicate(), Shard(0)),
+                self._global_size,
+                self._global_stride,
+            )
+        else:
+            ret = DTensor.from_local(
+                tensor,
+                self.post_forward_mesh_info.mesh,
+                (Replicate(), Shard(0)),
+                shape=self._global_size,
+                stride=self._global_stride,
+            )
+        return ret
 
     def alloc_all_gather_output(self) -> None:
-        # TODO: can we change it to `self.all_gather_output = torch.empty(...)`, it's actually an intermediate, not visible to FSDP users
         unsafe_alloc_storage(self.all_gather_output)
 
     def free_all_gather_output(self) -> None:
-        # TODO: can we change it to `self.all_gather_output = torch.empty(0)`, it's actually an intermediate, not visible to FSDP users
         unsafe_free_storage(self.all_gather_output)
 
     @property
@@ -392,15 +417,8 @@ class FSDPParam:
 
     @property
     def unsharded_grad_data(self) -> torch.Tensor:
-        # grad = self.unsharded_param.grad
-        # assert grad is not None, "Expects unsharded_param.grad to not be None"
-        assert self.all_gather_output.grad is not None, "Expects all_gather_output.grad to not be None"
-        grad = torch.as_strided(
-            self.all_gather_output.grad,
-            self._orig_size,
-            self._contiguous_orig_stride,
-            storage_offset=0,
-        )
+        grad = self.unsharded_param.grad
+        assert grad is not None, "Expects unsharded_param.grad to not be None"
         return self._get_grad_inner_tensor(grad)
 
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:

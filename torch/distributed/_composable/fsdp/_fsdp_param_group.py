@@ -298,12 +298,10 @@ class FSDPParamGroup:
             fsdp_params_with_grad: List[FSDPParam] = []
             unsharded_grads: List[torch.Tensor] = []
             for fsdp_param in self.fsdp_params:
-                # if fsdp_param.unsharded_param.grad is not None:
-                if fsdp_param.all_gather_output.grad is not None:
+                if fsdp_param.unsharded_param.grad is not None:
                     fsdp_params_with_grad.append(fsdp_param)
                     unsharded_grads.append(fsdp_param.unsharded_grad_data)
-                    # fsdp_param.unsharded_param.grad = None
-                    fsdp_param.all_gather_output.grad = None
+                    fsdp_param.unsharded_param.grad = None
             self.reshard()
         if len(fsdp_params_with_grad) == 0:
             return
