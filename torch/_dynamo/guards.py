@@ -487,6 +487,10 @@ class GuardBuilder(GuardBuilderBase):
         if istype(val, torch.Size):
             val = tuple(val)
 
+        # Code object can not be compared against their string representation
+        # I.e `eval(f"{compile('2+2','','exec')!r}")` raises SyntaxError
+        assert not istype(val, types.CodeType)
+
         # TODO: It feels like it would be better to just implement our own
         # equality test in C that handles all of the necessary type checking
         # and NaN tests
@@ -495,7 +499,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def CONSTANT_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if istype(val, (bool, type(None))):
+        if istype(val, (bool, type(None), types.CodeType)):
             self.ID_MATCH(guard)
         else:
             self.EQUALS_MATCH(guard)
