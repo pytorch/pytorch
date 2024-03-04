@@ -108,8 +108,6 @@ def _check_input_constraints_for_graph(
                         min_val, max_val = _convert_range_to_int(
                             range_constraints[node_dim.node.expr]
                         )
-                        # NOTE: we allow dimensions to be 0/1 at runtime
-                        # No longer use this check, use EP signature as ultimate check
                         if arg_dim < min_val:
                             raise RuntimeError(
                                 f"Expected input at {get_keystr(key_path)}.shape[{j}] to be >= "
