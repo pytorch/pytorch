@@ -1003,17 +1003,6 @@ class CheckFunctionManager:
         guards = output_graph.guards if output_graph else None
         self._weakrefs: Dict[int, ReferenceType[object]] = {}
         self.output_graph = output_graph
-
-        # Note: right overrides left
-        def combine_scopes(left, right):
-            if left is None:
-                return right
-
-            if right is None:
-                return left
-
-            return {**left, **right}
-
         w_builder = None
 
         def source_ref(source):
