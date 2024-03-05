@@ -147,7 +147,7 @@ std::size_t countTrailingZeros(T Val, ZeroBehavior ZB = ZB_Width) {
 namespace detail {
 template <typename T, std::size_t SizeOfT>
 struct LeadingZerosCounter {
-  static std::size_t count(T Val, ZeroBehavior) {
+  constexpr static std::size_t count(T Val, ZeroBehavior) {
     if (!Val)
       return std::numeric_limits<T>::digits;
 
@@ -167,7 +167,7 @@ struct LeadingZerosCounter {
 #if (defined(__GNUC__) && __GNUC__ >= 4) || defined(_MSC_VER)
 template <typename T>
 struct LeadingZerosCounter<T, 4> {
-  static std::size_t count(T Val, ZeroBehavior ZB) {
+  constexpr static std::size_t count(T Val, ZeroBehavior ZB) {
     if (ZB != ZB_Undefined && Val == 0)
       return 32;
 
@@ -184,7 +184,7 @@ struct LeadingZerosCounter<T, 4> {
 #if !defined(_MSC_VER) || defined(_M_X64)
 template <typename T>
 struct LeadingZerosCounter<T, 8> {
-  static std::size_t count(T Val, ZeroBehavior ZB) {
+  constexpr static std::size_t count(T Val, ZeroBehavior ZB) {
     if (ZB != ZB_Undefined && Val == 0)
       return 64;
 
@@ -209,7 +209,7 @@ struct LeadingZerosCounter<T, 8> {
 /// \param ZB the behavior on an input of 0. Only ZB_Width and ZB_Undefined are
 ///   valid arguments.
 template <typename T>
-std::size_t countLeadingZeros(T Val, ZeroBehavior ZB = ZB_Width) {
+constexpr std::size_t countLeadingZeros(T Val, ZeroBehavior ZB = ZB_Width) {
   static_assert(
       std::numeric_limits<T>::is_integer && !std::numeric_limits<T>::is_signed,
       "Only unsigned integral types are allowed.");
