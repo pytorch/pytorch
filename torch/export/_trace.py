@@ -8,6 +8,8 @@ import warnings
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
+import sympy
+
 import torch
 import torch._dynamo
 import torch.fx
@@ -802,17 +804,37 @@ def _export(
         gm = ep_non_strict.gm
 
         # add code to match mod.forward signature names, with dim ranges in dynamic_shapes dict
-        user_input_names = set(spec.arg.name for spec in ep_non_strict.sig.input_specs if spec.kind == InputKind.USER_INPUT)
-        user_input_nodes = [node for node in gm.graph.nodes if node.name in user_input_names]
-        for name, node in zip(inspect.signature(mod.forward).parameters, user_input_nodes):
-            shapes = node.meta["val"].size()
-            dynamic_dim = dynamic_shapes.get(name, {})
-            for dim, shape in enumerate(shapes):
-                if isinstance(shape, torch.SymInt) and dynamic_dim[dim]:
-                    range_constraints[shape.node._expr] = ValueRanges(
-                        lower=dynamic_dim[dim].min,
-                        upper=dynamic_dim[dim].max
-                    )
+        if dynamic_shapes is not None:
+            user_input_names = set(
+                spec.arg.name
+                for spec in ep_non_strict.sig.input_specs
+                if spec.kind == InputKind.USER_INPUT
+            )
+            user_input_nodes = [
+                node for node in gm.graph.nodes if node.name in user_input_names
+            ]
+            for i, (name, node) in enumerate(
+                zip(inspect.signature(mod.forward).parameters, user_input_nodes)
+            ):
+                shapes = node.meta["val"].size()
+                if isinstance(dynamic_shapes, dict):
+                    dynamic_dim = dynamic_shapes.get(name, {})
+                else:
+                    dynamic_dim = dynamic_shapes[i]
+                for dim, shape in enumerate(shapes):
+                    if isinstance(shape, torch.SymInt) and dynamic_dim[dim]:
+                        # if isinstance(dynamic_dim[dim], torch.export.dynamic_shapes._DerivedDim):
+                        #     continue
+                        range_constraints[shape.node._expr] = ValueRanges(
+                            lower=dynamic_dim[dim].min, upper=dynamic_dim[dim].max
+                        )
+
+        # filter out non-symbols (exprs)
+        range_constraints = {
+            k: v
+            for k, v in range_constraints.items()
+            if isinstance(k, sympy.core.symbol.Symbol)
+        }
 
         module_call_signatures = {
             strip_root(fqn): ModuleCallSignature(inputs=[], outputs=[], **specs)

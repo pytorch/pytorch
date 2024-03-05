@@ -30,7 +30,7 @@ class _Dim(type):
 
     @staticmethod
     def readable(name, min_, max_):
-        if min_ == 0:
+        if min_ == 2:
             min_ = None
         if max_ == sys.maxsize - 1:
             max_ = None
@@ -478,7 +478,7 @@ def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
         id(t),
         index,
         StrictMinMaxConstraint(
-            vr=ValueRanges(lower=2, upper=sympy.oo), warn_only=False
+            vr=ValueRanges(lower=0, upper=sympy.oo), warn_only=False
         ),
         debug_name=debug_name,
     )
@@ -678,8 +678,6 @@ def _process_dynamic_shapes(
                 constraint = constraint >= dim.min
             if dim.max != sys.maxsize - 1:
                 constraint = constraint <= dim.max
-            constraint.min = max(dim.min, 0)
-            constraint.max = min(dim.max, sys.maxsize - 1)
         return constraint
 
     bounds: Dict[str, Tuple[int, int]] = {}
