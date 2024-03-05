@@ -190,7 +190,7 @@ class FSDPState(_State):
                 state._fsdp_param_group.lazy_init()
         # TODO(yf225): This needs more investigation. Current state is that:
         # 1. This causes issue during compile (post_forward hook thinks that `post_forward_mesh_info` is None thus not doing resharding and not doing .resize_(0))
-        # 2. Commenting this out fails some eager unit tests (obvious because we are changing eager behavior)
+        # 2. [EAGER TEST FAIL] Commenting this out fails some eager unit tests (obvious because we are changing eager behavior)
         # if self._fsdp_param_group:
         #     # For the root, do not reshard after forward since for training,
         #     # the parameters would be freed and all-gathered immediately
