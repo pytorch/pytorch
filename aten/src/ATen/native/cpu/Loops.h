@@ -306,7 +306,7 @@ void cpu_kernel(TensorIteratorBase& iter, func_t&& op, int64_t grain_size = at::
   // this could be extended to work with void return types
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
-  TORCH_INTERNAL_ASSERT((!needs_dynamic_casting<func_t>::check(iter), "Dynamic casting is not currently supported on CPU");
+  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter), "Dynamic casting is not currently supported on CPU");
 
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
     // basic loop can handle 1d slices with arbitrary strides, and 1d slices is all that
