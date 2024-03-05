@@ -184,8 +184,7 @@ static void basicAutogradNotImplementedFallbackImpl(
             // users typically call .backward() and backprop through
             // the entire program).
             if (t.is_view() && is_mutable_output) {
-              // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-              auto& base = const_cast<at::TensorBase&>(t._base());
+              const auto& base = t._base();
               if (base.requires_grad()) {
                 // Can only register_hook on tensors that require grad.
                 base.register_hook([op_name](const at::TensorBase& grad) {
@@ -210,8 +209,7 @@ static void basicAutogradNotImplementedFallbackImpl(
           // rebase_history assumes single Tensor(a!) return, and in general
           // custom ops don't have a good in-place story.
           if (!is_mutable_output) {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-            set_history(const_cast<at::Tensor&>(t), grad_fn);
+            set_history(t, grad_fn);
           }
         },
         stack,
@@ -418,11 +416,9 @@ static void autogradNotImplementedFallbackImpl(
         [&](size_t idx_tensor, size_t idx_ret, const at::Tensor& t) {
           if (isDifferentiableType(t.scalar_type())) {
             if (is_inplace_output[idx_ret]) {
-              // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-              rebase_history(const_cast<at::Tensor&>(t), grad_fn);
+              rebase_history(t, grad_fn);
             } else {
-              // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-              set_history(const_cast<at::Tensor&>(t), grad_fn);
+              set_history(t, grad_fn);
             }
           }
         },
