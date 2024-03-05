@@ -44,11 +44,6 @@ from torchgen.context import (
     with_native_function,
     with_native_function_and_indices,
 )
-from torchgen.gen_aoti_c_shim import (
-    gen_aoti_c_shim,
-    gen_static_dispatch_backend_call_signature,
-    get_backend_index_for_aoti,
-)
 from torchgen.gen_functionalization_type import (
     gen_functionalization_definition,
     gen_functionalization_registration,
@@ -421,7 +416,14 @@ def generate_static_dispatch_backend_call(
     f: NativeFunction,
     backend_index: BackendIndex,
 ) -> str:
-    cpp_sig = gen_static_dispatch_backend_call_signature(sig, f)
+    cpp_sigs = CppSignatureGroup.from_native_function(
+        f, method=False, fallback_binding=False
+    )
+    if sig.symint and f.func.has_symint():
+        cpp_sig = cpp_sigs.symint_signature
+    else:
+        cpp_sig = cpp_sigs.signature
+    assert cpp_sig is not None
     name = cpp_sig.name()
     exprs = translate_args(sig, cpp_sig)
     backend_metadata = backend_index.get_kernel(f)
@@ -2179,7 +2181,6 @@ def gen_source_files(
     selector: SelectiveBuilder,
     static_dispatch_idx: List[BackendIndex],
     backend_indices: Dict[DispatchKey, BackendIndex],
-    aoti_fm: FileManager,
     core_fm: FileManager,
     cpu_fm: FileManager,
     cpu_vec_fm: FileManager,
@@ -2348,60 +2349,6 @@ def gen_source_files(
                 )
             else:
                 raise AssertionError(f"unrecognized {dispatch_key} for ufunc")
-
-        if dispatch_key in (DispatchKey.CPU, DispatchKey.CUDA):
-
-            def get_header(
-                f: NativeFunction,
-            ) -> Optional[str]:
-                backend_index = get_backend_index_for_aoti(
-                    f, dispatch_key, backend_indices
-                )
-                return (
-                    None
-                    if backend_index is None
-                    else f"#include <ATen/ops/{f.root_name}_{backend_index.dispatch_key.lower()}_dispatch.h>"
-                )
-
-            def headers_for_aoti() -> str:
-                headers = []
-                for g in grouped_native_functions:
-                    if isinstance(g, NativeFunctionsGroup):
-                        for f in g.functions():
-                            # some variants are registered in the backend, but some are registered as CompositeExplicitAutograd
-                            header = get_header(f)
-                            if header is not None:
-                                headers.append(header)
-                    else:
-                        header = get_header(g)
-                        if header is not None:
-                            headers.append(header)
-                return "\n".join(sorted(set(headers)))
-
-            extra_headers = (
-                extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else ""
-            )
-
-            aoti_fm.write(
-                f"c_shim_{dispatch_key.lower()}.h",
-                lambda: gen_aoti_c_shim(
-                    native_functions,
-                    dispatch_key,
-                    backend_indices,
-                    header=True,
-                    includes="",
-                ),
-            )
-            aoti_fm.write(
-                f"c_shim_{dispatch_key.lower()}.cpp",
-                lambda: gen_aoti_c_shim(
-                    native_functions,
-                    dispatch_key,
-                    backend_indices,
-                    header=False,
-                    includes=headers_for_aoti() + "\n" + extra_headers,
-                ),
-            )
 
         del fm
 
@@ -2836,9 +2783,6 @@ def main() -> None:
     cpu_vec_fm = make_file_manager(options=options)
     cuda_fm = make_file_manager(options=options)
     ops_fm = make_file_manager(options=options, install_dir=ops_install_dir)
-    aoti_fm = make_file_manager(
-        options=options, install_dir="torch/csrc/inductor/aoti_torch/generated"
-    )
 
     # Only a limited set of dispatch keys get CPUFunctions.h headers generated
     # for them; this is the set
@@ -2881,7 +2825,6 @@ def main() -> None:
             selector=selector,
             static_dispatch_idx=static_dispatch_idx,
             backend_indices=backend_indices,
-            aoti_fm=aoti_fm,
             core_fm=core_fm,
             cpu_fm=cpu_fm,
             cpu_vec_fm=cpu_vec_fm,

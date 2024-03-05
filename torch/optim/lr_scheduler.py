@@ -466,16 +466,15 @@ class MultiStepLR(LRScheduler):
 
 
 class ConstantLR(LRScheduler):
-    """Multiply the learning rate of each parameter group by a small constant factor until the
-    number of epoch reaches a pre-defined milestone: total_iters.
-    Notice that such multiplication of the small constant factor can
+    """Decays the learning rate of each parameter group by a small constant factor until the
+    number of epoch reaches a pre-defined milestone: total_iters. Notice that such decay can
     happen simultaneously with other changes to the learning rate from outside this scheduler.
     When last_epoch=-1, sets initial lr as lr.
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
         factor (float): The number we multiply learning rate until the milestone. Default: 1./3.
-        total_iters (int): The number of steps that the scheduler multiplies the learning rate by the factor.
+        total_iters (int): The number of steps that the scheduler decays the learning rate.
             Default: 5.
         last_epoch (int): The index of the last epoch. Default: -1.
         verbose (bool): If ``True``, prints a message to stdout for

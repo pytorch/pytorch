@@ -367,7 +367,7 @@ def encode_exception_table_varint(n: int) -> List[int]:
     while n > 0:
         b.append(n & 63)
         n >>= 6
-    b.reverse()
+    b = list(reversed(b))
     for i in range(len(b) - 1):
         b[i] |= 64
     return b

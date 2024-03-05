@@ -2212,7 +2212,7 @@ class View(GenericView):
             var, size_new = stack_new.pop()
             V.graph.sizevars.guard_equals(size_new, 1)  # type: ignore[arg-type]
 
-        view_expr.reverse()
+        view_expr = list(reversed(view_expr))
         assert len(view_expr) == len(old_size)
 
         def reindex(index):
@@ -4855,10 +4855,7 @@ class FallbackKernel(ExternKernelAlloc):
         self.init_args_default_value(kernel._schema)
 
     def is_legacy_abi_kernel(self):
-        return (
-            config.c_shim_version == "1"
-            and "_scaled_dot_product_flash_attention" in str(self.python_kernel_name)
-        )
+        return "_scaled_dot_product_flash_attention" in str(self.python_kernel_name)
 
     def init_args_default_value(self, schema):
         self.args_default_value = [
@@ -4911,7 +4908,6 @@ class FallbackKernel(ExternKernelAlloc):
         self.abi_compatible_kernel = (
             f"{self.cpp_kernel_name}_v2"
             if self.cpp_kernel_name in {"at::_scaled_dot_product_flash_attention"}
-            and config.c_shim_version == "1"
             else self.cpp_kernel_name
         )
 
@@ -5069,13 +5065,7 @@ class FallbackKernel(ExternKernelAlloc):
             # Aten Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
             if V.graph.cpp_wrapper:
-                if (
-                    config.is_fbcode()
-                    and kernel not in has_c_shim
-                    # C shim v2 is torchgen-ed, which should cover all aten ops.
-                    # If you do hit a missed op, please update gen_aoti_c_shim.py.
-                    and config.c_shim_version == "1"
-                ):
+                if config.is_fbcode() and kernel not in has_c_shim:
                     log.warning(
                         "%s is missing a c-shim implementation, using proxy executor as fallback",
                         kernel,
