@@ -3524,8 +3524,6 @@ module_db: List[ModuleInfo] = [
                    # Not implmented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
                                 dtypes=(torch.chalf,), device_type='cuda'),
-                   # Ref: https://github.com/pytorch/pytorch/issues/73502
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_pickle', dtypes=(torch.chalf,)),
                    # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
                    # xfail does not work due to Fatal Python error: Aborted
                    DecorateInfo(skipIfMps, "TestModule", "test_memory_format",
@@ -3559,8 +3557,6 @@ module_db: List[ModuleInfo] = [
                    # Not implemented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
                                 dtypes=(torch.chalf,), device_type='cuda'),
-                   # Ref: https://github.com/pytorch/pytorch/issues/73502
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_pickle', dtypes=(torch.chalf,)),
                    # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
                    # xfail does not work due to Fatal Python error: Aborted
                    DecorateInfo(skipIfMps, "TestModule", "test_memory_format",
@@ -3593,8 +3589,6 @@ module_db: List[ModuleInfo] = [
                    # Not implmented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
                                 dtypes=(torch.chalf,), device_type='cuda'),
-                   # Ref: https://github.com/pytorch/pytorch/issues/73502
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_pickle', dtypes=(torch.chalf,)),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -4295,7 +4289,9 @@ module_db: List[ModuleInfo] = [
                module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU,
                skips=(
                    # RNNBase overrides `_apply` and adds weakrefs to params
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to', active_if=lambda p: p['swap']),),
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to', active_if=lambda p: p['swap']),
+                   # RNNBase overrides `_apply` and adds weakrefs to params
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to_empty', active_if=lambda p: p['swap']),),
                decorators=rnn_gru_lstm_module_info_decorators
                ),
     ModuleInfo(torch.nn.GRU,
@@ -4304,7 +4300,9 @@ module_db: List[ModuleInfo] = [
                module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU,
                skips=(
                    # RNNBase overrides `_apply` and adds weakrefs to params
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to', active_if=lambda p: p['swap']),),
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to', active_if=lambda p: p['swap']),
+                   # RNNBase overrides `_apply` and adds weakrefs to params
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to_empty', active_if=lambda p: p['swap']),),
                decorators=rnn_gru_lstm_module_info_decorators),
     ModuleInfo(torch.nn.LSTM,
                train_and_eval_differ=True,
@@ -4314,7 +4312,9 @@ module_db: List[ModuleInfo] = [
                    # LSTM with projections is not currently supported with MPS
                    DecorateInfo(skipMPS),
                    # RNNBase overrides `_apply` and adds weakrefs to params
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to', active_if=lambda p: p['swap'])),
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to', active_if=lambda p: p['swap']),
+                   # RNNBase overrides `_apply` and adds weakrefs to params
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_to_empty', active_if=lambda p: p['swap']),),
                decorators=rnn_gru_lstm_module_info_decorators),
     ModuleInfo(torch.nn.ReflectionPad1d,
                module_inputs_func=module_inputs_torch_nn_ReflectionPad1d,
