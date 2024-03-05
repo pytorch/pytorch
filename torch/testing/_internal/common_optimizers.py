@@ -35,7 +35,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
 )
-from torch.testing._internal.triton_utils import requires_cuda
 from torch.utils._foreach_utils import (
     _get_foreach_kernels_supported_devices,
     _get_fused_kernels_supported_devices,
@@ -1202,12 +1201,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
             ),
-            DecorateInfo(
-                requires_cuda,
-                "CompiledOptimizerParityTests",
-                "test_correctness",
-                device_type="cuda",
-            ),
         ),
     ),
     OptimizerInfo(
@@ -1307,12 +1300,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_param_groups_lr",
-            ),
-            DecorateInfo(
-                requires_cuda,
-                "CompiledOptimizerParityTests",
-                "test_correctness",
-                device_type="cuda",
             ),
         ),
     ),
