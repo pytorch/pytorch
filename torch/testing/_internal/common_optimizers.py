@@ -114,8 +114,6 @@ class OptimizerInfo:
         supports_param_groups: bool = True,
         # whether the optimizer supports parameters on multiple devices
         supports_multiple_devices: bool = True,
-        # whether the optimizer ONLY supports capturable on foreach vs. both foreach and forloop
-        only_supports_capturable_on_foreach: bool = False,
         skips=(),  # Indicates which tests to skip
         decorators=None,  # Additional decorators to apply to generated tests
         optim_error_inputs_func=None,  # Function to generate optim inputs that error
@@ -128,7 +126,6 @@ class OptimizerInfo:
         self.step_requires_closure = step_requires_closure
         self.supports_param_groups = supports_param_groups
         self.supports_multiple_devices = supports_multiple_devices
-        self.only_supports_capturable_on_foreach = only_supports_capturable_on_foreach
         self.decorators = (
             *(decorators if decorators else []),
             *(skips if skips else []),
