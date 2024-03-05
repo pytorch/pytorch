@@ -336,6 +336,7 @@ class MetaConverter:
             from torch._dynamo.source import AttrSource
             from torch.fx.experimental.symbolic_shapes import (
                 DimDynamic,
+                StatelessSymbolicContext,
                 SubclassSymbolicContext,
                 SymbolicContext,
             )

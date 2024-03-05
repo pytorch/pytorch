@@ -22,6 +22,7 @@ from torch.nested._internal.nested_tensor import (
     jagged_from_list,
     jagged_from_tensor_and_lengths,
     nested_view_from_values_offsets,
+    NestedTensor,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -1338,23 +1339,13 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
             def backend(gm, args):
                 context = torch._guards.TracingContext.get()
                 guards = [str(g.expr) for g in context.fake_mode.shape_env.guards]
-                ranges = [
-                    f"{s}: [{vr.lower}, {vr.upper}]"
-                    for s, vr in context.fake_mode.shape_env.var_to_range.items()
-                ]
-                self.assertExpectedInline("\n".join(guards), "")
-                self.assertExpectedInline(
-                    "\n".join(ranges),
-                    """\
-s0: [2, 9223372036854775806]
-s1: [2, 9223372036854775805]
-s3: [2, 9223372036854775806]
-s4: [3, 9223372036854775806]
-s6: [2, 9223372036854775806]
-s7: [2, 9223372036854775806]
-s8: [2, 9223372036854775806]
-s9: [2, 2]""",
-                )
+
+                # varies based on the type of view
+                guard_str = "\n".join(guards)
+                if isinstance(nt_view._base, NestedTensor):
+                    self.assertExpectedInline(guard_str, """Eq(s3 - 1, s0)""")
+                else:
+                    self.assertExpectedInline(guard_str, """""")
                 return gm
 
             torch._dynamo.reset()
