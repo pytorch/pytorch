@@ -682,6 +682,8 @@ def min_cut_rematerialization_partition(
         joint_module.graph = cse_graph
 
     # Apply FSDP-specific passes
+    fsdp_fx_passes.if_tensor_is_resized_to_full_then_resize_it_to_0_at_end_of_graph(joint_module)
+    fsdp_fx_passes.if_tensor_is_resized_to_0_immediately_after_inplace_copy_then_delete_the_copy(joint_module)
     fsdp_fx_passes.replace_primal_clone_at_beginning_of_graph_with_primal(joint_module)
     fsdp_fx_passes.replace_primal_noop_as_strided_with_primal(joint_module)
     fsdp_fx_passes.reinplace_foreach_copy_if_input_has_no_other_use_in_graph(joint_module)

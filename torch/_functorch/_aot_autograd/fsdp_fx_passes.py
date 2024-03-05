@@ -218,3 +218,35 @@ def use_input_as_output_for_inplace_copy_ops(mod):
             n.replace_all_uses_with(left_inp_n)
             mod.graph.lint()
             mod.recompile()
+
+
+def flatten_arg_list(args):
+    flat_args = []
+    for arg in args:
+        if isinstance(arg, (list, tuple)):
+            flat_args.extend(flatten_arg_list(arg))
+        else:
+            flat_args.append(arg)
+    return flat_args
+
+
+def if_tensor_is_resized_to_0_immediately_after_inplace_copy_then_delete_the_copy(mod):
+    """
+    copy_: "f32[12340, 12340]" = torch.ops.aten.copy_.default(primals_6, getitem_44)
+    resize_storage_bytes__default_11 = torch.ops.inductor.resize_storage_bytes_.default(primals_6, 0);  primals_6 = None
+    ->
+    resize_storage_bytes__default_11 = torch.ops.inductor.resize_storage_bytes_.default(primals_6, 0);  primals_6 = None
+    """
+    node_list = list(mod.graph.nodes)
+    for i, n in enumerate(node_list):
+        if n.target is torch.ops.aten.copy_.default:
+            inplace_copy_inp = n.args[0]
+            for j, node in enumerate(node_list[i+1:]):
+                if inplace_copy_inp in flatten_arg_list(node.args):
+                    if node.target is torch.ops.inductor.resize_storage_bytes_.default and node.args[1] == 0:
+                        mod.graph.erase_node(n)
+                        mod.graph.lint()
+                        mod.recompile()
+                        break
+                    else:
+                        break
