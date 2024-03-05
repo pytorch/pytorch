@@ -59,11 +59,16 @@ using forward_t = decltype(X::forward(nullptr, std::declval<Args>()...));
 /// `ctx->get_saved_variables` (see
 /// `torch::autograd::AutogradContext::get_saved_variables`) and other saved
 /// data can be accessed from `ctx->saved_data`.
+/// To enable compiled autograd support (torch.compile for backward) for your
+/// custom autograd operation, you can set MyFunction::is_traceable
+/// (see Function::istraceable notes below).
 ///
 /// For example:
 /// ```
 /// class MyFunction : public Function<MyFunction> {
 ///   public:
+///   static constexpr bool is_traceable = true;
+///
 ///   static variable_list forward(AutogradContext *ctx, int n, Variable var) {
 ///      // Save data for backward in context
 ///      ctx->saved_data["n"] = n;
@@ -100,10 +105,13 @@ struct TORCH_API Function {
   static auto apply(Args&&... args)
       -> std::enable_if_t<std::is_same_v<X, T>, forward_t<X, Args...>>;
 
-  // Flag overriden by user to enable compiled autograd tracing for custom
-  // function <T>. Before you can set this flag to true, you need to ensure
-  // that all additional static variables used in the forward and backward
-  // are captured in compiled_args and apply_wih_saved.
+  // This flag is for an experimental feature: compiled autograd. Not all
+  // built-in APIs are supported at the moment e.g. mark_dirty and
+  // mark_non_differentiable. Before setting this flag to enable tracing for
+  // your custom function <T>, you need to ensure that the backward function is
+  // traceable i.e. any variables accessed in the backward other than the input
+  // arguments must be handled in a similar manner to built-ins in
+  // CppNode::compiled_args and CppNode::apply_with_saved.
   static constexpr bool is_traceable = false;
 };
 
@@ -198,6 +206,7 @@ struct CppNode : public Node {
     TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
     TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
     args.collect(ctx_.saved_variables_);
+    TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
     args.collect(ctx_.materialize_grads_);
     args.collect(ctx_.has_freed_buffers_);
     args.collect(is_variable_input_);
@@ -212,7 +221,7 @@ struct CppNode : public Node {
     TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
     TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
     saved.before(ctx_.saved_variables_);
-    saved.before(ctx_.to_save_);
+    TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
     saved.before(ctx_.materialize_grads_);
     saved.before(ctx_.has_freed_buffers_);
     saved.before(input_info_);
@@ -222,7 +231,7 @@ struct CppNode : public Node {
     TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
     TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
     saved.after(ctx_.saved_variables_);
-    saved.after(ctx_.to_save_);
+    TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
     saved.after(ctx_.materialize_grads_);
     saved.after(ctx_.has_freed_buffers_);
     saved.after(input_info_);
