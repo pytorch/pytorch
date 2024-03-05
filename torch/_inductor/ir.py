@@ -4712,7 +4712,7 @@ class RecordScalar(ExternKernel):
         else:
             wrapper.writeline(f"with open('{self.filename}', 'a') as file:")
             wrapper.writeline(
-                f"    file.write('{self.prefix}' + str({self.scalar}) + '\\n')"
+                f"    file.write('{self.prefix}: ' + str({self.scalar}) + '\\n')"
             )
             # No one should ever use this buffer, but for uniformity
             # define the variable and assign it None

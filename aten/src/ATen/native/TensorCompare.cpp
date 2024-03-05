@@ -26,8 +26,8 @@
 #include <ATen/ops/_print_native.h>
 #include <ATen/ops/_assert_scalar_native.h>
 #include <ATen/ops/_functional_assert_scalar_native.h>
-#include <ATen/ops/_record_scalar.h>
-#include <ATen/ops/_functional_record_scalar.h>
+#include <ATen/ops/_record_scalar_native.h>
+#include <ATen/ops/_functional_record_scalar_native.h>
 #include <ATen/ops/_make_per_tensor_quantized_tensor.h>
 #include <ATen/ops/_unique.h>
 #include <ATen/ops/allclose_native.h>

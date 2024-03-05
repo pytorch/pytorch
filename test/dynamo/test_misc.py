@@ -69,6 +69,7 @@ from torch.nn import functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    SM70OrLater,
     SM80OrLater,
     TEST_CUDA,
     TEST_MULTIGPU,
@@ -7657,7 +7658,7 @@ def fn():
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @unittest.skipIf(not SM70OrLater, "requires GPU capability >= SM70")
     def test_record_scalar(self):
         with tempfile.NamedTemporaryFile(mode="w+b") as f:
             torch.manual_seed(0)
@@ -7672,7 +7673,7 @@ def fn():
                 def forward(self, x):
                     x = self.relu(self.linear(x) + self.buf0)
                     y = x.sum().item()
-                    torch._record_scalar(y, "x:sum: ", f.name)
+                    torch._record_scalar(y, "x:sum", f.name)
                     return x + 1, y + 1
 
             x = torch.randn(10, 10, device="cuda")
