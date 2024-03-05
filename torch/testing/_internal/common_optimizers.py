@@ -1292,6 +1292,13 @@ optim_db: List[OptimizerInfo] = [
                     "capturable path no longer called after hitting cache limit, see #121178"
                 ),
                 "TestOptimRenewed",
+                "test_save_load_equality_with_weights_only",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "capturable path no longer called after hitting cache limit, see #121178"
+                ),
+                "TestOptimRenewed",
                 "test_load_nontensor_step",
             ),
             DecorateInfo(
