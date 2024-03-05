@@ -101,7 +101,6 @@ check_obj_id = torch._C._dynamo.guards.check_obj_id
 check_type_id = torch._C._dynamo.guards.check_type_id
 dict_version = torch._C._dynamo.guards.dict_version
 
-# GuardManager = torch._C._dynamo.guards.GuardManager
 RootGuardManager = torch._C._dynamo.guards.RootGuardManager
 DictGuardManager = torch._C._dynamo.guards.DictGuardManager
 install_tensor_aliasing_guard = torch._C._dynamo.guards.install_tensor_aliasing_guard
@@ -111,6 +110,12 @@ install_no_tensor_aliasing_guard = (
 
 
 class GuardManager:
+    """
+    A helper class that contains the root guard manager. An instance of this
+    class is stored in the Dynamo cache entry, so that the cache entry can call
+    __call__ method to perform a guard check.
+    """
+
     def __init__(self):
         self.root = RootGuardManager()
 
@@ -125,75 +130,75 @@ class GuardManager:
         self.extra_state = None
         self.id_matched_objs = None
 
-    def pretty_print_leaf_guard(self, prefix, guard):
+    def get_guard_lines(self, guard):
         guard_name = guard.__class__.__name__
         parts = guard.verbose_code_parts()
-        parts = [prefix + guard_name + ": " + part for part in parts]
-        return "\n".join(parts) + "\n"
+        parts = [guard_name + ": " + part for part in parts]
+        return parts
 
-    def _debug_print(self, mgr, prefix):
-        s = ""
-
-        for guard in mgr.get_leaf_guards():
-            s += self.pretty_print_leaf_guard(prefix + "+- ", guard)
-
-        if istype(mgr, DictGuardManager):
-            for dict_key_index, kv_mgr in sorted(mgr.get_key_value_managers().items()):
-                key_manager = kv_mgr[0]
-                if key_manager:
-                    suffix = " key_manager at index=" + str(dict_key_index) + "\n"
-                    s += (
-                        prefix
-                        + "+- "
-                        + key_manager.__class__.__name__
-                        + " source ="
-                        + key_manager.get_source()
-                        + suffix
-                    )
-                    s += self._debug_print(key_manager, prefix + "|  ")
-
-                value_manager = kv_mgr[1]
-                if value_manager:
-                    suffix = " value_manager at index=" + str(dict_key_index) + "\n"
-                    s += (
-                        prefix
-                        + "+- "
-                        + value_manager.__class__.__name__
-                        + " source ="
-                        + value_manager.get_source()
-                        + suffix
-                    )
-                    s += self._debug_print(value_manager, prefix + "|  ")
-
-        # Now handle the general case of GuardManager/RootGuardManager
-        for accessor, child_mgr in zip(mgr.get_accessors(), mgr.get_child_managers()):
-            suffix = " with " + accessor.repr() + "\n"
-            s += (
-                prefix
-                + "+- "
-                + child_mgr.__class__.__name__
-                + ", source="
-                + child_mgr.get_source()
-                + suffix
-            )
-            s += self._debug_print(child_mgr, prefix + "|  ")
+    def get_manager_line(self, accessor_str, guard_manager):
+        source = guard_manager.get_source()
+        t = guard_manager.__class__.__name__
+        s = t + "(source = " + source + ", accessor = " + accessor_str + ")"
         return s
 
+    def construct_dict_manager_string(self, mgr, body):
+        for idx, (key_mgr, val_mgr) in sorted(mgr.get_key_value_managers().items()):
+            if key_mgr:
+                accessor = f"KeyManager(index={idx})"
+                body.writeline(self.get_manager_line(accessor, key_mgr))
+                self.construct_manager_string(key_mgr, body)
+
+            if val_mgr:
+                accessor = f"ValueManager(index={idx})"
+                body.writeline(self.get_manager_line(accessor, val_mgr))
+                self.construct_manager_string(val_mgr, body)
+
+    def construct_manager_string(self, mgr, body):
+        with body.indent():
+            for guard in mgr.get_leaf_guards():
+                body.writelines(self.get_guard_lines(guard))
+
+            if istype(mgr, DictGuardManager):
+                self.construct_dict_manager_string(mgr, body)
+
+            # General case of GuardManager/RootGuardManager
+            for accessor, child_mgr in zip(
+                mgr.get_accessors(), mgr.get_child_managers()
+            ):
+                body.writeline(self.get_manager_line(accessor.repr(), child_mgr))
+                self.construct_manager_string(child_mgr, body)
+
     def __str__(self):
-        first_line = "\n+- " + self.root.__class__.__name__ + "\n"
-        subtree = self._debug_print(self.root, "|  ")
-        epilogue_guards = ""
+        from torch._inductor.utils import IndentedBuffer
+
+        class IndentedBufferWithPrefix(IndentedBuffer):
+            def prefix(self):
+                return "| " * (self._indent * self.tabwidth)
+
+            def writeline(self, line, skip_prefix=False):
+                if skip_prefix:
+                    super().writeline(line)
+                else:
+                    super().writeline("+- " + line)
+
+        body = IndentedBufferWithPrefix()
+        body.tabwidth = 1
+        body.writeline("", skip_prefix=True)
+        body.writeline("TREE_GUARD_MANAGER:", skip_prefix=True)
+        body.writeline("RootGuardManager")
+        self.construct_manager_string(self.root, body)
         for guard in self.root.get_epilogue_lambda_guards():
-            epilogue_guards += self.pretty_print_leaf_guard("|  +- ", guard)
-        return first_line + subtree + epilogue_guards
+            body.writelines(self.get_guard_lines(guard))
+        return body.getvalue()
 
     def __call__(self, x):
         # TODO - This is used in eval_frame.c, as we save GuardManager in
         # cache_entry, instead of check_fn. This is suboptimal because we are
         # doing a few unnecessary operations - going from C++ to Python,
         # LOAD_ATTR of check. What we really want is to directly call
-        # check_nopybind from guard_manager. But, I have to figure out how to do
-        # that with pybind and PyObjects.
+        # check_nopybind from guard_manager. Follow up with this change in a
+        # separate PR.
         return self.root.check(x)
 
     def check_verbose(self, x):
