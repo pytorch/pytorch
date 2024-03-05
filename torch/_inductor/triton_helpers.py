@@ -10,6 +10,7 @@ else:
     libdevice = tl.math
     math = tl
 
+
 @triton.jit
 def promote_to_tensor(x):
     # Addition promotes to tensor for us

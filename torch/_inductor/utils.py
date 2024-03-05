@@ -710,7 +710,7 @@ if attrs_descriptor_available:
         if ids_of_folded_args_available:
             kwargs["ids_of_folded_args"] = ids_of_folded_args
         if divisible_by_8_available:
-            kwargs["divisible_by_8"] = divisible_by_8,
+            kwargs["divisible_by_8"] = divisible_by_8
 
         # Instantiate AttrsDescriptor with the prepared arguments
         return AttrsDescriptor(**kwargs)
