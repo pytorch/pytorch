@@ -1508,7 +1508,7 @@ def _allgather_orig_param_states(
     """
     fsdp_state = fsdp_param_info.state
     if fsdp_state.rank == 0 and dist.get_debug_level() == dist.DebugLevel.DETAIL:
-        logger.warning(
+        logger.info(
             "CUDA Memory Summary before calling to _allgather_orig_param_states %s",
             torch.cuda.memory_summary(),
         )
