@@ -3,7 +3,6 @@
 #include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/LegacyVmapMode.h>
 #include <c10/util/irange.h>
-#include <c10/util/thread_name.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/THP.h>
