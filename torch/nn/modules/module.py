@@ -2048,11 +2048,12 @@ class Module:
                     with torch.no_grad():
                         if assign_to_params_buffers:
                             # Shape checks are already done above
-                            if (isinstance(param, torch.nn.Parameter) and
-                                    not isinstance(input_param, torch.nn.Parameter)):
-                                setattr(self, name, torch.nn.Parameter(input_param))
-                            else:
-                                setattr(self, name, input_param)
+                            if (isinstance(param, torch.nn.Parameter)):
+                                if not isinstance(input_param, torch.nn.Parameter):
+                                    input_param = torch.nn.Parameter(input_param, requires_grad=param.requires_grad)
+                                else:
+                                    input_param.requires_grad_(param.requires_grad)
+                            setattr(self, name, input_param)
                         elif use_swap_tensors:
                             param_requires_grad = param.requires_grad
                             new_input_param = param.module_load(input_param)
