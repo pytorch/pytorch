@@ -840,6 +840,7 @@ class TestSerializeCustomClass(TestCase):
                         (custom_obj,),
                     )
                     custom_node.meta["val"] = torch.ones(4, 4)
+                    custom_node.meta["nn_module_stack"] = {"": ("", None)}
                     arg0, _ = node.args
                     node.args = (arg0, custom_node)
 
