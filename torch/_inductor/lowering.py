@@ -2186,7 +2186,6 @@ make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 make_fallback(aten.grid_sampler_2d_backward, require_dense)
 make_fallback(aten.randperm)  # needs sort
-make_fallback(aten.nll_loss2d_backward.default, require_contiguous)
 
 
 def sdpa_constraint(fx_node, *args, **kwargs):
