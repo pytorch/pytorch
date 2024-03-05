@@ -524,8 +524,13 @@ def _sfdp_params_check(match):
     return True
 
 
+# We could add conditions for enabling oneDNN Graph in this check
+# But in that case, we wouldn't be able to add replacements for existing patterns
+# that already have a replacement defined.
 def _onednn_graph_extra_check(match):
     query = match.kwargs["query"].meta["val"]
+    if query.dtype not in [torch.float32, torch.bfloat16]:
+        return False
     if (query.dtype == torch.bfloat16) and not IS_AVX512_BF16_SUPPORTED:
         return False
     return _sfdp_params_check(match)
@@ -793,7 +798,7 @@ def _get_sfdp_patterns(enable_onednn_fusions=False, serialization_mode=False):
                 {},
                 _sfdp_params_check,
                 False,
-                False,
+                True,
                 True,
             ),
         ]

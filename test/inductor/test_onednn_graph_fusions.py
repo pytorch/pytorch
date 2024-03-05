@@ -127,9 +127,6 @@ if HAS_CPU:
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_18
         )
 
-    class SDPAPatternRewriterCpuDynamicTests(SDPAPatternRewriterCpuTests):
-        use_static_shapes = False
-
 
 if __name__ == "__main__":
     if IS_LINUX and torch._C._has_onednn_graph and IS_AVX512_VNNI_SUPPORTED:

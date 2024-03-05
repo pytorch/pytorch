@@ -9,6 +9,8 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_to_dense_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #endif
 
 #if AT_ONEDNN_GRAPH_ENABLED()
@@ -306,8 +308,7 @@ Tensor mkldnn_graph_sdpa_pattern(
     input_tensors.push_back(scale_val);
     map_key.insert(
         map_key.end(), scale_val.sizes().begin(), scale_val.sizes().end());
-  }
-  if (inverse_scale != c10::nullopt) {
+  } else if (inverse_scale != c10::nullopt) {
     auto scale_val = inverse_scale.value();
     input_tensors.push_back(scale_val);
     map_key.insert(
@@ -369,17 +370,10 @@ namespace {
 using namespace at::native;
 using namespace at::native::onednn_graph;
 
-bool is_any_shape_symbolic(SymIntArrayRef& shape) {
-  auto shape_vec = shape.vec();
-  for (auto& shape_symbol : shape_vec) {
-    if (shape_symbol.is_symbolic()) {
-      return true;
-    }
-  }
-  return false;
-}
-
 // Compile fused kernels in Inductor compilation stage
+// TODO: Create a common function that compiles fused kernels
+// to eliminate duplicate code because even at::tensorBase::sizes
+// works for Meta tensors
 Tensor mkldnn_graph_sdpa_pattern_meta(
     const Tensor& query,
     const Tensor& key,
@@ -394,6 +388,12 @@ Tensor mkldnn_graph_sdpa_pattern_meta(
     bool key_requires_transpose_once = false,
     bool value_requires_transpose = false,
     bool output_requires_transpose_and_reorder = false) {
+  // check if shapes are static
+  if (query.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
+      key.unsafeGetTensorImpl()->has_symbolic_sizes_strides() ||
+      value.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
+    TORCH_CHECK(false, "Dynamic shapes are currently not supported");
+  }
   // first check cache
   // The key has a pattern ID, as well as the shapes of input tenors
   std::vector<int64_t> map_key;
@@ -415,26 +415,17 @@ Tensor mkldnn_graph_sdpa_pattern_meta(
   input_tensors.push_back(value);
 
   map_key.push_back(patternID);
+  auto query_sym_sizes = query.sym_sizes();
   auto key_sym_sizes = key.sym_sizes();
-  if (is_any_shape_symbolic(key_sym_sizes)) {
-    return query;
-  }
+  auto value_sym_sizes = value.sym_sizes();
   auto key_sym_sizes_vec = asIntArrayRefUnchecked(key_sym_sizes).vec();
   std::vector<int64_t> key_sizes(
       key_sym_sizes_vec.begin(), key_sym_sizes_vec.end());
 
-  auto query_sym_sizes = query.sym_sizes();
-  if (is_any_shape_symbolic(query_sym_sizes)) {
-    return query;
-  }
   auto query_sym_sizes_vec = asIntArrayRefUnchecked(query_sym_sizes).vec();
   std::vector<int64_t> query_sizes(
       query_sym_sizes_vec.begin(), query_sym_sizes_vec.end());
 
-  auto value_sym_sizes = value.sym_sizes();
-  if (is_any_shape_symbolic(value_sym_sizes)) {
-    return query;
-  }
   auto value_sym_sizes_vec = asIntArrayRefUnchecked(value_sym_sizes).vec();
   std::vector<int64_t> value_sizes(
       value_sym_sizes_vec.begin(), value_sym_sizes_vec.end());
@@ -445,9 +436,6 @@ Tensor mkldnn_graph_sdpa_pattern_meta(
   if (scale.has_value()) {
     input_tensors.push_back(scale.value());
     auto scale_sym_sizes = scale.value().sym_sizes();
-    if (is_any_shape_symbolic(scale_sym_sizes)) {
-      return query;
-    }
     auto scale_sym_sizes_vec = asIntArrayRefUnchecked(scale_sym_sizes).vec();
     std::vector<int64_t> scale_sizes(
         scale_sym_sizes_vec.begin(), scale_sym_sizes_vec.end());
@@ -455,9 +443,6 @@ Tensor mkldnn_graph_sdpa_pattern_meta(
   } else if (inverse_scale.has_value()) {
     input_tensors.push_back(inverse_scale.value());
     auto scale_sym_sizes = inverse_scale.value().sym_sizes();
-    if (is_any_shape_symbolic(scale_sym_sizes)) {
-      return query;
-    }
     auto scale_sym_sizes_vec = asIntArrayRefUnchecked(scale_sym_sizes).vec();
     std::vector<int64_t> scale_sizes(
         scale_sym_sizes_vec.begin(), scale_sym_sizes_vec.end());
@@ -467,9 +452,6 @@ Tensor mkldnn_graph_sdpa_pattern_meta(
   if (attn_mask.has_value()) {
     input_tensors.push_back(attn_mask.value());
     auto attn_mask_sym_sizes = attn_mask.value().sym_sizes();
-    if (is_any_shape_symbolic(attn_mask_sym_sizes)) {
-      return query;
-    }
     auto attn_mask_sym_sizes_vec =
         asIntArrayRefUnchecked(attn_mask_sym_sizes).vec();
     std::vector<int64_t> attn_mask_sizes(
@@ -481,9 +463,6 @@ Tensor mkldnn_graph_sdpa_pattern_meta(
   if (causal_mask.has_value()) {
     input_tensors.push_back(causal_mask.value());
     auto causal_mask_sym_sizes = causal_mask.value().sym_sizes();
-    if (is_any_shape_symbolic(causal_mask_sym_sizes)) {
-      return query;
-    }
     auto causal_mask_sym_sizes_vec =
         asIntArrayRefUnchecked(causal_mask_sym_sizes).vec();
     std::vector<int64_t> causal_mask_sizes(
@@ -495,9 +474,6 @@ Tensor mkldnn_graph_sdpa_pattern_meta(
   if (causal_mask_value.has_value()) {
     input_tensors.push_back(causal_mask_value.value());
     auto causal_mask_val_sym_sizes = causal_mask_value.value().sym_sizes();
-    if (is_any_shape_symbolic(causal_mask_val_sym_sizes)) {
-      return query;
-    }
     auto causal_mask_val_sym_sizes_vec =
         asIntArrayRefUnchecked(causal_mask_val_sym_sizes).vec();
     std::vector<int64_t> causal_mask_val_sizes(
