@@ -21,6 +21,7 @@ from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     skipIfRocm,
+    skipIfTorchDynamo,
     TEST_FAIRSEQ,
     run_tests,
     parametrize,
@@ -3424,6 +3425,7 @@ class TestAttnBias(NNTestCase):
     @unittest.skipIf(
         sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
     )
+    @skipIfTorchDynamo("This function already calls torch.compile.")
     def test_causal_variants_compile(self, device, causal_variant: CausalVariant, shape: List[Tuple[int]]):
         cnts = CompileCounterWithBackend("aot_eager")
         make_tensor = partial(
