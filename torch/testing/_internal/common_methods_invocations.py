@@ -9471,10 +9471,6 @@ foreach_unary_op_db: List[OpInfo] = [
                          "test_meta_inplace", dtypes=integral_types_and(torch.bool)),
         ),
     ),
-    ForeachFuncInfo(
-        "alias_copy",
-        foreach_inputs_sample_func(1, False, False),
-    ),
 ]
 
 foreach_binary_op_db: List[OpInfo] = [
@@ -10735,6 +10731,12 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_addcmul_addcdiv,
            reference_inputs_func=partial(
                reference_inputs_elementwise_ternary, sample_inputs_func=reference_inputs_addcmul_addcdiv)),
+    UnaryUfuncInfo('alias_copy',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_out=True,),
     UnaryUfuncInfo('asin',
                    aliases=('arcsin', ),
                    ref=np.arcsin,
