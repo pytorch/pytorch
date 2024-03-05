@@ -348,7 +348,6 @@ void Engine::thread_init(
     int device,
     const std::shared_ptr<ReadyQueue>& ready_queue,
     bool should_increment) {
-
   // pthread_setname_np restricts the name to 16 characters including
   // the null byte.
   std::string thread_name = "pt_autograd_" + std::to_string(device);
