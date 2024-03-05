@@ -314,7 +314,8 @@ static void autogradNotImplementedFallbackImpl(
             // that require grad. However, we loosen this check to maintain
             // backward compatibility.
             // See https://github.com/pytorch/pytorch/issues/120988
-            if (!can_mutate_inplace(t, any_requires_grad)) {
+            if (can_mutate_inplace(t, any_requires_grad) !=
+                can_mutate_inplace_result::success) {
               throw_error_out_requires_grad(schema.name().c_str());
             }
           } else {
