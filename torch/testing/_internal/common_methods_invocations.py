@@ -9471,6 +9471,10 @@ foreach_unary_op_db: List[OpInfo] = [
                          "test_meta_inplace", dtypes=integral_types_and(torch.bool)),
         ),
     ),
+    ForeachFuncInfo(
+        "alias_copy",
+        foreach_inputs_sample_func(1, False, False),
+    ),
 ]
 
 foreach_binary_op_db: List[OpInfo] = [
@@ -9647,7 +9651,6 @@ foreach_binary_op_db: List[OpInfo] = [
     ForeachFuncInfo(
         "copy",
         foreach_inputs_sample_func(2, False, False),
-        aliases=("alias_copy",),
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
         supports_out=False,
         supports_forward_ad=False,
