@@ -4,22 +4,21 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-import io
 import json
-import logging
 import os
-import select
+import shutil
 import signal
 import sys
 import threading
 import time
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set
 
 from torch.distributed.elastic.timer.api import TimerClient, TimerRequest
+from torch.distributed.elastic.utils.logging import get_logger
 
 __all__ = ["FileTimerClient", "FileTimerRequest", "FileTimerServer"]
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 class FileTimerRequest(TimerRequest):
     """
@@ -31,10 +30,9 @@ class FileTimerRequest(TimerRequest):
     process.
     """
 
-    __slots__ = ["version", "worker_pid", "scope_id", "expiration_time", "signal"]
+    __slots__ = ["worker_pid", "scope_id", "expiration_time", "signal"]
 
     def __init__(self, worker_pid: int, scope_id: str, expiration_time: float, signal: int = 0) -> None:
-        self.version = 1
         self.worker_pid = worker_pid
         self.scope_id = scope_id
         self.expiration_time = expiration_time
@@ -43,8 +41,7 @@ class FileTimerRequest(TimerRequest):
     def __eq__(self, other) -> bool:
         if isinstance(other, FileTimerRequest):
             return (
-                self.version == other.version
-                and self.worker_pid == other.worker_pid
+                self.worker_pid == other.worker_pid
                 and self.scope_id == other.scope_id
                 and self.expiration_time == other.expiration_time
                 and self.signal == other.signal
@@ -54,7 +51,6 @@ class FileTimerRequest(TimerRequest):
     def to_json(self) -> str:
         return json.dumps(
             {
-                "version": self.version,
                 "pid": self.worker_pid,
                 "scope_id": self.scope_id,
                 "expiration_time": self.expiration_time,
@@ -68,69 +64,67 @@ class FileTimerClient(TimerClient):
     Client side of ``FileTimerServer``. This client is meant to be used
     on the same host that the ``FileTimerServer`` is running on and uses
     pid to uniquely identify a worker.
-    This client uses a named_pipe to send timer requests to the
+    This client uses a temp file to send timer requests to the
     ``FileTimerServer``. This client is a producer while the
     ``FileTimerServer`` is a consumer. Multiple clients can work with
     the same ``FileTimerServer``.
 
     Args:
 
-        file_path: str, the path of a FIFO special file. ``FileTimerServer``
-                        must have created it by calling os.mkfifo().
+        file_path: str, the path of a watchdog file.
+
+        timeout_sec: int, watchdog timeout.
+
+        scope_id: str, scope ID of worker
 
         signal: signal, the signal to use to kill the process. Using a
                         negative or zero signal will not kill the process.
     """
-    def __init__(self, file_path: str, signal=(signal.SIGKILL if sys.platform != "win32" else
-                                               signal.CTRL_C_EVENT)) -> None:  # type: ignore[attr-defined]
+    def __init__(
+        self,
+        file_path: str,
+        timeout_sec: int,
+        scope_id: str,
+        signal=(signal.SIGKILL if sys.platform != "win32" else
+                signal.CTRL_C_EVENT)) -> None:  # type: ignore[attr-defined]
         super().__init__()
         self._file_path = file_path
+        self._timeout_sec = timeout_sec
         self.signal = signal
-
-    def _open_non_blocking(self) -> Optional[io.TextIOWrapper]:
-        try:
-            fd = os.open(self._file_path, os.O_WRONLY | os.O_NONBLOCK)
-            return os.fdopen(fd, "wt")
-        except Exception:
-            return None
-
-    def _send_request(self, request: FileTimerRequest) -> None:
-        # The server may have crashed or may haven't started yet.
-        # In such case, calling open() in blocking model blocks the client.
-        # To avoid such issue, open it in non-blocking mode, and an OSError will
-        # be raised if the server is not there.
-        file = self._open_non_blocking()
-        if file is None:
-            raise BrokenPipeError("Could not send the FileTimerRequest because FileTimerServer is not available.")
-        with file:
+        log.info(
+            "Starting %s..."
+            " file_path=%s,"
+            " timeout=%s,"
+            " signal=%s",
+            type(self).__name__,
+            self._file_path,
+            self._timeout_sec,
+            self.signal,
+        )
+        with open(self._file_path, "w") as file:
+            # FileTimerRequest at init is used to write client level
+            # metadata once to watchdog file, later acquire will not
+            # write duplicate data
+            request = FileTimerRequest(
+                worker_pid=os.getpid(),
+                scope_id=scope_id,
+                expiration_time=timeout_sec,
+                signal=signal,
+            )
             json_request = request.to_json()
-            # Write request with no greater than select.PIPE_BUF is guarantee to be atomic.
-            if len(json_request) > select.PIPE_BUF:
-                raise RuntimeError(
-                    f"FileTimerRequest larger than {select.PIPE_BUF} bytes "
-                    f"is not supported: {json_request}"
-                )
             file.write(json_request + "\n")
 
     def acquire(self, scope_id: str, expiration_time: float) -> None:
-        self._send_request(
-            request=FileTimerRequest(
-                worker_pid=os.getpid(),
-                scope_id=scope_id,
-                expiration_time=expiration_time,
-                signal=self.signal
-            ),
-        )
+        if not os.path.isfile(self._file_path):
+            raise FileNotFoundError("Could not send the FileTimerRequest because FileTimerServer is not available.")
+        # updating watchdog file modified time to current time as heartbeat
+        # avoid writing duplicate FileTimerRequest, expiration time is
+        # calcuated using 'modified time + timeout'
+        os.utime(self._file_path)
 
     def release(self, scope_id: str) -> None:
-        self._send_request(
-            request=FileTimerRequest(
-                worker_pid=os.getpid(),
-                scope_id=scope_id,
-                expiration_time=-1,
-                signal=0
-            ),
-        )
+        # release is no-op as timer are alive until end of server shutdown
+        pass
 
 
 class FileTimerServer:
@@ -143,7 +137,10 @@ class FileTimerServer:
 
     Args:
 
-        file_path: str, the path of a FIFO special file to be created.
+        dir_path: str, the path of directory where watchdog files will be
+        created.
+
+        num_clients: int, number of worker clients.
 
         max_interval: float, max interval in seconds for each watchdog loop.
 
@@ -155,25 +152,23 @@ class FileTimerServer:
 
     def __init__(
         self,
-        file_path: str,
+        dir_path: str,
+        num_clients: int,
         max_interval: float = 10,
         daemon: bool = True,
         log_event: Optional[Callable[[str, Optional[FileTimerRequest]], None]] = None
     ) -> None:
-        self._file_path = file_path
+        self._dir_path = dir_path
+        self._num_clients = num_clients
         self._max_interval = max_interval
         self._daemon = daemon
-        self._timers: Dict[Tuple[int, str], FileTimerRequest] = {}
+        self._timers: Dict[str, FileTimerRequest] = {}
         self._stop_signaled = False
         self._watchdog_thread: Optional[threading.Thread] = None
-        if os.path.exists(self._file_path):
-            os.remove(self._file_path)
-        os.mkfifo(self._file_path)
-        # For test only. Count the number of requests received.
-        self._request_count = 0
         # For test only. Process all requests and stop the server.
         self._run_once = False
         self._log_event = log_event if log_event is not None else lambda name, request: None
+        self._clients_metadata: Dict[str, Optional[FileTimerRequest]] = {}
 
 
     def start(self) -> None:
@@ -197,8 +192,8 @@ class FileTimerServer:
             self._watchdog_thread = None
         else:
             log.info("No watchdog thread running, doing nothing")
-        if os.path.exists(self._file_path):
-            os.remove(self._file_path)
+        if os.path.exists(self._dir_path):
+            shutil.rmtree(self._dir_path)
         self._log_event("watchdog stopped", None)
 
     def run_once(self) -> None:
@@ -209,84 +204,73 @@ class FileTimerServer:
             self._watchdog_thread = None
         else:
             log.info("No watchdog thread running, doing nothing")
-        if os.path.exists(self._file_path):
-            os.remove(self._file_path)
 
     def _watchdog_loop(self) -> None:
-        # Open the pipe in blocking mode blocks the server thread.
-        # This is fine for the following reasons:
-        #  1. No client case usually does not happen.
-        #  2. We are running the watchdog loop in a separate daemon
-        #     thread, which will not block the process to stop.
-        with open(self._file_path) as fd:
-            while not self._stop_signaled:
-                try:
-                    run_once = self._run_once
-                    self._run_watchdog(fd)
-                    if run_once:
-                        break
-                except Exception:
-                    log.exception("Error running watchdog")
+        while not self._stop_signaled:
+            try:
+                run_once = self._run_once
+                self._load_clients()
+                self._run_watchdog()
+                if run_once:
+                    break
+            except Exception:
+                log.exception("Error running watchdog")
 
-    def _run_watchdog(self, fd: io.TextIOWrapper) -> None:
-        timer_requests = self._get_requests(fd, self._max_interval)
+    def _load_clients(self) -> None:
+        if len(self._clients_metadata) == self._num_clients:
+            return
+
+        client_files = os.listdir(self._dir_path)
+        for file in client_files:
+            if file not in self._clients_metadata:
+                file_name = f"{self._dir_path}/{file}"
+                with open(file_name) as fd:
+                    request = json.loads(fd.readline())
+                    self._clients_metadata[file] = FileTimerRequest(
+                        worker_pid=request["pid"],
+                        scope_id=request["scope_id"],
+                        expiration_time=request["expiration_time"],
+                        signal=request["signal"],
+                    )
+
+    def _run_watchdog(self) -> None:
+        timer_requests = self._get_requests(self._max_interval)
         self.register_timers(timer_requests)
         now = time.time()
-        reaped_worker_pids = set()
-        for worker_pid, expired_timers in self.get_expired_timers(now).items():
-            log.info("Reaping worker_pid=[%s]. Expired timers: %s", worker_pid, self._get_scopes(expired_timers))
-            reaped_worker_pids.add(worker_pid)
-            # In case we have multiple expired timers, we find the first timer
-            # with a valid signal (>0) in the expiration time order.
-            expired_timers.sort(key=lambda timer: timer.expiration_time)
-            signal = 0
-            expired_timer = None
-            for timer in expired_timers:
-                self._log_event("timer expired", timer)
-                if timer.signal > 0:
-                    signal = timer.signal
-                    expired_timer = timer
-                    break
-            if signal <= 0:
-                log.info("No signal specified with worker=[%s]. Do not reap it.", worker_pid)
+        reaped_workers = set()
+        for etimer in self.get_expired_timers(now):
+            log.info("Reaping worker_pid=[%s]. Expired timer: %s", etimer.worker_pid, etimer.scope_id)
+            reaped_workers.add(etimer.scope_id)
+            self._log_event("timer expired", etimer)
+            if etimer.signal <= 0:
+                log.info("No signal specified with worker=[%s]. Do not reap it.", etimer.worker_pid)
                 continue
-            if self._reap_worker(worker_pid, signal):
-                log.info("Successfully reaped worker=[%s] with signal=%s", worker_pid, signal)
-                self._log_event("kill worker process", expired_timer)
+            # clear metadata for reaped worker to avoid keep reaping in future
+            self._clients_metadata[etimer.scope_id] = None
+            if self._reap_worker(etimer.worker_pid, etimer.signal):
+                log.info("Successfully reaped worker=[%s] with signal=%s", etimer.worker_pid, etimer.signal)
+                self._log_event("kill worker process", etimer)
             else:
-                log.error("Error reaping worker=[%s]. Will retry on next watchdog.", worker_pid)
-        self.clear_timers(reaped_worker_pids)
+                log.error("Error reaping worker=[%s]. Will retry on next watchdog.", etimer.worker_pid)
+        self.clear_timers(reaped_workers)
 
-    def _get_scopes(self, timer_requests: List[FileTimerRequest]) -> List[str]:
-        return [r.scope_id for r in timer_requests]
-
-    def _get_requests(self, fd: io.TextIOWrapper, max_interval: float) -> List[FileTimerRequest]:
+    def _get_requests(self, max_interval: float) -> List[FileTimerRequest]:
         start = time.time()
         requests = []
         while not self._stop_signaled or self._run_once:
-            # For named pipe, readline() is blocking when at least one writer opens.
-            # It returns only when flush() is called at the writer side.
-            # Note that flush() is automatically called inside close().
-            # After the last writer closes, readline() is not blocking.
-            # It will return an empty string when it's at end-of-file.
-            # Since the client side always opens the pipe, writes a message and closes
-            # the pipe immediately, the readline() call below is not blocking for long.
-            json_request = fd.readline()
-            if len(json_request) == 0:
-                if self._run_once:
-                    break
-                time.sleep(min(max_interval, 1))
-            else:
-                request = json.loads(json_request)
-                pid = request["pid"]
-                scope_id = request["scope_id"]
-                expiration_time = request["expiration_time"]
-                signal = request["signal"]
+            for metadata in self._clients_metadata.values():
+                if not metadata:
+                    continue
+                last_mtime = os.path.getmtime(f"{self._dir_path}/{metadata.scope_id}")
                 requests.append(
                     FileTimerRequest(
-                        worker_pid=pid, scope_id=scope_id, expiration_time=expiration_time, signal=signal
+                        worker_pid=metadata.worker_pid,
+                        scope_id=metadata.scope_id,
+                        expiration_time=last_mtime + metadata.expiration_time,
+                        signal=metadata.signal,
                     )
                 )
+            time.sleep(min(max_interval, 10))
             now = time.time()
             if now - start > max_interval:
                 break
@@ -294,32 +278,23 @@ class FileTimerServer:
 
     def register_timers(self, timer_requests: List[FileTimerRequest]) -> None:
         for request in timer_requests:
-            pid = request.worker_pid
             scope_id = request.scope_id
             expiration_time = request.expiration_time
-            self._request_count += 1
 
-            key = (pid, scope_id)
             # negative expiration is a proxy for a release call
             if expiration_time < 0:
-                if key in self._timers:
-                    del self._timers[key]
+                if scope_id in self._timers:
+                    del self._timers[scope_id]
             else:
-                self._timers[key] = request
+                self._timers[scope_id] = request
 
-    def clear_timers(self, worker_pids: Set[int]) -> None:
-        for (pid, scope_id) in list(self._timers.keys()):
-            if pid in worker_pids:
-                del self._timers[(pid, scope_id)]
+    def clear_timers(self, workers: Set[str]) -> None:
+        for worker in workers:
+            if worker in self._timers:
+                del self._timers[worker]
 
-    def get_expired_timers(self, deadline: float) -> Dict[int, List[FileTimerRequest]]:
-        # pid -> [timer_requests...]
-        expired_timers: Dict[int, List[FileTimerRequest]] = {}
-        for request in self._timers.values():
-            if request.expiration_time <= deadline:
-                expired_scopes = expired_timers.setdefault(request.worker_pid, [])
-                expired_scopes.append(request)
-        return expired_timers
+    def get_expired_timers(self, deadline: float) -> List[FileTimerRequest]:
+        return [timer for timer in self._timers.values() if timer.expiration_time <= deadline]
 
     def _reap_worker(self, worker_pid: int, signal: int) -> bool:
         try:

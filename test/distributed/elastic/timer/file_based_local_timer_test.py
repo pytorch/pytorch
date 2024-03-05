@@ -6,11 +6,12 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import multiprocessing as mp
+import os
 import signal
+import tempfile
 import time
 import unittest
 import unittest.mock as mock
-import uuid
 
 import torch.distributed.elastic.timer as timer
 from torch.testing._internal.common_utils import (
@@ -25,20 +26,23 @@ from torch.testing._internal.common_utils import (
 # timer is not supported on windows or macos
 if not (IS_WINDOWS or IS_MACOS):
     # func2 should time out
-    def func2(n, file_path):
+    def func2(n, file_path, scope_id):
         if file_path is not None:
-            timer.configure(timer.FileTimerClient(file_path))
+            timer.configure(timer.FileTimerClient(file_path, 0.1, scope_id))
         if n > 0:
             with timer.expires(after=0.1):
-                func2(n - 1, None)
+                func2(n - 1, None, None)
                 time.sleep(0.2)
 
     class FileTimerTest(TestCase):
         def setUp(self):
             super().setUp()
             self.max_interval = 0.01
-            self.file_path = "/tmp/test_file_path_" + str(uuid.uuid4())
-            self.server = timer.FileTimerServer(self.file_path, self.max_interval)
+            self.num_clients = 10
+            td = tempfile.mkdtemp(prefix="test-watchdog")
+            self.server = timer.FileTimerServer(td, self.num_clients, self.max_interval)
+            self.scope_ids = [f"rank{i}" for i in range(self.num_clients)]
+            self.file_paths = [f"{td}/{scope}" for scope in self.scope_ids]
             self.server.start()
 
         def tearDown(self):
@@ -60,7 +64,7 @@ if not (IS_WINDOWS or IS_MACOS):
         def test_client_interaction(self):
             # no timer client configured but one passed in explicitly
             # no exception expected
-            timer_client = timer.FileTimerClient(self.file_path)
+            timer_client = timer.FileTimerClient(self.file_paths[0], 1, self.scope_ids[0])
             timer_client.acquire = mock.MagicMock(wraps=timer_client.acquire)
             timer_client.release = mock.MagicMock(wraps=timer_client.release)
             with timer.expires(after=1, scope="test", client=timer_client):
@@ -70,59 +74,55 @@ if not (IS_WINDOWS or IS_MACOS):
             timer_client.release.assert_called_once_with("test")
 
         def test_happy_path(self):
-            timer.configure(timer.FileTimerClient(self.file_path))
+            timer.configure(timer.FileTimerClient(self.file_paths[0], 0.5, self.scope_ids[0]))
             with timer.expires(after=0.5):
                 time.sleep(0.1)
 
         def test_get_timer_recursive(self):
-            """
-            If a function acquires a countdown timer with default scope,
-            then recursive calls to the function should re-acquire the
-            timer rather than creating a new one. That is only the last
-            recursive call's timer will take effect.
-            """
-            timer.configure(timer.FileTimerClient(self.file_path))
+            timer_client = timer.FileTimerClient(self.file_paths[0], 1, self.scope_ids[0])
 
             # func should not time out
             def func(n):
                 if n > 0:
-                    with timer.expires(after=0.1):
-                        func(n - 1)
-                        time.sleep(0.05)
+                    print("here...", n)
+                    timer_client.acquire("test", 1)
+                    time.sleep(0.5)
+                    func(n - 1)
 
             func(4)
+            self.server.stop()
 
-            p = mp.Process(target=func2, args=(2, self.file_path))
+        def test_get_timer_recursive_process(self):
+            p = mp.Process(target=func2, args=(2, self.file_paths[0], self.scope_ids[0]))
             p.start()
             p.join()
             self.assertEqual(-signal.SIGKILL, p.exitcode)
 
         def test_multiple_clients_interaction(self):
             # func should not time out
-            def func(n, file_path):
+            def func(n, file_path, scope_id):
                 if file_path is not None:
-                    timer.configure(timer.FileTimerClient(file_path))
+                    timer.configure(timer.FileTimerClient(file_path, 100, scope_id))
                 if n > 0:
                     with timer.expires(after=100):
                         func(n - 1, None)
                         time.sleep(0.01)
 
-            num_clients = 10
             num_requests_per_client = 10
             processes = []
-            for i in range(num_clients):
-                p = mp.Process(target=func, args=(num_requests_per_client, self.file_path))
+            for i in range(self.num_clients):
+                p = mp.Process(target=func, args=(num_requests_per_client, self.file_paths[i], self.scope_ids[i]))
                 processes.append(p)
                 p.start()
             for p in processes:
                 p.join()
 
             self.server.run_once()  # Allows the server to process all requests
-            self.assertEqual(2 * num_clients * num_requests_per_client, self.server._request_count)
+            self.assertEqual(self.num_clients, len(self.server._timers))
 
         @staticmethod
-        def _run(file_path, timeout, duration):
-            client = timer.FileTimerClient(file_path)
+        def _run(file_path, scope_id, timeout, duration):
+            client = timer.FileTimerClient(file_path, timeout, scope_id)
             timer.configure(client)
             with timer.expires(after=timeout):
                 time.sleep(duration)
@@ -131,28 +131,17 @@ if not (IS_WINDOWS or IS_MACOS):
         def test_timer(self):
             timeout = 0.1
             duration = 1
-            p = mp.Process(target=self._run, args=(self.file_path, timeout, duration))
+            p = mp.Process(target=self._run, args=(self.file_paths[0], self.scope_ids[0], timeout, duration))
             p.start()
             p.join()
             self.assertEqual(-signal.SIGKILL, p.exitcode)
 
-    def _request_on_interval(file_path, n, interval, sem):
-        """
-        enqueues ``n`` timer requests into ``mp_queue`` one element per
-        interval seconds. Releases the given semaphore once before going to work.
-        """
-        client = timer.FileTimerClient(file_path)
-        sem.release()
-        for i in range(0, n):
-            client.acquire("test_scope", 0)
-            time.sleep(interval)
-
 
     class FileTimerClientTest(TestCase):
         def test_send_request_without_server(self):
-            client = timer.FileTimerClient("test_file")
-            timer.configure(client)
-            with self.assertRaises(BrokenPipeError):
+            with self.assertRaises(FileNotFoundError):
+                client = timer.FileTimerClient("/tmp/watchdognotexist/test_file", 0.1, "test")
+                timer.configure(client)
                 with timer.expires(after=0.1):
                     time.sleep(0.1)
 
@@ -160,9 +149,12 @@ if not (IS_WINDOWS or IS_MACOS):
     class FileTimerServerTest(TestCase):
         def setUp(self):
             super().setUp()
-            self.file_path = "/tmp/test_file_path_" + str(uuid.uuid4())
+            td = tempfile.mkdtemp(prefix="test-watchdog")
             self.max_interval = 0.01
-            self.server = timer.FileTimerServer(self.file_path, self.max_interval)
+            self.num_clients = 4
+            self.server = timer.FileTimerServer(td, self.num_clients, self.max_interval)
+            self.scope_ids = [f"rank{i}" for i in range(self.num_clients)]
+            self.file_paths = [f"{td}/{scope}" for scope in self.scope_ids]
 
         def tearDown(self):
             super().tearDown()
@@ -175,9 +167,8 @@ if not (IS_WINDOWS or IS_MACOS):
             self.server._run_watchdog = mock.MagicMock(wraps=self.server._run_watchdog)
             self.server.start()
 
-            test_pid = -3
-            client = timer.FileTimerClient(self.file_path)
-            client._send_request(self._valid_timer(pid=test_pid, scope="test0"))
+            client = timer.FileTimerClient(self.file_paths[0], 1, self.scope_ids[0])
+            client.acquire("test0", 60)
 
             wait = 0.1
             time.sleep(wait)
@@ -190,20 +181,9 @@ if not (IS_WINDOWS or IS_MACOS):
 
         def test_watchdog_empty_queue(self):
             """
-            checks that the watchdog can run on an empty pipe
+            checks that the watchdog can run on an empty file
             """
             self.server.start()
-
-        def _expired_timer(self, pid, scope):
-            expired = time.time() - 60
-            return timer.FileTimerRequest(worker_pid=pid, scope_id=scope, expiration_time=expired, signal=signal.SIGKILL)
-
-        def _valid_timer(self, pid, scope):
-            valid = time.time() + 60
-            return timer.FileTimerRequest(worker_pid=pid, scope_id=scope, expiration_time=valid, signal=signal.SIGKILL)
-
-        def _release_timer(self, pid, scope):
-            return timer.FileTimerRequest(worker_pid=pid, scope_id=scope, expiration_time=-1)
 
         @mock.patch("os.kill")
         def test_expired_timers(self, mock_os_kill):
@@ -213,32 +193,17 @@ if not (IS_WINDOWS or IS_MACOS):
             """
             self.server.start()
 
-            test_pid = -3
-            client = timer.FileTimerClient(self.file_path)
-            client._send_request(self._expired_timer(pid=test_pid, scope="test1"))
-            client._send_request(self._valid_timer(pid=test_pid, scope="test2"))
+            client1 = timer.FileTimerClient(self.file_paths[0], 1, self.scope_ids[0])
+            client2 = timer.FileTimerClient(self.file_paths[1], 2, self.scope_ids[1])
+
+            client1.acquire("test1", 1)
+            client2.acquire("test2", 1)
+            time.sleep(1.5)
 
             self.server.run_once()  # Allows the server to process all requests
-            self.assertEqual(0, len(self.server._timers))
-            mock_os_kill.assert_called_once_with(test_pid, signal.SIGKILL)
-
-        @mock.patch("os.kill")
-        def test_send_request_release(self, mock_os_kill):
-            """
-            tests that:
-            1. a timer can be acquired then released (should not terminate process)
-            2. a timer can be vacuously released (e.g. no-op)
-            """
-            self.server.start()
-
-            client = timer.FileTimerClient(self.file_path)
-            test_pid = -3
-            client._send_request(self._valid_timer(pid=test_pid, scope="test1"))
-            client._send_request(self._release_timer(pid=test_pid, scope="test1"))
-            client._send_request(self._release_timer(pid=test_pid, scope="test2"))
-
-            self.assertEqual(0, len(self.server._timers))
-            mock_os_kill.assert_not_called()
+            print(self.server._timers)
+            self.assertEqual(1, len(self.server._timers))
+            mock_os_kill.assert_called_once_with(os.getpid(), signal.SIGKILL)
 
         @mock.patch("os.kill")
         def test_valid_timers(self, mock_os_kill):
@@ -247,18 +212,15 @@ if not (IS_WINDOWS or IS_MACOS):
             """
             self.server.start()
 
-            client = timer.FileTimerClient(self.file_path)
-            client._send_request(self._valid_timer(pid=-3, scope="test1"))
-            client._send_request(self._valid_timer(pid=-3, scope="test2"))
-            client._send_request(self._valid_timer(pid=-2, scope="test1"))
-            client._send_request(self._valid_timer(pid=-2, scope="test2"))
+            client1 = timer.FileTimerClient(self.file_paths[0], 60, self.scope_ids[0])
+            client2 = timer.FileTimerClient(self.file_paths[1], 60, self.scope_ids[1])
+            client3 = timer.FileTimerClient(self.file_paths[2], 60, self.scope_ids[2])
+            client4 = timer.FileTimerClient(self.file_paths[3], 60, self.scope_ids[3])
 
             self.server.run_once()  # Allows the server to process all requests
             self.assertEqual(4, len(self.server._timers))
-            self.assertTrue((-3, "test1") in self.server._timers)
-            self.assertTrue((-3, "test2") in self.server._timers)
-            self.assertTrue((-2, "test1") in self.server._timers)
-            self.assertTrue((-2, "test2") in self.server._timers)
+            for scope in self.scope_ids:
+                self.assertTrue(scope in self.server._timers)
             mock_os_kill.assert_not_called()
 
 
