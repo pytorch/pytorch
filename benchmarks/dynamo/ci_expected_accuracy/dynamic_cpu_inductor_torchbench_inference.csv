@@ -10,6 +10,10 @@ Background_Matting,pass_due_to_skip,0
 
 
 
+DALLE2_pytorch,model_fail_to_load,0
+
+
+
 LearningToPaint,pass,0
 
 
@@ -50,47 +54,7 @@ densenet121,pass,0
 
 
 
-detectron2_fasterrcnn_r_101_c4,infra_error,0
-
-
-
-detectron2_fasterrcnn_r_101_dc5,infra_error,0
-
-
-
-detectron2_fasterrcnn_r_101_fpn,infra_error,0
-
-
-
-detectron2_fasterrcnn_r_50_c4,infra_error,0
-
-
-
-detectron2_fasterrcnn_r_50_dc5,infra_error,0
-
-
-
-detectron2_fasterrcnn_r_50_fpn,infra_error,0
-
-
-
-detectron2_fcos_r_50_fpn,infra_error,0
-
-
-
-detectron2_maskrcnn_r_101_c4,infra_error,0
-
-
-
-detectron2_maskrcnn_r_101_fpn,infra_error,0
-
-
-
-detectron2_maskrcnn_r_50_c4,infra_error,0
-
-
-
-detectron2_maskrcnn_r_50_fpn,infra_error,0
+detectron2_fcos_r_50_fpn,pass,38
 
 
 
@@ -130,6 +94,14 @@ hf_Bart,pass,0
 
 
 
+hf_Bert,pass,0
+
+
+
+hf_Bert_large,pass,0
+
+
+
 hf_DistilBert,pass,0
 
 
@@ -154,11 +126,23 @@ hf_T5_large,pass_due_to_skip,0
 
 
 
+hf_distil_whisper,pass,0
+
+
+
 lennard_jones,pass,0
 
 
 
 llama,pass,0
+
+
+
+llava,fail_accuracy,0
+
+
+
+maml,pass_due_to_skip,0
 
 
 
@@ -174,7 +158,19 @@ mobilenet_v2,pass,0
 
 
 
+mobilenet_v2_quantized_qat,pass,2
+
+
+
 mobilenet_v3_large,pass,0
+
+
+
+moco,model_fail_to_load,0
+
+
+
+moondream,pass,0
 
 
 
@@ -183,10 +179,6 @@ nvidia_deeprecommender,pass,0
 
 
 opacus_cifar10,pass,0
-
-
-
-phi_1_5,pass,74
 
 
 
@@ -206,7 +198,7 @@ pyhpc_isoneutral_mixing,pass,0
 
 
 
-pyhpc_turbulent_kinetic_energy,infra_error,0
+pyhpc_turbulent_kinetic_energy,pass,0
 
 
 
@@ -234,6 +226,10 @@ resnet50,pass,0
 
 
 
+resnet50_quantized_qat,pass,2
+
+
+
 resnext50_32x4d,pass,0
 
 
@@ -255,6 +251,10 @@ squeezenet1_1,pass,0
 
 
 stable_diffusion_unet,pass_due_to_skip,0
+
+
+
+timm_efficientdet,model_fail_to_load,0
 
 
 
@@ -286,6 +286,10 @@ timm_vovnet,pass,0
 
 
 
+torch_multimodal_clip,pass,3
+
+
+
 tts_angular,pass,2
 
 
@@ -294,7 +298,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,29
+vision_maskrcnn,pass,28
 
 
 

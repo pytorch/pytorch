@@ -79,7 +79,7 @@ constexpr int64_t GRAIN_SIZE = 32768;
 
 // Storage for a non-owning Tensor, without needing to include Tensor.h
 class TORCH_API OpaqueOptionalTensorRef {
-  alignas(alignof(TensorBase)) std::array<char, sizeof(TensorBase)> data_;
+  alignas(alignof(TensorBase)) std::array<char, sizeof(TensorBase)> data_{};
 
  public:
   OpaqueOptionalTensorRef();
@@ -171,6 +171,8 @@ struct TORCH_API OperandInfo {
 
   bool is_read_write = false;
 
+  bool is_const = false;
+
   void validate() {
     TORCH_CHECK(
         !tensor_base_->defined() || tensor_base_->layout() == kStrided,
@@ -210,7 +212,7 @@ struct TORCH_API OperandInfo {
  private:
   c10::MaybeOwned<TensorBase> tensor_base_;
   c10::MaybeOwned<TensorBase> original_tensor_base_ =
-      c10::MaybeOwned<TensorBase>::owned(c10::in_place);
+      c10::MaybeOwned<TensorBase>::owned(std::in_place);
 
   // We store TensorBase visibly in the header to allow inline access.
   // However, we sometimes need a genuine `const Tensor &` for the
@@ -384,7 +386,8 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
       TORCH_INTERNAL_ASSERT(
           original_tensor_base.scalar_type() != common_dtype());
       return c10::fetch_and_cast<T>(
-          original_tensor_base.scalar_type(), original_tensor_base.data_ptr());
+          original_tensor_base.scalar_type(),
+          original_tensor_base.const_data_ptr());
     } else {
       return scalar_value<T>(arg);
     }
@@ -413,10 +416,10 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   template <
       typename loop1d_t,
       std::enable_if_t<
-          std::is_convertible<
+          std::is_convertible_v<
               loop1d_t,
               c10::function_ref<
-                  void(char**, const int64_t* strides, int64_t size)>>::value,
+                  void(char**, const int64_t* strides, int64_t size)>>,
           int> = 0>
   void for_each(loop1d_t loop, int64_t grain_size = at::internal::GRAIN_SIZE) {
     for_each(loop_2d_from_1d(loop), grain_size);
@@ -429,10 +432,10 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   template <
       typename loop1d_t,
       std::enable_if_t<
-          std::is_convertible<
+          std::is_convertible_v<
               loop1d_t,
               c10::function_ref<
-                  void(char**, const int64_t* strides, int64_t size)>>::value,
+                  void(char**, const int64_t* strides, int64_t size)>>,
           int> = 0>
   void serial_for_each(loop1d_t loop, Range range) {
     serial_for_each(loop_2d_from_1d(loop), range);
@@ -443,7 +446,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   /// Create a strides array for a Tensor with shape of this iterator. The
   /// parameter `element_size` specifies the size of Tensor's data type in
   /// bytes (e.g. `4` for `float`)
-  StrideVector compatible_stride(int element_size) const;
+  StrideVector compatible_stride(int64_t element_size) const;
 
   /// Inverts the re-ordering done by reorder_dimensions. This can only be
   /// called *before* coalesce_dimensions() is called.
@@ -769,10 +772,14 @@ class TORCH_API TensorIteratorConfig final {
   TensorIteratorConfig& add_input(const TensorBase& input) {
     return add_borrowed_input(input);
   }
+  TensorIteratorConfig& add_const_input(const TensorBase& input) {
+    return add_borrowed_const_input(input);
+  }
 
   // Borrowing from temporaries is unlikely to go well.
   TensorIteratorConfig& add_output(TensorBase&& output) = delete;
   TensorIteratorConfig& add_input(TensorBase&& input) = delete;
+  TensorIteratorConfig& add_const_input(TensorBase&& input) = delete;
 
   // Stores input/output Tensors while incrementing the reference count.
   // Note that add_{in,out}put are nearly always what you
@@ -780,6 +787,7 @@ class TORCH_API TensorIteratorConfig final {
   // compile.
   TensorIteratorConfig& add_owned_output(const TensorBase& output);
   TensorIteratorConfig& add_owned_input(const TensorBase& input);
+  TensorIteratorConfig& add_owned_const_input(const TensorBase& input);
 
   // Advanced API: stores input/output Tensors without incrementing
   // the reference count. The caller must ensure that these Tensors
@@ -788,10 +796,12 @@ class TORCH_API TensorIteratorConfig final {
   // Important: the outputs have to be added before the inputs.
   TensorIteratorConfig& add_borrowed_output(const TensorBase& output);
   TensorIteratorConfig& add_borrowed_input(const TensorBase& input);
+  TensorIteratorConfig& add_borrowed_const_input(const TensorBase& input);
 
   // Borrowing from temporaries is unlikely to go well.
   TensorIteratorConfig& add_borrowed_output(TensorBase&& output) = delete;
   TensorIteratorConfig& add_borrowed_input(TensorBase&& input) = delete;
+  TensorIteratorConfig& add_borrowed_const_input(TensorBase&& input) = delete;
 
   // Sets the check_mem_overlap_ flag, which is true by default.
   // If true, inputs are checked for partial overlap with the outputs and
@@ -929,6 +939,8 @@ class TORCH_API TensorIteratorConfig final {
   }
 
  private:
+  bool is_tensor_const(size_t idx);
+
   SmallVector<c10::MaybeOwned<TensorBase>, 4> tensors_;
   int num_outputs_ = 0;
   int num_inputs_ = 0;
@@ -947,6 +959,8 @@ class TORCH_API TensorIteratorConfig final {
   bool promote_inputs_to_common_dtype_ = false;
   bool promote_integer_inputs_to_float_ = false;
   bool cast_common_dtype_to_outputs_ = false;
+
+  SmallVector<size_t, 4> const_tensor_indices_;
 };
 
 /// A container-like struct that acts as if it contains splits of a
@@ -981,6 +995,7 @@ struct TORCH_API SplitUntil32Bit {
   iterator end() const;
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const TensorIteratorBase& iter;
 };
 

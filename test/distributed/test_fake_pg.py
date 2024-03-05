@@ -10,15 +10,15 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing import FileCheck
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed._tensor import DeviceMesh, init_device_mesh
+from torch.distributed._tensor import DeviceMesh, init_device_mesh, Shard
 from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
 )
 from torch.distributed.tensor.parallel import (
-    PairwiseParallel,
-    SequenceParallel,
+    ColwiseParallel,
     parallelize_module,
+    RowwiseParallel,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     MLPModule,
@@ -195,13 +195,20 @@ class TestFakePG(TestCase):
             mesh_dim_names=["dp", "tp"]
         )
 
-        # TODO: update test to use RowwiseParallel and ColwiseParallel instead.
-        for parallel_style in [SequenceParallel(), PairwiseParallel()]:
+        sequence_parallelize_plan = {
+            "net1": ColwiseParallel(input_layouts=Shard(0)),
+            "net2": RowwiseParallel(output_layouts=Shard(0)),
+        }
+        pairwise_parallelize_plan = {
+            "net1": ColwiseParallel(),
+            "net2": RowwiseParallel(),
+        }
+        for parallel_plan in [sequence_parallelize_plan, pairwise_parallelize_plan]:
 
             my_module = parallelize_module(
                 MLPModule(device="cuda"),
                 device_mesh["tp"],
-                parallel_style,
+                parallel_plan,
             )
 
             sharded_module = FSDP(

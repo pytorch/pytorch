@@ -301,6 +301,10 @@ class CUDAHostAllocator {
     }
   }
 
+  void copy_data(void* dest, const void* src, std::size_t count) const {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for CUDAHostAllocator");
+  }
+
  private:
   void process_events() {
     while (true) {
@@ -488,13 +492,17 @@ void CachingHostAllocator_emptyCache() {
 }
 
 struct CUDAHostAllocatorWrapper final : public at::Allocator {
-  at::DataPtr allocate(size_t size) const override {
+  at::DataPtr allocate(size_t size) override {
     auto ptr_and_ctx = getCUDAHostAllocator().allocate(size);
     return {
         ptr_and_ctx.first,
         ptr_and_ctx.second,
         &CUDAHostAllocatorDeleter,
         at::DeviceType::CPU};
+  }
+
+  void copy_data(void* dest, const void* src, std::size_t count) const final {
+    getCUDAHostAllocator().copy_data(dest, src, count);
   }
 };
 

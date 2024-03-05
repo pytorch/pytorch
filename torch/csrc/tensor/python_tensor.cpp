@@ -13,7 +13,7 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/cuda_enabled.h>
-#include <torch/csrc/utils/cuda_lazy_init.h>
+#include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/utils/tensor_types.h>
@@ -25,8 +25,7 @@
 #include <type_traits>
 #include <vector>
 
-namespace torch {
-namespace tensors {
+namespace torch::tensors {
 
 using namespace at;
 using namespace torch::autograd;
@@ -56,7 +55,7 @@ struct PyTensorType {
 };
 
 static_assert(
-    std::is_standard_layout<PyTensorType>::value,
+    std::is_standard_layout_v<PyTensorType>,
     "PyTensorType must be standard layout");
 
 static Backend default_backend = Backend::CPU;
@@ -64,21 +63,17 @@ static Backend default_backend = Backend::CPU;
 static void py_bind_tensor_types(
     const std::vector<PyTensorType*>& tensor_types);
 
-static TypeError unavailable_type(const PyTensorType& type) {
-  return TypeError(
-      "type %s not available. Torch not compiled with CUDA enabled.",
-      type.name);
-}
-
 static PyObject* Tensor_new(
     PyTypeObject* type,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   auto& tensor_type = *((PyTensorType*)type);
-  if (tensor_type.is_cuda && !torch::utils::cuda_enabled()) {
-    throw unavailable_type(tensor_type);
-  }
+  TORCH_CHECK_TYPE(
+      !tensor_type.is_cuda || torch::utils::cuda_enabled(),
+      "type ",
+      tensor_type.name,
+      " not available. Torch not compiled with CUDA enabled.")
   if (tensor_type.is_cuda) {
     TORCH_WARN_ONCE(
         "The torch.cuda.*DtypeTensor constructors are no longer recommended. "
@@ -219,29 +214,15 @@ static void py_initialize_tensor_type(
   }
 }
 
-static const char* get_module(Backend backend) {
-  switch (backend) {
-    case Backend::CPU:
-      return "torch";
-    case Backend::CUDA:
-      return "torch.cuda";
-    case Backend::SparseCPU:
-      return "torch.sparse";
-    case Backend::SparseCUDA:
-      return "torch.cuda.sparse";
-    default:
-      AT_ERROR("invalid backend: ", toString(backend));
-  }
-}
-
 static std::string get_name(Backend backend, ScalarType scalarType) {
   std::ostringstream ss;
-  ss << get_module(backend) << "." << toString(scalarType) << "Tensor";
+  ss << torch::utils::backend_to_string(backend) << "." << toString(scalarType)
+     << "Tensor";
   return ss.str();
 }
 
 static THPObjectPtr get_storage_obj(Backend backend, ScalarType dtype) {
-  auto module_name = get_module(backend);
+  auto module_name = torch::utils::backend_to_string(backend);
   auto module_obj = THPObjectPtr(PyImport_ImportModule(module_name));
   if (!module_obj)
     throw python_error();
@@ -249,9 +230,8 @@ static THPObjectPtr get_storage_obj(Backend backend, ScalarType dtype) {
   auto storage_name = std::string(toString(dtype)) + "Storage";
   THPObjectPtr storage(
       PyObject_GetAttrString(module_obj.get(), storage_name.c_str()));
-  if (!storage.get()) {
-    throw TypeError("couldn't find storage object %s", storage_name.c_str());
-  }
+  TORCH_CHECK_TYPE(
+      storage.get(), "couldn't find storage object ", storage_name);
   return storage;
 }
 
@@ -455,9 +435,11 @@ void py_set_default_tensor_type(PyObject* obj) {
       PyTensorType_Check(obj),
       "invalid type object: only floating-point types are supported as the default type");
   PyTensorType* type = (PyTensorType*)obj;
-  if (type->is_cuda && !torch::utils::cuda_enabled()) {
-    throw unavailable_type(*type);
-  }
+  TORCH_CHECK_TYPE(
+      !type->is_cuda || torch::utils::cuda_enabled(),
+      "type ",
+      type->name,
+      " not available. Torch not compiled with CUDA enabled.")
   set_default_tensor_type(type->get_backend(), type->get_scalar_type());
 }
 
@@ -481,5 +463,4 @@ ScalarType get_default_scalar_type() {
   return get_default_dtype_as_scalartype();
 }
 
-} // namespace tensors
-} // namespace torch
+} // namespace torch::tensors

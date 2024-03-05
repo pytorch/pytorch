@@ -1,5 +1,5 @@
 import tensorboard
-from packaging.version import Version
+from torch._vendor.packaging.version import Version
 
 if not hasattr(tensorboard, "__version__") or Version(
     tensorboard.__version__

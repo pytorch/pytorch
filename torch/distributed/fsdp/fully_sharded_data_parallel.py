@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import contextlib
 import copy
 import functools
@@ -128,6 +130,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     .. _`Xu et al.`: https://arxiv.org/abs/2004.13336
     .. _DeepSpeed: https://www.deepspeed.ai/
 
+    For advanced notes please refer to :ref:`fsdp_notes`.
+
     Example::
 
         >>> # xdoctest: +SKIP("undefined variables")
@@ -242,6 +246,10 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         group being inter-node, setting ``NCCL_CROSS_NIC=1`` can help improve
         the all-reduce times over the replication process group for some
         cluster setups.
+
+    .. warning::
+        FSDP does not work with double backwards due to how it registers
+        backward hooks.
 
     Args:
         module (nn.Module):
@@ -444,7 +452,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # over which sharding occurs, if sharding_strategy is {HYBRID_SHARD, _HYBRID_SHARD_ZERO2}.
         # Note that this is done before auto_wrapping, so that child FSDP modules simply pick up
         # the same process group state as the root FSDP module.
-        self.device_mesh = device_mesh
+        self._device_mesh = device_mesh
         _init_process_group_state(
             self,
             process_group,
@@ -466,8 +474,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 "limit_all_gathers": limit_all_gathers,
                 "use_orig_params": use_orig_params,
                 "ignored_states": self._ignored_params,
+                "device_mesh": device_mesh,
             }
-            if sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+            if sharding_strategy in HYBRID_SHARDING_STRATEGIES and device_mesh is None:
                 # Share root process groups with children to maintain
                 # the invariant that all FSDP modules will have the same
                 # process groups.
@@ -1165,7 +1174,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # `if clip_coef < 1`
         clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
         for grad in grads:
-            grad.detach().mul_(clip_coef_clamped.to(grad.device, grad.dtype))
+            grad.mul_(clip_coef_clamped.to(grad.device, grad.dtype))
         # Use the "largest" dtype by type promotion semantics to use the same
         # dtype as if we did not force local norm computation to be in FP32
         if len(grads) == 0:
@@ -1803,7 +1812,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             >>> )
             >>> model.load_state_dict(state_dict)
             >>> optim_state_dict = FSDP.optim_state_dict_to_load(
-            >>>     optim_state_dict, model, optim
+            >>>     model, optim, optim_state_dict
             >>> )
             >>> optim.load_state_dict(optim_state_dict)
 

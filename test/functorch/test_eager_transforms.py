@@ -9,7 +9,8 @@
 import copy
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests,
-    IS_FBCODE, freeze_rng_state, skipIfTorchDynamo, IS_WINDOWS, IS_MACOS, IS_ARM64
+    IS_FBCODE, freeze_rng_state, skipIfTorchDynamo, IS_WINDOWS, IS_MACOS, IS_ARM64,
+    markDynamoStrictTest
 )
 import torch
 import torch.nn as nn
@@ -24,6 +25,7 @@ from functools import wraps
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU, dtypes, onlyCUDA
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
 from torch.testing._internal.common_cuda import with_tf32_off, SM70OrLater, TEST_CUDA
+from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing import make_tensor
 from torch._dynamo import allow_in_graph
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -66,6 +68,7 @@ except ImportError:
 # TestCase for _slice_argnums, an important helper function
 
 
+@markDynamoStrictTest
 class TestSliceArgnums(TestCase):
     def test_invalid_argnum_type(self):
         x = torch.randn(3)
@@ -179,6 +182,7 @@ def _get_weights_and_functional_call_with_buffers(net, mechanism):
         return net_func, dict(net.named_parameters()), dict(net.named_buffers())
 
 
+@markDynamoStrictTest
 class TestGradTransform(TestCase):
     def test_primitive(self, device):
         x = torch.randn([], device=device)
@@ -1015,6 +1019,7 @@ class TestGradTransform(TestCase):
         self.assertEqual(z, 2)
 
 
+@markDynamoStrictTest
 class TestAutogradFunction(TestCase):
     def test_set_materialize_grads(self, device):
         class A(torch.autograd.Function):
@@ -1190,7 +1195,7 @@ class TestAutogradFunction(TestCase):
         grad_y = torch.randn_like(x)
 
         def h(x, grad_y):
-            _, vjp_fn = vjp(f, x)
+            _, vjp_fn = vjp(f, x)  # noqa: F821
             gx, = vjp_fn(grad_y)
             return gx
 
@@ -1222,12 +1227,13 @@ class TestAutogradFunction(TestCase):
         self.assertEqual(names, ['FooBarGeneratedBackward'])
 
 
+@markDynamoStrictTest
 class TestAutogradFunctionVmapAPI(TestCase):
     def test_no_vmap_staticmethod_and_no_generate_vmap_rule(self, device):
         class NumpyCube(torch.autograd.Function):
             @staticmethod
             def forward(input):
-                input_np = to_numpy(input)
+                input_np = to_numpy(input)  # noqa: F821
                 dinput = torch.tensor(3 * input_np ** 2, device=input.device)
                 return torch.tensor(input_np ** 3, device=input.device), dinput
 
@@ -1249,7 +1255,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
 
             @staticmethod
             def forward(input):
-                input_np = to_numpy(input)
+                input_np = to_numpy(input)  # noqa: F821
                 dinput = torch.tensor(3 * input_np ** 2, device=input.device)
                 return torch.tensor(input_np ** 3, device=input.device), dinput
 
@@ -1498,6 +1504,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
             result = vmap(Zeros.apply)(x)
 
 
+@markDynamoStrictTest
 class TestVmapOfGrad(TestCase):
     def test_per_sample_grads_inplace_view(self, device):
         def compute_loss(weight, x, t):
@@ -1635,7 +1642,7 @@ jacrev_and_jacfwd = parametrize("jacapi", [subtest(jacrev, name='jacrev'), subte
 
 FIXME_jacrev_only = parametrize("jacapi", [subtest(jacrev, name='jacrev')])
 
-
+@markDynamoStrictTest
 class TestJac(TestCase):
     @jacrev_and_jacfwd
     def test_simple(self, device, jacapi):
@@ -1663,7 +1670,7 @@ class TestJac(TestCase):
 
         self.assertEqual(jacrev(func)(x), torch.autograd.functional.jacobian(func, x))
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_diff_numel(self, device, jacapi):
         x = torch.randn(2, 4, device=device)
 
@@ -1680,14 +1687,14 @@ class TestJac(TestCase):
         expected[2, 0, 0, 3] = 1
         self.assertEqual(y, expected)
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_vmap_on_jac_simple(self, device, jacapi):
         x = torch.randn(2, 3, device=device)
         y = vmap(jacapi(torch.sin))(x)
         expected = torch.stack([torch.diagflat(x[i].cos()) for i in range(2)])
         assert torch.allclose(y, expected)
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_nested_jac_simple(self, device, jacapi):
         def foo(x):
             return x.sin().sum()
@@ -1748,7 +1755,7 @@ class TestJac(TestCase):
         self.assertTrue(isinstance(z[0], tuple))
         self.assertEqual(z, ((expected_out0_x,), (expected_out1_x,)))
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_multiple_outputs_pytree(self, device, jacapi):
         def f(x, y):
             return {'left': 2 * x + 3 * y, 'right': 4 * x + 5 * y}
@@ -1809,7 +1816,7 @@ class TestJac(TestCase):
         self.assertEqual(result.dim(), 2)
         self.assertEqual(result, x.new_ones(1, 1))
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_aux_tensor(self, device, jacapi):
         def f(x):
             y = x.clone()
@@ -1905,7 +1912,7 @@ class TestJac(TestCase):
         )
         self.assertEqual(result, expected)
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_multiple_inputs_outputs_pytree_multidim(self, device, jacapi):
         def f(dct):
             a = dct['a']
@@ -2260,6 +2267,7 @@ class TestJac(TestCase):
         expected = torch.autograd.functional.jacobian(partial(f, int_x=3), t)
         self.assertEqual(actual, expected)
 
+@markDynamoStrictTest
 class TestHessian(TestCase):
     def _test_against_reference(self, f, inputs):
         def foo(inputs):
@@ -2323,6 +2331,7 @@ class TestHessian(TestCase):
         self.assertEqual(hess2, hess1)
 
 
+@markDynamoStrictTest
 class TestJvp(TestCase):
     def test_inplace_on_captures(self, device):
         x = torch.tensor([1., 2., 3.], device=device)
@@ -2646,6 +2655,7 @@ class TestJvp(TestCase):
         # Should not error
         vmap(vmap(push_jvp, (0, None)))(dummy, x)
 
+@markDynamoStrictTest
 class TestLinearize(TestCase):
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     @dtypes(torch.float)
@@ -2749,6 +2759,7 @@ class TestLinearize(TestCase):
 
 # The tests here follow the cases in [Forward Grad View/inplace]
 # https://github.com/pytorch/pytorch/blob/master/torch/csrc/autograd/autograd_meta.cpp#L18-L43
+@markDynamoStrictTest
 class TestVmapJvpInplaceView(TestCase):
     # Case 1 in [Forward Grad View/inplace]
     def test_all_dual_no_view(self, device):
@@ -2904,6 +2915,7 @@ class TestVmapJvpInplaceView(TestCase):
 
 
 # Use for testing miscellaneous helper functions
+@markDynamoStrictTest
 class TestHelpers(TestCase):
     def test_CtxWithSavedTensors_error_if_name_collision(self, device):
         x = torch.randn([], device=device, requires_grad=True)
@@ -3060,6 +3072,7 @@ class TestHelpers(TestCase):
         self.assertEqual(output, grad_input.movedim(-1, 2).sum(0).sum(0))
 
 
+@markDynamoStrictTest
 class TestComposability(TestCase):
     def test_deprecation_vmap(self, device):
         x = torch.randn(3, device=device)
@@ -3073,6 +3086,8 @@ class TestComposability(TestCase):
             warnings.simplefilter("error")
             torch.vmap(torch.sin)
 
+    # Some of these pass, some of these don't
+    @skipIfTorchDynamo()
     @parametrize('transform', [
         'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
     ])
@@ -3311,6 +3326,8 @@ class TestComposability(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'must override the setup_context'):
             transform(MySin.apply)(x)
 
+    # Some of these pass, some of these don't
+    @skipIfTorchDynamo()
     @parametrize('transform', [
         'vmap', 'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
     ])
@@ -3413,6 +3430,7 @@ class TestComposability(TestCase):
             self.assertTrue(local_exclude_set.has(DispatchKey.Autograd))
 
 
+@markDynamoStrictTest
 class TestMakeFunctional(TestCase):
     @parametrize('disable_autograd_tracking', [True, False])
     def test_disable_autograd_tracking(self, disable_autograd_tracking):
@@ -3750,6 +3768,7 @@ class TestMakeFunctional(TestCase):
         self.assertEqual(old_state_linear_weight, new_state_linear_weight)
         self.assertEqual(old_state_linear_bias, new_state_linear_bias)
 
+@markDynamoStrictTest
 class TestExamplesCorrectness(TestCase):
     def _update_params(self, params, grads, alpha, mechanism):
         if mechanism == "make_functional":
@@ -4236,6 +4255,7 @@ def normalize_devices(fx_g):
     fx_g.recompile()
     return fx_g
 
+@markDynamoStrictTest
 class TestFunctionalize(TestCase):
     def _check_functionalize_correctness(self, f, inpt, *, skip_vmap=False):
         inpt1 = inpt.clone()
@@ -4649,6 +4669,7 @@ def construct_sum_pyop():
 
 sum_pyop = construct_sum_pyop()
 
+@markDynamoStrictTest
 class TestHigherOrderOperatorInteraction(TestCase):
 
     def test_basic_sum(self, device):
@@ -4734,10 +4755,15 @@ def traceable(f):
     return wrapper
 
 
+@markDynamoStrictTest
 class TestCompileTransforms(TestCase):
+    @skipIfRocm(msg="test leaks memory on ROCm")
     # torch.compile is not supported on Windows
     # Triton only supports GPU with SM70 or later.
-    @expectedFailureIf((IS_ARM64 and not IS_MACOS) or IS_WINDOWS or (TEST_CUDA and not SM70OrLater))
+    @expectedFailureIf((IS_ARM64 and not IS_MACOS) or
+                       IS_WINDOWS or
+                       (TEST_CUDA and not SM70OrLater) or
+                       (sys.version_info >= (3, 12)))
     def test_compile_vmap_hessian(self, device):
         # The model and inputs are a smaller version
         # of code at benchmark repo:
@@ -4766,8 +4792,8 @@ class TestCompileTransforms(TestCase):
         actual = opt_fn(params_and_buffers, x)
         self.assertEqual(actual, expected)
 
-    # torch.compile is not supported on Windows
-    @expectedFailureIf(IS_WINDOWS)
+    # torch.compile is not supported on Windows or on Python 3.12+
+    @expectedFailureIf(IS_WINDOWS or (sys.version_info >= (3, 12)))
     @torch._dynamo.config.patch(suppress_errors=False)
     @torch._dynamo.config.patch(capture_func_transforms=True)
     @skipIfTorchDynamo("Do not test torch.compile on top of torch.compile")
@@ -4780,6 +4806,7 @@ class TestCompileTransforms(TestCase):
 
         actual = wrapper_fn(x, y)
         expected = torch.compile(wrapper_fn, backend='eager', fullgraph=True)(x, y)
+        fn = torch.compile(wrapper_fn, backend='eager', fullgraph=True)
         self.assertEqual(actual, expected)
 
         def wrapper_fn(x, y):

@@ -14,6 +14,7 @@ from torch.distributed._tensor import (
     Replicate,
     Shard,
 )
+from torch.testing._internal.common_utils import run_tests
 
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -37,14 +38,14 @@ def shard_fn(name, module, device_mesh):
 
 
 # prepare input
-def input_fn(inputs, device_mesh):
+def input_fn(mod, inputs, device_mesh):
     # split the input tensor to be sharded input
     dist_inp = distribute_tensor(inputs[0], device_mesh, [Shard(0)])
     return dist_inp
 
 
 # prepare output to be local torch.Tensor
-def output_fn(outputs, device_mesh):
+def output_fn(mod, outputs, device_mesh):
     assert isinstance(outputs, DTensor)
     return outputs.redistribute(placements=[Replicate()] * device_mesh.ndim).to_local()
 
@@ -307,3 +308,165 @@ class TestDTensorOptimizer(DTensorTestBase):
             # on different ranks
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
+
+    @with_comms
+    def test_adadelta_1d_sharding(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        adadelta_configs = [
+            {"lr": 0.1},
+            {"lr": 0.1, "rho": 0.85},
+            {"lr": 0.1, "rho": 0.88, "eps": 1e-5},
+            {"lr": 0.1, "rho": 0.88, "eps": 1e-6, "weight_decay": 0.05},
+            {
+                "lr": 0.1,
+                "rho": 0.88,
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "foreach": True,
+            },
+            {
+                "lr": 0.1,
+                "rho": 0.88,
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "foreach": True,
+                "maximize": True,
+            },
+        ]
+
+        for config in adadelta_configs:
+            mod = MLPModule(self.device_type)
+            opt = torch.optim.Adadelta(mod.parameters(), **config)
+
+            dist_mod = distribute_module(
+                deepcopy(mod), mesh, shard_fn, input_fn, output_fn
+            )
+            dist_opt = torch.optim.Adadelta(dist_mod.parameters(), **config)
+
+            # use ones to make sure the single machine model have the same input
+            # on different ranks
+            inp = torch.ones(8, 10, device=self.device_type)
+            self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
+
+    @with_comms
+    def test_nadam_1d_sharding(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        nadam_configs = [
+            {"lr": 0.1},
+            {"lr": 0.1, "weight_decay": 0.05},
+            {"lr": 0.1, "weight_decay": 0.05, "foreach": True},
+            {
+                "lr": 0.1,
+                "betas": (0.6, 0.66),
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "foreach": True,
+            },
+            {
+                "lr": 0.1,
+                "betas": (0.6, 0.66),
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "decoupled_weight_decay": True,
+                "foreach": True,
+            },
+        ]
+
+        for config in nadam_configs:
+            mod = MLPModule(self.device_type)
+            opt = torch.optim.NAdam(mod.parameters(), **config)
+
+            dist_mod = distribute_module(
+                deepcopy(mod), mesh, shard_fn, input_fn, output_fn
+            )
+            dist_opt = torch.optim.NAdam(dist_mod.parameters(), **config)
+
+            # use ones to make sure the single machine model have the same input
+            # on different ranks
+            inp = torch.ones(8, 10, device=self.device_type)
+            self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
+
+    @with_comms
+    def test_radam_1d_sharding(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        radam_configs = [
+            {"lr": 0.1},
+            {"lr": 0.1, "weight_decay": 0.05},
+            {"lr": 0.1, "weight_decay": 0.05, "foreach": True},
+            {
+                "lr": 0.1,
+                "betas": (0.6, 0.66),
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "foreach": True,
+            },
+            {
+                "lr": 0.1,
+                "betas": (0.6, 0.66),
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "decoupled_weight_decay": True,
+                "foreach": True,
+            },
+        ]
+
+        for config in radam_configs:
+            mod = MLPModule(self.device_type)
+            opt = torch.optim.RAdam(mod.parameters(), **config)
+
+            dist_mod = distribute_module(
+                deepcopy(mod), mesh, shard_fn, input_fn, output_fn
+            )
+            dist_opt = torch.optim.RAdam(dist_mod.parameters(), **config)
+
+            # use ones to make sure the single machine model have the same input
+            # on different ranks
+            inp = torch.ones(8, 10, device=self.device_type)
+            self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
+
+    @with_comms
+    def test_adamax_1d_sharding(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        adamax_configs = [
+            {"lr": 0.1},
+            {"lr": 0.1, "betas": (0.6, 0.66)},
+            {"lr": 0.1, "betas": (0.6, 0.66), "eps": 1e-6},
+            {"lr": 0.1, "betas": (0.6, 0.66), "eps": 1e-6, "weight_decay": 0.05},
+            {
+                "lr": 0.1,
+                "betas": (0.6, 0.66),
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "foreach": True,
+            },
+            {
+                "lr": 0.1,
+                "betas": (0.6, 0.66),
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "foreach": True,
+                "maximize": True,
+            },
+        ]
+
+        for config in adamax_configs:
+            mod = MLPModule(self.device_type)
+            opt = torch.optim.Adamax(mod.parameters(), **config)
+
+            dist_mod = distribute_module(
+                deepcopy(mod), mesh, shard_fn, input_fn, output_fn
+            )
+            dist_opt = torch.optim.Adamax(dist_mod.parameters(), **config)
+
+            # use ones to make sure the single machine model have the same input
+            # on different ranks
+            inp = torch.ones(8, 10, device=self.device_type)
+            self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
+
+
+if __name__ == "__main__":
+    run_tests()

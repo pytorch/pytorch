@@ -32,6 +32,7 @@ enum class MacOSVersion : uint32_t {
   MACOS_VER_13_1_PLUS,
   MACOS_VER_13_2_PLUS,
   MACOS_VER_13_3_PLUS,
+  MACOS_VER_14_0_PLUS,
 };
 
 //-----------------------------------------------------------------

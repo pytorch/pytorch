@@ -77,6 +77,15 @@ jobs:
         with:
           docker-image-name: ${{ inputs.docker-image }}
 
+      - name: Use following to pull public copy of the image
+        id: print-ghcr-mirror
+        env:
+          ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        shell: bash
+        run: |
+          tag=${ECR_DOCKER_IMAGE##*/}
+          echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
+
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
@@ -107,6 +116,10 @@ jobs:
         uses: ./.github/actions/download-build-artifacts
         with:
           name: ${{ inputs.build-environment }}
+
+      - name: Download TD artifacts
+        continue-on-error: true
+        uses: ./.github/actions/download-td-artifacts
 
       - name: Parse ref
         id: parse-ref
@@ -155,13 +168,14 @@ jobs:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
-          PYTORCH_RETRY_TEST_CASES: 1
-          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
           REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
+          VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
+          NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
+          NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           SHM_SIZE: ${{ contains(inputs.build-environment, 'cuda') && '2g' || '1g' }}
@@ -200,6 +214,7 @@ jobs:
             -e GITHUB_RUN_NUMBER \
             -e GITHUB_RUN_ATTEMPT \
             -e JOB_ID \
+            -e JOB_NAME \
             -e BASE_SHA \
             -e BRANCH \
             -e SHA1 \
@@ -210,8 +225,9 @@ jobs:
             -e NUM_TEST_SHARDS \
             -e REENABLED_ISSUES \
             -e CONTINUE_THROUGH_ERROR \
-            -e PYTORCH_RETRY_TEST_CASES \
-            -e PYTORCH_OVERRIDE_FLAKY_SIGNAL \
+            -e VERBOSE_TEST_LOGS \
+            -e NO_TEST_TIMEOUT \
+            -e NO_TD \
             -e PR_LABELS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \

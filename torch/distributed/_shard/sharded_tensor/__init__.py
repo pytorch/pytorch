@@ -1,9 +1,12 @@
-
 import functools
-from typing import List
+from typing import List, TYPE_CHECKING
 
 import torch
-import torch.distributed._shard.sharding_spec as shard_spec
+
+if TYPE_CHECKING:
+    from torch.distributed._shard.sharding_spec import ShardingSpec
+else:
+    ShardingSpec = "ShardingSpec"
 
 from .api import (
     _CUSTOM_SHARDED_OPS,
@@ -18,7 +21,7 @@ from .metadata import ShardMetadata  # noqa: F401
 from torch.distributed._shard.op_registry_utils import _decorator_func
 
 
-def empty(sharding_spec: shard_spec.ShardingSpec,
+def empty(sharding_spec: ShardingSpec,
           *size,
           dtype=None,
           layout=torch.strided,
@@ -39,7 +42,7 @@ def empty(sharding_spec: shard_spec.ShardingSpec,
 
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-            Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
+            Default: if ``None``, uses a global default (see :func:`torch.set_default_dtype`).
         layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
             Default: ``torch.strided``.
         requires_grad (bool, optional): If autograd should record operations on the
@@ -70,7 +73,7 @@ def empty(sharding_spec: shard_spec.ShardingSpec,
         init_rrefs=init_rrefs,
     )
 
-def ones(sharding_spec: shard_spec.ShardingSpec,
+def ones(sharding_spec: ShardingSpec,
          *size,
          dtype=None,
          layout=torch.strided,
@@ -91,7 +94,7 @@ def ones(sharding_spec: shard_spec.ShardingSpec,
 
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-            Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
+            Default: if ``None``, uses a global default (see :func:`torch.set_default_dtype`).
         layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
             Default: ``torch.strided``.
         requires_grad (bool, optional): If autograd should record operations on the
@@ -121,7 +124,7 @@ def ones(sharding_spec: shard_spec.ShardingSpec,
         init_rrefs=init_rrefs
     )
 
-def zeros(sharding_spec: shard_spec.ShardingSpec,
+def zeros(sharding_spec: ShardingSpec,
           *size,
           dtype=None,
           layout=torch.strided,
@@ -142,7 +145,7 @@ def zeros(sharding_spec: shard_spec.ShardingSpec,
 
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-            Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
+            Default: if ``None``, uses a global default (see :func:`torch.set_default_dtype`).
         layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
             Default: ``torch.strided``.
         requires_grad (bool, optional): If autograd should record operations on the
@@ -172,7 +175,7 @@ def zeros(sharding_spec: shard_spec.ShardingSpec,
         init_rrefs=init_rrefs
     )
 
-def full(sharding_spec: shard_spec.ShardingSpec,
+def full(sharding_spec: ShardingSpec,
          size,
          fill_value,
          *,
@@ -195,7 +198,7 @@ def full(sharding_spec: shard_spec.ShardingSpec,
         fill_value (Scalar) – the value to fill the output tensor with.
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-            Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
+            Default: if ``None``, uses a global default (see :func:`torch.set_default_dtype`).
         layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
             Default: ``torch.strided``.
         requires_grad (bool, optional): If autograd should record operations on the
@@ -225,7 +228,7 @@ def full(sharding_spec: shard_spec.ShardingSpec,
     torch.nn.init.constant_(sharded_tensor, fill_value)  # type: ignore[arg-type]
     return sharded_tensor
 
-def rand(sharding_spec: shard_spec.ShardingSpec,
+def rand(sharding_spec: ShardingSpec,
          *size,
          dtype=None,
          layout=torch.strided,
@@ -247,7 +250,7 @@ def rand(sharding_spec: shard_spec.ShardingSpec,
 
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-            Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
+            Default: if ``None``, uses a global default (see :func:`torch.set_default_dtype`).
         layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
             Default: ``torch.strided``.
         requires_grad (bool, optional): If autograd should record operations on the
@@ -278,7 +281,7 @@ def rand(sharding_spec: shard_spec.ShardingSpec,
     torch.nn.init.uniform_(sharded_tensor, 0, 1)  # type: ignore[arg-type]
     return sharded_tensor
 
-def randn(sharding_spec: shard_spec.ShardingSpec,
+def randn(sharding_spec: ShardingSpec,
           *size,
           dtype=None,
           layout=torch.strided,
@@ -301,7 +304,7 @@ def randn(sharding_spec: shard_spec.ShardingSpec,
 
     Keyword args:
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-            Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
+            Default: if ``None``, uses a global default (see :func:`torch.set_default_dtype`).
         layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
             Default: ``torch.strided``.
         requires_grad (bool, optional): If autograd should record operations on the

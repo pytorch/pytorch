@@ -66,6 +66,9 @@ class EventTracerProfileInstructionScope final {
   EventTracer* event_tracer_;
 };
 
+void event_tracer_log_evalue(EventTracer* event_tracer, EValue& evalue) {
+  (void)evalue;
+}
 
 } // namespace internal
 } // namespace executor

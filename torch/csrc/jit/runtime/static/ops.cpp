@@ -264,7 +264,7 @@ static Tensor& linear_out(
 
   auto bias = bias_opt.has_value()
       ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
-      : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+      : c10::MaybeOwned<Tensor>::owned(std::in_place);
 
   if (input.dim() == 2 && bias->defined()) {
     // Fused op is marginally faster.
@@ -2075,7 +2075,7 @@ namespace {
 c10::MaybeOwned<at::Tensor> borrow_from_optional_tensor_ivalue(
     const IValue& iv) {
   if (iv.isNone()) {
-    return c10::MaybeOwned<at::Tensor>::owned(c10::in_place);
+    return c10::MaybeOwned<at::Tensor>::owned(std::in_place);
   }
   return c10::MaybeOwned<at::Tensor>::borrowed(iv.toTensor());
 }

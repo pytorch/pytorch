@@ -3,13 +3,21 @@
 import copy
 import sys
 from itertools import chain
-from typing import Callable
+from typing import Callable, Tuple, Type, Union
 
 import torch
 import torch.distributed as dist
+import torch.nn as nn
 from torch.distributed._composable import fully_shard, replicate
+
+# importing fully_shard as FSDP2 since the original fully_shard is used in this test.
+# TODO: remove old composable fully_shard so that we don't have to import new fully_shard as FSDP2
+from torch.distributed._composable.fsdp import fully_shard as FSDP2
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor, init_device_mesh
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    apply_activation_checkpointing,
+)
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
@@ -23,6 +31,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.optim import Optimizer
 from torch.testing._internal.common_dist_composable import (
     CompositeParamModel,
     UnitModule,
@@ -133,7 +142,13 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self._verify_osd(model, optim, osd, dist_osd)
 
     def _test_fsdp(
-        self, use_orig_params: bool, use_composable: bool, use_dtensor: bool
+        self,
+        *,
+        use_orig_params: bool,
+        use_composable: bool,
+        use_dtensor: bool,
+        wrapping: Tuple[nn.Module] = (),
+        compile_model: bool = False,
     ) -> None:
         if not use_orig_params and use_composable:
             return
@@ -149,27 +164,58 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             orig_model = CompositeParamModel(device=torch.device("cuda"))
             orig_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-3)
             copy_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-3)
+            if wrapping:
+                strategy = set(wrapping)
+            else:
+                strategy = {UnitModule}
             if use_composable:
                 dist_model = fully_shard(
-                    copy.deepcopy(orig_model), policy=ModuleWrapPolicy({UnitModule})
+                    copy.deepcopy(orig_model), policy=ModuleWrapPolicy(strategy)
                 )
             else:
                 if use_dtensor:
                     device_mesh = init_device_mesh("cuda", (self.world_size,))
                     dist_model = FSDP(
                         copy.deepcopy(orig_model),
-                        auto_wrap_policy=ModuleWrapPolicy({UnitModule}),
+                        auto_wrap_policy=ModuleWrapPolicy(strategy),
                         use_orig_params=use_orig_params,
                         device_mesh=device_mesh,
                     )
                 else:
                     dist_model = FSDP(
                         copy.deepcopy(orig_model),
-                        auto_wrap_policy=ModuleWrapPolicy({UnitModule}),
+                        auto_wrap_policy=ModuleWrapPolicy(strategy),
                         use_orig_params=use_orig_params,
                     )
 
+            if compile_model:
+                dist_model = torch.compile(dist_model)
             dist_optim = torch.optim.Adam(dist_model.parameters(), lr=1e-3)
+            return orig_model, orig_optim, copy_optim, dist_model, dist_optim
+
+        self._test_save_load(init_model_optim)
+
+    def _test_fsdp2(
+        self,
+        *,
+        reshard_after_forward: Union[bool, int],
+        optimizer_class: Type[Optimizer],
+        compile_model: bool,
+    ):
+        def init_model_optim():
+            orig_model = CompositeParamModel(device=torch.device("cuda"))
+            orig_optim = optimizer_class(orig_model.parameters(), lr=1e-3)
+            copy_optim = optimizer_class(orig_model.parameters(), lr=1e-3)
+
+            dist_model = FSDP2(
+                copy.deepcopy(orig_model),
+                reshard_after_forward=reshard_after_forward,
+            )
+
+            if compile_model:
+                dist_model = torch.compile(dist_model)
+            dist_optim = optimizer_class(dist_model.parameters(), lr=1e-3)
+
             return orig_model, orig_optim, copy_optim, dist_model, dist_optim
 
         self._test_save_load(init_model_optim)
@@ -182,8 +228,33 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 "use_orig_params": [True, False],
                 "use_composable": [True, False],
                 "use_dtensor": [True, False],
+                "wrapping": [tuple(), (nn.Linear, UnitModule)],
             },
             self._test_fsdp,
+        )
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_compiled_fsdp(self) -> None:
+        self._test_fsdp(
+            use_orig_params=True,
+            use_composable=False,
+            use_dtensor=False,
+            wrapping=tuple(),
+            compile_model=True,
+        )
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp2(self) -> None:
+        self.run_subtests(
+            {
+                "reshard_after_forward": [True, False],
+                # TODO: Add torch.optim.AdamW to unit test.
+                "optimizer_class": [torch.optim.Adam],
+                "compile_model": [True, False],
+            },
+            self._test_fsdp2,
         )
 
     def _test_ddp(self, use_composable: bool) -> None:
@@ -431,6 +502,19 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         else:
             self.assertEqual(mst, {})
             self.assertEqual(ost, {})
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_activation_ckpt_fqns(self) -> None:
+        """Tests that activation checkpointing prefixes are removed from module names"""
+        model = CompositeParamModel(device=torch.device("cuda"))
+        original_keys = get_model_state_dict(model).keys()
+
+        apply_activation_checkpointing(model)
+        model = DDP(model)
+        new_keys = get_model_state_dict(model).keys()
+
+        self.assertEqual(original_keys, new_keys)
 
 
 if __name__ == "__main__":

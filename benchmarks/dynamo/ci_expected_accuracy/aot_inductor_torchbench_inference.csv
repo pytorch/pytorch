@@ -2,6 +2,10 @@ name,accuracy,graph_breaks
 
 
 
+torchrec_dlrm,eager_fail_to_run,0
+
+
+
 BERT_pytorch,fail_to_run,0
 
 
@@ -46,7 +50,51 @@ dcgan,pass,0
 
 
 
+demucs,pass,0
+
+
+
 densenet121,pass,0
+
+
+
+detectron2_fasterrcnn_r_101_c4,eager_fail_to_run,0
+
+
+
+detectron2_fasterrcnn_r_101_dc5,eager_fail_to_run,0
+
+
+
+detectron2_fasterrcnn_r_101_fpn,eager_fail_to_run,0
+
+
+
+detectron2_fasterrcnn_r_50_c4,eager_fail_to_run,0
+
+
+
+detectron2_fasterrcnn_r_50_dc5,eager_fail_to_run,0
+
+
+
+detectron2_fasterrcnn_r_50_fpn,eager_fail_to_run,0
+
+
+
+detectron2_maskrcnn_r_101_c4,eager_fail_to_run,0
+
+
+
+detectron2_maskrcnn_r_101_fpn,eager_fail_to_run,0
+
+
+
+detectron2_maskrcnn_r_50_c4,eager_fail_to_run,0
+
+
+
+detectron2_maskrcnn_r_50_fpn,eager_fail_to_run,0
 
 
 
@@ -82,6 +130,14 @@ hf_Bart,pass,0
 
 
 
+hf_Bert,pass,0
+
+
+
+hf_Bert_large,pass,0
+
+
+
 hf_BigBird,fail_accuracy,0
 
 
@@ -102,6 +158,10 @@ hf_T5,pass,0
 
 
 
+hf_T5_base,eager_fail_to_run,0
+
+
+
 hf_T5_large,pass_due_to_skip,0
 
 
@@ -110,11 +170,27 @@ hf_Whisper,pass,0
 
 
 
+hf_distil_whisper,pass,0
+
+
+
 lennard_jones,pass,0
 
 
 
 llama,fail_to_run,0
+
+
+
+llama_v2_7b_16h,model_fail_to_load,0
+
+
+
+llava,model_fail_to_load,0
+
+
+
+maml,pass_due_to_skip,0
 
 
 
@@ -130,11 +206,19 @@ mobilenet_v2,pass,0
 
 
 
+mobilenet_v2_quantized_qat,model_fail_to_load,0
+
+
+
 mobilenet_v3_large,pass,0
 
 
 
 moco,fail_to_run,0
+
+
+
+moondream,model_fail_to_load,0
 
 
 
@@ -155,10 +239,6 @@ phlippe_resnet,pass,0
 
 
 pyhpc_equation_of_state,pass,0
-
-
-
-pyhpc_isoneutral_mixing,fail_to_run,0
 
 
 
@@ -187,6 +267,10 @@ resnet18,pass,0
 
 
 resnet50,pass,0
+
+
+
+resnet50_quantized_qat,model_fail_to_load,0
 
 
 
@@ -239,6 +323,10 @@ timm_vision_transformer_large,pass_due_to_skip,0
 
 
 timm_vovnet,pass,0
+
+
+
+torch_multimodal_clip,pass,0
 
 
 

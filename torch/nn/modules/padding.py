@@ -411,6 +411,7 @@ class ReflectionPad2d(_ReflectionPadNd):
         padding (int, tuple): the size of the padding. If is `int`, uses the same
             padding in all boundaries. If a 4-`tuple`, uses (:math:`\text{padding\_left}`,
             :math:`\text{padding\_right}`, :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`)
+            Note that padding size should be less than the corresponding input dimension.
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.

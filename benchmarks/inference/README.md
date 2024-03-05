@@ -14,7 +14,7 @@ The frontend worker is a process with three threads
 2. A thread that reads responses from the response queue and collects metrics on
    the latency of the first response, which corresponds to the cold start time,
    average, minimum and maximum response latency as well as throughput.
-3. A thread that polls nvidia-smi for GPU utilization metrics every 100ms.
+3. A thread that polls nvidia-smi for GPU utilization metrics.
 
 For now we omit data preprocessing as well as result post-processing.
 
@@ -28,6 +28,7 @@ The togglable commmand line arguments to the script are as follows:
   - `compile` (default: compile): or `--no-compile` whether to `torch.compile()`
     the model
   - `output_file` (default: output.csv): The name of the csv file to write the outputs to in the `results/` directory.
+  - `num_workers` (default: 2): The `max_threads` passed to the `ThreadPoolExecutor` in charge of model prediction
 
 e.g. A sample command to run the benchmark
 
@@ -47,5 +48,5 @@ The script `runner.sh` will run a sweep of the benchmark over different batch
 sizes with compile on and off and collect the mean and standard deviation of warmup latency,
 average latency, throughput and GPU utilization for each. The `results/` directory will contain the metrics
 from running a sweep as we develop this benchmark where `results/output_{batch_size}_{compile}.md`
-will contain the mean and standard deviation of results for a given batch size and compile setting,
-if the file already exists, the metrics form the run will be appended as a new row in the markdown table.
+will contain the mean and standard deviation of results for a given batch size and compile setting.
+If the file already exists, the metrics from the run will be appended as a new row in the markdown table.

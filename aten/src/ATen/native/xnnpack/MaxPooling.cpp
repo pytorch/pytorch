@@ -214,14 +214,23 @@ Tensor max_pool2d(
       xnn_status_success == create_status,
       "xnn_create_max_pooling2d_nhwc_f32 failed!");
 
-  const xnn_status setup_status = xnn_setup_max_pooling2d_nhwc_f32(
+  const xnn_status reshape_status = xnn_reshape_max_pooling2d_nhwc_f32(
       max_pool_op,                                                  // operator
       input_padded_contig_nhwc.size(Layout::Activation4D::batch),   // batch_size
       input_padded_contig_nhwc.size(Layout::Activation4D::height),  // input_height
       input_padded_contig_nhwc.size(Layout::Activation4D::width),   // input_width
-      input_padded_contig_nhwc.data_ptr<float>(),                   // input
-      output_padded_contig_nhwc.data_ptr<float>(),                  // output
+      nullptr,                                                      // output_height_out
+      nullptr,                                                      // output_width_out
       caffe2::pthreadpool_());                                      // threadpool
+
+  TORCH_CHECK(
+    xnn_status_success == reshape_status,
+    "xnn_reshape_max_pooling2d_nhwc_f32 failed!");
+
+  const xnn_status setup_status = xnn_setup_max_pooling2d_nhwc_f32(
+      max_pool_op,                                                  // operator
+      input_padded_contig_nhwc.data_ptr<float>(),                   // input
+      output_padded_contig_nhwc.data_ptr<float>());                 // output
 
   TORCH_CHECK(
       xnn_status_success == setup_status,

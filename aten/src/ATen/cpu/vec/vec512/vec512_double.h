@@ -83,27 +83,15 @@ public:
     if (count == size())
       return _mm512_loadu_pd(reinterpret_cast<const double*>(ptr));
 
-
-    __at_align__ double tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
-    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
-    // instructions while a loop would be compiled to one instruction.
-    for (const auto i : c10::irange(size())) {
-      tmp_values[i] = 0.0;
-    }
-    std::memcpy(
-        tmp_values,
-        reinterpret_cast<const double*>(ptr),
-        count * sizeof(double));
-    return _mm512_load_pd(tmp_values);
+    __mmask8 mask = (1ULL << count) - 1;
+    return _mm512_maskz_loadu_pd(mask, ptr);
   }
   void store(void* ptr, int count = size()) const {
     if (count == size()) {
       _mm512_storeu_pd(reinterpret_cast<double*>(ptr), values);
     } else if (count > 0) {
-      double tmp_values[size()];
-      _mm512_storeu_pd(reinterpret_cast<double*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(double));
+      __mmask8 mask = (1ULL << count) - 1;
+      _mm512_mask_storeu_pd(reinterpret_cast<double*>(ptr), mask, values);
     }
   }
   const double& operator[](int idx) const  = delete;
@@ -117,6 +105,10 @@ public:
     auto cmp_mask = _mm512_cmp_pd_mask(values, _mm512_set1_pd(0.0), _CMP_UNORD_Q);
     return _mm512_castsi512_pd(_mm512_mask_set1_epi64(zero_vector, cmp_mask,
                                                       0xFFFFFFFFFFFFFFFF));
+  }
+  bool has_inf_nan() const {
+    __m512d self_sub  = _mm512_sub_pd(values, values);
+    return (_mm512_movepi8_mask(_mm512_castpd_si512(self_sub)) & 0x7777777777777777) != 0;
   }
   Vectorized<double> map(double (*const f)(double)) const {
     __at_align__ double tmp[size()];
@@ -157,6 +149,9 @@ public:
   Vectorized<double> acos() const {
     return Vectorized<double>(Sleef_acosd8_u10(values));
   }
+  Vectorized<double> acosh() const {
+    return Vectorized<double>(Sleef_acoshd8_u10(values));
+  }
   Vectorized<double> asin() const {
     return Vectorized<double>(Sleef_asind8_u10(values));
   }
@@ -189,6 +184,9 @@ public:
   }
   Vectorized<double> expm1() const {
     return Vectorized<double>(Sleef_expm1d8_u10(values));
+  }
+  Vectorized<double> exp_u20() const {
+    return exp();
   }
   Vectorized<double> fmod(const Vectorized<double>& q) const {
     return Vectorized<double>(Sleef_fmodd8(values, q));

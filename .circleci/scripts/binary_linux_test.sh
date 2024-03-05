@@ -96,13 +96,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
     conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
   )
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
-  if [[ "$(uname -m)" == aarch64 ]]; then
-    # Using "extra-index-url" until all needed aarch64 dependencies are
-    # added to "https://download.pytorch.org/whl/"
-    pip install "\$pkg" --extra-index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
-  else
-    pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
-  fi
+  pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
   retry pip install -q numpy protobuf typing-extensions
 fi
 if [[ "$PACKAGE_TYPE" == libtorch ]]; then

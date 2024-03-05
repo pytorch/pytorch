@@ -29,8 +29,7 @@ def sink_waits(
                     new_order.append(wait)
                     cur_waits.remove(wait)
             new_order.append(snode)
-    for snode in tuple_sorted(cur_waits):
-        new_order.append(snode)
+    new_order.extend(tuple_sorted(cur_waits))
     return new_order
 
 
@@ -61,8 +60,7 @@ def raise_comms(
                 new_order_reversed.append(comm)
             new_order_reversed.append(snode)
     assert len(cur_comms) <= 1
-    for snode in tuple_sorted(cur_comms):
-        new_order_reversed.append(snode)
+    new_order_reversed.extend(tuple_sorted(cur_comms))
     return new_order_reversed[::-1]
 
 
@@ -117,7 +115,8 @@ def estimate_op_runtime(snode: "scheduler.BaseSchedulerNode") -> float:
     if config.estimate_op_runtime == "default":
         runtime = snode.get_estimated_runtime()
     else:
-        runtime = config.estimate_op_runtime(snode)  # type: ignore[operator]
+        assert callable(config.estimate_op_runtime)
+        runtime = config.estimate_op_runtime(snode)
     return runtime
 
 
@@ -151,7 +150,7 @@ def reorder_compute_for_overlap(
     comm_ancestors = {node: get_ancestors(node) for node in comm_nodes}
     comm_descendants = {node: get_descendants(node) for node in comm_nodes}
 
-    indeg = {k: 0 for k in snodes}
+    indeg = dict.fromkeys(snodes, 0)
     for snode in snodes:
         for user in snode.node_users:
             if user in indeg:
@@ -290,7 +289,7 @@ def reorder_compute_for_overlap(
 def node_summary(snode):
     detail = ""
     if isinstance(snode.node, ir.ExternKernelOut):
-        detail = f" ({snode.node.kernel})"
+        detail = f" ({snode.node.python_kernel_name})"
     out_tensor_info = ""
     if (
         hasattr(snode.node, "layout")

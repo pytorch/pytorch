@@ -747,5 +747,33 @@ class TORCH_API LPPool2dImpl : public LPPoolImpl<2, LPPool2dImpl> {
 /// learn about PyTorch's module storage semantics.
 TORCH_MODULE(LPPool2d);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LPPool3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies the LPPool3d function element-wise.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.LPPool3d to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::LPPool3dOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// LPPool3d model(LPPool3dOptions(1, std::vector<int64_t>({3, 4, 5})).stride(
+/// {5, 6, 7}).ceil_mode(true));
+/// ```
+class TORCH_API LPPool3dImpl : public LPPoolImpl<3, LPPool3dImpl> {
+ public:
+  using LPPoolImpl<3, LPPool3dImpl>::LPPoolImpl;
+
+  Tensor forward(const Tensor& input);
+};
+
+/// A `ModuleHolder` subclass for `LPPool3dImpl`.
+/// See the documentation for `LPPool3dImpl` class to learn what methods it
+/// provides, and examples of how to use `LPPool3d` with
+/// `torch::nn::LPPool3dOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
+TORCH_MODULE(LPPool3d);
+
 } // namespace nn
 } // namespace torch

@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
+import functools
+import math
 import sys
 
 import torch
@@ -9,7 +11,7 @@ from torch import distributed as dist
 from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import _get_module_fsdp_state
-from torch.distributed.fsdp.wrap import ModuleWrapPolicy
+from torch.distributed.fsdp.wrap import ModuleWrapPolicy, transformer_auto_wrap_policy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
@@ -91,6 +93,10 @@ class ModelWithIgnoredModules(Model):
 
 
 class TestFSDPIgnoredModules(FSDPTest):
+    @property
+    def world_size(self):
+        return min(torch.cuda.device_count(), 2)
+
     def _train_model(self, model, optim, num_iters, device=torch.device("cuda")):
         for _ in range(num_iters):
             module = model.module if isinstance(model, FSDP) else model
@@ -228,33 +234,17 @@ class TestFSDPIgnoredModules(FSDPTest):
         # sequential's second linear layer (`layer1[1]`) and then wraps the
         # overall model while ignoring the nested sequential (`layer1`)
         model = Model().cuda()
-        model.layer1[1] = (
-            FSDP(model.layer1[1], use_orig_params=use_orig_params)
-            if not composable
-            else fully_shard(model.layer1[1])
+        fsdp_fn = (
+            fully_shard
+            if composable
+            else functools.partial(FSDP, use_orig_params=use_orig_params)
         )
+        model.layer1[1] = fsdp_fn(model.layer1[1])
         if ignore_modules:
-            wrapped_model = (
-                FSDP(
-                    model,
-                    ignored_modules=[model.layer1],
-                    use_orig_params=use_orig_params,
-                )
-                if not composable
-                else fully_shard(model, ignored_modules=[model.layer1])
-            )
+            wrapped_model = fsdp_fn(model, ignored_modules=[model.layer1])
         else:
-            wrapped_model = (
-                FSDP(
-                    model,
-                    ignored_states=[model.layer1],
-                    use_orig_params=use_orig_params,
-                )
-                if not composable
-                else fully_shard(
-                    model,
-                    ignored_states=[model.layer1],
-                )
+            wrapped_model = fsdp_fn(
+                model, ignored_states=list(model.layer1.parameters())
             )
         # Check that the wrapped model's flattened parameter does not include
         # the ignored nested sequential's parameters
@@ -284,6 +274,55 @@ class TestFSDPIgnoredModules(FSDPTest):
         # Check that we can run a few iterations
         optim = torch.optim.Adam(wrapped_model.parameters(), lr=1e-3)
         self._train_model(wrapped_model, optim, 3)
+
+    @skip_if_lt_x_gpu(2)
+    def test_ignored_states_auto_wrap(self):
+        transformer_policy = functools.partial(
+            transformer_auto_wrap_policy, transformer_layer_cls={nn.Sequential}
+        )
+        self.run_subtests(
+            {
+                "policy": [transformer_policy, ModuleWrapPolicy((nn.Sequential,))],
+                "ignore_bias": [True, False],
+            },
+            self._test_ignored_states_auto_wrap,
+        )
+
+    def _test_ignored_states_auto_wrap(self, policy, ignore_bias: bool):
+        model = Model().cuda()
+        ignored_states = [model.layer1[1].weight]
+        if ignore_bias:
+            ignored_states.append(model.layer1[1].bias)
+        # Construct 2 flat parameters: one for `layer1` and one for the model
+        fsdp_model = FSDP(
+            model,
+            # Use `False` to avoid complexity of intra-flat-parameter padding
+            use_orig_params=False,
+            auto_wrap_policy=policy,
+            ignored_states=ignored_states,
+        )
+        ref_model = Model()
+        expected_layer1_unsharded_numel = (
+            sum(p.numel() for p in ref_model.layer1.parameters())
+            - ref_model.layer1[1].weight.numel()
+        )
+        if ignore_bias:
+            expected_layer1_unsharded_numel -= ref_model.layer1[1].bias.numel()
+        expected_model_unsharded_numel = sum(
+            p.numel() for p in ref_model.parameters()
+        ) - sum(p.numel() for p in ref_model.layer1.parameters())
+        expected_layer1_sharded_numel = math.ceil(
+            expected_layer1_unsharded_numel / self.world_size
+        )
+        expected_model_sharded_numel = math.ceil(
+            expected_model_unsharded_numel / self.world_size
+        )
+        self.assertLessEqual(
+            fsdp_model.layer1.module._flat_param.numel(), expected_layer1_sharded_numel
+        )
+        self.assertLessEqual(
+            fsdp_model.module._flat_param.numel(), expected_model_sharded_numel
+        )
 
     @skip_if_lt_x_gpu(2)
     @parametrize("composable", [True, False])

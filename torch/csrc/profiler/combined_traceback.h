@@ -29,6 +29,8 @@ struct TORCH_API CapturedTraceback : public c10::GatheredContext {
   CapturedTraceback() = default;
   CapturedTraceback(const CapturedTraceback&) = delete;
   CapturedTraceback& operator=(const CapturedTraceback&) = delete;
+  CapturedTraceback(CapturedTraceback&&) noexcept = default;
+  CapturedTraceback& operator=(CapturedTraceback&&) noexcept = delete;
   ~CapturedTraceback() override;
 
   using visitproc = int (*)(void* self, void* arg);

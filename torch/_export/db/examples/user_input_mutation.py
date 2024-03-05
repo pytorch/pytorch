@@ -6,11 +6,11 @@ from torch._export.db.case import export_case, SupportLevel
 @export_case(
     example_inputs=(torch.ones(3, 2),),
     tags={"torch.mutation"},
-    support_level=SupportLevel.NOT_SUPPORTED_YET,
+    support_level=SupportLevel.SUPPORTED,
 )
 class UserInputMutation(torch.nn.Module):
     """
-    Can't directly mutate user input in forward
+    Directly mutate user input in forward
     """
 
     def forward(self, x):

@@ -106,6 +106,12 @@ public:
   Vectorized<float> isnan() const {
     return _mm256_cmp_ps(values, _mm256_set1_ps(0.0f), _CMP_UNORD_Q);
   }
+
+  bool has_inf_nan() const {
+    __m256 self_sub  = _mm256_sub_ps(values, values);
+    return (_mm256_movemask_epi8(_mm256_castps_si256(self_sub)) & 0x77777777) != 0;
+  }
+
   Vectorized<float> map(float (*const f)(float)) const {
     __at_align__ float tmp[size()];
     store(tmp);
@@ -141,6 +147,9 @@ public:
   }
   Vectorized<float> acos() const {
     return Vectorized<float>(Sleef_acosf8_u10(values));
+  }
+  Vectorized<float> acosh() const {
+    return Vectorized<float>(Sleef_acoshf8_u10(values));
   }
   Vectorized<float> asin() const {
     return Vectorized<float>(Sleef_asinf8_u10(values));
@@ -203,6 +212,68 @@ public:
   }
   Vectorized<float> expm1() const {
     return Vectorized<float>(Sleef_expm1f8_u10(values));
+  }
+  Vectorized<float> exp_u20() const {
+    // A faster version of exp with ULP=20
+    static __m256 vec_factorial_1 =
+        _mm256_set1_ps(0.999999701f); // 1/factorial(1)
+    static __m256 vec_factorial_2 =
+        _mm256_set1_ps(0.499991506f); // 1/factorial(2)
+    static __m256 vec_factorial_3 =
+        _mm256_set1_ps(0.166676521f); // 1/factorial(3)
+    static __m256 vec_factorial_4 =
+        _mm256_set1_ps(0.0418978221f); // 1/factorial(4)
+    static __m256 vec_factorial_5 =
+        _mm256_set1_ps(0.00828929059f); // 1/factorial(5)
+    static __m256 vec_exp_log2ef =
+        (__m256)_mm256_set1_epi32(0x3fb8aa3b); // log2(e)
+    static __m256 vec_half = _mm256_set1_ps(0.5f);
+    static __m256 vec_one = _mm256_set1_ps(1.f);
+    static __m256 vec_zero = _mm256_set1_ps(0.f);
+    static __m256 vec_two = _mm256_set1_ps(2.f);
+    static __m256 vec_ln2f = (__m256)_mm256_set1_epi32(0x3f317218); // ln(2)
+    static __m256 vec_ln_flt_min = (__m256)_mm256_set1_epi32(0xc2aeac50);
+    static __m256 vec_ln_flt_max = (__m256)_mm256_set1_epi32(0x42b17218);
+    static __m256i vec_127 = _mm256_set1_epi32(0x0000007f);
+    static int n_mantissa_bits = 23;
+
+    // exp(x) =
+    // = exp(n * ln(2) + r) // divide x by ln(2) and get quot and rem
+    // = 2^n * exp(r) // simplify the exp(n*ln(2)) expression
+
+    auto less_ln_flt_min_mask =
+        _mm256_cmp_ps(values, vec_ln_flt_min, 1 /*_CMP_LT_OS*/);
+    auto vec_src = _mm256_min_ps(values, vec_ln_flt_max);
+    vec_src = _mm256_max_ps(vec_src, vec_ln_flt_min);
+
+    // fx = floorf(x * log2ef + 0.5)
+    auto vec_fx = _mm256_fmadd_ps(vec_src, vec_exp_log2ef, vec_half);
+    vec_fx = _mm256_floor_ps(vec_fx);
+
+    // x = x - fx * ln2
+    auto vec_exp_poly = _mm256_fnmadd_ps(vec_fx, vec_ln2f, vec_src);
+
+    // compute polynomial
+    auto vec_res =
+        _mm256_fmadd_ps(vec_exp_poly, vec_factorial_5, vec_factorial_4);
+    vec_res = _mm256_fmadd_ps(vec_exp_poly, vec_res, vec_factorial_3);
+    vec_res = _mm256_fmadd_ps(vec_exp_poly, vec_res, vec_factorial_2);
+    vec_res = _mm256_fmadd_ps(vec_exp_poly, vec_res, vec_factorial_1);
+    vec_res = _mm256_fmadd_ps(vec_exp_poly, vec_res, vec_one);
+
+    // compute 2^(n-1)
+    auto vec_exp_number = _mm256_sub_ps(vec_fx, vec_one);
+    auto vec_exp_number_i = _mm256_cvtps_epi32(vec_exp_number);
+    auto vec_two_pow_n_i = _mm256_add_epi32(vec_exp_number_i, vec_127);
+    vec_two_pow_n_i = _mm256_slli_epi32(vec_two_pow_n_i, n_mantissa_bits);
+    auto vec_two_pow_n = (__m256)vec_two_pow_n_i;
+    vec_two_pow_n =
+        _mm256_blendv_ps(vec_two_pow_n, vec_zero, less_ln_flt_min_mask);
+
+    // y = y * 2^n
+    vec_res = _mm256_mul_ps(vec_res, vec_two_pow_n);
+    vec_res = _mm256_mul_ps(vec_res, vec_two);
+    return vec_res;
   }
   Vectorized<float> fmod(const Vectorized<float>& q) const {
     return Vectorized<float>(Sleef_fmodf8(values, q));

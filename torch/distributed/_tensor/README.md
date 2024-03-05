@@ -6,14 +6,18 @@ This folder contains the DTensor (a.k.a DistributedTensor) implementation in PyT
 We propose distributed tensor primitives to allow easier distributed computation authoring in SPMD(Single Program Multiple Devices) paradigm. The primitives are simple but powerful when used to express tensor distributions with both sharding and replication parallelism strategies. This could empower native Tensor parallelism among other advanced parallelism explorations. For example, to shard a big tensor across devices with 3 lines of code:
 
 ```python
+# to run this file (i.e. dtensor_example.py):
+# torchrun --standalone --nnodes=1 --nproc-per-node=4 dtensor_example.py
+import os
 import torch
-from torch.distributed._tensor import DeviceMesh, Shard, distribute_tensor
+from torch.distributed._tensor import init_device_mesh, Shard, distribute_tensor
 
 # Create a mesh topology with the available devices:
-# 1. We can directly create the mesh using elastic launcher,
-# 2. If using mp.spawn, we need to initialize the world process_group first.
+# 1. We can directly create the mesh using elastic launcher, (recommended)
+# 2. If using mp.spawn, one need to initialize the world process_group first and set device
 #   i.e. torch.distributed.init_process_group(backend="nccl", world_size=world_size)
-mesh = DeviceMesh("cuda", list(range(world_size)))
+
+mesh = init_device_mesh("cuda", (int(os.environ["WORLD_SIZE"]),))
 big_tensor = torch.randn(100000, 88)
 # Shard this tensor over the mesh by sharding `big_tensor`'s 0th dimension over the 0th dimension of `mesh`.
 my_dtensor = distribute_tensor(big_tensor, mesh, [Shard(dim=0)])
@@ -48,11 +52,12 @@ Here are some basic DTensor API examples that showcase:
 3. How to “reshard” an existing DTensor to a different DTensor with modified placement strategy or world size.
 
 ```python
+# torchrun --standalone --nnodes=1 --nproc-per-node=4 dtensor_example.py
 import torch
-from torch.distributed._tensor import DTensor, DeviceMesh, Shard, Replicate, distribute_tensor, distribute_module
+from torch.distributed._tensor import DTensor, Shard, Replicate, distribute_tensor, distribute_module, init_device_mesh
 
 # construct a device mesh with available devices (multi-host or single host)
-device_mesh = DeviceMesh("cuda", [0, 1, 2, 3])
+device_mesh = init_device_mesh("cuda", (4,))
 # if we want to do row-wise sharding
 rowwise_placement=[Shard(0)]
 # if we want to do col-wise sharding
@@ -68,7 +73,7 @@ replica_placement = [Replicate()]
 replica_tensor = distribute_tensor(big_tensor, device_mesh=device_mesh, placements=replica_placement)
 
 # if we want to distributed a tensor with both replication and sharding
-device_mesh = DeviceMesh("cuda", [[0, 1], [2, 3]])
+device_mesh = init_device_mesh("cuda", (2, 2))
 # replicate across the first dimension of device mesh, then sharding on the second dimension of device mesh
 spec=[Replicate(), Shard(0)]
 partial_replica = distribute_tensor(big_tensor, device_mesh=device_mesh, placements=spec)
@@ -80,7 +85,6 @@ rowwise_tensor = DTensor.from_local(local_tensor, device_mesh, rowwise_placement
 # reshard the current row-wise tensor to a colwise tensor or replicate tensor
 colwise_tensor = rowwise_tensor.redistribute(device_mesh, colwise_placement)
 replica_tensor = colwise_tensor.redistribute(device_mesh, replica_placement)
-
 ```
 
 #### High level User Facing APIs
@@ -109,6 +113,9 @@ def distribute_module(
 #### High level API examples:
 
 ```python
+import torch.nn as nn
+from torch.distributed._tensor import Shard, distribute_tensor, distribute_module, init_device_mesh
+
 class MyModule(nn.Module):
     def __init__(self):
         super().__init__()
@@ -119,21 +126,19 @@ class MyModule(nn.Module):
     def forward(self, input):
         return self.relu(self.fc1(input) + self.fc2(input))
 
-mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1], [2, 3]])
+mesh = init_device_mesh("cuda", (4,))
 
 def shard_params(mod_name, mod, mesh):
-    rowwise_placement = [Shard(0)]
-    def to_dist_tensor(t): return distribute_tensor(t, mesh, rowwise_placement)
-    mod._apply(to_dist_tensor)
+    col_linear_placement = [Shard(0)]
+    # shard fc1 and fc2
+    if isinstance(mod, nn.Linear):
+        for name, param in mod.named_parameters():
+            dist_param = nn.Parameter(
+                distribute_tensor(param, mesh, col_linear_placement)
+            )
+            mod.register_parameter(name, dist_param)
 
 sharded_module = distribute_module(MyModule(), mesh, partition_fn=shard_params)
-
-def shard_fc(mod_name, mod, mesh):
-    rowwise_placement = [Shard(0)]
-    if mod_name == "fc1":
-        mod.weight = torch.nn.Parameter(distribute_tensor(mod.weight, mesh, rowwise_placement))
-
-sharded_module = distribute_module(MyModule(), mesh, partition_fn=shard_fc)
 
 ```
 

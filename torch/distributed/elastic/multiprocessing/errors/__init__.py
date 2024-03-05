@@ -345,6 +345,13 @@ def record(
             error_handler.initialize()
             try:
                 return f(*args, **kwargs)
+            except SystemExit as se:
+                # For run_path based entrypoints, SystemExit with code = 0 will never exit.
+                # Handling it here by returning a value:
+                if se.code == 0:
+                    return None
+                else:
+                    raise
             except ChildFailedError as e:
                 rank, failure = e.get_first_failure()
                 if failure.error_file != _NOT_AVAILABLE:

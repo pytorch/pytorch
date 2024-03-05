@@ -421,6 +421,7 @@ l1_loss
 log_softmax
 lp_pool1d
 lp_pool2d
+lp_pool3d
 lstm_cell
 margin_ranking_loss
 max_pool1d_with_indices
