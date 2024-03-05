@@ -2,7 +2,17 @@ import contextlib
 import logging
 import math
 import warnings
-from typing import Any, Callable, cast, Dict, Generator, Iterator, no_type_check, Tuple
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Generator,
+    Iterator,
+    List,
+    no_type_check,
+    Tuple,
+)
 
 import torch
 import torch.distributed as dist
@@ -854,6 +864,7 @@ def _pre_load_state_dict_hook(
 @torch.no_grad()
 def _post_load_state_dict_hook(
     module: nn.Module,
+    incompatible_keys: Tuple[List[str], List[str]],
     *args: Any,
 ) -> None:
     fsdp_state = _get_module_fsdp_state_if_fully_sharded_module(module)
@@ -876,6 +887,15 @@ def _post_load_state_dict_hook(
         # Dispatch into state_dict type specific implementation of post-hook for
         # loading state_dict.
         _post_load_state_dict_hook_fn[fsdp_state._state_dict_type](module, fsdp_state)
+
+    # When reporting incompatible keys, trim FSDP prefixes.
+    missing_keys = incompatible_keys[0]
+    unexpected_keys = incompatible_keys[1]
+    for i in range(len(missing_keys)):
+        missing_keys[i] = clean_tensor_name(missing_keys[i])
+
+    for i in range(len(unexpected_keys)):
+        unexpected_keys[i] = clean_tensor_name(unexpected_keys[i])
 
     if fsdp_state._is_root:
         SimpleProfiler.dump_and_reset("FSDP model load_state_dict profiling: ")
