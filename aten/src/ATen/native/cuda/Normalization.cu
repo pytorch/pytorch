@@ -723,8 +723,15 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cuda(
 
   const int64_t n_input = self.size(1);
 
-  TORCH_CHECK(n_input > 0 && self.numel() > 0, "both input.size(1) and input.numel() need to be greater than 0, got input.size(1) = ", n_input, ", input.numel() = ", self.numel());
-
+  TORCH_CHECK(
+      self.size(0) > 0 && n_input > 0 && self.numel() > 0,
+      "input.size(0), input.size(1) and input.numel() need to be greater than 0, got input.size(0) = ",
+      self.size(0),
+      ", input.size(1) = ",
+      n_input,
+      ", input.numel() = ",
+      self.numel()
+  );
   auto options = self.options().dtype(
       at::toAccumulateType(self.scalar_type(), /*is_cuda=*/true));
   auto save_mean = at::empty({n_input}, options);

@@ -5021,16 +5021,21 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
     def test_batch_norm_update_stats(self):
         input1 = torch.rand(0, 0)
         input2 = torch.rand(0, 1)
+        input3 = torch.rand(1, 0)
         running_mean = torch.rand(1)
         running_var = torch.rand(1)
         with self.assertRaisesRegex(RuntimeError,
-                                    re.escape("both input.size(1) and input.numel() need to be greater than 0, "
-                                              "got input.size(1) = 0, input.numel() = 0")):
+                                    re.escape("input.size(0), input.size(1) and input.numel() need to be greater than 0,"
+                                              " got input.size(0) = 0, input.size(1) = 0, input.numel() = 0")):
             torch.batch_norm_update_stats(input=input1, momentum=0.0, running_mean=running_mean, running_var=running_var)
         with self.assertRaisesRegex(RuntimeError,
-                                    re.escape("both input.size(1) and input.numel() need to be greater than 0, "
-                                              "got input.size(1) = 1, input.numel() = 0")):
+                                    re.escape("input.size(0), input.size(1) and input.numel() need to be greater than 0,"
+                                              " got input.size(0) = 0, input.size(1) = 1, input.numel() = 0")):
             torch.batch_norm_update_stats(input=input2, momentum=0.0, running_mean=running_mean, running_var=running_var)
+        with self.assertRaisesRegex(RuntimeError,
+                                    re.escape("input.size(0), input.size(1) and input.numel() need to be greater than 0,"
+                                              " got input.size(0) = 1, input.size(1) = 0, input.numel() = 0")):
+            torch.batch_norm_update_stats(input=input3, momentum=0.0, running_mean=running_mean, running_var=running_var)
 
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
