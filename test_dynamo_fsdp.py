@@ -183,7 +183,7 @@ def main_compiled(n_iter):
 
     def compiler_fn(gm):
         torch_log.warning("Compiling autograd?")
-        return torch.compile(gm, backend="inductor", fullgraph=True, dynamic=dynamic)
+        return torch.compile(gm, backend="aot_eager", fullgraph=True, dynamic=dynamic)
 
     torch._dynamo.config.trace_distributed = True
 
@@ -191,7 +191,7 @@ def main_compiled(n_iter):
     #     # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
     #     import time
     #     time.sleep(600)
-    model = torch.compile(model, backend="inductor", fullgraph=True, dynamic=dynamic)
+    model = torch.compile(model, backend="aot_eager", fullgraph=True, dynamic=dynamic)
     with compiled_autograd.enable(compiler_fn):
         res = run(model, optim, n_iter)
     print(f"res: {res}")
