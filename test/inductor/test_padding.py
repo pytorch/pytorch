@@ -7,7 +7,7 @@ from torch import nn
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._inductor import config
 from torch._inductor.fx_passes import pad_mm as pad_mm_pass
-from torch._inductor.utils import do_bench
+from torch._inductor.utils import do_bench, run_and_get_code
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
@@ -104,12 +104,22 @@ class PaddingTest(TestCase):
         inputs_bad_shape = m_bad_shape.get_example_inputs()
         m_bad_shape_opt = torch.compile(copy.deepcopy(m_bad_shape))
 
-        forward_and_backward_pass(m_bad_shape_opt, inputs_bad_shape)
+        _, wrapper_codes = run_and_get_code(
+            forward_and_backward_pass, m_bad_shape_opt, inputs_bad_shape
+        )
         forward_and_backward_pass(m_bad_shape, inputs_bad_shape)
         self.assertTrue(
             torch.allclose(
                 m_bad_shape.linear.weight.grad, m_bad_shape_opt.linear.weight.grad
             )
+        )
+        self.assertTrue(len(wrapper_codes) == 2)  # one for forward and oen for backward
+        forward_wrapper = wrapper_codes[0]
+
+        # make sure the store for softmax is aligned
+        self.assertTrue(
+            "tl.store(out_ptr2 + (r1 + (30528*x0))" in forward_wrapper,
+            f"forward_wrapper: {forward_wrapper}",
         )
 
         if DO_PERF_TEST:

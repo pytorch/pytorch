@@ -9,6 +9,15 @@ def is_fbcode():
     return not hasattr(torch.version, "git_version")
 
 
+def enable_autotune_remote_cache():
+    if is_fbcode():
+        from torch._utils_internal import justknobs_check
+
+        if justknobs_check("pytorch/autotune_remote_cache:enable"):
+            return True
+    return os.environ.get("TORCH_INDUCTOR_AUTOTUNE_REMOTE_CACHE") == "1"
+
+
 # add some debug printouts
 debug = False
 
@@ -188,6 +197,12 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
+
+# enable autotune local cache
+use_autotune_local_cache = True
+
+# enable autotune remote cache
+use_autotune_remote_cache = enable_autotune_remote_cache()
 
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
@@ -370,6 +385,12 @@ shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "1") == "1"
 comprehensive_padding = (
     os.environ.get("TORCHINDUCTOR_COMPREHENSIVE_PADDING", "1") == "1"
 )
+# XXX: Just for testing. Will remove before landing.
+pad_fixed_layout = os.environ.get("TORCHINDUCTOR_PAD_FIXED_LAYOUT") == "1"
+
+# Record the stacktrace when creating a FixedLayout. Used to figure out
+# if we are too conservative to make a layout fixed rather than flexible
+debug_fixed_layout = os.environ.get("TORCHINDUCTOR_DEBUG_FIXED_LAYOUT") == "1"
 
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
@@ -725,6 +746,8 @@ class trace:
     # Upload the .tar.gz file
     # Needs to be overriden based on specific environment needs
     upload_tar: Optional[Callable[[str], None]] = None
+
+    log_autotuning_results: bool = False
 
 
 _save_config_ignore = {
