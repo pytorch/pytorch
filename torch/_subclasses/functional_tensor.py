@@ -221,6 +221,7 @@ class FunctionalTensor(torch.Tensor):
         else:
             return [elem.tolist() for elem in self.elem]
 
+
 class FunctionalTensorMode(TorchDispatchMode):
     def __init__(self, pre_dispatch=False, export=False, _allow_token_discovery=False):
         self.export = export
