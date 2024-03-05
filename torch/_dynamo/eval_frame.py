@@ -1507,10 +1507,6 @@ class TorchPatcher:
             sparse_adam,
         }
 
-        excluded_single_tensor = {
-            radam,  # https://github.com/pytorch/pytorch/issues/118230
-        }
-
         for opt_mod in optimizer_modules:
             opt_name = opt_mod.__name__.split(".")[-1]
             fused_fn_name = f"_fused_{opt_name}"
@@ -1519,16 +1515,6 @@ class TorchPatcher:
             if hasattr(opt_mod, fused_fn_name):
                 setattr(
                     opt_mod, fused_fn_name, disable(getattr(opt_mod, fused_fn_name))
-                )
-
-            if (
-                hasattr(opt_mod, single_tensor_fn_name)
-                and opt_mod in excluded_single_tensor
-            ):
-                setattr(
-                    opt_mod,
-                    single_tensor_fn_name,
-                    disable(getattr(opt_mod, single_tensor_fn_name)),
                 )
 
         optimizer_classes = [

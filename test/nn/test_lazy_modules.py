@@ -586,7 +586,7 @@ class TestLazyModules(TestCase):
         # Add RAdam when #118230 is complete
         optimizers = [torch.optim.Adadelta, torch.optim.Adagrad, torch.optim.Adamax, torch.optim.Adam,
                       torch.optim.AdamW, torch.optim.ASGD, torch.optim.SGD, torch.optim.Rprop,
-                      torch.optim.RMSprop, torch.optim.LBFGS]
+                      torch.optim.RMSprop, torch.optim.LBFGS, torch.optim.NAdam, torch.optim.RAdam]
 
         def run_step(module, optim):
             self.assertIsInstance(optim.param_groups[0]['params'][0], UninitializedParameter)

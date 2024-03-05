@@ -686,18 +686,6 @@ def optim_inputs_func_radam(device=None):
 
 def optim_error_inputs_func_radam(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
-    if "cuda" in str(device):
-        error_inputs += [
-            ErrorOptimizerInput(
-                OptimizerInput(
-                    params=None,
-                    kwargs=dict(foreach=False, capturable=True),
-                    desc="single tensor capturable not supported",
-                ),
-                error_type=ValueError,
-                error_regex="Capturable not supported with single tensor RAdam",
-            ),
-        ]
     if str(device) == "cpu":
         error_inputs += [
             ErrorOptimizerInput(
@@ -1560,7 +1548,6 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_radam,
         optim_error_inputs_func=optim_error_inputs_func_radam,
         supported_impls=("foreach", "differentiable"),
-        only_supports_capturable_on_foreach=True,  # Remove this line when #118230 is done!
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1628,100 +1615,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_can_load_older_state_dict",
                 device_type="cpu",
-            ),
-            DecorateInfo(
-                toleranceOverride(
-                    {  # previously atol=5-05, rtol=0.001, https://github.com/pytorch/pytorch/issues/116202
-                        torch.float32: tol(atol=5e-04, rtol=0.01),
-                    }
-                ),
-                "TestOptimRenewed",
-                "test_mixed_device_dtype",
-                active_if=TEST_WITH_TORCHDYNAMO,
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
-                ),
-                "TestOptimRenewed",
-                "test_complex",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
-                ),
-                "TestOptimRenewed",
-                "test_step_is_noop_for_zero_grads",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
-                ),
-                "TestOptimRenewed",
-                "test_step_is_noop_when_params_have_no_grad",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
-                ),
-                "TestOptimRenewed",
-                "test_load_nontensor_step",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
-                ),
-                "TestOptimRenewed",
-                "test_param_groups_weight_decay",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
-                ),
-                "TestOptimRenewed",
-                "test_param_groups_lr",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_with_cuda_params",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
-                ),
-                "TestOptimRenewed",
-                "test_mixed_device_dtype",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
-                ),
-                "TestOptimRenewed",
-                "test_step_post_hook",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
-                ),
-                "TestOptimRenewed",
-                "test_step_pre_hook",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
-                ),
-                "TestOptimRenewed",
-                "test_step_all_hooks",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
-                ),
-                "TestOptimRenewed",
-                "test_save_load_equality_with_weights_only",
             ),
         ),
     ),
