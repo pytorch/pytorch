@@ -801,6 +801,38 @@ class f(torch.nn.Module):
                 torch._check(y.storage_offset() == x.storage_offset())
             self.assertEqual(len(_get_ephemeral_source_symbols(t_with_ephemeral)), 0)
 
+    def test_ephemeral_source_unified_with_non_ephemeral_source(self):
+        from torch._dynamo.source import EphemeralSource
+
+        for construct_ephemeral_first in (False, True):
+            shape_env = ShapeEnv()
+            shape = (5, 10)
+            # use duck sizing here to ensure symbol reuse across x and y
+            duck_dims = [DimDynamic.DUCK for _ in shape]
+            x = create_symbolic_tensor(
+                "x",
+                torch.randn(*shape),
+                shape_env,
+                source=(EphemeralSource() if construct_ephemeral_first else None),
+                dynamic_dims=duck_dims,
+            )
+            y = create_symbolic_tensor(
+                "y",
+                torch.randn(*shape),
+                shape_env,
+                source=(EphemeralSource() if not construct_ephemeral_first else None),
+                dynamic_dims=duck_dims,
+            )
+
+            # regardless of construction order, non-ephemeral sources should be preferred
+            # first in the var_to_sources list for potential guarding later on
+            for source_list in shape_env.var_to_sources.values():
+                self.assertFalse(source_list[0].is_ephemeral())
+
+            self.assertEqual(x.size(), y.size())
+            self.assertEqual(x.stride(), y.stride())
+            self.assertEqual(x.storage_offset(), y.storage_offset())
+
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
 class TestSymNumberMagicMethods(TestCase):
