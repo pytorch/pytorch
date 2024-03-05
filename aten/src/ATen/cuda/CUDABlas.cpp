@@ -191,7 +191,7 @@ static size_t _parseChosenWorkspaceSize() {
   cudaDeviceProp* p = at::cuda::getDeviceProperties(c10::cuda::current_device());
   // Keep workspace_size = 1024 for small Ampere GPUs
   // See https://github.com/pytorch/pytorch/pull/120925#issuecomment-1977556485
-  if (p->major == 8 && p->total_memory / 1073741824 >= 24) {
+  if (p->major == 8 && p->totalGlobalMem / 1073741824 >= 24) {
     workspace_size = 4096;
   } else if (p->major >= 9) {
     workspace_size = 32768;
