@@ -538,7 +538,8 @@ static std::vector<T> map_py_func(
   return new_items;
 }
 
-template <> std::vector<at::Tensor> map_py_func(
+template <>
+std::vector<at::Tensor> map_py_func(
     const py::function& func,
     const std::vector<at::Tensor>& items) {
   std::vector<at::Tensor> new_items;
