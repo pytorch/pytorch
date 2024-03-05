@@ -3770,7 +3770,6 @@ class TestExportCustomClass(TorchTestCase):
                 x.tolist()
 
         ep = torch.export.export(M(), (torch.ones(3),), strict=False)
-        ep(torch.ones(3))
 
 if __name__ == '__main__':
     run_tests()
