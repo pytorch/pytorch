@@ -134,9 +134,12 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     # It iterates over the batch, which is dynamic, and dynamo chokes
     # We should be able to graphbreak there.
     "doctr_det_predictor",
+    "dlrm",
+    "pyhpc_isoneutral_mixing",
+    "pyhpc_equation_of_state",
+    "pyhpc_turbulent_kinetic_energy",
     "detectron2_fcos_r_50_fpn",
     "hf_T5_generate",
-    "dlrm",
 }
 
 # These models currently fail accuracy with eager Adam optimizer
@@ -2052,6 +2055,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_models_for_freezing(self):
+        return set()
+
+    @property
     def slow_models(self):
         return set()
 
@@ -3576,6 +3583,9 @@ def run(runner, args, original_dir=None):
 
     if not args.multiprocess:
         runner.skip_models.update(runner.skip_multiprocess_models)
+
+    if args.freezing:
+        runner.skip_models.update(runner.skip_models_for_freezing)
 
     if args.no_skip:
         runner.skip_models.clear()
