@@ -1906,10 +1906,12 @@ class EnumEncoder(json.JSONEncoder):
 
 def _dataclass_to_dict(obj):
     if isinstance(obj, _Union):
-        return {"$type": obj.type, "$value": _dataclass_to_dict(obj.value)}
+        return {obj.type: _dataclass_to_dict(obj.value)}
     elif dataclasses.is_dataclass(obj):
         return {
-            f.name: _dataclass_to_dict(getattr(obj, f.name)) for f in dataclasses.fields(obj)
+            f.name: _dataclass_to_dict(getattr(obj, f.name))
+            for f in dataclasses.fields(obj)
+            if not (f.default is None and getattr(obj, f.name) is None)
         }
     elif isinstance(obj, list):
         return [_dataclass_to_dict(x) for x in obj]
@@ -1953,8 +1955,9 @@ def _dict_to_dataclass(cls, data):
         return _dict_to_dataclass(ty_args[0], data)
     elif isinstance(cls, type) and issubclass(cls, _Union):
         assert isinstance(data, dict)
-        _type = data["$type"]
-        _value = data["$value"]
+        assert len(data) == 1
+        _type = next(iter(data.keys()))
+        _value = next(iter(data.values()))
         assert isinstance(_type, str)
         field_type = cls.__annotations__[_type]
         return cls.create(**{_type: _dict_to_dataclass(field_type, _value)})
