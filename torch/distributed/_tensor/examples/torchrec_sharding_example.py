@@ -129,11 +129,8 @@ def run_torchrec_table_wise_sharding_example(rank, world_size):
     #   The global ProcessGroup has 4 ranks, so each rank will have one 8 by 16 complete
     #   table as its local shard.
 
-    # device mesh is a representation of the worker ranks
-    # create a 1-D device mesh that includes every rank
     device_type = get_device_type()
     device = torch.device(device_type)
-    device_mesh = init_device_mesh(device_type=device_type, mesh_shape=(world_size,))
 
     # manually create the embedding table's local shards
     num_embeddings = 8
@@ -155,29 +152,32 @@ def run_torchrec_table_wise_sharding_example(rank, world_size):
     # example 1: transform local_shards into DTensor
     table_to_dtensor = {}  # same purpose as _model_parallel_name_to_sharded_tensor
     table_wise_sharding_placements = [Replicate()]  # table-wise sharding
+
+    # create a submesh that only contains the current rank
+    # note that we cannot use ``init_device_mesh'' to create a submesh
+    # so we choose to use the `DeviceMesh` api to directly create a DeviceMesh
+    device_submesh = DeviceMesh(
+        device_type=device_type,
+        mesh=torch.tensor(
+            [rank], dtype=torch.int64
+        ),
+    )
     for table_id, local_shard in table_to_local_shard.items():
-        # create a submesh that only contains the rank of the current table
-        # note that we cannot use ``init_device_mesh'' to create a submesh
-        # so we choose to use the `DeviceMesh` api to directly create a DeviceMesh
-        device_mesh = DeviceMesh(
-            device_type=device_type,
-            mesh=torch.tensor(
-                [table_id], dtype=torch.int64
-            ),  # table i is only placed on rank i
-        )
         # create a DTensor from the local shard for the current table
         dtensor = DTensor.from_local(
-            local_shard, device_mesh, table_wise_sharding_placements, run_check=False
+            local_shard, device_submesh, table_wise_sharding_placements, run_check=False
         )
         table_to_dtensor[table_id] = dtensor
 
     # print each table's sharding
     for table_id, dtensor in table_to_dtensor.items():
-        if rank == 0:  # the print result is identical on all ranks
-            print(
-                f"DTensor's sharding be-like in table-wise sharding for Table {table_id}:"
-            )
-            # visualize_sharding(dtensor)  # TODO: fix visualization
+        visualize_sharding(
+            dtensor,
+            prompt=(
+                "DTensor's sharding be-like in table-wise sharding"
+                f"for Table {table_id}:"
+            ),
+        )
 
     ###########################################################################
     # example 2: transform DTensor into torch.Tensor
