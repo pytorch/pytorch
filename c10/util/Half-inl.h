@@ -8,20 +8,16 @@
 
 #ifdef __CUDACC__
 #include <cuda_fp16.h>
-#define __C10_NOT_CPU__
 #endif
 
 #ifdef __HIPCC__
 #include <hip/hip_fp16.h>
-#define __C10_NOT_CPU__
 #endif
 
 #if defined(CL_SYCL_LANGUAGE_VERSION)
 #include <CL/sycl.hpp> // for SYCL 1.2.1
-#define __C10_NOT_CPU__
 #elif defined(SYCL_LANGUAGE_VERSION)
 #include <sycl/sycl.hpp> // for SYCL 2020
-#define __C10_NOT_CPU__
 #endif
 
 #if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && \
@@ -36,7 +32,13 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
 
 namespace c10 {
 
+#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
 /// Constructors
+inline Half::Half(float16_t value) : x(detail::fp16_to_bits(value)) {}
+inline Half::operator float16_t() const {
+  return detail::fp16_from_bits(x);
+}
+#else
 
 inline C10_HOST_DEVICE Half::Half(float value)
     :
@@ -47,11 +49,7 @@ inline C10_HOST_DEVICE Half::Half(float value)
 #elif (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && \
     !defined(__APPLE__)
       x(at::vec::float2half_scalar(value))
-#elif defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
-      x(detail::native_fp16_from_fp32_value(value))
-#elif defined(__C10_NATIVE_FP16__)
-      y(value)
-#else // !__C10_NATIVE_FP16__ && !AVX && !SYCL && !CUDA && !ROCM
+#else
       x(detail::fp16_ieee_from_fp32_value(value))
 #endif
 {
@@ -69,12 +67,13 @@ inline C10_HOST_DEVICE Half::operator float() const {
   return at::vec::half2float_scalar(x);
 #elif defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
   return detail::native_fp16_to_fp32_value(x);
-#elif defined(__C10_NATIVE_FP16__)
-  return y;
-#else // !__C10_NATIVE_FP16__ && !AVX && !SYCL && !CUDA && !ROCM
+#else
   return detail::fp16_ieee_to_fp32_value(x);
 #endif
 }
+
+#endif /* !defined(__aarch64__) || defined(C10_MOBILE) || defined(__CUDACC__) \
+        */
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
 inline C10_HOST_DEVICE Half::Half(const __half& value) {
@@ -104,57 +103,6 @@ inline __device__ Half __ldg(const Half* ptr) {
 #endif
 
 /// Arithmetic
-
-#ifdef __C10_NATIVE_FP16__
-
-#define return_half(r) \
-  do {                 \
-    Half ret;          \
-    ret.y = r;         \
-    return ret;        \
-  } while (0)
-
-inline Half operator+(const Half& a, const Half& b) {
-  return_half(a.y + b.y);
-}
-
-inline Half operator-(const Half& a, const Half& b) {
-  return_half(a.y - b.y);
-}
-
-inline Half operator*(const Half& a, const Half& b) {
-  return_half(a.y * b.y);
-}
-
-inline Half operator/(const Half& a, const Half& b) {
-  return_half(a.y / b.y);
-}
-
-inline Half operator-(const Half& a) {
-  return_half(-a.y);
-}
-
-inline Half& operator+=(Half& a, const Half& b) {
-  a.y += b.y;
-  return a;
-}
-
-inline Half& operator-=(Half& a, const Half& b) {
-  a.y -= b.y;
-  return a;
-}
-
-inline Half& operator*=(Half& a, const Half& b) {
-  a.y *= b.y;
-  return a;
-}
-
-inline Half& operator/=(Half& a, const Half& b) {
-  a.y /= b.y;
-  return a;
-}
-
-#else
 
 inline C10_HOST_DEVICE Half operator+(const Half& a, const Half& b) {
   return static_cast<float>(a) + static_cast<float>(b);
@@ -203,8 +151,6 @@ inline C10_HOST_DEVICE Half& operator/=(Half& a, const Half& b) {
   a = a / b;
   return a;
 }
-
-#endif
 
 /// Arithmetic with floats
 
@@ -281,36 +227,6 @@ inline C10_HOST_DEVICE double operator/(double a, Half b)
 
 /// Arithmetic with ints
 
-#ifdef __C10_NATIVE_FP16__
-
-inline Half operator+(Half a, int b) {
-  return_half(a.y + b);
-}
-inline Half operator-(Half a, int b) {
-  return_half(a.y - b);
-}
-inline Half operator*(Half a, int b) {
-  return_half(a.y * b);
-}
-inline Half operator/(Half a, int b) {
-  return_half(a.y / b);
-}
-
-inline Half operator+(int a, Half b) {
-  return_half(a + b.y);
-}
-inline Half operator-(int a, Half b) {
-  return_half(a - b.y);
-}
-inline Half operator*(int a, Half b) {
-  return_half(a * b.y);
-}
-inline Half operator/(int a, Half b) {
-  return_half(a / b.y);
-}
-
-#else
-
 inline C10_HOST_DEVICE Half operator+(Half a, int b) {
   return a + static_cast<Half>(b);
 }
@@ -337,39 +253,7 @@ inline C10_HOST_DEVICE Half operator/(int a, Half b) {
   return static_cast<Half>(a) / b;
 }
 
-#endif
-
 //// Arithmetic with int64_t
-
-#ifdef __C10_NATIVE_FP16__
-
-inline Half operator+(Half a, int64_t b) {
-  return_half(a.y + b);
-}
-inline Half operator-(Half a, int64_t b) {
-  return_half(a.y - b);
-}
-inline Half operator*(Half a, int64_t b) {
-  return_half(a.y * b);
-}
-inline Half operator/(Half a, int64_t b) {
-  return_half(a.y / b);
-}
-
-inline Half operator+(int64_t a, Half b) {
-  return_half(a + b.y);
-}
-inline Half operator-(int64_t a, Half b) {
-  return_half(a - b.y);
-}
-inline Half operator*(int64_t a, Half b) {
-  return_half(a * b.y);
-}
-inline Half operator/(int64_t a, Half b) {
-  return_half(a / b.y);
-}
-
-#else
 
 inline C10_HOST_DEVICE Half operator+(Half a, int64_t b) {
   return a + static_cast<Half>(b);
@@ -399,8 +283,6 @@ inline C10_HOST_DEVICE Half operator/(int64_t a, Half b) {
 
 /// NOTE: we do not define comparisons directly and instead rely on the implicit
 /// conversion from c10::Half to float.
-
-#endif
 
 } // namespace c10
 
