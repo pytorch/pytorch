@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
 )
 
 
+@unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestWithEffects(TestCase):
     def setUp(self):
         if IS_MACOS:
@@ -160,7 +161,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         ):
             make_fx(f)(torch.tensor([]), torch.tensor(4))
 
-    @skipIfTorchDynamo()
     def test_compile_aot_eager(self):
         def f(x):
             torch.ops.aten._print("moo")
@@ -191,7 +191,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res = torch.compile(f, backend="inductor")(*inputs)
         self.assertTrue(torch.allclose(res, f(*inputs)))
 
-    @skipIfTorchDynamo()
     def test_compile_aot_eager_requires_grad(self):
         def f(x):
             torch.ops.aten._print("moo")
