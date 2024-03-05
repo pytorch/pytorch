@@ -51,7 +51,8 @@ class _KinetoProfile:
 
     Args:
         activities (iterable): list of activity groups (CPU, CUDA) to use in profiling, supported values:
-            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``.
+            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``,
+            ``torch.profiler.ProfilerActivity.XPU``.
             Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA.
         record_shapes (bool): save information about operator's input shapes.
         profile_memory (bool): track tensor memory allocation/deallocation (see ``export_memory_timeline``
@@ -113,6 +114,7 @@ class _KinetoProfile:
     def prepare_trace(self):
         self.profiler = prof.profile(
             use_cuda=(ProfilerActivity.CUDA in self.activities),
+            use_xpu=(ProfilerActivity.XPU in self.activities),
             use_cpu=(ProfilerActivity.CPU in self.activities),
             use_mtia=(ProfilerActivity.MTIA in self.activities),
             use_device=None,
@@ -242,6 +244,8 @@ class _KinetoProfile:
             "backend": dist.get_backend(),
             "rank": dist.get_rank(),
             "world_size": dist.get_world_size(),
+            "pg_count": dist.get_pg_count(),
+            "pg_config": dist.distributed_c10d._get_all_pg_configs(),
         }
 
     def _memory_profile(self) -> MemoryProfile:
@@ -280,7 +284,12 @@ class _KinetoProfile:
             device = self.use_device + ":0"
 
         if device is None:
-            device = "cuda:0" if torch.cuda.is_available() else "cpu"
+            if hasattr(torch, "xpu") and torch.xpu.is_available():  # type: ignore[attr-defined]
+                device = "xpu:0"
+            elif torch.cuda.is_available():
+                device = "cuda:0"
+            else:
+                device = "cpu"
 
         # Construct the memory timeline plot data
         self.mem_tl = MemoryProfileTimeline(self._memory_profile())
@@ -399,7 +408,8 @@ class profile(_KinetoProfile):
 
     Args:
         activities (iterable): list of activity groups (CPU, CUDA) to use in profiling, supported values:
-            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``.
+            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``,
+            ``torch.profiler.ProfilerActivity.XPU``.
             Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA.
         schedule (Callable): callable that takes step (int) as a single parameter and returns
             ``ProfilerAction`` value that specifies the profiler action to perform at each step.

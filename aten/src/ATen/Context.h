@@ -24,7 +24,6 @@
 #include <c10/util/irange.h>
 
 #include <cstdint>
-#include <memory>
 #include <mutex>
 
 namespace at {
