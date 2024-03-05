@@ -106,15 +106,6 @@ def build_opt_kwarg_db():
 
                 name += f"_{device}"
 
-                # Eager for-loop impl doesn't support capturable ASGD
-                if name in [
-                    "test_asgd_capturable_cuda",
-                    "test_asgd_maximize_capturable_cuda",
-                    "test_asgd_weight_decay_capturable_cuda",
-                    "test_asgd_weight_decay_maximize_capturable_cuda",
-                ]:
-                    continue
-
                 kwargs["device"] = device
                 if name in KERNEL_COUNT_OVERRIDES:
                     kwargs["kernel_count"] = KERNEL_COUNT_OVERRIDES[name]
@@ -339,13 +330,6 @@ class CompiledOptimizerParityTests(TestCase):
         )
         for optim_input in all_optim_inputs:
             kwargs = optim_input.kwargs
-
-            # ASGD #116052
-            # Single tensor eager needs to be refactored to enable tracing
-            if optim_info.only_supports_capturable_on_foreach and not kwargs.get(
-                "foreach", False
-            ):
-                kwargs["foreach"] = True
 
             torch._dynamo.reset()
             torch._inductor.metrics.reset()

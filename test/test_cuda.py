@@ -2708,11 +2708,8 @@ exit(2)
             for optimizer_ctor, amsgrad in product((torch.optim.Adam, torch.optim.AdamW), (False, True))
         ] + [
             (optimizer_ctor, {"lr": 0.1, "foreach": foreach, "maximize": maximize, "weight_decay": weight_decay})
-            for optimizer_ctor, foreach, maximize, weight_decay in product((torch.optim.Adamax,), (False, True),
+            for optimizer_ctor, foreach, maximize, weight_decay in product((torch.optim.Adamax, torch.optim.ASGD), (False, True),
                                                                            (False, True), (0, 0.1))
-        ] + [
-            (optimizer_ctor, {"lr": 0.1, "foreach": True, "maximize": maximize, "weight_decay": weight_decay})
-            for optimizer_ctor, maximize, weight_decay in product((torch.optim.ASGD,), (False, True), (0, 0.1))
         ]
 
         for optimizer_ctor, kwargs in cases:
@@ -2723,7 +2720,8 @@ exit(2)
     def test_graph_optims_with_explicitly_capturable_param_groups(self):
         # mimicking `_test_graphed_optimizer` maladroitly to pass two param_groups to optimizer.__init__
         n_warmup, n_replay = 3, 2
-        for optimizer, second_param_group_capturable in product((torch.optim.Adam, torch.optim.AdamW, torch.optim.Adamax,
+        for optimizer, second_param_group_capturable in product((torch.optim.Adam, torch.optim.AdamW,
+                                                                 torch.optim.ASGD, torch.optim.Adamax,
                                                                  torch.optim.NAdam, torch.optim.RAdam), (True, False)):
             ref_p1, param1 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
             ref_p2, param2 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
