@@ -456,7 +456,7 @@ def dequantize_per_channel(
        quant_max (int): maximum quantized value for output Tensor (not used in computation,
        reserved for pattern matching)
 
-       dtype (torch.dtype): requested dtype for output Tensor (not used in computation,
+       dtype (torch.dtype): dtype for input Tensor (not used in computation,
        reserved for pattern matching)
 
        output_dtype (torch.dtype): dtype for output Tensor (not used in computation,
