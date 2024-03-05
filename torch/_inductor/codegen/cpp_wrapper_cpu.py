@@ -1206,7 +1206,7 @@ class CppWrapperCpu(WrapperCodeGen):
         int_array: str,
         writer=None,
         known_statically=False,
-        graph=None,
+        graph=None,  # for per-graph caching
     ):
         # Because the memory planning is done in two passes (see the implementation
         # of self.generate), the writeline behavior is different in the two passes.
@@ -1444,32 +1444,38 @@ class CppWrapperCpu(WrapperCodeGen):
             super().codegen_multi_output(name, value)
 
     def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
-        self.writeline(f"{self.comment} subgraph: {subgraph.name}")
-        for inner_input, outer_input in zip(subgraph.graph.graph_inputs, outer_inputs):
-            if config.abi_compatible:
-                self.writeline(f"AtenTensorHandle {inner_input}_handle;")
-                self.writeline(
-                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_tensor({outer_input}, &{inner_input}_handle));"
+        try:
+            self.push_codegened_graph(subgraph.graph)
+            self.writeline(f"{self.comment} subgraph: {subgraph.name}")
+            for inner_input, outer_input in zip(
+                subgraph.graph.graph_inputs, outer_inputs
+            ):
+                if config.abi_compatible:
+                    self.writeline(f"AtenTensorHandle {inner_input}_handle;")
+                    self.writeline(
+                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_tensor({outer_input}, &{inner_input}_handle));"
+                    )
+                    self.writeline(
+                        f"RAIIAtenTensorHandle {inner_input}({inner_input}_handle);"
+                    )
+                else:
+                    self.writeline(
+                        f"{self.declare}{inner_input} = {outer_input}{self.ending}"
+                    )
+            parent_graph = V.graph
+            with V.set_graph_handler(subgraph.graph):
+                subgraph.graph.codegen_subgraph(
+                    parent_graph=parent_graph,
                 )
-                self.writeline(
-                    f"RAIIAtenTensorHandle {inner_input}({inner_input}_handle);"
-                )
-            else:
-                self.writeline(
-                    f"{self.declare}{inner_input} = {outer_input}{self.ending}"
-                )
-        parent_graph = V.graph
-        with V.set_graph_handler(subgraph.graph):
-            subgraph.graph.codegen_subgraph(
-                parent_graph=parent_graph,
-            )
-        for inner_output, outer_output in zip(
-            subgraph.graph.graph_outputs, outer_outputs
-        ):
-            src = inner_output.codegen_reference()
-            if config.abi_compatible:
-                src = f"std::move({src})"
-            self.writeline(f"{outer_output} = {src}{self.ending}")
+            for inner_output, outer_output in zip(
+                subgraph.graph.graph_outputs, outer_outputs
+            ):
+                src = inner_output.codegen_reference()
+                if config.abi_compatible:
+                    src = f"std::move({src})"
+                self.writeline(f"{outer_output} = {src}{self.ending}")
+        finally:
+            self.pop_codegened_graph()
 
     def codegen_conditional(self, conditional):
         name = conditional.get_name()
@@ -1731,7 +1737,7 @@ class CppWrapperCpu(WrapperCodeGen):
 
         self.extern_call_ops.add(cpp_kernel_key)
 
-    def generate_store_remaining_kernels(self):
+    def generate_save_uncompiled_kernels(self):
         pass
 
     def val_to_cpp_arg_str(self, type_, val, is_legacy_abi) -> str:

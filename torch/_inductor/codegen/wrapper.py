@@ -412,7 +412,7 @@ class WrapperCodeGen(CodeGen):
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: Dict[str, str] = {}
-        self.kernel_numel_expr: Set[str] = set()
+        self.kernel_numel_expr: Set[Tuple[str, "GraphLowering"]] = set()
         self.lines: List[Union[MemoryPlanningLine, LineContext]] = []
         self.declare = ""
         self.declare_maybe_reference = ""
@@ -432,7 +432,7 @@ class WrapperCodeGen(CodeGen):
         self.allow_stack_allocation: Optional[bool] = None
         self.stack_allocated_buffers: Dict[BufferName, ir.Buffer] = {}
         self.computed_sizes: Set[sympy.Symbol] = set()
-        self.graph_stack = []
+        self.codegened_graph_stack = [V.graph]
 
         self.write_header()
         self.write_prefix()
@@ -581,13 +581,13 @@ class WrapperCodeGen(CodeGen):
         return name
 
     def get_codegened_graph(self):
-        return self.graph_stack[-1]
+        return self.codegened_graph_stack[-1]
 
     def push_codegened_graph(self, graph):
-        self.graph_stack.append(graph)
+        self.codegened_graph_stack.append(graph)
 
     def pop_codegened_graph(self):
-        return self.graph_stack.pop()
+        return self.codegened_graph_stack.pop()
 
     def next_kernel_suffix(self) -> str:
         return f"{next(self._names_iter)}"
@@ -735,7 +735,7 @@ class WrapperCodeGen(CodeGen):
                 self.generate_end_graph()
 
             if config.triton.store_cubin:
-                self.generate_store_remaining_kernels()
+                self.generate_save_uncompiled_kernels()
 
             self.generate_return(output_refs)
 
@@ -1109,6 +1109,7 @@ class WrapperCodeGen(CodeGen):
 
         inductor_meta = {
             "kernel_name": name,
+            "backend_hash": torch.utils._triton.triton_hash_with_backend(),
         }
 
         configs = [
@@ -1173,8 +1174,9 @@ class WrapperCodeGen(CodeGen):
 
     def generate_numel_expr(self, kernel_name: str, tree):
         expr = f"{kernel_name}_{tree.prefix}numel"
-        if expr not in self.kernel_numel_expr:
-            self.kernel_numel_expr.add(expr)
+        if (expr, V.graph) not in self.kernel_numel_expr:
+            # declare expr once in each graph (scope)
+            self.kernel_numel_expr.add((expr, V.graph))
             self.writeline(
                 f"{self.declare}{expr} = {self.expr_printer(tree.numel)}{self.ending}"
             )
@@ -1213,20 +1215,22 @@ class WrapperCodeGen(CodeGen):
     def generate_end_graph(self):
         self.wrapper_call.writeline("end_graph()")
 
-    def generate_store_remaining_kernels(self):
+    def generate_save_uncompiled_kernels(self):
         """
-        Precompile and store the CUBINs of the Triton kernels
-        that haven't been precompiled and stored during the
+        Precompile and save the CUBINs of the Triton kernels
+        that haven't been precompiled and saved during the
         run of the generated model. This can happen when the
         model contains control flow, only one pass through
-        which covers the kernels that are stored.
+        which covers the kernels that are saved. The main
+        purpose is to compile and save the Triton kernels
+        outside the active control flow path for subsequent
+        AOTInductor code generation and compilation.
         """
-        pass
         self.wrapper_call.splice(
             """
             for name, kernel in globals().items():
                 if isinstance(kernel, torch._inductor.triton_heuristics.CachingAutotuner):
-                    if not kernel.saved_cuda_kernel:
+                    if not kernel.cuda_kernel_saved:
                         if len(kernel.launchers) == 0:
                             kernel.precompile()
                         kernel.save_cuda_kernel(

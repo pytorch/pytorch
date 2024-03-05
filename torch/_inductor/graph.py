@@ -1034,6 +1034,7 @@ class GraphLowering(torch.fx.Interpreter):
                                 torch.ops.onednn.qconv2d_pointwise.default,
                                 torch.ops.onednn.qconv2d_pointwise.binary,
                                 torch.ops.onednn.qlinear_pointwise.default,
+                                torch.ops.onednn.qlinear_pointwise.tensor,
                             ]
                             if torch._C.has_mkl:
                                 need_fixed_layout += [torch.ops.mkl._mkl_linear.default]
@@ -1195,12 +1196,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.scheduler = Scheduler(self.buffers)
         V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
 
-        try:
-            self.wrapper_code.push_codegened_graph(self)
-            self.scheduler.codegen()
-            return self.wrapper_code.generate(self.is_inference)
-        finally:
-            assert self.wrapper_code.pop_codegened_graph() == self
+        self.scheduler.codegen()
+        return self.wrapper_code.generate(self.is_inference)
 
     def codegen_subgraph(self, parent_graph):
         """
@@ -1216,14 +1213,10 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.wrapper_code = parent_graph.wrapper_code
         self.device_ops = parent_graph.device_ops
+        self.cpp_wrapper = parent_graph.cpp_wrapper
 
         self.scheduler = Scheduler(self.buffers)
-
-        try:
-            self.wrapper_code.push_codegened_graph(self)
-            self.scheduler.codegen()
-        finally:
-            assert self.wrapper_code.pop_codegened_graph() == self
+        self.scheduler.codegen()
 
     def count_bytes(self):
         from .scheduler import Scheduler
