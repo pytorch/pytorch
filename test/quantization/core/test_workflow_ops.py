@@ -30,7 +30,7 @@ from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TestCase, skipIfTorchDynamo
 
 # Reference method for fake quantize
 # Note: because scale/zero_point are left as float in the actual kernel, this mimics how fake_quant works for float16/64
@@ -1013,6 +1013,7 @@ class TestFakeQuantizeOps(TestCase):
                         Y, Y_prime, "Difference found between dequant+quant_per_channel and fake_quantize_per_channel")
                 self.assertTrue(test_was_run)
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_fake_quantize_per_channel_affine_scale_dtypes(self):
         """
         Ensure the error message is more helpful
