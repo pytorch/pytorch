@@ -135,6 +135,9 @@ def visualize_sharding(dtensor, prompt=""):
     Visualizes sharding in 1D-2D dtensors
     Requires tabulate, install with `pip install tabulate`
     """
+    if (dtensor.numel() == 0):  # we do not print for empty tensors
+        return
+
     if len(dtensor.shape) >= 3:
         raise RuntimeError(
             "visualize sharding is only implemented for 1D or 2D dtensor"
