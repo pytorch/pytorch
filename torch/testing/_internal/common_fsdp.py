@@ -1387,6 +1387,7 @@ def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
                     fully_shard_patch.value,
                 ):
                     func(*args, **kwargs)
+                    torch.distributed.barrier()
                 # mock.patch.__exit__ does not work with multi-thread
                 # thread 1 set {func.__module__}.fully_shard
                 # thread 2 read {func.__module__}.fully_shard and thought it is original
