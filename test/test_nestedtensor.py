@@ -3206,7 +3206,7 @@ class TestNestedTensorSubclass(TestCase):
         view = nt.expand(-1, -1, 5)
         self.assertEqual(nt.shape[:2], view.shape[:2])
 
-    @xfailIfTorchDynamo
+    @skipIfTorchDynamo("skipped until proper view support for NT")
     def test_view_ragged_idx_not_one(self, device):
         nt = random_nt_from_dims([2, None, 20], device=device, dtype=torch.float32, layout=torch.jagged)
 
