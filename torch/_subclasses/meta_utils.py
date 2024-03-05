@@ -332,9 +332,7 @@ class MetaConverter:
         # fully dynamic dims. This is useful when fake-ifying intermediate tensors in
         # closed-over ViewFunc state, as we don't have symbolic contexts for them, but we
         # don't want to over-specialize during view replay.
-        def all_dynamic_symbolic_context(
-            t, source, shape_env=shape_env, callback=callback
-        ):
+        def all_dynamic_symbolic_context(t, source, shape_env, callback):
             from torch._dynamo.source import AttrSource
             from torch.fx.experimental.symbolic_shapes import (
                 DimDynamic,
@@ -345,13 +343,13 @@ class MetaConverter:
             view_base_context: Optional[SymbolicContext] = None
             if t._is_view():
                 view_base_context = all_dynamic_symbolic_context(
-                    t._base, AttrSource(source, "_base")
+                    t._base, AttrSource(source, "_base"), shape_env, callback
                 )
 
             grad_context: Optional[SymbolicContext] = None
             if safe_grad(t) is not None:
                 grad_context = all_dynamic_symbolic_context(
-                    t.grad, AttrSource(source, "grad")
+                    t.grad, AttrSource(source, "grad"), shape_env, callback
                 )
 
             t_symbolic_context: SymbolicContext
@@ -363,7 +361,7 @@ class MetaConverter:
                     assert isinstance(attr, str)
                     inner = getattr(t, attr)
                     inner_contexts[attr] = all_dynamic_symbolic_context(
-                        inner, AttrSource(source, attr)
+                        inner, AttrSource(source, attr), shape_env, callback
                     )
                 t_symbolic_context = SubclassSymbolicContext(
                     dynamic_sizes=t_dynamic_sizes,
@@ -487,7 +485,7 @@ class MetaConverter:
                     callback,
                     source=temp_source,
                     symbolic_context=all_dynamic_symbolic_context(
-                        visited_t, temp_source
+                        visited_t, temp_source, shape_env, callback
                     ),
                 )
 
@@ -876,11 +874,14 @@ class MetaConverter:
                     from torch._dynamo.source import AttrSource
                     from torch.fx.experimental.symbolic_shapes import (
                         StatelessSymbolicContext,
+                        SymbolicContext,
                     )
 
-                    assert isinstance(symbolic_context, StatelessSymbolicContext)
-                    grad_context = symbolic_context.grad_context
-                    assert grad_context is not None
+                    grad_context: Optional[SymbolicContext] = None
+                    if symbolic_context is not None:
+                        assert isinstance(symbolic_context, StatelessSymbolicContext)
+                        grad_context = symbolic_context.grad_context
+                        assert grad_context is not None
 
                     r.grad = self.meta_tensor(
                         safe_grad(t),
