@@ -133,6 +133,7 @@ def validate_ir(node_or_nodes):
                 (
                     torch._inductor.ir.ExpandView,
                     DynamicScalar,
+                    AssertScalar,
                     TensorBox,
                     sympy.logic.boolalg.Boolean,
                     Expr,
@@ -2211,7 +2212,7 @@ class View(GenericView):
             var, size_new = stack_new.pop()
             V.graph.sizevars.guard_equals(size_new, 1)  # type: ignore[arg-type]
 
-        view_expr = list(reversed(view_expr))
+        view_expr.reverse()
         assert len(view_expr) == len(old_size)
 
         def reindex(index):
@@ -4638,6 +4639,47 @@ class DynamicScalar(ExternKernel):
         wrapper.codegen_dynamic_scalar(self)
 
 
+class AssertScalar(ExternKernel):
+    """
+    The result of a call to aten._assert_scalar
+    """
+
+    def get_reads(self):
+        return ()
+
+    def should_allocate(self):
+        return False
+
+    def __init__(self, scalar, msg):
+        super().__init__(
+            # Buffer(name, layotu)
+            None,
+            NoneLayout(torch.device("cpu")),  # type: ignore[arg-type]
+            # InputsKernel(inputs)
+            [],
+        )  # type: ignore[arg-type]
+        self.scalar = scalar
+        self.msg = msg
+
+    def has_side_effects(self):
+        return True
+
+    def get_unbacked_symbol_uses(self):
+        return free_unbacked_symbols(self.scalar)
+
+    def codegen(self, wrapper):
+        if V.graph.cpp_wrapper:
+            pass
+        else:
+            wrapper.writeline(
+                f"if not {V.graph.wrapper_code.codegen_python_sizevar(self.scalar)}:"
+            )
+            wrapper.writeline(f"    raise RuntimeError({repr(self.msg)})")
+            # No one should ever use this buffer, but for uniformity
+            # define the variable and assign it None
+            wrapper.writeline(f"{self.get_name()} = None")
+
+
 @dataclasses.dataclass
 class ExternKernelNode:
     name: str
@@ -4813,7 +4855,10 @@ class FallbackKernel(ExternKernelAlloc):
         self.init_args_default_value(kernel._schema)
 
     def is_legacy_abi_kernel(self):
-        return "_scaled_dot_product_flash_attention" in str(self.python_kernel_name)
+        return (
+            config.c_shim_version == "1"
+            and "_scaled_dot_product_flash_attention" in str(self.python_kernel_name)
+        )
 
     def init_args_default_value(self, schema):
         self.args_default_value = [
@@ -4866,6 +4911,7 @@ class FallbackKernel(ExternKernelAlloc):
         self.abi_compatible_kernel = (
             f"{self.cpp_kernel_name}_v2"
             if self.cpp_kernel_name in {"at::_scaled_dot_product_flash_attention"}
+            and config.c_shim_version == "1"
             else self.cpp_kernel_name
         )
 
@@ -5023,7 +5069,13 @@ class FallbackKernel(ExternKernelAlloc):
             # Aten Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
             if V.graph.cpp_wrapper:
-                if config.is_fbcode() and kernel not in has_c_shim:
+                if (
+                    config.is_fbcode()
+                    and kernel not in has_c_shim
+                    # C shim v2 is torchgen-ed, which should cover all aten ops.
+                    # If you do hit a missed op, please update gen_aoti_c_shim.py.
+                    and config.c_shim_version == "1"
+                ):
                     log.warning(
                         "%s is missing a c-shim implementation, using proxy executor as fallback",
                         kernel,
@@ -6436,6 +6488,8 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
+        has_bias=True,
+        x_scale_zp_are_tensors=False,
     ):
         """
         if bias is not None
@@ -6447,21 +6501,32 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             - const_args is: [bias, x_scale, x_zp, o_inv_scale, o_zp,
               fp32_output, unary_attr, unary_scalars, unary_algorithm]
         """
-        self.has_bias = len(inputs) == 5
+        self.has_bias = has_bias
+        self.x_scale_zp_are_tensors = x_scale_zp_are_tensors
         super().__init__(
             layout,
             inputs,
             constant_args,
             None,
-            python_kernel_name="torch.ops.onednn.qlinear_pointwise",
+            python_kernel_name=(
+                "torch.ops.onednn.qlinear_pointwise.tensor"
+                if x_scale_zp_are_tensors
+                else "torch.ops.onednn.qlinear_pointwise.default"
+            ),
             cpp_kernel_name="onednn::qlinear_pointwise",
         )
+        self.cpp_kernel_overload_name = "tensor" if x_scale_zp_are_tensors else ""
         self.cpp_kernel_key = "qlinear_pointwise"
-        self.cpp_op_schema = """
+        x_scale_type_str, x_zp_type_str = (
+            ("at::Tensor", "at::Tensor")
+            if x_scale_zp_are_tensors
+            else ("double", "int64_t")
+        )
+        self.cpp_op_schema = f"""
             at::Tensor(
                 at::Tensor act,
-                double act_scale,
-                int64_t act_zero_point,
+                {x_scale_type_str} act_scale,
+                {x_zp_type_str} act_zero_point,
                 at::Tensor weight,
                 at::Tensor weight_scales,
                 at::Tensor weight_zero_points,
@@ -6483,16 +6548,29 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
         packed_weight = args[1]
         bias = args[2] if self.has_bias else const_args[0]
         w_scale, w_zp = args[-2], args[-1]
-        (
-            x_scale,
-            x_zp,
-            o_inv_scale,
-            o_zp,
-            output_dtype,
-            unary_attr,
-            unary_scalars,
-            unary_algorithm,
-        ) = const_args[-8:]
+        if self.x_scale_zp_are_tensors:
+            assert len(args) >= 4
+            x_scale, x_zp = args[-4], args[-3]
+            (
+                o_inv_scale,
+                o_zp,
+                output_dtype,
+                unary_attr,
+                unary_scalars,
+                unary_algorithm,
+            ) = const_args[-6:]
+        else:
+            assert len(const_args) >= 8
+            (
+                x_scale,
+                x_zp,
+                o_inv_scale,
+                o_zp,
+                output_dtype,
+                unary_attr,
+                unary_scalars,
+                unary_algorithm,
+            ) = const_args[-8:]
 
         codegen_args = (
             x,
@@ -6515,6 +6593,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             codegen_args,
             self.cpp_op_schema,
             self.cpp_kernel_key,
+            self.cpp_kernel_overload_name,
         )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -6543,12 +6622,19 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             bias,
         )
 
+        if isinstance(x_scale, TensorBox) and isinstance(x_zp, TensorBox):
+            x_scale.realize()
+            x_zp.realize()
+            inputs = inputs + [x_scale, x_zp]
+            x_scale_zp_are_tensors = True
+        else:
+            assert isinstance(x_scale, float) and isinstance(x_zp, int)
+            constant_args = constant_args + [x_scale, x_zp]
+            x_scale_zp_are_tensors = False
         w_scale.realize()
         w_zp.realize()
         inputs = inputs + [w_scale, w_zp]
         constant_args = constant_args + [
-            x_scale,
-            x_zp,
             o_inv_scale,
             output_zero_point,
             output_dtype,
@@ -6567,6 +6653,8 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             layout=kernel_layout,
             inputs=inputs,
             constant_args=constant_args,
+            has_bias=(bias is not None),
+            x_scale_zp_are_tensors=x_scale_zp_are_tensors,
         )
 
 
