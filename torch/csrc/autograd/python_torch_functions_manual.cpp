@@ -664,29 +664,6 @@ static PyObject* THPVariable__functionalize_sync(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPVariable__functionalize_are_view_metas_equal(
-    PyObject* self,
-    PyObject* args,
-    PyObject* kwargs) {
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser(
-      {"_functionalize_are_view_metas_equal(Tensor lhs, Tensor rhs)"},
-      /*traceable=*/true);
-
-  ParsedArgs<2> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  auto lhs = r.tensor(0);
-  auto rhs = r.tensor(1);
-  TORCH_CHECK(at::functionalization::impl::isFunctionalTensor(lhs));
-  if (at::functionalization::impl::unsafeGetFunctionalWrapper(lhs)
-          ->are_view_metas_equal(rhs)) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject* THPVariable__functionalize_mark_mutation_hidden_from_autograd(
     PyObject* self,
     PyObject* args,
@@ -798,11 +775,6 @@ static PyMethodDef torch_functions_manual[] = {
      nullptr},
     {"_functionalize_sync",
      castPyCFunctionWithKeywords(THPVariable__functionalize_sync),
-     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
-     nullptr},
-    {"_functionalize_are_view_metas_equal",
-     castPyCFunctionWithKeywords(
-         THPVariable__functionalize_are_view_metas_equal),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_enable_functionalization",
