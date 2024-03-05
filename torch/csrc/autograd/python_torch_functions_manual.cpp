@@ -670,40 +670,35 @@ static PyObject* THPVariable__functionalize_apply_view_metas(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
-      {"_functionalize_apply_view_metas(Tensor functional_tensor, Tensor base)"},
+      {"_functionalize_apply_view_metas(Tensor tensor, Tensor base)"},
       /*traceable=*/true);
 
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-  auto functional_tensor = r.tensor(0);
+  auto tensor = r.tensor(0);
   TORCH_INTERNAL_ASSERT(
-      at::functionalization::impl::isFunctionalTensor(functional_tensor));
-  auto wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(
-      functional_tensor);
-  return wrap(wrapper->apply_view_metas(r.tensor(1)));
+      at::functionalization::impl::isFunctionalTensor(tensor));
+  auto impl = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
+  return wrap(impl->apply_view_metas(r.tensor(1)));
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPVariable__functionalize_are_view_metas_equal(
+static PyObject* THPVariable__functionalize_base(
     PyObject* self,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
-      {"_functionalize_are_view_metas_equal(Tensor lhs, Tensor rhs)"},
+      {"THPVariable__functionalize_base(Tensor tensor)"},
       /*traceable=*/true);
 
-  ParsedArgs<2> parsed_args;
+  ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-  auto lhs = r.tensor(0);
-  auto rhs = r.tensor(1);
-  TORCH_CHECK(at::functionalization::impl::isFunctionalTensor(lhs));
-  if (at::functionalization::impl::unsafeGetFunctionalWrapper(lhs)
-          ->are_view_metas_equal(rhs)) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
+  auto tensor = r.tensor(0);
+  TORCH_INTERNAL_ASSERT(
+      at::functionalization::impl::isFunctionalTensor(tensor));
+  auto impl = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
+  return wrap(impl->base());
   END_HANDLE_TH_ERRORS
 }
 
@@ -824,9 +819,8 @@ static PyMethodDef torch_functions_manual[] = {
      castPyCFunctionWithKeywords(THPVariable__functionalize_apply_view_metas),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
-    {"_functionalize_are_view_metas_equal",
-     castPyCFunctionWithKeywords(
-         THPVariable__functionalize_are_view_metas_equal),
+    {"_functionalize_base",
+     castPyCFunctionWithKeywords(THPVariable__functionalize_base),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_enable_functionalization",

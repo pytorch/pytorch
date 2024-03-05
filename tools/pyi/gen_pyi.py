@@ -800,10 +800,10 @@ def gen_pyi(
             ],
             "_functionalize_sync": ["def _functionalize_sync(t: Tensor) -> None: ..."],
             "_functionalize_apply_view_metas": [
-                "def _functionalize_apply_view_metas(functional_tensor: Tensor, base: Tensor) -> Tensor: ..."
+                "def _functionalize_apply_view_metas(tensor: Tensor, base: Tensor) -> Tensor: ..."
             ],
-            "_functionalize_are_view_metas_equal": [
-                "def _functionalize_are_view_metas_equal(lhs: Tensor, rhs: Tensor) -> bool: ..."
+            "_functionalize_base": [
+                "def _functionalize_base(tensor: Tensor) -> Tensor: ..."
             ],
             "_enable_functionalization": [
                 "def _enable_functionalization(*, reapply_views: _bool = False): ..."

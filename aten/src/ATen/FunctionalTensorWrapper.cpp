@@ -328,6 +328,11 @@ void FunctionalTensorWrapper::sync_() {
   regenerate_from_base();
 }
 
+Tensor FunctionalTensorWrapper::base() {
+  auto storage_impl = functional_storage_impl();
+  return storage_impl->base();
+}
+
 Tensor FunctionalTensorWrapper::apply_view_metas(const Tensor& base) {
   auto t = base;
 
@@ -341,34 +346,16 @@ Tensor FunctionalTensorWrapper::apply_view_metas(const Tensor& base) {
 
 void FunctionalTensorWrapper::regenerate_from_base() {
   at::AutoDispatchSkipFunctionalize guard;
-  auto storage_impl = functional_storage_impl();
-  auto t = storage_impl->base();
+  auto t = base();
+
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
   t = apply_view_metas(t);
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
+
   replace_(t);
+
+  auto storage_impl = functional_storage_impl();
   generation_ = storage_impl->generation();
-}
-
-bool FunctionalTensorWrapper::are_view_metas_equal(const Tensor& other) {
-  TORCH_CHECK(at::functionalization::impl::isFunctionalTensor(other));
-  auto other_functional_tensor = at::functionalization::impl::unsafeGetFunctionalWrapper(other);
-
-  // First, check if sizes are equal.
-  if (view_metas_.size() != other_functional_tensor->view_metas_.size()) {
-    return false;
-  }
-
-  // Then, check if the name of each ViewMeta matches with other.
-  // This ensures the order and actual view operations are the same.
-  int64_t size = static_cast<int64_t>(view_metas_.size());
-  for (int64_t i = 0; i < size; i++) {
-    if (view_metas_[i].name != other_functional_tensor->view_metas_[i].name) {
-      return false;
-    }
-  }
-
-  return true;
 }
 
 bool FunctionalTensorWrapper::apply_updates() {

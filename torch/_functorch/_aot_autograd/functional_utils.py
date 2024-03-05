@@ -213,11 +213,21 @@ def gen_alias_from_base(
     # functions applied to itself (collected during functionalization) so as
     # to replay them (view functions) on the aliased_base_tensor.
     if target_functional_tensor is not None:
-        out = torch._functionalize_apply_view_metas(
-            target_functional_tensor.tensor, aliased_base_tensor
-        )
-        assert out is not None and out.shape == target_meta_tensor.shape
-        return patch_requires_grad(out)
+        try:
+            out = torch._functionalize_apply_view_metas(
+                target_functional_tensor.tensor, aliased_base_tensor
+            )
+            assert out is not None and out.shape == target_meta_tensor.shape
+            return patch_requires_grad(out)
+        except RuntimeError:
+            # NYI for dynamic shapes.
+            #
+            # On functionalization, the ViewMeta lambdas will have symbolic shapes.
+            # When trying to apply those lambdas on concrete tensors, it will fail.
+            #
+            # In order for this to work, we should have a way to replace those
+            # symbolic shapes with concrete numbers.
+            pass
 
     # Try to do view-replay if possible.
     # fall back to .as_strided() if we can't.

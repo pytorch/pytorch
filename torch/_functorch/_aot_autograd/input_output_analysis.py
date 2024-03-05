@@ -220,6 +220,7 @@ def create_synthetic_base_metadata(
                 # Map the input idx pre-synthetic-bases to the new idx post-synthetic-bases
                 base_idx=new_base_idx,  # type: ignore[arg-type]
                 requires_grad=o.requires_grad,
+                functional_tensor=o.functional_tensor,
             )
         )
 
