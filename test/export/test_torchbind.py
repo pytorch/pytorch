@@ -18,7 +18,7 @@ class TestExportTorchbind(TestCase):
 
             @classmethod
             def from_real(cls, foo):
-                x, y = foo.__get_metadata__()
+                (x, y), _ = foo.__getstate__()
                 return cls(x, y)
 
             def add_tensor(self, z):
@@ -153,7 +153,7 @@ class TestImplAbstractClass(TestCase):
                     self.y = y
 
                 def from_real(self, foo_obj):
-                    x, y = foo_obj.__get_metadata__()
+                    x, y = foo_obj.__getstate__()
                     return FakeFoo(x, y)
 
     def test_impl_abstract_class_valid(self):
@@ -164,7 +164,7 @@ class TestImplAbstractClass(TestCase):
 
             @classmethod
             def from_real(cls, foo_obj):
-                x, y = foo_obj.__get_metadata__()
+                x, y = foo_obj.__getstate__()
                 return cls(x, y)
 
         torch._library.impl_abstract_class("_TorchScriptTesting::_Foo", FakeFoo)
@@ -178,7 +178,7 @@ class TestImplAbstractClass(TestCase):
 
             @classmethod
             def from_real(cls, foo_obj):
-                x, y = foo_obj.__get_metadata__()
+                x, y = foo_obj.__getstate__()
                 return cls(x, y)
 
         with self.assertRaisesRegex(RuntimeError, "already registered"):
