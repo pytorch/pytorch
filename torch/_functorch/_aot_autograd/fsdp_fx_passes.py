@@ -202,3 +202,19 @@ def replace_as_strided_scatter_with_primal_if_primal_has_no_other_use_after_this
                     mod.graph.erase_node(as_strided_scatter_node)
                     mod.graph.lint()
                     mod.recompile()
+
+
+def use_input_as_output_for_inplace_copy_ops(mod):
+    """
+    copy_: "f32[12340, 12340]" = torch.ops.aten.copy_.default(getitem_2, as_strided)
+    accumulate_grad__1 = torch.ops.inductor.accumulate_grad_.default(copy_, add_1)
+    ->
+    copy_: "f32[12340, 12340]" = torch.ops.aten.copy_.default(getitem_2, as_strided)
+    accumulate_grad__1 = torch.ops.inductor.accumulate_grad_.default(getitem_2, add_1)
+    """
+    for n in list(mod.graph.nodes):
+        if n.target is torch.ops.aten.copy_.default:
+            left_inp_n = n.args[0]
+            n.replace_all_uses_with(left_inp_n)
+            mod.graph.lint()
+            mod.recompile()

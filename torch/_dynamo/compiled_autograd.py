@@ -22,6 +22,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.fx.proxy import Proxy
+from torch._functorch._aot_autograd import fsdp_fx_passes
 
 compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 
@@ -206,6 +207,10 @@ class AutogradCompilerInstance:
         )
         compiled_autograd_log.info(
             "%s", lazy_format_graph_code("Compiled autograd graph", graph)
+        )
+        fsdp_fx_passes.use_input_as_output_for_inplace_copy_ops(graph)
+        compiled_autograd_log.info(
+            "%s", lazy_format_graph_code("Compiled autograd graph (after FSDP-specific FX passes)", graph)
         )
         trace_structured(
             "compiled_autograd_graph",
