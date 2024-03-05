@@ -274,7 +274,7 @@ def save_graph_repro(
     fd.write("if __name__ == '__main__':\n")
     fd.write("    from torch._dynamo.repro.after_aot import run_repro\n")
     fd.write(
-        f"    with torch.no_grad():\n"
+        f"    with torch.no_grad():"
         f"        run_repro(mod, load_args, accuracy={accuracy!r}, command={command!r}, "
         f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r}"
         ")\n"
@@ -702,10 +702,9 @@ def repro_run(options, mod, load_args):
             if isinstance(arg, torch.Tensor) and arg.is_cuda:
                 need_sync = True
                 break
-        ref = compiled(list(args))
+        ref = compiled(args)
         if need_sync:
             synchronize()  # ensure segfaults are surfaced
-    return lambda: compiled(list(args))
 
 
 # TODO: lazily load the inputs or something, rather than cloning them
@@ -929,4 +928,4 @@ divergences--you just might not end up with a useful repro in the end.""",
         "minifier-query": repro_minifier_query,
         "run": repro_run,
     }
-    return COMMAND_FNS[options.command](options, mod, load_args)
+    COMMAND_FNS[options.command](options, mod, load_args)

@@ -115,20 +115,6 @@ class BenchmarkFusionTestTemplate:
             opt_f = torch.compile(f)
             opt_f(*inputs)
 
-    def test_foreach_kernel(self):
-        """
-        Benchmark fusion should skip benchmarking kernels involves foreach kernel
-        for now. Without the skipping logic, `codegen_node_schedule` may fail.
-        """
-        a = torch.randn(1024, 256, device=self.device)
-        b = torch.randn(1024, 512, device=self.device)
-
-        def f(a, b):
-            a, b = torch._foreach_abs([a, b])
-            return a + 1, b + 2
-
-        self.common(f, (a, b))
-
 
 if HAS_CUDA and not TEST_WITH_ASAN:
 

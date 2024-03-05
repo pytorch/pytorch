@@ -7156,47 +7156,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(DoNotUpcastModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    def test_scalar_type_promotion_onnx_where_two_prim_const(self):
-        class TwoPrimConstCastWhereModel(torch.nn.Module):
-            def forward(self, c):
-                return torch.where(c, 0, 1.0)
-
-        c = torch.ones(8, dtype=torch.bool)
-        self.run_test(TwoPrimConstCastWhereModel(), (c))
-
-    @skipIfUnsupportedMinOpsetVersion(9)
-    def test_scalar_type_promotion_onnx_where_one_prim_const(self):
-        class OnePrimConstCastWhereModel(torch.nn.Module):
-            def forward(self, c, x):
-                return torch.where(c, x, 1.0)
-
-        c = torch.ones(8, dtype=torch.bool)
-        x = torch.ones(8, dtype=torch.float16)
-        self.run_test(OnePrimConstCastWhereModel(), (c, x))
-
-    @skipIfUnsupportedMinOpsetVersion(9)
-    def test_scalar_type_promotion_onnx_where_one_tensor_const(self):
-        class OneTensorConstCastWhereModel(torch.nn.Module):
-            def forward(self, c, x):
-                return torch.where(c, x, torch.ones(size=(), dtype=torch.float64))
-
-        c = torch.ones(8, dtype=torch.bool)
-        x = torch.ones(8, dtype=torch.float16)
-        self.run_test(OneTensorConstCastWhereModel(), (c, x))
-
-    @skipIfUnsupportedMinOpsetVersion(9)
-    def test_scalar_type_upcast_type_promotion_onnx_where_no_const(self):
-        class OnnxWhereUpcastModel(torch.nn.Module):
-            def forward(self, c, x, y):
-                return torch.where(c, x, y)
-
-        c = torch.ones(8, dtype=torch.bool)
-        x = torch.ones(8, dtype=torch.float16)
-        y = torch.ones(8, dtype=torch.float32)
-
-        self.run_test(OnnxWhereUpcastModel(), (c, x, y))
-
-    @skipIfUnsupportedMinOpsetVersion(9)
     def test_full_like(self):
         class FullLikeModel(torch.nn.Module):
             def forward(self, x):
