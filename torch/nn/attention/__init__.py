@@ -27,8 +27,6 @@ __all__: List[str] = ["SDPBackend", "sdpa_kernel", "WARN_FOR_UNFUSED_KERNELS"]
 WARN_FOR_UNFUSED_KERNELS = False
 
 
-from enum import Enum
-
 from torch._C import _SDPBackend as SDPBackend
 
 # Hacks for Sphinx documentation:
