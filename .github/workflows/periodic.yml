@@ -217,8 +217,8 @@ jobs:
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       test-matrix: |
         { include: [
-          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },
-          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
+          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.2" },
+          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.2" },
         ]}
 
   linux-focal-rocm6_0-py3_8-test:
