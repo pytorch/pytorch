@@ -114,9 +114,9 @@ class TensorParallelTest(DTensorTestBase):
                 },
             )
 
+    @unittest.expectedFailure
     @with_comms
     @run_with_both_funcol_impls_with_arg
-    @unittest.expectedFailure
     def test_tp_transform_e2e(self, use_native_funcol):
         torch.manual_seed(0)
         model = MLPListModule(2).to(device=self.device_type)
