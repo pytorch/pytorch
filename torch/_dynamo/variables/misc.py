@@ -11,6 +11,7 @@ from typing import Dict, List
 
 import torch._C
 import torch._numpy as tnp
+import torch.utils._pytree as pytree
 from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
@@ -40,9 +41,9 @@ class SuperVariable(VariableTracker):
         codegen(self.typevar)
         if self.objvar is not None:
             codegen(self.objvar)
-            return create_call_function(2, True)
+            codegen.extend_output(create_call_function(2, True))
         else:
-            return create_call_function(1, True)
+            codegen.extend_output(create_call_function(1, True))
 
     def _resolved_getattr_and_source(self, tx, name):
         assert self.objvar, "1-arg super not implemented"
@@ -233,7 +234,7 @@ class ClosureVariable(UnknownVariable):
         self.name = name
 
     def reconstruct(self, codegen):
-        return [codegen.create_load_closure(self.name)]
+        codegen.append_output(codegen.create_load_closure(self.name))
 
 
 # closure variable created by an inlined function
@@ -243,7 +244,7 @@ class InlinedClosureVariable(UnknownVariable):
         self.name = name
 
     def reconstruct(self, codegen):
-        return [codegen.create_load_closure(self.name)]
+        codegen.append_output(codegen.create_load_closure(self.name))
 
 
 class NewCellVariable(VariableTracker):
@@ -483,6 +484,9 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             assert self.source and not kwargs
             tx.output.side_effects.track_save_for_backward(self, args)
 
+        # In eager mode, multiple calls to .save_for_backward() will overwrite previous calls.
+        if len(self.saved_tensors.tensors) > 0:
+            self.saved_tensors.tensors = []
         for arg in args:
             self.saved_tensors.tensors.append(arg)
         return variables.ConstantVariable.create(None)
@@ -539,7 +543,7 @@ class GetAttrVariable(VariableTracker):
 
     def reconstruct(self, codegen):
         codegen(self.obj)
-        return codegen.create_load_attrs(self.name)
+        codegen.extend_output(codegen.create_load_attrs(self.name))
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -765,7 +769,7 @@ class NullVariable(VariableTracker):
     def reconstruct(self, codegen):
         if sys.version_info < (3, 11):
             unimplemented("cannot reconstruct NullVariable in < Python 3.11")
-        return [create_instruction("PUSH_NULL")]
+        codegen.append_output(create_instruction("PUSH_NULL"))
 
 
 class DeletedVariable(VariableTracker):
@@ -808,12 +812,64 @@ class StringFormatVariable(VariableTracker):
             codegen.append_output(create_instruction("PUSH_NULL"))
         codegen.append_output(codegen.create_load_const(self.format_string))
         codegen.append_output(codegen.create_load_attr("format"))
-        codegen.extend_output(
-            variables.TupleVariable(self.sym_args).reconstruct(codegen)
-        )
+        codegen(variables.TupleVariable(self.sym_args))
         kwargs = {
             variables.ConstantVariable.create(k): v for k, v in self.sym_kwargs.items()
         }
-        codegen.extend_output(variables.ConstDictVariable(kwargs).reconstruct(codegen))
+        codegen(variables.ConstDictVariable(kwargs))
         codegen.append_output(create_instruction("CALL_FUNCTION_EX", arg=1))
-        return []
+
+
+class DebuggingVariable(VariableTracker):
+    """
+    Represents a call to a debugging function like print(), or something
+    registered to config.reorderable_logging_functions.
+    """
+
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
+    @staticmethod
+    def is_reorderable_logging_function(obj):
+        return (
+            callable(obj)
+            and isinstance(obj, (types.FunctionType, types.BuiltinFunctionType))
+            and obj in torch._dynamo.config.reorderable_logging_functions
+        )
+
+    def call_function(self, tx, args, kwargs):
+        if tx.export:
+            # For export cases, we can just make debugging functions no-ops
+            return
+
+        if not self.can_reorder_logs(self.value, args, kwargs):
+            unimplemented(
+                f"Reordering debugging function {self.value} "
+                f"with inputs {args} {kwargs} is not yet implemented."
+            )
+
+        tx.debug_locals.append((self, list(args)))
+
+    def reconstruct(self, codegen):
+        return self.source.reconstruct(codegen)
+
+    @staticmethod
+    def can_reorder_logs(fn, args, kwargs) -> True:
+        """
+        Run some additional checks for what sort of function calls can we
+        actually reorder.
+        """
+
+        allowed_input_types = (
+            variables.TensorVariable,
+            variables.ConstantVariable,
+            StringFormatVariable,
+        )
+
+        flat_args = pytree.tree_leaves([args, kwargs])
+        for arg in flat_args:
+            if not isinstance(arg, allowed_input_types):
+                return False
+
+        return True

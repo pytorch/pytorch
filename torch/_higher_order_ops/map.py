@@ -7,6 +7,7 @@ from torch._functorch.aot_autograd import AOTConfig, create_joint, from_fun
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
+    reenter_make_fx,
     UnsupportedAliasMutationException,
 )
 from torch._ops import HigherOrderOperator
@@ -228,8 +229,9 @@ def trace_map(proxy_mode, func_overload, f, xs, pos_args):
 
     example_input = _unstack_pytree(xs)[0]
     body_graph = f
-    if not isinstance(body_graph, torch.fx.GraphModule):
-        body_graph = make_fx(body_graph)(*example_input, *pos_args)
+
+    pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
+    body_graph = reenter_make_fx(body_graph, pre_dispatch)(*example_input, *pos_args)
 
     next_name = None
     i = 0
@@ -341,10 +343,15 @@ def map_functionalize(ctx, f, xs, pos_args):
     with ctx.redispatch_to_next():
         with disable_proxy_modes_tracing():
             example_inputs = (*_unstack_pytree(unwrapped_xs)[0], *unwrapped_args)
-        if _has_potential_branch_input_mutation(f, example_inputs):
+        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
+        if _has_potential_branch_input_mutation(
+            f, example_inputs, pre_dispatch=pre_dispatch
+        ):
             raise UnsupportedAliasMutationException("torch.map is mutating the input!")
 
-        if _has_potential_branch_input_alias(f, example_inputs):
+        if _has_potential_branch_input_alias(
+            f, example_inputs, pre_dispatch=pre_dispatch
+        ):
             raise UnsupportedAliasMutationException("torch.map is aliasing the input!")
 
         map_return = map_impl(wrapped_fn, unwrapped_xs, unwrapped_args)

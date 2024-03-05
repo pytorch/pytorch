@@ -953,7 +953,7 @@ class VecISA:
     # In fbcode however, we are using the same compiler for pytorch and for inductor codegen,
     # making the runtime check unnecessary.
     _avx_code = """
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON)
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #endif
@@ -965,7 +965,7 @@ extern "C" void __avx_chk_kernel() {
     auto tmp1 = tmp0.exp();
     tmp1.store(in_out_ptr0);
 }
-"""
+"""  # noqa: B950
 
     _avx_py_load = """
 import torch
@@ -1027,6 +1027,19 @@ cdll.LoadLibrary("__lib_path__")
 
 
 @dataclasses.dataclass
+class VecNEON(VecISA):
+    _bit_width = 256  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec256/vec256_float_neon.h
+    _macro = "-DCPU_CAPABILITY_NEON"
+    _arch_flags = ""  # Unused
+    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16}
+
+    def __str__(self) -> str:
+        return "neon"  # Unused
+
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
+
+@dataclasses.dataclass
 class VecAVX512(VecISA):
     _bit_width = 512
     _macro = "-DCPU_CAPABILITY_AVX512"
@@ -1081,7 +1094,11 @@ class InvalidVecISA(VecISA):
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAVX512(), VecAVX2()]
+supported_vec_isa_list = [
+    VecAVX512(),
+    VecAVX2(),
+    VecNEON(),
+]  # This order matters for test_cpu_repro
 
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
@@ -1099,7 +1116,12 @@ def valid_vec_isa_list() -> List[VecISA]:
     with open("/proc/cpuinfo") as _cpu_info:
         _cpu_info_content = _cpu_info.read()
         for isa in supported_vec_isa_list:
-            if str(isa) in _cpu_info_content and isa:
+            # cpuinfo does not reveal info about NEON support. All aarch64 processors do support NEON though.
+            if (
+                (str(isa) in _cpu_info_content)
+                or (isinstance(isa, VecNEON) and platform.processor() == "aarch64")
+                and isa
+            ):
                 isa_list.append(isa)
         return isa_list
 
@@ -2391,6 +2413,20 @@ def caching_device_properties():
             device_interface.Worker.get_device_properties()
 
 
+def _set_triton_ptxas_path() -> None:
+    if os.environ.get("TRITON_PTXAS_PATH") is not None:
+        return
+    ptxas_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "bin", "ptxas")
+    )
+    if not os.path.exists(ptxas_path):
+        return
+    if os.path.isfile(ptxas_path) and os.access(ptxas_path, os.X_OK):
+        os.environ["TRITON_PTXAS_PATH"] = ptxas_path
+    else:
+        warnings.warn(f"{ptxas_path} exists but is not an executable")
+
+
 def _worker_compile(
     kernel_name: str, source_code: str, cc: int, device: torch.device
 ) -> None:
@@ -2401,6 +2437,7 @@ def _worker_compile(
 
 
 def _load_kernel(kernel_name: str, source_code: str) -> ModuleType:
+    _set_triton_ptxas_path()
     kernel = TritonCodeCache.load(kernel_name, source_code)
     kernel.precompile()
     return kernel
@@ -2471,7 +2508,7 @@ def shutdown_compile_workers() -> None:
     global _pool_set
     for pool in _pool_set:
         pool.shutdown()
-    _pool_set = set()
+    _pool_set.clear()
 
 
 class AsyncCompile:
@@ -2624,4 +2661,10 @@ class AsyncCompile:
         _compile_end()
 
 
-AsyncCompile.warm_pool()
+if os.environ.get("TORCH_TNT_IN_USE", "0") == "1":
+    # When TorchTNT is used, calling warm_pool() here will cause the
+    # compile workers created not being able to be shut down inside
+    # shutdown_compile_workers(). This may cause significant QPS drop.
+    log.info("Do not call AsyncCompile.warm_pool() because TorchTNT is in use.")
+else:
+    AsyncCompile.warm_pool()

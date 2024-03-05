@@ -334,6 +334,8 @@ def check_model(
     *,
     atol=None,
     rtol=None,
+    grad_atol=None,
+    grad_rtol=None,
     check_lowp=True,
     exact_dtype=True,
     nopython=True,
@@ -510,8 +512,8 @@ def check_model(
             self.assertEqual(
                 actual_grad,
                 expect_grad,
-                atol=atol,
-                rtol=rtol,
+                atol=grad_atol or atol,
+                rtol=grad_rtol or rtol,
                 equal_nan=True,
                 exact_dtype=exact_dtype,
             )
@@ -528,6 +530,8 @@ def check_model_gpu(
     *,
     atol=None,
     rtol=None,
+    grad_atol=None,
+    grad_rtol=None,
     check_lowp=True,
     exact_dtype=True,
     nopython=True,
@@ -554,6 +558,8 @@ def check_model_gpu(
         kwargs,
         atol=atol,
         rtol=rtol,
+        grad_atol=grad_atol,
+        grad_rtol=grad_rtol,
         exact_dtype=exact_dtype,
         nopython=nopython,
         reference_in_float=reference_in_float,
@@ -584,6 +590,8 @@ def check_model_gpu(
             kwargs,
             atol=atol,
             rtol=rtol,
+            grad_atol=grad_atol,
+            grad_rtol=grad_rtol,
             exact_dtype=exact_dtype,
             nopython=nopython,
             reference_in_float=reference_in_float,
@@ -597,7 +605,9 @@ def check_model_gpu(
 check_model_cuda = check_model_gpu
 
 
-def _run_and_assert_no_indirect_indexing(test_case, func, *args, **kwargs):
+def _run_and_assert_no_indirect_indexing(
+    test_case, func, *args, has_wrapping=None, **kwargs
+):
     result, source_codes = run_and_get_code(func, *args, **kwargs)
 
     for code in source_codes:
@@ -623,6 +633,11 @@ def _run_and_assert_no_indirect_indexing(test_case, func, *args, **kwargs):
             test_case.assertTrue(
                 "tmp" not in stmt,
                 msg=f"Found indirect indexing in statement '{stmt}' from code:\n{code}",
+            )
+        if has_wrapping is not None:
+            test_case.assertTrue(
+                ("where" in code or "?" in code) is has_wrapping,
+                msg=f"Wanted {has_wrapping=} but got\n{code}",
             )
 
     return result
@@ -974,7 +989,9 @@ class CommonTemplate:
         repeat_opt = torch._dynamo.optimize("inductor")(repeat)
 
         # this should be collapsed to direct indexing
-        actual = _run_and_assert_no_indirect_indexing(self, repeat_opt, x, 3)
+        actual = _run_and_assert_no_indirect_indexing(
+            self, repeat_opt, x, 3, has_wrapping=False
+        )
         expect = x.repeat(3)
         self.assertEqual(expect, actual)
         self.assertEqual(actual, repeat(x, 3))
@@ -1407,11 +1424,11 @@ class CommonTemplate:
             return x.cumsum(0), x.cumsum(1)
 
         # Persistent reductions
-        self.common(fn, (torch.rand(16, 32),), check_lowp=not TEST_WITH_ROCM)
-        self.common(fn, (torch.rand(20, 30),), check_lowp=not TEST_WITH_ROCM)
+        self.common(fn, (torch.rand(16, 32),), check_lowp=True)
+        self.common(fn, (torch.rand(20, 30),), check_lowp=True)
 
         # Non-persistent reduction
-        self.common(fn, (torch.rand(100, 4000),), check_lowp=not TEST_WITH_ROCM)
+        self.common(fn, (torch.rand(100, 4000),), check_lowp=True)
 
     def test_cumsum_zero_dim(self):
         def fn(x):
@@ -1435,6 +1452,24 @@ class CommonTemplate:
     def test_cumprod_zero_dim(self):
         def fn(x):
             return x.cumprod(0), x.cumprod(-1)
+
+        a = torch.rand(())
+        self.common(fn, (a,))
+
+    def test_logcumsumexp(self):
+        def fn(x):
+            return x.logcumsumexp(0), x.logcumsumexp(1)
+
+        # Persistent reductions
+        self.common(fn, (torch.rand(16, 32),), check_lowp=not TEST_WITH_ROCM)
+        self.common(fn, (torch.rand(20, 30),), check_lowp=not TEST_WITH_ROCM)
+
+        # Non-persistent reduction
+        self.common(fn, (torch.rand(100, 4000),), check_lowp=not TEST_WITH_ROCM)
+
+    def test_logcumsumexp_zero_dim(self):
+        def fn(x):
+            return x.logcumsumexp(0), x.logcumsumexp(-1)
 
         a = torch.rand(())
         self.common(fn, (a,))
@@ -3146,6 +3181,85 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 0)
 
+    def test_adaptive_max_pool2d1(self):
+        def fn(x):
+            return aten.adaptive_max_pool2d(x, (6, 6))
+
+        self.common(
+            fn,
+            (torch.randn(2, 4, 16, 16),),
+            check_lowp=False,
+        )
+
+        # lowering to max_pool2d case
+        self.common(
+            fn,
+            (torch.randn(2, 4, 3, 3),),
+        )
+
+        # no-op case
+        self.common(
+            fn,
+            (torch.randn(2, 4, 6, 6),),
+        )
+
+    def test_adaptive_max_pool2d2(self):
+        # Big kernel size, use fallback
+        def fn(x):
+            return aten.adaptive_max_pool2d(x, (4, 4))
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            (torch.randn(2, 4, 21, 21),),
+            check_lowp=False,
+        )
+        assertGeneratedKernelCountEqual(self, 0)
+
+    def test_fractional_max_pool2d1(self):
+        def fn(x, samples):
+            return aten.fractional_max_pool2d(x, (3, 3), (2, 2), samples)
+
+        self.common(
+            fn, (torch.randn(1, 4, 16, 16), torch.rand(1, 4, 2)), check_lowp=False
+        )
+
+    def test_fractional_max_pool2d2(self):
+        # fallback for larger kernel size
+
+        def fn(x, samples):
+            return aten.fractional_max_pool2d(x, (6, 5), (3, 3), samples)
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            (torch.randn(2, 4, 36, 36), torch.rand(2, 4, 2)),
+            check_lowp=False,
+        )
+        assertGeneratedKernelCountEqual(self, 0)
+
+    def test_fractional_max_pool2d3(self):
+        def fn(x, samples):
+            return aten.fractional_max_pool2d(x, (1, 1), (16, 16), samples)
+
+        self.common(
+            fn, (torch.randn(2, 4, 16, 16), torch.rand(2, 4, 2)), check_lowp=False
+        )
+
+    @config.patch(fallback_random=True)
+    def test_fractional_max_pool2d4(self):
+        random.seed(1234)
+        torch.manual_seed(1234)
+
+        # check rectangular kernel/output size
+
+        def fn(x):
+            return torch.nn.functional.fractional_max_pool2d_with_indices(
+                x, (4, 3), (3, 2)
+            )
+
+        self.common(fn, (torch.randn(1, 4, 16, 16),), check_lowp=False)
+
     def test_multi_threading(self):
         model = torch.nn.Linear(2, 3).eval()
         inp = torch.randn(4, 2)
@@ -4696,7 +4810,7 @@ class CommonTemplate:
                     dtype=torch.float32,
                     device=a.device,
                 ),
-                torch.zeros(2, 3, names=None),
+                torch.zeros(2, 3),
                 a + torch.ones(8, device=a.device),
                 torch.full((2, 3), 3.1416, device=a.device),
             )
@@ -7055,7 +7169,7 @@ class CommonTemplate:
         )
 
         if self.device == GPU_TYPE:
-            self.assertEqual(fw_code.count("tl.rand"), 1)
+            self.assertEqual(fw_code.count("tl.rand"), 2)
             self.assertEqual(bw_code.count("tl.rand"), 0)
         expected_kernel = 4
 
@@ -7074,7 +7188,7 @@ class CommonTemplate:
         _, source_codes = run_and_get_code(fn1)
         if self.device == GPU_TYPE:
             self.assertEqual(len(source_codes), 1)
-            self.assertEqual(source_codes[0].count("async_compile.triton"), 1)
+            self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
 
     def test_roll(self):
         def fn(a):
