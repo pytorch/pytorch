@@ -36,17 +36,8 @@ runs:
 
     - name: Start docker if docker deamon is not running
       shell: bash
-      env:
-        IS_ARC: ${{ inputs.is_arc }}
       run: |
-        if [ "$IS_ARC" = "true" ]; then
-          docker info > /dev/null 2>&1
-            if [ $? -eq 0 ]; then
-                echo "Docker is running."
-            else
-                echo "Docker is not running."
-            fi
-        else
+        if [ ! -e /.inarc ]; then
           if systemctl is-active --quiet docker; then
               echo "Docker daemon is running...";
           else
