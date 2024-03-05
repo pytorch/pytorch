@@ -388,12 +388,16 @@ def _sfdp_pattern_16(query, key, value, attn_mask, inv_scale, dropout_p):
     q = query.permute([0, 2, 1, 3])
     k = key.permute([0, 2, 1, 3])
     v = value.permute([0, 2, 1, 3])
-    return torch.nn.functional.dropout(
-        (torch.matmul(q, k.transpose(-2, -1)).div(inv_scale) + attn_mask).softmax(
-            dim=-1
-        ),
-        dropout_p,
-    ).matmul(v)
+    return (
+        torch.nn.functional.dropout(
+            (torch.matmul(q, k.transpose(-2, -1)).div(inv_scale) + attn_mask).softmax(
+                dim=-1
+            ),
+            dropout_p,
+        )
+        .to(dtype=query.dtype)
+        .matmul(v)
+    )
 
 
 def _sfdp_replacement_16(query, key, value, attn_mask, inv_scale, dropout_p):
@@ -449,6 +453,33 @@ def _sfdp_replacement_17(query, key, value, attn_mask, inv_scale, dropout_p):
     )
 
 
+def _sfdp_pattern_18(query, key, value, attn_mask, inv_scale, dropout_p):
+    # for BertTiny with dropout
+    return (
+        torch.nn.functional.dropout(
+            (
+                torch.matmul(query, key.transpose(-2, -1)).div(inv_scale) + attn_mask
+            ).softmax(dim=-1),
+            dropout_p,
+        )
+        .to(dtype=query.dtype)
+        .matmul(value)
+    )
+
+
+def _sfdp_replacement_18(query, key, value, attn_mask, inv_scale, dropout_p):
+    counters["inductor"]["fuse_attention"] += 1
+    return aten.scaled_dot_product_attention(
+        query,
+        key,
+        value,
+        attn_mask=attn_mask.to(dtype=query.dtype),
+        dropout_p=dropout_p,
+        is_causal=False,
+        scale=1.0 / inv_scale,
+    )
+
+
 def _sfdp_params_check(match):
     assert all(k in match.kwargs for k in ("query", "key", "value"))
     query = match.kwargs["query"].meta["val"]
@@ -467,9 +498,14 @@ def _sfdp_params_check(match):
             return False
         attn_mask = attn_mask_node.meta["val"]  # type: ignore[union-attr]
         # Make sure attn_mask.dtype == query.dtype or attn_mask.dtype == torch.bool
+        # attn_mask.dtype == torch.float for models like albert.
         if (
             not isinstance(attn_mask, torch.Tensor)
-            or not (attn_mask.dtype == query.dtype or attn_mask.dtype == torch.bool)
+            or not (
+                attn_mask.dtype == query.dtype
+                or attn_mask.dtype == torch.bool
+                or attn_mask.dtype == torch.float
+            )
             or query.device != attn_mask.device
         ):
             return False
@@ -534,7 +570,8 @@ def _get_sfdp_patterns():
     )
     # attn_mask
     b_inp = functools.partial(torch.empty, (1, 1, 8, 8), device=device)
-    m_inp = functools.partial(torch.empty, (2, 1, 1, 4), device=device)
+    m1_inp = functools.partial(torch.empty, (2, 1, 1, 4), device=device)
+    m2_inp = functools.partial(torch.empty, (2, 1, 1, 8), device=device)
     # inv_scale
     c_inp = functools.partial(torch.tensor, 2.0, device=device)
     # workaround https://github.com/pytorch/pytorch/issues/97894
@@ -551,11 +588,14 @@ def _get_sfdp_patterns():
     for dtype in [torch.float, torch.half]:
         g = functools.partial(g_inp, dtype=dtype)
         b = functools.partial(b_inp, dtype=dtype)
-        m = functools.partial(m_inp, dtype=dtype)
+        m1 = functools.partial(m1_inp, dtype=dtype)  # q/k/v permute before bmm
+        m2 = functools.partial(m2_inp, dtype=dtype)  # q/k/v not permute before bmm
+        m1_float = functools.partial(m1_inp, dtype=torch.float)
+        m2_float = functools.partial(m2_inp, dtype=torch.float)
         c = functools.partial(c_inp, dtype=dtype)
         g_3d = functools.partial(g_3d_inp, dtype=dtype)
 
-        for pattern, replacement, args, workaround, extra_check in [
+        candidates = [
             (
                 _sfdp_pattern_1,
                 _sfdp_replacement_1,
@@ -650,14 +690,14 @@ def _get_sfdp_patterns():
             (
                 _sfdp_pattern_14,
                 _sfdp_replacement_14,
-                [g(), g(), g(), m(), c()],
+                [g(), g(), g(), m1(), c()],
                 {},
                 _sfdp_extra_check(aten.div.Tensor),
             ),
             (
                 _sfdp_pattern_15,
                 _sfdp_replacement_15,
-                [g(), g(), g(), m(), c()],
+                [g(), g(), g(), m1(), c()],
                 {},
                 _sfdp_extra_check(aten.div.Tensor),
             ),
@@ -665,25 +705,61 @@ def _get_sfdp_patterns():
             (
                 _sfdp_pattern_16,
                 _sfdp_replacement_16,
-                [g(), g(), g(), m(), c()],
+                [g(), g(), g(), m1(), c()],
                 d,
                 _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
             ),
             (
                 _sfdp_pattern_17,
                 _sfdp_replacement_17,
-                [g(), g(), g(), m(), c()],
+                [g(), g(), g(), m1(), c()],
                 d,
                 _sfdp_extra_check(aten.div.Tensor),
             ),
-        ]:
+            # TODO: Enable CUDA after solving Bert accuracy issue of calling efficient attention
+            (
+                _sfdp_pattern_18,
+                _sfdp_replacement_18,
+                [g(), g(), g(), m2(), c()],
+                d,
+                _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
+            ),
+        ]
+        mask_fp32_patterns = ["pattern_16", "pattern_18"]
+        if dtype == torch.half:
+            # Add inputs of bf16 q/k/v and fp32 mask, for models like albert.
+            candidates.append(
+                (
+                    _sfdp_pattern_16,
+                    _sfdp_replacement_16,
+                    [g(), g(), g(), m1_float(), c()],
+                    d,
+                    _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
+                )
+            )
+            candidates.append(
+                (
+                    _sfdp_pattern_18,
+                    _sfdp_replacement_18,
+                    [g(), g(), g(), m2_float(), c()],
+                    d,
+                    _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
+                )
+            )
+
+        for pattern, replacement, args, workaround, extra_check in candidates:
             # XXX: when adding a new pattern, re-run `gen_attention_patterns` so the pattern
             # gets serialized to a python file and does not require tracing at runtime.
             assert isinstance(workaround, dict)
             name = pattern.__name__
 
             training_name = (
-                f"{name}_training" if dtype == torch.float else f"{name}_training_half"
+                f"{name}_training"
+                if dtype == torch.float
+                else f"{name}_training_half_mask_fp32"
+                if any(p in name for p in mask_fp32_patterns)
+                and args[3].dtype == torch.float32
+                else f"{name}_training_half"
             )
             yield training_name, {
                 "search_fn": pattern,
@@ -707,6 +783,9 @@ def _get_sfdp_patterns():
             inference_name = (
                 f"{name}_inference"
                 if dtype == torch.float
+                else f"{name}_inference_half_mask_fp32"
+                if any(p in name for p in mask_fp32_patterns)
+                and args[3].dtype == torch.float32
                 else f"{name}_inference_half"
             )
             yield inference_name, {
