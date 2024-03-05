@@ -1068,8 +1068,6 @@ def fw_compiler_freezing(
 ):
     from torch._inductor.freezing import convert_conv_weights_to_channels_last, freeze
 
-    # whether or not to do inference with oneDNN Graph
-
     # partition_fn won't be called
 
     _recursive_joint_graph_passes(aot_autograd_model)

@@ -90,9 +90,7 @@ def serialize_functions() -> None:
     for (
         key,
         kwargs,
-    ) in _get_sfdp_patterns(
-        serialization_mode=True
-    ):  # type: ignore[no-untyped-call]
+    ) in _get_sfdp_patterns():  # type: ignore[no-untyped-call]
         pattern_name = kwargs["search_fn"].__name__
         gen_kwargs = {
             key: kwargs[key]

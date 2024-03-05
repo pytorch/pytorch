@@ -606,7 +606,7 @@ def partialize_and_update_signature(func, **kwargs):
     return wrapper
 
 
-def _get_sfdp_patterns(serialization_mode=False):
+def _get_sfdp_patterns():
     from .joint_graph import patterns
 
     if torch.cuda.is_available():

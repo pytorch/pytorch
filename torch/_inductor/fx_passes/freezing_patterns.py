@@ -82,9 +82,7 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
 
 
 @init_once_fakemode
-def lazy_init(inference_with_onednn_graph=False):
-    # Although inference_with_onednn_graph would not be used here, it's essential
-    # for using the init_once_fakemode wrapper
+def lazy_init():
     if torch._C._has_mkldnn and config.cpp.weight_prepack:
         from .mkldnn_fusion import _mkldnn_weight_pack_init
 
