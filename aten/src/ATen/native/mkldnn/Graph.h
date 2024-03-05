@@ -1,18 +1,11 @@
 #include <ATen/Config.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/mkldnn/Utils.h>
-#include <c10/core/SymIntArrayRef.h>
-#include <c10/util/ArrayRef.h>
 #include <c10/util/irange.h>
-#include <oneapi/dnnl/dnnl_graph.hpp>
 #include <torch/library.h>
 
 #if AT_ONEDNN_GRAPH_ENABLED()
-
-#ifdef AT_PER_OPERATOR_HEADERS
-#include <ATen/ops/empty.h>
-#include <ATen/ops/empty_like.h>
-#endif
+#include <oneapi/dnnl/dnnl_graph.hpp>
 
 namespace std {
 template <>
@@ -69,9 +62,6 @@ struct cp_entry {
 using key_value_pair_t = std::pair<std::vector<int64_t>, cp_entry>;
 using list_iterator_t = std::list<key_value_pair_t>::iterator;
 
-// Somehow, linking fails if extern is not used here, although
-// extern should have been implicit.
-
 void insert_in_fused_kernel_cache(std::vector<int64_t>& map_key, cp_entry& cp);
 
 void insert_in_partition_cache(int64_t partitionID, partition& p);
@@ -96,11 +86,7 @@ compiled_partition compile_partition(
 
 data_type aten_to_onednn_graph_dtype(at::ScalarType dt);
 
-// assign a unique ID to each pattern here
-// using an enum is troublesome with using std::unordered_map
-// These should be used in torch/_inductor/fx_passes/fuse_attention.py
-// Instead of using magic numbers in the python code there,
-// we could even use custom classes.
+// TODO: use an enum instead
 #define ONEDNN_GRAPH_SDPA_PATTERN_18_FP32 0
 #define ONEDNN_GRAPH_SDPA_PATTERN_18_BF16 1
 

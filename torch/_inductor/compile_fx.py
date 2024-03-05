@@ -265,7 +265,7 @@ def _recursive_pre_grad_passes(gm, example_inputs):
     return pre_grad_passes(gm, example_inputs)
 
 
-def _recursive_joint_graph_passes(gm, inference_with_onednn_graph):
+def _recursive_joint_graph_passes(gm, inference_with_onednn_graph=False):
     for subgraph_name in _get_subgraph_names(gm):
         subgraph = getattr(gm, subgraph_name)
         _recursive_joint_graph_passes(subgraph, inference_with_onednn_graph)
@@ -1115,7 +1115,7 @@ def fw_compiler_freezing(
     # partition_fn won't be called
 
     _recursive_joint_graph_passes(
-      aot_autograd_model, inference_with_onednn_graph=inference_with_onednn_graph
+        aot_autograd_model, inference_with_onednn_graph=inference_with_onednn_graph
     )
 
     layout_opt = GraphLowering.decide_layout_opt(aot_autograd_model, is_inference=True)

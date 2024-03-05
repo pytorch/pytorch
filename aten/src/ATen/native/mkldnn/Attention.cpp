@@ -27,6 +27,12 @@ namespace {
 using namespace onednn_graph;
 
 /*
+
+GPT2 MHA kernel
+
+Attention-mask is non-optional but would be
+optional in oneDNN v3.5 for better performance.
+
  [query]    [key]
       \     /
 [cond] MatMul [mask]
@@ -189,7 +195,7 @@ void compile_and_cache_pattern(
     case ONEDNN_GRAPH_SDPA_PATTERN_18_BF16: {
       auto output_size = input_tensors[0].sizes().vec();
       std::swap(output_size[1], output_size[2]);
-      std::vector<int64_t> output_strides {
+      std::vector<int64_t> output_strides{
           output_size[1] * output_size[2] * output_size[3],
           output_size[2] * output_size[3],
           output_size[3],
@@ -279,12 +285,12 @@ Tensor mkldnn_graph_sdpa_pattern(
   // Algo ID
   int64_t patternID = -1;
   std::vector<Tensor> input_tensors;
-  if (output_requires_transpose_and_reorder &&
-    causal_mask.has_value() && attn_mask.has_value()) {
-      patternID = query.scalar_type() == c10::ScalarType::Float
-          ? ONEDNN_GRAPH_SDPA_PATTERN_18_FP32
-          : ONEDNN_GRAPH_SDPA_PATTERN_18_BF16;
-      input_tensors.reserve(7);
+  if (output_requires_transpose_and_reorder && causal_mask.has_value() &&
+      attn_mask.has_value()) {
+    patternID = query.scalar_type() == c10::ScalarType::Float
+        ? ONEDNN_GRAPH_SDPA_PATTERN_18_FP32
+        : ONEDNN_GRAPH_SDPA_PATTERN_18_BF16;
+    input_tensors.reserve(7);
   }
   input_tensors.push_back(query);
   input_tensors.push_back(key);
@@ -373,6 +379,7 @@ bool is_any_shape_symbolic(SymIntArrayRef& shape) {
   return false;
 }
 
+// Compile fused kernels in Inductor compilation stage
 Tensor mkldnn_graph_sdpa_pattern_meta(
     const Tensor& query,
     const Tensor& key,
@@ -396,12 +403,12 @@ Tensor mkldnn_graph_sdpa_pattern_meta(
   // Algo ID
   int64_t patternID = -1;
   std::vector<Tensor> input_tensors;
-  if (output_requires_transpose_and_reorder &&
-    causal_mask.has_value() && attn_mask.has_value()) {
-      patternID = query.scalar_type() == c10::ScalarType::Float
-          ? ONEDNN_GRAPH_SDPA_PATTERN_18_FP32
-          : ONEDNN_GRAPH_SDPA_PATTERN_18_BF16;
-      input_tensors.reserve(7);
+  if (output_requires_transpose_and_reorder && causal_mask.has_value() &&
+      attn_mask.has_value()) {
+    patternID = query.scalar_type() == c10::ScalarType::Float
+        ? ONEDNN_GRAPH_SDPA_PATTERN_18_FP32
+        : ONEDNN_GRAPH_SDPA_PATTERN_18_BF16;
+    input_tensors.reserve(7);
   }
   input_tensors.push_back(query);
   input_tensors.push_back(key);
@@ -523,7 +530,23 @@ Tensor mkldnn_graph_sdpa_pattern_meta(
   } else {
     change_pos_in_list(iter->second);
   }
-  return query;
+  at::Tensor output_tensor;
+  switch (patternID) {
+    case ONEDNN_GRAPH_SDPA_PATTERN_18_FP32:
+    case ONEDNN_GRAPH_SDPA_PATTERN_18_BF16: {
+      auto output_size = input_tensors[0].sizes().vec();
+      std::swap(output_size[1], output_size[2]);
+      std::vector<int64_t> output_strides{
+          output_size[1] * output_size[2] * output_size[3],
+          output_size[2] * output_size[3],
+          output_size[3],
+          1};
+      output_tensor = at::detail::empty_strided_meta(
+          output_size, output_strides, input_tensors[1].scalar_type());
+      break;
+    }
+  }
+  return output_tensor;
 }
 
 } // end anonymous namespace

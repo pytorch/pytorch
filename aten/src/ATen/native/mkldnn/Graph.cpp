@@ -16,6 +16,8 @@ thread_local std::unordered_map<int64_t, dnnl::graph::partition> partition_map_;
 thread_local std::list<key_value_pair_t> cache_items_list_;
 thread_local std::unordered_map<std::vector<int64_t>, list_iterator_t>
     fused_kernel_cache_map_;
+// cache capacity is arbitrary
+// TODO: Add an API to manipulate cache capacity
 thread_local size_t capacity_ = 75000;
 
 void insert_in_fused_kernel_cache(std::vector<int64_t>& map_key, cp_entry& cp) {
