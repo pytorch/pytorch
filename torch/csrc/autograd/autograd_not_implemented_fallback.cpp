@@ -301,12 +301,10 @@ static void autogradNotImplementedFallbackImpl(
       num_arguments);
 
   const bool any_requires_grad = !tensors_requiring_grad_on_stack.empty();
-  bool has_out_arg = false;
-  for (const auto& arg : schema.arguments()) {
-    if (arg.is_out()) {
-      has_out_arg = true;
-    }
-  }
+  const bool has_out_arg = std::any_of(
+      schema.arguments().begin(),
+      schema.arguments().end(),
+      [](const c10::Argument& arg) { return arg.is_out(); });
 
   _foreach_tensor(
       [&](size_t _, size_t i, const at::Tensor& t) {
