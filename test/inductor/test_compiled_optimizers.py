@@ -83,9 +83,7 @@ KERNEL_COUNTS = {
     RAdam: KernelCounts(
         multitensor=2, singletensor=None
     ),  # Single tensor eager needs to be refactored to enable tracing (#118230)
-    Adamax: KernelCounts(
-        multitensor=2, singletensor=None
-    ),  # Single tensor eager needs to be refactored to enable tracing (#117836)
+    Adamax: KernelCounts(multitensor=2, singletensor=8),
 }
 
 
@@ -344,7 +342,7 @@ class CompiledOptimizerParityTests(TestCase):
         for optim_input in all_optim_inputs:
             kwargs = optim_input.kwargs
 
-            # RAdam #117836 and Adamax #118230 and ASGD #116052
+            # RAdam #118230 and ASGD #116052
             # Single tensor eager needs to be refactored to enable tracing
             if optim_info.only_supports_capturable_on_foreach and not kwargs.get(
                 "foreach", False
