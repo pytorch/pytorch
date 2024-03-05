@@ -2213,7 +2213,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._higher_order_ops.out_dtype.out_dtype_fake_tensor_mode",
         "torch._higher_order_ops.out_dtype.out_dtype_fallback",
         "torch._higher_order_ops.out_dtype.out_dtype_func",
-        "torch._higher_order_ops.out_dtype.out_dtype_predispatch",
         "torch._higher_order_ops.out_dtype.out_dtype_proxy",
         "torch._higher_order_ops.out_dtype.trace_out_dtype",
         "torch._higher_order_ops.utils.autograd_not_implemented_inner",
