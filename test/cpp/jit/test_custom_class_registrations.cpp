@@ -339,10 +339,7 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
           },
           [](std::vector<int64_t> state) { // __setstate__
             return c10::make_intrusive<Foo>(state[0], state[1]);
-          })
-      .def_meta([](c10::intrusive_ptr<Foo> self) { // __get_metadata__
-        return std::vector<int64_t>{self->x, self->y};
-      });
+          });
 
   m.class_<FooGetterSetter>("_FooGetterSetter")
       .def(torch::init<int64_t, int64_t>())
