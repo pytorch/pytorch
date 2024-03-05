@@ -520,6 +520,39 @@ def _sfdp_replacement_18(query, key, value, inv_scale, causal_mask_value, causal
     )
 
 
+def _sfdp_pattern_19(query, key, value, inv_scale, causal_mask_value, causal_mask):
+    # for hf_GPT2 with dropout (batch size 1)
+    attn_weights = torch.matmul(query, key.permute(0, 1, 3, 2))
+    attn_weights = attn_weights.div(inv_scale)
+    attn_weights = torch.where(causal_mask, attn_weights, causal_mask_value)
+    return (
+        torch.nn.functional.dropout(attn_weights.softmax(dim=-1), 0.0)
+        .matmul(value)
+        .permute([0, 2, 1, 3])
+        .contiguous()
+    )
+
+
+def _sfdp_replacement_19(query, key, value, inv_scale, causal_mask_value, causal_mask):
+    counters["inductor"]["fuse_attention"] += 1
+    attn_bias = torch.zeros(1, 1, query.size(2), query.size(2))
+    return torch.ops.mkldnn._graph_sdpa_pattern(
+        query,
+        key.transpose(-1, -2),
+        value,
+        None,
+        inv_scale,
+        attn_bias,  # oneDNN v3.5 will not require this workaround
+        causal_mask,
+        causal_mask_value,
+        False,
+        False,
+        False,
+        False,
+        True,
+    )
+
+
 def _sfdp_params_check(match):
     assert all(k in match.kwargs for k in ("query", "key", "value"))
     query = match.kwargs["query"].meta["val"]
@@ -548,10 +581,8 @@ def _sfdp_params_check(match):
 
 
 def _onednn_graph_extra_check(match):
-    if (
-        config.onednn_graph
-        and torch._C._has_onednn_graph
-        and not IS_AVX512_VNNI_SUPPORTED
+    if not (
+        config.onednn_graph and torch._C._has_onednn_graph and IS_AVX512_VNNI_SUPPORTED
     ):
         return False
     query = match.kwargs["query"].meta["val"]
@@ -627,6 +658,9 @@ def _get_sfdp_patterns():
     c_inp = functools.partial(torch.tensor, 2.0, device=device)
     # causal_mask
     gpt2_cmask = functools.partial(torch.empty, (1, 1, 4, 4), device=device)
+    gpt2_cmask_q_not_permuted = functools.partial(
+        torch.empty, (1, 1, 8, 8), device=device
+    )
     # workaround https://github.com/pytorch/pytorch/issues/97894
     # 0.113377 is a "magic" value that lets us recover the lost input arg relationship
     d = {"dropout_p": 0.113377}
@@ -646,6 +680,7 @@ def _get_sfdp_patterns():
         c = functools.partial(c_inp, dtype=dtype)
         g_3d = functools.partial(g_3d_inp, dtype=dtype)
         gpt2_c = functools.partial(gpt2_cmask, dtype=torch.bool)
+        gpt2_c_2 = functools.partial(gpt2_cmask_q_not_permuted, dtype=torch.bool)
 
         for pattern, replacement, args, workaround, extra_check, register_training in [
             (
@@ -789,6 +824,14 @@ def _get_sfdp_patterns():
                 _sfdp_pattern_18,
                 _sfdp_replacement_18,
                 [g(), g(), g(), c(), c(), gpt2_c()],
+                {},
+                _onednn_graph_extra_check,
+                False,
+            ),
+            (
+                _sfdp_pattern_19,
+                _sfdp_replacement_19,
+                [g(), g(), g(), c(), c(), gpt2_c_2()],
                 {},
                 _onednn_graph_extra_check,
                 False,

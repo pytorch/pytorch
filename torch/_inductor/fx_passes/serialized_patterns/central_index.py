@@ -20,6 +20,7 @@ from ._sfdp_pattern_15 import (_sfdp_pattern_15_training, _sfdp_pattern_15_infer
 from ._sfdp_pattern_16 import (_sfdp_pattern_16_training, _sfdp_pattern_16_inference, _sfdp_pattern_16_training_half, _sfdp_pattern_16_inference_half)
 from ._sfdp_pattern_17 import (_sfdp_pattern_17_training, _sfdp_pattern_17_inference, _sfdp_pattern_17_training_half, _sfdp_pattern_17_inference_half)
 from ._sfdp_pattern_18 import (_sfdp_pattern_18_inference, _sfdp_pattern_18_inference_half)
+from ._sfdp_pattern_19 import (_sfdp_pattern_19_inference, _sfdp_pattern_19_inference_half)
 
 central_index = {
     '_sfdp_pattern_1_training': _sfdp_pattern_1_training,
@@ -57,6 +58,7 @@ central_index = {
     '_sfdp_pattern_17_training': _sfdp_pattern_17_training,
     '_sfdp_pattern_17_inference': _sfdp_pattern_17_inference,
     '_sfdp_pattern_18_inference': _sfdp_pattern_18_inference,
+    '_sfdp_pattern_19_inference': _sfdp_pattern_19_inference,
     '_sfdp_pattern_1_training_half': _sfdp_pattern_1_training_half,
     '_sfdp_pattern_1_inference_half': _sfdp_pattern_1_inference_half,
     '_sfdp_pattern_2_training_half': _sfdp_pattern_2_training_half,
@@ -92,6 +94,7 @@ central_index = {
     '_sfdp_pattern_17_training_half': _sfdp_pattern_17_training_half,
     '_sfdp_pattern_17_inference_half': _sfdp_pattern_17_inference_half,
     '_sfdp_pattern_18_inference_half': _sfdp_pattern_18_inference_half,
+    '_sfdp_pattern_19_inference_half': _sfdp_pattern_19_inference_half,
 }
 
 
