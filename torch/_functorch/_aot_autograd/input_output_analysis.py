@@ -127,7 +127,7 @@ def create_synthetic_base_metadata(
         # (aka if "a" and "b" are views, then a.is_leaf == b.is_leaf)
         any_leaf = any(m.input_info[x].is_leaf for x in outer_indices)
         all_leaf = all(m.input_info[x].is_leaf for x in outer_indices)
-        # assert any_leaf == all_leaf
+        assert any_leaf == all_leaf
 
         mutates_data = (
             True
