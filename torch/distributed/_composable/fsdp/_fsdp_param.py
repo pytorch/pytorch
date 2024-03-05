@@ -395,8 +395,7 @@ class FSDPParam:
         return ret
 
     def alloc_all_gather_output(self) -> None:
-        # These two do the exact same thing, because .all_gather_output and ._unsharded_param share the same storage.
-        # Use ._unsharded_param under compile just to avoid having .all_gather_output as graph input.
+        # TODO(yf225): make sure compile resizes to the same numel as eager! use constants for resize-to value
         if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
             unsafe_alloc_storage(self.all_gather_output)
         else:
