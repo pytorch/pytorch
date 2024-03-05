@@ -283,9 +283,7 @@ class TestMaxAutotune(TestCase):
                     reset()
                     torch._inductor.codecache.PyCodeCache.clear()
                 self.assertEqual(num_get, 3)
-                # TODO: This should really be 1 but it seems like we write even
-                # when we find it
-                self.assertEqual(num_put, 4)
+                self.assertEqual(num_put, 1)
             num_get = 0
             num_put = 0
             for _ in range(4):
@@ -293,9 +291,7 @@ class TestMaxAutotune(TestCase):
                 reset()
                 torch._inductor.codecache.PyCodeCache.clear()
             self.assertEqual(num_get, 3)
-            # TODO: This should really be 1 but it seems like we write even
-            # when we find it
-            self.assertEqual(num_put, 4)
+            self.assertEqual(num_put, 1)
 
     def test_precompilation_threads(self):
         import threading

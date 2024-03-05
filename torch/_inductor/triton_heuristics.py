@@ -782,6 +782,8 @@ def load_cached_autotuning(
     configs_hash: str,
     configs: List[Config],
 ):
+    if best_config is None:
+        return None
     if best_config.pop("configs_hash", None) != configs_hash:
         return None
 
@@ -861,12 +863,13 @@ def cached_autotune(
             with open(cache_filename) as fd:
                 best_config = json.loads(fd.read())
         elif remote_cache is not None and remote_cache_key is not None:
-            best_config = remote_cache.get([remote_cache_key])
+            cache_outs = remote_cache.get([remote_cache_key])
+            cache_out = cache_outs.get(remote_cache_key, None)
+            best_config = json.loads(cache_out) if cache_out else None
 
+        best_config = load_cached_autotuning(best_config, configs_hash, configs)
         if best_config:
-            best_config = load_cached_autotuning(best_config, configs_hash, configs)
-            if best_config:
-                configs = [best_config]
+            configs = [best_config]
 
         def save_cache_hook(cfg, found_by_coordesc=False):
             data = json.dumps(
