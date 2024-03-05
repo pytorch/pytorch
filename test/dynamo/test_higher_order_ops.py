@@ -3580,6 +3580,391 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(actual, expected)
 
     @config.patch(capture_func_transforms=True)
+    def test_jacfwd(self):
+        counters.clear()
+
+        def wrapper_fn(x):
+            return torch.func.jacfwd(torch.sin)(x)
+
+        x = torch.randn(4, 3)
+        wrapped_gm = self._compile_check(wrapper_fn, (x,))
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        primal_1 = L_x_
+
+        tensor = torch.tensor((12,))
+        cumsum = tensor.cumsum(dim = 0);  tensor = None
+        getitem = cumsum[slice(None, -1, None)];  cumsum = None
+        neg = getitem.neg();  getitem = None
+        unbind = neg.unbind();  neg = None
+
+        chunk = primal_1.new_zeros(12, 12)
+
+        diagonal = chunk.diagonal(0)
+        fill_ = diagonal.fill_(1);  diagonal = None
+
+        arg_3 = chunk.view(12, 4, 3);  chunk = None
+
+        lazy_load_decompositions = torch._functorch.vmap.lazy_load_decompositions()
+
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+        _vmap_increment_nesting = torch._C._functorch._vmap_increment_nesting(12, 'error')
+
+        t = torch._C._functorch._add_batch_dim(arg_3, 0, 1);  arg_3 = None
+
+        _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+
+        _jvp_treespec_compare = torch._functorch.eager_transforms._jvp_treespec_compare((primal_1,), (t,))
+
+        _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
+        _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
+
+        count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
+
+        _enter_dual_level = torch._C._enter_dual_level()
+
+        maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
+
+        _make_dual = torch._make_dual(primal_1, t, level = 0);  t = None
+
+        _wrap_for_grad = torch._C._functorch._wrap_for_grad(primal_1, 2);  primal_1 = None
+
+        dual = torch.sin(_make_dual);  _make_dual = None
+
+        _unpack_dual = torch._unpack_dual(dual, level = 0);  dual = None
+        child_6 = _unpack_dual[0]
+        child_7 = _unpack_dual[1];  _unpack_dual = None
+
+        _ = torch._C._functorch._unwrap_for_grad(child_6, 2);  child_6 = None
+
+        batched_output = torch._C._functorch._unwrap_for_grad(child_7, 2);  child_7 = None
+
+        _exit_dual_level = torch._C._exit_dual_level(0)
+        _set_fwd_grad_enabled_1 = torch._C._set_fwd_grad_enabled(True)
+        _jvp_decrement_nesting = torch._C._functorch._jvp_decrement_nesting()
+        _saved_tensors_hooks_disable_2 = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+
+        jac_out = torch._C._functorch._remove_batch_dim(batched_output, 1, 12, 0);  batched_output = None
+
+        _vmap_decrement_nesting = torch._C._functorch._vmap_decrement_nesting()
+        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
+
+        movedim = jac_out.movedim(0, -1);  jac_out = None
+        split = movedim.split((12,), dim = -1);  movedim = None
+        jac_out_in = split[0];  split = None
+
+        unflatten = jac_out_in.unflatten(-1, (4, 3));  jac_out_in = None
+        return (unflatten,)
+""",
+        )
+
+    @config.patch(capture_func_transforms=True)
+    def test_jacfwd_two_tensors_argnums(self):
+        counters.clear()
+
+        def fn(x, y):
+            return y.sin()
+
+        def wrapper_fn(x, y):
+            return torch.func.jacfwd(fn, argnums=1)(x, y)
+
+        x = torch.randn(4, 3)
+        y = torch.randn(3, 4)
+        wrapped_gm = self._compile_check(wrapper_fn, (x, y))
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
+        child_6 = L_x_
+        primal_1 = L_y_
+
+        tensor = torch.tensor((12,))
+        cumsum = tensor.cumsum(dim = 0);  tensor = None
+        getitem = cumsum[slice(None, -1, None)];  cumsum = None
+        neg = getitem.neg();  getitem = None
+        unbind = neg.unbind();  neg = None
+
+        chunk = primal_1.new_zeros(12, 12)
+
+        diagonal = chunk.diagonal(0)
+        fill_ = diagonal.fill_(1);  diagonal = None
+
+        arg_4 = chunk.view(12, 3, 4);  chunk = None
+
+        lazy_load_decompositions = torch._functorch.vmap.lazy_load_decompositions()
+
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+        _vmap_increment_nesting = torch._C._functorch._vmap_increment_nesting(12, 'error')
+
+        t = torch._C._functorch._add_batch_dim(arg_4, 0, 1);  arg_4 = None
+
+        _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+
+        _jvp_treespec_compare = torch._functorch.eager_transforms._jvp_treespec_compare((primal_1,), (t,))
+
+        _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
+        _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
+
+        count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
+
+        _enter_dual_level = torch._C._enter_dual_level()
+
+        maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
+
+        _make_dual = torch._make_dual(primal_1, t, level = 0);  t = None
+
+        _wrap_for_grad = torch._C._functorch._wrap_for_grad(child_6, 2);  child_6 = None
+        _wrap_for_grad_1 = torch._C._functorch._wrap_for_grad(primal_1, 2);  primal_1 = None
+
+        dual = _make_dual.sin();  _make_dual = None
+
+        _unpack_dual = torch._unpack_dual(dual, level = 0);  dual = None
+        child_8 = _unpack_dual[0]
+        child_9 = _unpack_dual[1];  _unpack_dual = None
+
+        _ = torch._C._functorch._unwrap_for_grad(child_8, 2);  child_8 = None
+
+        batched_output = torch._C._functorch._unwrap_for_grad(child_9, 2);  child_9 = None
+
+        _exit_dual_level = torch._C._exit_dual_level(0)
+        _set_fwd_grad_enabled_1 = torch._C._set_fwd_grad_enabled(True)
+        _jvp_decrement_nesting = torch._C._functorch._jvp_decrement_nesting()
+        _saved_tensors_hooks_disable_2 = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+
+        jac_out = torch._C._functorch._remove_batch_dim(batched_output, 1, 12, 0);  batched_output = None
+
+        _vmap_decrement_nesting = torch._C._functorch._vmap_decrement_nesting()
+        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
+
+        movedim = jac_out.movedim(0, -1);  jac_out = None
+        split = movedim.split((12,), dim = -1);  movedim = None
+        jac_out_in = split[0];  split = None
+
+        unflatten = jac_out_in.unflatten(-1, (3, 4));  jac_out_in = None
+        return (unflatten,)
+""",
+        )
+
+    @config.patch(capture_func_transforms=True)
+    def test_jacfwd_has_aux(self):
+        counters.clear()
+
+        def fn(x, y):
+            return y.sin(), x
+
+        def wrapper_fn(x, y):
+            return torch.func.jacfwd(fn, argnums=1, has_aux=True)(x, y)
+
+        x = torch.randn(4, 3)
+        y = torch.randn(3, 4)
+        wrapped_gm = self._compile_check(wrapper_fn, (x, y))
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
+        child_6 = L_x_
+        primal_1 = L_y_
+
+        tensor = torch.tensor((12,))
+        cumsum = tensor.cumsum(dim = 0);  tensor = None
+        getitem = cumsum[slice(None, -1, None)];  cumsum = None
+        neg = getitem.neg();  getitem = None
+        unbind = neg.unbind();  neg = None
+
+        chunk = primal_1.new_zeros(12, 12)
+
+        diagonal = chunk.diagonal(0)
+        fill_ = diagonal.fill_(1);  diagonal = None
+
+        arg_4 = chunk.view(12, 3, 4);  chunk = None
+
+        lazy_load_decompositions = torch._functorch.vmap.lazy_load_decompositions()
+
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+        _vmap_increment_nesting = torch._C._functorch._vmap_increment_nesting(12, 'error')
+
+        t = torch._C._functorch._add_batch_dim(arg_4, 0, 1);  arg_4 = None
+
+        _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+
+        _jvp_treespec_compare = torch._functorch.eager_transforms._jvp_treespec_compare((primal_1,), (t,))
+
+        _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
+        _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
+
+        count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
+
+        _enter_dual_level = torch._C._enter_dual_level()
+
+        maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
+
+        _make_dual = torch._make_dual(primal_1, t, level = 0);  t = None
+
+        aux = torch._C._functorch._wrap_for_grad(child_6, 2);  child_6 = None
+        _wrap_for_grad_1 = torch._C._functorch._wrap_for_grad(primal_1, 2);  primal_1 = None
+
+        dual = _make_dual.sin();  _make_dual = None
+
+        batched_output_1 = torch._C._functorch._unwrap_for_grad(aux, 2);  aux = None
+
+        _unpack_dual = torch._unpack_dual(dual, level = 0);  dual = None
+        child_8 = _unpack_dual[0]
+        child_9 = _unpack_dual[1];  _unpack_dual = None
+
+        _ = torch._C._functorch._unwrap_for_grad(child_8, 2);  child_8 = None
+
+        batched_output = torch._C._functorch._unwrap_for_grad(child_9, 2);  child_9 = None
+
+        _exit_dual_level = torch._C._exit_dual_level(0)
+        _set_fwd_grad_enabled_1 = torch._C._set_fwd_grad_enabled(True)
+        _jvp_decrement_nesting = torch._C._functorch._jvp_decrement_nesting()
+        _saved_tensors_hooks_disable_2 = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+
+        jac_out = torch._C._functorch._remove_batch_dim(batched_output, 1, 12, 0);  batched_output = None
+        value = torch._C._functorch._remove_batch_dim(batched_output_1, 1, 12, 0);  batched_output_1 = None
+
+        _vmap_decrement_nesting = torch._C._functorch._vmap_decrement_nesting()
+        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
+
+        aux_4 = value[0];  value = None
+
+        movedim = jac_out.movedim(0, -1);  jac_out = None
+        split = movedim.split((12,), dim = -1);  movedim = None
+        jac_out_in = split[0];  split = None
+
+        unflatten = jac_out_in.unflatten(-1, (3, 4));  jac_out_in = None
+        return (unflatten, aux_4)
+""",
+        )
+
+    @config.patch(capture_func_transforms=True)
+    def test_jacfwd_randomness(self):
+        counters.clear()
+
+        def fn(x, y):
+            return y.sin(), x
+
+        def wrapper_fn(x, y):
+            return torch.func.jacfwd(fn, randomness="same")(x, y)
+
+        x = torch.randn(4, 3)
+        y = torch.randn(3, 4)
+        wrapped_gm = self._compile_check(wrapper_fn, (x, y))
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
+        primal_4 = L_x_
+        child_7 = L_y_
+
+        tensor = torch.tensor((12,))
+        cumsum = tensor.cumsum(dim = 0);  tensor = None
+        getitem = cumsum[slice(None, -1, None)];  cumsum = None
+        neg = getitem.neg();  getitem = None
+        unbind = neg.unbind();  neg = None
+
+        chunk = primal_4.new_zeros(12, 12)
+
+        diagonal = chunk.diagonal(0)
+        fill_ = diagonal.fill_(1);  diagonal = None
+
+        arg_4 = chunk.view(12, 4, 3);  chunk = None
+
+        lazy_load_decompositions = torch._functorch.vmap.lazy_load_decompositions()
+
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+        _vmap_increment_nesting = torch._C._functorch._vmap_increment_nesting(12, 'same')
+
+        t = torch._C._functorch._add_batch_dim(arg_4, 0, 1);  arg_4 = None
+
+        _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+
+        _jvp_treespec_compare = torch._functorch.eager_transforms._jvp_treespec_compare((primal_4,), (t,))
+
+        _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
+        _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
+
+        count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
+
+        _enter_dual_level = torch._C._enter_dual_level()
+
+        maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
+
+        dual_1 = torch._make_dual(primal_4, t, level = 0);  t = None
+
+        _wrap_for_grad = torch._C._functorch._wrap_for_grad(primal_4, 2);  primal_4 = None
+        _wrap_for_grad_1 = torch._C._functorch._wrap_for_grad(child_7, 2);  child_7 = None
+
+        dual = _wrap_for_grad_1.sin();  _wrap_for_grad_1 = None
+
+        _unpack_dual = torch._unpack_dual(dual, level = 0);  dual = None
+        child_10 = _unpack_dual[0];  _unpack_dual = None
+
+        child_12 = torch.zeros_like(child_10)
+
+        _unpack_dual_1 = torch._unpack_dual(dual_1, level = 0);  dual_1 = None
+        child_11 = _unpack_dual_1[0]
+        child_13 = _unpack_dual_1[1];  _unpack_dual_1 = None
+
+        arg_5 = torch._C._functorch._unwrap_for_grad(child_10, 2);  child_10 = None
+        arg_6 = torch._C._functorch._unwrap_for_grad(child_11, 2);  child_11 = None
+
+        batched_output = torch._C._functorch._unwrap_for_grad(child_12, 2);  child_12 = None
+        batched_output_1 = torch._C._functorch._unwrap_for_grad(child_13, 2);  child_13 = None
+
+        _exit_dual_level = torch._C._exit_dual_level(0)
+        _set_fwd_grad_enabled_1 = torch._C._set_fwd_grad_enabled(True)
+        _jvp_decrement_nesting = torch._C._functorch._jvp_decrement_nesting()
+        _saved_tensors_hooks_disable_2 = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+
+        jac_out = torch._C._functorch._remove_batch_dim(batched_output, 1, 12, 0);  batched_output = None
+        jac_out_1 = torch._C._functorch._remove_batch_dim(batched_output_1, 1, 12, 0);  batched_output_1 = None
+
+        _vmap_decrement_nesting = torch._C._functorch._vmap_decrement_nesting()
+        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
+
+        movedim = jac_out.movedim(0, -1);  jac_out = None
+        split = movedim.split((12,), dim = -1);  movedim = None
+        jac_out_in = split[0];  split = None
+
+        unflatten = jac_out_in.unflatten(-1, (4, 3));  jac_out_in = None
+
+        movedim_1 = jac_out_1.movedim(0, -1);  jac_out_1 = None
+        split_1 = movedim_1.split((12,), dim = -1);  movedim_1 = None
+        jac_out_in_1 = split_1[0];  split_1 = None
+
+        unflatten_1 = jac_out_in_1.unflatten(-1, (4, 3));  jac_out_in_1 = None
+        return (unflatten, unflatten_1)
+""",
+        )
+
+    @config.patch(capture_func_transforms=True)
     def test_jvp_simple(self):
         counters.clear()
 
