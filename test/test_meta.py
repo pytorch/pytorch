@@ -8,7 +8,7 @@ from enum import Enum
 from torch.overrides import resolve_name
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch.utils import _pytree as pytree
-from torch._subclasses.meta_utils import MetaConverter, assert_metadata_eq
+from torch._subclasses.meta_utils import MetaConverter, assert_metadata_eq, is_sparse_any
 import torch.utils._python_dispatch
 from torch._dispatch.python import enable_python_dispatcher
 from torch._ops import OpOverload, OpOverloadPacket
@@ -490,7 +490,9 @@ def verbose_print(e):
             return self.s
 
     def go(t):
-        if isinstance(t, torch.Tensor):
+        if is_sparse_any(t):
+            return t
+        elif isinstance(t, torch.Tensor):
             return Lit(f"{t} stride={t.stride()}")
         else:
             return t
@@ -641,7 +643,6 @@ meta_function_expected_failures = {
     torch.Tensor.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.Tensor.item : {f64, i32, c128, i64, i16, f16, u8, c32, c64, bf16, b8, i8, f32},
     torch.bincount : {i32, i64, u8, i16, i8},
-    torch.frexp : {f64, f16, bf16, f32},
     torch.functional.unique : {f64, i32, i64, u8, i16, f16, bf16, b8, i8, f32},
     torch.functional.unique_consecutive : {f64, i32, i64, u8, i16, f16, bf16, b8, i8, f32},
     torch.histc : {f64, f16, bf16, f32},
@@ -815,7 +816,6 @@ meta_dispatch_expected_failures = {
     aten._unique2.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
     aten.bincount.default : {i64, i8, i32, i16, u8},
     aten.equal.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
-    aten.frexp.Tensor : {bf16, f32, f16, f64},
     aten.histc.default : {bf16, f32, f64},
     aten.histc.out : {bf16, f32, f64},
     aten.histogram.bin_ct : {f32, f64},

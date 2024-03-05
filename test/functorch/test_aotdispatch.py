@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
 import copy
 import torch
+import torch._dynamo as torchdynamo
 import torch.nn as nn
 import torch.utils._pytree as pytree
 import unittest
@@ -2987,29 +2988,114 @@ def forward(self, arg0_1, arg1_1):
     _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
     return (add_3,)""")
 
-    # TODO(tmanlaibaatar) properly support functionalizing HOO in
-    # predispatch tracing mode
-    @unittest.expectedFailure
-    def test_aot_export_predispatch_with_cond(self):
+    @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
+    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "TorchDynamo is not supported")
+    def test_aot_export_predispatch_with_cond_nested(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_buffer("buffer", torch.randn(4, 4))
 
             def forward(self, x):
                 def true_fn(x):
-                    self.buffer.add_(5)
-                    return x.cos() + self.buffer.sum()
+                    y = x.sin()
+                    y.add_(5)
+
+                    def true_true_fn(x):
+                        y = x.sin()
+                        y.add_(7)
+                        return y.sin()
+
+                    def true_false_fn(x):
+                        return x.cos()
+
+                    return torch.cond(y.cos().shape[0] > 5, true_true_fn, true_false_fn, [y.cos()])
 
                 def false_fn(x):
-                    self.buffer.add_(6)
-                    return x.sin() + self.buffer.sum()
+                    z = x.cos()
+                    z.add_(6)
+                    return z.sin()
 
                 a = torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
                 return (a + 3, a + 4)
 
         inp = torch.randn(2, 2)
         gm, _ = aot_export_module(M(), [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1):
+    _set_grad_enabled = torch._C._set_grad_enabled(False)
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
+    _set_grad_enabled_2 = torch._C._set_grad_enabled(False)
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1]);  true_graph_0 = false_graph_0 = arg0_1 = None
+    getitem = conditional[0];  conditional = None
+    add = torch.ops.aten.add.Tensor(getitem, 3)
+    add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
+    return (add, add_1)""")  # noqa: B950
+
+        self.assertExpectedInline(str(gm.true_graph_0.code).strip(), """\
+def forward(self, arg0_1):
+    sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(sin, 5);  sin = None
+    cos = torch.ops.aten.cos.default(add)
+    cos_1 = torch.ops.aten.cos.default(add);  add = None
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [cos_1]);  true_graph_0 = false_graph_0 = cos_1 = None
+    getitem = conditional[0];  conditional = None
+    return (getitem,)""")  # noqa: B950
+
+        self.assertExpectedInline(str(gm.true_graph_0.true_graph_0.code).strip(), """\
+def forward(self, arg0_1):
+    sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(sin, 7);  sin = None
+    sin_1 = torch.ops.aten.sin.default(add);  add = None
+    return (sin_1,)""")
+
+    @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
+    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "TorchDynamo is not supported")
+    def test_aot_export_predispatch_with_cond(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                def true_fn(x):
+                    y = x.sin()
+                    z = torch.ops.aten.linear.default(y, torch.randn(2, 2))
+                    z.add_(5)
+                    return z.cos()
+
+                def false_fn(x):
+                    z = x.cos()
+                    z.add_(6)
+                    return z.sin()
+
+                a = torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
+                return (a + 3, a + 4)
+
+        inp = torch.randn(2, 2)
+        gm, _ = aot_export_module(M(), [inp], trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1):
+    _set_grad_enabled = torch._C._set_grad_enabled(False)
+    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
+    _set_grad_enabled_2 = torch._C._set_grad_enabled(False)
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1]);  true_graph_0 = false_graph_0 = arg0_1 = None
+    getitem = conditional[0];  conditional = None
+    add = torch.ops.aten.add.Tensor(getitem, 3)
+    add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
+    return (add, add_1)""")  # noqa: B950
+        self.assertExpectedInline(str(gm.true_graph_0.code).strip(), """\
+def forward(self, arg0_1):
+    sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+    randn = torch.ops.aten.randn.default([2, 2], device = device(type='cpu'), pin_memory = False)
+    linear = torch.ops.aten.linear.default(sin, randn);  sin = randn = None
+    add = torch.ops.aten.add.Tensor(linear, 5);  linear = None
+    cos = torch.ops.aten.cos.default(add);  add = None
+    return (cos,)""")
 
     def test_aot_export_predispatch_conv_and_bn(self):
         class ConvBatchnorm(torch.nn.Module):
@@ -4381,7 +4467,6 @@ aot_autograd_failures = {
 
 symbolic_aot_autograd_failures = {
     xfail('combinations', ''),  # aten.masked_select.default
-    xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('index_fill', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kthvalue', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.eigvals', ''),  # aten.linalg_eig.default - couldn't find symbolic meta function/decomposition
@@ -4396,8 +4481,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.fractional_max_pool2d', ''),  # rand() received an invalid combination of arguments - g...
     xfail('nn.functional.fractional_max_pool3d', ''),  # rand() received an invalid combination of arguments - g...
     xfail('nn.functional.group_norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.interpolate', 'linear'),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.interpolate', 'trilinear'),  # Cannot call sizes() on tensor with symbolic sizes/st...
     xfail('nn.functional.nll_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('_segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
@@ -4555,8 +4638,6 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.FractionalMaxPool3d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
     torch.nn.BCELoss,  # new_size = _infer_size(target.size(), weight.size())
                        # RuntimeError: expected int at position 0, but got: SymInt
-    torch.nn.CrossEntropyLoss,  # RuntimeError: Cannot call numel() on tensor with symbolic sizes/strides
-    torch.nn.NLLLoss,  # RuntimeError: Cannot call numel() on tensor with symbolic sizes/strides
 }
 
 
