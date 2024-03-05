@@ -1454,15 +1454,13 @@ def init_once_fakemode(fn: Callable[..., Any]):
 
     @functools.lru_cache(None)
     @functools.wraps(fn)
-    def lazy_init(inference_with_onednn_graph=False):
-        # Although inference_with_onednn_graph would not be used here, it's essential
-        # for using the init_once_fakemode wrapper
+    def lazy_init():
         counters_ref = counters["inductor"].copy()
 
         with torch._guards.tracing(
             None
         ), maybe_disable_fake_tensor_mode(), FakeTensorMode():
-            result = fn(inference_with_onednn_graph=inference_with_onednn_graph)
+            result = fn()
 
         # clear view matches encountered during tracing
         counters["inductor"] = counters_ref

@@ -2,10 +2,11 @@ import functools
 import inspect
 import logging
 import math
+import sys
 
 import torch
 from ..._dynamo.utils import counters
-from ..compile_fx import IS_AVX512_BF16_SUPPORTED
+from .. import config
 from ..pattern_matcher import (
     filter_nodes,
     fwd_only,
@@ -15,6 +16,28 @@ from ..pattern_matcher import (
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+
+
+# Some fusions would only work on Xeon SP processors gen 2 & above
+def is_avx512_vnni_supported():
+    if sys.platform != "linux":
+        return False
+    with open("/proc/cpuinfo", encoding="ascii") as f:
+        lines = f.read()
+    return "vnni" in lines
+
+
+# Some BF16 fusions would only work on Xeon SP processors gen 3 (Cooper Lake) & above
+def is_avx512_bf16_supported():
+    if sys.platform != "linux":
+        return False
+    with open("/proc/cpuinfo", encoding="ascii") as f:
+        lines = f.read()
+    return "avx512_bf16" in lines
+
+
+IS_AVX512_VNNI_SUPPORTED = is_avx512_vnni_supported()
+IS_AVX512_BF16_SUPPORTED = is_avx512_bf16_supported()
 
 
 def _sfdp_pattern_1(query, key, value, inv_scale):
@@ -524,12 +547,17 @@ def _sfdp_params_check(match):
     return True
 
 
-# We could add conditions for enabling oneDNN Graph in this check
-# But in that case, we wouldn't be able to add replacements for existing patterns
-# that already have a replacement defined.
 def _onednn_graph_extra_check(match):
+    if (
+        config.onednn_graph
+        and torch._C._has_onednn_graph
+        and not IS_AVX512_VNNI_SUPPORTED
+    ):
+        return False
     query = match.kwargs["query"].meta["val"]
     if query.dtype not in [torch.float32, torch.bfloat16]:
+        return False
+    if str(query.device) != "cpu":
         return False
     if (query.dtype == torch.bfloat16) and not IS_AVX512_BF16_SUPPORTED:
         return False
@@ -578,7 +606,7 @@ def partialize_and_update_signature(func, **kwargs):
     return wrapper
 
 
-def _get_sfdp_patterns(enable_onednn_fusions=False, serialization_mode=False):
+def _get_sfdp_patterns(serialization_mode=False):
     from .joint_graph import patterns
 
     if torch.cuda.is_available():
@@ -627,7 +655,6 @@ def _get_sfdp_patterns(enable_onednn_fusions=False, serialization_mode=False):
                 {},
                 _sfdp_extra_check(aten.div.Tensor),
                 True,
-                True,
                 False,
             ),
             (
@@ -636,7 +663,6 @@ def _get_sfdp_patterns(enable_onednn_fusions=False, serialization_mode=False):
                 [g(), g(), g(), c()],
                 {},
                 _sfdp_extra_check(aten.mul.Tensor),
-                True,
                 True,
                 False,
             ),
@@ -647,7 +673,6 @@ def _get_sfdp_patterns(enable_onednn_fusions=False, serialization_mode=False):
                 d,
                 _sfdp_extra_check(aten.div.Tensor),
                 True,
-                True,
                 False,
             ),
             (
@@ -656,7 +681,6 @@ def _get_sfdp_patterns(enable_onednn_fusions=False, serialization_mode=False):
                 [g(), g(), g(), c()],
                 d,
                 _sfdp_extra_check(aten.mul.Tensor),
-                True,
                 True,
                 False,
             ),
@@ -667,7 +691,6 @@ def _get_sfdp_patterns(enable_onednn_fusions=False, serialization_mode=False):
                 {},
                 _sfdp_params_check,
                 True,
-                True,
                 False,
             ),
             (
@@ -676,7 +699,6 @@ def _get_sfdp_patterns(enable_onednn_fusions=False, serialization_mode=False):
                 [g(), g(), g(), b()],
                 d,
                 _sfdp_params_check,
-                True,
                 True,
                 False,
             ),
@@ -687,7 +709,6 @@ def _get_sfdp_patterns(enable_onednn_fusions=False, serialization_mode=False):
                 d,
                 _sfdp_params_check,
                 True,
-                True,
                 False,
             ),
             (
@@ -696,7 +717,6 @@ def _get_sfdp_patterns(enable_onednn_fusions=False, serialization_mode=False):
                 [g(), g(), g()],
                 {},
                 _sfdp_params_check,
-                True,
                 True,
                 False,
             ),
@@ -707,7 +727,6 @@ def _get_sfdp_patterns(enable_onednn_fusions=False, serialization_mode=False):
                 d,
                 _sfdp_params_check,
                 True,
-                True,
                 False,
             ),
             (
@@ -716,7 +735,6 @@ def _get_sfdp_patterns(enable_onednn_fusions=False, serialization_mode=False):
                 [g(), g(), g()],
                 {},
                 _sfdp_params_check,
-                True,
                 True,
                 False,
             ),
@@ -727,7 +745,6 @@ def _get_sfdp_patterns(enable_onednn_fusions=False, serialization_mode=False):
                 {},
                 _sfdp_extra_check(aten.div.Tensor),
                 True,
-                True,
                 False,
             ),
             (
@@ -736,7 +753,6 @@ def _get_sfdp_patterns(enable_onednn_fusions=False, serialization_mode=False):
                 [g(), g(), g(), c()],
                 d,
                 _sfdp_extra_check(aten.div.Tensor),
-                True,
                 True,
                 False,
             ),
@@ -747,7 +763,6 @@ def _get_sfdp_patterns(enable_onednn_fusions=False, serialization_mode=False):
                 d,
                 _sfdp_params_check,
                 True,
-                True,
                 False,
             ),
             (
@@ -757,7 +772,6 @@ def _get_sfdp_patterns(enable_onednn_fusions=False, serialization_mode=False):
                 {},
                 _sfdp_extra_check(aten.div.Tensor),
                 True,
-                True,
                 False,
             ),
             (
@@ -766,7 +780,6 @@ def _get_sfdp_patterns(enable_onednn_fusions=False, serialization_mode=False):
                 [g(), g(), g(), m(), c()],
                 {},
                 _sfdp_extra_check(aten.div.Tensor),
-                True,
                 True,
                 False,
             ),
@@ -778,7 +791,6 @@ def _get_sfdp_patterns(enable_onednn_fusions=False, serialization_mode=False):
                 d,
                 _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
                 True,
-                True,
                 False,
             ),
             (
@@ -788,7 +800,6 @@ def _get_sfdp_patterns(enable_onednn_fusions=False, serialization_mode=False):
                 d,
                 _sfdp_extra_check(aten.div.Tensor),
                 True,
-                True,
                 False,
             ),
             (
@@ -796,9 +807,8 @@ def _get_sfdp_patterns(enable_onednn_fusions=False, serialization_mode=False):
                 _sfdp_replacement_18,
                 [g(), g(), g(), c(), c(), gpt2_c()],
                 {},
-                _sfdp_params_check,
+                _onednn_graph_extra_check,
                 False,
-                True,
                 True,
             ),
         ]
@@ -810,7 +820,6 @@ def _get_sfdp_patterns(enable_onednn_fusions=False, serialization_mode=False):
             workaround,
             extra_check,
             register_training,
-            register_for_half_dtype,
             onednn_graph_only,
         ) in replacement_info:
             # XXX: when adding a new pattern, re-run `gen_attention_patterns` so the pattern
@@ -818,66 +827,53 @@ def _get_sfdp_patterns(enable_onednn_fusions=False, serialization_mode=False):
             assert isinstance(workaround, dict)
             name = pattern.__name__
 
-            if not (dtype == torch.half and not register_for_half_dtype):
-                # currently, only inference patterns are supported with oneDNN Graph
-                if not enable_onednn_fusions and register_training:
-                    training_name = (
-                        f"{name}_training"
-                        if dtype == torch.float
-                        else f"{name}_training_half"
-                    )
-                    yield training_name, {
-                        "search_fn": pattern,
-                        "replace_fn": replacement,
-                        "example_inputs": args,
-                        "trace_fn": joint_fwd_bwd,
-                        "pass_dicts": patterns,
-                        "extra_check": extra_check,
-                        "scalar_workaround": workaround,
-                    }
-
-                    if workaround:
-                        assert len(workaround) == 1 and "dropout_p" in workaround
-                        # functools.partial insufficient because we look at signature downstream
-                        pattern = partialize_and_update_signature(
-                            pattern, dropout_p=0.0
-                        )
-                        replacement = partialize_and_update_signature(
-                            replacement, dropout_p=0.0
-                        )
-                        workaround = {}
-
-                if (
-                    not serialization_mode
-                    and onednn_graph_only
-                    and not enable_onednn_fusions
-                ):
-                    # this pattern is only meant to be used with oneDNN Graph
-                    continue
-
-                inference_name = (
-                    f"{name}_inference"
+            # currently, only inference patterns are supported with oneDNN Graph
+            if register_training:
+                training_name = (
+                    f"{name}_training"
                     if dtype == torch.float
-                    else f"{name}_inference_half"
+                    else f"{name}_training_half"
                 )
-                yield inference_name, {
+                yield training_name, {
                     "search_fn": pattern,
                     "replace_fn": replacement,
                     "example_inputs": args,
-                    "trace_fn": fwd_only,
+                    "trace_fn": joint_fwd_bwd,
                     "pass_dicts": patterns,
                     "extra_check": extra_check,
                     "scalar_workaround": workaround,
                 }
 
+                if workaround:
+                    assert len(workaround) == 1 and "dropout_p" in workaround
+                    # functools.partial insufficient because we look at signature downstream
+                    pattern = partialize_and_update_signature(pattern, dropout_p=0.0)
+                    replacement = partialize_and_update_signature(
+                        replacement, dropout_p=0.0
+                    )
+                    workaround = {}
+
+            inference_name = (
+                f"{name}_inference"
+                if dtype == torch.float
+                else f"{name}_inference_half"
+            )
+            yield inference_name, {
+                "search_fn": pattern,
+                "replace_fn": replacement,
+                "example_inputs": args,
+                "trace_fn": fwd_only,
+                "pass_dicts": patterns,
+                "extra_check": extra_check,
+                "scalar_workaround": workaround,
+            }
+
 
 @functools.lru_cache(None)
-def _sfdp_init(enable_onednn_fusions=False):
+def _sfdp_init():
     from .serialized_patterns.central_index import get_serialized_pattern
 
-    for key, register_replacement_kwargs in _get_sfdp_patterns(
-        enable_onednn_fusions=enable_onednn_fusions
-    ):
+    for key, register_replacement_kwargs in _get_sfdp_patterns():
         search_fn_pattern = get_serialized_pattern(key)
         register_replacement(
             **register_replacement_kwargs, search_fn_pattern=search_fn_pattern

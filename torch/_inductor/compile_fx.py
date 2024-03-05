@@ -77,46 +77,6 @@ post_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "post_grad_gra
 ALIGNMENT = 16
 
 
-# Some fusions would only work on Xeon SP processors gen 2 & above
-def is_avx512_vnni_supported():
-    if sys.platform != "linux":
-        return False
-    with open("/proc/cpuinfo", encoding="ascii") as f:
-        lines = f.read()
-    return "vnni" in lines
-
-
-# Some BF16 fusions would only work on Xeon SP processors gen 3 (Cooper Lake) & above
-def is_avx512_bf16_supported():
-    if sys.platform != "linux":
-        return False
-    with open("/proc/cpuinfo", encoding="ascii") as f:
-        lines = f.read()
-    return "avx512_bf16" in lines
-
-
-IS_AVX512_VNNI_SUPPORTED = is_avx512_vnni_supported()
-IS_AVX512_BF16_SUPPORTED = is_avx512_bf16_supported()
-
-
-def may_use_onednn_graph(example_inputs):
-    retVal = False
-    if config.onednn_graph and torch._C._has_onednn_graph and IS_AVX512_VNNI_SUPPORTED:
-        retVal = True
-        for example_input in example_inputs:
-            # all inputs must be on CPU
-            if type(example_input) == FakeTensor or type(example_input) == torch.Tensor:
-                if not example_input.is_cpu:
-                    retVal = False
-                    break
-                # AVX512-BF16 is only supported on Xeon SP 3rd gen & above
-                if example_input.dtype == torch.bfloat16:
-                    if not IS_AVX512_BF16_SUPPORTED:
-                        retVal = False
-                        break
-    return retVal
-
-
 @dataclasses.dataclass
 class BoxedBool:
     value: bool
@@ -265,11 +225,11 @@ def _recursive_pre_grad_passes(gm, example_inputs):
     return pre_grad_passes(gm, example_inputs)
 
 
-def _recursive_joint_graph_passes(gm, inference_with_onednn_graph=False):
+def _recursive_joint_graph_passes(gm):
     for subgraph_name in _get_subgraph_names(gm):
         subgraph = getattr(gm, subgraph_name)
-        _recursive_joint_graph_passes(subgraph, inference_with_onednn_graph)
-    joint_graph_passes(gm, inference_with_onednn_graph)
+        _recursive_joint_graph_passes(subgraph)
+    joint_graph_passes(gm)
 
 
 def _recursive_post_grad_passes(gm, is_inference: bool = False):
@@ -1110,13 +1070,9 @@ def fw_compiler_freezing(
 
     # whether or not to do inference with oneDNN Graph
 
-    inference_with_onednn_graph = may_use_onednn_graph(aot_example_inputs)
-
     # partition_fn won't be called
 
-    _recursive_joint_graph_passes(
-        aot_autograd_model, inference_with_onednn_graph=inference_with_onednn_graph
-    )
+    _recursive_joint_graph_passes(aot_autograd_model)
 
     layout_opt = GraphLowering.decide_layout_opt(aot_autograd_model, is_inference=True)
     if layout_opt:
@@ -1286,12 +1242,9 @@ def compile_fx(
         is_inference: bool,
     ):
         if is_inference:
-            inference_with_onednn_graph = may_use_onednn_graph(example_inputs)
-
             # partition_fn won't be called
-            _recursive_joint_graph_passes(
-                model, inference_with_onednn_graph=inference_with_onednn_graph
-            )
+            _recursive_joint_graph_passes(model)
+
         num_rng_seed_offset_inputs = 2 if functorch_config.functionalize_rng_ops else 0
         fixed = len(example_inputs) - num_example_inputs - num_rng_seed_offset_inputs
         user_visible_outputs = set()
