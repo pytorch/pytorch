@@ -3,11 +3,7 @@
 import copy
 import sys
 from itertools import chain
-<<<<<<< HEAD
 from typing import Callable, Tuple, Type, Union
-=======
-from typing import Callable, Tuple, Type
->>>>>>> 794616534e (add AdamW to test_state_dict)
 
 import torch
 import torch.distributed as dist
@@ -113,9 +109,6 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         # Then finally we can call set_state_dict().
         if not isinstance(dist_optim, list):
             dist_optim = [dist_optim]
-        curr_dist_msd, curr_dist_osd = get_state_dict(
-            dist_model, optimizers=dist_optim, options=options
-        )
         if test_frozen:
             # We won't be able to load the partial state_dict back.
             return
@@ -135,9 +128,6 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         dist_msd, dist_osd = get_state_dict(
             dist_model, optimizers=dist_optim, options=options
         )
-        for (k1, v1), (k2, v2) in zip(msd.items(), dist_msd.items()):
-            if not torch.allclose(v1, v2):
-                print(f"{k1=}, {v1=}, {v2=}, {v1-v2=}")
         self._verify_msd(msd, dist_msd, options)
         # TODO: ditto
         # self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
@@ -160,6 +150,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         use_dtensor: bool,
         wrapping: Tuple[nn.Module] = (),
         compile_model: bool = False,
+        optimizer_class: Type[Optimizer],
     ) -> None:
         if not use_orig_params and use_composable:
             return
@@ -173,8 +164,8 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 device_mesh = init_device_mesh("cuda", (self.world_size,))
 
             orig_model = CompositeParamModel(device=torch.device("cuda"))
-            orig_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-3)
-            copy_optim = torch.optim.Adam(orig_model.parameters(), lr=1e-3)
+            orig_optim = optimizer_class(orig_model.parameters(), lr=1e-3)
+            copy_optim = optimizer_class(orig_model.parameters(), lr=1e-3)
             if wrapping:
                 strategy = set(wrapping)
             else:
@@ -201,7 +192,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
             if compile_model:
                 dist_model = torch.compile(dist_model)
-            dist_optim = torch.optim.Adam(dist_model.parameters(), lr=1e-3)
+            dist_optim = optimizer_class(dist_model.parameters(), lr=1e-3)
             return orig_model, orig_optim, copy_optim, dist_model, dist_optim
 
         self._test_save_load(init_model_optim)
@@ -215,6 +206,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 "use_composable": [True, False],
                 "use_dtensor": [True, False],
                 "wrapping": [tuple(), (nn.Linear, UnitModule)],
+                "optimizer_class": [torch.optim.Adam, torch.optim.AdamW],
             },
             self._test_fsdp,
         )
@@ -222,12 +214,15 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_compiled_fsdp(self) -> None:
-        self._test_fsdp(
-            use_orig_params=True,
-            use_composable=False,
-            use_dtensor=False,
-            wrapping=tuple(),
-            compile_model=True,
+        self.run_subtests(
+            {
+                "use_orig_params": [True],
+                "use_composable": [False],
+                "use_dtensor": [False],
+                "wrapping": [tuple()],
+                "optimizer_class": [torch.optim.Adam, torch.optim.AdamW],
+            },
+            self._test_fsdp,
         )
 
     def _test_fsdp2(
@@ -247,7 +242,12 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 reshard_after_forward=reshard_after_forward,
             )
 
-            if compile_model:
+            import sys
+            major_version = sys.version_info[0]
+            minor_version = sys.version_info[1]
+            # Adding more checks to temporarily work around
+            # `RuntimeError: Dynamo is not supported on Python 3.12+`
+            if major_version == 3 and minor_version < 12 and compile_model:
                 dist_model = torch.compile(dist_model)
             dist_optim = optimizer_class(dist_model.parameters(), lr=1e-3)
 
@@ -383,7 +383,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     @skip_if_lt_x_gpu(1)
     def test_single_gpu(self) -> None:
         self.run_subtests(
-            {"optimizer_class": [torch.optim.AdamW]},
+            {"optimizer_class": [torch.optim.Adam, torch.optim.AdamW]},
             self._test_single_gpu,
         )
 
