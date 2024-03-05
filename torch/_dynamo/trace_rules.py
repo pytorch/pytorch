@@ -101,6 +101,8 @@ manual_torch_name_rule_map = {
     "torch.overrides.get_default_nowrap_functions": TorchInGraphFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_tracing": TorchInGraphFunctionVariable,
     "torch._dynamo.external_utils.is_compiling": TorchInGraphFunctionVariable,
+    "torch.compiler.is_compiling": TorchInGraphFunctionVariable,
+    "torch.compiler.is_dynamo_compiling": TorchInGraphFunctionVariable,
     "torch.autograd._profiler_enabled": SkipFunctionVariable,
     # We graph break on RNG state setters or getters like
     # `torch.get_rng_state` or `torch.set_rng_state`. These functions
@@ -223,6 +225,7 @@ manual_torch_name_rule_map = {
     "torch._dynamo.mark_static": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
     "torch.cuda._get_device_properties": TorchInGraphFunctionVariable,
+    "torch.utils.hooks.BackwardHook": TorchInGraphFunctionVariable,
 }
 
 
@@ -2219,7 +2222,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._higher_order_ops.out_dtype.out_dtype_fake_tensor_mode",
         "torch._higher_order_ops.out_dtype.out_dtype_fallback",
         "torch._higher_order_ops.out_dtype.out_dtype_func",
-        "torch._higher_order_ops.out_dtype.out_dtype_predispatch",
         "torch._higher_order_ops.out_dtype.out_dtype_proxy",
         "torch._higher_order_ops.out_dtype.trace_out_dtype",
         "torch._higher_order_ops.utils.autograd_not_implemented_inner",
@@ -2257,6 +2259,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._register_device_module",
         "torch._running_with_deploy",
         "torch._sparse_coo_tensor_unsafe",
+        "torch._utils._dummy_type",
         "torch._weights_only_unpickler._get_allowed_globals",
         "torch._weights_only_unpickler.load",
         "torch.align_tensors",
@@ -2400,7 +2403,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda._set_stream_by_id",
         "torch.cuda._sleep",
         "torch.cuda._transform_uuid_to_ordinals",
-        "torch.cuda._utils._dummy_type",
         "torch.cuda._utils._get_device_index",
         "torch.cuda.amp.autocast_mode._cast",
         "torch.cuda.amp.autocast_mode.custom_bwd",
@@ -3104,6 +3106,7 @@ BUILTIN_SKIPLIST = (
 # we should use lazy import & skip in the future.
 THIRDPARTY_SKIPLIST = (
     "fx2trt_oss",
+    "hypothesis",
     "networkx",
     "numpy",
     "omegaconf",
@@ -3190,17 +3193,18 @@ MOD_INLINELIST = {
     "torch.backends.cuda",
     "torch.cuda.amp.autocast_mode",
     "torch.distributions",
-    "torch.export.wrapper",
     "torch.fx._pytree",
     "torch.fx.passes.shape_prop",
     "torch.nn",
     "torch.random",
     "torch.sparse",
     "torch.testing",
+    "torch.testing._internal.hypothesis_utils",
     "torch.utils._content_store",
     "torch.utils._contextlib",
     "torch.utils._foreach_utils",
     "torch.utils._pytree",
+    "torch.utils.hooks",
     "torch._tensor",
     "torch._higher_order_ops.strict_mode",
     "torch._higher_order_ops.while_loop",
