@@ -1269,8 +1269,7 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 toleranceOverride(
-                    {  # previously atol=5-05, rtol=0.08, discrepancy due to the order of sub'ing 1 in float16
-                        # between the forloop and foreach capturable implementations
+                    {  # previously atol=5-05, rtol=0.08, discrepancy due to #121238
                         torch.float32: tol(atol=5e-03, rtol=0.5),
                     }
                 ),
