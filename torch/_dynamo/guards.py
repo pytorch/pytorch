@@ -341,9 +341,9 @@ def get_tensor_guard_code_part(value, name, sizes, strides):
     return guard_str
 
 
-def handle_dict_mananger(
-    source, base_guard_manager, base_example_value, source_name, example_value
-):
+def handle_dict_mananger(source, base_guard_manager, base_example_value, example_value):
+    base_source_name = source.base.name()
+    source_name = source.name()
     if isinstance(source.index, ConstDictKeySource):
         index = source.index.index
     else:
@@ -352,15 +352,17 @@ def handle_dict_mananger(
         assert isinstance(base_example_value, dict)
         index = list(base_example_value.keys()).index(source.index)
 
+    key_source = f"{base_source_name}.keys()[{index}]"
+    value_source = f"{base_source_name}[{key_source}]"
     if not isinstance(source.index, ConstDictKeySource):
         # We have to insert a key manager guard here
         # TODO - source debug string is probably wrong here.
         base_guard_manager.get_key_manager(
-            index=index, source=source_name, example_value=source.index
-        ).add_equals_match_guard(source.index, [f"key=={source.index}"])
+            index=index, source=key_source, example_value=source.index
+        ).add_equals_match_guard(source.index, [f"{key_source} == {source.index}"])
 
     return base_guard_manager.get_value_manager(
-        index=index, source=source_name, example_value=example_value
+        index=index, source=value_source, example_value=example_value
     )
 
 
@@ -517,7 +519,6 @@ class GuardBuilder(GuardBuilderBase):
                         source,
                         base_guard_manager,
                         base_example_value,
-                        source_name,
                         example_value,
                     )
                 index = source.index
@@ -534,7 +535,6 @@ class GuardBuilder(GuardBuilderBase):
                     source,
                     base_guard_manager,
                     base_example_value,
-                    source_name,
                     example_value,
                 )
             elif istype(source, DefaultsSource):
@@ -1030,17 +1030,21 @@ class GuardBuilder(GuardBuilderBase):
             dict_mgr = self.get_guard_manager(guard)
             assert isinstance(dict_mgr, DictGuardManager)
             for idx, key in enumerate(value.keys()):
+                key_source = guard.name + f".keys()[{idx}]"
                 key_manager = dict_mgr.get_key_manager(
-                    index=idx, source=guard.name, example_value=key
+                    index=idx, source=key_source, example_value=key
                 )
                 if key_is_id(key):
                     id_val = self.id_ref(key)
                     key_manager.add_id_match_guard(
-                        id_val, get_verbose_code_parts(code, guard)
+                        id_val,
+                        get_verbose_code_parts(
+                            f"__check_obj_id({key_source}, {id_val})", guard
+                        ),
                     )
                 else:
                     key_manager.add_equals_match_guard(
-                        key, get_verbose_code_parts(code, guard)
+                        key, get_verbose_code_parts(f"{key_source} == {key}", guard)
                     )
 
         self._produce_guard_code(guard, code)
@@ -1095,11 +1099,12 @@ class GuardBuilder(GuardBuilderBase):
             dict_mgr = self.get_guard_manager(guard)
             assert isinstance(dict_mgr, DictGuardManager)
             for idx, key in enumerate(list(value.keys())):
+                key_source = guard.name + f".keys()[{idx}]"
                 key_manager = dict_mgr.get_key_manager(
-                    index=idx, source=guard.name, example_value=key
+                    index=idx, source=key_source, example_value=key
                 )
                 key_manager.add_equals_match_guard(
-                    key, get_verbose_code_parts(code, guard)
+                    key, get_verbose_code_parts(f"{key_source} == {key}", guard)
                 )
 
     def OBJECT_MUTATION(self, guard: Guard):
