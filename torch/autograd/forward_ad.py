@@ -127,23 +127,17 @@ def make_dual(tensor, tangent, *, level=None):
     return torch._VF._make_dual(tensor, tangent, level=level)
 
 
-UnpackedDualTensor = namedtuple("UnpackedDualTensor", ["primal", "tangent"])
+_UnpackedDualTensor = namedtuple("_UnpackedDualTensor", ["primal", "tangent"])
 
 
-# Note for the reviewer: class below is not treated as a namedtuple by dynamo.
-# See torch/_dynamo/utils.py::is_namedtuple_cls
-#
-# >>> UnpackedDualTensor.__bases__
-# (<class 'torch.autograd.forward_ad._UnpackedDualTensor'>,)
-#
-# class UnpackedDualTensor(_UnpackedDualTensor):
-#     r"""Namedtuple returned by :func:`unpack_dual` containing the primal and tangent components of the dual tensor.
-#
-#     See :func:`unpack_dual` for more details.
-#
-#     """
-#
-#     pass
+class UnpackedDualTensor(_UnpackedDualTensor):
+    r"""Namedtuple returned by :func:`unpack_dual` containing the primal and tangent components of the dual tensor.
+
+    See :func:`unpack_dual` for more details.
+
+    """
+
+    pass
 
 
 def unpack_dual(tensor, *, level=None):

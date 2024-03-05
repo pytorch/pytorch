@@ -872,12 +872,12 @@ def is_namedtuple(obj):
 
 
 def is_namedtuple_cls(cls):
-    """Test if an object is a namedtuple or a torch.return_types.* quasi-namedtuple"""
+    """Test if an object is a namedtuple or a (torch.return_types|torch.autograd.forward_ad).* quasi-namedtuple"""
     try:
         if issubclass(cls, tuple):
             bases = getattr(cls, "__bases__", []) or [None]
             module = getattr(cls, "__module__", None)
-            return module == "torch.return_types" or (
+            return module in ("torch.return_types", "torch.autograd.forward_ad") or (
                 bases[0] is tuple and hasattr(cls, "_make") and hasattr(cls, "_fields")
             )
     except TypeError:
