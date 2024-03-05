@@ -264,6 +264,8 @@ class TestLoadStateDict(NNTestCase):
         swap = torch.__future__.get_swap_module_params_on_conversion()
         net = MyModule()
         state_dict = net.state_dict(keep_vars=keep_vars)
+        for v in state_dict.values():
+            v.requires_grad_(False)
 
         with torch.device('meta'):
             net_meta = MyModule()
@@ -285,6 +287,7 @@ class TestLoadStateDict(NNTestCase):
                         # state_dict[key] is not an nn.Parameter so it will be detached when wrapping with a Parameter
                         self.assertTrue(net_meta_state_dict[key] is not net_meta_state_dict_old[key])
                         self.assertEqual(net_meta_state_dict_old[key].requires_grad, net_meta_state_dict[key].requires_grad)
+                self.assertEqual(net_meta_state_dict_old[key].requires_grad, net_meta_state_dict[key].requires_grad)
                 self.assertEqual(state_dict[key], net_meta_state_dict[key])
             elif key in net_meta._buffers and key not in net_meta._non_persistent_buffers_set:
                 self.assertTrue(state_dict[key] is net_meta_state_dict[key])
@@ -508,7 +511,6 @@ class TestLoadStateDictSwap(TestCase):
         def _test(m_subclass=None, sd_subclass=None):
             m = _create_model(m_subclass)
             sd = _create_model(sd_subclass).state_dict()
-            sd = sd
             m.load_state_dict(sd, assign=assign)
             self.assertEqual(m.weight, sd['weight'])
             self.assertEqual(m.buf, sd['buf'])
