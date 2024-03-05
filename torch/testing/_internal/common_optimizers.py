@@ -1268,16 +1268,6 @@ optim_db: List[OptimizerInfo] = [
                 "test_foreach_large_tensor",
             ),
             DecorateInfo(
-                toleranceOverride(
-                    {  # previously atol=5-05, rtol=0.08, discrepancy due to #121238
-                        torch.float32: tol(atol=5e-03, rtol=0.5),
-                    }
-                ),
-                "TestOptimRenewed",
-                "test_mixed_device_dtype",
-                active_if=TEST_WITH_TORCHDYNAMO,
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo(
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),

@@ -305,10 +305,12 @@ def _single_tensor_adamax(
             exp_inf.copy_(torch.amax(norm_buf, 0, keepdim=False))
 
         if capturable:
-            bias_correction = 1 - beta1 ** step_t
-            bias_correction.div_(lr)
-            denom = exp_inf * bias_correction
-            param.addcdiv_(exp_avg, denom, value=-1)
+            # why jump through extra hoops and negate bias_correction? check out #121238
+            # once fixed, we should use bias_correction with addcdiv value=-1 for readability
+            neg_bias_correction = beta1 ** step_t - 1
+            neg_bias_correction.div_(lr)
+            denom = exp_inf * neg_bias_correction
+            param.addcdiv_(exp_avg, denom)
         else:
             bias_correction = 1 - beta1 ** _get_value(step_t)
             clr = lr / bias_correction

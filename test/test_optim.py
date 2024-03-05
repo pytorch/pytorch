@@ -895,7 +895,6 @@ class TestOptimRenewed(TestCase):
 
         for optim_input in all_optim_inputs:
             kwargs = optim_input.kwargs
-            kwargs["foreach"] = True
             if (optim_info.only_supports_capturable_on_foreach and kwargs.get("capturable", False)
                     and not kwargs.get("foreach", False)):
                 continue
