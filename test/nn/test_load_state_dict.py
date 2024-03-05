@@ -10,7 +10,7 @@ import torch.nn as nn
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import TestCase, \
     TEST_NUMPY, IS_WINDOWS, skipIfTorchDynamo, instantiate_parametrized_tests, \
-    run_tests, skipIfCrossRef, swap
+    parametrize, run_tests, skipIfCrossRef, swap
 from torch.utils._pytree import tree_map
 
 if TEST_NUMPY:
@@ -249,28 +249,42 @@ class TestLoadStateDict(NNTestCase):
         self.assertEqual(mm[0].sub.weight[0, 0].item(), 555)
 
     @swap([True, False])
-    def test_load_state_dict_assign_meta(self):
+    @parametrize("keep_vars", [True, False])
+    def test_load_state_dict_assign_meta(self, keep_vars):
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.fc1 = nn.Linear(3, 5)
                 self.bn = nn.BatchNorm1d(5)
+                self.x = nn.Parameter(torch.rand(5), requires_grad=False)
 
             def forward(self, input):
-                return self.bn(self.fc1(input))
+                return self.x + self.bn(self.fc1(input))
 
         net = MyModule()
-        state_dict = net.state_dict(keep_vars=True)
+        state_dict = net.state_dict(keep_vars=keep_vars)
+        for v in state_dict.values():
+            v.requires_grad_(False)
 
         with torch.device('meta'):
             net_meta = MyModule()
 
+        net_meta_state_dict_old = net_meta.state_dict(keep_vars=True)
         net_meta.load_state_dict(state_dict, assign=True)
 
         # Make sure parameters and persistent buffers were assigned
         net_meta_state_dict = net_meta.state_dict(keep_vars=True)
         for key in state_dict.keys():
-            if isinstance(state_dict[key], torch.nn.Parameter):
+            if key in net_meta._parameters:
+                self.assertEqual(net_meta_state_dict_old[key].requires_grad, net_meta_state_dict[key].requires_grad)
+                if keep_vars:
+                    # state_dict[key] is an nn.Parameter
+                    self.assertTrue(state_dict[key] is net_meta_state_dict[key])
+                else:
+                    # state_dict[key] is not an nn.Parameter so it will be detached when wrapping with a Parameter
+                    self.assertTrue(net_meta_state_dict[key] is not net_meta_state_dict_old[key])
+                    self.assertEqual(state_dict[key], net_meta_state_dict[key])
+            elif key in net_meta._buffers and key not in net_meta._non_persistent_buffers_set:
                 self.assertTrue(state_dict[key] is net_meta_state_dict[key])
 
         # Make sure that ordering of parameters and buffers is preserved
@@ -279,14 +293,10 @@ class TestLoadStateDict(NNTestCase):
         net_meta_named_parameters = net_meta.named_parameters()
         net_meta_named_buffers = net_meta.named_buffers()
 
-        for p1, p2 in zip(net_named_parameters, net_meta_named_parameters):
-            n1, _ = p1
-            n2, _ = p2
+        for (n1, _), (n2, _) in zip(net_named_parameters, net_meta_named_parameters):
             self.assertEqual(n1, n2)
 
-        for p1, p2 in zip(net_named_buffers, net_meta_named_buffers):
-            n1, _ = p1
-            n2, _ = p2
+        for (n1, _), (n2, _) in zip(net_named_buffers, net_meta_named_buffers):
             self.assertEqual(n1, n2)
 
         # Make sure outputs are the same
