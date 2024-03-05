@@ -54,6 +54,10 @@ densenet121,pass,0
 
 
 
+detectron2_fcos_r_50_fpn,pass,38
+
+
+
 dlrm,pass,0
 
 
@@ -187,6 +191,10 @@ pyhpc_equation_of_state,pass,0
 
 
 pyhpc_isoneutral_mixing,pass,0
+
+
+
+pyhpc_turbulent_kinetic_energy,pass,0
 
 
 
