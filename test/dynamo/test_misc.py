@@ -6,6 +6,8 @@ import dataclasses
 import dis
 import enum
 import functools
+import gc
+import io
 import itertools
 import logging
 import math
@@ -60,6 +62,7 @@ from torch.fx.experimental.symbolic_shapes import (
     constrain_unify,
     ConstraintViolationError,
     expect_true,
+    guard_size_oblivious,
     ShapeEnv,
 )
 from torch.nn import functional as F
@@ -80,6 +83,7 @@ from torch.testing._internal.common_utils import (
     wrapDeterministicFlagAPITest,
 )
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.logging_utils import logs_to_string
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 T = typing.TypeVar("T")
@@ -131,6 +135,13 @@ uniform_qconfig_8bit = QConfig(
 qconfig_dict = {"object_type": [(torch.nn.Linear, uniform_qconfig_8bit)]}
 
 
+def closure_adder(val):
+    def inner(x):
+        return torch.sin(x + val)
+
+    return inner
+
+
 class MiscTests(torch._dynamo.test_case.TestCase):
     def test_get_cache_entry(self):
         def f(x):
@@ -150,6 +161,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             _debug_get_cache_entry_list(1)
         except TypeError as e:
             self.assertIn("expected a code object!", str(e))
+
+        # test get cache entry on skipped code object
+        def h(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            return x + 1
+
+        torch.compile(h)(torch.randn(3, 3))
+
+        entries = _debug_get_cache_entry_list(torch._dynamo.graph_break)
+        self.assertEqual(len(entries), 0)
 
     def test_boolarg(self):
         def boolarg(aa, bb, flag):
@@ -454,6 +476,25 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         cleanup_op("mylib::foo")
         del lib
 
+    def test_closure_recompiles(self):
+        cnt = CompileCounter()
+
+        def fn(x, other_fn):
+            return other_fn(x + 1) - 1
+
+        opt = torch.compile(fn, backend=cnt, fullgraph=True)
+
+        x = torch.randn(8)
+        for f in (
+            closure_adder(5),
+            closure_adder(5),
+            closure_adder(torch.randn(8)),
+            closure_adder(torch.randn(8)),
+        ):
+            self.assertEqual(opt(x, f), fn(x, f))
+
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_generate_trivial_abstract_impl(self):
         try:
             lib = torch.library.Library("mylib", "FRAGMENT")
@@ -554,7 +595,27 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             orig_args = (x, y, z, n)
 
             compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
-            torch.compile(f, backend="inductor", fullgraph=True)(*compiled_args)
+
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.compile_fx", "post_grad_graphs"
+            )
+            with ctx():
+                torch.compile(f, backend="inductor", fullgraph=True)(*compiled_args)
+
+            post_grad_graphs = "\n".join(
+                log_stream.getvalue().strip().split("\n")[3:]
+            ).strip()
+
+            # Check the graph under static shapes
+            if torch._dynamo.config.assume_static_by_default:
+                self.assertExpectedInline(
+                    post_grad_graphs,
+                    """\
+def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]"):
+        # No stacktrace found for following nodes
+        foo_default = torch.ops.mylib.foo.default(arg0_1, [arg3_1, arg4_1], arg1_1, 2, arg2_1);  arg0_1 = arg3_1 = arg4_1 = arg1_1 = arg2_1 = None
+        return ()""",
+                )
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
             f(*eager_args)
@@ -594,9 +655,28 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             orig_args = (x, y, z, n)
 
             compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
-            compiled_out = torch.compile(
-                f, backend="aot_eager_decomp_partition", fullgraph=True
-            )(*compiled_args)
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.compile_fx", "post_grad_graphs"
+            )
+            with ctx():
+                compiled_out = torch.compile(f, backend="inductor", fullgraph=True)(
+                    *compiled_args
+                )
+
+            if torch._dynamo.config.assume_static_by_default:
+                post_grad_graphs = "\n".join(
+                    log_stream.getvalue().strip().split("\n")[3:]
+                ).strip()
+                self.assertExpectedInline(
+                    post_grad_graphs,
+                    """\
+def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]"):
+        # No stacktrace found for following nodes
+        foo_default = torch.ops.mylib.foo.default(arg0_1, [arg3_1, arg4_1], arg1_1, 2, arg2_1);  arg0_1 = arg3_1 = arg4_1 = arg1_1 = arg2_1 = None
+        getitem_4: "f32[3]" = foo_default[0]
+        getitem_5: "f32[3]" = foo_default[1];  foo_default = None
+        return (getitem_4, getitem_5)""",
+                )
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
             eager_out = f(*eager_args)
@@ -669,9 +749,24 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             orig_args = (x, y, z, n)
 
             compiled_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
-            torch.compile(f, backend="aot_eager_decomp_partition", fullgraph=True)(
-                *compiled_args
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.compile_fx", "post_grad_graphs"
             )
+            with ctx():
+                torch.compile(f, backend="inductor", fullgraph=True)(*compiled_args)
+
+            if torch._dynamo.config.assume_static_by_default:
+                post_grad_graphs = "\n".join(
+                    log_stream.getvalue().strip().split("\n")[3:]
+                ).strip()
+                self.assertExpectedInline(
+                    post_grad_graphs,
+                    """\
+def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]"):
+        # No stacktrace found for following nodes
+        foo_default = torch.ops.mylib.foo.default(None, [arg0_1, arg3_1], arg1_1, 2, arg2_1);  arg0_1 = arg3_1 = arg1_1 = arg2_1 = None
+        return ()""",
+                )
 
             eager_args = pytree.tree_map_only(torch.Tensor, torch.clone, orig_args)
             f(*eager_args)
@@ -2543,6 +2638,29 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_fn = torch.compile(fn, backend=cnts)
         self.assertTrue(same(fn(x, y), opt_fn(x.clone(), y.clone())))
         self.assertEqual(cnts.frame_count, 1)
+
+    def test_out_variants_with_resizing_on_graph_inputs_with_dynamic(self):
+        # https://github.com/pytorch/pytorch/issues/120482
+        class CustomModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, inputs):
+                return torch.outer(**inputs)
+
+        compile_fn = torch.compile(CustomModel(), fullgraph=True)
+
+        shapes = [(2, 1), (6, 1), (4, 1)]
+        for shape in shapes:
+            vec1, vec2 = shape
+            input_tensor1 = torch.randn(vec1)
+            input_tensor2 = torch.randn(vec2)
+            out_tensor = torch.empty(shape)
+            args = {"input": input_tensor1, "vec2": input_tensor2, "out": out_tensor}
+            res = compile_fn(args)
+            opt_res = res.clone()  # cuz this is out and we mutate it
+            res = CustomModel()(args)
+            self.assertEqual(res, opt_res)
 
     def test_dict_mutation_side_effect(self):
         def fn(d):
@@ -5846,16 +5964,35 @@ def fn():
         self.assertEqual(cnt.frame_count, 0)
 
     def test_is_compiling(self):
-        def f():
+        def f1():
             if torch._dynamo.is_compiling():
                 return torch.ones(2, 2)
             else:
                 return torch.zeros(2, 2)
 
-        opt_f = torch._dynamo.optimize("eager")(f)
+        def f2():
+            if torch._utils.is_compiling():
+                return torch.ones(2, 2)
+            else:
+                return torch.zeros(2, 2)
 
-        self.assertEqual(f(), torch.zeros(2, 2))
-        self.assertEqual(opt_f(), torch.ones(2, 2))
+        def f3():
+            if torch.compiler.is_compiling():
+                return torch.ones(2, 2)
+            else:
+                return torch.zeros(2, 2)
+
+        def f4():
+            if torch.compiler.is_dynamo_compiling():
+                return torch.ones(2, 2)
+            else:
+                return torch.zeros(2, 2)
+
+        for f in [f1, f2, f3, f4]:
+            opt_f = torch._dynamo.optimize("eager")(f)
+
+            self.assertEqual(f(), torch.zeros(2, 2))
+            self.assertEqual(opt_f(), torch.ones(2, 2))
 
     def test_torch_generator_set_state(self):
         def fn():
@@ -5952,7 +6089,7 @@ def fn():
                 first_guard_failure,
             )
         else:
-            self.assertIn("""L['x'].size()[0] < 3""", first_guard_failure)
+            self.assertIn("""2 <= L['x'].size()[0] <= 2""", first_guard_failure)
 
     def test_guard_failure_fn2(self):
         def fn(x, y):
@@ -6139,6 +6276,18 @@ def fn():
         inputs = [torch.randn(10, 10) for _ in range(3)]
 
         fn(inputs, iter(tuple(inputs)))
+
+        def fn(params):
+            y = tuple(params)
+            return inner_fn(*y)
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        inputs = [torch.randn(10, 10) for _ in range(3)]
+        self.assertTrue(same(fn(iter(tuple(inputs))), opt_fn(iter(tuple(inputs)))))
+
+        # Force recompilation
+        inputs = [torch.randn(10, 10) for _ in range(4)]
+        self.assertTrue(same(fn(iter(tuple(inputs))), opt_fn(iter(tuple(inputs)))))
 
     def test_torch_package_working_with_trace(self):
         # from torch._dynamo.test_case import run_tests
@@ -9216,9 +9365,6 @@ ShapeEnv not equal: field values don't match:
 ==> name_to_node: values don't match.
   >  Left: {_assert, ge, x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
   > Right: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
-==> var_to_guards: values don't match.
-  >  Left: {s0: (s0 >= 3, None)}
-  > Right: {}
 ==> var_to_range: values don't match.
   >  Left: {s0: ValueRanges(lower=3, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
   > Right: {s0: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
@@ -9515,43 +9661,58 @@ fn
         c2 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c2), 0)
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
-    def test_module_free(self):
-        """Test that CUDA memory is freed when a model goes out of scope"""
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_guard_size_oblivious(self):
+        # This code, in fact, does NOT work in eager
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            y = torch.zeros(x.item())
+            if guard_size_oblivious(y.size(0) == 0):
+                assert False
+            return y
+
+        self.assertEqual(fn(torch.tensor([0])), torch.zeros(0))
+
+    def _test_compile_model_free(self, model_inp_ctr, weakref_watch):
+        """
+        Args:
+        model_inp_ctr
+            - constructor that returns a new model and inputs to that model
+        weakref_watch
+            - function that returns a layer of the model for weakref to
+              finalize on, so we can check that the layer is freed after
+              the model goes out of scope
+        """
+        cleared = False
+
+        def finalize():
+            nonlocal cleared
+            cleared = True
+
+        def run():
+            mod, inp = model_inp_ctr()
+            weakref.finalize(weakref_watch(mod), finalize)
+            torch.compile(mod, backend="eager")(inp)
+
+        run()
+        gc.collect()
+        self.assertTrue(cleared)
+
+    def test_custom_module_free(self):
+        """Test that a model is freed when it goes out of scope"""
 
         class Mod(torch.nn.Module):
             def __init__(self):
                 super(Mod, self).__init__()
-                self.fc = torch.nn.Linear(10000, 10000)
+                self.fc = torch.nn.Linear(100, 100)
 
             def forward(self, out):
                 return self.fc(out)
 
-        def run(compile):
-            mod = Mod().cuda()
-            if compile:
-                mod = torch.compile(mod, backend="eager")
-            inp = torch.rand(10000, 10000).cuda()
-            mod(inp)
-
-        def clean_and_report_memory():
-            import gc
-
-            gc.collect()
-            return torch.cuda.memory_allocated()
-
-        run(False)
-        # mem1 = clean_and_report_memory()
-        run(True)
-        mem2 = clean_and_report_memory()
-        torch._dynamo.reset_code_caches()
-        mem3 = clean_and_report_memory()
-
-        # it's possible for dynamo to hold on to more memory
-        # even after a _dynamo.reset[_code_caches], so we omit the following check.
-        # self.assertEqual(mem1, mem2)
-
-        self.assertEqual(mem2, mem3)
+        self._test_compile_model_free(
+            lambda: (Mod(), torch.randn(100, 100)),
+            lambda mod: mod.fc,
+        )
 
     def test_dynamo_cache_move_to_front(self):
         class Mod(torch.nn.Module):
@@ -9635,6 +9796,58 @@ fn
         del m2
         c5 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c5), 0)
+
+    def test_grad_none(self):
+        def fn(x, y):
+            x.grad = torch.abs(y)
+            x.grad.add_(y)
+            return torch.abs(y)
+
+        y = torch.arange(4).reshape(2, 2).to(torch.float)
+        x = torch.randn(2, 2)
+        x.grad = None
+
+        z = fn(x, y)
+        ref_y = torch.clone(z).detach()
+        ref_x_grad = torch.clone(x.grad).detach()
+
+        y = torch.arange(4).reshape(2, 2).to(torch.float)
+        x = torch.randn(2, 2)
+        x.grad = None
+
+        opt_fn = torch.compile(fn, backend="eager")
+        z = opt_fn(x, y)
+        self.assertEqual(z, ref_y)
+        self.assertEqual(x.grad, ref_x_grad)
+
+    def test_grad_non_none(self):
+        def fn(x, y):
+            x.grad.add_(y)
+            return torch.abs(y)
+
+        y = torch.ones(2, 2)
+        x = torch.randn(2, 2)
+        x.grad = torch.arange(4).reshape(2, 2).to(torch.float)
+
+        z = fn(x, y)
+        ref_y = torch.clone(z).detach()
+        ref_x_grad = torch.clone(x.grad).detach()
+
+        y = torch.ones(2, 2)
+        x = torch.randn(2, 2)
+        x.grad = torch.arange(4).reshape(2, 2).to(torch.float)
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("eager")
+        opt_fn = torch.compile(fn, backend=cnt)
+        z = opt_fn(x, y)
+
+        # Ensure that the generated graph returns only one output. We want the
+        # add_ on the grad to be part of the graph itself, so that inductor can
+        # theoretically move the add_ and resutling copy_ nodes at the right
+        # place to free memory.
+        self.assertEqual(len(list(cnt.graphs[0].graph.nodes)[-1].all_input_nodes), 1)
+        self.assertEqual(z, ref_y)
+        self.assertEqual(x.grad, ref_x_grad)
 
 
 class TestTracer(JitTestCase):

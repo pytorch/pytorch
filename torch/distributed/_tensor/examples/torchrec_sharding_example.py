@@ -6,8 +6,6 @@ import argparse
 import os
 
 import torch
-import torch.distributed as dist
-import torch.multiprocessing as mp
 
 from torch.distributed._tensor import (
     DeviceMesh,
@@ -19,11 +17,7 @@ from torch.distributed._tensor import (
 from torch.distributed._tensor.debug.visualize_sharding import visualize_sharding
 
 
-def backend():
-    return "nccl" if device_type() == "cuda" else "gloo"
-
-
-def device_type():
+def get_device_type():
     return (
         "cuda"
         if torch.cuda.is_available() and torch.cuda.device_count() >= 4
@@ -38,13 +32,11 @@ def run_torchrec_row_wise_sharding_example(rank, world_size):
     #   The global ProcessGroup has 4 ranks, so each rank will have one 2 by 16 local
     #   shard.
 
-    # store each rank of the global ProcessGroup in a tensor
-    global_ranks = torch.arange(world_size)
     # device mesh is a representation of the worker ranks
     # create a 1-D device mesh that includes every rank
-    _device_type = device_type()
-    device = torch.device(_device_type)
-    device_mesh = init_device_mesh(device_type=_device_type, mesh_shape=(world_size,))
+    device_type = get_device_type()
+    device = torch.device(device_type)
+    device_mesh = init_device_mesh(device_type=device_type, mesh_shape=(world_size,))
 
     # manually create the embedding table's local shards
     num_embeddings = 8
@@ -79,10 +71,12 @@ def run_torchrec_row_wise_sharding_example(rank, world_size):
     dtensor = DTensor.from_local(
         local_shard, device_mesh, row_wise_sharding_placements, run_check=False
     )
+
     # display the DTensor's sharding
-    if rank == 0:  # the print result is identical on all ranks
-        print("DTensor's sharding be-like in row-wise sharding:")
-        visualize_sharding(dtensor)
+    visualize_sharding(
+        dtensor, prompt="DTensor's sharding be-like in row-wise sharding:"
+    )
+
     # get the global tensor from the DTensor
     dtensor_full = dtensor.full_tensor()  # torch.Tensor
     # manually compose the global tensor from the local shards
@@ -111,7 +105,7 @@ def run_torchrec_row_wise_sharding_example(rank, world_size):
         :,
     ]
     # the local shard obtained from both approaches should be identical
-    assert torch.equal(local_shard_spliced, local_shard_spliced)
+    assert torch.equal(local_shard, local_shard_spliced)
 
     ###########################################################################
     # example 3: load state dict
@@ -135,13 +129,11 @@ def run_torchrec_table_wise_sharding_example(rank, world_size):
     #   The global ProcessGroup has 4 ranks, so each rank will have one 8 by 16 complete
     #   table as its local shard.
 
-    # store each rank of the global ProcessGroup in a tensor
-    global_ranks = torch.arange(world_size)
     # device mesh is a representation of the worker ranks
     # create a 1-D device mesh that includes every rank
-    _device_type = device_type()
-    device = torch.device(_device_type)
-    device_mesh = init_device_mesh(device_type=_device_type, mesh_shape=(world_size,))
+    device_type = get_device_type()
+    device = torch.device(device_type)
+    device_mesh = init_device_mesh(device_type=device_type, mesh_shape=(world_size,))
 
     # manually create the embedding table's local shards
     num_embeddings = 8
@@ -168,7 +160,7 @@ def run_torchrec_table_wise_sharding_example(rank, world_size):
         # note that we cannot use ``init_device_mesh'' to create a submesh
         # so we choose to use the `DeviceMesh` api to directly create a DeviceMesh
         device_mesh = DeviceMesh(
-            device_type=_device_type,
+            device_type=device_type,
             mesh=torch.tensor(
                 [table_id], dtype=torch.int64
             ),  # table i is only placed on rank i
@@ -207,29 +199,18 @@ def run_example(rank, world_size, example_name):
     # the example to run
     example_func = name_to_example_code[example_name]
 
-    # set up world pg
-    os.environ["MASTER_ADDR"] = "localhost"
-    # may need to switch to another available port if it has been taken
-    os.environ["MASTER_PORT"] = "12355"
-    # initialize the process group
-    dist.init_process_group(backend=backend(), rank=rank, world_size=world_size)
-
-    # set device for nccl pg for collectives
-    if backend() == "nccl":
-        torch.cuda.set_device(rank)
-
     # set manual seed
     torch.manual_seed(0)
 
     # run the example
     example_func(rank, world_size)
 
-    # shutting down world pg
-    dist.destroy_process_group()
-
 
 if __name__ == "__main__":
-    world_size = 4  # our example uses 4 worker ranks
+    # this script is launched via torchrun which automatically manages ProcessGroup
+    rank = int(os.environ["RANK"])
+    world_size = int(os.environ["WORLD_SIZE"])
+    assert world_size == 4  # our example uses 4 worker ranks
     # parse the arguments
     parser = argparse.ArgumentParser(
         description="torchrec sharding examples",
@@ -243,5 +224,4 @@ if __name__ == "__main__":
     )
     parser.add_argument("-e", "--example", help=example_prompt, required=True)
     args = parser.parse_args()
-    mp.spawn(run_example, args=(world_size, args.example), nprocs=world_size, join=True)
-    print("example completes!")
+    run_example(rank, world_size, args.example)
