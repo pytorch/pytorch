@@ -16487,7 +16487,6 @@ op_db: List[OpInfo] = [
            test_neg_view=False,
            sample_inputs_func=sample_inputs_index_put,
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                DecorateInfo(unittest.skip("Skipped"), 'TestBwdGradients', 'test_fn_grad', dtypes=[torch.float64],
                             device_type='cuda', active_if=(TEST_WITH_ROCM and TEST_WITH_TORCHINDUCTOR)),
            )),
@@ -17380,7 +17379,6 @@ op_db: List[OpInfo] = [
            skips=(
                # Not implemented on CUDA
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='cuda'),
-               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # JIT tests don't work with Tensor keyword arguments
                # https://github.com/pytorch/pytorch/issues/58507
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
