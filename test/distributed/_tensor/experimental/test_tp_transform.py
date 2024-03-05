@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 from collections import defaultdict
 from typing import Dict
+import unittest
 
 import torch
 from torch.distributed._tensor.experimental.tp_transform import (
