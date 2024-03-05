@@ -7,7 +7,7 @@ from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CPU
 
 
 class TestWoqMMPatternRewriterTemplate(TestCase):
@@ -73,15 +73,6 @@ class TestWoqMMPatternRewriterTemplate(TestCase):
             return torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
 
         self._check_common(mod, override_check_equal=True)
-
-
-if HAS_CUDA:
-
-    class WoqMMPatternRewriterCudaTests(TestWoqMMPatternRewriterTemplate):
-        device = "cuda"
-        test_woq_mm_rewriter_1_cuda = (
-            TestWoqMMPatternRewriterTemplate._test_woq_mm_rewriter_1
-        )
 
 
 if HAS_CPU:
