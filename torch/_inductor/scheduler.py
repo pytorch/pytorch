@@ -833,7 +833,22 @@ class FusedSchedulerNode(BaseSchedulerNode):
         assert isinstance(node1, (SchedulerNode, FusedSchedulerNode)) and isinstance(
             node2, (SchedulerNode, FusedSchedulerNode)
         )
-        return cls(node1.scheduler, list(node1.get_nodes()) + list(node2.get_nodes()))  # type: ignore[arg-type]
+        fused = cls(node1.scheduler, list(node1.get_nodes()) + list(node2.get_nodes()))  # type: ignore[arg-type]
+
+        common_memory_deps = (node1.read_writes.reads | node1.read_writes.writes) & (
+            node2.read_writes.reads | node2.read_writes.writes
+        )
+        common_memory_deps = {
+            dep for dep in common_memory_deps if not dep.has_unbacked_symbols()
+        }
+        keys = (node1.read_writes.writes) & (common_memory_deps)
+        reads = set()
+        for read in node1.read_writes.reads:
+            reads.add(read.name)
+        if len(keys) > 0:
+            key = keys.pop()
+            fused.rename_dict[key.name] = reads
+        return fused
 
     def __init__(self, scheduler: "Scheduler", snodes: List[SchedulerNode]):
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
@@ -843,6 +858,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         self.users: List[NodeUser] = []
         self.inverse_users = []
         self.node_users = []
+        self.rename_dict: [str, set()] = dict()
         self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
         self.ancestors = set.union(
             *[x.ancestors for x in snodes if x.ancestors is not None]
@@ -1983,9 +1999,6 @@ class Scheduler:
             ):
                 return False
 
-        if node2.is_template():
-            why("templates can only fuse epilogues")
-            return False
         if node1.is_template() and (
             node2.has_aliasing_or_mutation()
             or node2.is_reduction()
@@ -2007,6 +2020,42 @@ class Scheduler:
         ):
             why("no shared data")
             return False  # heuristic not needed for correctness
+
+        if node2.is_template():
+            if not config.prologue_fusion:
+                why("prologue fusion is disabled in config")
+                return False
+            # Avoid fusing multiple nodes into template
+            if len(node1.get_nodes()) > 1:
+                why("fusing multiple nodes into template is not supported")
+                return False
+
+            # Check if input size is a power of 2 and more than the smallest block size, which is defined in filtered_configs in mm_common.py
+            node = node1.get_nodes()[0]
+            if isinstance(node.node, ComputedBuffer):
+                for read in node1.read_writes.reads:
+                    if isinstance(read, MemoryDep):
+                        for size in read.size:
+                            if size & (size - 1) != 0:
+                                why("Tensor size is not a power of 2. Zero-padding will incur wrong results in some prologue functions such as sigmoid.")
+                                return False
+                            elif node.node.data.dtype == torch.int8 and size < 1024:
+                                why("Tensor size is smaller than Triton kernel's minimum block size 32. Zero-padding will incur wrong results in some prologue functions such as sigmoid.")
+                                return False
+                            elif size < 256:
+                                why("Tensor size is smaller than Triton kernel's minimum block size 16. Zero-padding will incur wrong results in some prologue functions such as sigmoid.")
+                                return False
+
+            # Check if node1's reads and node2's reads have common indices
+            index1 = {
+                node1_read.index for node1_read in node1.read_writes.reads
+            }
+            index2 = {
+                node2_read.index for node2_read in node2.read_writes.reads
+            }
+            if len(index1 - index2) > 0:
+                why("Indices are different")
+                return False
 
         if (
             not node1.is_foreach()
@@ -2316,8 +2365,15 @@ class Scheduler:
             self.buffer_names_to_free.update(node.last_usage)
 
             if node.is_template():
-                node, *epilogue = node.get_nodes()
-                self.get_backend(device).codegen_template(node, epilogue)  # type: ignore[possibly-undefined]
+                node1, *node2 = node.get_nodes()
+                if isinstance(node1.node, ir.TemplateBuffer):
+                    # epilogue
+                    self.get_backend(device).codegen_template(node1, node2)
+                else:
+                    *node1, node2 = node.get_nodes()
+                    if isinstance(node2.node, ir.TemplateBuffer):
+                        # prologue
+                        self.get_backend(device).codegen_template(node2, node1, rename_dict=node.rename_dict, isEpilogue=False)
             elif node.is_extern():
                 self.codegen_extern_call(node)
             elif node.is_foreach():
@@ -2380,7 +2436,7 @@ class BaseScheduling:
         raise NotImplementedError()
 
     def codegen_template(
-        self, template_node: SchedulerNode, epilogue_nodes: List[SchedulerNode]
+        self, template_node: SchedulerNode, epilogue_nodes: List[SchedulerNode], isEpilogue=True
     ):
         """
         Given a template node, generate a kernel.

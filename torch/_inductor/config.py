@@ -80,6 +80,9 @@ benchmark_harness = True
 # fuse pointwise into templates
 epilogue_fusion = True
 
+# fuse pointwise into templates
+prologue_fusion = False
+
 # do epilogue fusions before other fusions
 epilogue_fusion_first = False
 

@@ -181,7 +181,7 @@ class CUDACPPScheduling(BaseScheduling):
         return kernel_name
 
     def codegen_template(
-        self, template_node: BaseSchedulerNode, epilogue_nodes: List[SchedulerNode]
+        self, template_node: BaseSchedulerNode, epilogue_nodes: List[SchedulerNode], isEpilogue=True
     ):
         """
         Codegen a CUDA template, possibly with fused epilogues

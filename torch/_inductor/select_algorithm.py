@@ -317,12 +317,89 @@ class TritonTemplateKernel(TritonKernel):
 
         def hook():
             # more stuff might have been added since the codegen_body above
-            self.codegen_body()
-            return textwrap.indent(self.body.getvalue(), "    ").strip()
+            if V.kernel.isEpilogue:
+                self.codegen_body()
+                return textwrap.indent(self.body.getvalue(), "    ").strip()
+            else:
+                return textwrap.indent(self.body.getvalue(), "    ").strip()
 
         assert "<STORE_OUTPUT>" not in self.render_hooks
         self.render_hooks["<STORE_OUTPUT>"] = hook
         return "<STORE_OUTPUT>"
+
+    def prologue_A(self, val):
+        prologue = self.input_nodes[0]
+        size = prologue.get_size()
+        if V.kernel.isEpilogue:
+            # No need to register hook
+            return ""
+
+        # prologue node
+        _, call_args, _ = self.args.python_argdefs()
+        is_A_prologue = False
+        for read in prologue.get_reads():
+            for i, arg in enumerate(call_args):
+                if arg in V.kernel.rename_dict:
+                    # First parameter of triton kernel
+                    if i == 0:
+                        V.ops.cache_assign(read.name, "prologue_A_or_B")
+                        is_A_prologue = True
+
+        if not is_A_prologue:
+            # No need to register hook
+            return ""
+
+        def hook():
+            self.codegen_prologue_body("a")
+            stmts = textwrap.indent(self.prologue_A_body.getvalue(), "        ").strip()
+            val_assign = stmts.splitlines()[-1].split("=")[0].strip()
+            assign = textwrap.indent(f"{val} = {val_assign}", "        ").strip()
+            stmts += "\n        "
+            stmts += assign
+            return stmts
+
+        assert "<PROLOGUE_A>" not in self.render_hooks
+        self.render_hooks["<PROLOGUE_A>"] = hook
+        return "<PROLOGUE_A>"
+
+    def prologue_B(self, val):
+        prologue = self.input_nodes[0]
+        size = prologue.get_size()
+        if V.kernel.isEpilogue:
+            # No need to register hook
+            return ""
+
+        # prologue node
+        _, call_args, _ = self.args.python_argdefs()
+        is_B_prologue = False
+        for read in prologue.get_reads():
+            if len(call_args) == 1:
+                if call_args[0] in V.kernel.rename_dict:
+                    V.ops.cache_assign(read.name, "prologue_A_or_B")
+                    is_B_prologue = True
+            else:
+                for i, arg in enumerate(call_args):
+                    if arg in V.kernel.rename_dict:
+                        # Second parameter of trition kernel
+                        if i == 1:
+                            V.ops.cache_assign(read.name, "prologue_A_or_B")
+                            is_B_prologue = True
+
+        if not is_B_prologue:
+            return ""
+
+        def hook():
+            self.codegen_prologue_body("b")
+            stmts = textwrap.indent(self.prologue_B_body.getvalue(), "        ").strip()
+            val_assign = stmts.splitlines()[-1].split("=")[0].strip()
+            assign = textwrap.indent(f"{val} = {val_assign}", "        ").strip()
+            stmts += "\n        "
+            stmts += assign
+            return stmts
+
+        assert "<PROLOGUE_B>" not in self.render_hooks
+        self.render_hooks["<PROLOGUE_B>"] = hook
+        return "<PROLOGUE_B>"
 
     def render(self, template, kwargs):
         return PartialRender(
@@ -357,6 +434,8 @@ class TritonTemplateKernel(TritonKernel):
                 self.size,
                 self.stride,
                 self.store_output,
+                self.prologue_A,
+                self.prologue_B,
                 self.make_load,
             ]
         }
@@ -388,10 +467,19 @@ class TritonTemplateKernel(TritonKernel):
         self.body.clear()
         self.indexing_code.clear()
 
-    def call_kernel(self, name: str, node: Optional[ir.IRNode] = None):
+    def call_kernel(self, name: str, node: Optional[ir.IRNode] = None, rename_dict: Dict[str, set] = None):
         wrapper = V.graph.wrapper_code
         _, call_args, _ = self.args.python_argdefs()
         call_args = [str(a) for a in call_args]
+
+        call_args_renamed = []
+        if rename_dict is not None:
+            for arg in call_args:
+                if arg in rename_dict:
+                    for val in rename_dict[arg]:
+                        call_args_renamed.append(val)
+                else:
+                    call_args_renamed.append(arg)
 
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
@@ -429,9 +517,14 @@ class TritonTemplateKernel(TritonKernel):
                 texpr(V.graph.sizevars.simplify(s)) for s in self.call_sizes
             ] + [meta]
             grid_call = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}({', '.join(grid_call)})"
-            wrapper.writeline(
-                f"{name}.run({', '.join(call_args)}, grid={grid_call}, stream={stream_name})"
-            )
+            if rename_dict:
+                wrapper.writeline(
+                    f"{name}.run({', '.join(call_args_renamed)}, grid={grid_call}, stream={stream_name})"
+                )
+            else:
+                wrapper.writeline(
+                    f"{name}.run({', '.join(call_args)}, grid={grid_call}, stream={stream_name})"
+                )
 
 
 @functools.lru_cache(None)

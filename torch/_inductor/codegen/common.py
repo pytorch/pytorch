@@ -1526,12 +1526,17 @@ class Kernel(CodeGen):
                 return self.load(name, index)
 
             @staticmethod
+            def cache_assign(name, value):
+                self.cse.store_cache[name] = value
+
+            @staticmethod
             def store(
                 name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
             ) -> None:
                 self.store_buffer_names.add(name)
                 if mode is None:
-                    self.cse.store_cache[name] = value
+                    if name not in self.cse.store_cache:
+                        self.cse.store_cache[name] = value
                     if self.current_node:
                         for other_name in self.current_node.get_mutations():
                             self.cse.store_cache[other_name] = value

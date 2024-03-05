@@ -805,6 +805,52 @@ class TestMaxAutotune(TestCase):
             y1_expected = fn(x1, w, b, mul1)
             torch.testing.assert_close(y1, y1_expected)
 
+    def test_triton_template_with_prologues_and_dynamic_shape(self):
+        def fn(
+            x: torch.Tensor, w: torch.Tensor, bias: torch.Tensor, mul: torch.Tensor
+        ) -> torch.Tensor:
+            return (
+                    (
+                    torch.matmul(
+                         torch.nn.functional.relu(torch.transpose(x, 0, 1)),
+                         torch.transpose(w, 0, 1)
+                    )
+                    + bias
+                )
+                * mul
+            )
+
+        M0 = 5
+        M1 = 8
+        K = 4
+        N = 3
+        w = torch.rand(N, K).cuda().half()
+        b = torch.rand(N).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": "Triton",
+                "prologue_fusion" : True,
+            }
+        ):
+            compiled_fn = torch.compile(
+                fn, fullgraph=True, dynamic=True, mode="max-autotune-no-cudagraphs"
+            )
+
+            x0 = torch.rand(K, M0).cuda().half()
+            mul0 = torch.rand(M0, N).cuda().half()
+            y0 = compiled_fn(x0, w, b, mul0)
+            y0_expected = fn(x0, w, b, mul0)
+            torch.testing.assert_close(y0, y0_expected)
+
+            x1 = torch.rand(K, M1).cuda().half()
+            mul1 = torch.rand(M1, N).cuda().half()
+            y1 = compiled_fn(x1, w, b, mul1)
+            y1_expected = fn(x1, w, b, mul1)
+            torch.testing.assert_close(y1, y1_expected)
+
     @config.patch(
         benchmark_kernel=True,
         fallback_random=True,

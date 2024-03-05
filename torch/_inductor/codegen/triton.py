@@ -1254,6 +1254,8 @@ class TritonKernel(Kernel):
         self.iter_vars_count = itertools.count()
         self.inside_reduction = self.numels[-1] != 1
         self.body = IndentedBuffer()
+        self.prologue_A_body = IndentedBuffer()
+        self.prologue_B_body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
         self.suffix: IndentedBuffer = IndentedBuffer()  # type: ignore[assignment]
         self.outside_loop_vars: Set[Any] = set()
@@ -1264,6 +1266,8 @@ class TritonKernel(Kernel):
         self.block_ptr_id = itertools.count()
         # buffer accesses in the kernel
         self.buf_accesses: DefaultDict[str, List[Dep]] = collections.defaultdict(list)
+        self.isEpilogue = True
+        self.rename_dict = dict()
 
         self.persistent_reduction: bool = (
             not disable_persistent_reduction
@@ -2423,6 +2427,15 @@ class TritonKernel(Kernel):
         result_var.mask_vars = masks  # type: ignore[attr-defined]
         return result_var
 
+    def codegen_prologue_body(self, x):
+        if x == "a":
+            # self.compute is not cleared for x == b
+            if len(self.prologue_A_body.getvalue()) == 0:
+                self.prologue_A_body.splice(self.compute.getvalue().replace("prologue_A_or_B", "a"))
+        else:
+            self.prologue_B_body.splice(self.compute.getvalue().replace("prologue_A_or_B", "b"))
+            self.compute.clear()
+
     def codegen_body(self):
         """
         Concat output code from index_code, loads, compute, stores,
@@ -3087,6 +3100,11 @@ class TritonScheduling(BaseScheduling):
                 if not is_triton_template:
                     why("node1 is not TritonTemplateBuffer")
                 return is_triton_template
+            elif node2.is_template():
+                is_triton_template = isinstance(node2.node, TritonTemplateBuffer)
+                if not is_triton_template:
+                    why("node2 is not TritonTemplateBuffer")
+                return is_triton_template
 
             # check for a bad combined tiling
             tiling1 = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
@@ -3557,18 +3575,21 @@ class TritonScheduling(BaseScheduling):
 
         return kernel_name
 
-    def codegen_template(self, template_node, epilogue_nodes):
+    def codegen_template(self, template_node: BaseSchedulerNode, nodes: List[SchedulerNode], rename_dict: Dict[str, set] = None, isEpilogue = True):
         """
         Codegen a triton template
         """
         _, (numel, rnumel) = template_node.group
         assert rnumel == 1
         kernel, render = template_node.node.make_kernel_render(template_node.node)
+
         with kernel:
-            for node in [template_node, *epilogue_nodes]:
+            kernel.isEpilogue = isEpilogue
+            kernel.rename_dict = rename_dict
+            for node in [template_node, *nodes]:
                 node.mark_run()
             partial_code = render()
-            for node in epilogue_nodes:
+            for node in nodes:
                 node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
         # finalize must be called after adding epilogue above
@@ -3579,7 +3600,7 @@ class TritonScheduling(BaseScheduling):
                 if isinstance(partial_code, str)
                 else partial_code.finalize()
             )
-            node_schedule = [template_node, *epilogue_nodes]
+            node_schedule = [template_node, *nodes]
 
             if config.benchmark_kernel:
                 num_gb = kernel.estimate_kernel_num_bytes() / 1e9
@@ -3594,7 +3615,7 @@ class TritonScheduling(BaseScheduling):
 
             kernel_name = self.define_kernel(src_code, node_schedule)
         self.codegen_comment(node_schedule)
-        kernel.call_kernel(kernel_name, template_node.node)
+        kernel.call_kernel(kernel_name, template_node.node, rename_dict=rename_dict)
         V.graph.removed_buffers |= kernel.removed_buffers
         V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
         self.scheduler.free_buffers()

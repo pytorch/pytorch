@@ -3374,7 +3374,20 @@ class TemplateBuffer(Buffer):
         deps = dependencies.extract_read_writes(
             dummy, self.get_size(), (), normalize=True
         )
-        deps.reads = {dependencies.StarDep(x.get_name()) for x in self.inputs}
+
+        if not config.prologue_fusion:
+            deps.reads = {dependencies.StarDep(x.get_name()) for x in self.inputs}
+        else:
+            for x in self.inputs:
+                def loader(index):
+                    indexer = self.layout.make_indexer()
+                    return ops.load(x.get_name(), indexer(index))
+
+                deps_reads = dependencies.extract_read_writes(
+                    loader, self.get_size(), normalize=True
+                )
+                deps.reads |= deps_reads.reads
+
         return deps
 
     def get_reduction_size(self):
