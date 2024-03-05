@@ -274,7 +274,6 @@ class OpDispatcher:
         runtime_schema_info = self.sharding_propagator.op_to_schema_info.get(
             op_call, None
         )
-        print(op_call)
 
         if runtime_schema_info is not None and runtime_schema_info.needs_pytree:
             # flatten args/kwargs when necessary
@@ -289,8 +288,7 @@ class OpDispatcher:
         local_kwargs: Dict[str, object] = {}
         mesh: Optional[DeviceMesh] = None
 
-        for i, arg in enumerate(args_list):
-            print(i, type(arg))
+        for arg in args_list:
             if isinstance(arg, dtensor.DTensor):
                 args_schema.append(arg._spec)
                 local_args.append(arg._local_tensor)
