@@ -1241,13 +1241,6 @@ class FakeTensorMode(TorchDispatchMode):
                 return x
 
             full_qualname = x._type().qualified_name()
-            if not hasattr(x, "__get_metadata__"):
-                raise RuntimeError(
-                    f"Trying to fake tensor dispatch {func} that takes ScriptObject {full_qualname} "
-                    f" as input but the script object doesn't have a __get_metadata__ method. "
-                    f" Please add a __get_metadata__ method to the script object with .def_meta()."
-                )
-
             fake_class = torch._library.abstract_impl_class.find_fake_impl(
                 full_qualname
             )
