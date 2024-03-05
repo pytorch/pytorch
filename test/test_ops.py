@@ -1540,6 +1540,56 @@ class TestCompositeCompliance(TestCase):
                 op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual)
 
     @ops(op_db, allowed_dtypes=(torch.float,))
+    def test_cow_input(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype)
+
+        def is_strided_tensor(arg):
+            return torch.is_tensor(arg) and arg.layout == torch.strided
+
+        for sample in samples:
+            args_raw = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+            args_copy = []
+            args = []
+
+            # Convert strided tensor inputs to COW tensors
+            for idx, arg in enumerate(args_raw):
+                if is_strided_tensor(arg):
+                    args_copy.append(arg.clone().detach())
+                    args.append(torch._lazy_clone(arg))
+                else:
+                    if torch.is_tensor(arg):
+                        args_copy.append(arg.clone().detach())
+                    else:
+                        args_copy.append(copy.deepcopy(arg))
+                    args.append(arg)
+
+            res = op.get_op()(*args, **kwargs)
+
+            # Check that COW inputs remain COW after the op is executed
+            for idx, arg in enumerate(args):
+                if is_strided_tensor(arg):
+                    is_cow = torch._C._is_cow_tensor(arg)
+
+                    if op.supports_cow_input_no_materialize:
+                        self.assertTrue(
+                            is_cow,
+                            msg=(
+                                f"Argument {idx} unexpectedly materializes. "
+                                "Either set `supports_cow_input_no_materialize=False` "
+                                "in this operation's OpInfo or change the "
+                                "implementation to avoid materialization."))
+
+                    if is_cow:
+                        orig = args_copy[idx]
+                        self.assertTrue(
+                            torch.allclose(arg, orig, rtol=0, atol=0, equal_nan=True),
+                            msg=(
+                                f"Argument {idx} avoided materialization, "
+                                "but the operation mutated its data."
+                            ))
+
+    @ops(op_db, allowed_dtypes=(torch.float,))
     def test_view_replay(self, device, dtype, op):
         def _assert_match_metadata(a, b):
             self.assertEqual(a.size(), b.size())
