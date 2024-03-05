@@ -26,6 +26,7 @@ def get_file_template() -> str:
 {auto_generated_msg}
 import torch
 import torch._inductor
+import operator
 
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -89,7 +90,9 @@ def serialize_functions() -> None:
     for (
         key,
         kwargs,
-    ) in _get_sfdp_patterns():  # type: ignore[no-untyped-call]
+    ) in _get_sfdp_patterns(
+        serialization_mode=True
+    ):  # type: ignore[no-untyped-call]
         pattern_name = kwargs["search_fn"].__name__
         gen_kwargs = {
             key: kwargs[key]
@@ -102,6 +105,10 @@ def serialize_functions() -> None:
             pattern = gen_pattern(**gen_kwargs)
 
         serialized_pattern = PatternPrettyPrinter.run(pattern, output_name=key)
+        # serialized pattern file should have "operator.getitem" instead of just "getitem"
+        serialized_pattern = serialized_pattern.replace(
+            "CallFunction(getitem", "CallFunction(operator.getitem"
+        )
         if pattern_name not in seen_patterns:
             write_mode = "w"
             seen_patterns.add(pattern_name)

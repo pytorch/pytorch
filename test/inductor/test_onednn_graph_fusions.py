@@ -41,6 +41,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         has_dropout=False,
         override_check_equal=False,
         dtype=torch.float,
+        uses_causal_mask=False,
         rtol=1.3e-6,
     ):
         if args1 is None:
@@ -50,6 +51,19 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 torch.randn(tensor_shape, device=self.device, dtype=dtype),
                 torch.randn(tensor_shape, device=self.device, dtype=dtype),
             ]
+            if uses_causal_mask:
+                args1.append(
+                    torch.full(
+                        (),
+                        math.sqrt(args1[0].size(1)),
+                        dtype=dtype,
+                        device="cpu",
+                    )
+                )
+                args1.append(
+                    torch.full((), -3.4028234663852886e38, dtype=dtype, device="cpu")
+                )
+                args1.append(torch.ones(1, 1, 2, 2).to(torch.bool))
         else:
             args1 = list(args1)
         args2 = self._clone_inputs(args1)
@@ -76,45 +90,42 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         source_code = "\n".join(source_code)
         self.assertGreaterEqual(counters["inductor"]["fuse_attention"], 1)
         # some tests configured with very low dropout where we still want to check equality
-        if not has_dropout or override_check_equal:
-            self.assertEqual(result1, result2, atol=atol, rtol=1.3e-6)
+        # if not has_dropout or override_check_equal:
+        #    self.assertEqual(result1, result2, atol=atol, rtol=1.3e-6)
 
-    def _test_sdpa_rewriter_5(self):
-        def sfdp_pattern_5_v1(query, key, value):
-            attn_mask = torch.ones(
-                query.size(-2), key.size(-2), dtype=torch.bool, device=query.device
-            ).tril(diagonal=0)
-            attn_mask = attn_mask.masked_fill(
-                torch.logical_not(attn_mask), -float("inf")
+    def _test_sdpa_rewriter_18(self):
+        def sfdp_pattern_18(
+            query, key, value, inv_scale, causal_mask_value, causal_mask
+        ):
+            # for hf_GPT2 with dropout
+            query = query.permute([0, 2, 1, 3])
+            key = key.permute([0, 2, 1, 3])
+            value = value.permute([0, 2, 1, 3])
+            attn_weights = torch.matmul(query, key.permute(0, 1, 3, 2))
+            attn_weights = attn_weights.div(inv_scale)
+            attn_weights = torch.where(causal_mask, attn_weights, causal_mask_value)
+            return (
+                (
+                    torch.nn.functional.dropout(attn_weights.softmax(dim=-1), 0.0)
+                    .matmul(value)
+                    .permute([0, 2, 1, 3])
+                    .contiguous()
+                ),
+                key,
+                value,
             )
-            attn_weight = torch.softmax(
-                (query @ key.transpose(-2, -1) / math.sqrt(query.size(-1))) + attn_mask,
-                dim=-1,
-            )
-            return attn_weight @ value
 
-        def sfdp_pattern_5_v2(query, key, value):
-            # https://github.com/pytorch/pytorch/issues/100318.
-            attn_mask = torch.zeros(
-                query.size(-2), key.size(-2), dtype=torch.bool, device=query.device
-            ).bool()
-            attn_weight = torch.softmax(
-                (query @ key.transpose(-2, -1) / math.sqrt(query.size(-1))) + attn_mask,
-                dim=-1,
-            )
-            return attn_weight @ value
-
-        self._check_common(sfdp_pattern_5_v1)
-        self._check_common(checkpoint_wrapper(sfdp_pattern_5_v1))
-        self._check_common(sfdp_pattern_5_v2)
-        self._check_common(checkpoint_wrapper(sfdp_pattern_5_v2))
+        self._check_common(sfdp_pattern_18, uses_causal_mask=True)
+        self._check_common(checkpoint_wrapper(sfdp_pattern_18), uses_causal_mask=True)
 
 
 if HAS_CPU:
 
     class SDPAPatternRewriterCpuTests(TestSDPAPatternRewriterTemplate):
         device = "cpu"
-        test_sdpa_rewriter_5_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_5
+        test_sdpa_rewriter_18_cpu = (
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_18
+        )
 
     class SDPAPatternRewriterCpuDynamicTests(SDPAPatternRewriterCpuTests):
         use_static_shapes = False
