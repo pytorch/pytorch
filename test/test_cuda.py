@@ -2707,8 +2707,12 @@ exit(2)
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad})
             for optimizer_ctor, amsgrad in product((torch.optim.Adam, torch.optim.AdamW), (False, True))
         ] + [
+            (optimizer_ctor, {"lr": 0.1, "foreach": foreach, "maximize": maximize, "weight_decay": weight_decay})
+            for optimizer_ctor, foreach, maximize, weight_decay in product((torch.optim.Adamax,), (False, True),
+                                                                           (False, True), (0, 0.1))
+        ] + [
             (optimizer_ctor, {"lr": 0.1, "foreach": True, "maximize": maximize, "weight_decay": weight_decay})
-            for optimizer_ctor, maximize, weight_decay in product((torch.optim.Adamax, torch.optim.ASGD), (False, True), (0, 0.1))
+            for optimizer_ctor, maximize, weight_decay in product((torch.optim.ASGD,), (False, True), (0, 0.1))
         ] + [
             (torch.optim.RAdam, {"lr": 0.1, "foreach": True, "decoupled_weight_decay": decoupled_weight_decay,
                                  "weight_decay": weight_decay})
