@@ -1013,6 +1013,26 @@ class TestFakeQuantizeOps(TestCase):
                         Y, Y_prime, "Difference found between dequant+quant_per_channel and fake_quantize_per_channel")
                 self.assertTrue(test_was_run)
 
+    def test_fake_quantize_per_channel_affine_scale_dtypes(self):
+        """
+        Ensure the error message is more helpful
+        """
+        dtype_list = [torch.float, torch.float64, torch.bfloat16, torch.half]
+        for scale_dtype in dtype_list:
+            input = torch.randn(3, 4, 5, 6)
+            scale = torch.Tensor([0.1, 0.2, 0.3, 0.4]).to(scale_dtype)
+            zero_point = torch.tensor([1, 2, 3, 4], dtype=torch.int32)
+            axis = 1
+            quant_min = 0
+            quant_max = 255
+            try:
+                torch.fake_quantize_per_channel_affine(
+                    input, scale, zero_point, axis, quant_min, quant_max
+                )
+            except Exception as e:
+                assert "INTERNAL ASSERT FAILED" not in str(e)
+
+
 class TestFusedObsFakeQuant(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            symmetric_quant=st.booleans())
