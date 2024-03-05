@@ -519,7 +519,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def abs(x):
-        return f"triton_helpers.libdevice.abs({x})"
+        return f"triton_helpers.math.abs({x})"
 
     @staticmethod
     def libdevice_abs(x):
