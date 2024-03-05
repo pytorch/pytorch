@@ -2,6 +2,11 @@
 
 set -ex
 
+if [ -e /.inarc ] ; then
+    echo "In INARC, skipping protobuf installation as it should be already available"
+    exit 0
+fi
+
 pb_dir="/usr/temp_pb_install_dir"
 mkdir -p $pb_dir
 
