@@ -38,6 +38,8 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
           "and right, which is not supported by cudnn.");
     }
 
+    // verify TensorCore math is supported
+    enable_tensor_core_ &= TensorCoreAvailable();
 
     bool individual_force_algo = OperatorBase::HasArgument("force_algo_fwd") ||
         OperatorBase::HasArgument("force_algo_dgrad") ||
@@ -1276,43 +1278,6 @@ bool CudnnConvGradientOp::DoRunWithType() {
           dX->template mutable_data<T_DX>()));
     }
   });
-  for (int i = 0; i < group_; ++i) {
-    cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
-      CUDNN_ENFORCE(cudnnConvolutionBackwardFilter(
-          state->cudnn_handle(),
-          cudnnTypeWrapper<T_X>::kOne(),
-          bottom_desc_,
-          X.template data<T_X>() + i * group_offset_X,
-          top_desc_,
-          dY.template data<T_DY>() + i * group_offset_Y,
-          bwd_filter_conv_desc_,
-          bwd_filter_algo_,
-          state->workspace().get(cudnn_ws_nbytes_),
-          cudnn_ws_nbytes_,
-          cudnnTypeWrapper<T_DW>::kZero(),
-          filter_desc_,
-          dfilter->template mutable_data<T_DW>() + i * group_offset_filter));
-      if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
-        // Compute the gradient w.r.t. the input.
-        auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
-        dX->ResizeLike(X);
-        CUDNN_ENFORCE(cudnnConvolutionBackwardData(
-            state->cudnn_handle(),
-            cudnnTypeWrapper<T_W>::kOne(),
-            filter_desc_,
-            filter.template data<T_W>() + i * group_offset_filter,
-            top_desc_,
-            dY.template data<T_DY>() + i * group_offset_Y,
-            bwd_data_conv_desc_,
-            bwd_data_algo_,
-            state->workspace().get(cudnn_ws_nbytes_),
-            cudnn_ws_nbytes_,
-            cudnnTypeWrapper<T_DX>::kZero(),
-            bottom_desc_,
-            dX->template mutable_data<T_DX>() + i * group_offset_X));
-      }
-    });
-  }
   return true;
 }
 
