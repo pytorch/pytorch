@@ -13,14 +13,14 @@ from functools import wraps
 from typing import Any, List, Optional
 
 import torch
-import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dynamo.utils import lazy_format_graph_code
 from torch._guards import detect_fake_mode, tracing, TracingContext
-from torch._logging import getArtifactLogger
+from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
+from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
 from .. import config
@@ -66,6 +66,21 @@ aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 aten = torch.ops.aten
 
 
+def _compute_output_meta_with_inductor_strides(fw_module, fwd_output_strides):
+    out = [n.meta["val"] for n in (list(fw_module.graph.nodes)[-1].args[0])]
+    # will only be set for inductor
+    if not fwd_output_strides:
+        return out
+    with TracingContext.get().fake_mode.shape_env.suppress_guards():
+        for i in range(len(out)):
+            if not isinstance(out[i], Tensor):
+                continue
+            if all(s1 == s2 for s1, s2 in zip(out[i].stride(), fwd_output_strides[i])):
+                continue
+            out[i] = out[i].as_strided(out[i].shape, fwd_output_strides[i])
+    return out
+
+
 def aot_dispatch_base(
     flat_fn,
     flat_args: List[Tensor],
@@ -79,6 +94,7 @@ def aot_dispatch_base(
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = torch._C._DisableAutocast if disable_amp else nullcontext
+    fakified_out = None
 
     with context(), track_graph_compiling(aot_config, "inference"):
         compiler = (
@@ -98,9 +114,16 @@ def aot_dispatch_base(
                 if maybe_subclass_meta is None
                 else maybe_subclass_meta.fw_metadata
             )
-        compiled_fw = compiler(fw_module, updated_flat_args)
 
-    # This boxed_call handling happens inside create_runtime_wrapper as well.
+        with TracingContext.report_output_strides() as fwd_output_strides:
+            compiled_fw = compiler(fw_module, updated_flat_args)
+
+        # see note: [Returning Fake Tensors on First AOT Autograd Call]
+        if tracing_context and tracing_context.fakify_first_call:
+            fakified_out = _compute_output_meta_with_inductor_strides(
+                fw_module, fwd_output_strides
+            )
+
     # However, create_runtime_wrapper does not expect the rng offsets in the
     # output. So, we have to create another wrapper and take out the offset. As
     # a result, we have to account for not boxed_call compilers as well.
@@ -110,6 +133,13 @@ def aot_dispatch_base(
     # Create a wrapper to set up the rng functionalize bits
     @wraps(compiled_fw)
     def rng_functionalization_wrapper(args):
+        # see note: [Returning Fake Tensors on First AOT Autograd Call]
+        nonlocal fakified_out
+        if fakified_out is not None:
+            out = fakified_out
+            fakified_out = None
+            return out
+
         # args is a list because compiled_fw is boxed_call
         if fw_metadata.is_rng_op_functionalized:
             # Add the seed and offset to args
@@ -158,16 +188,19 @@ def aot_dispatch_autograd(
     )
 
     # Copied from aot_dispatch_autograd_graph.
-    traced_tangents = pytree.tree_map(
-        lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
-        fw_metadata.traced_tangents,
-    )
     disable_amp = torch._C._is_any_autocast_enabled()
 
     if aot_config.enable_log:
         aot_joint_log.info(
             "%s", lazy_format_graph_code("Joint graph", fx_g, aot_config.aot_id)
         )
+        trace_structured(
+            "aot_joint_graph",
+            payload_fn=lambda: fx_g.print_readable(print_output=False),  # type: ignore[union-attr]
+        )
+
+    fakify_first_call = False
+    fakified_out = None
 
     with torch.no_grad():
         inner_meta = (
@@ -287,6 +320,14 @@ def aot_dispatch_autograd(
                 "%s",
                 lazy_format_graph_code("Backward graph", bw_module, aot_config.aot_id),
             )
+            trace_structured(
+                "aot_forward_graph",
+                payload_fn=lambda: fw_module.print_readable(print_output=False),
+            )
+            trace_structured(
+                "aot_backward_graph",
+                payload_fn=lambda: bw_module.print_readable(print_output=False),
+            )
 
         with track_graph_compiling(aot_config, "forward"):
             # flat_args at this point might still be subclasses-
@@ -308,6 +349,13 @@ def aot_dispatch_autograd(
                 compiled_fw_func = aot_config.fw_compiler(fw_module, adjusted_flat_args)
             if not hasattr(compiled_fw_func, "_boxed_call"):
                 compiled_fw_func = make_boxed_func(compiled_fw_func)
+
+            # see note: [Returning Fake Tensors on First AOT Autograd Call]
+            if tracing_context and tracing_context.fakify_first_call:
+                fakified_out = _compute_output_meta_with_inductor_strides(
+                    fw_module, fwd_output_strides
+                )
+                fakify_first_call = True
 
             if maybe_subclass_meta is not None:
                 # Why do we need to pass in num_fw_outs_saved_for_bw?
@@ -407,6 +455,11 @@ def aot_dispatch_autograd(
 
     saved_context = TracingContext.try_get()
 
+    backward_state_indices = [
+        idx for idx, x in enumerate(flat_args) if isinstance(x, BackwardState)
+    ]
+    assert len(backward_state_indices) <= 1
+
     class CompiledFunction(torch.autograd.Function):
         compiled_fw = compiled_fw_func
         compiled_bw = compiled_bw_func
@@ -414,6 +467,7 @@ def aot_dispatch_autograd(
         maybe_subclass_metadata: Optional[SubclassMeta] = maybe_subclass_meta
         num_symints_saved_for_bw = _num_symints_saved_for_bw
         _compiled_autograd_should_lift = False
+        _fakify_first_call = fakify_first_call
 
         @staticmethod
         def _compiled_autograd_key(ctx):
@@ -422,31 +476,41 @@ def aot_dispatch_autograd(
         @staticmethod
         def forward(ctx, *deduped_flat_tensor_args):
             args = deduped_flat_tensor_args
+            if backward_state_indices:
+                bw_state = args[backward_state_indices[0]]
+                assert isinstance(bw_state, BackwardState)
+                ctx._compiled_autograd_backward_state = bw_state
 
             marked_dirty_inps = []
             for i in fw_metadata.mutated_graph_handled_indices_seen_by_autograd:
                 ctx.mark_dirty(deduped_flat_tensor_args[i])
                 marked_dirty_inps.append(deduped_flat_tensor_args[i])
 
-            if CompiledFunction.metadata.is_rng_op_functionalized:
-                # Add the seed and offset to args
-                seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
-                args = (*args, seed, offset)
-            # There is a pretty complicated calling convention around what the compiled fw returns.
-            # The full list of outputs and their relative order is:
-            # (*mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
-            # - Note that in the synthetic bases case, mutated_inputs will correspond to an updated version
-            #   of the original view, and not the synthetic base
-            fw_outs = call_func_at_runtime_with_args(
-                CompiledFunction.compiled_fw,
-                args,
-                disable_amp=disable_amp,
-            )
+            if not CompiledFunction._fakify_first_call:
+                if CompiledFunction.metadata.is_rng_op_functionalized:
+                    # Add the seed and offset to args
+                    seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
+                    args = (*args, seed, offset)
+                # There is a pretty complicated calling convention around what the compiled fw returns.
+                # The full list of outputs and their relative order is:
+                # (*mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
+                # - Note that in the synthetic bases case, mutated_inputs will correspond to an updated version
+                #   of the original view, and not the synthetic base
+
+                fw_outs = call_func_at_runtime_with_args(
+                    CompiledFunction.compiled_fw,
+                    args,
+                    disable_amp=disable_amp,
+                )
+            else:
+                nonlocal fakified_out
+                assert fakified_out is not None
+                CompiledFunction._fakify_first_call = False
+                fw_outs = fakified_out
+                fakified_out = None
 
             num_outputs = CompiledFunction.metadata.num_outputs
             num_outputs_aliased = CompiledFunction.metadata.num_outputs_aliased
-            num_intermediate_bases = CompiledFunction.metadata.num_intermediate_bases
-            num_symints_saved_for_bw = CompiledFunction.num_symints_saved_for_bw
             num_mutated_runtime_inps = (
                 CompiledFunction.metadata.num_mutated_inp_runtime_indices
             )
@@ -720,7 +784,12 @@ Got grad_output types: {str(grad_output_types)}"""
             # Make the tangents contiguous. Note that we must do this after subclass desugaring
             # because inputs to inductor have to be contiguous
             all_args = [
-                t.contiguous() if tangents_start_idx <= i < tangents_end_idx else t
+                t.contiguous()
+                if (
+                    (tangents_start_idx <= i < tangents_end_idx)
+                    and (not t.is_contiguous())
+                )
+                else t
                 for i, t in enumerate(all_args)
             ]
 
@@ -730,6 +799,9 @@ Got grad_output types: {str(grad_output_types)}"""
                     symints = ctx._get_compiled_autograd_symints()
                     assert len(symints) == len(ctx.symints)
                     all_args[: len(symints)] = symints
+                    if backward_state_indices:
+                        assert ctx._compiled_autograd_backward_state.proxy is not None
+                        all_args.append(ctx._compiled_autograd_backward_state)
                     context = torch._C._DisableAutocast if disable_amp else nullcontext
                     with context():
                         out = normalize_as_list(bw_module(*all_args))
@@ -737,6 +809,9 @@ Got grad_output types: {str(grad_output_types)}"""
                         CompiledFunction.metadata, out
                     )
                     return tuple(out)
+                assert (
+                    not backward_state_indices
+                ), "BackwardState requires CompiledAutograd"
                 ctx.maybe_clear_saved_tensors()
                 if CompiledFunction.compiled_bw is None:
                     context = torch._C._DisableAutocast if disable_amp else nullcontext

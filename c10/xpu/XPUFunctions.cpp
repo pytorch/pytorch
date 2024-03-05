@@ -4,8 +4,6 @@
 
 #include <sys/wait.h>
 #include <unistd.h>
-#include <cmath>
-#include <mutex>
 #include <vector>
 
 namespace c10::xpu {
@@ -90,11 +88,17 @@ void initDeviceProperties(DeviceProp* device_prop, int device) {
 }
 
 inline void check_device(DeviceIndex device) {
+  // TODO: Use c10::Device::MAX_NUM_DEVICES directly. DeviceIndex is a int8_t
+  // value, and the maximum number of GPUs that PyTorch recognizes is 64. So, we
+  // have to check if there is an overflow happen. When DeviceIndex changes to
+  // int16_t and c10::Device::MAX_NUM_DEVICES is provided, we should use it
+  // directly to check if too many XPU devices are detected.
   TORCH_CHECK(
-      device >= 0 &&
-          device < std::min(
-                       gDevicePool.devices.size(),
-                       std::numeric_limits<DeviceIndex>::max()),
+      gDevicePool.devices.size() <= std::numeric_limits<DeviceIndex>::max(),
+      "Too many XPU devices, DeviceIndex overflowed");
+  auto total = static_cast<DeviceIndex>(gDevicePool.devices.size());
+  TORCH_CHECK(
+      device >= 0 && device < total,
       "device is out of range, device is ",
       device,
       ", total number of device is ",
@@ -125,7 +129,7 @@ void get_device_properties(DeviceProp* device_prop, DeviceIndex device) {
   initDeviceProperties(device_prop, device);
 }
 
-int get_device_idx_from_pointer(void* ptr) {
+DeviceIndex get_device_idx_from_pointer(void* ptr) {
   initDevicePoolCallOnce();
   TORCH_CHECK(ptr, "ptr is an invalid pointer.");
   auto type = sycl::get_pointer_type(ptr, get_device_context());
@@ -140,8 +144,9 @@ int get_device_idx_from_pointer(void* ptr) {
       gDevicePool.devices.begin(), gDevicePool.devices.end(), match_device);
   TORCH_CHECK(
       it != gDevicePool.devices.end(),
-      "Cant't find the pointer from XPU devices.");
-  return static_cast<int>(std::distance(gDevicePool.devices.begin(), it));
+      "Can't find the pointer from XPU devices.");
+  return static_cast<DeviceIndex>(
+      std::distance(gDevicePool.devices.begin(), it));
 }
 
 DeviceIndex device_count() {
@@ -163,7 +168,7 @@ DeviceIndex current_device() {
 
 void set_device(DeviceIndex device) {
   initDevicePoolCallOnce();
-  check_device(static_cast<int>(device));
+  check_device(device);
   curDeviceIndex = device;
 }
 

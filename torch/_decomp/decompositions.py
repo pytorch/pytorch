@@ -1860,19 +1860,6 @@ def device_hint(tensor):
         return None
 
 
-def wrap_output_with_input_device_(x, common_device):
-    # wrap meta tensor
-    if common_device is not None and x.device.type == "meta":
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
-        fake_mode = FakeTensorMode()
-        fake_mode.in_kernel_invocation = True
-        converter = fake_mode.fake_tensor_converter
-        return converter.from_meta_and_device(fake_mode, x, common_device)
-
-    return x
-
-
 @register_decomposition(aten._to_copy)
 @out_wrapper()
 def _to_copy(
@@ -1891,19 +1878,18 @@ def _to_copy(
         return x.clone()
     dtype_converted = False
     common_device = device_hint(x)
+
     if device is not None and device != x.device:
         # avoid conversions on cpu
         if dtype is not None and device.type == "cpu":
             x = torch._prims.convert_element_type(x, dtype)
             dtype_converted = True
         x = torch._prims.device_put(x, device)
+
     if dtype is not None and not dtype_converted:
         x = torch._prims.convert_element_type(x, dtype)
         dtype_converted = True
-    # In case of dtype promotion, faketensor converted into tensor.
-    # Need to convert into faketensor if input was a faketensor.
-    if dtype_converted:
-        x = wrap_output_with_input_device_(x, common_device)
+
     if memory_format is not None:  # no ref/prim for memory format
         return torch.clone(x, memory_format=memory_format)
     return x
@@ -3312,13 +3298,60 @@ def upsample_bicubic2d_aa_vec(input, output_size, align_corners, scale_factors):
 
 
 @register_decomposition(aten.upsample_bilinear2d.vec)
+@register_decomposition(aten.upsample_trilinear3d.vec)
+@aten.upsample_linear1d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.upsample_linear1d.vec.py_impl(DispatchKey.Autograd)
 @aten.upsample_bilinear2d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_bilinear2d.vec.py_impl(DispatchKey.Autograd)
-def upsample_bilinear2d_vec(input, output_size, align_corners, scale_factors):
+@aten.upsample_trilinear3d.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.upsample_trilinear3d.vec.py_impl(DispatchKey.Autograd)
+def _upsample_linear_vec(input, output_size, align_corners, scale_factors):
     osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
-    scale_h = get_scale_value(scale_factors, 0)
-    scale_w = get_scale_value(scale_factors, 1)
-    return upsample_bilinear2d(input, osize, align_corners, scale_h, scale_w)
+    scales = scale_factors if scale_factors else [None] * len(osize)
+    return _upsample_linear(input, osize, align_corners, scales)
+
+
+@register_decomposition([aten.upsample_linear1d.default, aten.upsample_linear1d.out])
+@out_wrapper()
+def upsample_linear1d(
+    input: Tensor,
+    output_size: List[int],
+    align_corners: bool,
+    scales_w: Optional[float] = None,
+) -> Tensor:
+    return _upsample_linear(input, output_size, align_corners, [scales_w])
+
+
+@register_decomposition(
+    [aten.upsample_bilinear2d.default, aten.upsample_bilinear2d.out]
+)
+@aten.upsample_bilinear2d.default.py_impl(DispatchKey.Autograd)
+@out_wrapper()
+def upsample_bilinear2d(
+    input: Tensor,
+    output_size: List[int],
+    align_corners: bool,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
+) -> Tensor:
+    return _upsample_linear(input, output_size, align_corners, [scales_h, scales_w])
+
+
+@register_decomposition(
+    [aten.upsample_trilinear3d.default, aten.upsample_trilinear3d.out]
+)
+@out_wrapper()
+def upsample_trilinear3d(
+    input: Tensor,
+    output_size: List[int],
+    align_corners: bool,
+    scales_d: Optional[float] = None,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
+) -> Tensor:
+    return _upsample_linear(
+        input, output_size, align_corners, [scales_d, scales_h, scales_w]
+    )
 
 
 def _compute_scale(in_size, out_size, align_corners, scale=None):
@@ -3335,60 +3368,61 @@ def _compute_source_index(scale, dst_index, align_corners):
         return scale * (dst_index + 0.5) - 0.5
 
 
-@register_decomposition(aten.upsample_bilinear2d.default)
-@aten.upsample_bilinear2d.default.py_impl(DispatchKey.Autograd)
 @pw_cast_for_opmath
-def upsample_bilinear2d(
+def _upsample_linear(
     input: Tensor,
     output_size: List[int],
     align_corners: bool,
-    scales_h: Optional[float] = None,
-    scales_w: Optional[float] = None,
+    scales: List[Optional[float]],
 ) -> Tensor:
     # get dimensions of original image
-    _, n_channels, in_h, in_w = input.shape
-
-    # Calculate horizontal and vertical scaling factor
-    h_scale_factor = _compute_scale(in_h, output_size[0], align_corners, scales_h)
-    w_scale_factor = _compute_scale(in_w, output_size[1], align_corners, scales_w)
+    n_batch, n_channels = input.shape[:2]
+    inp_sizes = input.shape[2:]
+    n_dims = len(inp_sizes)
 
     _, dtype = utils.elementwise_dtypes(
-        input, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+        input,
+        type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     )
-    # We have to create arange with int64 dtype and use .to in order to avoid
-    # additional kernels creation in inductor and get a perf slowdown
-    i = torch.arange(output_size[0], device=input.device).to(dtype=dtype)
-    j = torch.arange(output_size[1], device=input.device).to(dtype=dtype)
 
-    x_f32 = _compute_source_index(w_scale_factor, j, align_corners).clamp(min=0.0)
-    y_f32 = _compute_source_index(h_scale_factor, i, align_corners).clamp(min=0.0)
-    y_f32 = y_f32.unsqueeze(-1)
+    def get_values(inp_size, out_size, scales, nsqueeze):
+        # First Calculate scaling factor
+        scale_factor = _compute_scale(inp_size, out_size, align_corners, scales)
+        # We have to create arange with int64 dtype and use .to in order to avoid
+        # additional kernels creation in inductor and get a perf slowdown
+        i = torch.arange(out_size, device=input.device).to(dtype=dtype)
 
-    x = x_f32.to(torch.int64)
-    y = y_f32.to(torch.int64)
+        x_f32 = _compute_source_index(scale_factor, i, align_corners).clamp(min=0.0)
+        x_f32 = x_f32.reshape(x_f32.shape[0], *[1] * (nsqueeze))
+        x = x_f32.to(torch.int64)
+        xp1 = (x + 1).clamp(max=inp_size - 1)
+        return x_f32, x, xp1
 
-    xp1 = (x + 1).clamp(max=in_w - 1)
-    yp1 = (y + 1).clamp(max=in_h - 1)
+    values = [
+        get_values(inp_size, out_size, scales, n_dims - 1 - i)
+        for i, (inp_size, out_size, scales) in enumerate(
+            zip(inp_sizes, output_size, scales)
+        )
+    ]
+    xs_f32, xs, xp1s = list(zip(*values))
 
-    v1 = aten._unsafe_index(input, [None, None, y, x])
-    v2 = aten._unsafe_index(input, [None, None, y, xp1])
-    v3 = aten._unsafe_index(input, [None, None, yp1, x])
-    v4 = aten._unsafe_index(input, [None, None, yp1, xp1])
+    vs = []
+    for a in product(*[[0, 1]] * n_dims):
+        idx = [None, None] + [xs[k] if a[k] == 0 else xp1s[k] for k in range(n_dims)]
+        v = aten._unsafe_index(input, idx)
+        v = _maybe_convert_to_dtype(v, dtype)
+        vs.append(v)
 
-    dtype = torch.float32 if not input.is_floating_point() else input.dtype
-    if not input.is_floating_point():
-        v1 = v1.to(dtype)
-        v2 = v2.to(dtype)
-        v3 = v3.to(dtype)
-        v4 = v4.to(dtype)
+    for i in reversed(range(n_dims)):
+        xscale = (xs_f32[i] - xs[i]).clamp(0.0, 1.0).to(dtype)
+        vs = [
+            # x1 * (1 - alpha) + x2 * alpha == x1 + (x2 - x1) * alpha
+            v1 + torch.mul(v2 - v1, xscale)
+            for v1, v2 in zip(vs[::2], vs[1::2])
+        ]
 
-    yscale = (y_f32 - y).clamp(0.0, 1.0).to(dtype)
-    xscale = (x_f32 - x).clamp(0.0, 1.0).to(dtype)
-
-    # x1 * (1 - alpha) + x2 * alpha == x1 + (x2 - x1) * alpha
-    q1 = v1 + torch.mul(v2 - v1, xscale)
-    q2 = v3 + torch.mul(v4 - v3, xscale)
-    result = q1 + torch.mul(q2 - q1, yscale)
+    assert len(vs) == 1
+    result = vs[0]
 
     # convert output to correct memory format, if necessary
     memory_format = utils.suggest_memory_format(input)
@@ -3396,6 +3430,8 @@ def upsample_bilinear2d(
     # following "heuristic: only use channels_last path when it's faster than the contiguous path"
     if input.device.type == "cuda" and n_channels < 16:
         memory_format = torch.contiguous_format
+
+    assert isinstance(result, torch.Tensor)
 
     result = result.contiguous(memory_format=memory_format)
 
@@ -4443,6 +4479,12 @@ def _weight_norm_interface(x, y, dim=0):
 @register_decomposition(aten.isin)
 @out_wrapper()
 def isin(elements, test_elements, *, assume_unique=False, invert=False):
+    # handle when either elements or test_elements are Scalars (they can't both be)
+    if not isinstance(elements, torch.Tensor):
+        elements = torch.tensor(elements, device=test_elements.device)
+    if not isinstance(test_elements, torch.Tensor):
+        test_elements = torch.tensor(test_elements, device=elements.device)
+
     if test_elements.numel() < 10.0 * pow(elements.numel(), 0.145):
         return isin_default(elements, test_elements, invert=invert)
     else:
@@ -4452,6 +4494,9 @@ def isin(elements, test_elements, *, assume_unique=False, invert=False):
 
 
 def isin_default(elements, test_elements, *, invert=False):
+    if elements.numel() == 0:
+        return torch.empty_like(elements, dtype=torch.bool)
+
     x = elements.view(*elements.shape, *((1,) * test_elements.ndim))
     if not invert:
         cmp = x == test_elements
