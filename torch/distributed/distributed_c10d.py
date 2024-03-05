@@ -562,6 +562,7 @@ class _World:
             config_info.append(
                 {
                     "pg_name": self.pg_names[pg],
+                    "uid": _get_process_group_uid(pg),
                     "backend_config": self.pg_backend_config[pg],
                     "ranks": list(ranks.keys())
                     if len(ranks) != default_pg_size
@@ -1072,6 +1073,16 @@ def get_backend(group: Optional[ProcessGroup] = None) -> Backend:
     pg_store = _world.pg_map[pg] if pg in _world.pg_map else None
     return Backend(not_none(pg_store)[0])
 
+def _get_process_group_uid(pg: ProcessGroup) -> int:
+    backend = None
+    try:
+        backend = pg._get_backend(torch.device("cuda"))
+    except RuntimeError:
+        pass
+    if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
+        return backend.uid
+    return -1
+
 def _get_pg_config(group: Optional[ProcessGroup] = None) -> Dict[str, Any]:
     """
     Return the pg configuration of the given process group.
@@ -1083,6 +1094,7 @@ def _get_pg_config(group: Optional[ProcessGroup] = None) -> Dict[str, Any]:
         pg = group
     return {
         "pg_name": _get_process_group_name(pg),
+        "uid": _get_process_group_uid(pg),
         "backend_config": get_backend_config(pg),
         "pg_size": _get_group_size(pg),
         "ranks": get_process_group_ranks(pg),

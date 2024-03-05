@@ -1524,6 +1524,18 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         self.assertEqual(backend.comm_split_count(), 1)
 
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_get_uid(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f'cuda:{self.rank}')
+        pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
+        from torch.distributed.distributed_c10d import _get_process_group_uid
+        self.assertEqual(_get_process_group_uid(pg), 0)
+        pg_2 = c10d.new_group([0, 1])
+        self.assertEqual(_get_process_group_uid(pg_2), 1)
+
+
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
 ):

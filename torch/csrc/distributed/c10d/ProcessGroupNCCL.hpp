@@ -465,6 +465,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   ~ProcessGroupNCCL() override;
 
+  uint64_t getUid() {
+    return static_cast<uint64_t>(uid_);
+  }
+
   c10::intrusive_ptr<Options> getOptions() {
     return options_;
   }
