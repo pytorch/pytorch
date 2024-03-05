@@ -188,14 +188,13 @@ class FSDPState(_State):
             self._state_ctx.all_states.append(state)
             if state._fsdp_param_group:
                 state._fsdp_param_group.lazy_init()
-        # NOTE(yf225): I believe this causes issue during compile
-        # (post_forward hook thinks that `post_forward_mesh_info` is None thus not doing resharding and not doing .resize_(0). Is it expected eager behavior?)
-        # Need to understand why.
-        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-            if self._fsdp_param_group:
-                # For the root, do not reshard after forward since for training,
-                # the parameters would be freed and all-gathered immediately
-                self._fsdp_param_group.post_forward_mesh_info = None
+        # TODO(yf225): This needs more investigation. Current state is that:
+        # 1. This causes issue during compile (post_forward hook thinks that `post_forward_mesh_info` is None thus not doing resharding and not doing .resize_(0))
+        # 2. Commenting this out fails some eager unit tests (obvious because we are changing eager behavior)
+        # if self._fsdp_param_group:
+        #     # For the root, do not reshard after forward since for training,
+        #     # the parameters would be freed and all-gathered immediately
+        #     self._fsdp_param_group.post_forward_mesh_info = None
         self._init_fqns()
         self._init_shared_state()
 

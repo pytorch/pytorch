@@ -144,7 +144,7 @@ def input_is_used_in_other_ops(ops, inp_n, except_callback):
 
 def reinplace_foreach_copy_if_input_has_no_other_use_in_graph(mod):
     """
-    _foreach_copy_1 = torch.ops.aten._foreach_copy.default([view_1, view_2, view_3, view_4], [getitem_28, getitem_33, getitem_38, getitem_43]);  view_1 = view_2 = view_3 = view_4 = getitem_28 = getitem_33 = getitem_38 = getitem_43 = None
+    _foreach_copy_1 = torch.ops.aten._foreach_copy.default([primal_1, primal_2, primal_3, primal_4], [getitem_28, getitem_33, getitem_38, getitem_43]);  view_1 = view_2 = view_3 = view_4 = getitem_28 = getitem_33 = getitem_38 = getitem_43 = None
     getitem_44: "f32[2, 76137800]" = _foreach_copy_1[0]
     getitem_45: "f32[2, 6170]" = _foreach_copy_1[1]
     getitem_46: "f32[2, 76137800]" = _foreach_copy_1[2]
@@ -152,13 +152,17 @@ def reinplace_foreach_copy_if_input_has_no_other_use_in_graph(mod):
 
     ->
 
-    _foreach_copy__1 = torch.ops.aten._foreach_copy_.default([view_1, view_2, view_3, view_4], [getitem_28, getitem_33, getitem_38, getitem_43]);  view_1 = view_2 = view_3 = view_4 = getitem_28 = getitem_33 = getitem_38 = getitem_43 = None
+    _foreach_copy__1 = torch.ops.aten._foreach_copy_.default([primal_1, primal_2, primal_3, primal_4], [getitem_28, getitem_33, getitem_38, getitem_43]);  view_1 = view_2 = view_3 = view_4 = getitem_28 = getitem_33 = getitem_38 = getitem_43 = None
     """
     # TODO: maybe super slow, need optimization
     for n in list(mod.graph.nodes):
         if n.target is torch.ops.aten._foreach_copy.default:
             _foreach_copy_outplace_node = n
-            if all(not input_is_used_in_other_ops(list(mod.graph.nodes), inp_n, except_callback=lambda n: n == _foreach_copy_outplace_node) for inp_n in _foreach_copy_outplace_node.args[0]):
+            if all(not input_is_used_in_other_ops(
+                list(mod.graph.nodes),
+                inp_n,
+                except_callback=lambda n: (n == _foreach_copy_outplace_node or (n.target is torch.ops.inductor.resize_storage_bytes_.default))  # ignore this op, and ignore resize_storage_bytes_ ops
+            ) for inp_n in _foreach_copy_outplace_node.args[0]):
                 with mod.graph.inserting_before(_foreach_copy_outplace_node):
                     for i, arg in enumerate(_foreach_copy_outplace_node.args[0]):
                         copy_to = arg
@@ -192,7 +196,7 @@ def replace_as_strided_scatter_with_primal_if_primal_has_no_other_use_after_this
                 if (
                     primal.meta['val'].shape == as_strided_scatter_node.meta['val'].shape \
                     and primal.meta['val'].stride() == as_strided_scatter_node.meta['val'].stride() \
-                    and not input_is_used_in_other_ops(list(mod.graph.nodes)[i+1:], primal, except_callback=lambda n: n.target is torch.ops.inductor.resize_storage_bytes_ and n.args[1] == 0)
+                    and not input_is_used_in_other_ops(list(mod.graph.nodes)[i+1:], primal, except_callback=lambda n: n.target is torch.ops.inductor.resize_storage_bytes_.default and n.args[1] == 0)
                 ):
                     as_strided_scatter_node.replace_all_uses_with(primal)
                     mod.graph.erase_node(as_strided_scatter_node)

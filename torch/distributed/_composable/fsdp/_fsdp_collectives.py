@@ -130,9 +130,10 @@ def foreach_all_gather_copy_out(
                     storage_offset=0,
                 )
             )
-        # NOTE: Use this if you must test this branch under eager mode, to avoid version counter issue.
-        # with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter_for_tensors(out):
-        with torch.no_grad():
+        ctx = contextlib.nullcontext()
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            ctx = torch.autograd._unsafe_preserve_version_counter_for_tensors(out)
+        with torch.no_grad(), ctx:
             torch._foreach_copy_(out, splits_unpadded)
 
 

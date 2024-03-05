@@ -229,7 +229,7 @@ def aot_dispatch_autograd(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
 
-            # fsdp_fx_passes.insert_primal_resize_to_full_at_start_and_resize_to_0_at_end_of_graph(fw_module)
+            fsdp_fx_passes.insert_primal_resize_to_full_at_start_and_resize_to_0_at_end_of_graph(fw_module)
             fsdp_fx_passes.move_resize_to_0_to_end_of_graph(fw_module)
             fsdp_fx_passes.replace_primal_noop_as_strided_with_primal(fw_module)
 
