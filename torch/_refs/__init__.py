@@ -15,8 +15,8 @@ import torch
 
 import torch._prims as prims
 import torch._prims_common as utils
-from torch import sym_float, sym_int
 import torch.utils._pytree as pytree
+from torch import sym_float, sym_int
 from torch._prims_common import (
     DeviceLikeType,
     Dim,
