@@ -799,7 +799,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             new_parameter_placeholder, [shape, dtype, device, requires_grad]
         )
         if data.requires_grad:
-            data = data.call_method("tx", "detach", [], {})
+            data = data.call_method(tx, "detach", [], {})
         result = TorchInGraphFunctionVariable(tracable_create_parameter).call_function(
             tx, [data, placeholder], {}
         )
