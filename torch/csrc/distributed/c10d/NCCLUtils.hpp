@@ -472,6 +472,17 @@ class NCCLComm {
 #endif
   }
 
+  uint64_t getCommHash() {
+#ifdef NCCL_COMM_GET_UNIQUE_HASH
+    // query from NCCL when first time called
+    if (commHash_ == 0) {
+      C10D_NCCL_CHECK(
+          ncclCommGetUniqueHash(ncclComm_, &commHash_), c10::nullopt);
+    }
+#endif
+    return commHash_;
+  }
+
   friend class ProcessGroupNCCL;
 
  protected:
@@ -480,6 +491,7 @@ class NCCLComm {
   ncclComm_t ncclComm_;
   // Unique nccl_id for this communicator.
   ncclUniqueId ncclId_;
+  uint64_t commHash_{0};
   bool aborted_;
   uint64_t ncclCommSplitCounter_{0};
   ncclResult_t ncclAsyncErr_;

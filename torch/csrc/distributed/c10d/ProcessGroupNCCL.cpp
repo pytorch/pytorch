@@ -308,7 +308,7 @@ void cacheAllocatorDeregisterHook(
 #if defined(IS_NCCL_EXP) && defined(NCCL_COMM_DUMP)
 std::string dump_nccl_trace() {
   std::unordered_map<
-      std::string /* ncclUniqueID */,
+      uint64_t /* nccl commHash */,
       std::unordered_map<std::string, std::string> /* dump from this comm */>
       ncclDumpMap;
   // dump_nccl_trace is only called from the default PG (uid_=0), but we want to
@@ -323,8 +323,8 @@ std::string dump_nccl_trace() {
   }
   ncclCommDevIdxMapMutex.unlock();
   for (auto& ncclComm : allNCCLComms) {
-    std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getNcclId());
-    ncclDumpMap[ncclUniqueIDStr] = ncclComm->ncclCommDump();
+    auto commHash = ncclComm->getCommHash();
+    ncclDumpMap[commHash] = ncclComm->ncclCommDump();
   }
   return NCCLTraceBuffer::get()->dump(ncclDumpMap);
 }
@@ -1023,7 +1023,8 @@ void ProcessGroupNCCL::abortCommsFromMap(
     auto& ncclComm = it.second;
 
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
-              << ncclComm->ncclComm_ << " on CUDA device: " << devName;
+              << ncclComm->ncclComm_ << " commHash " << std::hex
+              << ncclComm->getCommHash() << " on CUDA device: " << devName;
     ncclComm->ncclCommAbort(abortReason);
     // Note that we don't remove the aborted communicators from the
     // cache. The reason is that if we do remove the communicator
@@ -1956,7 +1957,8 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
 #endif
 
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
-            << ncclComm->ncclComm_ << " on CUDA device: " << deviceIndex;
+            << ncclComm->ncclComm_ << " commHash " << std::hex
+            << ncclComm->getCommHash() << " on CUDA device: " << deviceIndex;
 
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file
@@ -2106,6 +2108,7 @@ bool check_same_size(const std::vector<at::Tensor>& input_tensors) {
 
 c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     at::Device& device,
+    std::shared_ptr<NCCLComm>& ncclComm,
     int rank,
     OpType opType,
     const char* profilingTitle,
@@ -2123,6 +2126,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       desyncDebug_,
       enableTiming_.load(),
       dist_debug_level_);
+  r->ncclComm_ = ncclComm;
   if (record) {
     // Ideally record every work that we enqueue, rather than every work we
     // create.
@@ -2141,6 +2145,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
         uid_,
         seq_,
         op_id_,
+        ncclComm->getCommHash(),
         profilingTitle ? profilingTitle : "",
         inputs,
         outputs,
@@ -2239,8 +2244,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
   bool enqueue =
       (coalescing_state_) && capture_status == c10::cuda::CaptureStatus::None;
   auto work =
-      initWork(device, rank_, optype, "nccl:coalesced", {}, {}, enqueue);
-  work->ncclComm_ = comm;
+      initWork(device, comm, rank_, optype, "nccl:coalesced", {}, {}, enqueue);
   work->blockingWait_ = blockingWait_;
   work->avoidRecordStreams_ = avoidRecordStreams_;
   work->opTimeout_ = options_->timeout;
@@ -2326,8 +2330,15 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 
   bool enqueue =
       !coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None;
-  auto work =
-      initWork(device, rank_, opType, profilingTitle, inputs, outputs, enqueue);
+  auto work = initWork(
+      device,
+      ncclComm,
+      rank_,
+      opType,
+      profilingTitle,
+      inputs,
+      outputs,
+      enqueue);
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ =
@@ -2388,7 +2399,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   if (!coalescing_state_) {
     work->ncclEndEvent_->record(ncclStream);
   }
-  work->ncclComm_ = ncclComm;
 
   {
     c10::cuda::CUDAMultiStreamGuard streamGuard(ncclStream);
@@ -2474,7 +2484,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   syncStream(device, ncclEvents_[key], ncclStream);
 
   auto work = initWork(
-      device, rank_, opType, nullptr, inputs, outputs, /*record=*/true);
+      device,
+      ncclComm,
+      rank_,
+      opType,
+      nullptr,
+      inputs,
+      outputs,
+      /*record=*/true);
 
   // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
@@ -2547,7 +2564,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   if (!coalescing_state_) {
     work->ncclEndEvent_->record(ncclStream);
   }
-  work->ncclComm_ = ncclComm;
 
   {
     c10::cuda::CUDAMultiStreamGuard streamGuard(ncclStream);
@@ -2671,6 +2687,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         uid_,
         seq_,
         op_id_,
+        ncclComm->getCommHash(),
         profilingTitle,
         {tensor},
         {tensor},
@@ -2689,7 +2706,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // cases such as profiling.
 
     work = initWork(
-        device, rank_, opType, profilingTitle, {tensor}, {}, /*record=*/false);
+        device,
+        ncclComm,
+        rank_,
+        opType,
+        profilingTitle,
+        {tensor},
+        {},
+        /*record=*/false);
     // This bypasses something in Work() that crashes if {tensor} is given as
     // output, not sure what
     work->outputs_ = std::make_shared<std::vector<at::Tensor>>();
@@ -2701,6 +2725,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         uid_,
         seq_,
         op_id_,
+        ncclComm->getCommHash(),
         profilingTitle,
         {tensor},
         {tensor},
@@ -2747,7 +2772,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
 
     // End event should only be recorded after the ncclGroupEnd()
     work->ncclEndEvent_->record(ncclStream);
-    work->ncclComm_ = ncclComm;
     work->blockingWait_ = blockingWait_;
     work->opTimeout_ = options_->timeout;
     work->store_ = store_;

@@ -62,6 +62,7 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
 
   c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       at::Device& device,
+      std::shared_ptr<c10d::NCCLComm>& ncclComm,
       int rank,
       c10d::OpType opType,
       const char* profilingTitle,
@@ -124,6 +125,7 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
 
   c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       at::Device& device,
+      std::shared_ptr<c10d::NCCLComm>& ncclComm,
       int rank,
       c10d::OpType opType,
       const char* profilingTitle,

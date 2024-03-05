@@ -367,6 +367,12 @@ inline c10::List<c10::IValue> new_list() {
   return c10::List<c10::IValue>(c10::AnyType::get());
 }
 
+inline std::string hashToHexStr(const uint64_t hash) {
+  std::stringstream ss;
+  ss << std::hex << hash;
+  return ss.str();
+}
+
 struct NCCLTraceBuffer {
   static NCCLTraceBuffer* get() {
     // intentionally leak on exit
@@ -394,6 +400,8 @@ struct NCCLTraceBuffer {
     // group)
     size_t seq_id_;
     size_t op_id_;
+    uint64_t nccl_comm_hash_; // commHash used inside NCCL to correlate with
+                              // dump contents from ncclCommDump
     std::string profiling_name_;
 
     std::shared_ptr<torch::CapturedTraceback> traceback_;
@@ -439,6 +447,7 @@ struct NCCLTraceBuffer {
       size_t pg_id,
       size_t seq_id,
       size_t op_id,
+      uint64_t nccl_comm_hash,
       std::string profiling_name,
       const std::vector<at::Tensor>& inputs,
       const std::vector<at::Tensor>& outputs,
@@ -456,6 +465,7 @@ struct NCCLTraceBuffer {
         pg_id,
         seq_id,
         op_id,
+        nccl_comm_hash,
         std::move(profiling_name),
         std::move(traceback),
         std::move(start),
@@ -585,7 +595,7 @@ struct NCCLTraceBuffer {
 
   std::string dump(
       const c10::optional<std::unordered_map<
-          std::string,
+          uint64_t,
           std::unordered_map<std::string, std::string>>>& ncclDumpMap) {
     auto result = dump_entries();
     auto entries = new_list();
@@ -600,6 +610,7 @@ struct NCCLTraceBuffer {
     c10::IValue pg_id_key = "pg_id";
     c10::IValue seq_id_key = "seq_id";
     c10::IValue op_id_key = "op_id";
+    c10::IValue nccl_comm_hash_key = "nccl_comm_hash";
     c10::IValue profiling_name_key = "profiling_name";
     c10::IValue input_sizes_key = "input_sizes";
     c10::IValue output_sizes_key = "output_sizes";
@@ -637,6 +648,7 @@ struct NCCLTraceBuffer {
       dict.insert(pg_id_key, int64_t(e.pg_id_));
       dict.insert(seq_id_key, int64_t(e.seq_id_));
       dict.insert(op_id_key, int64_t(e.op_id_));
+      dict.insert(nccl_comm_hash_key, hashToHexStr(e.nccl_comm_hash_));
       dict.insert(profiling_name_key, e.profiling_name_);
       dict.insert(time_created_key, int64_t(e.time_created_));
       if (e.duration_) {
@@ -698,12 +710,12 @@ struct NCCLTraceBuffer {
     // convert ncclDumpMap into a dictionary
     auto per_comm_dict = new_dict();
     if (ncclDumpMap.has_value()) {
-      for (const auto& [ncclId, ncclDump] : ncclDumpMap.value()) {
+      for (const auto& [commHash, ncclDump] : ncclDumpMap.value()) {
         auto inner_dict = new_dict();
         for (const auto& [key, value] : ncclDump) {
           inner_dict.insert(key, value);
         }
-        per_comm_dict.insert(ncclId, inner_dict);
+        per_comm_dict.insert(hashToHexStr(commHash), inner_dict);
       }
     }
 

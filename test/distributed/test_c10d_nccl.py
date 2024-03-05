@@ -4111,6 +4111,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(last['input_sizes'], ((3, 4),))
         self.assertEqual(last['output_sizes'], ((3, 4),))
         self.assertEqual(last['seq_id'], 2)
+        nch = last['nccl_comm_hash']
+        self.assertIsNotNone(nch)
         now = datetime.now()
         event_created_time = datetime.fromtimestamp(last['time_created_ns'] / 1000000000)
         before_test = now - timedelta(minutes=1)

@@ -658,6 +658,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // workEnqueue
   virtual c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
       at::Device& device,
+      std::shared_ptr<NCCLComm>& ncclComm,
       int rank,
       OpType opType,
       const char* profilingTitle = nullptr,
