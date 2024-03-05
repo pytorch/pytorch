@@ -15,7 +15,6 @@ ciflow_push_tags:
 - ciflow/trunk
 - ciflow/unstable
 - ciflow/xpu
-- ciflow/aarch64
 retryable_workflows:
 - lint
 - pull
