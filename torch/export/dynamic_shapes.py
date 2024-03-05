@@ -678,6 +678,8 @@ def _process_dynamic_shapes(
                 constraint = constraint >= dim.min
             if dim.max != sys.maxsize - 1:
                 constraint = constraint <= dim.max
+            constraint.min = max(dim.min, 0)
+            constraint.max = min(dim.max, sys.maxsize - 1)
         return constraint
 
     bounds: Dict[str, Tuple[int, int]] = {}

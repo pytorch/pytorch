@@ -45,6 +45,7 @@ def try_solve(
     floordiv_inequality: bool = True,
 ) -> Optional[Tuple[sympy.Rel, sympy.Basic]]:
     mirror = mirror_rel_op(type(expr))
+    breakpoint()
 
     # Ignore unsupported expressions:
     #   - Those that are not relational operations

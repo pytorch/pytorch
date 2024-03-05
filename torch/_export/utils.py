@@ -59,6 +59,7 @@ def _check_input_constraints_for_graph(
     unification_map: "Dict[sympy.Symbol, Any]" = {}
     for (key_path, arg), node in zip(flat_args_with_path, input_placeholders):
         node_val = node.meta.get("val")
+        breakpoint()
         if isinstance(node_val, FakeTensor):
             if not isinstance(arg, torch.Tensor):
                 raise RuntimeError(
@@ -93,6 +94,7 @@ def _check_input_constraints_for_graph(
                             # this can happen when, say, arg is a fake tensor
                             unification_map[symbol] = arg_dim
                         else:
+                            breakpoint()
                             solution = try_solve(
                                 sympy.Eq(node_dim.node.expr, arg_dim), symbol
                             )

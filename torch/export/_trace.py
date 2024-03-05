@@ -41,7 +41,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
-from torch.utils._sympy.value_ranges import ValueRangeError
+from torch.utils._sympy.value_ranges import ValueRangeError, ValueRanges
 
 from ._safeguard import AutogradStateOpsFailSafeguard
 
@@ -800,6 +800,19 @@ def _export(
         assert out_spec is not None
 
         gm = ep_non_strict.gm
+
+        # add code to match mod.forward signature names, with dim ranges in dynamic_shapes dict
+        user_input_names = set(spec.arg.name for spec in ep_non_strict.sig.input_specs if spec.kind == InputKind.USER_INPUT)
+        user_input_nodes = [node for node in gm.graph.nodes if node.name in user_input_names]
+        for name, node in zip(inspect.signature(mod.forward).parameters, user_input_nodes):
+            shapes = node.meta["val"].size()
+            dynamic_dim = dynamic_shapes.get(name, {})
+            for dim, shape in enumerate(shapes):
+                if isinstance(shape, torch.SymInt) and dynamic_dim[dim]:
+                    range_constraints[shape.node._expr] = ValueRanges(
+                        lower=dynamic_dim[dim].min,
+                        upper=dynamic_dim[dim].max
+                    )
 
         module_call_signatures = {
             strip_root(fqn): ModuleCallSignature(inputs=[], outputs=[], **specs)
