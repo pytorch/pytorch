@@ -1484,7 +1484,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._validate_sparse_csr_tensor_args",
         "torch._values_copy",
         "torch._weight_int4pack_mm",
-        "torch._weight_int8pack_mm",
         "torch._weight_norm_interface",
         "torch._weight_norm",
         "torch.abs_",
@@ -2214,7 +2213,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._higher_order_ops.out_dtype.out_dtype_fake_tensor_mode",
         "torch._higher_order_ops.out_dtype.out_dtype_fallback",
         "torch._higher_order_ops.out_dtype.out_dtype_func",
-        "torch._higher_order_ops.out_dtype.out_dtype_predispatch",
         "torch._higher_order_ops.out_dtype.out_dtype_proxy",
         "torch._higher_order_ops.out_dtype.trace_out_dtype",
         "torch._higher_order_ops.utils.autograd_not_implemented_inner",
@@ -3102,6 +3100,7 @@ BUILTIN_SKIPLIST = (
 # we should use lazy import & skip in the future.
 THIRDPARTY_SKIPLIST = (
     "fx2trt_oss",
+    "hypothesis",
     "networkx",
     "numpy",
     "omegaconf",
@@ -3195,6 +3194,7 @@ MOD_INLINELIST = {
     "torch.random",
     "torch.sparse",
     "torch.testing",
+    "torch.testing._internal.hypothesis_utils",
     "torch.utils._content_store",
     "torch.utils._contextlib",
     "torch.utils._foreach_utils",
