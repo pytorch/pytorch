@@ -74,9 +74,6 @@ def impl_abstract_class(qualname, fake_class=None):
                     },
                     [](std::vector<int64_t> state) { // __setstate__
                       return c10::make_intrusive<Foo>(state[0], state[1]);
-                    })
-                .def_meta([](c10::intrusive_ptr<Foo> self) { // __get_metadata__
-                  return std::vector<int64_t>{self->x, self->y};
                 });
         # We could register a fake class FakeFoo in Python as follows:
         import torch
@@ -89,8 +86,7 @@ def impl_abstract_class(qualname, fake_class=None):
 
             @classmethod
             def from_real(cls, foo_obj):
-                # __get_metadata__ is defined by .def_meta in C++
-                x, y = foo_obj.__get_metadata__()
+                x, y = foo_obj.__getstate__()
                 return cls(x, y)
 
             def add_tensor(self, z):
