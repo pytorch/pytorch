@@ -723,7 +723,8 @@ class Tensor(torch._C.TensorBase):
 
         .. note::
             This method should always return a new object that is not ``self`` or ``other``.
-            For example, the default implementation returns ``self.copy_(other).detach()``.
+            For example, the default implementation returns ``self.copy_(other).detach()``
+            if ``assign`` is ``False`` or ``other.detach()`` if ``assign`` is ``True``.
 
         Args:
             other (Tensor): value in state dict with key corresponding to ``self``
@@ -735,9 +736,10 @@ class Tensor(torch._C.TensorBase):
                 Tensor.module_load, (self, other), self, other, assign=assign
             )
 
-        if not assign:
+        if assign:
+            return other.detach()
+        else:
             return self.copy_(other).detach()
-        return other.detach()
 
     def __reversed__(self):
         r"""Reverses the tensor along dimension 0."""

@@ -2112,12 +2112,13 @@ class Module:
             strict (bool, optional): whether to strictly enforce that the keys
                 in :attr:`state_dict` match the keys returned by this module's
                 :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
-            assign (bool, optional): whether to assign items in the state
-                dictionary to their corresponding keys in the module instead
-                of copying them inplace into the module's current parameters and buffers.
-                When ``False``, the properties of the tensors in the current
-                module are preserved while when ``True``, the properties of the
-                Tensors in the state dict are preserved.
+            assign (bool, optional): When ``False``, the properties of the tensors
+                in the current module are preserved while when ``True``, the
+                properties of the Tensors in the state dict are preserved. Additionally,
+                the ``requires_grad`` of :class:`~torch.nn.Parameter`s in the
+                ``state_dict`` are preserved, but tensors in the ``state_dict``
+                will adopt the ``requires_grad`` of the corresponding parameter
+                in the module.
                 Default: ``False``
 
         Returns:
