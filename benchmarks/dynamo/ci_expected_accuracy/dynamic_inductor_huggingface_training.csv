@@ -50,7 +50,7 @@ DebertaForMaskedLM,pass,5
 
 
 
-DebertaForQuestionAnswering,fail_accuracy,5
+DebertaForQuestionAnswering,pass,5
 
 
 
