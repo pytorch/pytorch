@@ -261,6 +261,7 @@ class TestLoadStateDict(NNTestCase):
             def forward(self, input):
                 return self.x + self.bn(self.fc1(input))
 
+        swap = torch.__future__.get_swap_module_params_on_conversion()
         net = MyModule()
         state_dict = net.state_dict(keep_vars=keep_vars)
         for v in state_dict.values():
@@ -276,16 +277,21 @@ class TestLoadStateDict(NNTestCase):
         net_meta_state_dict = net_meta.state_dict(keep_vars=True)
         for key in state_dict.keys():
             if key in net_meta._parameters:
-                self.assertEqual(net_meta_state_dict_old[key].requires_grad, net_meta_state_dict[key].requires_grad)
-                if keep_vars:
+                if keep_vars and not swap:
                     # state_dict[key] is an nn.Parameter
                     self.assertTrue(state_dict[key] is net_meta_state_dict[key])
                 else:
-                    # state_dict[key] is not an nn.Parameter so it will be detached when wrapping with a Parameter
-                    self.assertTrue(net_meta_state_dict[key] is not net_meta_state_dict_old[key])
-                    self.assertEqual(state_dict[key], net_meta_state_dict[key])
+                    if swap:
+                        self.assertTrue(net_meta_state_dict[key] is net_meta_state_dict_old[key])
+                    else:
+                        # state_dict[key] is not an nn.Parameter so it will be detached when wrapping with a Parameter
+                        self.assertTrue(net_meta_state_dict[key] is not net_meta_state_dict_old[key])
+                        self.assertEqual(net_meta_state_dict_old[key].requires_grad, net_meta_state_dict[key].requires_grad)
+                self.assertEqual(net_meta_state_dict_old[key].requires_grad, net_meta_state_dict[key].requires_grad)
+                self.assertEqual(state_dict[key], net_meta_state_dict[key])
             elif key in net_meta._buffers and key not in net_meta._non_persistent_buffers_set:
                 self.assertTrue(state_dict[key] is net_meta_state_dict[key])
+                self.assertEqual(state_dict[key], net_meta_state_dict[key])
 
         # Make sure that ordering of parameters and buffers is preserved
         net_named_parameters = net.named_parameters()
@@ -391,19 +397,32 @@ class TestLoadStateDict(NNTestCase):
 def load_torch_function_handler(cls, func, types, args=(), kwargs=None):
     kwargs = {} if kwargs is None else kwargs
 
-    def module_load(dest, src):
-        # always convert src to cls
+    def module_load(dest, src, assign=False):
         if isinstance(dest, cls):
-            if type(src) is torch.Tensor:
-                return cls(src)
-            elif type(src) is cls:
+            if assign:
+                return src.detach()
+            else:
+                if type(src) is torch.Tensor:
+                    return cls(src)
+                elif type(src) is cls:
+                    return src.detach()
+                else:
+                    if isinstance(src, MyWrapperLoadTensor):
+                        return cls(src._data)
+                    return cls(src)
+        else:
+            assert isinstance(src, cls), f"Expected isinstance(src, {cls}) but got {type(src)}"
+            assert type(dest) == torch.Tensor or type(dest) == torch.nn.Parameter or issubclass(cls, type(dest))
+            if assign:
                 return src.detach()
             else:
                 if isinstance(src, MyWrapperLoadTensor):
-                    return cls(src._data)
-                return cls(src)
-        else:
-            return src.detach()
+                    if type(dest) not in {torch.Tensor, torch.nn.Parameter}:
+                        return type(dest)(src._data)
+                    else:
+                        return src._data.detach()
+                else:
+                    return torch.Tensor(src)
 
     if func is torch.Tensor.module_load:
         return module_load(*args, **kwargs)
@@ -478,7 +497,8 @@ class TestLoadStateDictSwap(TestCase):
     @skipIfCrossRef
     @skipIfTorchDynamo("Can't swap with dynamo as dynamo installs weakrefs")
     @swap([True])
-    def test_swap_subclass(self):
+    @parametrize("assign", [True, False])
+    def test_swap_subclass(self, assign):
 
         def _create_model(subclass=None):
             m = torch.nn.Linear(2, 3, bias=False)
@@ -491,24 +511,20 @@ class TestLoadStateDictSwap(TestCase):
         def _test(m_subclass=None, sd_subclass=None):
             m = _create_model(m_subclass)
             sd = _create_model(sd_subclass).state_dict()
-            sd = sd
-            m.load_state_dict(sd)
+            m.load_state_dict(sd, assign=assign)
             self.assertEqual(m.weight, sd['weight'])
             self.assertEqual(m.buf, sd['buf'])
             self.assertTrue(isinstance(m.weight, torch.nn.Parameter))
             self.assertTrue(not isinstance(m.buf, torch.nn.Parameter))
 
             weight_type, buf_type = (torch.nn.Parameter, torch.Tensor)
-            if m_subclass is not None and sd_subclass is not None:
-                # handler of subclass takes precedence over superclass
-                if issubclass(sd_subclass, m_subclass):
+            if assign:
+                if sd_subclass is not None:
                     weight_type, buf_type = (sd_subclass, sd_subclass)
-                else:
+            else:
+                if m_subclass is not None:
                     weight_type, buf_type = (m_subclass, m_subclass)
-            elif m_subclass is not None:
-                weight_type, buf_type = (m_subclass, m_subclass)
-            elif sd_subclass is not None:
-                weight_type, buf_type = (sd_subclass, sd_subclass)
+
             self.assertTrue(type(m.weight) is weight_type)
             self.assertTrue(type(m.buf) is buf_type)
 
