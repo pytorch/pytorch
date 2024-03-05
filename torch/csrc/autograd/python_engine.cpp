@@ -190,15 +190,6 @@ PyObject* THPEngine_run_backward(
                                              "allow_unreachable",
                                              "accumulate_grad",
                                              nullptr};
-
-  // This gets called while we are still in the main thread. The caveat of selecting
-  // this location for naming the threads is that it only works for applications that
-  // have a backward pass.
-
-  static c10::once_flag flag_main_thread_name;
-  c10::call_once(
-    flag_main_thread_name, &c10::setThreadName, "pt_main_thread");
-
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
