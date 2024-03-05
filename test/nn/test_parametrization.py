@@ -11,7 +11,7 @@ import torch.nn.init as init
 import torch.nn.utils.parametrize as parametrize
 from torch.nn import Parameter
 from torch.testing._internal.common_utils import run_tests, skipIfNoLapack, \
-    TemporaryFileName, instantiate_parametrized_tests, set_default_dtype
+    TemporaryFileName, instantiate_parametrized_tests, set_default_dtype, skipIfTorchDynamo
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_nn import NNTestCase
@@ -1388,6 +1388,7 @@ class TestNNParametrization(NNTestCase):
         expect_out = m(input)
         self.assertEqual(expect_out, out_hat)
 
+    @skipIfTorchDynamo("Test does not work with TorchDynamo")
     def test_new_spectral_norm_value(self):
         # a test that the spectral norm (= top singular value)
         # is in fact properly calculated, using example of a simple diagonal matrix.
