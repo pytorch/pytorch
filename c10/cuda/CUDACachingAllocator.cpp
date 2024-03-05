@@ -143,14 +143,6 @@ void decrease_stat(Stat& stat, size_t amount) {
   stat.freed += static_cast<int64_t>(amount);
 }
 
-void update_stat(Stat& stat, int64_t amount) {
-  if (amount > 0) {
-    increase_stat(stat, static_cast<size_t>(amount));
-  } else if (amount < 0) {
-    decrease_stat(stat, static_cast<size_t>(-amount));
-  }
-}
-
 void reset_accumulated_stat(Stat& stat) {
   stat.allocated = 0;
   stat.freed = 0;
@@ -2122,11 +2114,24 @@ class DeviceCachingAllocator {
       // so we simply just exclude expandable segments from
       // inactive_split
       if (!block->expandable_segment_) {
-        update_stat(
-            stats.inactive_split[stat_type], net_change_inactive_split_blocks);
-        update_stat(
-            stats.inactive_split_bytes[stat_type],
-            net_change_inactive_split_size);
+        if (net_change_inactive_split_blocks > 0) {
+          increase_stat(
+              stats.inactive_split[stat_type],
+              static_cast<size_t>(net_change_inactive_split_blocks));
+        } else if (net_change_inactive_split_blocks < 0) {
+          decrease_stat(
+              stats.inactive_split[stat_type],
+              static_cast<size_t>(-net_change_inactive_split_blocks));
+        }
+        if (net_change_inactive_split_size > 0) {
+          increase_stat(
+              stats.inactive_split_bytes[stat_type],
+              static_cast<size_t>(net_change_inactive_split_size));
+        } else if (net_change_inactive_split_size < 0) {
+          decrease_stat(
+              stats.inactive_split_bytes[stat_type],
+              static_cast<size_t>(-net_change_inactive_split_size));
+        }
       }
       decrease_stat(stats.active[stat_type], 1);
       decrease_stat(stats.active_bytes[stat_type], original_block_size);
