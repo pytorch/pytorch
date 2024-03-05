@@ -183,20 +183,13 @@ uint32_t _getAlignment(uintptr_t address) {
 
 static size_t _parseChosenWorkspaceSize() {
   const char * val = getenv("CUBLASLT_WORKSPACE_SIZE");
-  size_t workspace_size = 1024;
 #ifdef USE_ROCM
   if (!val) {
     // accept either env var
     val = getenv("HIPBLASLT_WORKSPACE_SIZE");
   }
-#else
-  cudaDeviceProp* p = at::cuda::getDeviceProperties(c10::cuda::current_device());
-  if (p->major == 8) {
-    workspace_size = 4096;
-  } else if (p->major >= 9) {
-    workspace_size = 32768;
-  }
 #endif
+  size_t workspace_size = 1024; /* default size in KiB according to #73328 */
   if (val) {
     try {
       workspace_size = std::stoi(val);
