@@ -109,6 +109,7 @@ def aot_dispatch_base_graph(
     # NOTE(yf225): this is CA forward graph code path
     fsdp_fx_passes.if_tensor_is_resized_to_full_then_resize_it_to_0_at_end_of_graph(fw_module)
     fsdp_fx_passes.move_resize_to_0_to_end_of_graph(fw_module)
+    fsdp_fx_passes.reinplace_foreach_copy_if_input_has_no_other_use_in_graph(fw_module)
     print(f"aot_dispatch_base_graph: fw_module.graph: {fw_module.graph}")
 
     if aot_config.enable_log:
