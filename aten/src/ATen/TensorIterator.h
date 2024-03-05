@@ -446,7 +446,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   /// Create a strides array for a Tensor with shape of this iterator. The
   /// parameter `element_size` specifies the size of Tensor's data type in
   /// bytes (e.g. `4` for `float`)
-  StrideVector compatible_stride(int element_size) const;
+  StrideVector compatible_stride(int64_t element_size) const;
 
   /// Inverts the re-ordering done by reorder_dimensions. This can only be
   /// called *before* coalesce_dimensions() is called.
@@ -960,7 +960,7 @@ class TORCH_API TensorIteratorConfig final {
   bool promote_integer_inputs_to_float_ = false;
   bool cast_common_dtype_to_outputs_ = false;
 
-  SmallVector<int, 4> const_tensor_indices_;
+  SmallVector<size_t, 4> const_tensor_indices_;
 };
 
 /// A container-like struct that acts as if it contains splits of a
@@ -995,6 +995,7 @@ struct TORCH_API SplitUntil32Bit {
   iterator end() const;
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const TensorIteratorBase& iter;
 };
 

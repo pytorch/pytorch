@@ -3117,7 +3117,7 @@ def forward(self, arg0_1):
                         a.add_(5)
                         return a + y
 
-                    return z + control_flow.map(f, z, r).sum()
+                    return z + control_flow.map(f, z, r).sum() + control_flow.map(f, z, r).sum()
 
                 a = torch.cond(x.shape[0] > 4, true_fn, false_fn, [x, y])
                 return (a + 3, a + 4)
@@ -3148,11 +3148,17 @@ def forward(self, arg0_1, arg1_1):
     cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
     select = torch.ops.aten.select.int(cos, 0, 0)
     body_graph_0 = self.body_graph_0
-    map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = arg1_1 = None
+    map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = None
     getitem = map_impl[0];  map_impl = None
     sum_1 = torch.ops.aten.sum.default(getitem);  getitem = None
-    add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
-    return (add,)""")
+    add = torch.ops.aten.add.Tensor(cos, sum_1);  sum_1 = None
+    select_1 = torch.ops.aten.select.int(cos, 0, 0)
+    body_graph_1 = self.body_graph_1
+    map_impl_1 = torch.ops.higher_order.map_impl(body_graph_1, [cos], [arg1_1]);  body_graph_1 = cos = arg1_1 = None
+    getitem_1 = map_impl_1[0];  map_impl_1 = None
+    sum_2 = torch.ops.aten.sum.default(getitem_1);  getitem_1 = None
+    add_1 = torch.ops.aten.add.Tensor(add, sum_2);  add = sum_2 = None
+    return (add_1,)""")
         self.assertExpectedInline(str(gm.false_graph_0.body_graph_0.code).strip(), """\
 def forward(self, arg0_1, arg1_1):
     cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
@@ -4567,7 +4573,6 @@ symbolic_aot_autograd_failures = {
     xfail('combinations', ''),  # aten.masked_select.default
     xfail('index_fill', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kthvalue', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('linalg.eigvals', ''),  # aten.linalg_eig.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.lstsq', ''),  # aten.linalg_lstsq.default - couldn't find symbolic meta function/decomposition
     xfail('linalg.lstsq', 'grad_oriented'),  # aten.linalg_lstsq.default - couldn't find symbolic meta funct...
     xfail('linalg.lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/deco...

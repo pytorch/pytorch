@@ -304,6 +304,11 @@ class HigherOrderOperator(OperatorBase):
     def dispatch(self, dispatch_key, *args, **kwargs):
         from torch.utils._python_dispatch import _get_current_dispatch_mode
 
+        if dispatch_key in self._dispatch_cache:
+            kernel = self._dispatch_cache[dispatch_key]
+            assert not isinstance(kernel, torch._C.DispatchKey)
+            return kernel(*args, **kwargs)
+
         if dispatch_key == torch._C.DispatchKey.FuncTorchDynamicLayerFrontMode:
             return dispatch_functorch(self, args, kwargs)
 
@@ -346,11 +351,6 @@ class HigherOrderOperator(OperatorBase):
 
         final_key = resolve_key(self, dispatch_key)
 
-        if final_key in self._dispatch_cache:
-            kernel = self._dispatch_cache[dispatch_key]
-            assert not isinstance(kernel, torch._C.DispatchKey)
-            return kernel(*args, **kwargs)
-
         # This can current fail due to backend fallbacks.  You just have to
         # register them by hand for HigherOrderOperator.
         if final_key not in self.py_kernels:
@@ -358,7 +358,13 @@ class HigherOrderOperator(OperatorBase):
                 f"could not find kernel for HigherOrderOperator {self._name} "
                 f"at dispatch key {final_key} (resolved from {dispatch_key})"
             )
-        self._dispatch_cache[dispatch_key] = self.py_kernels[final_key]
+
+        # [NOTE] We shouldn't cache PreDispatch kernel here because depending
+        # on what modes are active, predispatch behaviour is different.
+        # Also we do same thing for normal ops:
+        # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
+        if dispatch_key != torch._C.DispatchKey.PreDispatch:
+            self._dispatch_cache[dispatch_key] = self.py_kernels[final_key]
         kernel = self.py_kernels[final_key]
         # It's illegal to register DispatchKey to py_kernels, since there's no
         # C++ kernel to call into
@@ -613,6 +619,11 @@ class OpOverload(OperatorBase):
     @property
     def namespace(self):
         return self._schema.name.split("::")[0]
+
+    def _handle(self):
+        return torch._C._dispatch_find_schema_or_throw(
+            self._schema.name, self._schema.overload_name
+        )
 
     def decompose(self, *args, **kwargs):
         dk = torch._C.DispatchKey.CompositeImplicitAutograd
