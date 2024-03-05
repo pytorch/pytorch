@@ -6,6 +6,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/autograd/variable_info.h>
 #include <vector>
 
 namespace torch::autograd {
@@ -155,20 +156,6 @@ struct TORCH_API AutogradContext {
 
   template <class T>
   friend struct CppNode;
-};
-
-struct TORCH_API VariableInfo {
-  explicit VariableInfo();
-  explicit VariableInfo(const Variable& var);
-
-  Variable zeros(at::OptionalDeviceGuard& device_guard) const;
-
-  at::Layout layout = at::Layout::Strided;
-  at::Device device = at::kCPU;
-  at::ScalarType scalar_type = at::kFloat;
-  std::vector<c10::SymInt> size;
-  bool requires_grad;
-  bool is_empty;
 };
 
 // CppNode<T> is the Node in the autograd graph that represents the user defined

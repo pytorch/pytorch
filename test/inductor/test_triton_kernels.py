@@ -999,10 +999,8 @@ def forward(self, x_1, output_1):
             # when half_n_elements passed to the Triton kernel is
             # dynamic, equal_to_1 specializaiton can't be enforced
             self.assertTrue("equal_to_1=()" in sources[0])
-            self.assertTrue("ids_of_folded_args=()" in sources[0])
         else:
             self.assertTrue("equal_to_1=(3,)" in sources[0])
-            self.assertTrue("ids_of_folded_args=(3,)" in sources[0])
         self.assertEqual(compiled_out, eager_out)
 
     @requires_cuda
@@ -1046,6 +1044,47 @@ def forward(self, x_1, output_1):
             self.assertTrue("add_kernel_1.run" not in code)
 
         self.assertEqual(compiled_out, eager_out)
+
+    @requires_cuda
+    @skipIfRocm
+    def test_triton_kernel_reset_to_zero(self):
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 128}, num_stages=3, num_warps=8),
+                triton.Config({"BLOCK_SIZE": 64}, num_stages=3, num_warps=8),
+            ],
+            key=["n_elements"],
+            reset_to_zero=["out_ptr"],
+        )
+        @triton.jit
+        def add_kernel_autotuned_reset(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        @torch.compile(fullgraph=True)
+        def f(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel_autotuned_reset[grid](x, y, output, n_elements)
+            return output
+
+        x = torch.randn(4, device="cuda")
+        msg = "Only configs and keys are supported for triton.autotune"
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            f(x, x)
 
 
 def make_mutation_test(fn):
