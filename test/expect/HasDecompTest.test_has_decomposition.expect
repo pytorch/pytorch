@@ -30,6 +30,8 @@ aten::_amp_update_scale.out
 aten::_amp_update_scale_
 aten::_assert_async
 aten::_assert_async.msg
+aten::_batch_norm_no_update.out
+aten::_batch_norm_with_update.out
 aten::_cdist_backward
 aten::_cdist_backward.out
 aten::_cdist_forward
