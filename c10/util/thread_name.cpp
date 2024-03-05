@@ -19,8 +19,8 @@ namespace c10 {
 
 void setThreadName(std::string name) {
 #ifdef C10_HAS_PTHREAD_SETNAME_NP
-  constexpr size_t kMaxThreadName = 16;
-  name.resize(std::min(name.size(), kMaxThreadName), '\0');
+  constexpr size_t kMaxThreadName = 15;
+  name.resize(std::min(name.size(), kMaxThreadName));
 
   pthread_setname_np(pthread_self(), name.c_str());
 #endif
