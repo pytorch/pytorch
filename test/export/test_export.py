@@ -3764,6 +3764,15 @@ class TestExportCustomClass(TorchTestCase):
                 arg = node.args[0]
                 self.assertTrue(arg.op == "placeholder")
 
+    
+    def test_tolist_nonstrict_output(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.tolist()
+
+        ep = torch.export.export(M(), (torch.ones(3),), strict=False)
+        res = ep(torch.ones(3))
+        self.assertEqual(res[0][0], [1,1,1])
 
 if __name__ == '__main__':
     run_tests()
