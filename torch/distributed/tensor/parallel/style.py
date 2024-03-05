@@ -83,7 +83,7 @@ class ColwiseParallel(ParallelStyle):
         self.use_local_output = use_local_output
 
     @staticmethod
-    def _prepare_input_fn(input_layouts, desired_input_layouts, inputs, device_mesh):
+    def _prepare_input_fn(input_layouts, desired_input_layouts, mod, inputs, device_mesh):
         # TODO: figure out dynamo support for instance method and switch this to instance method
 
         # annotate module input placements/sharding with input_layouts
@@ -115,7 +115,7 @@ class ColwiseParallel(ParallelStyle):
             module.register_parameter(name, dist_param)
 
     @staticmethod
-    def _prepare_output_fn(output_layouts, use_local_output, outputs, device_mesh):
+    def _prepare_output_fn(output_layouts, use_local_output, mod, outputs, device_mesh):
         # outputs is a shard on last dimension DTensor, i.e. Shard(-1)
         outputs = outputs.redistribute(placements=output_layouts)
         # back to local tensor
@@ -184,7 +184,7 @@ class RowwiseParallel(ParallelStyle):
         self.use_local_output = use_local_output
 
     @staticmethod
-    def _prepare_input_fn(input_layouts, desired_input_layouts, inputs, device_mesh):
+    def _prepare_input_fn(input_layouts, desired_input_layouts, mod, inputs, device_mesh):
         input_tensor = inputs[0]
         if not isinstance(input_tensor, DTensor):
             input_tensor = DTensor.from_local(input_tensor, device_mesh, input_layouts, run_check=False)
@@ -214,7 +214,7 @@ class RowwiseParallel(ParallelStyle):
             module.register_parameter(name, dist_param)
 
     @staticmethod
-    def _prepare_output_fn(output_layouts, use_local_output, outputs, device_mesh):
+    def _prepare_output_fn(output_layouts, use_local_output, mod, outputs, device_mesh):
         # Rowwise sharding produces partial output, depending on output layouts:
         # 1. to replicate -> allreduce
         # 2. to shard -> reduce_scatter
