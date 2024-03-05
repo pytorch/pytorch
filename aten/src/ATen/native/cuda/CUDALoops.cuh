@@ -256,7 +256,7 @@ void gpu_kernel_impl_nocast(TensorIteratorBase& iter, const func_t& f) {
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
-  TORCH_CHECK(!needs_dynamic_casting<func_t>::check(iter), "Dynamic casting is not currently supported on CPU");
+  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
 
   at::detail::Array<char*, ntensors> data;
   for (int i = 0; i < ntensors; i++) {
