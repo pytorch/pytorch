@@ -833,11 +833,6 @@ class TestNestedTensorDeviceType(TestCase):
             lambda: layer_norm(nt),
         )
 
-    @decorateIf(
-        xfailIfTorchDynamo,
-        # only fails in python 3.11. TODO: Ensure this is fixed once views work!
-        lambda params: params["layout"] == torch.jagged and sys.version_info >= (3, 11)
-    )
     @parametrize("layout", [torch.strided, torch.jagged], name_fn=layout_name)
     def test_embedding(self, device, layout):
         inputs = [
