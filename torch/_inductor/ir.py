@@ -187,6 +187,7 @@ def stride_order2fill_order(order):
     """
     Convert stride order to fill order
     For channel last format,
+
     stride order = [3, 0, 2, 1] and fill order = [1, 3, 2, 0]
     """
     lookup = {pos: idx for idx, pos in enumerate(order)}
@@ -2552,16 +2553,30 @@ class Layout(IRNode):
         return self.is_stride_ordered(order)
 
     @staticmethod
-    def _pad_strides(in_strides, align=DEFAULT_ALIGN):
+    def _pad_strides(in_strides, size, align=DEFAULT_ALIGN):
         """
-        TODO: maybe we should pad high dimension more if the low dimensions
-        have also been padded.
+        The padding does not change stride order but makes sure all non 1 strides
+        are multiple of align.
         """
-        new_stride = []
-        for s in in_strides:
-            if s > 1 and s % align != 0:
-                s = (s + align - 1) // align * align
-            new_stride.append(s)
+        if len(in_strides) == 0:
+            return in_strides
+
+        stride_order = get_stride_order(in_strides)
+        fill_order = stride_order2fill_order(stride_order)
+
+        new_stride = [0 for _ in range(len(in_strides))]
+        # since way pad when the layout is flexible, we can decide the
+        # smallest stride to be 1.
+        new_stride[fill_order[0]] = 1
+
+        for rank, idx in enumerate(fill_order[1:], start=1):
+            prev_idx = fill_order[rank - 1]
+            stride = new_stride[prev_idx] * size[prev_idx]
+
+            if stride != 1 and stride % align != 0:
+                stride = (stride + align - 1) // align * align
+            new_stride[idx] = stride
+
         return new_stride
 
     def need_padding(self, align=DEFAULT_ALIGN):
@@ -2575,7 +2590,7 @@ class Layout(IRNode):
         if not config.pad_fixed_layout:
             assert isinstance(self, FlexibleLayout)
         assert self._stride is not None
-        self._stride = self._pad_strides(self._stride)
+        self._stride = self._pad_strides(self._stride, self.size)
 
     def should_pad_strides(self):
         return config.comprehensive_padding and (
@@ -2733,7 +2748,7 @@ class FlexibleLayout(Layout):
     def as_stride_order(self, order, allow_padding=False):
         new_stride = self.stride_ordered(self.size, order)
         if self.should_pad_strides() and allow_padding:
-            new_stride = self._pad_strides(new_stride)
+            new_stride = self._pad_strides(new_stride, self.size)
 
         return FixedLayout(
             self.device,
@@ -2746,7 +2761,7 @@ class FlexibleLayout(Layout):
     def as_fill_order(self, order):
         new_stride = self.fill_ordered(self.size, order)
         if self.should_pad_strides():
-            new_stride = self._pad_strides(new_stride)
+            new_stride = self._pad_strides(new_stride, self.size)
         return FixedLayout(
             self.device,
             self.dtype,
@@ -2758,7 +2773,7 @@ class FlexibleLayout(Layout):
     def as_same_order(self, stride):
         new_stride = self.same_ordered(self.size, stride)
         if self.should_pad_strides():
-            new_stride = self._pad_strides(new_stride)
+            new_stride = self._pad_strides(new_stride, self.size)
         return FixedLayout(
             self.device,
             self.dtype,

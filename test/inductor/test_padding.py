@@ -5,7 +5,7 @@ import os
 import torch
 from torch import nn
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._inductor import config
+from torch._inductor import config, ir
 from torch._inductor.fx_passes import pad_mm as pad_mm_pass
 from torch._inductor.utils import do_bench, run_and_get_code
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -189,6 +189,33 @@ class PaddingTest(TestCase):
 
         x = torch.randn(3, 9)
         self.common_numeric_check(f, x)
+
+    def test_pad_strides(self):
+        sizes = [2, 16, 127]
+        in_strides = [2032, 127, 1]
+        out_strides = list(ir.Layout._pad_strides(in_strides, sizes))
+        expected_strides = [2048, 128, 1]
+        self.assertEqual(
+            expected_strides, out_strides, f"{expected_strides} v.s. {out_strides}"
+        )
+
+    def test_pad_3d_tensor(self):
+        """
+        Constructing this test case guided by the fact that we don't pad
+        placeholder or user visible output's strides.
+
+        Add a matmul in the beginning and end so we can pad strides for
+        intermediate tensors.
+        """
+
+        def f(x, y):
+            x = torch.matmul(x, y)
+            x = x + 1
+            return torch.matmul(x, y)
+
+        x = torch.randn(2, 16, 127)
+        y = torch.randn(127, 127)
+        self.common_numeric_check(f, x, y)
 
 
 if __name__ == "__main__":
