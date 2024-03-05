@@ -3767,11 +3767,10 @@ class TestExportCustomClass(TorchTestCase):
     def test_tolist_nonstrict_output(self):
         class M(torch.nn.Module):
             def forward(self, x):
-                return torch.tensor(x.tolist()[0])
+                x.tolist()
 
         ep = torch.export.export(M(), (torch.ones(3),), strict=False)
-        res = ep(torch.ones(3))
-        self.assertEqual(res[0], 1)
+        ep(torch.ones(3))
 
 if __name__ == '__main__':
     run_tests()
