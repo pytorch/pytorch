@@ -352,7 +352,6 @@ void Engine::thread_init(
   // pthread_setname_np restricts the name to 16 characters including
   // the null byte.
   std::string thread_name = "pt_autograd_" + std::to_string(device);
-  thread_name.resize(16, '\0');
   c10::setThreadName(thread_name);
 
   c10::set_terminate_handler();
