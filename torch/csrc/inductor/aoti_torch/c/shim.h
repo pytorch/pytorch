@@ -465,6 +465,20 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_view_dtype(
 
 #ifdef USE_CUDA
 
+struct CUDAGuardOpaque;
+using CUDAGuardHandle = CUDAGuardOpaque*;
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_cuda_guard(
+    int32_t device_index,
+    CUDAGuardHandle* ret_guard // returns new reference
+);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_cuda_guard(CUDAGuardHandle guard);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cuda_guard_set_index(CUDAGuardHandle guard, int32_t device_index);
+
 struct CUDAStreamGuardOpaque;
 using CUDAStreamGuardHandle = CUDAStreamGuardOpaque*;
 
@@ -476,6 +490,10 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_cuda_stream_guard(
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_cuda_stream_guard(CUDAStreamGuardHandle guard);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_current_cuda_stream(int32_t device_index, void** ret_stream);
+
 #endif
 
 // See `ProxyExecutor Design Note` in ir.py for more details

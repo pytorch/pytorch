@@ -93,6 +93,26 @@ if TEST_WITH_ROCM:
             dynamic_shapes_test_name
         ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=True)
 
+if config.abi_compatible:
+    exclude_list = [
+        "test_bernoulli1_cuda",
+        "test_conv_backward_cuda",
+        "test_custom_op_cuda",
+        "test_index_put_deterministic_fallback_cuda",
+        "test_linear1_cuda",
+        "test_multi_device_cuda",
+        "test_profiler_mark_wrapper_call",
+    ]
+
+    # Create skip entries for both the cuda and cuda_dynamic_shapes variants
+    for test_name in exclude_list:
+        test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
+            ("cuda_wrapper",), is_skip=True
+        )
+        test_failures_cuda_wrapper[
+            f"{test_name}_dynamic_shapes"
+        ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=True)
+
 
 def make_test_case(
     name,

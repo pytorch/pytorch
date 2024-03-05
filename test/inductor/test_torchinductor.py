@@ -769,7 +769,7 @@ class CommonTemplate:
             _, code = run_and_get_code(fn, x, y)
             self.assertEqual(
                 " ".join(code).count(
-                    "::view_dtype" if config.cpp_wrapper else "aten.view"
+                    "view_dtype" if config.cpp_wrapper else "aten.view"
                 ),
                 3,
             )
