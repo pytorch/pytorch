@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, List
 
 import torch
 
@@ -394,3 +394,16 @@ class _unsafe_preserve_version_counter(_DecoratorContextManager):
 
     def __exit__(self, *args) -> None:
         torch._C._autograd._unsafe_set_version_counter(self.tensor, self.prev_version)
+
+
+class _unsafe_preserve_version_counter_for_tensors(_DecoratorContextManager):
+    def __init__(self, tensors: List[torch.Tensor]) -> None:
+        self.tensors = tensors
+        self.prev_versions = [tensor._version for tensor in tensors]
+
+    def __enter__(self) -> None:
+        pass
+
+    def __exit__(self, *args) -> None:
+        for tensor, prev_version in zip(self.tensors, self.prev_versions):
+            torch._C._autograd._unsafe_set_version_counter(tensor, prev_version)

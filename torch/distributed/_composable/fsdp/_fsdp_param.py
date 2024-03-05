@@ -301,6 +301,8 @@ class FSDPParam:
             )
         shard_rank = self.post_forward_mesh_info.shard_mesh_rank
         sharded_numel = numel // shard_world_size
+        if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            raise Exception("NYI(yf225): need to use ._unsharded_param instead of .all_gather_output for compile, to avoid having .all_gather_output as graph input")
         self._sharded_post_forward_param_data = (
             self.all_gather_output.narrow(0, sharded_numel * shard_rank, sharded_numel)
         ).clone()  # clone to be able to free all-gather output
@@ -393,10 +395,20 @@ class FSDPParam:
         return ret
 
     def alloc_all_gather_output(self) -> None:
-        unsafe_alloc_storage(self.all_gather_output)
+        # These two do the exact same thing, because .all_gather_output and ._unsharded_param share the same storage.
+        # Use ._unsharded_param under compile just to avoid having .all_gather_output as graph input.
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            unsafe_alloc_storage(self.all_gather_output)
+        else:
+            unsafe_alloc_storage(self._unsharded_param)
 
     def free_all_gather_output(self) -> None:
-        unsafe_free_storage(self.all_gather_output)
+        # These two do the exact same thing, because .all_gather_output and ._unsharded_param share the same storage.
+        # Use ._unsharded_param under compile just to avoid having .all_gather_output as graph input.
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+            unsafe_free_storage(self.all_gather_output)
+        else:
+            unsafe_free_storage(self._unsharded_param)
 
     @property
     def all_gather_input(self) -> torch.Tensor:  # 1D

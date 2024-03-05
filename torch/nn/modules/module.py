@@ -552,16 +552,16 @@ class Module:
 
         if param is None:
             self._parameters[name] = None
-        # elif not isinstance(param, Parameter):
-        #     raise TypeError(f"cannot assign '{torch.typename(param)}' object to parameter '{name}' "
-        #                     "(torch.nn.Parameter or None required)"
-        #                     )
-        # elif param.grad_fn:
-        #     raise ValueError(
-        #         f"Cannot assign non-leaf Tensor to parameter '{name}'. Model "
-        #         f"parameters must be created explicitly. To express '{name}' "
-        #         "as a function of another Tensor, compute the value in "
-        #         "the forward() method.")
+        elif not isinstance(param, Parameter):
+            raise TypeError(f"cannot assign '{torch.typename(param)}' object to parameter '{name}' "
+                            "(torch.nn.Parameter or None required)"
+                            )
+        elif param.grad_fn:
+            raise ValueError(
+                f"Cannot assign non-leaf Tensor to parameter '{name}'. Model "
+                f"parameters must be created explicitly. To express '{name}' "
+                "as a function of another Tensor, compute the value in "
+                "the forward() method.")
         else:
             for hook in _global_parameter_registration_hooks.values():
                 output = hook(self, name, param)
@@ -1720,10 +1720,10 @@ class Module:
             remove_from(self.__dict__, self._buffers, self._modules, self._non_persistent_buffers_set)
             self.register_parameter(name, value)
         elif params is not None and name in params:
-            # if value is not None:
-            #     raise TypeError(f"cannot assign '{torch.typename(value)}' as parameter '{name}' "
-            #                     "(torch.nn.Parameter or None expected)"
-            #                     )
+            if value is not None:
+                raise TypeError(f"cannot assign '{torch.typename(value)}' as parameter '{name}' "
+                                "(torch.nn.Parameter or None expected)"
+                                )
             self.register_parameter(name, value)
         else:
             modules = self.__dict__.get('_modules')

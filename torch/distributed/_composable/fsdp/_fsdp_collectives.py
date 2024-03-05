@@ -99,19 +99,41 @@ def foreach_all_gather_copy_out(
             all_gather_input_numel, world_size, dtype, device
         )  # no-op after 1st call
         fsdp_param.alloc_all_gather_output()
+        fsdp_param.init_unsharded_param()  # no-op after 1st call. Need to call here so that ._unsharded_param access below doesn't fail.
     all_gather_output = all_gather_output.view(world_size, -1)
-    out = [
-        fsdp_param.all_gather_output.view(world_size, -1) for fsdp_param in fsdp_params
-    ]
+    # NOTE: This is the biggest difference between eager and compile code path.
+    # In eager, we directly copy from `all_gather_output` into `fsdp_param.all_gather_output` (`fsdp_param._unsharded_param` will be updated because of shared storage),
+    # but in compile path we copy from `as_strided(all_gather_output)` into `fsdp_param._unsharded_param` to avoid having `fsdp_param.all_gather_output` as graph input.
+    # They are equivalent and must produce the same result.
     if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-        # TODO(yf225): ListVariable out variant is not supported by Dynamo yet
+        out = [
+            fsdp_param.all_gather_output.view(world_size, -1) for fsdp_param in fsdp_params
+        ]
         torch.split_with_sizes_copy(
             all_gather_output, all_gather_input_numels, dim=1, out=out
         )
     else:
         splits = torch.split(all_gather_output, all_gather_input_numels, dim=1)
+        out = []
+        splits_unpadded = []
+        assert len(fsdp_params) == len(splits)
+        for i, fsdp_param in enumerate(fsdp_params):
+            unsharded_param = fsdp_param._unsharded_param
+            if fsdp_param.is_dtensor:
+                unsharded_param = unsharded_param.to_local()
+            out.append(unsharded_param)
+            splits_unpadded.append(
+                torch.as_strided(
+                    splits[i].contiguous().view(splits[i].numel()),
+                    fsdp_param._orig_size,
+                    fsdp_param._contiguous_orig_stride,
+                    storage_offset=0,
+                )
+            )
+        # NOTE: Use this if you must test this branch under eager mode, to avoid version counter issue.
+        # with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter_for_tensors(out):
         with torch.no_grad():
-            torch._foreach_copy_(out, splits)
+            torch._foreach_copy_(out, splits_unpadded)
 
 
 @torch.no_grad()
