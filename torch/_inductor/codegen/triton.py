@@ -2391,9 +2391,13 @@ class TritonKernel(Kernel):
                     self.compute, f"tl.where({cond}, {value}, {default_tensor})"
                 )
 
+            value_dtype = self.cse.generate(
+                self.compute,
+                f"{value}.to({triton_compute_type(dtype)})",
+            )
             value = self.cse.generate(
                 self.compute,
-                f"tl.broadcast_to({value}.to({triton_compute_type(dtype)}), {self.dense_size_str()})",
+                f"tl.broadcast_to({value_dtype}, {self.dense_size_str()})",
             )
             broadcasted_values.append(value)
 
@@ -2402,7 +2406,6 @@ class TritonKernel(Kernel):
                 self.body,
                 f"tl.full({[1] * self.triton_tensor_ndim()}, {default}, {triton_compute_type(dtype)})",
             )
-            dim = len(self.range_trees) - 1 - int(bool(self.no_x_dim))
             acc_type = triton_acc_type(dtype)
             cond = " & ".join(masks)
 
