@@ -44,7 +44,7 @@ r"""An enum-like class that contains the different backends for scaled dot produ
 
     See :func:`torch.nn.attention.sdpa_kernel` for more details.
 
-    ... warning:: This class is in beta and subject to change.
+    .. warning:: This class is in beta and subject to change.
 """
 SDPBackend.__module__ = __name__
 SDPBackend.__name__ = "SDPBackend"

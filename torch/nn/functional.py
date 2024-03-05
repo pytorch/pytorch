@@ -5009,10 +5009,10 @@ Note:
     is used, the following functions are provided for enabling and disabling implementations.
     The context manager is the preferred mechanism:
 
-        - :func:`torch.nn.attention.sdpa_kernel`: A context manager used to enable/disable any of the implementations.
-        - :func:`torch.backends.cuda.enable_flash_sdp`: Globally Enables or Disables FlashAttention.
-        - :func:`torch.backends.cuda.enable_mem_efficient_sdp`: Globally Enables or Disables Memory-Efficient Attention.
-        - :func:`torch.backends.cuda.enable_math_sdp`: Globally Enables or Disables the PyTorch C++ implementation.
+        - :func:`torch.nn.attention.sdpa_kernel`: A context manager used to enable or disable any of the implementations.
+        - :func:`torch.backends.cuda.enable_flash_sdp`: Globally enables or disables FlashAttention.
+        - :func:`torch.backends.cuda.enable_mem_efficient_sdp`: Globally enables or disables  Memory-Efficient Attention.
+        - :func:`torch.backends.cuda.enable_math_sdp`: Globally enables or disables  the PyTorch C++ implementation.
 
     Each of the fused kernels has specific input limitations. If the user requires the use of a specific fused implementation,
     disable the PyTorch C++ implementation using :func:`torch.nn.attention.sdpa_kernel`.
