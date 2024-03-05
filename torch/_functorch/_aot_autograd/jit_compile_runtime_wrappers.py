@@ -222,6 +222,9 @@ def aot_dispatch_autograd(
                 + inner_meta.num_outputs
                 + inner_meta.num_intermediate_bases
                 + inner_meta.num_outputs_rng_offset
+                + len(
+                    fw_metadata.tokens
+                )  # See Note [Side-Effectful Tokens in AOTAutograd]
             )
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
@@ -493,7 +496,7 @@ def aot_dispatch_autograd(
                     args = (*args, seed, offset)
                 # There is a pretty complicated calling convention around what the compiled fw returns.
                 # The full list of outputs and their relative order is:
-                # (*mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
+                # (*tokens, *mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
                 # - Note that in the synthetic bases case, mutated_inputs will correspond to an updated version
                 #   of the original view, and not the synthetic base
 
@@ -514,6 +517,7 @@ def aot_dispatch_autograd(
             num_mutated_runtime_inps = (
                 CompiledFunction.metadata.num_mutated_inp_runtime_indices
             )
+            num_tokens = len(CompiledFunction.metadata.tokens)
             num_forward_returns = CompiledFunction.metadata.num_forward_returns
             num_forward = CompiledFunction.metadata.num_forward
 
@@ -538,7 +542,7 @@ def aot_dispatch_autograd(
             ), str([type(x) for x in symint_outs])
             ctx.symints = symint_outs
 
-            raw_returns = fw_outs[0:num_forward_returns]
+            raw_returns = fw_outs[0 : num_forward_returns + num_tokens]
 
             # Wrap all autograd.Function.forward() outputs that are aliases
             # so that autograd.Function doesn't treat them as tensors
