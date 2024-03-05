@@ -183,11 +183,14 @@ class FSDPParam:
             self._global_stride = param.stride()
             param_data = cast(DTensor, param)._local_tensor
         else:
-            if _mesh_resources.get_parent_mesh(self.mesh_info.mesh) is not None:
+            mesh = self.mesh_info.mesh
+            if (parent_mesh := _mesh_resources.get_parent_mesh(mesh)) is not None:
+                module_info = self._module_info
                 raise NotImplementedError(
-                    "Using a parent mesh with pure FSDP/HSDP is not supported"
+                    f"Sharding with FSDP mesh {mesh} and parent mesh {parent_mesh} requires "
+                    f"a DTensor but got non-DTensor {module_info.param_name} on {module_info.module}"
                 )
-            self._global_mesh = self.mesh_info.mesh
+            self._global_mesh = mesh
             self._global_placements = (Shard(0),)
             self._global_size = param.size()
             self._global_stride = param.stride()
