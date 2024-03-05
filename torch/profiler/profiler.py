@@ -2,6 +2,7 @@ import gzip
 import json
 import os
 import tempfile
+from abc import ABC, abstractmethod
 from enum import Enum
 from functools import partial
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
@@ -48,93 +49,21 @@ def supported_activities():
     return torch.autograd._supported_activities()
 
 
-class ExecutionTraceObserver:
-    """Execution Trace Observer
+class _ITraceObserver(ABC):
+    """Abstract interface for a Trace observer.
+    This satisfies 3 methods: start, stop and cleanup"""
 
-    Each process can have a single ExecutionTraceObserver instance. The observer
-    can be added to record function callbacks via calling register_callback()
-    explicitly. Without calling unregister_callback(), repeated calls to
-    register_callback() will not add additional observers to record function
-    callbacks. Once an ExecutionTraceObserver is created, the start() and stop()
-    methods control when the event data is recorded.
-
-    Deleting or calling unregister_callback() will remove the observer from the
-    record function callbacks, finalize the output file, and will stop
-    incurring any overheads.
-    """
-
-    def __init__(self):
-        """
-        Initializes the default states.
-        """
-        self._registered = False
-        self._execution_trace_running = False
-
-    def __del__(self):
-        """
-        Calls unregister_callback() to make sure to finalize outputs.
-        """
-        self.unregister_callback()
-
-    def register_callback(self, output_file_path: str) -> Self:
-        """
-        Adds ET observer to record function callbacks. The data will be
-        written to output_file_path.
-        """
-        if not self._registered:
-            self._output_file_path = output_file_path
-            self._registered = _add_execution_trace_observer(output_file_path)
-        return self
-
-    def unregister_callback(self):
-        """
-        Removes ET observer from record function callbacks.
-        """
-        if self._registered:
-            self.stop()
-            _remove_execution_trace_observer()
-            self._registered = False
-
-    @property
-    def is_registered(self):
-        """
-        Returns True if the execution trace observer is registered, otherwise False.
-        """
-        return self._registered
-
-    def is_running(self):
-        """
-        Returns True if the observer is running, otherwise False.
-        """
-        return self._execution_trace_running
-
+    @abstractmethod
     def start(self):
-        """
-        Starts to capture.
-        """
-        if self._registered and not self._execution_trace_running:
-            _enable_execution_trace_observer()
-            self._execution_trace_running = True
+        pass
 
+    @abstractmethod
     def stop(self):
-        """
-        Stops to capture.
-        """
-        if self._execution_trace_running:
-            _disable_execution_trace_observer()
-            self._execution_trace_running = False
+        pass
 
-    def get_output_file_path(self) -> str:
-        """
-        Returns the output file name.
-        """
-        if self.is_registered:
-            return self._output_file_path
-        else:
-            raise RuntimeError(
-                "A callback to the ET profiler needs to be registered "
-                "first before getting the output file path"
-            )
+    @abstractmethod
+    def cleanup(self):
+        pass
 
 
 class _KinetoProfile:
@@ -158,11 +87,20 @@ class _KinetoProfile:
             and not eager mode models.
         experimental_config (_ExperimentalConfig) : A set of experimental options
             used by profiler libraries like Kineto. Note, backward compatibility is not guaranteed.
-        execution_trace_observer (ExecutionTraceObserver) : Object configuring a PyTorch Execution
-            Trace observer. Execution Traces offer a graph based representation of AI/ML workloads and
+        execution_trace_observer (ExecutionTraceObserver) : A PyTorch Execution Trace Oobserver object.
+            PyTorch Execution Traces offer a graph based representation of AI/ML workloads and
             enable replay benchmarks, simulators, and emulators (https://arxiv.org/pdf/2305.14516.pdf).
-            When this argument is not None the observer start() and stop() will be called during the
-            same time window as PyTorch profiler.
+            When this argument is included the observer start() and stop() will be called for the
+            same time window as PyTorch profiler. The following sample shows how to setup up
+            an Execution Trace observer.
+            ```
+            ...
+            execution_trace_observer=(
+                ExecutionTraceObserver().register_callback("./execution_trac.json")
+            ),
+            ```
+            You can also refer to test_execution_trace_with_kineto() in tests/profiler/test_profier.py.
+            *Note* One can also pass any object sastisfying the _ITraceObserver interface.
 
     .. note::
         This API is experimental and subject to change in the future.
@@ -183,7 +121,7 @@ class _KinetoProfile:
         with_flops: bool = False,
         with_modules: bool = False,
         experimental_config: Optional[_ExperimentalConfig] = None,
-        execution_trace_observer: Optional[ExecutionTraceObserver] = None,
+        execution_trace_observer: Optional[_ITraceObserver] = None,
     ):
         self.activities = set(activities) if activities else supported_activities()
         self.record_shapes = record_shapes
@@ -519,12 +457,20 @@ class profile(_KinetoProfile):
             and not eager mode models.
         experimental_config (_ExperimentalConfig) : A set of experimental options
             used for Kineto library features. Note, backward compatibility is not guaranteed.
-        execution_trace_observer (ExecutionTraceObserver) : Object configuring a PyTorch Execution
-            Trace observer. Execution Traces offer a graph based representation of AI/ML workloads and
+        execution_trace_observer (ExecutionTraceObserver) : A PyTorch Execution Trace Oobserver object.
+            PyTorch Execution Traces offer a graph based representation of AI/ML workloads and
             enable replay benchmarks, simulators, and emulators (https://arxiv.org/pdf/2305.14516.pdf).
-            When this argument is not None the observer start() and stop() will be called during the
-            same time window as PyTorch profiler.
-
+            When this argument is included the observer start() and stop() will be called for the
+            same time window as PyTorch profiler. The following sample shows how to setup up
+            an Execution Trace observer.
+            ```
+            ...
+            execution_trace_observer=(
+                ExecutionTraceObserver().register_callback("./execution_trac.json")
+            ),
+            ```
+            You can also refer to test_execution_trace_with_kineto() in tests/profiler/test_profier.py.
+            *Note* One can also pass any object sastisfying the _ITraceObserver interface.
         use_cuda (bool):
             .. deprecated:: 1.8.1
                 use ``activities`` instead.
@@ -623,7 +569,7 @@ class profile(_KinetoProfile):
         with_flops: bool = False,
         with_modules: bool = False,
         experimental_config: Optional[_ExperimentalConfig] = None,
-        execution_trace_observer: Optional[ExecutionTraceObserver] = None,
+        execution_trace_observer: Optional[_ITraceObserver] = None,
         # deprecated:
         use_cuda: Optional[bool] = None,
     ):
@@ -731,6 +677,8 @@ class profile(_KinetoProfile):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
         prof.KinetoStepTracker.erase_step_count(PROFILER_STEP_NAME)
+        if self.execution_trace_observer:
+            self.execution_trace_observer.cleanup()
 
     def start(self):
         self._transit_action(ProfilerAction.NONE, self.current_action)
@@ -772,3 +720,98 @@ class profile(_KinetoProfile):
         if action_list:
             for action in action_list:
                 action()
+
+
+class ExecutionTraceObserver(_ITraceObserver):
+    """Execution Trace Observer
+
+    Each process can have a single ExecutionTraceObserver instance. The observer
+    can be added to record function callbacks via calling register_callback()
+    explicitly. Without calling unregister_callback(), repeated calls to
+    register_callback() will not add additional observers to record function
+    callbacks. Once an ExecutionTraceObserver is created, the start() and stop()
+    methods control when the event data is recorded.
+
+    Deleting or calling unregister_callback() will remove the observer from the
+    record function callbacks, finalize the output file, and will stop
+    incurring any overheads.
+    """
+
+    def __init__(self):
+        """
+        Initializes the default states.
+        """
+        self._registered = False
+        self._execution_trace_running = False
+
+    def __del__(self):
+        """
+        Calls unregister_callback() to make sure to finalize outputs.
+        """
+        self.unregister_callback()
+
+    def register_callback(self, output_file_path: str) -> Self:
+        """
+        Adds ET observer to record function callbacks. The data will be
+        written to output_file_path.
+        """
+        if not self._registered:
+            self._output_file_path = output_file_path
+            self._registered = _add_execution_trace_observer(output_file_path)
+        return self
+
+    def unregister_callback(self):
+        """
+        Removes ET observer from record function callbacks.
+        """
+        if self._registered:
+            self.stop()
+            _remove_execution_trace_observer()
+            self._registered = False
+
+    @property
+    def is_registered(self):
+        """
+        Returns True if the execution trace observer is registered, otherwise False.
+        """
+        return self._registered
+
+    def is_running(self):
+        """
+        Returns True if the observer is running, otherwise False.
+        """
+        return self._execution_trace_running
+
+    def start(self):
+        """
+        Starts to capture.
+        """
+        if self._registered and not self._execution_trace_running:
+            _enable_execution_trace_observer()
+            self._execution_trace_running = True
+
+    def stop(self):
+        """
+        Stops to capture.
+        """
+        if self._execution_trace_running:
+            _disable_execution_trace_observer()
+            self._execution_trace_running = False
+
+    def cleanup(self):
+        """
+        Calls unregister_callback() to make sure to finalize outputs.
+        """
+        self.unregister_callback()
+
+    def get_output_file_path(self) -> str:
+        """
+        Returns the output file name.
+        """
+        if self.is_registered:
+            return self._output_file_path
+        else:
+            raise RuntimeError(
+                "A callback to the ET profiler needs to be registered "
+                "first before getting the output file path"
+            )

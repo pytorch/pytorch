@@ -383,7 +383,6 @@ class TestExecutionTrace(TestCase):
         kt = tempfile.NamedTemporaryFile(mode="w+t", suffix=".kineto.json", delete=False)
         kt.close()
 
-        et = ExecutionTraceObserver().register_callback(fp.name)
         with profile(
             activities=supported_activities(),
             schedule=torch.profiler.schedule(
@@ -393,24 +392,25 @@ class TestExecutionTrace(TestCase):
                 active=2,
                 repeat=1),
             on_trace_ready=trace_handler,
-            execution_trace_observer=et,
+            execution_trace_observer=(
+                ExecutionTraceObserver().register_callback(fp.name)
+            ),
         ) as p:
             for idx in range(10):
                 with record_function(f"## LOOP {idx} ##"):
                     self.payload(use_cuda=use_cuda)
                 p.step()
-
-        p.export_chrome_trace(kt.name)
+            self.assertEqual(
+                fp.name,
+                p.execution_trace_observer.get_output_file_path()
+            )
 
         # Uncomment for debugging
         # print("Output kineto = ", kt.name)
-        # print("Output ET = ", et.get_output_file_path())
+        # print("Output ET = ", fp.name)
 
+        p.export_chrome_trace(kt.name)
         self.assertEqual(trace_called_num, 1)
-        self.assertEqual(fp.name, et.get_output_file_path())
-
-        # cleanup
-        et.unregister_callback()
 
         nodes = self.get_execution_trace_root(fp.name)
         loop_count = 0
