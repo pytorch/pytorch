@@ -834,7 +834,7 @@ def set_model_state_dict(
 
     Args:
         model (nn.Module): the nn.Module to the model.
-        model_state_dict: (Union[Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]]):
+        model_state_dict: (Dict[str, ValueType]):
            the model state_dict to load. If the key of the ``model_state_dict``
            is nn.Module, the key is a submodule of ``model`` and the value should
            be the state_dict of the submodule. When loading the state_dict,
