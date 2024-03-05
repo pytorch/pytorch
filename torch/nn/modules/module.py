@@ -2047,7 +2047,6 @@ class Module:
                 try:
                     with torch.no_grad():
                         if use_swap_tensors:
-                            param_requires_grad = param.requires_grad
                             new_input_param = param.module_load(input_param, assign=assign_to_params_buffers)
                             if id(new_input_param) == id(input_param) or id(new_input_param) == id(param):
                                 raise RuntimeError("module_load returned one of self or other, please .detach() "
