@@ -647,7 +647,7 @@ def _get_sfdp_patterns():
         g_3d = functools.partial(g_3d_inp, dtype=dtype)
         gpt2_c = functools.partial(gpt2_cmask, dtype=torch.bool)
 
-        replacement_info = [
+        for pattern, replacement, args, workaround, extra_check, register_training in [
             (
                 _sfdp_pattern_1,
                 _sfdp_replacement_1,
@@ -655,7 +655,6 @@ def _get_sfdp_patterns():
                 {},
                 _sfdp_extra_check(aten.div.Tensor),
                 True,
-                False,
             ),
             (
                 _sfdp_pattern_2,
@@ -664,7 +663,6 @@ def _get_sfdp_patterns():
                 {},
                 _sfdp_extra_check(aten.mul.Tensor),
                 True,
-                False,
             ),
             (
                 _sfdp_pattern_3,
@@ -673,7 +671,6 @@ def _get_sfdp_patterns():
                 d,
                 _sfdp_extra_check(aten.div.Tensor),
                 True,
-                False,
             ),
             (
                 _sfdp_pattern_4,
@@ -682,7 +679,6 @@ def _get_sfdp_patterns():
                 d,
                 _sfdp_extra_check(aten.mul.Tensor),
                 True,
-                False,
             ),
             (
                 _sfdp_pattern_5,
@@ -691,7 +687,6 @@ def _get_sfdp_patterns():
                 {},
                 _sfdp_params_check,
                 True,
-                False,
             ),
             (
                 _sfdp_pattern_6,
@@ -700,7 +695,6 @@ def _get_sfdp_patterns():
                 d,
                 _sfdp_params_check,
                 True,
-                False,
             ),
             (
                 _sfdp_pattern_7,
@@ -709,7 +703,6 @@ def _get_sfdp_patterns():
                 d,
                 _sfdp_params_check,
                 True,
-                False,
             ),
             (
                 _sfdp_pattern_8,
@@ -718,7 +711,6 @@ def _get_sfdp_patterns():
                 {},
                 _sfdp_params_check,
                 True,
-                False,
             ),
             (
                 _sfdp_pattern_9,
@@ -727,7 +719,6 @@ def _get_sfdp_patterns():
                 d,
                 _sfdp_params_check,
                 True,
-                False,
             ),
             (
                 _sfdp_pattern_10,
@@ -736,7 +727,6 @@ def _get_sfdp_patterns():
                 {},
                 _sfdp_params_check,
                 True,
-                False,
             ),
             (
                 _sfdp_pattern_11,
@@ -745,7 +735,6 @@ def _get_sfdp_patterns():
                 {},
                 _sfdp_extra_check(aten.div.Tensor),
                 True,
-                False,
             ),
             (
                 _sfdp_pattern_12,
@@ -754,7 +743,6 @@ def _get_sfdp_patterns():
                 d,
                 _sfdp_extra_check(aten.div.Tensor),
                 True,
-                False,
             ),
             (
                 _sfdp_pattern_13,
@@ -763,7 +751,6 @@ def _get_sfdp_patterns():
                 d,
                 _sfdp_params_check,
                 True,
-                False,
             ),
             (
                 _sfdp_pattern_14,
@@ -772,7 +759,6 @@ def _get_sfdp_patterns():
                 {},
                 _sfdp_extra_check(aten.div.Tensor),
                 True,
-                False,
             ),
             (
                 _sfdp_pattern_15,
@@ -781,7 +767,6 @@ def _get_sfdp_patterns():
                 {},
                 _sfdp_extra_check(aten.div.Tensor),
                 True,
-                False,
             ),
             # TODO: Enable CUDA after solving Bert accuracy issue of calling efficient attention
             (
@@ -791,7 +776,6 @@ def _get_sfdp_patterns():
                 d,
                 _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
                 True,
-                False,
             ),
             (
                 _sfdp_pattern_17,
@@ -800,7 +784,6 @@ def _get_sfdp_patterns():
                 d,
                 _sfdp_extra_check(aten.div.Tensor),
                 True,
-                False,
             ),
             (
                 _sfdp_pattern_18,
@@ -809,25 +792,15 @@ def _get_sfdp_patterns():
                 {},
                 _onednn_graph_extra_check,
                 False,
-                True,
             ),
-        ]
-
-        for (
-            pattern,
-            replacement,
-            args,
-            workaround,
-            extra_check,
-            register_training,
-            onednn_graph_only,
-        ) in replacement_info:
+        ]:
             # XXX: when adding a new pattern, re-run `gen_attention_patterns` so the pattern
             # gets serialized to a python file and does not require tracing at runtime.
             assert isinstance(workaround, dict)
             name = pattern.__name__
 
             # currently, only inference patterns are supported with oneDNN Graph
+            # but "register_training" could be used for other patterns as well
             if register_training:
                 training_name = (
                     f"{name}_training"
