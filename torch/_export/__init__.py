@@ -94,7 +94,6 @@ def capture_pre_autograd_graph(
     f: torch.nn.Module,
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
-    constraints: Optional[List[Constraint]] = None,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
 ) -> torch.nn.Module:
     """
@@ -109,15 +108,6 @@ def capture_pre_autograd_graph(
       args: example positional inputs.
 
       kwargs: optional example keyword inputs.
-
-      constraints: [DEPRECATED: use ``dynamic_shapes`` instead, see below]
-         An optional list of constraints on the dynamic arguments
-         that specify their possible range of shapes. By default, shapes of
-         input torch.Tensors are assumed to be static. If an input torch.Tensor
-         is expected to have dynamic shapes, please use :func:`dynamic_dim`
-         to define :class:`Constraint` objects that specify the dynamics and the possible
-         range of shapes. See :func:`dynamic_dim` docstring for examples on
-         how to use it.
 
       dynamic_shapes: Should either be:
          1) a dict from argument names of ``f`` to their dynamic shape specifications,
@@ -147,16 +137,7 @@ def capture_pre_autograd_graph(
     if kwargs is None:
         kwargs = {}
 
-    if constraints is not None:
-        warnings.warn(
-            "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
-            "and will not be supported in the future. "
-            "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-    else:
-        constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
+    constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
 
     # Do not decompose dropout for exported models, because in eval mode the dropout
     # op disappears from the graph, which makes it difficult to switch to train mode.
