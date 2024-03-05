@@ -1644,12 +1644,13 @@ class TestNormalizeOperators(JitTestCase):
 
             def str_arg(arg):
                 if isinstance(arg, tuple):
-                    args = [f"{v}, " for v in arg]
+                    args = [f"{str_arg(v)}, " for v in arg]
                     return f"({' '.join(args)})"
                 elif isinstance(arg, list):
-                    return f"[{', '.join(arg)}]"
+                    args = [f"{str_arg(v)}" for v in arg]
+                    return f"[{', '.join(args)}]"
                 else:
-                    return str(arg)
+                    return arg
 
             for v in arg_values:
                 arg = pytree.tree_map(process_arg_with_idx, v)
