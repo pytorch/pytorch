@@ -1,6 +1,10 @@
 import contextlib
 from abc import ABC, abstractmethod
+<<<<<<< HEAD
 from typing import Any, Callable, ContextManager, Dict, Optional, List, Tuple
+=======
+from typing import Any, Callable, ContextManager, Optional, List, Tuple
+>>>>>>> 94b168f4168f803c958bfbb14330a1af8d220661
 
 import torch
 import torch.utils._pytree as pytree
