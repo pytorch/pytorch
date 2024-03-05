@@ -378,6 +378,7 @@ struct NCCLTraceBuffer {
     max_entries_ = getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0);
     capture_cpp_stack_ = getCvarBool({"TORCH_NCCL_TRACE_CPP_STACK"}, false);
     enabled_ = max_entries_ > 0;
+    pg_id_to_ranks_ = {};
   }
   using Event = at::cuda::CUDAEvent;
   struct Entry {
@@ -386,8 +387,14 @@ struct NCCLTraceBuffer {
                 // buffer this entry will be located to
                 // update state information
     size_t pg_id_;
-    size_t seq_id_; // as tracked by the process group
-    const char* profiling_name_;
+
+    // Both seq_id_ and op_id_ are per_pg incrementing counters
+    // seq_id refers to actual kernel launches (e.g. 1 per coalesced group)
+    // op_id refers to logical operations (e.g. one per op inside coalesced
+    // group)
+    size_t seq_id_;
+    size_t op_id_;
+    std::string profiling_name_;
 
     std::shared_ptr<torch::CapturedTraceback> traceback_;
     // we borrow pointers to start_ and end_ so we can query the state
@@ -426,11 +433,13 @@ struct NCCLTraceBuffer {
   size_t max_entries_ = 0;
   size_t next_ = 0;
   size_t id_ = 0;
+  std::map<size_t, std::vector<uint64_t>> pg_id_to_ranks_;
 
   c10::optional<size_t> record(
       size_t pg_id,
       size_t seq_id,
-      const char* profiling_name,
+      size_t op_id,
+      std::string profiling_name,
       const std::vector<at::Tensor>& inputs,
       const std::vector<at::Tensor>& outputs,
       Event* start,
@@ -446,7 +455,8 @@ struct NCCLTraceBuffer {
         id_,
         pg_id,
         seq_id,
-        profiling_name == nullptr ? "" : profiling_name,
+        op_id,
+        std::move(profiling_name),
         std::move(traceback),
         std::move(start),
         std::move(end),
@@ -473,6 +483,14 @@ struct NCCLTraceBuffer {
       }
     }
     return id_++;
+  }
+
+  void record_pg_ranks(size_t pg_id, std::vector<uint64_t> ranks) {
+    if (!enabled_) {
+      return;
+    }
+    std::lock_guard<std::mutex> guard(mutex_);
+    pg_id_to_ranks_[pg_id] = ranks;
   }
 
   void update_state(Entry& r) {
@@ -528,15 +546,15 @@ struct NCCLTraceBuffer {
 
     std::unique_lock<std::mutex> guard(mutex_);
 
-    auto& entry = entries_.at(*id % max_entries_);
-    if (entry.id_ == *id) {
-      update_state(entry);
+    Entry* entry = &entries_.at(*id % max_entries_);
+    if (entry->id_ == *id) {
+      update_state(*entry);
 
       if (compute_duration) {
-        can_compute_duration = entry.time_discovered_completed_.has_value() &&
-            entry.start_ && entry.end_;
-        startEvent = entry.start_;
-        endEvent = entry.end_;
+        can_compute_duration = entry->time_discovered_completed_.has_value() &&
+            entry->start_ && entry->end_;
+        startEvent = entry->start_;
+        endEvent = entry->end_;
       }
     }
 
@@ -548,34 +566,40 @@ struct NCCLTraceBuffer {
       duration = getDurationFromEvent(*startEvent, *endEvent);
       guard.lock();
 
-      // Refresh the entry ref, see if it has been overwritten
-      entry = entries_.at(*id % max_entries_);
-      if (entry.id_ != *id) {
+      // Refresh the entry pointer, see if the entry has been overwritten
+      entry = &entries_.at(*id % max_entries_);
+      if (entry->id_ != *id) {
         LOG(INFO)
             << "retire_id abandoned for id " << *id
             << ", event was overwritten while waiting to compute duration.";
         return;
       }
       if (duration.has_value()) {
-        entry.duration_ = duration.value();
+        entry->duration_ = duration.value();
       }
     }
 
-    entry.retired_ = true;
-    entry.start_ = entry.end_ = nullptr;
+    entry->retired_ = true;
+    entry->start_ = entry->end_ = nullptr;
   }
 
-  std::string dump() {
+  std::string dump(
+      const c10::optional<std::unordered_map<
+          std::string,
+          std::unordered_map<std::string, std::string>>>& ncclDumpMap) {
     auto result = dump_entries();
     auto entries = new_list();
     c10::IValue entries_key = "entries";
+    c10::IValue nccl_comm_key = "nccl_comm_state";
     c10::IValue version_key = "version";
     // Update whenever changing contents or formatting of the dump
     // (minor when adding fields, major when changing existing fields)
-    c10::IValue version_val = "1.1";
-
+    c10::IValue version_val = "1.4";
+    c10::IValue pg_config_key = "pg_config";
+    c10::IValue record_id_key = "record_id";
     c10::IValue pg_id_key = "pg_id";
     c10::IValue seq_id_key = "seq_id";
+    c10::IValue op_id_key = "op_id";
     c10::IValue profiling_name_key = "profiling_name";
     c10::IValue input_sizes_key = "input_sizes";
     c10::IValue output_sizes_key = "output_sizes";
@@ -609,8 +633,10 @@ struct NCCLTraceBuffer {
       auto& e = result.at(i);
       auto& tb = stracebacks.tracebacks.at(i);
       auto dict = new_dict();
+      dict.insert(record_id_key, int64_t(e.id_));
       dict.insert(pg_id_key, int64_t(e.pg_id_));
       dict.insert(seq_id_key, int64_t(e.seq_id_));
+      dict.insert(op_id_key, int64_t(e.op_id_));
       dict.insert(profiling_name_key, e.profiling_name_);
       dict.insert(time_created_key, int64_t(e.time_created_));
       if (e.duration_) {
@@ -660,10 +686,34 @@ struct NCCLTraceBuffer {
       dict.insert(frames_key, frames);
       entries.push_back(dict);
     }
+    auto pg_config = new_dict();
+    for (const auto& [pg_id, ranks] : pg_id_to_ranks_) {
+      auto pg_ranks = new_list();
+      for (const auto& rank : ranks) {
+        pg_ranks.push_back(static_cast<int>(rank));
+      }
+      pg_config.insert(static_cast<int>(pg_id), pg_ranks);
+    }
+
+    // convert ncclDumpMap into a dictionary
+    auto per_comm_dict = new_dict();
+    if (ncclDumpMap.has_value()) {
+      for (const auto& [ncclId, ncclDump] : ncclDumpMap.value()) {
+        auto inner_dict = new_dict();
+        for (const auto& [key, value] : ncclDump) {
+          inner_dict.insert(key, value);
+        }
+        per_comm_dict.insert(ncclId, inner_dict);
+      }
+    }
 
     auto dict = new_dict();
     dict.insert(entries_key, entries);
     dict.insert(version_key, version_val);
+    if (per_comm_dict.size() > 0) {
+      dict.insert(nccl_comm_key, per_comm_dict);
+    }
+    dict.insert(pg_config_key, pg_config);
 
     return pickle_str(dict);
   }

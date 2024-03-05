@@ -422,7 +422,7 @@ struct ExpandableSegment {
       CUmemAllocationProp prop = {};
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
       prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-      prop.location.id = device_;
+      prop.location.id = static_cast<int>(device_);
       auto status =
           DriverAPI::get()->cuMemCreate_(&handle, segment_size_, &prop, 0);
       if (status == CUDA_ERROR_OUT_OF_MEMORY) {
@@ -490,7 +490,7 @@ struct ExpandableSegment {
   void setAccess(c10::DeviceIndex device, size_t begin, size_t end) {
     CUmemAccessDesc desc;
     desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-    desc.location.id = device;
+    desc.location.id = static_cast<int>(device);
     desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemSetAccess_(
         ptr_ + begin * segment_size_, (end - begin) * segment_size_, &desc, 1));
@@ -954,8 +954,10 @@ class DeviceCachingAllocator {
     context_recorder_.store(record_history ? context_recorder : nullptr);
     alloc_trace_max_entries_ = std::max(size_t(1), alloc_trace_max_entries);
     record_context_ = enabled ? when : RecordContext::NEVER;
-    alloc_trace_next = 0;
-    alloc_trace->clear();
+    if (!enabled) {
+      alloc_trace_next = 0;
+      alloc_trace->clear();
+    }
   }
 
   bool isHistoryEnabled() {
@@ -1413,6 +1415,9 @@ class DeviceCachingAllocator {
 
     stats.num_alloc_retries = 0;
     stats.num_ooms = 0;
+    stats.num_sync_all_streams = 0;
+    stats.num_device_alloc = 0;
+    stats.num_device_free = 0;
     reset_accumulated_stat(stats.oversize_allocations);
     reset_accumulated_stat(stats.oversize_segments);
   }
@@ -2022,6 +2027,7 @@ class DeviceCachingAllocator {
       update_stat(stats.reserved_bytes[stat_type], mapped_range.size);
     });
 
+    stats.num_device_alloc++;
     record_trace(
         TraceEntry::SEGMENT_MAP,
         int64_t(mapped_range.ptr),
@@ -2442,6 +2448,7 @@ class DeviceCachingAllocator {
 
     // p.block came from new, not cudaMalloc. It should not be nullptr here.
     TORCH_INTERNAL_ASSERT(p.block != nullptr && p.block->ptr != nullptr);
+    stats.num_device_alloc++;
     record_trace(
         TraceEntry::SEGMENT_ALLOC,
         int64_t(p.block->ptr),
@@ -2547,6 +2554,7 @@ class DeviceCachingAllocator {
       Block* block,
       const std::shared_ptr<GatheredContext>& context) {
     TORCH_INTERNAL_ASSERT(!block->expandable_segment_);
+    stats.num_device_free++;
     record_trace(
         TraceEntry::SEGMENT_FREE,
         int64_t(block->ptr),
@@ -2629,6 +2637,7 @@ class DeviceCachingAllocator {
       update_stat(stats.reserved_bytes[stat_type], -unmapped.size);
     });
 
+    stats.num_device_free++;
     record_trace(
         TraceEntry::SEGMENT_UNMAP,
         int64_t(unmapped.ptr),
@@ -2672,6 +2681,7 @@ class DeviceCachingAllocator {
   void synchronize_and_free_events(
       const std::shared_ptr<GatheredContext>& context) {
     // Synchronize on outstanding events and then free associated blocks.
+    stats.num_sync_all_streams++;
 
     // This function syncs, so capture should not be underway. Might as well
     // make sure capture-deferred end of life events get processed too.
@@ -3032,6 +3042,22 @@ class NativeCachingAllocator : public CUDAAllocator {
       auto snap = da->snapshot();
       result.segments.insert(result.segments.end(), snap.begin(), snap.end());
     }
+
+    auto& md = result.config_metadata;
+    md.garbage_collection_threshold =
+        CUDAAllocatorConfig::garbage_collection_threshold();
+    md.max_split_size = CUDAAllocatorConfig::max_split_size();
+    md.pinned_num_register_threads =
+        CUDAAllocatorConfig::pinned_num_register_threads();
+    md.expandable_segments = CUDAAllocatorConfig::expandable_segments();
+    md.release_lock_on_malloc =
+        CUDAAllocatorConfig::release_lock_on_cudamalloc();
+    md.pinned_use_host_register =
+        CUDAAllocatorConfig::pinned_use_cuda_host_register();
+    md.last_allocator_settings = CUDAAllocatorConfig::last_allocator_settings();
+    md.roundup_power2_divisions =
+        CUDAAllocatorConfig::roundup_power2_divisions();
+
     return result;
   }
 
@@ -3080,7 +3106,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     return cpd;
   }
 
-  DataPtr allocate(size_t size) const override {
+  DataPtr allocate(size_t size) override {
     constexpr size_t one_exa_bytes = 1152921504606846976ULL;
     TORCH_CHECK_WITH(
         OutOfMemoryError,
@@ -3105,9 +3131,7 @@ class NativeCachingAllocator : public CUDAAllocator {
       }
     } else {
       if (size != 0) {
-        // Allocator declars allocate const!?
-        const_cast<NativeCachingAllocator*>(this)->malloc(
-            &devPtr, device, size, stream);
+        this->malloc(&devPtr, device, size, stream);
       }
     }
 

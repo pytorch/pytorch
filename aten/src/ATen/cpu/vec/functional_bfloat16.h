@@ -102,8 +102,7 @@ inline float reduce_all(const Op& vec_fun, const scalar_t* data, int64_t size) {
   using fVec = vec::Vectorized<float>;
   if (size < bVec::size()) {
     bVec data_bvec = bVec::loadu(data, size);
-    fVec data_fvec0, data_fvec1;
-    std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+    auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
     if (size > fVec::size()) {
       data_fvec0 = fVec::set(data_fvec0, vec_fun(data_fvec0, data_fvec1), size - fVec::size());
       return vec_reduce_all<float>(vec_fun, data_fvec0, fVec::size());
@@ -113,19 +112,16 @@ inline float reduce_all(const Op& vec_fun, const scalar_t* data, int64_t size) {
   }
   int64_t d = bVec::size();
   bVec acc_bvec = bVec::loadu(data);
-  fVec acc_fvec0, acc_fvec1;
-  std::tie(acc_fvec0, acc_fvec1) = convert_to_float<scalar_t>(acc_bvec);
+  auto [acc_fvec0, acc_fvec1] = convert_to_float<scalar_t>(acc_bvec);
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec data_bvec = bVec::loadu(data + d);
-    fVec data_fvec0, data_fvec1;
-    std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+    auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
     acc_fvec0 = vec_fun(acc_fvec0, data_fvec0);
     acc_fvec1 = vec_fun(acc_fvec1, data_fvec1);
   }
   if (size - d > 0) {
     bVec data_bvec = bVec::loadu(data + d, size - d);
-    fVec data_fvec0, data_fvec1;
-    std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+    auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
     if (size - d > fVec::size()) {
       acc_fvec0 = vec_fun(acc_fvec0, data_fvec0);
       acc_fvec1 = fVec::set(acc_fvec1, vec_fun(acc_fvec1, data_fvec1), size - d - fVec::size());
@@ -145,8 +141,7 @@ inline std::pair<float, float> reduce2_all(const Op1& vec_fun1, const Op2& vec_f
   using fVec = vec::Vectorized<float>;
   if (size < bVec::size()) {
     bVec data_bvec = bVec::loadu(data, size);
-    fVec data_fvec0, data_fvec1;
-    std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+    auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
     if (size > fVec::size()) {
       fVec acc1_fvec = fVec::set(data_fvec0, vec_fun1(data_fvec0, data_fvec1), size - fVec::size());
       fVec acc2_fvec = fVec::set(data_fvec0, vec_fun2(data_fvec0, data_fvec1), size - fVec::size());
@@ -161,14 +156,11 @@ inline std::pair<float, float> reduce2_all(const Op1& vec_fun1, const Op2& vec_f
   }
   int64_t d = bVec::size();
   bVec acc_bvec = bVec::loadu(data);
-  fVec acc1_fvec0, acc1_fvec1;
-  std::tie(acc1_fvec0, acc1_fvec1) = convert_to_float<scalar_t>(acc_bvec);
-  fVec acc2_fvec0, acc2_fvec1;
-  std::tie(acc2_fvec0, acc2_fvec1) = convert_to_float<scalar_t>(acc_bvec);
+  auto [acc1_fvec0, acc1_fvec1] = convert_to_float<scalar_t>(acc_bvec);
+  auto [acc2_fvec0, acc2_fvec1] = convert_to_float<scalar_t>(acc_bvec);
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec data_bvec = bVec::loadu(data + d);
-    fVec data_fvec0, data_fvec1;
-    std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+    auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
     acc1_fvec0 = vec_fun1(acc1_fvec0, data_fvec0);
     acc1_fvec1 = vec_fun1(acc1_fvec1, data_fvec1);
     acc2_fvec0 = vec_fun2(acc2_fvec0, data_fvec0);
@@ -176,8 +168,7 @@ inline std::pair<float, float> reduce2_all(const Op1& vec_fun1, const Op2& vec_f
   }
   if (size - d > 0) {
     bVec data_bvec = bVec::loadu(data + d, size - d);
-    fVec data_fvec0, data_fvec1;
-    std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+    auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
     if (size - d > fVec::size()) {
       acc1_fvec0 = vec_fun1(acc1_fvec0, data_fvec0);
       acc1_fvec1 = fVec::set(acc1_fvec1, vec_fun1(acc1_fvec1, data_fvec1), size - d - fVec::size());
@@ -206,8 +197,7 @@ inline float map_reduce_all(
   using fVec = vec::Vectorized<float>;
   if (size < bVec::size()) {
     bVec data_bvec = bVec::loadu(data, size);
-    fVec data_fvec0, data_fvec1;
-    std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+    auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
     if (size > fVec::size()) {
       data_fvec0 = map_fun(data_fvec0);
       data_fvec1 = map_fun(data_fvec1);
@@ -220,14 +210,12 @@ inline float map_reduce_all(
   }
   int64_t d = bVec::size();
   bVec acc_bvec = bVec::loadu(data);
-  fVec acc_fvec0, acc_fvec1;
-  std::tie(acc_fvec0, acc_fvec1) = convert_to_float<scalar_t>(acc_bvec);
+  auto [acc_fvec0, acc_fvec1] = convert_to_float<scalar_t>(acc_bvec);
   acc_fvec0 = map_fun(acc_fvec0);
   acc_fvec1 = map_fun(acc_fvec1);
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec data_bvec = bVec::loadu(data + d);
-    fVec data_fvec0, data_fvec1;
-    std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+    auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
     data_fvec0 = map_fun(data_fvec0);
     data_fvec1 = map_fun(data_fvec1);
     acc_fvec0 = red_fun(acc_fvec0, data_fvec0);
@@ -235,8 +223,7 @@ inline float map_reduce_all(
   }
   if (size - d > 0) {
     bVec data_bvec = bVec::loadu(data + d, size - d);
-    fVec data_fvec0, data_fvec1;
-    std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+    auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
     if (size - d > fVec::size()) {
       data_fvec0 = map_fun(data_fvec0);
       data_fvec1 = map_fun(data_fvec1);
@@ -263,11 +250,9 @@ inline float map2_reduce_all(
   using fVec = vec::Vectorized<float>;
   if (size < bVec::size()) {
     bVec data_bvec = bVec::loadu(data, size);
-    fVec data_fvec0, data_fvec1;
-    std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+    auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
     bVec data2_bvec = bVec::loadu(data2, size);
-    fVec data2_fvec0, data2_fvec1;
-    std::tie(data2_fvec0, data2_fvec1) = convert_to_float<scalar_t>(data2_bvec);
+    auto [data2_fvec0, data2_fvec1] = convert_to_float<scalar_t>(data2_bvec);
     if (size > fVec::size()) {
       data_fvec0 = map_fun(data_fvec0, data2_fvec0);
       data_fvec1 = map_fun(data_fvec1, data2_fvec1);
@@ -280,20 +265,16 @@ inline float map2_reduce_all(
   }
   int64_t d = bVec::size();
   bVec acc_bvec = bVec::loadu(data);
-  fVec acc_fvec0, acc_fvec1;
-  std::tie(acc_fvec0, acc_fvec1) = convert_to_float<scalar_t>(acc_bvec);
+  auto [acc_fvec0, acc_fvec1] = convert_to_float<scalar_t>(acc_bvec);
   bVec acc2_bvec = bVec::loadu(data2);
-  fVec acc2_fvec0, acc2_fvec1;
-  std::tie(acc2_fvec0, acc2_fvec1) = convert_to_float<scalar_t>(acc2_bvec);
+  auto [acc2_fvec0, acc2_fvec1] = convert_to_float<scalar_t>(acc2_bvec);
   acc_fvec0 = map_fun(acc_fvec0, acc2_fvec0);
   acc_fvec1 = map_fun(acc_fvec1, acc2_fvec1);
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec data_bvec = bVec::loadu(data + d);
-    fVec data_fvec0, data_fvec1;
-    std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+    auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
     bVec data2_bvec = bVec::loadu(data2 + d);
-    fVec data2_fvec0, data2_fvec1;
-    std::tie(data2_fvec0, data2_fvec1) = convert_to_float<scalar_t>(data2_bvec);
+    auto [data2_fvec0, data2_fvec1] = convert_to_float<scalar_t>(data2_bvec);
     data_fvec0 = map_fun(data_fvec0, data2_fvec0);
     data_fvec1 = map_fun(data_fvec1, data2_fvec1);
     acc_fvec0 = red_fun(acc_fvec0, data_fvec0);
@@ -301,11 +282,9 @@ inline float map2_reduce_all(
   }
   if (size - d > 0) {
     bVec data_bvec = bVec::loadu(data + d, size - d);
-    fVec data_fvec0, data_fvec1;
-    std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+    auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
     bVec data2_bvec = bVec::loadu(data2 + d, size - d);
-    fVec data2_fvec0, data2_fvec1;
-    std::tie(data2_fvec0, data2_fvec1) = convert_to_float<scalar_t>(data2_bvec);
+    auto [data2_fvec0, data2_fvec1] = convert_to_float<scalar_t>(data2_bvec);
     if (size - d > fVec::size()) {
       data_fvec0 = map_fun(data_fvec0, data2_fvec0);
       data_fvec1 = map_fun(data_fvec1, data2_fvec1);
@@ -333,14 +312,11 @@ inline float map3_reduce_all(
   using fVec = vec::Vectorized<float>;
   if (size < bVec::size()) {
     bVec data_bvec = bVec::loadu(data, size);
-    fVec data_fvec0, data_fvec1;
-    std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+    auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
     bVec data2_bvec = bVec::loadu(data2, size);
-    fVec data2_fvec0, data2_fvec1;
-    std::tie(data2_fvec0, data2_fvec1) = convert_to_float<scalar_t>(data2_bvec);
+    auto [data2_fvec0, data2_fvec1] = convert_to_float<scalar_t>(data2_bvec);
     bVec data3_bvec = bVec::loadu(data3, size);
-    fVec data3_fvec0, data3_fvec1;
-    std::tie(data3_fvec0, data3_fvec1) = convert_to_float<scalar_t>(data3_bvec);
+    auto [data3_fvec0, data3_fvec1] = convert_to_float<scalar_t>(data3_bvec);
     if (size > fVec::size()) {
       data_fvec0 = map_fun(data_fvec0, data2_fvec0, data3_fvec0);
       data_fvec1 = map_fun(data_fvec1, data2_fvec1, data3_fvec1);
@@ -353,26 +329,20 @@ inline float map3_reduce_all(
   }
   int64_t d = bVec::size();
   bVec acc_bvec = bVec::loadu(data);
-  fVec acc_fvec0, acc_fvec1;
-  std::tie(acc_fvec0, acc_fvec1) = convert_to_float<scalar_t>(acc_bvec);
+  auto [acc_fvec0, acc_fvec1] = convert_to_float<scalar_t>(acc_bvec);
   bVec acc2_bvec = bVec::loadu(data2);
-  fVec acc2_fvec0, acc2_fvec1;
-  std::tie(acc2_fvec0, acc2_fvec1) = convert_to_float<scalar_t>(acc2_bvec);
+  auto [acc2_fvec0, acc2_fvec1] = convert_to_float<scalar_t>(acc2_bvec);
   bVec acc3_bvec = bVec::loadu(data3);
-  fVec acc3_fvec0, acc3_fvec1;
-  std::tie(acc3_fvec0, acc3_fvec1) = convert_to_float<scalar_t>(acc3_bvec);
+  auto [acc3_fvec0, acc3_fvec1] = convert_to_float<scalar_t>(acc3_bvec);
   acc_fvec0 = map_fun(acc_fvec0, acc2_fvec0, acc3_fvec0);
   acc_fvec1 = map_fun(acc_fvec1, acc2_fvec1, acc3_fvec1);
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec data_bvec = bVec::loadu(data + d);
-    fVec data_fvec0, data_fvec1;
-    std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+    auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
     bVec data2_bvec = bVec::loadu(data2 + d);
-    fVec data2_fvec0, data2_fvec1;
-    std::tie(data2_fvec0, data2_fvec1) = convert_to_float<scalar_t>(data2_bvec);
+    auto [data2_fvec0, data2_fvec1] = convert_to_float<scalar_t>(data2_bvec);
     bVec data3_bvec = bVec::loadu(data3 + d);
-    fVec data3_fvec0, data3_fvec1;
-    std::tie(data3_fvec0, data3_fvec1) = convert_to_float<scalar_t>(data3_bvec);
+    auto [data3_fvec0, data3_fvec1] = convert_to_float<scalar_t>(data3_bvec);
     data_fvec0 = map_fun(data_fvec0, data2_fvec0, data3_fvec0);
     data_fvec1 = map_fun(data_fvec1, data2_fvec1, data3_fvec1);
     acc_fvec0 = red_fun(acc_fvec0, data_fvec0);
@@ -380,14 +350,11 @@ inline float map3_reduce_all(
   }
   if (size - d > 0) {
     bVec data_bvec = bVec::loadu(data + d, size - d);
-    fVec data_fvec0, data_fvec1;
-    std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+    auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
     bVec data2_bvec = bVec::loadu(data2 + d, size - d);
-    fVec data2_fvec0, data2_fvec1;
-    std::tie(data2_fvec0, data2_fvec1) = convert_to_float<scalar_t>(data2_bvec);
+    auto [data2_fvec0, data2_fvec1] = convert_to_float<scalar_t>(data2_bvec);
     bVec data3_bvec = bVec::loadu(data3 + d, size - d);
-    fVec data3_fvec0, data3_fvec1;
-    std::tie(data3_fvec0, data3_fvec1) = convert_to_float<scalar_t>(data3_bvec);
+    auto [data3_fvec0, data3_fvec1] = convert_to_float<scalar_t>(data3_bvec);
     if (size - d > fVec::size()) {
       data_fvec0 = map_fun(data_fvec0, data2_fvec0, data3_fvec0);
       data_fvec1 = map_fun(data_fvec1, data2_fvec1, data3_fvec1);
@@ -414,8 +381,7 @@ inline void map(
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec data_bvec = bVec::loadu(input_data + d);
-    fVec data_fvec0, data_fvec1;
-    std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+    auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
     fVec output_fvec0 = vec_fun(data_fvec0);
     fVec output_fvec1 = vec_fun(data_fvec1);
     bVec output_bvec = convert_from_float<scalar_t>(output_fvec0, output_fvec1);
@@ -423,8 +389,7 @@ inline void map(
   }
   if (size - d > 0) {
     bVec data_bvec = bVec::loadu(input_data + d, size - d);
-    fVec data_fvec0, data_fvec1;
-    std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+    auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
     fVec output_fvec0 = vec_fun(data_fvec0);
     fVec output_fvec1 = vec_fun(data_fvec1);
     bVec output_bvec = convert_from_float<scalar_t>(output_fvec0, output_fvec1);
@@ -480,11 +445,9 @@ inline void map2(
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec data_bvec = bVec::loadu(input_data + d);
-    fVec data_fvec0, data_fvec1;
-    std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+    auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
     bVec data2_bvec = bVec::loadu(input_data2 + d);
-    fVec data2_fvec0, data2_fvec1;
-    std::tie(data2_fvec0, data2_fvec1) = convert_to_float<scalar_t>(data2_bvec);
+    auto [data2_fvec0, data2_fvec1] = convert_to_float<scalar_t>(data2_bvec);
     fVec output_fvec0 = vec_fun(data_fvec0, data2_fvec0);
     fVec output_fvec1 = vec_fun(data_fvec1, data2_fvec1);
     bVec output_bvec = convert_from_float<scalar_t>(output_fvec0, output_fvec1);
@@ -492,11 +455,9 @@ inline void map2(
   }
   if (size - d > 0) {
     bVec data_bvec = bVec::loadu(input_data + d, size - d);
-    fVec data_fvec0, data_fvec1;
-    std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+    auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
     bVec data2_bvec = bVec::loadu(input_data2 + d, size - d);
-    fVec data2_fvec0, data2_fvec1;
-    std::tie(data2_fvec0, data2_fvec1) = convert_to_float<scalar_t>(data2_bvec);
+    auto [data2_fvec0, data2_fvec1] = convert_to_float<scalar_t>(data2_bvec);
     fVec output_fvec0 = vec_fun(data_fvec0, data2_fvec0);
     fVec output_fvec1 = vec_fun(data_fvec1, data2_fvec1);
     bVec output_bvec = convert_from_float<scalar_t>(output_fvec0, output_fvec1);
@@ -518,14 +479,11 @@ inline void map3(
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec data1_bvec = bVec::loadu(input_data1 + d);
-    fVec data1_fvec0, data1_fvec1;
-    std::tie(data1_fvec0, data1_fvec1) = convert_to_float<scalar_t>(data1_bvec);
+    auto [data1_fvec0, data1_fvec1] = convert_to_float<scalar_t>(data1_bvec);
     bVec data2_bvec = bVec::loadu(input_data2 + d);
-    fVec data2_fvec0, data2_fvec1;
-    std::tie(data2_fvec0, data2_fvec1) = convert_to_float<scalar_t>(data2_bvec);
+    auto [data2_fvec0, data2_fvec1] = convert_to_float<scalar_t>(data2_bvec);
     bVec data3_bvec = bVec::loadu(input_data3 + d);
-    fVec data3_fvec0, data3_fvec1;
-    std::tie(data3_fvec0, data3_fvec1) = convert_to_float<scalar_t>(data3_bvec);
+    auto [data3_fvec0, data3_fvec1] = convert_to_float<scalar_t>(data3_bvec);
     fVec output_fvec0 = vec_fun(data1_fvec0, data2_fvec0, data3_fvec0);
     fVec output_fvec1 = vec_fun(data1_fvec1, data2_fvec1, data3_fvec1);
     bVec output_bvec = convert_from_float<scalar_t>(output_fvec0, output_fvec1);
@@ -533,14 +491,11 @@ inline void map3(
   }
   if (size - d > 0) {
     bVec data1_bvec = bVec::loadu(input_data1 + d, size - d);
-    fVec data1_fvec0, data1_fvec1;
-    std::tie(data1_fvec0, data1_fvec1) = convert_to_float<scalar_t>(data1_bvec);
+    auto [data1_fvec0, data1_fvec1] = convert_to_float<scalar_t>(data1_bvec);
     bVec data2_bvec = bVec::loadu(input_data2 + d, size - d);
-    fVec data2_fvec0, data2_fvec1;
-    std::tie(data2_fvec0, data2_fvec1) = convert_to_float<scalar_t>(data2_bvec);
+    auto [data2_fvec0, data2_fvec1] = convert_to_float<scalar_t>(data2_bvec);
     bVec data3_bvec = bVec::loadu(input_data3 + d, size - d);
-    fVec data3_fvec0, data3_fvec1;
-    std::tie(data3_fvec0, data3_fvec1) = convert_to_float<scalar_t>(data3_bvec);
+    auto [data3_fvec0, data3_fvec1] = convert_to_float<scalar_t>(data3_bvec);
     fVec output_fvec0 = vec_fun(data1_fvec0, data2_fvec0, data3_fvec0);
     fVec output_fvec1 = vec_fun(data1_fvec1, data2_fvec1, data3_fvec1);
     bVec output_bvec = convert_from_float<scalar_t>(output_fvec0, output_fvec1);
@@ -563,17 +518,13 @@ inline void map4(
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec data1_bvec = bVec::loadu(input_data1 + d);
-    fVec data1_fvec0, data1_fvec1;
-    std::tie(data1_fvec0, data1_fvec1) = convert_to_float<scalar_t>(data1_bvec);
+    auto [data1_fvec0, data1_fvec1] = convert_to_float<scalar_t>(data1_bvec);
     bVec data2_bvec = bVec::loadu(input_data2 + d);
-    fVec data2_fvec0, data2_fvec1;
-    std::tie(data2_fvec0, data2_fvec1) = convert_to_float<scalar_t>(data2_bvec);
+    auto [data2_fvec0, data2_fvec1] = convert_to_float<scalar_t>(data2_bvec);
     bVec data3_bvec = bVec::loadu(input_data3 + d);
-    fVec data3_fvec0, data3_fvec1;
-    std::tie(data3_fvec0, data3_fvec1) = convert_to_float<scalar_t>(data3_bvec);
+    auto [data3_fvec0, data3_fvec1] = convert_to_float<scalar_t>(data3_bvec);
     bVec data4_bvec = bVec::loadu(input_data4 + d);
-    fVec data4_fvec0, data4_fvec1;
-    std::tie(data4_fvec0, data4_fvec1) = convert_to_float<scalar_t>(data4_bvec);
+    auto [data4_fvec0, data4_fvec1] = convert_to_float<scalar_t>(data4_bvec);
     fVec output_fvec0 = vec_fun(data1_fvec0, data2_fvec0, data3_fvec0, data4_fvec0);
     fVec output_fvec1 = vec_fun(data1_fvec1, data2_fvec1, data3_fvec1, data4_fvec1);
     bVec output_bvec = convert_from_float<scalar_t>(output_fvec0, output_fvec1);
@@ -581,17 +532,13 @@ inline void map4(
   }
   if (size - d > 0) {
     bVec data1_bvec = bVec::loadu(input_data1 + d, size - d);
-    fVec data1_fvec0, data1_fvec1;
-    std::tie(data1_fvec0, data1_fvec1) = convert_to_float<scalar_t>(data1_bvec);
+    auto [data1_fvec0, data1_fvec1] = convert_to_float<scalar_t>(data1_bvec);
     bVec data2_bvec = bVec::loadu(input_data2 + d, size - d);
-    fVec data2_fvec0, data2_fvec1;
-    std::tie(data2_fvec0, data2_fvec1) = convert_to_float<scalar_t>(data2_bvec);
+    auto [data2_fvec0, data2_fvec1] = convert_to_float<scalar_t>(data2_bvec);
     bVec data3_bvec = bVec::loadu(input_data3 + d, size - d);
-    fVec data3_fvec0, data3_fvec1;
-    std::tie(data3_fvec0, data3_fvec1) = convert_to_float<scalar_t>(data3_bvec);
+    auto [data3_fvec0, data3_fvec1] = convert_to_float<scalar_t>(data3_bvec);
     bVec data4_bvec = bVec::loadu(input_data4 + d, size - d);
-    fVec data4_fvec0, data4_fvec1;
-    std::tie(data4_fvec0, data4_fvec1) = convert_to_float<scalar_t>(data4_bvec);
+    auto [data4_fvec0, data4_fvec1] = convert_to_float<scalar_t>(data4_bvec);
     fVec output_fvec0 = vec_fun(data1_fvec0, data2_fvec0, data3_fvec0, data4_fvec0);
     fVec output_fvec1 = vec_fun(data1_fvec1, data2_fvec1, data3_fvec1, data4_fvec1);
     bVec output_bvec = convert_from_float<scalar_t>(output_fvec0, output_fvec1);
