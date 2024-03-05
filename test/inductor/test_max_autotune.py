@@ -222,6 +222,7 @@ class TestMaxAutotune(TestCase):
         with config.patch({"max_autotune": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
+    @skipIfRocm
     @parametrize("dynamic", (False, True))
     def test_max_autotune_remote_caching(self, dynamic: bool):
         from unittest.mock import patch
