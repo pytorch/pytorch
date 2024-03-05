@@ -1747,6 +1747,9 @@ def isend(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, 
         _warn_not_in_group("isend")
         return None
 
+    if tensor.is_complex():
+        tensor = torch.view_as_real(tensor)
+
     if group is None or group is GroupMember.WORLD:
         pg = _get_default_group()
     else:
@@ -1779,6 +1782,9 @@ def irecv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proce
     if _rank_not_in_group(group):
         _warn_not_in_group("irecv")
         return None
+
+    if tensor.is_complex():
+        tensor = torch.view_as_real(tensor)
 
     if group is None or group is GroupMember.WORLD:
         pg = _get_default_group()
@@ -1819,6 +1825,9 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
         _warn_not_in_group("send")
         return None
 
+    if tensor.is_complex():
+        tensor = torch.view_as_real(tensor)
+
     if group is None or group is GroupMember.WORLD:
         default_pg = _get_default_group()
         default_pg.send([tensor], dst, tag).wait()
@@ -1848,6 +1857,9 @@ def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proces
     if _rank_not_in_group(group):
         _warn_not_in_group("recv")
         return -1
+
+    if tensor.is_complex():
+        tensor = torch.view_as_real(tensor)
 
     if group is None:
         pg = _get_default_group()
