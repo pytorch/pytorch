@@ -186,7 +186,7 @@ def dequantize_per_tensor(
 
 @impl(quantized_decomposed_lib, "dequantize_per_tensor", "Meta")
 def dequantize_per_tensor_meta(input, scale, zero_point, quant_min, quant_max, dtype, output_dtype=torch.float32):
-    return torch.empty_like(input, dtype=dtype)
+    return torch.empty_like(input, dtype=output_dtype)
 
 quantized_decomposed_lib.define(
     "dequantize_per_tensor.tensor(Tensor input, Tensor scale, Tensor zero_point, "
@@ -215,7 +215,7 @@ def dequantize_per_tensor_tensor(
 def dequantize_per_tensor_tensor_meta(input, scale, zero_point, quant_min, quant_max, dtype, output_dtype=torch.float32):
     assert zero_point.numel() == 1, f"Expecting zero_point tensor to be one element, but received : {zero_point.numel()}"
     assert scale.numel() == 1, f"Expecting scale tensor to be one element, but received : {scale.numel()}"
-    return torch.empty_like(input, dtype=dtype)
+    return torch.empty_like(input, dtype=output_dtype)
 
 # TODO: remove other variants and keep this one
 quantized_decomposed_lib.define(
@@ -495,4 +495,4 @@ def dequantize_per_channel_meta(
     assert input.dtype == dtype, f"Expecting input to have dtype {dtype}, but got dtype: {input.dtype}"
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
-    return torch.empty_like(input, dtype=dtype)
+    return torch.empty_like(input, dtype=output_dtype)
