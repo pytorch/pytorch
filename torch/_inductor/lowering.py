@@ -5745,7 +5745,7 @@ def resize_as(self_, other, *, memory_format=None):
     return resize(self_, other.get_size(), memory_format=memory_format)
 
 
-@register_lowering(aten.resize_as, type_promotion_kind=None)
+@register_lowering(aten.resize_as_, type_promotion_kind=None)
 def resize_as_(self_, other, *, memory_format=None):
     return resize_(self_, other.get_size(), memory_format=memory_format)
 
