@@ -144,12 +144,15 @@ def _torchelastic_use_agent_store() -> bool:
     return os.environ.get("TORCHELASTIC_USE_AGENT_STORE", None) == str(True)
 
 
-def _create_c10d_store(hostname, port, rank, world_size, timeout, use_libuv=False) -> Store:
+def _create_c10d_store(hostname, port, rank, world_size, timeout, use_libuv=True) -> Store:
     """
     Smartly creates a c10d Store object on ``rank`` based on whether we need to re-use agent store.
 
     The TCPStore server is assumed to be hosted
     on ``hostname:port``.
+
+    By default, the TCPStore server uses the asynchronous implementation
+    ``LibUVStoreDaemon`` which utilizes libuv.
 
     If ``torchelastic_use_agent_store()`` is ``True``, then it is assumed that
     the agent leader (node rank 0) hosts the TCPStore server (for which the
@@ -193,7 +196,9 @@ def _tcp_rendezvous_handler(
 
     rank = int(query_dict["rank"])
     world_size = int(query_dict["world_size"])
-    use_libuv = query_dict.get("use_libuv", "0") == "1"
+    # libuv is the default backend for TCPStore. To enable the non-libuv backend,
+    # one needs to explicitly specify ``use_libuv=0`` in the URL parameter.
+    use_libuv = query_dict.get("use_libuv", "1") == "1"
     assert result.hostname is not None
 
     store = _create_c10d_store(result.hostname, result.port, rank, world_size, timeout, use_libuv)
@@ -241,7 +246,9 @@ def _env_rendezvous_handler(
 
     master_addr = _get_env_or_raise("MASTER_ADDR")
     master_port = int(_get_env_or_raise("MASTER_PORT"))
-    use_libuv = query_dict.get("use_libuv", os.environ.get("USE_LIBUV", "0")) == "1"
+    # when using env rendezvous, we use libuv for TCPStore backend by default,
+    # unless USE_LIBUV=0 is specified in the environment
+    use_libuv = query_dict.get("use_libuv", os.environ.get("USE_LIBUV", "1")) == "1"
 
     store = _create_c10d_store(master_addr, master_port, rank, world_size, timeout, use_libuv)
 

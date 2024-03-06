@@ -259,20 +259,31 @@ class TCPStoreTest(TestCase, StoreTestBase):
         store.set_timeout(timedelta(seconds=300))
         return store
 
+    def _create_store_with_port(
+            self,
+            addr="localhost",
+            port=12345,
+            world_size=1,
+            is_master=True,
+            timeout=timedelta(seconds=30),
+            wait_for_workers=True,
+            master_listen_fd=None,
+            multi_tenant=False,
+        ):
+        return dist.TCPStore(
+            addr,
+            port,
+            world_size=world_size,
+            is_master=is_master,
+            timeout=timeout,
+            wait_for_workers=wait_for_workers,
+            multi_tenant=multi_tenant,
+            master_listen_fd=master_listen_fd,
+            use_libuv=True,
+        )
+
     def _create_store_with_ws(self, addr, world_size):
         return create_tcp_store(addr, world_size, wait_for_workers=False)
-
-    def test_address_already_in_use(self):
-        err_msg_reg = "^The server socket has failed to listen on any local "
-        with self.assertRaisesRegex(RuntimeError, err_msg_reg):
-            addr = DEFAULT_HOSTNAME
-            port = common.find_free_port()
-
-            # Use noqa to silence flake8.
-            # Need to store in an unused variable here to ensure the first
-            # object is not destroyed before the second object is created.
-            store1 = dist.TCPStore(addr, port, 1, True)  # noqa: F841
-            store2 = dist.TCPStore(addr, port, 1, True)  # noqa: F841
 
     @retry_on_connect_failures
     def test_multitenancy(self):
@@ -282,8 +293,8 @@ class TCPStoreTest(TestCase, StoreTestBase):
         # Use noqa to silence flake8.
         # Need to store in an unused variable here to ensure the first
         # object is not destroyed before the second object is created.
-        store1 = dist.TCPStore(addr, port, 1, True, multi_tenant=True)  # type: ignore[call-arg] # noqa: F841
-        store2 = dist.TCPStore(addr, port, 1, True, multi_tenant=True)  # type: ignore[call-arg] # noqa: F841
+        store1 = self._create_store_with_port(addr, port, 1, True, multi_tenant=True)  # type: ignore[call-arg] # noqa: F841
+        store2 = self._create_store_with_port(addr, port, 1, True, multi_tenant=True)  # type: ignore[call-arg] # noqa: F841
 
     @skip_if_win32()
     @retry_on_connect_failures
@@ -316,18 +327,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         )
 
         rpc.shutdown()
-
-    @skip_if_win32()
-    def test_take_over_listen_socket(self):
-        listen_sock: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        listen_sock.bind(("localhost", 0))
-        addr, port, *_ = listen_sock.getsockname()
-        listen_fd = listen_sock.detach()
-
-        store = dist.TCPStore(addr, port, 1, is_master=True, master_listen_fd=listen_fd)
-
-        store.set("key", "value")
-        self.assertEqual(b"value", store.get("key"))
+        dist.destroy_process_group()
 
     # The TCPStore has 6 keys in test_set_get. It contains the 5 keys added by
     # the user and one additional key used for coordinate all the workers.
@@ -362,6 +362,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self._test_numkeys_delkeys(self._create_store())
 
     def _create_client(self, index, addr, port, world_size):
+        # TODO (xilunwu): changing to _create_store_with_port() causes failure
         client_store = dist.TCPStore(addr, port, world_size=world_size, timeout=timedelta(seconds=10))
         self.assertEqual(b"value", client_store.get("key"))
         client_store.set(f"new_key{index}", f"new_value{index}")
@@ -410,21 +411,79 @@ class TCPStoreTest(TestCase, StoreTestBase):
     def test_store_timeout_on_missing_clients(self):
         with self.assertRaisesRegex(DistStoreError, r"Timed out after \d+ seconds waiting for clients. \d+/\d+ clients joined."):
             # world_size is 2 so it should timeout
-            dist.TCPStore("localhost", 0, 2, True, timeout=timedelta(seconds=2))
+            self._create_store_with_port(
+                "localhost", 0, 2, True, timeout=timedelta(seconds=2)
+            )
 
         # when wait_for_workers is not set, then there should be no exception raised
-        dist.TCPStore("localhost", 0, 2, True, timeout=timedelta(seconds=2), wait_for_workers=False)
+        self._create_store_with_port(
+            "localhost", 0, 2, True, timeout=timedelta(seconds=2), wait_for_workers=False
+        )
 
-class LibUvTCPStoreTest(TCPStoreTest):
+class NonLibUvTCPStoreTest(TCPStoreTest):
 
     def _create_store(self):
-        store = create_tcp_store(use_libuv=True)
+        store = create_tcp_store(use_libuv=False)
         store.set_timeout(timedelta(seconds=300))
         return store
 
-    def _create_store_with_ws(self, addr, world_size):
-        return create_tcp_store(addr, world_size, wait_for_workers=False, use_libuv=True)
+    def _create_store_with_port(
+            self,
+            addr="localhost",
+            port=12345,
+            world_size=1,
+            is_master=True,
+            timeout=timedelta(seconds=30),
+            wait_for_workers=True,
+            master_listen_fd=None,
+            multi_tenant=False,
+        ):
+        return dist.TCPStore(
+            addr,
+            port,
+            world_size=world_size,
+            is_master=is_master,
+            timeout=timeout,
+            wait_for_workers=wait_for_workers,
+            multi_tenant=multi_tenant,
+            master_listen_fd=master_listen_fd,
+            use_libuv=False,
+        )
 
+    def _create_store_with_ws(self, addr, world_size):
+        return create_tcp_store(addr, world_size, wait_for_workers=False, use_libuv=False)
+
+    # TODO (xilunwu): this test throws python fatal error for libuv backend
+    def test_address_already_in_use(self):
+        err_msg_reg = "^The server socket has failed to listen on any local "
+        with self.assertRaisesRegex(RuntimeError, err_msg_reg):
+            addr = DEFAULT_HOSTNAME
+            port = common.find_free_port()
+
+            # Use noqa to silence flake8.
+            # Need to store in an unused variable here to ensure the first
+            # object is not destroyed before the second object is created.
+            store1 = self._create_store_with_port(
+                addr=addr, port=port, world_size=1, is_master=True
+            )  # noqa: F841
+            store2 = self._create_store_with_port(
+                addr=addr, port=port, world_size=1, is_master=True
+            )  # noqa: F841
+
+    # TODO (xilunwu): this test does not work for libuv backend
+    @skip_if_win32()
+    def test_take_over_listen_socket(self):
+        listen_sock: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listen_sock.bind(("localhost", 0))
+        addr, port, *_ = listen_sock.getsockname()
+        listen_fd = listen_sock.detach()
+
+        store = self._create_store_with_port(
+            addr, port, world_size=1, is_master=True, master_listen_fd=listen_fd
+        )
+
+        store.set("key", "value")
+        self.assertEqual(b"value", store.get("key"))
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -821,18 +880,30 @@ class InitPgWithUvStore(TestCase):
 
     def test_with_url_param(self):
         port = common.find_free_port()
-        dist.init_process_group("gloo", rank=0, world_size=1, init_method=f"tcp://{DEFAULT_HOSTNAME}:{port}?use_libuv=1")
-        self._run_test()
+        dist.init_process_group("gloo", rank=0, world_size=1, init_method=f"tcp://{DEFAULT_HOSTNAME}:{port}")
+        self._run_test(True)
+
+    def test_with_url_param_non_libuv(self):
+        port = common.find_free_port()
+        dist.init_process_group("gloo", rank=0, world_size=1, init_method=f"tcp://{DEFAULT_HOSTNAME}:{port}?use_libuv=0")
+        self._run_test(False)
 
     def test_with_env_var(self):
         port = common.find_free_port()
-        os.environ["USE_LIBUV"] = "1"
         os.environ["MASTER_ADDR"] = DEFAULT_HOSTNAME
         os.environ["MASTER_PORT"] = str(port)
         dist.init_process_group("gloo", rank=0, world_size=1, init_method="env://")
-        self._run_test()
+        self._run_test(True)
 
-    def _run_test(self):
+    def test_with_env_var_non_libuv(self):
+        port = common.find_free_port()
+        os.environ["USE_LIBUV"] = "0"
+        os.environ["MASTER_ADDR"] = DEFAULT_HOSTNAME
+        os.environ["MASTER_PORT"] = str(port)
+        dist.init_process_group("gloo", rank=0, world_size=1, init_method="env://")
+        self._run_test(False)
+
+    def _run_test(self, use_libuv_exp):
         pg = dist.group.WORLD
         store = c10d._get_process_group_store(pg)
         self.assertTrue(isinstance(store, dist.PrefixStore))
@@ -840,7 +911,7 @@ class InitPgWithUvStore(TestCase):
         while isinstance(store, dist.PrefixStore):
             store = store.underlying_store
         self.assertTrue(isinstance(store, dist.TCPStore))
-        self.assertTrue(store.libuvBackend)
+        self.assertEqual(store.libuvBackend, use_libuv_exp)
         dist.destroy_process_group()
 
 if __name__ == "__main__":
