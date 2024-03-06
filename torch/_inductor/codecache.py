@@ -37,18 +37,7 @@ from pathlib import Path
 from threading import Thread
 from time import sleep, time
 from types import ModuleType
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 import torch
 
@@ -1583,7 +1572,6 @@ class AotCodeCompiler:
             specified_output_path,
             specified_so_name,
         ) = split_aot_inductor_output_path(config.aot_inductor.output_path)
-
         key, input_path = write(
             source_code,
             "cpp",
@@ -1845,10 +1833,9 @@ _libgomp: Optional[CDLL] = None
 
 
 class CppCodeCache:
-    cache: Dict[str, Union[CDLL, ModuleType, str]] = {}
+    cache: Dict[str, Union[CDLL, ModuleType]] = {}
     clear = staticmethod(cache.clear)
     cpp_compile_command_flags: Dict[str, Any] = {}
-    vec_isa: VecISA = invalid_vec_isa
 
     @staticmethod
     def _load_library_inner(path: str, key: str) -> Union[CDLL, ModuleType]:
@@ -1874,56 +1861,41 @@ class CppCodeCache:
             raise
 
     @classmethod
-    def compile(cls, source_code: str, cuda: bool = False) -> Tuple[str, str]:
-        cls.vec_isa = pick_vec_isa() if cls.vec_isa == invalid_vec_isa else cls.vec_isa
+    def load(cls, source_code: str, cuda: bool = False) -> Union[CDLL, ModuleType]:
         cls.cpp_compile_command_flags.update({"cuda": cuda})
+        picked_vec_isa = pick_vec_isa()
         cpp_command = repr(
             cpp_compile_command(
-                "i", "o", vec_isa=cls.vec_isa, **cls.cpp_compile_command_flags
+                "i", "o", vec_isa=picked_vec_isa, **cls.cpp_compile_command_flags
             )
         )
         key, input_path = write(source_code, "cpp", extra=cpp_command)
-        output_path: str = input_path[:-3] + "so"
-
         if key not in cls.cache:
             from filelock import FileLock
 
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
+                output_path = input_path[:-3] + "so"
                 if not os.path.exists(output_path):
                     cmd = shlex.split(
                         cpp_compile_command(
                             input=input_path,
                             output=output_path,
-                            vec_isa=cls.vec_isa,
+                            vec_isa=picked_vec_isa,
                             **cls.cpp_compile_command_flags,
                         )
                     )
                     compile_file(input_path, output_path, cmd)
-                    assert os.path.exists(
-                        output_path
-                    ), f"Failed to compile {input_path}"
-        else:
-            assert output_path == cls.cache[key], f"Cache mismatch for {key}"
-            assert os.path.exists(output_path), f"Failed to find {output_path}"
+                cls.cache[key] = cls._load_library(output_path, key)
+                cls.cache[key].key = key  # type: ignore[union-attr]
 
-        return key, output_path
-
-    @classmethod
-    def load(cls, source_code: str, cuda: bool = False) -> Union[CDLL, ModuleType, str]:
-        source_code_key, output_so_path = cls.compile(source_code, cuda)
-        if source_code_key not in cls.cache:
-            cls.cache[source_code_key] = cls._load_library(
-                output_so_path, source_code_key
-            )
-            cls.cache[source_code_key].key = source_code_key  # type: ignore[union-attr]
-        return cls.cache[source_code_key]
+        return cls.cache[key]
 
 
 # Customized Python binding for cpp kernels
 class CppPythonBindingsCodeCache(CppCodeCache):
-    cache: Dict[str, Union[CDLL, ModuleType, str]] = {}
+    cache: Dict[str, Union[CDLL, ModuleType]] = {}
     clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
         # kernels have no dependency on libtorch
@@ -2013,7 +1985,6 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         source_code: str,
         cuda: bool = False,
         num_outputs: int = -1,
-        kernel_meta_info: Any = None,
     ) -> Any:
         """
         Wrap a C++ function in fast Python bindings.
@@ -2029,94 +2000,32 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             f"parse_arg<{argtype.replace('const ', '')}>(args, {n})"
             for n, argtype in enumerate(argtypes)
         )
-
-        if config.aot_inductor.eager_mode:
-            c_func_name_decl = textwrap.dedent(
-                """
-                extern "C" {
-                    std::vector<at::Tensor> aoti_eager_inductor_entry_cpp(const std::vector<at::Tensor>& inputs) {
-                        return inductor_entry_cpp(inputs);
-                    }
-                }
-                """
-            )
-
-            source_code_key, output_so_path = cls.compile(
-                source_code + c_func_name_decl, cuda
-            )
-            if source_code_key not in cls.cache:
-                cls.cache[source_code_key] = output_so_path
-
-            if kernel_meta_info:
-                assert isinstance(kernel_meta_info, dict)
-                eager_cache_dir = pathlib.Path(os.path.join(cache_dir(), "aten_eager"))
-                eager_cache_dir.mkdir(parents=True, exist_ok=True)
-                op_name, input_tensors_meta_info = next(iter(kernel_meta_info.items()))
-                if op_name:
-                    kernel_meta_info = {}
-                    kernel_meta_info["meta_info"] = input_tensors_meta_info
-                    kernel_meta_info["kernel_path"] = output_so_path
-
-                    json_data = []
-                    update_json = True
-                    op_conf = os.path.join(eager_cache_dir, f"{op_name}.json")
-                    mode = "r" if os.path.exists(op_conf) else "w"
-                    with open(op_conf, mode) as f:
-                        try:
-                            json_data = json.load(f)
-                        except Exception as e:
-                            json_data = []
-
-                        assert isinstance(json_data, list)
-                        for item in json_data:
-                            assert isinstance(item, dict)
-                            if item["meta_info"] == input_tensors_meta_info:
-                                update_json = False
-                                break
-
-                    if update_json:
-                        json_data.append(kernel_meta_info)
-                        with open(op_conf, "w") as f:
-                            json.dump(json_data, f)
-
-            _extra_parse_arg = cls.extra_parse_arg % (
-                output_so_path,
-                cls.entry_function,
-            )
-        else:
-            _extra_parse_arg = cls.extra_parse_arg
-
         suffix = cls.suffix_template % (
             cls.entry_function,
             cls.extra_parse_arg % num_outputs if cls.extra_parse_arg else "",
-            _extra_parse_arg,
             cls.entry_function,
             len(argtypes),
             len(argtypes),
-            cls.call_entry_function % (cls.entry_function, parseargs),
+            cls.call_entry_function % parseargs,
             cls.entry_function,
             cls.entry_function,
             cls.entry_function,
             cls.entry_function,
         )
-
-        if config.aot_inductor.eager_mode:
-            result = cls.load(suffix, cuda)
-        else:
-            result = cls.load(source_code + suffix, cuda)
+        result = cls.load(source_code + suffix, cuda)
         assert isinstance(result, ModuleType)
         return getattr(result, cls.entry_function)
 
 
 class CppWrapperCodeCache(CppPythonBindingsCodeCache):
-    cache: Dict[str, Union[CDLL, ModuleType, str]] = {}
+    cache: Dict[str, Union[CDLL, ModuleType]] = {}
     clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
         "include_pytorch": True,
         "shared": True,
     }
     entry_function = "inductor_entry_cpp"
-    call_entry_function = "return THPVariable_WrapList(%s(%s));"
+    call_entry_function = "return THPVariable_WrapList(inductor_entry_cpp(%s));"
     extra_parse_arg = textwrap.dedent(
         """
         #include <torch/csrc/autograd/python_variable.h>
@@ -2145,67 +2054,6 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
 
             return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
                 output_handles.data(), output_handles.size());
-        }
-        """
-    )
-
-
-class CppWrapperCodeCacheForEager(CppWrapperCodeCache):
-    entry_function = "inductor_entry_cpp_eager"
-    extra_parse_arg = textwrap.dedent(
-        """
-        #include <dlfcn.h>
-        #include <torch/csrc/autograd/python_variable.h>
-
-        template <> inline std::vector<at::Tensor> parse_arg<std::vector<at::Tensor>>(PyObject* args, size_t n) {
-            return THPVariable_UnpackList(PyTuple_GET_ITEM(args, n));
-        }
-
-        using inductor_entry_cpp_t = std::vector<at::Tensor> (*)(const std::vector<at::Tensor>&);
-
-        namespace {
-            class SharedAOTIKernelObject {
-            public:
-                SharedAOTIKernelObject(const char* soPath) {
-                    inductor_entry_cpp_so_handle = dlopen(soPath, RTLD_NOW | RTLD_LOCAL);
-                    if (!inductor_entry_cpp_so_handle) {
-                        throw std::runtime_error("Cannot load library: " + std::string(dlerror()));
-                    }
-
-                    inductor_entry_cpp_so_sym = dlsym(inductor_entry_cpp_so_handle, "aoti_eager_inductor_entry_cpp");
-                    if (!inductor_entry_cpp_so_sym) {
-                        dlclose(inductor_entry_cpp_so_handle);
-                        inductor_entry_cpp_so_handle = nullptr;
-                        throw std::runtime_error("Cannot load symbol 'inductor_entry_cpp': " + std::string(dlerror()));
-                    }
-                }
-
-                ~SharedAOTIKernelObject() {
-                    if (inductor_entry_cpp_so_handle) {
-                        dlclose(inductor_entry_cpp_so_handle);
-                        inductor_entry_cpp_so_handle = nullptr;
-                        inductor_entry_cpp_so_sym = nullptr;
-                    }
-                }
-
-                SharedAOTIKernelObject(const SharedAOTIKernelObject&) = delete;
-                SharedAOTIKernelObject& operator=(const SharedAOTIKernelObject&) = delete;
-
-                std::vector<at::Tensor> operator()(const std::vector<at::Tensor>& inputs) {
-                    return reinterpret_cast<inductor_entry_cpp_t>(inductor_entry_cpp_so_sym)(inputs);
-                }
-
-            private:
-                void* inductor_entry_cpp_so_handle = nullptr;
-                void* inductor_entry_cpp_so_sym = nullptr;
-            };
-
-            SharedAOTIKernelObject aoti_eager_inductor_entry_cpp_kernel("%s");
-        }
-
-        std::vector<at::Tensor> %s(const std::vector<at::Tensor>& inputs) {
-            pybind11::gil_scoped_release release;
-            return aoti_eager_inductor_entry_cpp_kernel(inputs);
         }
         """
     )
@@ -2771,10 +2619,7 @@ class AsyncCompile:
 
     def cpp(self, source_code: str) -> ModuleType:
         def task():
-            cpp_code_cache = cast(
-                Union[CDLL, ModuleType], CppCodeCache.load(source_code)
-            )
-            return cpp_code_cache.kernel
+            return CppCodeCache.load(source_code).kernel
 
         return self.submit(task)
 
