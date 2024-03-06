@@ -127,6 +127,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
       (*stack)[arguments_begin + idx] = c10::IValue(opt_tensors);
     } else if (ivalue.isDevice()) {
       device = ivalue.toDevice();
+      (*stack)[arguments_begin + idx] = c10::IValue(c10::Device(kCPU));
     }
   }
   // XLA requires all of the tensor arguments to be gathered up and converted to CPU together.
