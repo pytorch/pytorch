@@ -2300,6 +2300,84 @@ class DictGetItemGuardAccessor : public GuardAccessor {
 };
 
 /**
+ * Represents func.__defaults__ accessor.
+ */
+class FuncDefaultsGuardAccessor : public GuardAccessor {
+ public:
+  FuncDefaultsGuardAccessor(
+      RootGuardManager* root,
+      py::object name,
+      std::string source,
+      py::handle example_value)
+      : GuardAccessor(root, name, source, example_value) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    if (!PyFunction_Check(obj)) {
+      return false;
+    }
+
+    PyObject* x = PyFunction_GetDefaults(obj); // borrowed ref
+    return _guard_manager->check_nopybind(x);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    if (!PyFunction_Check(obj)) {
+      return GuardDebugInfo(
+          false, std::string("Not a function on ") + get_source(), 0);
+    }
+
+    PyObject* x = PyFunction_GetDefaults(obj);
+    return _guard_manager->check_verbose_nopybind(x);
+  }
+
+  std::string repr() const override {
+    return "FuncDefaultsGuardAccessor";
+  }
+};
+
+/**
+ * Represents func.__kwdefaults__ accessor.
+ */
+class FuncKwDefaultsGuardAccessor : public GuardAccessor {
+ public:
+  FuncKwDefaultsGuardAccessor(
+      RootGuardManager* root,
+      py::object name,
+      std::string source,
+      py::handle example_value)
+      : GuardAccessor(root, name, source, example_value) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    if (!PyFunction_Check(obj)) {
+      return false;
+    }
+
+    PyObject* x = PyFunction_GetKwDefaults(obj); // borrowed ref
+    return _guard_manager->check_nopybind(x);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    if (!PyFunction_Check(obj)) {
+      return GuardDebugInfo(
+          false, std::string("Not a function on ") + get_source(), 0);
+    }
+
+    PyObject* x = PyFunction_GetKwDefaults(obj);
+    return _guard_manager->check_verbose_nopybind(x);
+  }
+
+  std::string repr() const override {
+    return "FuncKwDefaultsGuardAccessor";
+  }
+};
+
+/**
  * Represents f_globals acccessor. This sits as a child accessor of the
  * RootGuardManager.
  */
@@ -2748,6 +2826,16 @@ PyObject* torch_c_dynamo_guards_init() {
       std::unique_ptr<DictGetItemGuardAccessor>>(
       py_m, "DictGetItemGuardAccessor");
   py::class_<
+      FuncDefaultsGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<FuncDefaultsGuardAccessor>>(
+      py_m, "FuncDefaultsGuardAccessor");
+  py::class_<
+      FuncKwDefaultsGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<FuncKwDefaultsGuardAccessor>>(
+      py_m, "FuncKwDefaultsGuardAccessor");
+  py::class_<
       GlobalsGuardAccessor,
       GuardAccessor,
       std::unique_ptr<GlobalsGuardAccessor>>(py_m, "GlobalsGuardAccessor");
@@ -2935,6 +3023,38 @@ PyObject* torch_c_dynamo_guards_init() {
           "dict_getitem_manager",
           &GuardManager::get_child_manager<DictGetItemGuardAccessor>,
           py::arg("key"),
+          py::arg("source"),
+          py::arg("example_value"),
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "func_defaults_manager",
+          [](GuardManager& self,
+             std::string source,
+             py::object example_value) -> GuardManager* {
+            // A unique key is used to save as the accessor key.
+            py::str unique_key("__defaults_accessor__");
+            return self.get_child_manager<FuncDefaultsGuardAccessor>(
+                unique_key, source, example_value);
+          },
+          py::arg("source"),
+          py::arg("example_value"),
+          py::return_value_policy::reference)
+
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "func_kwdefaults_manager",
+          [](GuardManager& self,
+             std::string source,
+             py::object example_value) -> GuardManager* {
+            // A unique key is used to save as the accessor key.
+            py::str unique_key("__kwdefaults_accessor__");
+            return self.get_child_manager<FuncKwDefaultsGuardAccessor>(
+
+                unique_key, source, example_value);
+          },
           py::arg("source"),
           py::arg("example_value"),
           py::return_value_policy::reference)

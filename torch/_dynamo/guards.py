@@ -566,12 +566,8 @@ class GuardBuilder(GuardBuilderBase):
             elif istype(source, DefaultsSource):
                 assert base_guard_manager  # to make mypy happy
                 if not source.is_kw:
-                    # TODO(anijain2305) - Use a defaults manager using
-                    # PyFunction_GetDefaults, could be faster than
-                    # PyObject_GetItem.
                     assert callable(base_example_value)
-                    return base_guard_manager.getattr_manager(
-                        attr="__defaults__",
+                    return base_guard_manager.func_defaults_manager(
                         source=base_source_name,
                         example_value=base_example_value.__defaults__,
                     ).getitem_manager(
@@ -584,8 +580,7 @@ class GuardBuilder(GuardBuilderBase):
                     # If we set example_value =
                     # base_example_value.__kwdefaults__, we will get a
                     # DictGuardManager.
-                    return base_guard_manager.getattr_manager(
-                        attr="__kwdefaults__",
+                    return base_guard_manager.func_kwdefaults_manager(
                         source=base_source_name,
                         example_value=None,
                     ).dict_getitem_manager(
