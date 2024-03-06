@@ -4554,8 +4554,6 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.FractionalMaxPool3d,  # int() argument must be a string, a bytes-like object or a number, not 'SymFloat'
     torch.nn.BCELoss,  # new_size = _infer_size(target.size(), weight.size())
                        # RuntimeError: expected int at position 0, but got: SymInt
-    torch.nn.CrossEntropyLoss,  # RuntimeError: Cannot call numel() on tensor with symbolic sizes/strides
-    torch.nn.NLLLoss,  # RuntimeError: Cannot call numel() on tensor with symbolic sizes/strides
 }
 
 
