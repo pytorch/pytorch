@@ -198,6 +198,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+          SCCACHE_REGION: us-east-1
           SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
