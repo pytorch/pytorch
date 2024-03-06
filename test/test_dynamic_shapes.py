@@ -942,6 +942,18 @@ class TestSymNumberMagicMethods(TestCase):
         hash(n)
         hash(m)
 
+    def test_symnode_deepcopy(self):
+        shape_env = ShapeEnv()
+
+        symnodes = (
+            create_symint(shape_env, 3),
+            create_symbool(shape_env, True),
+            create_symfloat(shape_env, 3.0),
+            torch._C._get_nested_int(1, 1),
+        )
+        deepcopied_symnodes = copy.deepcopy(symnodes)
+        self.assertEqual(symnodes, deepcopied_symnodes)
+
     def test_non_symbolic_symnode(self):
         j1 = torch._C._get_nested_int(1, 1)
         j2 = torch._C._get_nested_int(1, 1)
