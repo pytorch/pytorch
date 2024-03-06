@@ -20,8 +20,8 @@ static_assert(
     "Caffe2 requires cudnn version 8.2 or above.");
 
 #define CUDNN_VERSION_MIN(major, minor, patch) \
-  (major >= 9 ? CUDNN_VERSION >= ((major) * 10000 + (minor) * 100 + (patch)) : \
-		CUDNN_VERSION >= ((major) * 1000 + (minor) * 100 + (patch)))
+    (major >= 9 ? CUDNN_VERSION >= ((major) * 10000 + (minor) * 100 + (patch)) : \
+                  CUDNN_VERSION >= ((major) * 1000 + (minor) * 100 + (patch)))
 
 namespace caffe2 {
 
