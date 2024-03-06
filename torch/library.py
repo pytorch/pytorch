@@ -318,16 +318,18 @@ def impl(qualname, types, func=None, *, lib=None):
         >>> import numpy as np
         >>>
         >>> # Define the operator
-        >>> torch.library.define("mylibrary::sin", "(Tensor x) -> Tensor")
+        >>> torch.library.define("mylib::sin", "(Tensor x) -> Tensor")
         >>>
-        >>> # Add implementations for the cpu device
-        >>> @torch.library.impl("mylibrary::sin", "cpu")
+        >>> # Add implementations for the operator
+        >>> @torch.library.impl("mylib::sin", "cpu")
         >>> def f(x):
         >>>     return torch.from_numpy(np.sin(x.numpy()))
         >>>
+        >>> # Call the new operator from torch.ops.
         >>> x = torch.randn(3)
-        >>> y = torch.ops.mylibrary.sin(x)
-        >>> assert torch.allclose(y, x.sin())
+        >>> y1 = torch.ops.mylib.sin(x)
+        >>> y2 = np.sin(x)
+        >>> assert torch.allclose(y1, y2)
     """
     if isinstance(types, str):
         types = (types,)
