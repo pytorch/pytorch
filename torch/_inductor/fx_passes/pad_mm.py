@@ -60,32 +60,28 @@ def check_dtype(a: Tensor, b: Tensor) -> bool:
     return a.is_floating_point() and b.is_floating_point()
 
 
-def _result_layout_affects_graph_output(
-    match: Match, max_depth=30, max_iters=200
-) -> bool:
+def _result_layout_affects_graph_output(match: Match) -> bool:
     """
-    Heuristic to check if the matched GEMM operation potentially affects the graph output strides.
+    Check if the matched GEMM operation potentially affects the graph output strides.
     returns True if the matched op's output buffer does not pass through functions which certainly
     redefine the memory layout before being part of the graph output.
-
-    I call it a heuristic because it's a truncated search and doesn't cover all possible
-    cases. It tries to err on the side of caution, e.g. it's better to return True
-    even if the match cannot affect output strides than to return False if it can.
     """
 
     if match.ctx is not None:
         assert isinstance(match.ctx, MatchContext)
-        graph: torch.fx.Graph = match.ctx.graph
         search_node: torch.fx.Node = match.output_node()
     else:
         return True
 
     assert search_node is not None
-    assert graph is not None
+    seen: Set[torch.fx.Node] = set()
 
     def find_output(node: torch.fx.Node, is_start_node=False):
         if not isinstance(node, torch.fx.Node):
             return False
+        if node in seen:
+            return False
+        seen.add(node)
         if node.op == "output":
             return True
         if node.op != "call_function":
