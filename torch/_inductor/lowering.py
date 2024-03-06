@@ -2176,12 +2176,6 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
 FALLBACK_ALLOW_LIST = {
     "torchvision::roi_align",
 }
-make_fallback(aten._cudnn_rnn, require_dense)
-make_fallback(aten._cudnn_rnn_backward, require_contiguous)
-make_fallback(aten._embedding_bag, require_contiguous)
-make_fallback(aten._embedding_bag_forward_only, require_contiguous)
-make_fallback(aten._fused_moving_avg_obs_fq_helper)
-make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 
 
 def sdpa_constraint(fx_node, *args, **kwargs):
@@ -2296,11 +2290,17 @@ make_fallback(aten._addmm_activation, warn=False)
 
 # Need templated kernel. Probably impossible to write efficiently
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)
+make_fallback(aten._cudnn_rnn, require_dense)
+make_fallback(aten._cudnn_rnn_backward, require_contiguous)
 
-# Haven't checked but sound difficult
-make_fallback(aten._embedding_bag_per_sample_weights_backward)
-make_fallback(aten._embedding_bag_per_sample_weights_backward)
+# Haven't checked but sound difficult / impossible
+make_fallback(aten._embedding_bag, require_contiguous)
+make_fallback(aten._embedding_bag_forward_only, require_contiguous)
 make_fallback(aten._embedding_bag_dense_backward)
+make_fallback(aten._embedding_bag_per_sample_weights_backward)
+make_fallback(aten._embedding_bag_per_sample_weights_backward)
+make_fallback(aten._fused_moving_avg_obs_fq_helper)
+make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 
 
 # 4) Backwards (try py_impl'ing them) when fwd is written as a decomp
@@ -2361,7 +2361,37 @@ make_fallback(aten.cholesky_solve)
 make_fallback(aten.geqrf)
 make_fallback(aten._fft_r2c)  # needs complex as well
 
-# Pattern-matched
+# Data dependent (are these necessary?)
+make_fallback(aten.nonzero.default)
+
+# Misc
+make_fallback(aten.gcd.default, warn=False)
+make_fallback(aten._thnn_fused_lstm_cell, require_dense)
+make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
+make_fallback(torch._prims.rng_prims.run_with_rng_state)
+
+# Implmented / Half implemented
+# Scans. Implemented for CUDA, missing CPU
+make_fallback(aten.masked_scatter)
+make_fallback(aten.masked_scatter_backward)
+
+# Complex number support
+make_fallback(aten.view_as_complex, require_contiguous)
+make_fallback(aten.angle)  # needs complex
+
+# Needs efficentzerotensor
+make_fallback(aten._efficientzerotensor)
+
+# Needs Sparse
+make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
+make_fallback(aten.to_sparse)
+make_fallback(aten._to_sparse)
+
+# Needs dimname support
+make_fallback(aten.zeros.names)
+
+
+# 6) Pattern-matched
 make_fallback(
     aten._scaled_dot_product_efficient_attention.default,
     sdpa_constraint,
@@ -2396,36 +2426,6 @@ make_fallback(aten._flash_attention_forward.default, sdpa_constraint)
 make_fallback(aten._flash_attention_backward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_forward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
-
-
-# Data dependent (are these necessary?)
-make_fallback(aten.nonzero.default)
-
-# Misc
-make_fallback(aten.gcd.default, warn=False)
-make_fallback(aten._thnn_fused_lstm_cell, require_dense)
-make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
-make_fallback(torch._prims.rng_prims.run_with_rng_state)
-
-# Implmented / Half implemented
-# Scans. Implemented for CUDA, missing CPU
-make_fallback(aten.masked_scatter)
-make_fallback(aten.masked_scatter_backward)
-
-# Complex number support
-make_fallback(aten.view_as_complex, require_contiguous)
-make_fallback(aten.angle)  # needs complex
-
-# Needs efficentzerotensor
-make_fallback(aten._efficientzerotensor)
-
-# Needs Sparse
-make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
-make_fallback(aten.to_sparse)
-make_fallback(aten._to_sparse)
-
-# Needs dimname support
-make_fallback(aten.zeros.names)
 
 
 # Register with type_promotion_kind None.
