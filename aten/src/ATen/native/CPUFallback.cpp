@@ -189,8 +189,9 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
   const auto returns_begin = stack->size() - num_returns;
 
   c10::optional<c10::Device> tgt_device = c10::nullopt;
-  if (compute_target_device(tensor_args, tensorlist_args) != c10::nullopt) {
-    tgt_device = compute_target_device(tensor_args, tensorlist_args);
+  auto computed_tgt_device = compute_target_device(tensor_args, tensorlist_args);
+  if (computed_tgt_device != c10::nullopt) {
+    tgt_device = computed_tgt_device;
   } else {
     tgt_device = device;
   }
