@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from typing import Optional, Union, Tuple
 from functools import partial
 
+import torch
 import torch.nn as nn
 from torch.distributed._tensor import DeviceMesh, DTensor, Placement, Replicate, Shard, distribute_tensor, distribute_module
 
@@ -240,6 +241,86 @@ class RowwiseParallel(ParallelStyle):
             partition_fn,
             partial(self._prepare_input_fn, self.input_layouts, self.desired_input_layouts),
             partial(self._prepare_output_fn, self.output_layouts, self.use_local_output),
+        )
+
+class SequenceParallel(ParallelStyle):
+    """
+    SequenceParallel replicate a compatible nn.Module parameters and run the sharded computation with the sharded
+    input that shards on the sequence dimension. Currently supporting ``nn.LayerNorm``, ``nn.Dropout`` and the
+    `RMSNorm python implementation <https://github.com/facebookresearch/llama/blob/main/llama/model.py#L34>`__
+
+    This style implements the operation that described in the paper
+    `Reducing Activation Recomputation in Large Transformer Models <https://arxiv.org/abs/2205.05198>`__
+
+    Both the input and output of the nn.Module will be sharded on the sequence dimension.
+
+    Keyword Args:
+        sequence_dim (int, optional):
+            The sequence dimension of the input tensor for the nn.Module, this is used to annotate the input tensor to
+            become a DTensor that is sharded on the sequence dimension.
+        use_local_output (bool, optional):
+            Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module output, default: False.
+    Returns:
+        A :class:`ParallelStyle` object that represents Sequence Parallel of the nn.Module.
+
+    Example::
+        >>> # xdoctest: +SKIP(failing)
+        >>> from torch.distributed.tensor.parallel import parallelize_module, SequenceParallel
+        >>> from torch.distributed.device_mesh import init_device_mesh
+        >>> ...
+        >>> m = Model(...)  # m is a nn.Module that contains a "norm" nn.LayerNorm submodule
+        >>> tp_mesh = init_device_mesh("cuda", (8,))
+        >>>
+        >>> # By default, the input of the "norm" will be converted to DTensor that shards on the sequence dim
+        >>> # and the output of "norm" will return a sharded on sequence dimension :class:`torch.Tensor`.
+        >>>
+        >>> sharded_mod = parallelize_module(m, tp_mesh, {"norm": SequenceParallel()}),
+        >>> ...
+    """
+    def __init__(
+        self,
+        *,
+        sequence_dim: int = 1,
+        use_local_output: bool = False
+    ):
+        super().__init__()
+        self.sequence_dim = sequence_dim
+        self.use_local_output = use_local_output
+
+    def _replicate_module_fn(self, name: str, module: nn.Module, device_mesh: DeviceMesh):
+        for p_name, param in module.named_parameters():
+            # simple replication with fixed ones_ init from LayerNorm/RMSNorm, which allow
+            # us to simply just use from_local
+            replicated_param = torch.nn.Parameter(
+                DTensor.from_local(param, device_mesh, [Replicate()], run_check=False)
+            )
+            # unsafely setattr to bypass the reconstruction of nn.Parameter(to avoid
+            # unnecessary `detach() + requires_grad_`
+            # module._parameters[p_name] = replicated_dtensor  # type: ignore[assignment]
+            # super(nn.Module, module).__setattr__(p_name, replicated_dtensor)
+            module.register_parameter(p_name, replicated_param)
+
+    @staticmethod
+    def _prepare_input_fn(sequence_dim, mod, inputs, device_mesh):
+        input_tensor = inputs[0]
+        if isinstance(input_tensor, DTensor):
+            return inputs
+        elif isinstance(input_tensor, torch.Tensor):
+            return DTensor.from_local(input_tensor, device_mesh, [Shard(sequence_dim)], run_check=False)
+        else:
+            raise ValueError(f"expecting input of {mod} to be a torch.Tensor or DTensor")
+
+    @staticmethod
+    def _prepare_output_fn(use_local_output, mod, outputs, device_mesh):
+        return outputs.to_local() if use_local_output else outputs
+
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+        return distribute_module(
+            module,
+            device_mesh,
+            self._replicate_module_fn,
+            partial(self._prepare_input_fn, self.sequence_dim),
+            partial(self._prepare_output_fn, self.use_local_output),
         )
 
 
