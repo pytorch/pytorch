@@ -673,11 +673,40 @@ def distribute_module(
 
     Returns:
         A module that contains parameters/buffers that are all `DTensor`s.
+
+    Note:
+        When initialize the DeviceMesh with the `xla` device_type, `distribute_module`
+        return nn.Module with PyTorch/XLA SPMD annotated parameters. See [link](https://github.com/pytorch/pytorch/issues/92909)
+        for more details. The XLA integration is experimental and subject to change.
     """
 
     torch._C._log_api_usage_once("torch.dtensor.distribute_module")
 
     device_mesh = device_mesh or _mesh_resources.get_current_mesh()
+    device_type = device_mesh.device_type
+    if device_type == "xla":
+        try:
+            # This function annotates all module parameters for auto-partitioning with
+            # PyTorch/XLA SPMD or explicitly partition to :class:`XLAShardedTensor` parameters
+            # according to the `partition_fn` specified.
+            from torch_xla.distributed.spmd import (  # type:ignore[import]
+                xla_distribute_module,
+            )
+
+            return xla_distribute_module(
+                module, device_mesh, partition_fn, input_fn, output_fn
+            )  # type:ignore[return-value]
+        except ImportError as e:
+            msg = "To use DTensor API with xla, you must install the torch_xla package!"
+            raise ImportError(msg) from e
+    if device_type == "xla":
+        # call PyTorch/XLA SPMD for `xla` backend type device mesh.
+        # This returns annotated module for PyTorch/XLA SPMD.
+        from torch.distributed._tensor._xla import xla_distribute_module
+
+        return xla_distribute_module(
+            module, device_mesh, partition_fn, input_fn, output_fn
+        )  # type:ignore[return-value]
 
     def replicate_module_params_buffers(m: nn.Module, mesh: DeviceMesh) -> None:
         # This function loop over the immediate module parameters and
