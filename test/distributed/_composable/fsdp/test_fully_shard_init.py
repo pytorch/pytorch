@@ -14,7 +14,7 @@ from torch.distributed._composable.fsdp._fsdp_init import (
 )
 from torch.distributed._composable.fsdp._fsdp_param import ParamModuleInfo
 from torch.distributed._composable.fsdp._fsdp_param_group import _get_param_module_infos
-from torch.distributed._tensor import DeviceMesh, DTensor, random, Replicate, Shard
+from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -526,8 +526,6 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
         const = 1337
         for tensor in itertools.chain(model.parameters(), model.buffers()):
             tensor.detach().fill_(const)
-        tp_dim = max(0, mesh.mesh.ndim - 1)  # only used for TP
-        random.manual_seed(42, mesh, tp_dim)  # initialize a `CudaRNGStateTracker`
         for module in model.modules():
             if hasattr(module, "reset_parameters"):
                 module.reset_parameters()
