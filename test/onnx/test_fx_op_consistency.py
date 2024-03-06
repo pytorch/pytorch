@@ -135,10 +135,6 @@ def skip_torchlib_forward_compatibility(
 #     2b. If a test is not failing consistently, use skip.
 EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
-        "_chunk_cat",
-        reason=onnx_test_common.reason_dynamo_does_not_support("_chunk_cat")
-    ),
-    xfail(
         "__getitem__",
         reason="io_adaper doesn't support __getitem__ input slice(0, 3, None)",
     ),
