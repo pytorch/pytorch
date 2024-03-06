@@ -4092,10 +4092,12 @@
 
 - func: _convert_weight_to_int4pack(Tensor self, int innerKTiles) -> Tensor
   dispatch:
+    CPU: _convert_weight_to_int4pack_cpu
     CUDA: _convert_weight_to_int4pack_cuda
 
 - func: _weight_int4pack_mm(Tensor self, Tensor mat2, int qGroupSize, Tensor qScaleAndZeros) -> Tensor
   dispatch:
+    CPU: _weight_int4pack_mm_cpu
     CUDA: _weight_int4pack_mm_cuda
 
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
@@ -13812,11 +13814,18 @@
   dispatch:
     CPU, CUDA: linalg_eig_out
 
+- func: _linalg_eigvals(Tensor self) -> Tensor
+  python_module: linalg
+  dispatch:
+    CPU, CUDA: _linalg_eigvals
+
 - func: linalg_eigvals(Tensor self) -> Tensor
   python_module: linalg
 
 - func: linalg_eigvals.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
+  dispatch:
+    CPU, CUDA: linalg_eigvals_out
 
 # This function is exposes the `compute_v` flag, which is then used to implement `linalg.eigh` and
 # `linalg.eigvalsh` as composite functions that call this one

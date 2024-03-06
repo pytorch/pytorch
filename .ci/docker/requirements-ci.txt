@@ -248,7 +248,8 @@ tb-nightly==2.13.0a20230426
 #Pinned versions:
 #test that import:
 
-#typing-extensions
+# needed by torchgen utils
+typing-extensions
 #Description: type hints for python
 #Pinned versions:
 #test that import:
@@ -263,7 +264,8 @@ unittest-xml-reporting<=3.2.0,>=2.0.0
 #Pinned versions:
 #test that import:
 
-lintrunner==0.10.7
+#wheel not found on aarch64, and source build requires rust
+lintrunner==0.10.7 ; platform_machine == "x86_64"
 #Description: all about linters!
 #Pinned versions: 0.10.7
 #test that import:
