@@ -500,6 +500,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         grid: List[int],
         num_stages: int,
         num_warps: int,
+        matrix_instr_nonkdim: int = 0,  # only used for hip to choose the shape of mfma instruction.
     ):
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.module_path = module_path
@@ -507,6 +508,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         self.grid = grid
         self.num_stages = num_stages
         self.num_warps = num_warps
+        self.matrix_instr_nonkdim = matrix_instr_nonkdim
 
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
@@ -529,16 +531,29 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         if "warmup" in inspect.signature(run_method).parameters:
             warmup_arg["warmup"] = False
 
-        return functools.partial(
-            run_method,
-            *input_tensors,
-            output_tensor,
-            *self.extra_args,
-            grid=self.grid,
-            **warmup_arg,
-            num_stages=self.num_stages,
-            num_warps=self.num_warps,
-        )
+        if torch.version.hip and self.matrix_instr_nonkdim != 0:
+            return functools.partial(
+                run_method,
+                *input_tensors,
+                output_tensor,
+                *self.extra_args,
+                grid=self.grid,
+                **warmup_arg,
+                num_stages=self.num_stages,
+                num_warps=self.num_warps,
+                matrix_instr_nonkdim=self.matrix_instr_nonkdim,
+            )
+        else:
+            return functools.partial(
+                run_method,
+                *input_tensors,
+                output_tensor,
+                *self.extra_args,
+                grid=self.grid,
+                **warmup_arg,
+                num_stages=self.num_stages,
+                num_warps=self.num_warps,
+            )
 
     def __str__(self) -> str:
         return f"{self.kernel_name=}, {self.module_path=}, {self.module_cache_key=}"

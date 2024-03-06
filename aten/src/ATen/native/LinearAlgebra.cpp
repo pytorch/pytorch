@@ -1172,9 +1172,9 @@ static TensorIterator build_addr_iter(Tensor& result,
   auto iter = TensorIteratorConfig()
     .set_check_mem_overlap(true)
     .add_output(result)
-    .add_owned_input(*self_)
-    .add_owned_input(vec1.reshape({vec1_size0, 1}))
-    .add_input(vec2)
+    .add_owned_const_input(*self_)
+    .add_owned_const_input(vec1.reshape({vec1_size0, 1}))
+    .add_const_input(vec2)
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
     .cast_common_dtype_to_outputs(true)
@@ -1835,6 +1835,8 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
                 r, r, batch1.select(0, b), batch2.select(0, b), 0, 1);
           }
         };
+        // Materialize if COW, since we cannot do so during parallel_for
+        self_or_result.mutable_data_ptr();
         at::parallel_for(0, bs, 1, bmm_out_fn);
       } else {
         for (const auto b : c10::irange(bs)) {
@@ -1851,6 +1853,8 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
                 batch1.select(0, b), batch2.select(0, b), beta, alpha);
           }
         };
+        // Materialize if COW, since we cannot do so during parallel_for
+        self_or_result.mutable_data_ptr();
         at::parallel_for(0, bs, 1, bmm_fn);
       } else {
         for (const auto b : c10::irange(bs)) {
