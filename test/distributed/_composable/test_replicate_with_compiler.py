@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
+import functools
 import os
 import unittest
 from copy import deepcopy
@@ -221,29 +222,32 @@ class ReplicateTest(MultiProcessTestCase):
     def test_compile_backward_only(self):
         self._test_compile(use_gpu=True, no_sync=False, no_compile_forward=True)
 
-    def _test_bucketing(self):
-        dist.init_process_group(
-            backend="gloo",
-            rank=self.rank,
-            world_size=self.world_size,
-            store=dist.FileStore(self.file_name, self.world_size),
-        )
+    def _test_bucketing(self, init_process_group=True, loop=1):
+        if init_process_group:
+            dist.init_process_group(
+                backend="gloo",
+                rank=self.rank,
+                world_size=self.world_size,
+                store=dist.FileStore(self.file_name, self.world_size),
+            )
         model = Net()
         input = torch.randn([1, DIM])
         torch._dynamo.config.optimize_ddp = "python_reducer"
         compiled_model = torch.compile(replicate(deepcopy(model)), fullgraph=True)
-        with compiled_autograd.enable(compiler_fn()):
-            for i in range(1):
-                loss = compiled_model(input).sum()
+
+        def bwd(loss):
+            with compiled_autograd.enable(compiler_fn()):
                 loss.backward()
 
-        with compiled_autograd.enable(compiler_fn()):
+        for i in range(loop):
             loss = compiled_model(input).sum()
+            if i != loop - 1:
+                # Leave the last bwd for the run_and_get_triton_code.
+                bwd(loss)
 
-            def fn():
-                loss.backward()
-
-            code = run_and_get_triton_code(fn)
+        code = run_and_get_triton_code(functools.partial(bwd, loss=loss))
+        # if loop > 1:
+        # assert False, code
 
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         return code
@@ -255,6 +259,7 @@ class ReplicateTest(MultiProcessTestCase):
             "schedule_comm_wait",
         ]
 
+        # Gradient is None
         code = self._test_bucketing()
         self.assertEquals(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
@@ -263,9 +268,22 @@ class ReplicateTest(MultiProcessTestCase):
                 "torch.ops._c10d_functional.all_reduce_coalesced_.default("
             )
         for i in range(3):
-            fc.check("torch.ops._c10d_functional.wait_tensor.default").check(
-                "cpp_fused_"
-            ).run(code)
+            fc.check("torch.ops._c10d_functional.wait_tensor.default")
+
+        fc.run(code)
+
+        # Gradient is None
+        code = self._test_bucketing(init_process_group=False, loop=2)
+        self.assertEquals(counters["inductor"]["ddp_buckets"], 3)
+        fc = FileCheck()
+        for i in range(3):
+            fc.check("cpp_fused_").check(
+                "torch.ops._c10d_functional.all_reduce_coalesced_.default("
+            )
+        for i in range(3):
+            fc.check("torch.ops._c10d_functional.wait_tensor.default")
+
+        fc.run(code)
 
     @run_with_native_funcol
     def test_bucketing_concat_op(self):
@@ -274,6 +292,7 @@ class ReplicateTest(MultiProcessTestCase):
             "schedule_comm_wait",
         ]
 
+        # Gradient is None
         code = self._test_bucketing()
         self.assertEquals(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
@@ -282,9 +301,19 @@ class ReplicateTest(MultiProcessTestCase):
                 "torch.ops._c10d_functional.all_reduce_.default("
             )
         for i in range(3):
-            fc.check("torch.ops._c10d_functional.wait_tensor.default").check(
-                "cpp_fused_"
+            fc.check("torch.ops._c10d_functional.wait_tensor.default")
+        fc.run(code)
+
+        # Gradient is not None
+        code = self._test_bucketing(init_process_group=False, loop=2)
+        self.assertEquals(counters["inductor"]["ddp_buckets"], 3)
+        fc = FileCheck()
+        for i in range(3):
+            fc.check("aten.flatten.using_ints(").check("cpp_fused_").check(
+                "torch.ops._c10d_functional.all_reduce_.default("
             )
+        for i in range(3):
+            fc.check("torch.ops._c10d_functional.wait_tensor.default")
         fc.run(code)
 
 
