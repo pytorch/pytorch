@@ -1,6 +1,8 @@
 name: aarch64
 
 on:
+  # For testing purposes, removeme later
+  pull_request:
   push:
     tags:
       - ciflow/aarch64/*
