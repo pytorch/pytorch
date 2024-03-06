@@ -3230,9 +3230,9 @@ def _unsafe_masked_index(self, mask, indices, fill):
     )
 
 
-@register_lowering(aten._unsafe_masked_index_put)
-def _unsafe_masked_index_put(x, mask, indices, values, accumulate=False):
-    masked_value = where(mask, values, 0)
+@register_lowering(aten._unsafe_masked_index_put_accumulate)
+def _unsafe_masked_index_put_accumulate(x, mask, indices, values):
+    masked_value = where(mask, values, 3)
     shape = x.get_size()
     clamped_indices = [
         clamp(indices[i], -shape[i], shape[i] - 1) if indices[i] else None
@@ -3240,7 +3240,7 @@ def _unsafe_masked_index_put(x, mask, indices, values, accumulate=False):
     ]
     # TODO: use a masked store for this. currently only triton
     # supports masked stores and cpp backend does not.
-    return _unsafe_index_put(x, clamped_indices, masked_value, accumulate)
+    return _unsafe_index_put(x, clamped_indices, masked_value, accumulate=True)
 
 
 @make_pointwise
