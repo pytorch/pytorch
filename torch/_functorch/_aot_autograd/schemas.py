@@ -102,7 +102,13 @@ class OutputAliasInfo:
     # requires_grad
     requires_grad: bool
     # FunctionalTensorWrapper that represents this output.
+    #
     # Provides us the means to replay views from it.
+    #
+    # We need to wrap the actual FunctionalTensorWrapper with this class so that
+    # we only compare the tensor's metadata. That's because with the transformations
+    # of the model throughout AOTAutograd, the sequence of ViewMeta and the base
+    # tensor might change.
     functional_tensor: Optional[FunctionalTensorMetadataEq] = None
 
 

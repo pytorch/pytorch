@@ -213,21 +213,42 @@ def gen_alias_from_base(
     # functions applied to itself (collected during functionalization) so as
     # to replay them (view functions) on the aliased_base_tensor.
     if target_functional_tensor is not None:
-        try:
-            out = torch._functionalize_apply_view_metas(
-                target_functional_tensor.tensor, aliased_base_tensor
-            )
-            assert out is not None and out.shape == target_meta_tensor.shape
-            return patch_requires_grad(out)
-        except RuntimeError:
-            # NYI for dynamic shapes.
+        functional_tensor = target_functional_tensor.tensor
+        base = torch._functionalize_base(functional_tensor)
+
+        if base.shape == aliased_base_tensor.shape:
+            # Only apply these functions if the new base (aliased_base_tensor) has the
+            # same shape as the old base. The idea is:
             #
-            # On functionalization, the ViewMeta lambdas will have symbolic shapes.
-            # When trying to apply those lambdas on concrete tensors, it will fail.
+            #   1. target_functional_tensor represents the functional tensor that corresponds
+            #      to target_meta_tensor output
             #
-            # In order for this to work, we should have a way to replace those
-            # symbolic shapes with concrete numbers.
-            pass
+            #   2. In order to make the new base have the same shape as target_functional_tensor,
+            #      the base of the latter (old base) should have the same shape as the new base
+            #      (that's what FunctionalTensorWrapper guarantees with its regenerate_from_base)
+            #
+            #   3. Otherwise, we have no guarantees the output will have the same shape as
+            #      target_meta_tensor
+            try:
+                out = torch._functionalize_apply_view_metas(
+                    target_functional_tensor.tensor, aliased_base_tensor
+                )
+
+                assert out.shape == target_meta_tensor.shape, (
+                    "incorrect out shape after application of ViewMeta sequence: "
+                    f"{tuple(out.shape)} (actual) vs {tuple(target_meta_tensor.shape)} (expected)"
+                )
+
+                return patch_requires_grad(out)
+            except RuntimeError:
+                # NYI for dynamic shapes.
+                #
+                # On functionalization, the ViewMeta lambdas will have symbolic shapes.
+                # When trying to apply those lambdas on concrete tensors, it will fail.
+                #
+                # In order for this to work, we should have a way to replace those
+                # symbolic shapes with concrete numbers.
+                pass
 
     # Try to do view-replay if possible.
     # fall back to .as_strided() if we can't.
