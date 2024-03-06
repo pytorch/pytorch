@@ -154,7 +154,6 @@ manual_torch_name_rule_map = {
     "torch._C.set_autocast_ipu_enabled": SkipFunctionVariable,
     "torch._C.set_autocast_xla_dtype": SkipFunctionVariable,
     "torch._C.set_autocast_xla_enabled": SkipFunctionVariable,
-    "torch.resize_as_": SkipFunctionVariable,
     "torch.resize_as_sparse_": SkipFunctionVariable,
     "torch.get_default_device": TorchInGraphFunctionVariable,
     # functorch/vmap
@@ -1962,6 +1961,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.renorm",
         "torch.repeat_interleave",
         "torch.reshape",
+        "torch.resize_as",
+        "torch.resize_as_",
         "torch.resolve_conj",
         "torch.resolve_neg",
         "torch.result_type",

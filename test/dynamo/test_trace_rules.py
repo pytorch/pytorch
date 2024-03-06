@@ -54,7 +54,6 @@ ignored_c_binding_in_graph_function_names = {
     "torch._C.set_autocast_ipu_enabled",
     "torch._C.set_autocast_xla_dtype",
     "torch._C.set_autocast_xla_enabled",
-    "torch.resize_as_",
     "torch.resize_as_sparse_",
     "torch._C._data_address",
     "torch._C._is_cow_tensor",

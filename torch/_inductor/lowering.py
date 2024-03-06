@@ -51,6 +51,7 @@ from .ir import (
 from .utils import (
     ceildiv,
     decode_device,
+    get_dtype_size,
     is_dynamic,
     is_pointwise_use,
     pad_listlike,
@@ -2335,10 +2336,10 @@ make_fallback(aten.mode)
 make_fallback(aten.nanmedian)
 make_fallback(aten.ormqr)
 make_fallback(aten._pdist_forward)
-make_fallback(aten.resize)
-make_fallback(aten.resize_)
-make_fallback(aten.resize_as)
-make_fallback(aten.resize_as_)
+# make_fallback(aten.resize)
+# make_fallback(aten.resize_)
+# make_fallback(aten.resize_as)
+# make_fallback(aten.resize_as_)
 make_fallback(aten.searchsorted)
 make_fallback(aten._trilinear)
 make_fallback(aten.uniform, warn=False)
@@ -5715,6 +5716,42 @@ def resize_storage_bytes_(variable, new_size):
     variable.realize()
     ir.ResizeStorageBytes(variable, new_size)
     return variable
+
+
+@register_lowering(aten.resize, type_promotion_kind=None)
+def resize(x, size, *, memory_format=None):
+    x.realize()
+    dtype_item_size = get_dtype_size(x.get_dtype())
+    old_numel = V.graph.sizevars.evaluate_static_shape(sympy_product(x.get_size()))
+    new_numel = V.graph.sizevars.evaluate_static_shape(sympy_product(size))
+    if old_numel == new_numel:
+        return clone(x)
+
+    x = resize_storage_bytes_(x, new_numel * dtype_item_size)
+
+    storage, old_layout = ir.as_storage_and_layout(x)
+    new_stride = ir.make_contiguous_strides_for(size)
+
+    new_layout = ir.FixedLayout(
+        old_layout.device, old_layout.dtype, size, new_stride, old_layout.offset
+    )
+    return ir.TensorBox(ir.ReinterpretView(storage, new_layout))
+
+
+@register_lowering(aten.resize_, type_promotion_kind=None)
+def resize_(x, size, *, memory_format=None):
+    x.data = resize(x, size, memory_format=memory_format).data
+    return x
+
+
+@register_lowering(aten.resize_as, type_promotion_kind=None)
+def resize_as(self_, other, *, memory_format=None):
+    return resize(self_, other.get_size(), memory_format=memory_format)
+
+
+@register_lowering(aten.resize_as, type_promotion_kind=None)
+def resize_as_(self_, other, *, memory_format=None):
+    return resize_(self_, other.get_size(), memory_format=memory_format)
 
 
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
