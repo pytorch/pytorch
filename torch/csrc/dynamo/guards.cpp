@@ -3070,6 +3070,17 @@ PyObject* torch_c_dynamo_guards_init() {
             self.add_permitted_leaf_guard(std::make_shared<DICT_CONTAINS>(
                 contains, key, verbose_code_parts));
           })
+      .def(
+          "add_dict_version_guard",
+          [](DictGuardManager& self,
+             py::object value,
+             py::object verbose_code_parts) -> void {
+            // DICT_VERSION is used in a very narrow context today to guard on
+            // pytree SUPPPORTED_NODES. We can remove this once we have tags in
+            // DictGuardManager.
+            self.add_permitted_leaf_guard(
+                std::make_shared<DICT_VERSION>(value, verbose_code_parts));
+          })
       // Not permitted accesssors
       .def("lambda_manager", &DictGuardManager::fail_on_get_child_manager)
       .def("getitem_manager", &DictGuardManager::fail_on_get_child_manager)
