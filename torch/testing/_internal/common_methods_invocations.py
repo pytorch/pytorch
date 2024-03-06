@@ -2319,7 +2319,7 @@ def sample_inputs_chunk_cat(op_info, device, dtype, requires_grad, **kwargs):
         tensors = []
         for size in sizes:
             tensors.append(make_arg(size))
-        yield SampleInput(tensors, arg=(dim, num_chunks))
+        yield SampleInput(tensors, args=(dim, num_chunks))
 
     different_ndim_case = [
         torch.Size([5, 4, 9]),

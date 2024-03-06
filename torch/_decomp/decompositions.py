@@ -1221,19 +1221,9 @@ def _pad_chunk(
     for tensor in tensors:
         tensor_size = tensor.size()
         pad_along_dim = (tensor_size[dim] + num_chunks - 1) // num_chunks * num_chunks
-        padded_size = (
-            tensor_size[:dim]
-            + torch.Size(
-                [
-                    pad_along_dim,
-                ]
-            )
-            + tensor_size[dim + 1 :]
-        )
-        if padded_size != tensor_size:
-            padded_tensor = tensor.new_zeros(padded_size)
-            padded_tensor.narrow(dim, 0, tensor_size[dim]).copy_(tensor)
-            tensor = padded_tensor
+        if pad_along_dim != tensor_size[dim]:
+            pad = [0, pad_along_dim - tensor_size[dim]] + [0] * 2 * (tensor.ndim - dim - 1)
+            tensor = aten.constant_pad_nd(tensor, pad, 0)
         view_size = tensor_size[:dim] + torch.Size([num_chunks, -1])
         padded_tensors.append(tensor.view(view_size))
     return padded_tensors
