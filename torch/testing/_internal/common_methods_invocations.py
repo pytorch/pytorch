@@ -2335,8 +2335,8 @@ def sample_inputs_chunk_cat(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(tensors, args=(dim, num_chunks))
 
 
-def error_inputs_chunk_cat(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+def error_inputs_chunk_cat(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
     # input tensors have different ndims but dim is negative
     sizes, dim, num_chunks = [torch.Size([2, 3]), torch.Size([4,])], -1, 3

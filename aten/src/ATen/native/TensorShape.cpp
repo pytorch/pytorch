@@ -2774,7 +2774,6 @@ static int64_t preprocess_chunk_cat_inputs(TensorList tensors, int64_t dim, int6
 
 // Pads each tensor on `dim`-th dimension such that padded_dim % num_chunks == 0.
 static std::vector<Tensor> _pad_chunk(TensorList tensors, int64_t dim, int64_t num_chunks) {
-  dim = preprocess_chunk_cat_inputs(tensors, dim, num_chunks);
   auto num_tensors = tensors.size();
   std::vector<Tensor> padded_tensors;
   padded_tensors.reserve(num_tensors);
@@ -2795,12 +2794,12 @@ static std::vector<Tensor> _pad_chunk(TensorList tensors, int64_t dim, int64_t n
 }
 
 Tensor _chunk_cat(TensorList tensors, int64_t dim, int64_t num_chunks) {
-  auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].dim());
+  auto wrapped_dim = preprocess_chunk_cat_inputs(tensors, dim, num_chunks);
   return at::cat(_pad_chunk(tensors, wrapped_dim, num_chunks), wrapped_dim+1);
 }
 
 Tensor& _chunk_cat_out(TensorList tensors, int64_t dim, int64_t num_chunks, Tensor& out) {
-  auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].dim());
+  auto wrapped_dim = preprocess_chunk_cat_inputs(tensors, dim, num_chunks);
   at::cat_out(out, _pad_chunk(tensors, wrapped_dim, num_chunks), wrapped_dim+1);
   return out;
 }
