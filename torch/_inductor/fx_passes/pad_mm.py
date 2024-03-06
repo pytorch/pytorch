@@ -1,5 +1,5 @@
 import functools
-from typing import List, Optional, Union
+from typing import List, Optional, Set, Union
 
 import torch
 from torch import Tensor
