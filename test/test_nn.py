@@ -5018,6 +5018,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         meta_bn.load_state_dict(empty_dict, assign=True, strict=False)
         self.assertEqual(meta_bn.state_dict()["num_batches_tracked"], torch.tensor(0))
 
+    def test_batch_norm_update_stats(self):
+        input = torch.rand(0, 1)
+        running_mean = torch.rand(1)
+        running_var = torch.rand(1)
+        with self.assertRaisesRegex(RuntimeError,
+                                    re.escape("input tensor must have at least one element, but got input_sizes = [0, 1]")):
+            torch.batch_norm_update_stats(input=input, momentum=0.0, running_mean=running_mean, running_var=running_var)
+
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
         input2 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
