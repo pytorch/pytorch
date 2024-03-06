@@ -17,6 +17,7 @@ import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._logging import LazyString, trace_structured
+from torch._prims_common import make_contiguous_strides_for
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
@@ -847,6 +848,84 @@ class GraphLowering(torch.fx.Interpreter):
             else:
                 raise MissingOperatorWithoutDecomp(target, args, kwargs)
 
+        if target.__name__ == "sdpa":
+
+            def create_placeholder(name, dtype):
+                return TensorBox.create(
+                    InputBuffer(
+                        name,
+                        FixedLayout(
+                            args[0].get_device(),
+                            dtype,
+                            [
+                                1,
+                            ],
+                            [
+                                1,
+                            ],
+                        ),
+                    )
+                )
+
+            # env = create_placeholder(name) for name in ["score", "b_1", "h_1", "m_1", "n_1"]]
+            scalar_inps = ["score", "b", "h", "m", "n"]
+            env = {}
+            cnt = 0
+            placeholder_inps = [
+                create_placeholder(name, dtype)
+                for name, dtype in [
+                    ("score", args[0].get_dtype()),
+                    ("b", torch.int64),
+                    ("h", torch.int64),
+                    ("m", torch.int64),
+                    ("n", torch.int64),
+                ]
+            ]
+            for node in args[3].graph.nodes:
+                if node.op == "placeholder":
+                    if cnt >= len(scalar_inps):
+                        env[node] = args[cnt - 1]
+                    else:
+                        env[node] = placeholder_inps[cnt]
+                    cnt += 1
+                elif node.op == "call_function":
+                    from torch.utils._pytree import tree_map
+
+                    env[node] = lowerings[node.target](
+                        *tree_map(lambda x: env[x] if x in env else x, node.args)
+                    )
+                elif node.op == "output":
+                    output_buffer = env[node.args[0]]
+                    output_buffer.realize(dont_register=True)
+                    # breakpoint() # output_buffer.decide_layout()
+                    from .kernel.sdpa import sdpa_template
+
+                    layout = FixedLayout(
+                        output_buffer.get_device(),
+                        output_buffer.get_dtype(),
+                        args[0].get_size(),
+                        make_contiguous_strides_for(args[0].get_size()),
+                    )
+                    choices: List[Any] = []
+                    from .select_algorithm import autotune_select_algorithm
+
+                    sdpa_template.maybe_append_choice(
+                        [],
+                        grid=(args[0], args[1], args[2]),
+                        layout=layout,
+                        subgraph=output_buffer,
+                        num_stages=2,
+                        num_warps=8,
+                        BLOCK_M=64,
+                        BLOCK_N=128,
+                        BLOCK_DMODEL=args[0].get_size()[-1],
+                    )
+                    return autotune_select_algorithm(
+                        "sdpa", choices, [args[0], args[1], args[2]], layout
+                    )
+            return lowerings[torch.ops.aten.scaled_dot_product_attention.default](
+                args[0], args[1], args[2]
+            )
         try:
             log.debug("  via %s", lowerings[target])
             out = lowerings[target](*args, **kwargs)
