@@ -87,20 +87,11 @@ class _KinetoProfile:
             and not eager mode models.
         experimental_config (_ExperimentalConfig) : A set of experimental options
             used by profiler libraries like Kineto. Note, backward compatibility is not guaranteed.
-        execution_trace_observer (ExecutionTraceObserver) : A PyTorch Execution Trace Oobserver object.
-            PyTorch Execution Traces offer a graph based representation of AI/ML workloads and
-            enable replay benchmarks, simulators, and emulators (https://arxiv.org/pdf/2305.14516.pdf).
+        execution_trace_observer (ExecutionTraceObserver) : A PyTorch Execution Trace Observer object.
+            `PyTorch Execution Traces <https://arxiv.org/pdf/2305.14516.pdf>`__ offer a graph based
+            representation of AI/ML workloads and enable replay benchmarks, simulators, and emulators.
             When this argument is included the observer start() and stop() will be called for the
-            same time window as PyTorch profiler. The following sample shows how to setup up
-            an Execution Trace observer.
-            ```
-            ...
-            execution_trace_observer=(
-                ExecutionTraceObserver().register_callback("./execution_trac.json")
-            ),
-            ```
-            You can also refer to test_execution_trace_with_kineto() in tests/profiler/test_profier.py.
-            *Note* One can also pass any object sastisfying the _ITraceObserver interface.
+            same time window as PyTorch profiler.
 
     .. note::
         This API is experimental and subject to change in the future.
@@ -457,20 +448,11 @@ class profile(_KinetoProfile):
             and not eager mode models.
         experimental_config (_ExperimentalConfig) : A set of experimental options
             used for Kineto library features. Note, backward compatibility is not guaranteed.
-        execution_trace_observer (ExecutionTraceObserver) : A PyTorch Execution Trace Oobserver object.
-            PyTorch Execution Traces offer a graph based representation of AI/ML workloads and
-            enable replay benchmarks, simulators, and emulators (https://arxiv.org/pdf/2305.14516.pdf).
+        execution_trace_observer (ExecutionTraceObserver) : A PyTorch Execution Trace Observer object.
+            `PyTorch Execution Traces <https://arxiv.org/pdf/2305.14516.pdf>`__ offer a graph based
+            representation of AI/ML workloads and enable replay benchmarks, simulators, and emulators.
             When this argument is included the observer start() and stop() will be called for the
-            same time window as PyTorch profiler. The following sample shows how to setup up
-            an Execution Trace observer.
-            ```
-            ...
-            execution_trace_observer=(
-                ExecutionTraceObserver().register_callback("./execution_trac.json")
-            ),
-            ```
-            You can also refer to test_execution_trace_with_kineto() in tests/profiler/test_profier.py.
-            *Note* One can also pass any object sastisfying the _ITraceObserver interface.
+            same time window as PyTorch profiler. See the examples section below for a code sample.
         use_cuda (bool):
             .. deprecated:: 1.8.1
                 use ``activities`` instead.
@@ -501,6 +483,7 @@ class profile(_KinetoProfile):
         When record_shapes=True is specified, profiler will temporarily hold references to the tensors;
         that may further prevent certain optimizations that depend on the reference count and introduce
         extra tensor copies.
+
 
     Examples:
 
@@ -555,6 +538,23 @@ class profile(_KinetoProfile):
                     code_iteration_to_profile(iter)
                     # send a signal to the profiler that the next iteration has started
                     p.step()
+
+    The following sample shows how to setup up an Execution Trace Observer (`execution_trace_observer`)
+
+    .. code-block:: python
+
+        with torch.profiler.profile(
+            ...
+            execution_trace_observer=(
+                ExecutionTraceObserver().register_callback("./execution_trace.json")
+            ),
+        ) as p:
+            for iter in range(N):
+                code_iteration_to_profile(iter)
+                p.step()
+
+    You can also refer to test_execution_trace_with_kineto() in tests/profiler/test_profiler.py.
+    Note: One can also pass any object satisfying the _ITraceObserver interface.
     """
 
     def __init__(
