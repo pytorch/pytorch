@@ -10,17 +10,10 @@ from torch.utils.data.datapipes.utils.common import (
     _map_deprecated_functional_names,
 )
 from torch.utils.data.dataset import Dataset, IterableDataset
+from torch.utils._import_utils import import_dill
 
-try:
-    import dill
-    # XXX: By default, dill writes the Pickler dispatch table to inject its
-    # own logic there. This globally affects the behavior of the standard library
-    # pickler for any user who transitively depends on this module!
-    # Undo this extension to avoid altering the behavior of the pickler globally.
-    dill.extend(use_dill=False)
-    HAS_DILL = True
-except ImportError:
-    HAS_DILL = False
+dill = import_dill()
+HAS_DILL = dill is not None
 
 __all__ = [
     "DataChunk",

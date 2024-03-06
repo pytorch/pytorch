@@ -76,7 +76,7 @@ def _output_csv(file, results):
             dim_str = str(dim)
             shape_str = 'x'.join(str(s) for s in shape)
 
-        print(name, device, measurement.task_spec.num_threads, numel, shape_str, contiguous, dim_str,
+        print(name, device, measurement.task_spec.num_threads, numel, shape_str, contiguous, dim_str,  # type: ignore[possibly-undefined]
               measurement.mean * 1e6, measurement.median * 1e6, measurement.iqr * 1e6,
               sep=',', file=file)
 

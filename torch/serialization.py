@@ -14,7 +14,7 @@ from ._utils import _import_dotted_name
 from torch._sources import get_source_lines_and_file
 from torch.types import Storage
 from torch.storage import _get_dtype_from_pickle_storage_type
-from typing import Any, BinaryIO, Callable, cast, Dict, Optional, Type, Tuple, Union, IO
+from typing import Any, BinaryIO, Callable, cast, Dict, Optional, Type, Tuple, Union, IO, List
 from typing_extensions import TypeAlias, TypeGuard  # Python 3.10+
 import copyreg
 import pickle
@@ -67,7 +67,7 @@ def mkdtemp():
         shutil.rmtree(path)
 
 
-_package_registry = []
+_package_registry: List[Tuple[int, Callable[[STORAGE], Optional[str]], Callable[[STORAGE, str], Optional[STORAGE]]]] = []
 
 class LoadEndianness(Enum):
     NATIVE = 1
@@ -1166,7 +1166,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                     numel = struct.unpack(f'<{ndim}q', f.read(8 * ndim))
                     stride = struct.unpack(f'<{ndim}q', f.read(8 * ndim))
                     storage_offset, = struct.unpack('<q', f.read(8))
-                    tensor = torch.tensor([], dtype=storage.dtype).set_(
+                    tensor = torch.empty((0,), dtype=storage.dtype).set_(
                         storage._untyped_storage, storage_offset, numel, stride)
                     deserialized_objects[key] = tensor
 
@@ -1196,12 +1196,16 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             nbytes = numel * torch._utils._element_size(dtype)
 
             if root_key not in deserialized_objects:
-                obj = cast(Storage, torch.UntypedStorage(nbytes))
-                obj._torch_load_uninitialized = True
+                if torch._guards.detect_fake_mode(None) is not None:
+                    obj = cast(Storage, torch.UntypedStorage(nbytes, device='meta'))
+                else:
+                    obj = cast(Storage, torch.UntypedStorage(nbytes))
+                    obj._torch_load_uninitialized = True
+                    obj = restore_location(obj, location)
                 # TODO: Once we decide to break serialization FC, we can
                 # stop wrapping with TypedStorage
                 typed_storage = torch.storage.TypedStorage(
-                    wrap_storage=restore_location(obj, location),
+                    wrap_storage=obj,
                     dtype=dtype,
                     _internal=True)
                 deserialized_objects[root_key] = typed_storage
@@ -1268,15 +1272,16 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
 
     deserialized_storage_keys = pickle_module.load(f, **pickle_load_args)
 
-    offset = f.tell() if f_should_read_directly else None
-    for key in deserialized_storage_keys:
-        assert key in deserialized_objects
-        typed_storage = deserialized_objects[key]
-        typed_storage._untyped_storage._set_from_file(
-            f, offset, f_should_read_directly,
-            torch._utils._element_size(typed_storage.dtype))
-        if offset is not None:
-            offset = f.tell()
+    if torch._guards.detect_fake_mode(None) is None:
+        offset = f.tell() if f_should_read_directly else None
+        for key in deserialized_storage_keys:
+            assert key in deserialized_objects
+            typed_storage = deserialized_objects[key]
+            typed_storage._untyped_storage._set_from_file(
+                f, offset, f_should_read_directly,
+                torch._utils._element_size(typed_storage.dtype))
+            if offset is not None:
+                offset = f.tell()
 
     torch._utils._validate_loaded_sparse_tensors()
 
@@ -1365,7 +1370,10 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall
 
     def load_tensor(dtype, numel, key, location):
         name = f'data/{key}'
-        if overall_storage is not None:
+        if torch._guards.detect_fake_mode(None) is not None:
+            nbytes = numel * torch._utils._element_size(dtype)
+            storage = torch.UntypedStorage(nbytes, device='meta')
+        elif overall_storage is not None:
             storage_offset = zip_file.get_record_offset(name)
             storage = overall_storage[storage_offset:storage_offset + numel]
         else:

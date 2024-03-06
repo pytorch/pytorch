@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 from typing import Any, Dict, List, Optional, Set, Tuple, Union, Type, Callable
 from torch.ao.quantization.quant_type import QuantType
 import torch

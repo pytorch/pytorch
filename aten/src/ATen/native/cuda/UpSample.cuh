@@ -183,7 +183,7 @@ __device__ __forceinline__ static int nearest_neighbor_exact_bw_compute_source_i
 /* Used by UpSampleBicubic2d.cu */
 template <typename scalar_t>
 __device__ __forceinline__ static scalar_t upsample_get_value_bounded(
-    const PackedTensorAccessor64<scalar_t, 4>& data,
+    const PackedTensorAccessor64<const scalar_t, 4>& data,
     int batch,
     int channel,
     int height,
