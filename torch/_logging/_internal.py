@@ -982,8 +982,7 @@ class LazyTraceHandler(logging.StreamHandler):
                     self.root_dir = TRACE_LOG_DIR
 
             if self.root_dir is not None:
-                if not os.path.exists(self.root_dir):
-                    os.makedirs(self.root_dir, exist_ok=True)
+                os.makedirs(self.root_dir, exist_ok=True)
                 ranksuffix = ""
                 if dist.is_available() and dist.is_initialized():
                     ranksuffix = f"rank_{dist.get_rank()}_"
