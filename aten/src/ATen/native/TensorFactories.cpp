@@ -1245,6 +1245,10 @@ Tensor triu_indices_cpu(
 
   auto triu_size = row * col - get_tril_size(row, col, offset - 1);
 
+  c10::optional<Device> device_tmp = device_opt;
+  if(device_or_default(device_opt).type() != DeviceType::CPU){
+    device_tmp = Device(kCPU);
+  }
   // create an empty Tensor with correct size
   auto result = at::native::empty_cpu({2, triu_size}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 
