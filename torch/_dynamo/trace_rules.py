@@ -194,6 +194,11 @@ manual_torch_name_rule_map = {
     "torch._functorch.eager_transforms._validate_and_wrap_argnums": UserFunctionVariable,
     "torch._functorch.eager_transforms._wrap_all_tensors": UserFunctionVariable,
     "torch._functorch.eager_transforms._wrap_tensor_for_grad": UserFunctionVariable,
+    # functorch/jacrev
+    "torch._functorch.eager_transforms.jacrev": UserFunctionVariable,
+    "torch._functorch.eager_transforms.error_if_complex": UserFunctionVariable,
+    "torch._functorch.eager_transforms._chunked_standard_basis_for_": UserFunctionVariable,
+    "torch._functorch.eager_transforms._safe_zero_index": UserFunctionVariable,
     # functorch/vjp
     "torch._functorch.eager_transforms.vjp": UserFunctionVariable,
     "torch._functorch.eager_transforms._vjp_with_argnums": UserFunctionVariable,
@@ -1014,7 +1019,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._scatter_out",
         "torch._C._scatter",
         "torch._C._select_conv_backend",
-        "torch._C._select_batch_norm_backend",
         "torch._C._set_autograd_fallback_mode",
         "torch._C._set_backcompat_broadcast_warn",
         "torch._C._set_backcompat_keepdim_warn",
