@@ -2314,22 +2314,35 @@ class FuncDefaultsGuardAccessor : public GuardAccessor {
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj) override { // borrowed ref
-    if (!PyFunction_Check(obj)) {
+    PyObject* func = obj;
+    if (PyMethod_Check(obj)) {
+      func = PyMethod_GET_FUNCTION(obj); // borrowed ref
+    } else if (PyInstanceMethod_Check(obj)) {
+      func = PyInstanceMethod_GET_FUNCTION(obj); // borrowed ref
+    }
+    PyObject* x = PyFunction_GetDefaults(func); // borrowed ref
+    if (x == nullptr) {
+      PyErr_Clear();
       return false;
     }
-
-    PyObject* x = PyFunction_GetDefaults(obj); // borrowed ref
     return _guard_manager->check_nopybind(x);
   }
 
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
-    if (!PyFunction_Check(obj)) {
+    PyObject* func = obj;
+    if (PyMethod_Check(obj)) {
+      func = PyMethod_GET_FUNCTION(obj); // borrowed ref
+    } else if (PyInstanceMethod_Check(obj)) {
+      func = PyInstanceMethod_GET_FUNCTION(obj); // borrowed ref
+    }
+    PyObject* x = PyFunction_GetDefaults(func);
+    if (x == nullptr) {
+      PyErr_Clear();
       return GuardDebugInfo(
           false, std::string("Not a function on ") + get_source(), 0);
     }
 
-    PyObject* x = PyFunction_GetDefaults(obj);
     return _guard_manager->check_verbose_nopybind(x);
   }
 
@@ -2353,22 +2366,35 @@ class FuncKwDefaultsGuardAccessor : public GuardAccessor {
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj) override { // borrowed ref
-    if (!PyFunction_Check(obj)) {
+    PyObject* func = obj;
+    if (PyMethod_Check(obj)) {
+      func = PyMethod_GET_FUNCTION(obj); // borrowed ref
+    } else if (PyInstanceMethod_Check(obj)) {
+      func = PyInstanceMethod_GET_FUNCTION(obj); // borrowed ref
+    }
+    PyObject* x = PyFunction_GetKwDefaults(obj); // borrowed ref
+    if (x == nullptr) {
+      PyErr_Clear();
       return false;
     }
-
-    PyObject* x = PyFunction_GetKwDefaults(obj); // borrowed ref
     return _guard_manager->check_nopybind(x);
   }
 
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
-    if (!PyFunction_Check(obj)) {
+    PyObject* func = obj;
+    if (PyMethod_Check(obj)) {
+      func = PyMethod_GET_FUNCTION(obj); // borrowed ref
+    } else if (PyInstanceMethod_Check(obj)) {
+      func = PyInstanceMethod_GET_FUNCTION(obj); // borrowed ref
+    }
+    PyObject* x = PyFunction_GetKwDefaults(obj);
+    if (x == nullptr) {
+      PyErr_Clear();
       return GuardDebugInfo(
           false, std::string("Not a function on ") + get_source(), 0);
     }
 
-    PyObject* x = PyFunction_GetKwDefaults(obj);
     return _guard_manager->check_verbose_nopybind(x);
   }
 
