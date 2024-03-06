@@ -278,8 +278,10 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
     @with_temp_dir
     def test_no_dist(self):
-        DCP.save({}, checkpoint_id=self.temp_dir, no_dist=True)
-        DCP.load({}, checkpoint_id=self.temp_dir, no_dist=True)
+        # since comm's are not initialized in this method, `no_dist`
+        # is assumed False
+        DCP.save({}, checkpoint_id=self.temp_dir)
+        DCP.load({}, checkpoint_id=self.temp_dir)
 
 
 class TestNoCPU(DTensorTestBase):

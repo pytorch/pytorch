@@ -19,6 +19,7 @@ from torch.distributed.checkpoint.metadata import (
 from torch.distributed.checkpoint.planner import LoadItemType, LoadPlan, LoadPlanner
 from torch.distributed.checkpoint.planner_helpers import _create_chunk_list
 from torch.distributed.checkpoint.state_dict_loader import _load_state_dict
+from torch.distributed.checkpoint.state_dict_saver import _save_state_dict
 from torch.distributed.checkpoint.storage import StorageReader
 from torch.futures import Future
 
@@ -265,4 +266,6 @@ def torch_save_to_dcp(
     """
 
     state_dict = torch.load(torch_save_path)
-    dcp.save(state_dict, checkpoint_id=dcp_checkpoint_dir, no_dist=True)
+    # we don't need stateful behavior here because the expectation is anything loaded by
+    # torch.load would not contain stateful objects.
+    _save_state_dict(state_dict, checkpoint_id=dcp_checkpoint_dir, no_dist=True)
