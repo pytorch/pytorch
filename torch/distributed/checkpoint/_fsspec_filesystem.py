@@ -3,7 +3,7 @@
 
 import logging
 
-from torch.distributed.checkpoint._fsspec_filesystem import (  # noqa: F401  # noqa: F401
+from torch.distributed.checkpoint.fsspec import (  # noqa: F401  # noqa: F401
     FsspecReader,
     FsspecWriter,
 )
@@ -11,5 +11,5 @@ from torch.distributed.checkpoint._fsspec_filesystem import (  # noqa: F401  # n
 log = logging.getLogger(__name__)
 log.warning(
     "FSSpec Filesystem has been made public, please update your "
-    "import to torch.distributed.checkpoint.fsspec_filesystem"
+    "import to torch.distributed.checkpoint.fsspec"
 )
