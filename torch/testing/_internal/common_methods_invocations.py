@@ -5119,8 +5119,8 @@ def sample_inputs__unsafe_masked_index_put_accumulate(op_info, device, dtype, re
 
     cases = [
         ((S, S), S, (M, M)),
-        ((S, S), M, (S, S+1)),
-        ((S, S, S), S, (M, M-1, M+1)),
+        ((S, S), M, (S, S + 1)),
+        ((S, S, S), S, (M, M - 1, M + 1)),
     ]
 
     fill_value = make_tensor([], dtype=dtype, device="cpu").item()
