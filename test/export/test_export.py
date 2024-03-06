@@ -728,13 +728,13 @@ class TestExport(TestCase):
             (torch.randn(2, 2), ),
             dynamic_shapes={"x": {0: dx, 1: None}}
         )
-        ep(torch.randn(1, 2))
-        ep(torch.randn(2, 2))
+        ep.module()(torch.randn(1, 2))
+        ep.module()(torch.randn(2, 2))
         with self.assertRaisesRegex(
             RuntimeError,
             "Expected input at .* to be <= 2, but got 3"
         ):
-            ep(torch.randn(3, 2))
+            ep.module()(torch.randn(3, 2))
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
@@ -754,12 +754,31 @@ class TestExport(TestCase):
             (torch.randn(2, 2), ),
             dynamic_shapes={"x": {0: dx, 1: None}}
         )
-        ep(torch.randn(2, 2))
+        ep.module()(torch.randn(2, 2))
         with self.assertRaisesRegex(
             RuntimeError,
             "Expected input at .* to be >= 2, but got 1"
         ):
-            ep(torch.randn(1, 2))
+            ep.module()(torch.randn(1, 2))
+
+        dx = Dim("dx", min=1, max=3)
+        ep = export(
+            Bar(),
+            (torch.randn(2, 2), torch.randn(3, 2)),
+            dynamic_shapes={"x": {0: dx, 1: None}, "y": {0: dx+1, 1: None}}
+        )
+        ep.module()(torch.randn(3, 2), (torch.randn(4, 2)))
+        ep.module()(torch.randn(1, 2), (torch.randn(2, 2)))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected input .* to be of the form s0, where s0 is an integer"
+        ):
+            ep.module()(torch.randn(0, 2), torch.randn(1, 2))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected input at .* to be <= 3, but got 4"
+        ):
+            ep.module()(torch.randn(4, 2), torch.randn(5, 2))
 
 
     def test_raise_user_error_when_guard_on_data_dependent_operation(self):
