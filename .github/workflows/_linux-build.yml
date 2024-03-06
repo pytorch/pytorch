@@ -222,8 +222,9 @@ jobs:
           else
             JENKINS_USER="--user jenkins"
             USED_IMAGE="${DOCKER_IMAGE}"
+            # Fetch aws credential from IMDs
+            eval $(python3 -c 'import boto3; import json; c=boto3.Session().get_credentials().get_frozen_credentials()._asdict(); print(f"export AWS_ACCESS_KEY_ID=\"%s\"" % c["access_key"]); print(f"export AWS_SECRET_ACCESS_KEY=\"%s\"" % c["secret_key"]); print(f"export AWS_SESSION_TOKEN=\"%s\"" % c["token"])')
           fi
-
           # detached container should get cleaned up by teardown_ec2_linux
           # Used for JENKINS_USER, which can be empty
           # shellcheck disable=SC2086
@@ -231,10 +232,14 @@ jobs:
             -e BUILD_ENVIRONMENT \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
+            -e AWS_ACCESS_KEY_ID \
+            -e AWS_SECRET_ACCESS_KEY \
+            -e AWS_SESSION_TOKEN \
             -e PR_NUMBER \
             -e SHA1 \
             -e BRANCH \
             -e SCCACHE_BUCKET \
+            -e SCCACHE_REGION \
             -e SCCACHE_S3_KEY_PREFIX \
             -e XLA_CUDA \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
