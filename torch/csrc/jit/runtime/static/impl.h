@@ -940,7 +940,6 @@ class TORCH_API ProcessedNode {
 
   uint32_t num_outputs() const {
     DCHECK(fn_ != nullptr);
-    DCHECK_LE(fn_->num_outputs(), std::numeric_limits<uint32_t>::max());
     return static_cast<uint32_t>(fn_->num_outputs());
   }
 
