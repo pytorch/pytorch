@@ -44,6 +44,10 @@ class RAdam(Optimizer):
             raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
+
+        if foreach is False and capturable:
+            raise ValueError("Capturable not supported with single tensor RAdam")
+
         defaults = dict(
             lr=lr,
             betas=betas,
@@ -208,7 +212,7 @@ RAdam.__doc__ = r"""Implements RAdam algorithm.
             decay as in AdamW to obtain RAdamW (default: False)
         {_foreach_doc}
         {_differentiable_doc}
-        {_capturable_doc}
+        {_capturable_doc} For RAdam, capturable is only supported when foreach=True.
 
     .. _On the variance of the adaptive learning rate and beyond:
         https://arxiv.org/abs/1908.03265
@@ -297,7 +301,7 @@ def _single_tensor_radam(
     has_complex: bool,
 ):
     if capturable:
-        raise RuntimeError("capturable is not supported for single tensor radam")
+        raise RuntimeError("capturable is not supported for single tensor RAdam (when foreach=False)")
 
     for i, param in enumerate(params):
         grad = grads[i]

@@ -5183,7 +5183,11 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_lobpcg_ortho(self, device, dtype):
+        if torch.version.hip:
+            torch.backends.cuda.preferred_linalg_library('magma')
         self._test_lobpcg_method(device, dtype, 'ortho')
+        if torch.version.hip:
+            torch.backends.cuda.preferred_linalg_library('default')
 
     def _test_lobpcg_method(self, device, dtype, method):
         from torch.testing._internal.common_utils import random_symmetric_pd_matrix, random_sparse_pd_matrix
@@ -5785,9 +5789,10 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         version = _get_torch_cuda_version()
         SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
         SM70 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 0)
+        SM75 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 5)
         if version >= (11, 7):
             if not use_transpose_a and use_transpose_b:
-                if SM80OrLater or (version >= (12, 3) and SM70):
+                if SM80OrLater or (version >= (12, 3) and (SM70 or SM75)):
                     _test(17, k, n, use_transpose_a, use_transpose_b, version > (11, 7))
                 else:
                     with self.assertRaisesRegex(RuntimeError,
@@ -5805,7 +5810,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                     _test(17, k, n, use_transpose_a, use_transpose_b)
 
             if not use_transpose_a and not use_transpose_b:
-                if SM80OrLater or (version >= (12, 3) and SM70):
+                if SM80OrLater or (version >= (12, 3) and (SM70 or SM75)):
                     _test(17, k, n, use_transpose_a, use_transpose_b)
                 else:
                     with self.assertRaisesRegex(RuntimeError,

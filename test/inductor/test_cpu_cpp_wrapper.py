@@ -133,7 +133,6 @@ if RUN_CPU:
         code_string_count: dict = {}
 
     for item in [
-        BaseTest("test_add_complex2"),
         BaseTest("test_add_complex4"),
         BaseTest("test_as_strided"),  # buffer reuse
         BaseTest("test_bernoulli1"),
@@ -254,6 +253,18 @@ if RUN_CPU:
         ),
         BaseTest(
             "test_qlinear_dequant_promotion",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
+            "test_dynamic_qlinear",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+        ),
+        BaseTest(
+            "test_dynamic_qlinear_qat",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),

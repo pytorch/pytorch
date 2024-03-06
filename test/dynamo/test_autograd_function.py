@@ -276,14 +276,20 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             opt_model(x)
 
     def test_stride_in_bwd(self):
+        torch._dynamo.utils.counters.clear()
+        cnt = torch._dynamo.testing.CompileCounter()
         model = CustomFuncStrideModule()
-        opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
+        opt_model = torch.compile(backend=cnt)(model)
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            ".*HigherOrderOperator body's output must consist of tensors only",
-        ):
-            opt_model(x)
+        ref = model(x)
+        res = opt_model(x)
+
+        self.assertEqual(ref, res)
+        self.assertEqual(cnt.frame_count, 1)
+        # graph break: Illegal getattr invocation stride in strict mod.
+        self.assertEqual(
+            list(torch._dynamo.utils.counters["graph_break"].values()), [1]
+        )
 
     def test_enum_arg(self):
         from enum import Enum
@@ -815,6 +821,42 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
         foo(torch.randn(2, requires_grad=True))
         self.assertEqual(cnts.frame_count, 1)
+
+    def test_repeated_save_for_backward_calls(self):
+        from torch.autograd import Function
+
+        class Foo(Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.save_for_backward(x)
+                ctx.save_for_backward(x, y)
+                return x * y
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                x, y = ctx.saved_tensors
+                return grad_out * x, grad_out * y
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def foo(x, y):
+            return Foo.apply(x, y)
+
+        x_ref = torch.randn(2, requires_grad=True)
+        y_ref = torch.randn(2, requires_grad=True)
+        x_test = x_ref.clone().detach().requires_grad_()
+        y_test = y_ref.clone().detach().requires_grad_()
+
+        out_ref = foo(x_ref, y_ref)
+        out_ref.sum().backward()
+
+        out_test = torch.compile(foo, backend=cnts)(x_test, y_test)
+        out_test.sum().backward()
+
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(out_ref, out_test)
+        self.assertEqual(x_ref.grad, x_test.grad)
+        self.assertEqual(y_ref.grad, y_test.grad)
 
     def test_smuggle_tensor_and_complex_structures(self):
         from torch.autograd import Function

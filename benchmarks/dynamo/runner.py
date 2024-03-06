@@ -378,10 +378,17 @@ def get_skip_tests(suite, is_training: bool):
     module = importlib.import_module(suite)
     os.chdir(original_dir)
 
-    if hasattr(module, "SKIP"):
-        skip_tests.update(module.SKIP)
-    if is_training and hasattr(module, "SKIP_TRAIN"):
-        skip_tests.update(module.SKIP_TRAIN)
+    if suite == "torchbench":
+        skip_tests.update(module.TorchBenchmarkRunner().skip_models)
+        if is_training:
+            skip_tests.update(
+                module.TorchBenchmarkRunner().skip_not_suitable_for_training_models
+            )
+    else:
+        if hasattr(module, "SKIP"):
+            skip_tests.update(module.SKIP)
+        if is_training and hasattr(module, "SKIP_TRAIN"):
+            skip_tests.update(module.SKIP_TRAIN)
 
     skip_tests = (f"-x {name}" for name in skip_tests)
     skip_str = " ".join(skip_tests)

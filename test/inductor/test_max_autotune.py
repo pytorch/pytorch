@@ -6,6 +6,7 @@ from typing import Callable, List, Optional
 
 import torch
 from torch import multiprocessing as mp
+from torch._dynamo import reset
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import reset_rng_state
 from torch._dynamo.utils import counters
@@ -23,6 +24,7 @@ from torch._inductor.select_algorithm import (
     ChoiceCaller,
     TritonTemplateCaller,
 )
+
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -219,6 +221,178 @@ class TestMaxAutotune(TestCase):
 
         with config.patch({"max_autotune": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
+
+    @skipIfRocm
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_remote_caching(self, dynamic: bool):
+        from unittest.mock import patch
+
+        def mm(a, b):
+            a = torch.sin(a)
+            return a @ b
+
+        a = torch.randn(100, 10).cuda()
+        b = torch.randn(10, 100).cuda()
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        def f(x, y):
+            return Model()(x, y)
+
+        x = torch.randn(100, 100).cuda()
+        y = torch.randn(100, 100).cuda()
+
+        cache = {}
+        num_get = 0
+        num_put = 0
+
+        class MyCache:
+            def __init__(self, key, is_autotune=False):
+                pass
+
+            def get(self, filenames):
+                nonlocal cache
+                nonlocal num_get
+                ret = {file: cache[file] for file in filenames if file in cache}
+                num_get += len(ret)
+                return ret
+
+            def put(self, filename, data):
+                nonlocal cache
+                nonlocal num_put
+                cache[filename] = data
+                num_put += 1
+
+        cache_module = (
+            "triton.runtime.fb_memcache.FbMemcacheRemoteCacheBackend"
+            if config.is_fbcode()
+            else "triton.runtime.cache.RedisRemoteCacheBackend"
+        )
+
+        with config.patch(
+            {
+                "use_autotune_local_cache": False,
+                "use_autotune_remote_cache": True,
+            }
+        ), patch.dict(os.environ), patch(cache_module, MyCache, create=True):
+            os.environ.pop("TRITON_CACHE_MANAGER", None)
+            with config.patch({"max_autotune": True}):
+                for _ in range(4):
+                    torch.compile(mm, dynamic=dynamic)(a, b)
+                    reset()
+                    torch._inductor.codecache.PyCodeCache.clear()
+                self.assertEqual(num_get, 3)
+                self.assertEqual(num_put, 1)
+            num_get = 0
+            num_put = 0
+            for _ in range(4):
+                torch.compile(f, dynamic=dynamic)(x, y)
+                reset()
+                torch._inductor.codecache.PyCodeCache.clear()
+            self.assertEqual(num_get, 3)
+            self.assertEqual(num_put, 1)
+
+    def test_precompilation_threads(self):
+        import threading
+        from typing import Any, Dict
+        from unittest.mock import Mock, patch
+
+        class FakeChoiceCaller(ChoiceCaller):
+            def __init__(self):
+                super().__init__("none", [], Mock())
+                self.thread_id = None
+
+            def precompile(self):
+                self.thread_id = threading.get_ident()
+
+            def call_name(self) -> str:
+                return None
+
+            def to_callable(self):
+                return None
+
+            def hash_key(self) -> str:
+                return None
+
+            def output_node(self) -> "TensorBox":  # noqa: F821
+                return None
+
+        fake_choices = [FakeChoiceCaller() for i in range(10)]
+        fake_lookup_result = {choice: 0.123 for choice in fake_choices}
+
+        def no_lookup(
+            choices: List[ChoiceCaller],
+            op: str,
+            inputs: str,
+            benchmark: Callable[[Any], Dict[ChoiceCaller, float]],
+        ) -> Dict[ChoiceCaller, float]:
+            return benchmark(choices)
+
+        asc = AlgorithmSelectorCache()
+
+        def fake_benchmark_fn(*args, **kwargs):
+            return fake_lookup_result
+
+        main_thread_id = threading.get_ident()
+        mock_debug_handler = Mock()
+        old_debug_handler = V.debug
+        try:
+            V.set_debug_handler(mock_debug_handler)
+            with patch.object(asc, "lookup", new=no_lookup):
+                with patch.object(
+                    asc, "make_benchmark_fn", return_value=fake_benchmark_fn
+                ):
+                    with config.patch(
+                        {
+                            "autotune_in_subproc": False,
+                            "compile_threads": len(fake_choices),
+                        }
+                    ):
+                        asc("test_call", fake_choices, [], Mock())
+            for fake_choice in fake_choices:
+                assert (
+                    fake_choice.thread_id is not None
+                ), "Expected all ChoiceCaller's precompile method to have been called"
+                assert (
+                    fake_choice.thread_id != main_thread_id
+                ), "Expected all ChoiceCaller's precompile method to have been called on separate thread"
+        finally:
+            V.set_debug_handler(old_debug_handler)
+
+    @unittest.skipIf(not SM75OrLater, "need sm_75")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_max_autotune_precompile(self):
+        """
+        Make sure autotuning mm in sub processes work without crashes.
+        """
+
+        if torch.version.hip:
+            return
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn(100, 10).cuda().half()
+        b = torch.randn(10, 100).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": True,
+                "max_autotune_gemm_backends": "CUTLASS,Triton,ATen",
+                "compile_threads": 4,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 2,
+            }
+        ):
+            Y_compiled = torch.compile(mm, dynamic=False)(a, b)
+            Y = mm(a, b)
+            torch.testing.assert_close(Y_compiled, Y)
 
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM75OrLater, "need sm_75")

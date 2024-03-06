@@ -74,7 +74,7 @@ class InterpreterModule(torch.nn.Module):
 
     def forward(self, *args, **kwargs):
         assert self.graph_module is not None, "Didn't finalize this InterpreterModule"
-        if torch._dynamo.is_compiling():
+        if torch.compiler.is_dynamo_compiling():
             # Dynamo cannot trace through torch.fx.Interpreter, so fall back to
             # GraphModule codegen in this instance.
             return self.graph_module(*args, **kwargs)
@@ -168,13 +168,22 @@ class UnflattenedModule(torch.nn.Module):
                 name,
                 attr_kind=_AttrKind.PARAMETER,
             )
+
+        non_persistent_buffers = set(self.graph_signature.non_persistent_buffers)
         for name in self.graph_signature.buffers:
-            cloned = state_dict[name].clone()
+            if name in non_persistent_buffers:
+                persistent = False
+                cloned = export_module.constants[name].clone()
+            else:
+                persistent = True
+                cloned = state_dict[name].clone()
+
             _assign_attr(
                 cloned,
                 self,
                 name,
                 attr_kind=_AttrKind.BUFFER,
+                persistent=persistent,
             )
 
         for fqn in chain(

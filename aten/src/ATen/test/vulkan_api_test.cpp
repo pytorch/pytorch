@@ -1415,26 +1415,32 @@ TEST_F(VulkanAPITest, conv1d_simple) {
 
 void test_conv1d(
     int64_t kernel_size,
-    int64_t channels,
+    int64_t groups,
     int64_t lengths,
     int64_t stride = 1,
     int64_t padding = 0,
-    int64_t dilation = 1) {
+    int64_t dilation = 1,
+    int64_t in_group_size = 1,
+    int64_t out_group_size = 1,
+    int64_t batch_size = 1) {
   c10::InferenceMode mode;
 
-  const auto input_cpu = at::rand({1, channels, lengths}, at::kFloat);
-  const auto weights_cpu = at::rand({channels, 1, kernel_size}, at::kFloat);
-  const auto bias_cpu = at::rand({channels,}, at::kFloat);
+  int64_t in_channels = in_group_size * groups;
+  int64_t out_channels = out_group_size * groups;
+
+  const auto input_cpu = at::rand({batch_size, in_channels, lengths}, at::kFloat);
+  const auto weights_cpu = at::rand({out_channels, in_group_size, kernel_size}, at::kFloat);
+  const auto bias_cpu = at::rand({out_channels,}, at::kFloat);
 
   const auto input_vk = input_cpu.vulkan();
   const auto weights_vk = weights_cpu.vulkan();
   const auto bias_vk = bias_cpu.vulkan();
 
   const auto output_cpu = at::conv1d(
-      input_cpu, weights_cpu, bias_cpu, stride, padding, dilation, channels);
+      input_cpu, weights_cpu, bias_cpu, stride, padding, dilation, groups);
 
   const auto output_vk = at::conv1d(
-      input_vk, weights_vk, bias_vk, stride, padding, dilation, channels);
+      input_vk, weights_vk, bias_vk, stride, padding, dilation, groups);
   const auto output_vk_cpu = output_vk.cpu();
 
   const bool check = almostEqual(output_cpu, output_vk_cpu);
@@ -1456,6 +1462,11 @@ TEST_F(VulkanAPITest, conv1d) {
   test_conv1d(3, 5, 9, 2, 1, 2);
   test_conv1d(3, 5, 9, 1, 4, 2);
   test_conv1d(6, 22, 30, 5, 5, 3);
+  test_conv1d(6, 5, 30, 5, 5, 3, 3, 5);
+  test_conv1d(6, 5, 30, 5, 5, 3, 4, 2);
+  test_conv1d(6, 5, 30, 5, 5, 3, 4, 2, 2);
+  test_conv1d(6, 5, 30, 5, 5, 3, 4, 2, 5);
+  test_conv1d(6, 5, 30, 5, 5, 3, 4, 2, 9);
 }
 
 
@@ -4461,6 +4472,56 @@ TEST_F(VulkanAPITest, sigmoid_) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, DISABLED_log_softmax_underflow_exception) {
+  // We apply softmax and log in a sequence to the tesnor [20, 0].
+  // The output of softmax on CPU is [1.0000e+00, 2.0612e-09]; while
+  // the output on Vulkan is [1, 0] since 2.0612e-09 is smaller than
+  // the smallest represetable positive 5.96e−8. We expect to see nan
+  // or -inf when applying log.
+  float data[] = {20, 0};
+  const auto in_cpu = at::from_blob(data, {2}, at::kFloat);
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto softmax_out_cpu = at::softmax(in_cpu, 0);
+  const auto softmax_out_vulkan = at::softmax(in_vulkan, 0);
+
+  const auto log_out_cpu = at::log(softmax_out_cpu);
+  const auto log_out_vulkan = at::log(softmax_out_vulkan);
+
+  auto has_nan = log_out_vulkan.cpu().isnan().any().item().to<bool>();
+  auto has_inf = log_out_vulkan.cpu().isinf().any().item().to<bool>();
+
+  // We expect the output of log containing nan or inf.
+  const auto check = has_nan || has_inf;
+  if (!check) {
+    std::cout << "expect log_out_vulkan contains nan or inf, but got" << std::endl;
+    std::cout << log_out_vulkan.cpu() << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, log_softmax_underflow) {
+  // The minimum strictly positive (subnormal) value of float16 on Vulkan is 2−24 ≈ 5.96 × 10^−8.
+  // https://en.wikipedia.org/wiki/Half-precision_floating-point_format#Exponent_encoding
+  // then smallest_representable_log = log(5.96 × 10^−8) = -16.64.
+  // The implementation of `log_softmax` adds 6e-8 to the output of softmax before applying `log`
+  // to deal with underflow, so there won't be nan or -inf as shown in the
+  // `log_softmax_underflow_exception` test above
+  float smallest_representable_log = -16.64f;
+  float data[] = {20, 0};
+  const auto in_cpu = at::from_blob(data, {2}, at::kFloat);
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto log_softmax_cpu = at::log_softmax(in_cpu, 0);
+  const auto log_softmax_vulkan = at::log_softmax(in_vulkan, 0);
+
+  const auto check = checkRtol(log_softmax_cpu - log_softmax_vulkan.cpu(), -smallest_representable_log);
+  if (!check) {
+    showRtol(log_softmax_cpu, log_softmax_vulkan.cpu());
+  }
+  ASSERT_TRUE(check);
+}
+
 void test_softmax(const at::IntArrayRef shape, bool log_softmax = false) {
   at::Tensor in_cpu =
       at::rand(shape, at::TensorOptions(at::kCPU).dtype(at::kFloat));
@@ -4521,30 +4582,6 @@ TEST_F(VulkanAPITest, log_softmax) {
           std::vector<int64_t>(dim_vec.begin(), dim_vec.end() - trunc);
       test_softmax(trunc_dim_vec, log_softmax);
     }
-  }
-}
-
-// TODO: Currently the op is not working correctly. Add it back when it is fixed.
-TEST_F(VulkanAPITest, DISABLED_log_softmax) {
-  at::Tensor test_in[] = {
-    at::rand({1, 196, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    at::rand({1, 197, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    at::rand({1, 198, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    at::rand({1, 199, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-  };
-
-  for (auto in_cpu : test_in) {
-    const auto out_cpu = at::softmax(in_cpu, 1);
-
-    const auto in_vulkan = in_cpu.vulkan();
-    const auto out_vulkan = at::log_softmax(in_vulkan, 1);
-
-    const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-    if (!check) {
-      showRtol(out_cpu, out_vulkan.cpu());
-    }
-
-    ASSERT_TRUE(check);
   }
 }
 
@@ -7829,6 +7866,14 @@ void test_linear(
   }
 
   ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, linear_1d_small) {
+  test_linear({3}, {4, 3}, {4});
+}
+
+TEST_F(VulkanAPITest, linear_1d_large) {
+  test_linear({37}, {23, 37}, {23});
 }
 
 TEST_F(VulkanAPITest, linear_2d_flat) {

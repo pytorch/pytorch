@@ -767,7 +767,7 @@ std::vector<int64_t> reverse_list(const IntArrayRef list) {
 
 Tensor reverse_dim(const Tensor& t, int64_t dim) {
   Tensor index =
-      at::arange(t.size(dim) - 1, -1, -1, t.options().dtype(at::kLong));
+      at::arange(t.sym_size(dim) - 1, -1, -1, t.options().dtype(at::kLong));
   return t.index_select(dim, index);
 }
 
@@ -782,19 +782,19 @@ Tensor prod_safe_zeros_backward(
     return grad.expand_as(inp);
   }
 
-  if (inp.size(dim) == 1) {
+  if (inp.sym_size(dim) == 1) {
     return grad;
   }
 
-  auto ones_size = inp.sizes().vec();
+  auto ones_size = inp.sym_sizes().vec();
   ones_size[dim] = 1;
-  Tensor ones = at::ones(ones_size, grad.options());
+  Tensor ones = at::ones_symint(ones_size, grad.options());
   Tensor exclusive_normal_nocp =
-      at::cat({ones, inp.narrow(dim, 0, inp.size(dim) - 1)}, dim);
+      at::cat({ones, inp.narrow_symint(dim, 0, inp.sym_size(dim) - 1)}, dim);
   Tensor exclusive_normal = exclusive_normal_nocp.cumprod(dim);
 
   Tensor narrow_reverse =
-      reverse_dim(inp.narrow(dim, 1, inp.size(dim) - 1), dim);
+      reverse_dim(inp.narrow_symint(dim, 1, inp.sym_size(dim) - 1), dim);
   Tensor exclusive_reverse_nocp =
       at::cat({std::move(ones), std::move(narrow_reverse)}, dim);
   Tensor exclusive_reverse =
@@ -825,7 +825,7 @@ Tensor prod_backward(
   Tensor zero_idx = (input == 0).nonzero();
   if (zero_idx.sym_numel() == 0) {
     return grad * (result / input).conj();
-  } else if (!at::GradMode::is_enabled() && zero_idx.size(0) > 1) {
+  } else if (!at::GradMode::is_enabled() && zero_idx.sym_size(0) > 1) {
     return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
     return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
@@ -842,7 +842,7 @@ Tensor prod_backward(
   if (input.dim() == 0) {
     return grad;
   }
-  dim = at::maybe_wrap_dim(dim, static_cast<int64_t>(input.sizes().size()));
+  dim = at::maybe_wrap_dim(dim, static_cast<int64_t>(input.sym_sizes().size()));
   if (!keepdim) {
     // `prod` reduces the dimension at `dim`,
     // so, unsqueeze `grad` and `result` at dim.
@@ -912,34 +912,35 @@ Tensor logcumsumexp_backward(
 
   // Reference: https://github.com/tensorflow/tensorflow/blob/
   // 2a5910906a0e0f3dbc186ff9db6386d81a63448c/tensorflow/python/ops/math_grad.py#L1832-L1863
-  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
+
+  auto scalar_min = AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
       at::ScalarType::BFloat16,
       at::typeMetaToScalarType(grad.dtype()),
       "logcumsumexp_backward",
-      [grad, self, result, dim]() {
-        auto grad_min = at::empty_like(grad);
-        auto reverse_logcumsumexp = [dim](auto x) {
-          return at::flip(at::logcumsumexp(at::flip(x, {dim}), dim), {dim});
-        };
+      []() { return c10::Scalar(std::numeric_limits<scalar_t>::lowest()); });
 
-        if (!at::is_complex(grad)) {
-          grad_min.fill_(std::numeric_limits<scalar_t>::lowest());
-          auto log_grad_positive = at::where(grad > 0, grad.log(), grad_min);
-          auto log_grad_negative = at::where(grad < 0, (-grad).log(), grad_min);
+  auto reverse_logcumsumexp = [dim](auto x) {
+    return at::flip(at::logcumsumexp(at::flip(x, {dim}), dim), {dim});
+  };
 
-          auto output_pos =
-              (reverse_logcumsumexp(log_grad_positive - result) + self).exp();
-          auto output_neg =
-              (reverse_logcumsumexp(log_grad_negative - result) + self).exp();
+  if (!at::is_complex(grad)) {
+    auto grad_min = at::scalar_tensor(scalar_min, grad.options());
+    auto log_abs_grad = grad.abs().log();
+    auto log_grad_positive = at::where(grad > 0, log_abs_grad, grad_min);
+    auto log_grad_negative = at::where(grad < 0, log_abs_grad, grad_min);
 
-          return output_pos - output_neg;
-        } else {
-          // no trick separating the positive and negative required
-          auto log_grad = grad.conj().log();
-          auto output = (reverse_logcumsumexp(log_grad - result) + self).exp();
-          return output.conj();
-        }
-      });
+    auto output_pos =
+        (reverse_logcumsumexp(log_grad_positive - result) + self).exp();
+    auto output_neg =
+        (reverse_logcumsumexp(log_grad_negative - result) + self).exp();
+
+    return output_pos - output_neg;
+  } else {
+    // no trick separating the positive and negative required
+    auto log_grad = grad.conj().log();
+    auto output = (reverse_logcumsumexp(log_grad - result) + self).exp();
+    return output.conj();
+  }
 }
 
 Tensor logcumsumexp_jvp(
@@ -7112,8 +7113,7 @@ Tensor values_backward(const Tensor& grad, const Tensor& self) {
           self.options(),
           /*is_coalesced=*/true);
     } else if (at::sparse_csr::is_sparse_compressed(self)) {
-      Tensor compressed_indices, plain_indices;
-      std::tie(compressed_indices, plain_indices) =
+      auto [compressed_indices, plain_indices] =
           at::sparse_csr::getCompressedPlainIndices(self);
       return at::_sparse_compressed_tensor_unsafe_symint(
           compressed_indices,

@@ -33,13 +33,20 @@ from torch._dynamo import (
     logging as dynamo_logging,
     utils as dynamo_utils,
 )
-from torch._dynamo.utils import counters, detect_fake_mode, lazy_format_graph_code
+from torch._dynamo.utils import (
+    counters,
+    detect_fake_mode,
+    lazy_format_graph_code,
+    optimus_scuba_log,
+)
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
+from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
+from torch._utils_internal import signpost_event
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 from .._dynamo.backends.common import aot_autograd
@@ -200,6 +207,95 @@ def _unlift_graph(mod, gm, graph_signature):
     return unlifted_gm
 
 
+def _get_subgraph_names(gm):
+    for node in gm.graph.nodes:
+        if node.target == torch.ops.higher_order.cond:
+            true_subgraph_name = node.args[1].name
+            false_subgraph_name = node.args[2].name
+            yield true_subgraph_name
+            yield false_subgraph_name
+
+
+def _recursive_pre_grad_passes(gm, example_inputs):
+    for subgraph_name in _get_subgraph_names(gm):
+        subgraph = getattr(gm, subgraph_name)
+        # as we don't have recursive example inputs, passing None here
+        new_subgraph = _recursive_pre_grad_passes(subgraph, example_inputs=None)
+        setattr(gm, subgraph_name, new_subgraph)
+    return pre_grad_passes(gm, example_inputs)
+
+
+def _recursive_joint_graph_passes(gm):
+    for subgraph_name in _get_subgraph_names(gm):
+        subgraph = getattr(gm, subgraph_name)
+        _recursive_joint_graph_passes(subgraph)
+    joint_graph_passes(gm)
+
+
+def _recursive_post_grad_passes(gm, is_inference: bool = False):
+    for subgraph_name in _get_subgraph_names(gm):
+        subgraph = getattr(gm, subgraph_name)
+        _recursive_post_grad_passes(subgraph, is_inference)
+    post_grad_passes(gm, is_inference)
+
+
+def split_const_gm(
+    gm: torch.fx.GraphModule,
+) -> Tuple[torch.fx.GraphModule, Dict[str, int]]:
+    """
+    This function takes an GraphModule input "gm".
+    The gm will be split into 2 components,
+      1) const_gm, which consists the subgraph of gm that can be constant folded.
+      2) gm (being inplace modified,) which returns the graph after constant folding.
+
+    const_output_index is a mapping of corresponding node name from gm to the
+    output index of const_gm.
+    Returns (const_gm, const_output_index)
+    """
+    from torch._inductor.constant_folding import (
+        CONST_MODULE_TAG,
+        META_TAG,
+        MODULE_TAG,
+        replace_node_with_constant,
+        run_and_get_constant_graph,
+    )
+
+    const_gm = run_and_get_constant_graph(gm)
+    const_result = const_gm()
+
+    const_outputs = {
+        x.name: idx for idx, x in enumerate(tuple(const_gm.graph.nodes)[-1].args[0])
+    }
+
+    to_erase_node = []
+    to_replace_node = []
+    const_output_index = {}
+    for node in gm.graph.nodes:
+        if node.name in const_outputs:
+            to_replace_node.append(node)
+        elif node.meta[META_TAG] == CONST_MODULE_TAG:
+            to_erase_node.append(node)
+
+    for node in to_replace_node:
+        new_const_name = "_FOLDED_CONST_" + node.name
+        replace_node_with_constant(
+            gm,
+            node,
+            const_result[const_outputs[node.name]],
+            new_const_name,
+        )
+        const_output_index[new_const_name] = const_outputs[node.name]
+    for node in to_erase_node[::-1]:
+        if node.users:
+            for n in node.users:
+                assert n.meta[META_TAG] == MODULE_TAG, f"node: {node} user not empty."
+        else:
+            gm.graph.erase_node(node)
+    gm.recompile()
+
+    return const_gm, const_output_index
+
+
 def is_tf32_warning_applicable(gm: torch.fx.GraphModule):
     aten = torch.ops.aten
     tf32_ops = {
@@ -231,7 +327,7 @@ def count_bytes_inner(
     fake_mode = fake_tensor_prop(gm, example_inputs)
 
     with V.set_fake_mode(fake_mode):
-        post_grad_passes(gm, False)
+        _recursive_post_grad_passes(gm, False)
 
     graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
     with V.set_graph_handler(graph), V.set_real_inputs(example_inputs):
@@ -288,6 +384,7 @@ def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
 # compile_fx return and we may want to use the _LazyGraphModule for compiling
 # the backward graph as well.
 @_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
+@dynamo_utils.dynamo_timed(phase_name="inductor_compile")
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -526,6 +623,9 @@ def fx_codegen_and_compile(
         f"graph {graph_id}",
     )
     V.debug.fx_graph(gm, example_inputs)
+    # TODO: Should we actually dump this?  It should be redundant with the aot
+    # structured logs...
+    # trace_structured("inductor_input_graph", payload_fn=lambda: gm.print_readable(print_output=False))
 
     shape_env = _shape_env_from_inputs(example_inputs)
 
@@ -560,15 +660,47 @@ def fx_codegen_and_compile(
 
     with V.set_fake_mode(fake_mode):
         # has some issues with memory in training
-        post_grad_passes(gm, is_inference=is_inference)
+        _recursive_post_grad_passes(gm, is_inference=is_inference)
         V.debug.fx_graph_transformed(gm, example_inputs)
         post_grad_graphs_log.debug("%s", lazy_format_graph_code("AFTER POST GRAD", gm))
-        log.debug(
-            "counters of inductor dict after apply passes on the input FX graph in the post grad pass: %s",
-            counters["inductor"],
+        trace_structured(
+            "inductor_post_grad_graph",
+            payload_fn=lambda: gm.print_readable(print_output=False),
+        )
+        optimus_scuba_log["inductor_post_grad"] = counters["inductor"]
+        signpost_event(
+            "optimus",
+            "compile_fx.post_grad_passes",
+            optimus_scuba_log,
         )
 
     with V.set_fake_mode(fake_mode):
+        const_output_index = None
+        const_graph = None
+        const_code = None
+
+        if aot_mode and config.aot_inductor.use_runtime_constant_folding:
+            const_gm, const_output_index = split_const_gm(gm)
+
+            const_graph = GraphLowering(
+                const_gm,
+                example_inputs=[],
+                shape_env=shape_env,
+                num_static_inputs=num_fixed,
+                graph_id=graph_id,
+                cpp_wrapper=cpp_wrapper,
+                aot_mode=aot_mode,
+                user_visible_outputs=user_visible_outputs,
+                extern_node_serializer=extern_node_serializer,
+                is_inference=is_inference,
+                is_const_graph=True,
+            )
+            with V.set_graph_handler(const_graph):
+                assert cpp_wrapper, "AOT mode only supports C++ wrapper"
+                const_graph.run()
+
+                const_code, _ = const_graph.codegen_with_cpp_wrapper()
+
         graph = GraphLowering(
             gm,
             # example_inputs will be used by AOTInductor to dry-run the generated code for Triton kernel tuning.
@@ -583,6 +715,9 @@ def fx_codegen_and_compile(
             user_visible_outputs=user_visible_outputs,
             extern_node_serializer=extern_node_serializer,
             is_inference=is_inference,
+            const_output_index=const_output_index,
+            const_code=const_code,
+            const_module=const_graph,
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
@@ -934,7 +1069,7 @@ def fw_compiler_freezing(
     from torch._inductor.freezing import convert_conv_weights_to_channels_last, freeze
 
     # partition_fn won't be called
-    joint_graph_passes(aot_autograd_model)
+    _recursive_joint_graph_passes(aot_autograd_model)
 
     layout_opt = GraphLowering.decide_layout_opt(aot_autograd_model, is_inference=True)
     if layout_opt:
@@ -1071,10 +1206,12 @@ def compile_fx(
                 recursive_compile_fx,
             )
 
-        model_ = pre_grad_passes(model_, example_inputs_)
-        log.debug(
-            "counters of inductor dict after apply passes on the input FX graph in the pre grad pass: %s",
-            counters["inductor"],
+        model_ = _recursive_pre_grad_passes(model_, example_inputs_)
+        optimus_scuba_log["inductor_pre_grad"] = counters["inductor"]
+        signpost_event(
+            "optimus",
+            "compile_fx.pre_grad_passes",
+            optimus_scuba_log,
         )
 
     if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
@@ -1103,7 +1240,7 @@ def compile_fx(
     ):
         if is_inference:
             # partition_fn won't be called
-            joint_graph_passes(model)
+            _recursive_joint_graph_passes(model)
 
         num_rng_seed_offset_inputs = 2 if functorch_config.functionalize_rng_ops else 0
         fixed = len(example_inputs) - num_example_inputs - num_rng_seed_offset_inputs
@@ -1187,12 +1324,13 @@ def compile_fx(
         inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
 
     def partition_fn(graph, joint_inputs, **kwargs):
-        joint_graph_passes(graph)
+        _recursive_joint_graph_passes(graph)
         return min_cut_rematerialization_partition(
             graph, joint_inputs, **kwargs, compiler="inductor"
         )
 
     @dynamo_utils.dynamo_timed
+    @dynamo_utils.maybe_cprofile
     def bw_compiler(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         fixed = count_tangents(model)
         return inner_compile(

@@ -1,15 +1,16 @@
 import os
 import warnings
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Optional, Union
+from typing import cast, Optional, Union
 
 import torch
 import torch.distributed as dist
 from torch.distributed._state_dict_utils import _offload_state_dict_to_cpu
 from torch.distributed.checkpoint.stateful import Stateful
+from torch.distributed.distributed_c10d import _get_default_group
 
+from ._storage_utils import _storage_setup
 from .default_planner import DefaultSavePlanner
-from .filesystem import FileSystemWriter
 from .metadata import Metadata, STATE_DICT_TYPE
 from .planner import SavePlanner
 from .storage import StorageWriter
@@ -56,7 +57,7 @@ def save(
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
-    no_dist: bool = False,
+    no_dist: Optional[bool] = None,
 ) -> Metadata:
     """
     Save a distributed model in SPMD style.
@@ -83,6 +84,7 @@ def save(
     .. note::
         This function can be used to save a state_dict without having a process group
         initialized by passing ``no_dist=True``.
+        (Default: ``False`` when torch.distributed is available and initialized)
 
 
     Args:
@@ -133,19 +135,18 @@ def save(
     """
     torch._C._log_api_usage_once("torch.distributed.checkpoint.save")
 
+    if no_dist is None:
+        no_dist = not (dist.is_available() and dist.is_initialized())
+        if no_dist:
+            warnings.warn(
+                "Saving with `no_dist` set to True because torch.distributed"
+                " is unavailable or uninitialized."
+            )
+
     with _profile():
-        if not storage_writer:
-            if not checkpoint_id:
-                raise RuntimeError(
-                    "`checkpoint_id` must be specificed if storage_writer is None."
-                )
-            # TODO: automatically decide whether to use FSSpecFileSystem
-            # https://github.com/pytorch/pytorch/issues/118033 and
-            # https://github.com/pytorch/pytorch/issues/118036
-            storage_writer = FileSystemWriter(checkpoint_id)
-
-        storage_writer.reset(checkpoint_id)
-
+        storage_writer = cast(
+            StorageWriter, _storage_setup(storage_writer, checkpoint_id, reader=False)
+        )
         return _save_state_dict(
             _stateful_to_state_dict(state_dict),
             storage_writer,
@@ -200,6 +201,11 @@ def _async_save(
 
     """
     torch._C._log_api_usage_once("torch.distributed.checkpoint._async_save")
+
+    pg = process_group or _get_default_group()
+    assert (
+        torch.device("cpu") in pg._device_types  # type: ignore[attr-defined]
+    ), "A CPU backend must be enabled for async save; try initializing process group with 'cpu:gloo,cuda:ncc'"
 
     cpu_state_dict = _offload_state_dict_to_cpu(_stateful_to_state_dict(state_dict))
 

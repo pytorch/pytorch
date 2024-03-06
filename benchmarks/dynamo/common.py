@@ -135,6 +135,10 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     # We should be able to graphbreak there.
     "doctr_det_predictor",
     "dlrm",
+    "pyhpc_isoneutral_mixing",
+    "pyhpc_equation_of_state",
+    "pyhpc_turbulent_kinetic_energy",
+    "detectron2_fcos_r_50_fpn",
 }
 
 # These models currently fail accuracy with eager Adam optimizer
@@ -2050,6 +2054,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_models_for_freezing(self):
+        return set()
+
+    @property
     def slow_models(self):
         return set()
 
@@ -2986,9 +2994,10 @@ def parse_args(args=None):
     """,
     )
     parser.add_argument(
-        "--no-optimize-ddp",
-        action="store_true",
-        help="Disables dynamo DDPOptimizer (graph breaks). (Applies only when using --ddp benchmark mode).",
+        "--optimize-ddp-mode",
+        type=str,
+        default="ddp_optimizer",
+        help="Specify the DDP optimization mode -- the value of torch._dynamo.config.optimize_ddp.",
     )
     parser.add_argument(
         "--distributed-master-port",
@@ -3438,11 +3447,7 @@ def run(runner, args, original_dir=None):
         )
     if args.ddp:
         assert args.training, "DDP benchmark requires --training mode"
-        if args.no_optimize_ddp:
-            torch._dynamo.config.optimize_ddp = False
-        else:
-            # TODO(whc) after enabling DDPOptimizer by default this could be removed or assert
-            torch._dynamo.config.optimize_ddp = True
+        torch._dynamo.config.optimize_ddp = args.optimize_ddp_mode
         if args.only == "dlrm":
             log.error(
                 "DLRM+DDP is unsupported as it requires sharding the embedding layer separately from DDP"
@@ -3478,6 +3483,8 @@ def run(runner, args, original_dir=None):
             "Wav2Vec2ForCTC",
             "Wav2Vec2ForPreTraining",
             "sam",
+            "resnet50_quantized_qat",
+            "mobilenet_v2_quantized_qat",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
@@ -3575,6 +3582,9 @@ def run(runner, args, original_dir=None):
 
     if not args.multiprocess:
         runner.skip_models.update(runner.skip_multiprocess_models)
+
+    if args.freezing:
+        runner.skip_models.update(runner.skip_models_for_freezing)
 
     if args.no_skip:
         runner.skip_models.clear()

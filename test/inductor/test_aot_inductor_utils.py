@@ -10,6 +10,15 @@ from torch.testing._internal.common_utils import IS_FBCODE
 from torch.utils import _pytree as pytree
 
 
+class WrapperModule(torch.nn.Module):
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+
+    def forward(self, *args, **kwargs):
+        return self.model(*args, **kwargs)
+
+
 class AOTIRunnerUtil:
     @classmethod
     def compile(
@@ -20,6 +29,8 @@ class AOTIRunnerUtil:
         dynamic_shapes=None,
         disable_constraint_solver=False,
     ):
+        if not isinstance(model, torch.nn.Module):
+            model = WrapperModule(model)
         # The exact API is subject to change
         so_path = torch._export.aot_compile(
             model,
