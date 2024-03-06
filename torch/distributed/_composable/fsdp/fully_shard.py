@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 
 from torch.distributed._composable import contract
-from torch.distributed._tensor import DeviceMesh, DTensor
+from torch.distributed._tensor import DeviceMesh, DTensor, random
 
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
@@ -123,6 +123,10 @@ def fully_shard(
     for module in managed_modules:
         module._is_fsdp_managed_module = True  # type: ignore[assignment]
         module._fsdp_use_orig_params = True  # type: ignore[assignment]
+
+    if not random._rng_tracker:
+        # Used for DTensor random ops (e.g. for parameter initialization)
+        random._rng_tracker = random.OffsetBasedRNGTracker(mesh.device_type)
 
     # Place FSDP leftmost for highest priority in the method resolution order
     cls = module.__class__
