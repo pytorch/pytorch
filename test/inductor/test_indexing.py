@@ -2,7 +2,7 @@
 import sympy
 
 from torch._inductor.codegen.cpp import cexpr
-from torch._inductor.codegen.triton import texpr, TritonPrinter
+from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
 
 from torch._inductor.sizevars import SizeVarAllocator
@@ -212,7 +212,8 @@ class ExprPrinterTests(TorchTestCase):
             else:
                 self.assertExpectedInline(pexpr(expr), """math.floor((1/2)*s1)""")
                 self.assertExpectedInline(
-                    texpr(expr), """triton_helpers.libdevice.floor((1/2)*s1).to(tl.int64)"""
+                    texpr(expr),
+                    """triton_helpers.libdevice.floor((1/2)*s1).to(tl.int64)""",
                 )
                 self.assertExpectedInline(cexpr(expr), """std::floor((1.0/2.0)*s1)""")
 
