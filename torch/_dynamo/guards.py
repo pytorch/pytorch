@@ -545,7 +545,10 @@ class GuardBuilder(GuardBuilderBase):
                         example_value,
                     )
 
-                # For non dict objects like lists/tuples etc
+                # Check that we don't have dict or its subclasses
+                assert not isinstance(
+                    base_example_value, (dict, collections.OrderedDict)
+                )
                 index = source.index
                 if source.index_is_slice:
                     index = source.unpack_slice()
@@ -566,22 +569,26 @@ class GuardBuilder(GuardBuilderBase):
                     # TODO(anijain2305) - Use a defaults manager using
                     # PyFunction_GetDefaults, could be faster than
                     # PyObject_GetItem.
+                    assert callable(base_example_value)
                     return base_guard_manager.getattr_manager(
-                        attr="__defaults__", source=base_source_name, example_value=None
+                        attr="__defaults__",
+                        source=base_source_name,
+                        example_value=base_example_value.__defaults__,
                     ).getitem_manager(
                         key=source.idx_key,
                         source=source_name,
                         example_value=example_value,
                     )
                 else:
-                    # TODO(anijain2305) - Example value is None to avoid a
-                    # DictGuardManager. Add a test that causes a failure on this
-                    # and set the right value.
+                    # TODO(anijain2305) - Would dictGuardManager be better here?
+                    # If we set example_value =
+                    # base_example_value.__kwdefaults__, we will get a
+                    # DictGuardManager.
                     return base_guard_manager.getattr_manager(
                         attr="__kwdefaults__",
                         source=base_source_name,
                         example_value=None,
-                    ).getitem_manager(
+                    ).dict_getitem_manager(
                         key=str(source.idx_key),
                         source=source_name,
                         example_value=example_value,
