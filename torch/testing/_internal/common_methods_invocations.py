@@ -5103,13 +5103,40 @@ def sample_inputs__unsafe_masked_index(op_info, device, dtype, requires_grad, **
         indices = [make_idx(idx_size, high, dim, d) for d in range(dim)]
         masks = [torch.logical_and(idx >= 0, idx < self_shape[i]) for i, idx in enumerate(indices) if idx is not None]
         mask = functools.reduce(torch.logical_and, masks)
-        args = (mask, indices, fill_value)
-        yield SampleInput(make_arg(self_shape), args=args)
+        yield SampleInput(make_arg(self_shape), mask, indices, fill_value)
 
         masks = [torch.logical_and(idx >= 1, idx < self_shape[i] - 1) for i, idx in enumerate(indices) if idx is not None]
         mask = functools.reduce(torch.logical_and, masks)
-        args = (mask, indices, fill_value)
-        yield SampleInput(make_arg(self_shape), args=args)
+        yield SampleInput(make_arg(self_shape), mask, indices, fill_value)
+
+def sample_inputs__unsafe_masked_index_put_accumulate(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def make_idx(n, m, dim, d):
+        view_shape = [1] * dim
+        view_shape[d] = n
+        return make_tensor((n,), device=device, dtype=torch.int64, low=0, high=m).view(view_shape)
+
+    cases = [
+        ((S, S), S, (M, M)),
+        ((S, S), M, (S, S+1)),
+        ((S, S, S), S, (M, M-1, M+1)),
+    ]
+
+    fill_value = make_tensor([], dtype=dtype, device="cpu").item()
+
+    for c in cases:
+        self_shape, high, idx_sizes = c
+        dim = len(self_shape)
+        indices = [make_idx(idx_sizes[d], high, dim, d) for d in range(dim)]
+        masks = [torch.logical_and(idx >= 0, idx < self_shape[i]) for i, idx in enumerate(indices) if idx is not None]
+        mask = functools.reduce(torch.logical_and, masks)
+        values = make_arg(idx_sizes)
+        yield SampleInput(make_arg(self_shape), mask, indices, values)
+
+        masks = [torch.logical_and(idx >= 1, idx < self_shape[i] - 1) for i, idx in enumerate(indices) if idx is not None]
+        mask = functools.reduce(torch.logical_and, masks)
+        yield SampleInput(make_arg(self_shape), mask, indices, values)
 
 
 def sample_inputs_mode(op_info, device, dtype, requires_grad, **kwargs):
@@ -16461,6 +16488,14 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs__unsafe_masked_index),
+    OpInfo('_unsafe_masked_index_put_accumulate',
+           dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           supports_out=False,
+           supports_inplace_autograd=False,
+           supports_scripting=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           sample_inputs_func=sample_inputs__unsafe_masked_index_put_accumulate),
     OpInfo('__getitem__',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes

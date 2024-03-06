@@ -17,7 +17,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE2(_unsafe_index, Tensor);
   OP_DECOMPOSE(_unsafe_masked_index);
   OP_DECOMPOSE(_unsafe_index_put);
-  OP_DECOMPOSE(_unsafe_masked_index_put);
+  OP_DECOMPOSE(_unsafe_masked_index_put_accumulate);
 }
 
 }}
