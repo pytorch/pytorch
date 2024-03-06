@@ -5,6 +5,7 @@ import logging
 import re
 import time
 import warnings
+from collections.abc import Mapping
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -43,6 +44,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from torch.utils._pytree import SUPPORTED_NODES
 from torch.utils._sympy.value_ranges import ValueRangeError, ValueRanges
 
 from ._safeguard import AutogradStateOpsFailSafeguard
@@ -803,8 +805,23 @@ def _export(
 
         gm = ep_non_strict.gm
 
-        # add code to match mod.forward signature names, with dim ranges in dynamic_shapes dict
+        def tree_zip(combined_args, dynamic_shapes):
+            if isinstance(combined_args, (tuple, list)):
+                for i, shape in enumerate(dynamic_shapes):
+                    yield from tree_zip(combined_args[i], shape)
+            elif isinstance(combined_args, dict):
+                for k, shape in dynamic_shapes.items():
+                    yield from tree_zip(combined_args[k], shape)
+            elif type(combined_args) in SUPPORTED_NODES:
+                yield from tree_zip(
+                    SUPPORTED_NODES[type(combined_args)].flatten_fn(combined_args)[0],
+                    dynamic_shapes,
+                )
+            elif isinstance(combined_args, torch.Tensor):
+                yield (combined_args, dynamic_shapes)
+
         if dynamic_shapes is not None:
+            new_range_constraints = {}
             user_input_names = set(
                 spec.arg.name
                 for spec in ep_non_strict.sig.input_specs
@@ -813,28 +830,37 @@ def _export(
             user_input_nodes = [
                 node for node in gm.graph.nodes if node.name in user_input_names
             ]
-            for i, (name, node) in enumerate(
-                zip(inspect.signature(mod.forward).parameters, user_input_nodes)
+
+            signature = (
+                inspect.signature(mod.forward)
+                if isinstance(mod, torch.nn.Module)
+                else inspect.signature(mod)
+            )
+            combined_args = signature.bind(*args, **kwargs).arguments
+            combined_args = (
+                combined_args
+                if isinstance(dynamic_shapes, Mapping)
+                else list(combined_args.values())
+            )
+            for (_, dynamic_dim), input_node in zip(
+                tree_zip(combined_args, dynamic_shapes), user_input_nodes
             ):
-                shapes = node.meta["val"].size()
-                if isinstance(dynamic_shapes, dict):
-                    dynamic_dim = dynamic_shapes.get(name, {})
-                else:
-                    dynamic_dim = dynamic_shapes[i]
+                shapes = input_node.meta["val"].size()
+                if dynamic_dim is None:
+                    continue
                 for dim, shape in enumerate(shapes):
                     if isinstance(shape, torch.SymInt) and dynamic_dim[dim]:
-                        # if isinstance(dynamic_dim[dim], torch.export.dynamic_shapes._DerivedDim):
-                        #     continue
-                        range_constraints[shape.node._expr] = ValueRanges(
+                        new_range_constraints[shape.node._expr] = ValueRanges(
                             lower=dynamic_dim[dim].min, upper=dynamic_dim[dim].max
                         )
 
-        # filter out non-symbols (exprs)
-        range_constraints = {
-            k: v
-            for k, v in range_constraints.items()
-            if isinstance(k, sympy.core.symbol.Symbol)
-        }
+            # filter out non-symbols (exprs)
+            new_range_constraints = {
+                k: v
+                for k, v in new_range_constraints.items()
+                if isinstance(k, sympy.core.symbol.Symbol) and k in range_constraints
+            }
+            range_constraints = new_range_constraints
 
         module_call_signatures = {
             strip_root(fqn): ModuleCallSignature(inputs=[], outputs=[], **specs)
