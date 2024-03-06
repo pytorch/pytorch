@@ -187,13 +187,17 @@ class GraphLowering(torch.fx.Interpreter):
         if get_scheduling_for_device("cpu") is None:
             from .codegen.cpp import CppScheduling
 
-            register_backend_for_device("cpu", CppScheduling, WrapperCodeGen)
+            register_backend_for_device(
+                "cpu", CppScheduling, WrapperCodeGen, CppWrapperCpu
+            )
 
         if get_scheduling_for_device("cuda") is None:
             from .codegen.cuda_combined_scheduling import CUDACombinedScheduling
 
             # CUDACombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
-            register_backend_for_device("cuda", CUDACombinedScheduling, WrapperCodeGen)
+            register_backend_for_device(
+                "cuda", CUDACombinedScheduling, WrapperCodeGen, CppWrapperCuda
+            )
 
     def __init__(
         self,
@@ -1117,8 +1121,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.cuda = "cuda" in self.device_types
         if self.cpp_wrapper:
             self.validate_can_generate_cpp_wrapper()
-            self.wrapper_code = CppWrapperCuda() if self.cuda else CppWrapperCpu()
-            return
 
         device_types = self.device_types.copy()
         device_types.discard("cpu")
@@ -1130,7 +1132,9 @@ class GraphLowering(torch.fx.Interpreter):
         device_type = "cpu" if only_cpu else device_types.pop()
 
         self.device_ops = get_device_op_overrides(device_type)
-        wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type)
+        wrapper_code_gen_cls = get_wrapper_codegen_for_device(
+            device_type, self.cpp_wrapper
+        )
         assert wrapper_code_gen_cls is not None, f"Device {device_type} not supported"
         self.wrapper_code = wrapper_code_gen_cls()
 
