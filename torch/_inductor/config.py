@@ -279,7 +279,7 @@ max_fusion_size = 64
 max_pointwise_cat_inputs = 8
 
 # replace small reductions with pointwise, disable with `= 1`
-unroll_reductions_threshold = 16
+unroll_reductions_threshold = 8
 
 # Add extra comments to output code (causes compile cache misses)
 comment_origin = False
