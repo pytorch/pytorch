@@ -1709,7 +1709,7 @@ class Scheduler:
         if not config.benchmark_fusion:
             return True
 
-        if node1.is_template():
+        if node1.is_template() or node1.is_foreach() or node2.is_foreach():
             # TODO support benchmarking epilogue fusion
             return True
 

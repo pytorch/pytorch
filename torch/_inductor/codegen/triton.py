@@ -2749,6 +2749,7 @@ class TritonKernel(Kernel):
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
             "no_x_dim": self.no_x_dim,
+            "backend_hash": torch.utils._triton.triton_hash_with_backend(),
         }
         num_gb = None
         if config.benchmark_kernel or config.profile_bandwidth:

@@ -37,7 +37,17 @@ from __future__ import annotations
 import copy
 import itertools
 import os
-from typing import Any, Callable, Collection, Mapping, Optional, Tuple, Type, Union
+from typing import (
+    Any,
+    Callable,
+    Collection,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+    Type,
+    Union,
+)
 
 import error_reproduction
 
@@ -144,6 +154,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     ),
     skip(
         "_native_batch_norm_legit",
+        dtypes=(torch.float16,),
+        reason="fixme: Assertion error: result mismatch and type error",
+    ),
+    skip(
+        "_batch_norm_with_update",
         dtypes=(torch.float16,),
         reason="fixme: Assertion error: result mismatch and type error",
     ),
@@ -1342,6 +1357,20 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="https://github.com/pytorch/pytorch/issues/115106",
     ),
+    skip(
+        "_batch_norm_with_update",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason="https://github.com/pytorch/pytorch/issues/115106",
+    ),
+    # TODO: This test currently fails only for certain inputs, e.g. shape([3, 1]).
+    # Numerically the ONNX program is correct, but the output shapes for `save_mean`
+    # and `save_var` were tensor(-2.1268) instead of the correct tensor([-2.1268])
+    # for example.
+    skip(
+        "_batch_norm_with_update",
+        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
+        reason="not supported yet",
+    ),
     xfail(
         "addmm",  # xfail can't only use dtypes to catch all cases
         matcher=lambda sample: sample.input.dtype
@@ -1652,6 +1681,16 @@ OP_WITH_SKIPPED_XFAIL_SUBTESTS = frozenset(meta.op_name for meta in SKIP_XFAIL_S
 ALL_OPS_IN_DB = frozenset(op_info.name for op_info in OPS_DB)
 
 
+def _torch_size_flatten_spec(d: List[Any], spec: Any) -> List[Any]:
+    return [d[i] for i in range(spec.num_children)]
+
+
+torch.fx._pytree.register_pytree_flatten_spec(
+    torch.Size,
+    _torch_size_flatten_spec,
+)
+
+
 class SingleOpModel(torch.nn.Module):
     """Test model to wrap around a single op for export."""
 
@@ -1729,7 +1768,10 @@ def _compare_onnx_and_torch_exported_program(
     # Thus, ONNXProgram() must run before ref_model() to prevent ref_model.forward() from changing the state_dict.
     # Otherwise, the ref_model can change buffers on state_dict which would be used by ONNXProgram.__call__()
     onnx_outputs = onnx_exported_program(*input_args, **input_kwargs)
-    torch_outputs = torch_exported_program(*input_args, **input_kwargs)
+    if isinstance(torch_exported_program, torch.export.ExportedProgram):
+        torch_outputs = torch_exported_program.module()(*input_args, **input_kwargs)
+    else:
+        torch_outputs = torch_exported_program(*input_args, **input_kwargs)
     torch_outputs_onnx_format = onnx_exported_program.adapt_torch_outputs_to_onnx(
         torch_outputs
     )
