@@ -2,7 +2,7 @@ import os.path as _osp
 import torch
 
 from .throughput_benchmark import ThroughputBenchmark
-from .cpp_backtrace import get_cpp_backtrace
+from .cpp_backtrace import get_cpp_backtrace, get_python_cpp_trace
 from .backend_registration import rename_privateuse1_backend, generate_methods_for_privateuse1_backend
 from . import deterministic
 from . import collect_env
