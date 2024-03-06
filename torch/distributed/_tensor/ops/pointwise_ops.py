@@ -283,6 +283,7 @@ pointwise_ops = [
     aten.logit.out,
     aten.logit_.default,
     aten.masked_fill.Scalar,
+    aten.maximum.out,
     aten.mul.Scalar,
     aten.mul.Tensor,
     aten.mul.out,
@@ -351,6 +352,8 @@ pointwise_ops = [
     aten.sign_.default,
     aten.signbit.default,
     aten.signbit.out,
+    aten.silu.default,
+    aten.silu.out,
     aten.sin.default,
     aten.sin.out,
     aten.sin_.default,
@@ -395,6 +398,7 @@ pointwise_ops = [
     # please keep the entries below alphabetically sorted
     aten.gelu_backward.default,
     aten.sigmoid_backward.default,
+    aten.silu_backward.default,
     aten.tanh_backward.default,
     aten.threshold_backward.default,
 ]
@@ -444,7 +448,7 @@ def pointwise_strategy(
     pointwise_strategy = OpStrategy([])
 
     for placement_strategy in followed_strategy.strategies:
-        spec_to_follow = placement_strategy.out_spec
+        spec_to_follow = placement_strategy.output_spec
         out_placements: List[Placement] = []
 
         for placement in spec_to_follow.placements:
@@ -466,7 +470,7 @@ def pointwise_strategy(
         for idx, input_arg in enumerate(op_schema.args_schema):
             if isinstance(input_arg, OpStrategy):
                 # every arg follow the out_placements, but need to handle broadcasting
-                input_arg_spec = input_arg.strategies[0].out_spec
+                input_arg_spec = input_arg.strategies[0].output_spec
                 input_arg_dims_map = infer_broadcast_dims_map(
                     common_shape, input_arg_spec.shape
                 )
@@ -487,7 +491,7 @@ def pointwise_strategy(
 
         pointwise_strategy.strategies.append(
             PlacementStrategy(
-                output_spec=DTensorSpec(
+                output_specs=DTensorSpec(
                     mesh=mesh,
                     placements=tuple(out_placements),
                 ),
@@ -520,6 +524,7 @@ for op in pointwise_ops:
 
 # TODO: add all for_each ops
 for_each_ops = [
+    aten._foreach_abs_.default,
     aten._foreach_addcdiv_.Scalar,
     aten._foreach_addcdiv_.ScalarList,
     aten._foreach_addcdiv_.Tensor,
@@ -588,7 +593,7 @@ def foreach_list_strategy(
 
         strategies = []
         for strtgy in child_strtgy.strategies:
-            spec_to_follow = strtgy.out_spec
+            spec_to_follow = strtgy.output_spec
             if not linearity:
                 assert not is_tensor_partial(
                     spec_to_follow
@@ -604,7 +609,7 @@ def foreach_list_strategy(
                 )
             strategies.append(
                 PlacementStrategy(
-                    output_spec=spec_to_follow, redistribute_cost=redistribute_costs
+                    output_specs=spec_to_follow, redistribute_cost=redistribute_costs
                 )
             )
 

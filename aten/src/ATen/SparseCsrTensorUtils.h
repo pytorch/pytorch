@@ -335,8 +335,7 @@ inline bool only_sparse_compressed_binary_op_trivial_cases(
     return true;
   }
   if (self.is_same(other)) {
-    Tensor compressed_indices, plain_indices;
-    std::tie(compressed_indices, plain_indices) =
+    auto [compressed_indices, plain_indices] =
         at::sparse_csr::getCompressedPlainIndices(self);
     static_cast<SparseCsrTensorImpl*>(out.unsafeGetTensorImpl())
         ->set_member_tensors(
@@ -368,8 +367,7 @@ inline bool only_sparse_compressed_add_trivial_cases(
 }
 
 inline Tensor to_type(Tensor input, ScalarType dtype) {
-  Tensor compressed_indices, plain_indices;
-  std::tie(compressed_indices, plain_indices) =
+  auto [compressed_indices, plain_indices] =
       at::sparse_csr::getCompressedPlainIndices(input);
   return at::_sparse_compressed_tensor_unsafe(
       std::move(compressed_indices),

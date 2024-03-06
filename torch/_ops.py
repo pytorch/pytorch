@@ -4,7 +4,7 @@ import importlib
 import inspect
 import sys
 import types
-from typing import Any, Callable, Dict, Type, Union
+from typing import Any, Callable, Dict, Set, Type, Union
 
 import torch._C
 import torch.utils._pytree as pytree
@@ -227,7 +227,7 @@ def resolve_key(op: OperatorBase, k: DispatchKey):  # type: ignore[valid-type]
     raise NotImplementedError(f"could not find kernel for {op} at dispatch key {k}")
 
 
-_higher_order_ops = {}
+_higher_order_ops: Dict[str, "HigherOrderOperator"] = {}
 
 _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
     DispatchKey.PythonDispatcher,  # type: ignore[attr-defined]
@@ -500,7 +500,7 @@ def mode_stack_state_for_pre_dispatch():
     return _mode_stack_state_for_pre_dispatch
 
 
-cached_ops = set()
+cached_ops: Set["OpOverload"] = set()
 
 
 def add_cached_op(op_overload):
