@@ -1467,6 +1467,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(ValueError, 'Unknown nonlinearity'):
             rnn = torch.nn.RNN(1, 10, nonlinearity='garbage')
 
+    def test_RNN_nonlinearity_passed_as_arg(self):
+        rnn = torch.nn.RNN(2, 3, 1, 'relu')
+        self.assertEqual(rnn.nonlinearity, 'relu')
+
     def test_module_apply_inplace_op(self):
         def add_one_inplace(t):
             return t.add_(1.0)
@@ -6221,6 +6225,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         groups = 3
         input_tensor = torch.rand([0, 9, 4, 4])
         output = torch.nn.ChannelShuffle(groups)(input_tensor)
+        torch.testing.assert_close(output, input_tensor)
+
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
+    def test_native_channel_shuffle_return_alias_of_self(self):
+        groups = 3
+        input_tensor = torch.rand([0, 9, 4, 4])
+        output = torch.native_channel_shuffle(input_tensor, groups)
         torch.testing.assert_close(output, input_tensor)
 
     @set_default_dtype(torch.double)
