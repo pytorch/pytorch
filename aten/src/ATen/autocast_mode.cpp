@@ -331,7 +331,6 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL_CUDA(renorm, fp32)
   KERNEL_CUDA(logsumexp, fp32)
   KERNEL_CUDA(upsample, fp32)
-  KERNEL_CUDA2(upsample, fp32)
   // fp32_set_opt_dtype
   KERNEL_CUDA(prod, fp32_set_opt_dtype)
   KERNEL_CUDA2(prod, dim_int, fp32_set_opt_dtype)
