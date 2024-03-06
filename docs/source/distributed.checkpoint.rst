@@ -79,11 +79,14 @@ can handle all of torch.distributed constructs such as FSDP, DDP, ShardedTensor 
   :members:
 
 
-Due to the legacy design decisions, the state dictionary of `FSDP` and `DDP` have different keys, or fully qualified names (e.g., layer1.weight) even if the original unparallelized model is the same. Moreover, `FSDP` provides different types of model state dictionary, like full state_dict and sharded state_dict. An even more confusing case is the optimizer state dictionary, which does not use the fully qualified name but uses a parameter ID to indiciates a parameter. The design of optimizer state dictionary is fine when there is only one trainer but can cause issues when different parallelisms are used (e.g., pipeline parallelism).
+Due to legacy design decisions, the state dictionaries of `FSDP` and `DDP` may have different keys or fully qualified names (e.g., layer1.weight) even when the original unparallelized model is identical. Moreover, `FSDP` offers various types of model state dictionaries, such as full and sharded state dictionaries. Additionally, optimizer state dictionaries employ parameter IDs instead of fully qualified names to identify parameters, potentially causing issues when parallelisms are used (e.g., pipeline parallelism).
 
-To address these issues, we provide a set of APIs to help users to get and set state_dict easily. `get_model_state_dict` returns a model state dictionary, which always has the same keys as the keys returned by the unparallelized model state dictionary. Similarly, `get_optimizer_state_dict` returns the optimizer state dictionary, which always has the same key regardless what parallelisms are applized. To achieve this consistency, `get_optimizer_state_dict` converts the parameter IDs to the fully qualified names that are the same as the fully qualified names in the unparallelized model state dictionary.
+To tackle these challenges, we offer a collection of APIs for users to easily manage state_dicts. `get_model_state_dict` returns a model state dictionary with keys consistent with those returned by the unparallelized model state dictionary. Similarly, `get_optimizer_state_dict` provides the optimizer state dictionary with keys uniform across all parallelisms applied. To achieve this consistency, `get_optimizer_state_dict` converts parameter IDs to fully qualified names identical to those found in the unparallelized model state dictionary.
 
-This is an experimental feature and the signatures of APIs are subject to change.
+Note that results returned by hese APIs can be used directly with the `save()` and `load()` methods without requiring any additional conversions.
+
+Note that this feature is experimental, and API signatures might change in the future.
+
 
 .. autofunction:: torch.distributed.checkpoint.state_dict.get_state_dict
 
