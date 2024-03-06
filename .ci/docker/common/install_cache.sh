@@ -32,7 +32,9 @@ sed -e 's|PATH="\(.*\)"|PATH="/opt/cache/bin:\1"|g' -i /etc/environment
 export PATH="/opt/cache/bin:$PATH"
 
 # Setup compiler cache
-if [ -n "$ROCM_VERSION" ]; then
+if [ $(uname -m) == aarch64]; then
+  install_ubuntu
+elif [ -n "$ROCM_VERSION" ]; then
   curl --retry 3 http://repo.radeon.com/misc/.sccache_amd/sccache -o /opt/cache/bin/sccache
 else
   ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
