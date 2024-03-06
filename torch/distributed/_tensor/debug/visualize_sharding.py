@@ -130,7 +130,7 @@ def compute_local_shape_and_global_offset(
         return tuple(local_shape), tuple(global_offset)
 
 
-def visualize_sharding(dtensor, prompt=""):
+def visualize_sharding(dtensor, header=""):
     """
     Visualizes sharding in 1D-2D dtensors
     Requires tabulate, install with `pip install tabulate`
@@ -154,9 +154,8 @@ def visualize_sharding(dtensor, prompt=""):
     # Convert offsets to blocks with row_ranges for tabulate
     blocks = _convert_offset_to_ranges(all_offsets)
     local_rank_zero_on_all_dim = all(
-        device_mesh.get_local_rank(mesh_dim=dim) == 0
-        for dim in range(device_mesh.ndim)
+        device_mesh.get_local_rank(mesh_dim=dim) == 0 for dim in range(device_mesh.ndim)
     )
     if local_rank_zero_on_all_dim:
-        print(prompt)
+        print(header)
         print(_create_table(blocks))

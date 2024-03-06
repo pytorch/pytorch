@@ -67,9 +67,7 @@ def run_torchrec_row_wise_sharding_example(rank, world_size):
     )
 
     # display the DTensor's sharding
-    visualize_sharding(
-        dtensor, prompt="DTensor's sharding be-like in row-wise sharding:"
-    )
+    visualize_sharding(dtensor, header="Row-wise sharding example in DTensor")
 
     # get the global tensor from the DTensor
     dtensor_full = dtensor.full_tensor()  # torch.Tensor
