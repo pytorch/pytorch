@@ -39,25 +39,32 @@ DIM = 2000
 
 
 class Net(nn.Module):
-    def __init__(self, checkpoint=False):
+    def __init__(self, checkpoint=False, use_amp=False):
         super().__init__()
         self.fc1 = nn.Linear(DIM, DIM)
         self.fc2 = nn.Linear(DIM, DIM)
         self.fc3 = nn.Linear(DIM, DIM)
         self.fc4 = nn.Linear(DIM, DIM)
         self.use_checkpoint = checkpoint
+        self.use_amp = use_amp
 
     def forward(self, x):
         if self.use_checkpoint:
             _fc1 = checkpoint(self.fc1, x, use_reentrant=False)
         else:
             _fc1 = self.fc1(x)
-        return self.fc4(self.fc3(self.fc2(_fc1)))
+
+        if self.use_amp:
+            with torch.amp.autocast(device_type=self.fc1.weight.device.type):
+                return self.fc4(self.fc3(self.fc2(_fc1)))
+        else:
+            return self.fc4(self.fc3(self.fc2(_fc1)))
 
 
 def compiler_fn(no_inductor=False):
     def _compiler_fn(gm):
         def inner_compiler(gm_, example_inputs_):
+            return gm_
             if no_inductor:
                 return gm_
             else:
@@ -93,6 +100,7 @@ class ReplicateTest(MultiProcessTestCase):
         setup_func: Optional[Callable] = None,
         no_inductor: bool = False,
         no_compile_forward: bool = False,
+        use_amp: bool = False,
     ):
         backend = "nccl" if use_gpu else "gloo"
         dist.init_process_group(
@@ -113,13 +121,14 @@ class ReplicateTest(MultiProcessTestCase):
             else "python_reducer"
         )
         torch.manual_seed(123)
-        model = Net().to(device)
+        model = Net(use_amp=use_amp).to(device)
         input = torch.randn([1, DIM], device=device)
 
         compiled_model = torch.compile(replicate(deepcopy(model)), fullgraph=True)
         compiled_optim = torch.optim.Adam(compiled_model.parameters())
         model = replicate(model)
         optim = torch.optim.Adam(model.parameters())
+        grad_scaler = torch.cuda.amp.GradScaler()
 
         if setup_func:
             setup_func(model, compiled_model)
@@ -138,6 +147,8 @@ class ReplicateTest(MultiProcessTestCase):
                 context = contextlib.nullcontext()
             with context:
                 loss = model(input).sum()
+                if use_amp:
+                    loss = grad_scaler.scale(loss)
                 loss.backward()
 
             compiled_m = getattr(compiled_model, "_orig_mod", compiled_model)
@@ -148,6 +159,8 @@ class ReplicateTest(MultiProcessTestCase):
             with context:
                 with compiled_autograd.enable(compiler_fn(no_inductor)):
                     compiled_loss = compiled_model(input).sum()
+                    if use_amp:
+                        compiled_loss = grad_scaler.scale(compiled_loss)
                     compiled_loss.backward()
 
             if not no_sync or i % 2 == 1:
@@ -318,6 +331,13 @@ class ReplicateTest(MultiProcessTestCase):
         for i in range(3):
             fc.check("torch.ops._c10d_functional.wait_tensor.default")
         fc.run(code)
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_rocm
+    @skip_if_lt_x_gpu(2)
+    def test_mixed_precision(self):
+        self._test_compile(use_gpu=True, no_sync=False, use_amp=True)
+        self._test_compile(use_gpu=True, no_sync=True, use_amp=True)
 
 
 class DDP_TP_Test(MultiProcessTestCase):
