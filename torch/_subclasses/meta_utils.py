@@ -347,12 +347,6 @@ class MetaConverter:
                     t._base, AttrSource(source, "_base"), shape_env, callback
                 )
 
-            grad_context: Optional[SymbolicContext] = None
-            if safe_grad(t) is not None:
-                grad_context = all_dynamic_symbolic_context(
-                    t.grad, AttrSource(source, "grad"), shape_env, callback
-                )
-
             t_symbolic_context: SymbolicContext
             t_dynamic_sizes = [DimDynamic.DYNAMIC] * t.dim()
             if is_traceable_wrapper_subclass(t):
@@ -370,14 +364,12 @@ class MetaConverter:
                     inner_contexts=inner_contexts,
                     tensor_source=source,
                     view_base_context=view_base_context,
-                    grad_context=grad_context,
                 )
             else:
                 t_symbolic_context = StatelessSymbolicContext(
                     dynamic_sizes=t_dynamic_sizes,
                     constraint_sizes=[None] * t.dim(),
                     view_base_context=view_base_context,
-                    grad_context=grad_context,
                 )
 
             return t_symbolic_context
@@ -712,8 +704,11 @@ class MetaConverter:
                         )
 
                         assert isinstance(symbolic_context, StatelessSymbolicContext)
-                        assert symbolic_context.view_base_context is not None
-                        base_symbolic_context = symbolic_context.view_base_context
+                        # NB: This should generally be set when the input is a view,
+                        # but the exception right now is for fake-ifying grads, which is
+                        # a work in progress.
+                        if symbolic_context.view_base_context is not None:
+                            base_symbolic_context = symbolic_context.view_base_context
 
                     base = self.meta_tensor(
                         t._base,
@@ -905,23 +900,15 @@ class MetaConverter:
 
                 if safe_grad(t) is not None:
                     from torch._dynamo.source import AttrSource
-                    from torch.fx.experimental.symbolic_shapes import (
-                        StatelessSymbolicContext,
-                        SymbolicContext,
-                    )
 
-                    grad_context: Optional[SymbolicContext] = None
-                    if symbolic_context is not None:
-                        assert isinstance(symbolic_context, StatelessSymbolicContext)
-                        grad_context = symbolic_context.grad_context
-                        assert grad_context is not None
-
+                    # TODO: Use a valid grad-specific symbolic context instead of recycling
+                    # the one from t. This isn't correct if e.g. t._is_view() != t.grad._is_view().
                     r.grad = self.meta_tensor(
                         safe_grad(t),
                         shape_env,
                         callback,
                         source=AttrSource(source, "grad"),
-                        symbolic_context=grad_context,
+                        symbolic_context=symbolic_context,
                     )
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())
