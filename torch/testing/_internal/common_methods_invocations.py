@@ -18471,6 +18471,9 @@ op_db: List[OpInfo] = [
                          dtypes=[torch.bool]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                          dtypes=[torch.bool]),
+            # ROCm generates -inf+infj instead of nan+infj for complex64 for some of the results
+            DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
+                         dtypes=[torch.complex64], active_if=TEST_WITH_ROCM),
             # Expected failure: torch.jiterator_unary is not a valid op
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # Skip Nvfuser
