@@ -10,6 +10,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Local modifications in Pytorch variant:
+// 1. Add constexpr to countLeadingZeros and
+// llvm::detail::LeadingZerosCounter::count
+
 #pragma once
 
 #include <c10/util/bit_cast.h>
