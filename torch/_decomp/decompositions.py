@@ -2288,13 +2288,21 @@ def _avg_poolnd(
             scale = 1.0 / window_size
         return out * scale
     else:
-        cond = get_cond(padding if count_include_pad else [0] * dim)
-        return out / torch.sum(
-            cond.reshape(*[1] * len(batch), *reshape)
-            .expand(*batch, *reshape)
-            .to(torch.int32),
-            dim=[len(batch) + 1 + 2 * i for i in range(dim)],
-        )
+        divide_factors = []
+        for i in range(dim):
+            bh = torch.arange(h_out[i], device=x.device)
+            hstart = bh * stride[i] - padding[i]
+            hend = torch.clamp_min(hstart + kernel_size[i], h_out[i] + padding[i])
+            if not count_include_pad:
+                hstart = torch.clamp_max(hstart, 0)
+                hend = torch.clamp_min(hend, h_out[i])
+            factor = hend - hstart
+            shape = [1] * x.dim()
+            shape[-dim + i] = h_out[i]
+            divide_factors.append(factor.view(shape))
+
+        divide_factor = functools.reduce(operator.mul, divide_factors)
+        return out / divide_factor
 
 
 @register_decomposition(aten._adaptive_avg_pool2d)
