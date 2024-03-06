@@ -199,7 +199,7 @@ struct CppNode : public Node {
 
     // although neither of the 2 methods below have uniqueness guarantees
     // it is unlikely for them to collide at the same time
-    args.collect(typeid(T).hash_code());
+    args.collect(static_cast<uint64_t>(typeid(T).hash_code()));
     args.collect(std::string(typeid(T).name()));
 
     args.collect(ctx_.saved_data);
