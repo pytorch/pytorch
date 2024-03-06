@@ -3233,7 +3233,7 @@ def _unsafe_masked_index(self, mask, indices, fill):
 
 @register_lowering(aten._unsafe_masked_index_put_accumulate)
 def _unsafe_masked_index_put_accumulate(x, mask, indices, values):
-    masked_value = where(mask, values, 3)
+    masked_value = where(mask, values, 0)
     shape = x.get_size()
     clamped_indices = [
         clamp(indices[i], -shape[i], shape[i] - 1) if indices[i] else None
