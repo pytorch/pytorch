@@ -105,7 +105,7 @@ CLOSURE_VARS = {
     "___tuple_iterator_len": tuple_iterator_len,
     "___tuple_iterator_getitem": tuple_iterator_getitem,
     "__math_isnan": math.isnan,
-    "__numpy_isnan": np.isnan,
+    "__numpy_isnan": None if np is None else np.isnan,
     "inf": float("inf"),
     "__load_module": importlib.import_module,
     "utils_device": torch.utils._device,
@@ -487,6 +487,10 @@ class GuardBuilder(GuardBuilderBase):
         if istype(val, torch.Size):
             val = tuple(val)
 
+        # Code object can not be compared against their string representation
+        # I.e `eval(f"{compile('2+2','','exec')!r}")` raises SyntaxError
+        assert not istype(val, types.CodeType)
+
         # TODO: It feels like it would be better to just implement our own
         # equality test in C that handles all of the necessary type checking
         # and NaN tests
@@ -495,7 +499,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def CONSTANT_MATCH(self, guard: Guard):
         val = self.get(guard.name)
-        if istype(val, (bool, type(None))):
+        if istype(val, (bool, type(None), types.CodeType)):
             self.ID_MATCH(guard)
         else:
             self.EQUALS_MATCH(guard)
@@ -671,31 +675,29 @@ class GuardBuilder(GuardBuilderBase):
             ]
 
         if output_graph.export_constraints:
+            from sympy import Symbol
+
             source_pairs: List[Tuple[Source, Source]] = []
+            derived_equalities: List[  # type: ignore[type-arg]
+                Tuple[Source, Union[Source, Symbol], Callable]
+            ] = []
+            phantom_symbols: Dict[str, Symbol] = {}
             for constraint in output_graph.export_constraints:
                 if constraint.t_id in output_graph.tracked_fakes_id_to_source:
-                    source, *other_sources = get_sources(
-                        constraint.t_id, constraint.dim
+                    torch.export.dynamic_shapes._process_equalities(
+                        constraint,
+                        get_sources,
+                        output_graph.shape_env,
+                        source_pairs,
+                        derived_equalities,
+                        phantom_symbols,
                     )
-                    # When t.size()[dim] maps to src0, src1, ..., srcN, we add
-                    # constraints that make src0 "equal" to src1, ..., srcN.
-                    source_pairs.extend(
-                        (source, other_source) for other_source in other_sources
-                    )
-                    if constraint.shared is not None:
-                        # Moreover, when t.size()[dim] is specified equal to t'.size()[dim']
-                        # and t'.size()[dim'] maps to src1', ..., srcN', we add
-                        # constraints that also make src0 "equal" to src1', ..., srcN'.
-                        other_sources = get_sources(
-                            constraint.shared.t_id, constraint.shared.dim
-                        )
-                        source_pairs.extend(
-                            (source, other_source) for other_source in other_sources
-                        )
                 else:
                     log.warning("Untracked tensor used in export constraints")
             equalities_inputs = EqualityConstraint(
                 source_pairs=source_pairs,
+                derived_equalities=derived_equalities,
+                phantom_symbols=list(phantom_symbols.values()),
                 warn_only=False,
             )
         else:
@@ -1001,17 +1003,6 @@ class CheckFunctionManager:
         guards = output_graph.guards if output_graph else None
         self._weakrefs: Dict[int, ReferenceType[object]] = {}
         self.output_graph = output_graph
-
-        # Note: right overrides left
-        def combine_scopes(left, right):
-            if left is None:
-                return right
-
-            if right is None:
-                return left
-
-            return {**left, **right}
-
         w_builder = None
 
         def source_ref(source):
