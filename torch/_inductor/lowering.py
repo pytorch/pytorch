@@ -2237,7 +2237,6 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 
 # WIP
 make_fallback(aten.index_reduce)  # @pearu
-make_fallback(aten._scaled_mm.default, constrain_to_fx_strides)  # @alexsamardzic
 make_fallback(aten._adaptive_avg_pool3d)  # @isuruf
 make_fallback(aten.adaptive_max_pool3d)  # @isuruf
 make_fallback(aten.avg_pool3d)  # @isuruf
@@ -2426,6 +2425,7 @@ make_fallback(aten._flash_attention_forward.default, sdpa_constraint)
 make_fallback(aten._flash_attention_backward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_forward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
+make_fallback(aten._scaled_mm.default, constrain_to_fx_strides)
 
 
 # Register with type_promotion_kind None.
