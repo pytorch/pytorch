@@ -83,12 +83,16 @@ class ELU(torch.nn.ELU):
     Args:
         scale: quantization scale of the output tensor
         zero_point: quantization zero point of the output tensor
-        alpha: the alpha constant
+        alpha: the alpha constant. Default: 1.0
     """
-    def __init__(self, scale, zero_point, alpha=1.):
+    def __init__(self, scale: float, zero_point: int, alpha: float = 1.,
+                 device=None, dtype=None) -> None:
         super().__init__(alpha)
+        factory_kwargs = {'device': device, 'dtype': dtype}
         self.scale = scale
         self.zero_point = zero_point
+        self.register_buffer('scale', torch.tensor(scale, **factory_kwargs))
+        self.register_buffer('zero_point', torch.tensor(zero_point, **factory_kwargs))
 
     def forward(self, input):
         return torch.ao.nn.quantized.functional.elu(
