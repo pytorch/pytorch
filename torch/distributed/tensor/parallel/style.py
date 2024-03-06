@@ -294,10 +294,6 @@ class SequenceParallel(ParallelStyle):
             replicated_param = torch.nn.Parameter(
                 DTensor.from_local(param, device_mesh, [Replicate()], run_check=False)
             )
-            # unsafely setattr to bypass the reconstruction of nn.Parameter(to avoid
-            # unnecessary `detach() + requires_grad_`
-            # module._parameters[p_name] = replicated_dtensor  # type: ignore[assignment]
-            # super(nn.Module, module).__setattr__(p_name, replicated_dtensor)
             module.register_parameter(p_name, replicated_param)
 
     @staticmethod
