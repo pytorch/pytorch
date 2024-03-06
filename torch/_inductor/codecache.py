@@ -1335,7 +1335,7 @@ def get_include_and_linking_paths(
                     ]
                 )
 
-        if aot_mode and cuda:
+        if cuda:
             if macros is None:
                 macros = ""
             macros += " -D USE_ROCM" if torch.version.hip else " -D USE_CUDA"
@@ -2036,8 +2036,7 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
         }
 
         std::vector<at::Tensor> inductor_entry_cpp(std::vector<at::Tensor>&& inputs) {
-            auto input_handles =
-                torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
+            auto input_handles = unsafe_alloc_new_handles_from_tensors(inputs);
             // For outputs, we only allocate a vector to hold returned tensor handles,
             // not allocating the actual output tensor storage here
             std::vector<AtenTensorHandle> output_handles(%s);
@@ -2052,8 +2051,7 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
                 return {};
             }
 
-            return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
-                output_handles.data(), output_handles.size());
+            return alloc_tensors_by_stealing_from_handles(output_handles.data(), output_handles.size());
         }
         """
     )
