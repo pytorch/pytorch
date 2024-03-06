@@ -674,7 +674,16 @@ def fx_codegen_and_compile(
             optimus_scuba_log,
         )
 
-    with V.set_fake_mode(fake_mode):
+    # TODO: for CPU backend, enable comprehensive padding causes some unit tests
+    # fail due to changing number of generated kernels. Skip for now.
+    disable_comprehensive_padding = contextlib.nullcontext()
+    if config.comprehensive_padding and not any(
+        t.device.type == "cuda" for t in example_inputs if isinstance(t, torch.Tensor)
+    ):
+        disable_comprehensive_padding = config.patch(comprehensive_padding=False)
+        perf_hint_log.warning("Skip comprehensive padding on CPU")
+
+    with V.set_fake_mode(fake_mode), disable_comprehensive_padding:
         const_output_index = None
         const_graph = None
         const_code = None
