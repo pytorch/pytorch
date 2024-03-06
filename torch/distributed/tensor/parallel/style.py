@@ -272,10 +272,14 @@ class SequenceParallel(ParallelStyle):
         >>> tp_mesh = init_device_mesh("cuda", (8,))
         >>>
         >>> # By default, the input of the "norm" will be converted to DTensor that shards on the sequence dim
-        >>> # and the output of "norm" will return a sharded on sequence dimension :class:`torch.Tensor`.
+        >>> # and the output of "norm" will return a sharded on sequence dimension :class:`DTensor`.
         >>>
         >>> sharded_mod = parallelize_module(m, tp_mesh, {"norm": SequenceParallel()}),
         >>> ...
+
+    .. note:: SequenceParallel style assumes ones initialization if there are weights in the nn.Module (i.e.
+        ``nn.LayerNorm`` or ``RMSNorm``, and they by default have ones initialization). If you have custom
+        inits for the weights on those modules, need to broadcast the weights before/after parallelizing.
     """
     def __init__(
         self,
