@@ -2290,7 +2290,7 @@ def sample_inputs_chunk_cat(op_info, device, dtype, requires_grad, **kwargs):
     # 1. If input tensors have different ndims, dim should be non-negative and be less than the ndims of every input tensors.
     #    If all input tensors have the same ndims, we support both negative and non-negative dim.
     # 2. For wrapped_dim, all tensors should have the same size for 0,...,wrapped_dim-1 dimensions.
-    #        No requirements for wrapped_dim-th dimension can have different sizes. No requirements for (dim+1, ... ) dimensions.
+    #        No requirements for (wrapped_dim, ...)-th dimension.
     # 3. Expect positive num_chunks
     # 4. Expect non-empty input tensor list and each input tensor should have at least 1 element
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -2371,7 +2371,7 @@ def error_inputs_chunk_cat(op_info, device, **kwargs):
     )
 
     # zero as num_chunks
-    sizes, dim, num_chunks = [torch.Size([2,]), torch.Size([3,])], 0, -1
+    sizes, dim, num_chunks = [torch.Size([2,]), torch.Size([3,])], 0, 0
     tensors = [make_arg(size) for size in sizes]
     yield ErrorInput(
         SampleInput(tensors, args=(dim, num_chunks)),
