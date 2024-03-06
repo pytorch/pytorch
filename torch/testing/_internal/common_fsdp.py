@@ -32,7 +32,7 @@ from torch.distributed._composable.fsdp._fsdp_param_group import (
     FSDPParamGroup,
     RegisterPostBackwardFunction,
 )
-from torch.distributed._tensor import distribute_tensor, DTensor
+from torch.distributed._tensor import distribute_tensor, DTensor, Shard
 from torch.distributed.fsdp import CPUOffload, FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import TrainingState
 from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGIES
@@ -973,6 +973,11 @@ def check_sharded_parity(
         cls.assertIsInstance(sharded_param, DTensor)
         assert isinstance(sharded_param, DTensor)  # mypy
         mesh, placements = sharded_param.device_mesh, sharded_param.placements
+        if tuple(placements) == (Shard(0), Shard(0)):
+            raise AssertionError(
+                "FSDP's (Shard(0), Shard(0)) layout differs from distribute_tensor(), "
+                "so we cannot check for equality using it"
+            )
         sharded_ref_param = distribute_tensor(replicated_param, mesh, placements)
         cls.assertEqual(sharded_param.to_local(), sharded_ref_param.to_local())
         if replicated_param.grad is None:
