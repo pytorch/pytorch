@@ -2251,6 +2251,7 @@ make_fallback(aten.uniform, warn=False)
 make_fallback(aten.exponential.default, warn=False)  # (fails accuracy on test_torch.py)
 make_fallback(aten._pdist_forward)  # Has decomp. Needs benchmarks
 make_fallback(aten.soft_margin_loss_backward, warn=False)  # py_impl?
+make_fallback(aten.searchsorted)  # bucketized is implemented (see eager impl)
 
 
 # 1.5) Easy or Impossible
@@ -2330,7 +2331,6 @@ make_fallback(aten.topk)
 make_fallback(aten.mode)
 make_fallback(aten.median)
 make_fallback(aten.nanmedian)
-make_fallback(aten.searchsorted)
 make_fallback(aten.randperm)
 
 # Linalg
