@@ -16,45 +16,45 @@ import operator
 """
 
 
-def insert_primal_resize_to_full_at_start_and_resize_to_0_at_end_of_graph(mod):
-    # NOTE: this is hacky, and only safe if the primal stays size-0 before and after the graph (i.e. FSDP params)
-    # Proactively resize some primal tensors to their full size before clone at beginning of graph, and then resize them back to 0 at end of graph.
-    # Primal tensors being resized are only the ones that will be resized anyway after the clone->as_strided op chain added by AOTAutograd functionalization.
-    # (See "Forward graph 0" above)
-    # Doing resize to full proactively before clone, so that the clone won't fail.
-    primal_inputs_tensor_only = [x for x in list(filter(torch._functorch.partitioners._is_primal, mod.graph.nodes)) if isinstance(x.meta.get('val', None), torch.Tensor)]
-    primal_inputs_resized = set()
-    for n in mod.graph.nodes:
-        # Super complicated way to know that this is a size-0 primal input being cloned at beginning of graph.
-        if (
-            n.target is torch.ops.inductor.resize_storage_bytes_.default \
-            and n.args[0].target is torch.ops.aten.as_strided.default \
-            and n.args[0].args[0].target is torch.ops.aten.clone.default \
-            and n.args[0].args[0].args[0] in primal_inputs_tensor_only
-        ):
-            primal_inputs_resized.add(n.args[0].args[0].args[0])
-    for primal_input in list(primal_inputs_resized):
-        first_non_placeholder_op = None
-        return_op = None
-        for n in mod.graph.nodes:
-            if n.op != "placeholder":
-                first_non_placeholder_op = n
-                break
-        for n in mod.graph.nodes:
-            if n.op == "output":
-                return_op = n
-                break
-        assert first_non_placeholder_op is not None
-        with mod.graph.inserting_before(first_non_placeholder_op):
-            full_size = primal_input.meta['val'].untyped_storage().size()  # 'val' is fake tensor which always has full size
-            assert full_size > 0
-            primal_input_resized_to_full = mod.graph.call_function(torch.ops.inductor.resize_storage_bytes_.default, (primal_input, full_size), {})
-            # primal_input.replace_all_uses_with(primal_input_resized_to_full, propagate_meta=True)
-            # mod.graph.erase_node(primal_input)  # probably should not do this? not sure.
-        with mod.graph.inserting_before(return_op):
-            primal_input_resized_to_0 = mod.graph.call_function(torch.ops.inductor.resize_storage_bytes_.default, (primal_input, 0), {})
-        mod.graph.lint()
-        mod.recompile()
+# def insert_primal_resize_to_full_at_start_and_resize_to_0_at_end_of_graph(mod):
+#     # NOTE: this is hacky, and only safe if the primal stays size-0 before and after the graph (i.e. FSDP params)
+#     # Proactively resize some primal tensors to their full size before clone at beginning of graph, and then resize them back to 0 at end of graph.
+#     # Primal tensors being resized are only the ones that will be resized anyway after the clone->as_strided op chain added by AOTAutograd functionalization.
+#     # (See "Forward graph 0" above)
+#     # Doing resize to full proactively before clone, so that the clone won't fail.
+#     primal_inputs_tensor_only = [x for x in list(filter(torch._functorch.partitioners._is_primal, mod.graph.nodes)) if isinstance(x.meta.get('val', None), torch.Tensor)]
+#     primal_inputs_resized = set()
+#     for n in mod.graph.nodes:
+#         # Super complicated way to know that this is a size-0 primal input being cloned at beginning of graph.
+#         if (
+#             n.target is torch.ops.inductor.resize_storage_bytes_.default \
+#             and n.args[0].target is torch.ops.aten.as_strided.default \
+#             and n.args[0].args[0].target is torch.ops.aten.clone.default \
+#             and n.args[0].args[0].args[0] in primal_inputs_tensor_only
+#         ):
+#             primal_inputs_resized.add(n.args[0].args[0].args[0])
+#     for primal_input in list(primal_inputs_resized):
+#         first_non_placeholder_op = None
+#         return_op = None
+#         for n in mod.graph.nodes:
+#             if n.op != "placeholder":
+#                 first_non_placeholder_op = n
+#                 break
+#         for n in mod.graph.nodes:
+#             if n.op == "output":
+#                 return_op = n
+#                 break
+#         assert first_non_placeholder_op is not None
+#         with mod.graph.inserting_before(first_non_placeholder_op):
+#             full_size = primal_input.meta['val'].untyped_storage().size()  # 'val' is fake tensor which always has full size
+#             assert full_size > 0
+#             primal_input_resized_to_full = mod.graph.call_function(torch.ops.inductor.resize_storage_bytes_.default, (primal_input, full_size), {})
+#             # primal_input.replace_all_uses_with(primal_input_resized_to_full, propagate_meta=True)
+#             # mod.graph.erase_node(primal_input)  # probably should not do this? not sure.
+#         with mod.graph.inserting_before(return_op):
+#             primal_input_resized_to_0 = mod.graph.call_function(torch.ops.inductor.resize_storage_bytes_.default, (primal_input, 0), {})
+#         mod.graph.lint()
+#         mod.recompile()
 
 
 def if_tensor_is_resized_to_full_then_resize_it_to_0_at_end_of_graph(mod):
