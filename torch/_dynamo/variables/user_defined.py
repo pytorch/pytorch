@@ -19,6 +19,11 @@ try:
 except ModuleNotFoundError:
     np = None
 
+try:
+    from torch.utils._cxx_pytree import PyTreeSpec
+except ImportError:
+    PyTreeSpec = type(None)
+
 import torch._dynamo.config
 
 import torch.nn
@@ -65,7 +70,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def as_proxy(self):
         return self.value
 
-    def __repr__(self):
+    def __str__(self):
         return f"UserDefinedClassVariable({self.value})"
 
     @staticmethod
@@ -307,7 +312,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
-            field_defaults = self.value._field_defaults
+            # check if this a quasi-namedtuple or a real one
+            if self.value.__module__ == "torch.return_types":
+                # create pseudo-defaults from values of the quasi-namedtuple
+                field_defaults = dict(zip(fields, args[0].items))
+            else:
+                field_defaults = self.value._field_defaults
 
             items = list(args)
             items.extend([None] * (len(fields) - len(items)))
@@ -568,7 +578,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 )
 
             if method is list.__len__ and self.source and not (args or kwargs):
-                install_guard(self.source.make_guard(GuardBuilder.LIST_LENGTH))
+                install_guard(self.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
                 return ConstantVariable(len(self.value))
 
         return super().call_method(tx, name, args, kwargs)
@@ -580,7 +590,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             and self._maybe_get_baseclass_method("__len__") is list.__len__
             and self._maybe_get_baseclass_method("__getitem__") is list.__getitem__
         ):
-            install_guard(self.source.make_guard(GuardBuilder.LIST_LENGTH))
+            install_guard(self.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             return [
                 variables.LazyVariableTracker.create(
                     self.value[k],
@@ -692,7 +702,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def _getattr_static(self, name):
         if (
-            isinstance(self.value, torch.nn.Module)
+            isinstance(self.value, (torch.nn.Module, PyTreeSpec))
             or "__slots__" in self.value.__class__.__dict__
             or type(self.value) == threading.local
         ):
