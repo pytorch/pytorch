@@ -30,6 +30,8 @@ aten::_amp_update_scale.out
 aten::_amp_update_scale_
 aten::_assert_async
 aten::_assert_async.msg
+aten::_batch_norm_no_update.out
+aten::_batch_norm_with_update.out
 aten::_cdist_backward
 aten::_cdist_backward.out
 aten::_cdist_forward
@@ -387,6 +389,7 @@ aten::_linalg_det
 aten::_linalg_det.result
 aten::_linalg_eigh
 aten::_linalg_eigh.eigenvalues
+aten::_linalg_eigvals
 aten::_linalg_slogdet
 aten::_linalg_slogdet.sign
 aten::_linalg_solve_ex
@@ -844,6 +847,7 @@ aten::linalg_cholesky_ex
 aten::linalg_cholesky_ex.L
 aten::linalg_eig
 aten::linalg_eig.out
+aten::linalg_eigvals.out
 aten::linalg_householder_product
 aten::linalg_householder_product.out
 aten::linalg_inv_ex
