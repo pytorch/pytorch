@@ -197,6 +197,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(val4, correct1))
         self.assertEqual(counter.frame_count, 3)
 
+    def test_invalid_args_builtin(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            x = x.sin()
+            if isinstance(x, torch.Tensor, invalid=True):
+                x = x.sin()
+            return x
+
+        with self.assertRaises(TypeError):
+            fn(torch.randn(16))
+
     def test_callpacked(self):
         def call_packed(args):
             a, b, c = args
