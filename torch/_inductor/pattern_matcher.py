@@ -1002,56 +1002,64 @@ def register_replacement(
                         ):
                             sym_args.append(v)
 
-            if sym_args:
-                # AOT Autograd and make fx will dedupe symbolic shape size
-                # accesses of sym ints that appear as inputs
-                # We don't want the sym_size uses to interfere with pattern matching
-                # so we provide them as inputs.
-                # Later, when we actually do the replacement, the symbolic shape
-                # sizes will get re-traced and added to the graph.
+            # If we were given a pre-traced pattern then use that instead of
+            # retracing. Note that this means the pattern has to be independent
+            # of its args.
+            specific_pattern = search_fn_pattern
 
-                def search_fn_new(*args_new):
-                    return search_fn(*args_new[len(args_new) - len(args) :])
+            if not specific_pattern:
+                if sym_args:
+                    # AOT Autograd and make fx will dedupe symbolic shape size
+                    # accesses of sym ints that appear as inputs
+                    # We don't want the sym_size uses to interfere with pattern matching
+                    # so we provide them as inputs.
+                    # Later, when we actually do the replacement, the symbolic shape
+                    # sizes will get re-traced and added to the graph.
 
-                try:
-                    specific_graph = trace_fn(search_fn_new, sym_args + args)
-                except RuntimeError as e:
-                    log_trace_failure(search_fn, e)
-                    return False
+                    def search_fn_new(*args_new):
+                        return search_fn(*args_new[len(args_new) - len(args) :])
 
-                # correct argnames in the graph
-                sym_arg_names = []
-                for i, placeholder in zip(
-                    range(len(sym_args) + len(args)),
-                    specific_graph.graph.nodes,
-                ):
-                    if i < len(sym_args):
-                        sym_arg_names.append(placeholder.target)
-                        continue
+                    try:
+                        specific_graph = trace_fn(search_fn_new, sym_args + args)
+                    except RuntimeError as e:
+                        log_trace_failure(search_fn, e)
+                        return False
 
-                    with specific_graph.graph.inserting_after(placeholder):
-                        new_node = specific_graph.graph.placeholder(
-                            argnames[i - len(sym_args)]
-                        )
-                        new_node.target = new_node.name
-                        placeholder.replace_all_uses_with(new_node)
-                        specific_graph.graph.erase_node(placeholder)
+                    # correct argnames in the graph
+                    sym_arg_names = []
+                    for i, placeholder in zip(
+                        range(len(sym_args) + len(args)),
+                        specific_graph.graph.nodes,
+                    ):
+                        if i < len(sym_args):
+                            sym_arg_names.append(placeholder.target)
+                            continue
 
-                argnames = sym_arg_names + argnames
-            else:
-                try:
-                    specific_graph = trace_fn(search_fn, args)
-                except RuntimeError as e:
-                    log_trace_failure(search_fn, e)
-                    return False
+                        with specific_graph.graph.inserting_after(placeholder):
+                            new_node = specific_graph.graph.placeholder(
+                                argnames[i - len(sym_args)]
+                            )
+                            new_node.target = new_node.name
+                            placeholder.replace_all_uses_with(new_node)
+                            specific_graph.graph.erase_node(placeholder)
 
-            specific_pattern = fx_to_pattern(
-                specific_graph,
-                argnames=argnames,
-                exclusive_arg_names=exclusive_arg_names,
-                scalar_workaround=scalar_workaround,
-            )
+                    argnames = sym_arg_names + argnames
+                else:
+                    try:
+                        specific_graph = trace_fn(search_fn, args)
+                    except RuntimeError as e:
+                        log_trace_failure(search_fn, e)
+                        return False
+
+                specific_pattern = fx_to_pattern(
+                    specific_graph,
+                    argnames=argnames,
+                    exclusive_arg_names=exclusive_arg_names,
+                    scalar_workaround=scalar_workaround,
+                )
+
             specific_pattern_match = specific_pattern.match(match.output_nodes()[0])  # type: ignore[arg-type]
+
             if specific_pattern_match and extra_check(specific_pattern_match):
                 # trace the pattern using the shapes from the user program
                 match.replacement_graph = trace_fn(replace_fn, args)  # type: ignore[assignment]
