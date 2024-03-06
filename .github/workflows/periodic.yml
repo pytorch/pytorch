@@ -23,6 +23,13 @@ concurrency:
 permissions: read-all
 
 jobs:
+  target-determination:
+    name: before-test
+    uses: ./.github/workflows/target_determination.yml
+    permissions:
+      id-token: write
+      contents: read
+
   parallelnative-linux-jammy-py3_8-gcc11-build:
     name: parallelnative-linux-jammy-py3.8-gcc11
     uses: ./.github/workflows/_linux-build.yml
@@ -39,7 +46,9 @@ jobs:
   parallelnative-linux-jammy-py3_8-gcc11-test:
     name: parallelnative-linux-jammy-py3.8-gcc11
     uses: ./.github/workflows/_linux-test.yml
-    needs: parallelnative-linux-jammy-py3_8-gcc11-build
+    needs:
+      - parallelnative-linux-jammy-py3_8-gcc11-build
+      - target-determination
     with:
       build-environment: parallelnative-linux-jammy-py3.8-gcc11
       docker-image: ${{ needs.parallelnative-linux-jammy-py3_8-gcc11-build.outputs.docker-image }}
@@ -86,7 +95,9 @@ jobs:
   linux-focal-cuda11_8-py3_10-gcc9-debug-test:
     name: linux-focal-cuda11.8-py3.10-gcc9-debug
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-cuda11_8-py3_10-gcc9-debug-build
+    needs:
+      - linux-focal-cuda11_8-py3_10-gcc9-debug-build
+      - target-determination
     with:
       build-environment: linux-focal-cuda11.8-py3.10-gcc9-debug
       docker-image: ${{ needs.linux-focal-cuda11_8-py3_10-gcc9-debug-build.outputs.docker-image }}
@@ -110,7 +121,9 @@ jobs:
   win-vs2019-cuda11_8-py3-test:
     name: win-vs2019-cuda11.8-py3
     uses: ./.github/workflows/_win-test.yml
-    needs: win-vs2019-cuda11_8-py3-build
+    needs:
+      - win-vs2019-cuda11_8-py3-build
+      - target-determination
     with:
       build-environment: win-vs2019-cuda11.8-py3
       cuda-version: "11.8"
@@ -214,7 +227,9 @@ jobs:
       contents: read
     name: linux-focal-rocm6.0-py3.8
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-focal-rocm6_0-py3_8-build
+    needs:
+      - linux-focal-rocm6_0-py3_8-build
+      - target-determination
     with:
       build-environment: linux-focal-rocm6.0-py3.8
       docker-image: ${{ needs.linux-focal-rocm6_0-py3_8-build.outputs.docker-image }}
