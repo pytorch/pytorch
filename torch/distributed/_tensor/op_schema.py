@@ -64,7 +64,7 @@ def _pretty_print_spec(spec: object) -> str:
 @dataclass
 class PlacementStrategy:
     """
-    A placement strategy describes an acceptable sharding placements of the output
+    A placement strategy describes acceptable sharding placements of the output
     and the tensor arguments of an operation.
 
     note: when the op return value is a single DTensor object, output_specs is
@@ -94,6 +94,14 @@ class PlacementStrategy:
                 f"function output_spec expects a single DTensorSpec but got: {self.output_specs}"
             )
 
+    def input_spec(self, index: int = 0) -> DTensorSpec:
+        assert self.input_specs is not None, "input_specs of PlacementStrategy is None!"
+        assert len(self.input_specs) > index, (
+            f"Invalid index {index} for input_specs of length "
+            f"{len(self.input_specs)}: {self.input_specs}"
+        )
+        return self.input_specs[index]
+
     def __str__(self) -> str:
         input_specs_str = _pretty_print_spec(self.input_specs)
         output_spec_str = _pretty_print_spec(self.output_specs)
@@ -121,7 +129,7 @@ class OpStrategy(StrategyType):
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
         mesh_shape = self.output_mesh_shape
-        return f"OpStrategy:[{strategy_list_str}] @mesh: {mesh_shape}"
+        return f"OpStrategy:[{strategy_list_str}] @ mesh: {mesh_shape}"
 
     def max_num_shards(self) -> int:
         """
@@ -155,7 +163,8 @@ class TupleStrategy(StrategyType):
     TupleStrategy represents the output strategy of this op is a tuple
     of strategy, i.e. If the output of this op is a tuple of tensors or list of tensors
     with possibly different placement strategies, we should return a TupleStrategy that
-    contains a tuple of OpStrategy.
+    contains a tuple of OpStrategy, where each child represents the sharding strategy
+    of "each element" of the tuple/list of tensors the op returns.
 
     NOTE: if the output of the op is a List[Tensor] and they share the same placement
     strategy, then we should return a single OpStrategy instead of a TupleStrategy
@@ -181,8 +190,8 @@ class RuntimeSchemaInfo:
     """
 
     # This static_argnum records static arg "starting index" for ops that have non-tensor
-    # args/kwargs which would affect sharding propagation results. All args after this
-    # index would be hashed to our sharding cache.
+    # args/kwargs which would affect sharding propagation results. All args starting from
+    # this index would be hashed to our sharding cache.
     # Note that only a few ops need this information, e.g. view, transpose, var.dim, etc.
     static_argnum: int = 100
     # This static_kwargkey records static kwarg names which would affect sharding prop

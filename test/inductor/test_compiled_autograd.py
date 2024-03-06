@@ -651,6 +651,7 @@ class TestCompiledAutograd(TestCase):
             torch._dynamo.mark_dynamic(y, 0)
 
         def f():
+            y.grad = None
             out = x + y
 
             # make sure the backward call does not trigger any error when
@@ -690,26 +691,32 @@ def load_test_module(name):
         ).load_module()
 
 
-test_autograd = load_test_module("test_autograd")
+def make_wrapped(fn):
+    @functools.wraps(fn)
+    def wrapped(self):
+        torch._dynamo.reset()
+        with compiled_autograd.enable(compiler_fn):
+            return fn(self)
+
+    return wrapped
 
 
-class EagerAutogradTests(TestCase):
-    @classmethod
-    def add_test(cls, name, fn):
-        @functools.wraps(fn)
-        def wrapped(self: EagerAutogradTests):
-            torch._dynamo.reset()
-            with compiled_autograd.enable(compiler_fn):
-                return fn(self)
-
+def wrap_test_class(orig_cls):
+    dct = orig_cls.__dict__.copy()
+    for name in list(dct.keys()):
+        fn = dct[name]
         if not callable(fn):
-            return
+            continue
         elif known_failures_re.match(name) or name in known_failing_tests:
-            setattr(cls, name, unittest.expectedFailure)
-        elif name.startswith("test"):
-            setattr(cls, name, wrapped)
-        else:
-            setattr(cls, name, fn)
+            dct[name] = unittest.expectedFailure
+        elif name.startswith("test_"):
+            dct[name] = make_wrapped(fn)
+
+    return type(
+        orig_cls.__name__ + "WithCompiledAutograd",
+        orig_cls.__bases__,
+        dct,
+    )
 
 
 # These groups of tests aren't supported yet
@@ -833,15 +840,29 @@ known_failing_tests = {
     "test_simple_reentrant",  # torch._dynamo.exc.Unsupported: call_method SkipFunctionVariable() sum [] {}
     "test_tensor_hooks_inplace_multiple_outputs",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
     "test_lobpcg",  # torch._dynamo.exc.Unsupported: 'call_function LOBPCGAutogradFunction.backward in skip_files
+    "test_backward_dict_grad_for_nontensor",  # AssertionError: "non-Tensor-like types" does not match "'skip function
+    "test_backward_dict_invalid_keys",  # AssertionError: "to have keys {'x'}" does not match "'skip function
+    "test_backward_dict_requires_keys_for_input_optional_tensors",  # AssertionError: "to have keys {.*'y'.*}"
+    "test_backward_dict_requires_keys_for_input_tensors",  # AssertionError: "to have keys {.*'y'.*}" does not
+    "test_backward_grads_are_tensor_or_none",  # AssertionError: "either None or a Tensor" does not match "'
+    "test_backward_impl_on_existing_op",  # torch._dynamo.exc.Unsupported: 'skip function
+    "test_backward_returns_dict",  # AssertionError: "to be a dict" does not match "'skip function
+    "test_backward_tensorlist_input_requires_list_grads",  # AssertionError: "list of gradients" does not
+    "test_backward_tensorlist_input_requires_list_grads_none_or_Tensor",  # AssertionError: "None or Tensor"
+    "test_backward_tensorlist_input_requires_list_grads_with_same_numel",  # AssertionError: "3 gradients
+    "test_save_for_backward_inputs_are_namedtuple",  # torch._dynamo.exc.Unsupported: 'skip function
+    "test_autograd_function_backed_op",  # RuntimeError: compiled_args not implemented
 }
 
 if not HAS_CUDA:
     # Found Tesla M60 which is too old to be supported by the triton GPU compiler
     known_failing_tests.add("test_type_conversions")
 
-for name, fn in test_autograd.TestAutograd.__dict__.items():
-    EagerAutogradTests.add_test(name, fn)
+test_autograd = load_test_module("test_autograd")
+test_custom_ops = load_test_module("test_custom_ops")
 
+TestAutogradWithCompiledAutograd = wrap_test_class(test_autograd.TestAutograd)
+TestCustomOpWithCompiledAutograd = wrap_test_class(test_custom_ops.TestCustomOp)
 
 if __name__ == "__main__":
     if HAS_CPU:
