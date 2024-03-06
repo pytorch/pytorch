@@ -453,13 +453,11 @@ def unsafe_alloc_storage(tensor: torch.Tensor) -> None:
     # Skip the already-allocated check and assume that `tensor` is the base
     # tensor to save CPU overhead
     tensor.untyped_storage().resize_(tensor.numel() * tensor.itemsize)
-    # pass
 
 
 def unsafe_free_storage(tensor: torch.Tensor) -> None:
     # Skip the already-freed check to save CPU overhead
     tensor.untyped_storage().resize_(0)
-    # pass
 
 
 # NOTE: These bypass `nn.Module.__setattr__` checks, which incur non-trivial
