@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 from collections import defaultdict
 from typing import Dict
-import unittest
 
 import torch
 from torch.distributed._tensor.experimental.tp_transform import (
@@ -114,7 +113,6 @@ class TensorParallelTest(DTensorTestBase):
                 },
             )
 
-    @unittest.expectedFailure
     @with_comms
     @run_with_both_funcol_impls_with_arg
     def test_tp_transform_e2e(self, use_native_funcol):
