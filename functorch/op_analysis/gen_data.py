@@ -148,19 +148,19 @@ def remove_prefix(input_string, prefix):
 
 if True:
     with open("run_ops.txt") as f:
-        opinfo_ops = [remove_suffix(i.strip(), ".default") for i in f.readlines()]
+        opinfo_ops = [remove_suffix(i.strip(), ".default") for i in f]
     with open("count_ops.txt") as f:
-        opinfo_counts = [i.strip() for i in f.readlines()]
+        opinfo_counts = [i.strip() for i in f]
         opinfo_counts = defaultdict(int, dict(zip(opinfo_ops, opinfo_counts)))
 
     def count_fn(x):
         return opinfo_counts[x["full_name"]]
 
     with open("run_decompositions.txt") as f:
-        decomposed_ops = [remove_suffix(i.strip(), ".default") for i in f.readlines()]
+        decomposed_ops = [remove_suffix(i.strip(), ".default") for i in f]
 
     with open("public_api") as f:
-        ref_api = [i.strip() for i in f.readlines()]
+        ref_api = [i.strip() for i in f]
 
     def has_ref_impl(x):
         name = x["name"]
