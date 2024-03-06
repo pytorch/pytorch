@@ -1,5 +1,6 @@
 import torch
 from torch._prims import _make_prim, RETURN_TYPE
+from torch._prims_common import clone_preserve_strides
 
 doc = """
 This is used when dynamo traces torch.nn.Parameter, which normally would not trace properly
@@ -13,7 +14,9 @@ allowed to compute gradients on).
 _bind_nn_parameter = _make_prim(
     schema="_bind_nn_parameter(Tensor self, Tensor placeholder) -> Tensor",
     return_type=RETURN_TYPE.NEW,
-    meta=lambda self, placeholder: torch.nn.Parameter(self, placeholder.requires_grad),
+    meta=lambda self, placeholder: torch.nn.Parameter(
+        clone_preserve_strides(self), placeholder.requires_grad
+    ),
     impl_aten=lambda self, placeholder: placeholder.set_(self),
     doc=doc,
 )
