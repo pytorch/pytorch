@@ -258,15 +258,15 @@ static void _validate_sparse_compressed_tensor_args_worker(const Tensor& compres
       compressed_indices_name, " and ", plain_indices_name, " dtype must be Int or Long, but got ",
       compressed_indices_type);
 
-  if (!values.is_meta()) {
+  if (!compressed_indices.is_meta()) {
     // Indices invariants
     at::_validate_compressed_sparse_indices(
-      /*is_crow = */layout == kSparseCsr || layout == kSparseBsr,
-      compressed_indices,
-      plain_indices,
-      compressed_dim_size,
-      plain_dim_size,
-      values_nnz);
+        /*is_crow = */layout == kSparseCsr || layout == kSparseBsr,
+        compressed_indices,
+        plain_indices,
+        compressed_dim_size,
+        plain_dim_size,
+        values_nnz);
   }
 
   // Device Invariants
