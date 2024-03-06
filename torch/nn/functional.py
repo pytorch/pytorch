@@ -4965,13 +4965,12 @@ scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, i
 
 Computes scaled dot product attention on query, key and value tensors, using
 an optional attention mask if passed, and applying dropout if a probability
-greater than 0.0 is specified.
+greater than 0.0 is specified. The optional scale argument can only be specified as a keyword argument.
 
 .. code-block:: python
 
     # Efficient implementation equivalent to the following:
     def scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None) -> torch.Tensor:
-        # Efficient implementation equivalent to the following:
         L, S = query.size(-2), key.size(-2)
         scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
         attn_bias = torch.zeros(L, S, dtype=query.dtype)
@@ -5039,7 +5038,7 @@ Args:
     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
     is_causal (bool): If true, assumes upper left causal attention masking and errors if both attn_mask and is_causal
         are set.
-    scale (optional float): Scaling factor applied prior to softmax. If None, the default value is set
+    scale (optional float, keyword-only): Scaling factor applied prior to softmax. If None, the default value is set
         to :math:`\frac{1}{\sqrt{E}}`.
 
 
@@ -5459,7 +5458,7 @@ def multi_head_attention_forward(
 
     if need_weights:
         B, Nt, E = q.shape
-        q_scaled = q / math.sqrt(E)
+        q_scaled = q * math.sqrt(1.0 / float(E))
 
         assert not (is_causal and attn_mask is None), "FIXME: is_causal not implemented for need_weights"
 
