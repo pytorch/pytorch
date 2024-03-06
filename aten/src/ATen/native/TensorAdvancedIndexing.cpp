@@ -687,7 +687,7 @@ Tensor _unsafe_masked_index(const Tensor& self, const Tensor& mask, const torch:
   return result.masked_fill(at::logical_not(mask), fill);
 }
 
-Tensor _unsafe_masked_index_put(const Tensor& self, const Tensor& mask, const torch::List<c10::optional<Tensor>>& indices, const Tensor& values, bool accumulate) {
+Tensor _unsafe_masked_index_put_accumulate(const Tensor& self, const Tensor& mask, const torch::List<c10::optional<Tensor>>& indices, const Tensor& values) {
   // This is the backward of _unsafe_masked_index.
   // This function is not meant to be executed on eager mode.
   // We recompute the clamped indices and rely on inductor to CSE the computation
@@ -705,8 +705,8 @@ Tensor _unsafe_masked_index_put(const Tensor& self, const Tensor& mask, const to
   torch::List<c10::optional<Tensor>> clamped_indices(indices);
   std::transform(indices.begin(), indices.end(), self.sizes().begin(), clamped_indices.begin(), clamp);
 
-  auto masked_value = values.masked_fill(~mask, 0);
-  return at::_unsafe_index_put(self, clamped_indices, masked_value, accumulate);
+  auto masked_value = values.masked_fill(at::logical_not(mask), 0);
+  return at::_unsafe_index_put(self, clamped_indices, masked_value, true);
 }
 
 Tensor & put_(Tensor & self, const Tensor& index, const Tensor & source, const bool accumulate) {
