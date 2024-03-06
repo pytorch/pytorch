@@ -555,7 +555,9 @@ def _get_sfdp_patterns():
         torch.empty, (1024, 128, 128), device=device, requires_grad=True
     )
 
-    # when batch_size = 1, some clones disappear due to no memory layout change
+    # reshape in matmul decomposition generates a clone when batch_size>1 due to the memory layout change. 
+    # however when batch_size=1, reshape does not change the memory layout, so clone would not be generated.
+    # here we need to trace with input of batch_size=1 to generate a pattern graph without clone.
     g_bs1_inp = functools.partial(
         torch.empty, (1, 4, 8, 16), device=device, requires_grad=True
     )
