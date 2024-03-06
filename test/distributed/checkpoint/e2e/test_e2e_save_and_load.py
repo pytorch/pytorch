@@ -186,7 +186,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         }
 
         if async_op:
-            f = saver._async_save(sd, checkpoint_id=self.temp_dir)
+            f = saver.async_save(sd, checkpoint_id=self.temp_dir)
             t = time.monotonic()
             while not f.done():
                 time.sleep(1)
@@ -294,7 +294,7 @@ class TestNoCPU(DTensorTestBase):
         with self.assertRaisesRegex(
             AssertionError, r"A CPU backend must be enabled for async save;.*?"
         ):
-            f = saver._async_save({})
+            f = saver.async_save({})
             f.result()
 
 
