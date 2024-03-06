@@ -947,6 +947,7 @@ class VecISA:
     _macro: str
     _arch_flags: str
     _dtype_nelements: Dict[torch.dtype, int]
+    _valid: bool = False
 
     # Note [Checking for Vectorized Support in Inductor]
     # TorchInductor CPU vectorization reuses PyTorch vectorization utility functions
@@ -1007,6 +1008,9 @@ cdll.LoadLibrary("__lib_path__")
         if config.is_fbcode():
             return True
 
+        if self._valid:
+            return True
+
         key, input_path = write(VecISA._avx_code, "cpp")
         from filelock import FileLock
 
@@ -1032,9 +1036,10 @@ cdll.LoadLibrary("__lib_path__")
                     env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
                 )
             except Exception as e:
-                return False
+                self._valid = False
 
-            return True
+            self._valid = True
+            return self._valid
 
 
 @dataclasses.dataclass
@@ -1123,6 +1128,34 @@ def valid_vec_isa_list() -> List[VecISA]:
     if platform.machine() == "s390x":
         return [VecZVECTOR()]
 
+    base_name = "cpu_info"
+    from filelock import FileLock
+    lock = FileLock(os.path.join(get_lock_dir(), f"{base_name}.lock"), timeout=LOCK_TIMEOUT)
+    cpu_info_str = ""
+    with lock:
+        cpu_info_conf = os.path.join(cache_dir(), f"{base_name}.json")
+        if os.path.exists(cpu_info_conf):
+            with open(cpu_info_conf, "r") as f:
+                cpu_info_str = f.read()
+
+    if cpu_info_str:
+        try:
+            isa_list = []
+            json_data = json.load(cpu_info_str)
+            assert isinstance(json_data, list)
+            valid_vec_isas: Dict(str, VecISA) = {}
+            for isa in supported_vec_isa_list:
+                valid_vec_isas[str(isa)] = isa
+
+            for item in json_data:
+                if item in valid_vec_isas:
+                    valid_vec_isas[item]._valid = True
+                    isa_list.append(valid_vec_isas[item])
+
+            return isa_list
+        except Exception as e:
+            return []
+
     isa_list = []
     with open("/proc/cpuinfo") as _cpu_info:
         _cpu_info_content = _cpu_info.read()
@@ -1134,7 +1167,13 @@ def valid_vec_isa_list() -> List[VecISA]:
                 and isa
             ):
                 isa_list.append(isa)
-        return isa_list
+
+    with lock:
+        if not os.path.exists(cpu_info_conf) and isa_list:
+            with open(cpu_info_conf, "w") as _cpu_info_conf:
+                json.dump([str(isa) for isa in isa_list], _cpu_info_conf)
+
+    return isa_list
 
 
 def pick_vec_isa() -> VecISA:
