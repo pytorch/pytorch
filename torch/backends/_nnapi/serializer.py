@@ -1176,7 +1176,7 @@ class _NnapiSerializer:
             shape=change_element(out_oper.shape, dim, out_dim_size)
         )
 
-        if in_oper.dim_order == DimOrder.CHANNELS_LAST:
+        if in_oper.dim_order == DimOrder.CHANNELS_LAST:  # type: ignore[possibly-undefined]
             assert len(out_oper.shape) == 4
             nnapi_dim = [0, 3, 1, 2][dim]
         else:
@@ -1633,10 +1633,10 @@ class _NnapiSerializer:
         size_ctype, size_arg = self.get_constant_value(size_jit)
 
         if node.inputsSize() == 3:
-            scale_ctype, scale_arg = self.get_constant_value(scale_jit)
+            scale_ctype, scale_arg = self.get_constant_value(scale_jit)  # type: ignore[possibly-undefined]
         else:
-            scale_h_ctype, scale_h_arg = self.get_constant_value(scale_h_jit)
-            scale_w_ctype, scale_w_arg = self.get_constant_value(scale_w_jit)
+            scale_h_ctype, scale_h_arg = self.get_constant_value(scale_h_jit)  # type: ignore[possibly-undefined]
+            scale_w_ctype, scale_w_arg = self.get_constant_value(scale_w_jit)  # type: ignore[possibly-undefined]
 
             # The only way for the 4-argument overload of upsample_nearest2d to
             # have been added to the graph without error is if the scale_h and

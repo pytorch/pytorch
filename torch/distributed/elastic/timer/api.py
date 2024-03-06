@@ -231,7 +231,7 @@ class TimerServer(abc.ABC):
             log.info("No watchdog thread running, doing nothing")
 
 
-_timer_client = None
+_timer_client: Optional[TimerClient] = None
 
 
 def configure(timer_client: TimerClient):

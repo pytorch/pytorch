@@ -21,6 +21,7 @@ from .eval_frame import (
     explain,
     export,
     is_dynamo_supported,
+    is_inductor_supported,
     optimize,
     optimize_assert,
     OptimizedModule,
@@ -66,13 +67,8 @@ if torch.manual_seed is torch.random.manual_seed:
 
 def reset() -> None:
     """Clear all compile caches and restore initial state"""
-    with eval_frame.compile_lock:
-        for weak_code in (
-            convert_frame.input_codes.seen + convert_frame.output_codes.seen
-        ):
-            code = weak_code()
-            if code:
-                reset_code(code)
+    with convert_frame.compile_lock:
+        reset_code_caches()
         convert_frame.input_codes.clear()
         convert_frame.output_codes.clear()
         orig_code_map.clear()
@@ -82,4 +78,15 @@ def reset() -> None:
         _reset_guarded_backend_cache()
         reset_frame_count()
         torch._C._dynamo.compiled_autograd.clear_cache()
+
+
+def reset_code_caches() -> None:
+    """Clear compile caches that are keyed by code objects"""
+    with convert_frame.compile_lock:
+        for weak_code in (
+            convert_frame.input_codes.seen + convert_frame.output_codes.seen
+        ):
+            code = weak_code()
+            if code:
+                reset_code(code)
         code_context.clear()

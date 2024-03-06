@@ -291,7 +291,7 @@ struct C10_API TensorOptions {
   }
 
   /// Returns the device index of the `TensorOptions`.
-  int32_t device_index() const noexcept {
+  c10::DeviceIndex device_index() const noexcept {
     return device().index();
   }
 
@@ -590,9 +590,8 @@ inline TensorOptions device(Device device) {
 
 /// Convenience function that returns a `TensorOptions` object with the
 /// `device` set to CUDA and the `device_index` set to the given one.
-inline TensorOptions device_index(int16_t device_index) {
-  return TensorOptions().device_index(
-      static_cast<c10::DeviceIndex>(device_index));
+inline TensorOptions device_index(c10::DeviceIndex device_index) {
+  return TensorOptions().device_index(device_index);
 }
 
 /// Convenience function that returns a `TensorOptions` object with the
@@ -701,6 +700,8 @@ inline DispatchKey computeDispatchKey(
           return DispatchKey::SparseCsrCPU;
         case c10::DeviceType::CUDA:
           return DispatchKey::SparseCsrCUDA;
+        case c10::DeviceType::Meta:
+          return DispatchKey::SparseCsrMeta;
         default:
           AT_ERROR(
               "Unsupported device type for ",
@@ -721,6 +722,7 @@ inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
     return Layout::Sparse;
     case DispatchKey::SparseCsrCPU:
     case DispatchKey::SparseCsrCUDA:
+    case DispatchKey::SparseCsrMeta:
       TORCH_CHECK(
           false,
           "Cannot map DispatchKey ",

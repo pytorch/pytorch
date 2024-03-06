@@ -4,7 +4,9 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Float8_e4m3fn.h>
+#include <c10/util/Float8_e4m3fnuz.h>
 #include <c10/util/Float8_e5m2.h>
+#include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/Half.h>
 
 // Defines the accumulation type for a scalar type.
@@ -87,6 +89,8 @@ MPS_ACC_TYPE(BFloat16, float);
 MPS_ACC_TYPE(Half, float);
 MPS_ACC_TYPE(Float8_e5m2, float);
 MPS_ACC_TYPE(Float8_e4m3fn, float);
+MPS_ACC_TYPE(Float8_e5m2fnuz, float);
+MPS_ACC_TYPE(Float8_e4m3fnuz, float);
 MPS_ACC_TYPE(float, float);
 MPS_ACC_TYPE(double, float);
 MPS_ACC_TYPE(int8_t, int64_t);
@@ -107,6 +111,8 @@ CUDA_ACC_TYPE(BFloat16, float);
 CUDA_ACC_TYPE(Half, float);
 CUDA_ACC_TYPE(Float8_e5m2, float);
 CUDA_ACC_TYPE(Float8_e4m3fn, float);
+CUDA_ACC_TYPE(Float8_e5m2fnuz, float);
+CUDA_ACC_TYPE(Float8_e4m3fnuz, float);
 CUDA_ACC_TYPE(float, float);
 CUDA_ACC_TYPE(double, double);
 CUDA_ACC_TYPE(int8_t, int64_t);
@@ -123,8 +129,8 @@ CUDA_ACC_TYPE(c10::complex<double>, c10::complex<double>);
 CPU_ACC_TYPE(BFloat16, float);
 CPU_ACC_TYPE(Half, float);
 CPU_ACC_TYPE(Float8_e5m2, float);
-CPU_ACC_TYPE(Float8_e5m2fnuz, float);
 CPU_ACC_TYPE(Float8_e4m3fn, float);
+CPU_ACC_TYPE(Float8_e5m2fnuz, float);
 CPU_ACC_TYPE(Float8_e4m3fnuz, float);
 CPU_ACC_TYPE(float, double);
 CPU_ACC_TYPE(double, double);

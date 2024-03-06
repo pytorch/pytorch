@@ -47,7 +47,7 @@ def replace_node_module(node: fx.Node, modules: Dict[str, Any], new_module: torc
     modules[node.target] = new_module
     setattr(modules[parent_name], name, new_module)
 
-def fuse(model: torch.nn.Module, inplace=False) -> torch.nn.Module:
+def fuse(model: torch.nn.Module, inplace=False, no_trace=False) -> torch.nn.Module:
     """
     Fuses convolution/BN layers for inference purposes. Will deepcopy your
     model by default, but can modify the model inplace as well.
@@ -57,7 +57,10 @@ def fuse(model: torch.nn.Module, inplace=False) -> torch.nn.Module:
                 (nn.Conv3d, nn.BatchNorm3d)]
     if not inplace:
         model = copy.deepcopy(model)
-    fx_model = fx.symbolic_trace(model)
+    if not no_trace or not isinstance(model, torch.fx.GraphModule):
+        fx_model = fx.symbolic_trace(model)
+    else:
+        fx_model = model
     modules = dict(fx_model.named_modules())
     new_graph = copy.deepcopy(fx_model.graph)
 

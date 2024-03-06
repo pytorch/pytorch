@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import functools
 import inspect
 import itertools
@@ -7,7 +9,7 @@ from typing import Any, Dict, List
 
 import torch.nn
 
-from .. import skipfiles, variables
+from .. import trace_rules, variables
 from ..exc import unimplemented, UnspecializeRestartAnalysis, Unsupported
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import GenerationTracker
@@ -22,6 +24,7 @@ from ..utils import (
     get_custom_getattr,
     get_fake_value,
     is_lazy_module,
+    is_namedtuple,
     is_safe_constant,
     istensor,
     istype,
@@ -43,23 +46,24 @@ def initialize_lazy_module(tx, mod, args, kwargs):
     useful now that 'allowed' modules graph-break on hooks, calling this first ensures there is no hook
     by the time we trace __call__ and thus no graph-break for lazy allowed modules.
     """
-    assert len(kwargs) == 0
-
     if hasattr(mod, "_initialize_hook"):
 
         def convert_to_fake(x):
-            if isinstance(x, torch.fx.Proxy):
+            if is_namedtuple(x):
+                return type(x)(*(convert_to_fake(elem) for elem in x))
+            elif isinstance(x, dict):
+                return {k: convert_to_fake(v) for k, v in x.items()}
+            elif isinstance(x, (list, tuple, set)):
+                return type(x)(convert_to_fake(elem) for elem in x)
+            elif isinstance(x, torch.fx.Proxy):
                 return get_fake_value(x.node, tx)
             else:
                 return x
 
-        input = [
-            type(arg)([convert_to_fake(x) for x in arg])
-            if isinstance(arg, (list, tuple))
-            else convert_to_fake(arg)
-            for arg in proxy_args_kwargs(args, {})[0]
-        ]
-        mod._infer_parameters(mod, input)
+        proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
+        fake_args = [convert_to_fake(arg) for arg in proxy_args]
+        fake_kwargs = {k: convert_to_fake(v) for k, v in proxy_kwargs.items()}
+        mod._infer_parameters(mod, fake_args, fake_kwargs)
 
 
 @contextmanager
@@ -385,7 +389,7 @@ class NNModuleVariable(VariableTracker):
             with record_nn_module_stack(self.module_key, self.source, tx, module):
                 return generic_call_method_helper(name)
 
-        if name == "_check_input_dim" and skipfiles.is_torch_inline_allowed(
+        if name == "_check_input_dim" and trace_rules.is_torch_inline_allowed(
             inspect.getfile(module.__class__._check_input_dim)
         ):
             return ConstantVariable.create(True)
