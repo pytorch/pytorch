@@ -28,9 +28,11 @@ class CustomOpTestCaseBase(TestCase):
     test_ns = "_test_custom_op"
 
     def setUp(self):
+        super().setUp()
         self.libraries = []
 
     def tearDown(self):
+        super().tearDown()
         import torch._custom_op
 
         keys = list(torch._custom_op.impl.global_registry.keys())
@@ -1850,7 +1852,7 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
 
   static torch::Tensor forward(
       torch::autograd::AutogradContext* ctx,
-      torch::Tensor x) {
+      const torch::Tensor& x) {
     return x;
   }
 
@@ -1861,7 +1863,7 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
   }
 };
 
-torch::Tensor custom_op_backed_by_autograd_fn(torch::Tensor x) {
+torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x) {
   return CustomOpAutogradFunction::apply(x);
 }
 
