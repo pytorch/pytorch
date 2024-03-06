@@ -1,11 +1,13 @@
 import logging
+import os
 import warnings
 import weakref
-from typing import cast, List, Optional
+from typing import cast, Dict, List, Optional
 
 import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
+from torch._dynamo import assume_constant_result
 
 """
 Moved eager kernel implementations to a separate file partly for readability and partly as it is currently
@@ -23,9 +25,29 @@ _wait_all
 
 """
 
+_use_native_funcol: Optional[bool] = None
+
+
+@assume_constant_result
+def native_funcol_enabled():
+    global _use_native_funcol
+    if _use_native_funcol is None:
+        try:
+            # Disable native funcol when torch_xla is installed. This check
+            # will be removed once torch_xla adopts the native_funcol IR.
+            import torch_xla  # noqa: F401
+
+            _use_native_funcol = False
+        except Exception:
+            # When TORCH_DISABLE_NATIVE_FUNCOL is set, fallback to py funcol
+            _use_native_funcol = os.environ.get("TORCH_DISABLE_NATIVE_FUNCOL") != "1"
+
+    return _use_native_funcol
+
+
 logger = logging.getLogger(__name__)
 
-data_ptr_to_work = dict()
+data_ptr_to_work: Dict[int, "_WaitRegistration"] = dict()
 work_version = 0
 
 
@@ -92,6 +114,9 @@ def _wait_reg_dec(ptr, wait_reg):
 
 
 def _register_tensor_wrapper(tensor) -> None:
+    if native_funcol_enabled():
+        # Tensor storage -> work mapping is maintained in C++
+        return
     global data_ptr_to_work
     data_ptr = tensor.elem.data_ptr()
     # Note: we should NEVER try to trace this, bc it registers runtime stuff during trace.

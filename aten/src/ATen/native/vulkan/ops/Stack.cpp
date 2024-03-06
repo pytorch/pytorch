@@ -19,11 +19,11 @@ namespace {
 using namespace api::utils;
 
 Tensor stack(const at::TensorList tensors, const int64_t dim) {
-  TORCH_CHECK(tensors.size() > 0, "Vulkan stack expects at least one tensor");
-  at::Tensor tensor = tensors[0];
+  TORCH_CHECK(!tensors.empty(), "Vulkan stack expects at least one tensor");
+  const at::Tensor& tensor = tensors[0];
   TORCH_CHECK(
-      tensor.dim() >= 1 || tensor.dim() <= 3,
-      "Vulkan stack supports 1d, 2d, 3d tensors as input!");
+      tensor.dim() <= 3,
+      "Vulkan stack only supports up to 3d tensors as input!");
 
   TORCH_CHECK(
       dim >= -tensor.dim() - 1 && dim <= tensor.dim(),

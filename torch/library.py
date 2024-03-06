@@ -1,3 +1,4 @@
+from unittest.mock import patch
 from ._ops import OpOverload
 from typing import Any, Optional, Set, List
 import traceback
@@ -6,6 +7,7 @@ import weakref
 import functools
 import inspect
 import re
+import contextlib
 import sys
 
 __all__ = [
@@ -109,7 +111,30 @@ class Library:
         _defs.add(qualname)
         return result
 
-    def impl(self, op_name, fn, dispatch_key='', compile_mode=False):
+    def _impl_t_c(self, op_name, fn, dispatch_key=''):
+        impl_fn_name = "impl_t_c"
+
+        assert isinstance(op_name, str)
+        assert self.m is not None
+        assert hasattr(self.m, impl_fn_name)
+        impl_fn = getattr(self.m, impl_fn_name)
+        assert callable(impl_fn)
+
+        key = self.ns + "/" + op_name.split("::")[-1] + "/" + dispatch_key
+        if key in _impls:
+            # TODO: in future, add more info about where the existing function is registered (this info is
+            # today already returned by the C++ warning when impl is called but we error out before that)
+            raise RuntimeError("This is not allowed since there's already a kernel registered from python overriding {}"
+                               "'s behavior for {} dispatch key and {} namespace.".
+                               format(op_name.split("::")[-1], dispatch_key, self.ns))
+
+        impl_fn(op_name, dispatch_key, fn)
+
+        _impls.add(key)
+        self._op_impls.add(key)
+
+
+    def impl(self, op_name, fn, dispatch_key=''):
         r'''Registers the function implementation for an operator defined in the library.
 
         Args:
@@ -165,19 +190,33 @@ class Library:
                     " for the base ops that it decomposes into.")
 
         assert self.m is not None
-        impl_fn_name = "impl" if not compile_mode else "impl_t_c"
-        assert hasattr(self.m, impl_fn_name)
-        impl_fn = getattr(self.m, impl_fn_name)
-        impl_fn(name, dispatch_key if dispatch_key != "" else "CompositeImplicitAutograd", fn)
+        self.m.impl(name, dispatch_key if dispatch_key != "" else "CompositeImplicitAutograd", fn)
 
         _impls.add(key)
         self._op_impls.add(key)
 
     def _destroy(self):
+        if self.m is not None:
+            self.m.reset()
         self.m = None
         for handle in self._registration_handles:
             handle.destroy()
         self._registration_handles.clear()
+        for name in self._op_defs:
+            # Delete the cached torch.ops.ns.foo if it was registered.
+            # Otherwise, accessing it leads to a segfault.
+            # It's possible that we only registered an overload in this Library
+            # and another library owns an alive overload.
+            # That's OK - the next time torch.ops.ns.foo gets called, it'll be
+            # recomputed to point at the right collection of overloads.
+            ns, name_with_overload = name.split("::")
+            name = name_with_overload.split(".")[0]
+            if not hasattr(torch.ops, ns):
+                continue
+            namespace = getattr(torch.ops, ns)
+            if not hasattr(namespace, name):
+                continue
+            delattr(namespace, name)
 
 
 def _del_library(captured_impls, op_impls, captured_defs, op_defs, registration_handles):
@@ -187,7 +226,16 @@ def _del_library(captured_impls, op_impls, captured_defs, op_defs, registration_
         handle.destroy()
 
 
-_keep_alive = []
+@contextlib.contextmanager
+def _scoped_library(*args, **kwargs):
+    try:
+        lib = Library(*args, **kwargs)
+        yield lib
+    finally:
+        lib._destroy()
+
+
+_keep_alive: List[Library] = []
 
 
 NAMELESS_SCHEMA = re.compile(r"\(.*\) -> .*")

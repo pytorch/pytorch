@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import concurrent.futures
 import contextlib
 import json
