@@ -9,8 +9,6 @@ from collections.abc import Mapping
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
-import sympy
-
 import torch
 import torch._dynamo
 import torch.fx
@@ -849,18 +847,25 @@ def _export(
                 if dynamic_dim is None:
                     continue
                 for dim, shape in enumerate(shapes):
-                    if isinstance(shape, torch.SymInt) and dynamic_dim[dim]:
+                    if isinstance(dynamic_dim, Mapping) and dim not in dynamic_dim:
+                        continue
+                    if isinstance(dynamic_dim, (tuple, list)) and dim >= len(
+                        dynamic_dim
+                    ):
+                        continue
+                    if dynamic_dim[dim]:
                         new_range_constraints[shape.node._expr] = ValueRanges(
                             lower=dynamic_dim[dim].min, upper=dynamic_dim[dim].max
                         )
 
             # filter out non-symbols (exprs)
-            new_range_constraints = {
-                k: v
-                for k, v in new_range_constraints.items()
-                if isinstance(k, sympy.core.symbol.Symbol) and k in range_constraints
-            }
-            range_constraints = new_range_constraints
+            # new_range_constraints = {
+            #     k: v
+            #     for k, v in new_range_constraints.items()
+            # }
+            # new_range_constraints.update(range_constraints)
+            # range_constraints = new_range_constraints
+            range_constraints.update(new_range_constraints)
 
         module_call_signatures = {
             strip_root(fqn): ModuleCallSignature(inputs=[], outputs=[], **specs)

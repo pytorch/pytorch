@@ -708,6 +708,54 @@ class TestExport(TestCase):
             6,
         )
 
+    def test_dynamic_dim_constraints(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x * 2
+        class Bar(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y[1:]
+
+        dx = Dim("dx", min=1, max=2)
+        ep = export(
+            Foo(),
+            (torch.randn(2, 2), ),
+            dynamic_shapes={"x": {0: dx, 1: None}}
+        )
+        ep(torch.randn(1, 2))
+        ep(torch.randn(2, 2))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected input at .* to be <= 2, but got 3"
+        ):
+            ep(torch.randn(3, 2))
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            (
+                ".*"
+            ),
+        ):
+            ep = export(
+                Foo(),
+                (torch.randn(1, 2), ),
+                dynamic_shapes={"x": {0: dx, 1: None}}
+            )
+
+        dx = Dim("dx", min=2, max=3)
+        ep = export(
+            Foo(),
+            (torch.randn(2, 2), ),
+            dynamic_shapes={"x": {0: dx, 1: None}}
+        )
+        ep(torch.randn(2, 2))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected input at .* to be >= 2, but got 1"
+        ):
+            ep(torch.randn(1, 2))
+
+
     def test_raise_user_error_when_guard_on_data_dependent_operation(self):
         class M(torch.nn.Module):
             def forward(self, x):
