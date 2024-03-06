@@ -48,6 +48,7 @@ from torch._dynamo.testing import (
     same,
     skipIfNotPy311,
     unsupported,
+    xfailIfPy311,
 )
 from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
 from torch._inductor.utils import run_and_get_code
@@ -9723,6 +9724,26 @@ fn
         self._test_compile_model_free(
             lambda: (Mod(), torch.randn(100, 100)),
             lambda mod: mod.fc,
+        )
+
+    @xfailIfPy311
+    def test_sequential_module_free(self):
+        self._test_compile_model_free(
+            lambda: (
+                torch.nn.Sequential(
+                    torch.nn.Linear(100, 100),
+                    torch.nn.ReLU(),
+                ),
+                torch.randn(100, 100),
+            ),
+            lambda mod: mod[0],
+        )
+
+    @unittest.expectedFailure
+    def test_linear_module_free(self):
+        self._test_compile_model_free(
+            lambda: (torch.nn.Linear(100, 100), torch.randn(100, 100)),
+            lambda mod: mod,
         )
 
     def test_dynamo_cache_move_to_front(self):
