@@ -193,7 +193,7 @@ class _DimRange:
 
 
 @forbid_in_graph
-def mark_dynamic(t, index, min=None, max=None):
+def mark_dynamic(t, index, *, min=None, max=None):
     """
     Mark a tensor as having a dynamic dim and set corresponding min and max range for the dim.
 
@@ -233,7 +233,7 @@ def mark_dynamic(t, index, min=None, max=None):
 
     assert isinstance(index, (list, tuple))
     for i in index:
-        mark_dynamic(t, i, min, max)
+        mark_dynamic(t, i, min=min, max=max)
 
 
 @forbid_in_graph
