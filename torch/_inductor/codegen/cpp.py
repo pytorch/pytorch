@@ -7,6 +7,7 @@ import math
 import re
 import sys
 from copy import copy, deepcopy
+from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
@@ -3456,6 +3457,12 @@ class CppKernelProxy(CppKernel):
         self.codegen_loops_impl(self.loop_nest, code, worksharing)
 
 
+class ReasonFusedNodes(Enum):
+    SAME_VARS_REDUCE = "same_vars_reduce"
+    COMPATIBLE_REDUCTION = "compatible_reduction"
+    COMPATIBLE_RANGES_NO_REDUCTION = "compatible_ranges_no_reduction"
+
+
 class CppScheduling(BaseScheduling):
     # ctypes limits the number of args to 1024, refer to:
     # https://github.com/python/cpython/commit/a285af7e626d1b81cf09f8b2bf7656f100bc1237
@@ -3486,7 +3493,10 @@ class CppScheduling(BaseScheduling):
         if node1.is_foreach() or node2.is_foreach():
             return ForeachKernelSchedulerNode.fuse(node1, node2)
         else:
-            if self._can_fuse_nodes_with_compatible_ranges(node1, node2):
+            if (
+                self._why_fuse_nodes(node1, node2)
+                == ReasonFusedNodes.COMPATIBLE_RANGES_NO_REDUCTION
+            ):
                 assert isinstance(node1, (SchedulerNode, FusedSchedulerNode))
                 assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
 
@@ -3521,6 +3531,19 @@ class CppScheduling(BaseScheduling):
                 assert vars1 == vars2, (vars1, vars2)
 
             return FusedSchedulerNode.fuse(node1, node2)
+
+    def _why_fuse_nodes(self, node1, node2) -> Optional[ReasonFusedNodes]:
+        _, (vars1, reduce1) = node1.group
+        _, (vars2, reduce2) = node2.group
+
+        if vars1 == vars2 and reduce1 == reduce2:
+            return ReasonFusedNodes.SAME_VARS_REDUCE
+        if reduce1 == () and vars1 == vars2 + reduce2:
+            return ReasonFusedNodes.COMPATIBLE_REDUCTION
+        if self._can_fuse_nodes_with_compatible_ranges(node1, node2):
+            return ReasonFusedNodes.COMPATIBLE_RANGES_NO_REDUCTION
+        # TODO(jansel): allow fusion pointwise (vars1, ()) suffix?
+        return None
 
     def _can_fuse_nodes_with_compatible_ranges(self, node1, node2):
         # Here we try to fuse SchedulerNode/FusedSchedulerNode with compatible ranges
@@ -3573,18 +3596,7 @@ class CppScheduling(BaseScheduling):
     def _can_fuse_horizontal_impl(self, node1, node2):
         assert isinstance(node1, (FusedSchedulerNode, SchedulerNode))
         assert isinstance(node2, (FusedSchedulerNode, SchedulerNode))
-        _, (vars1, reduce1) = node1.group
-        _, (vars2, reduce2) = node2.group
-        if vars1 == vars2 and reduce1 == reduce2:
-            return True
-        if reduce1 == () and vars1 == vars2 + reduce2:
-            return True
-
-        if self._can_fuse_nodes_with_compatible_ranges(node1, node2):
-            return True
-
-        # TODO(jansel): allow fusion pointwise (vars1, ()) suffix?
-        return False
+        return self._why_fuse_nodes(node1, node2) is not None
 
     def can_fuse_horizontal(self, node1, node2):
         if (
