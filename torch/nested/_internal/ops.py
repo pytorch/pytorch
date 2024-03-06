@@ -1086,8 +1086,9 @@ def _nested_get_jagged_dummy(func, *args, **kwargs):
 
 
 with warnings.catch_warnings():
+    # catch warnings related to redefining these ops
     warnings.filterwarnings("ignore", category=UserWarning)
-    aten = torch.library.Library("aten", "IMPL")
-    aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "CPU")
-    aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "CUDA")
-    aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "Meta")
+    with torch.library._scoped_library("aten", "IMPL") as aten:
+        aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "CPU")
+        aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "CUDA")
+        aten.impl("_nested_get_jagged_dummy", _nested_get_jagged_dummy, "Meta")
