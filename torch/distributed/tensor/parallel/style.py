@@ -243,25 +243,26 @@ class RowwiseParallel(ParallelStyle):
             partial(self._prepare_output_fn, self.output_layouts, self.use_local_output),
         )
 
+
 class SequenceParallel(ParallelStyle):
     """
-    SequenceParallel replicate a compatible nn.Module parameters and run the sharded computation with the sharded
-    input that shards on the sequence dimension. Currently supporting ``nn.LayerNorm``, ``nn.Dropout`` and the
+    SequenceParallel replicates a compatible ``nn.Module`` parameters and runs the sharded computation with
+    input sharded on the sequence dimension. This currently supports ``nn.LayerNorm``, ``nn.Dropout``, and the
     `RMSNorm python implementation <https://github.com/facebookresearch/llama/blob/main/llama/model.py#L34>`__
 
-    This style implements the operation that described in the paper
+    This style implements the operation that is described in the paper
     `Reducing Activation Recomputation in Large Transformer Models <https://arxiv.org/abs/2205.05198>`__
 
-    Both the input and output of the nn.Module will be sharded on the sequence dimension.
+    Both the input and output of the ``nn.Module`` will be sharded on the sequence dimension.
 
     Keyword Args:
         sequence_dim (int, optional):
-            The sequence dimension of the input tensor for the nn.Module, this is used to annotate the input tensor to
+            The sequence dimension of the input tensor for the ``nn.Module``, this is used to annotate the input tensor to
             become a DTensor that is sharded on the sequence dimension.
         use_local_output (bool, optional):
             Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module output, default: False.
     Returns:
-        A :class:`ParallelStyle` object that represents Sequence Parallel of the nn.Module.
+        A :class:`ParallelStyle` object that represents Sequence Parallel of the ``nn.Module``.
 
     Example::
         >>> # xdoctest: +SKIP(failing)
@@ -279,7 +280,8 @@ class SequenceParallel(ParallelStyle):
 
     .. note:: SequenceParallel style assumes ones initialization if there are weights in the nn.Module (i.e.
         ``nn.LayerNorm`` or ``RMSNorm``, and they by default have ones initialization). If you have custom
-        inits for the weights on those modules, need to broadcast the weights before/after parallelizing.
+        inits for the weights on those modules, you need to broadcast the weights before/after parallelizing
+        to ensure that they are replicated.
     """
     def __init__(
         self,
@@ -308,7 +310,7 @@ class SequenceParallel(ParallelStyle):
         elif isinstance(input_tensor, torch.Tensor):
             return DTensor.from_local(input_tensor, device_mesh, [Shard(sequence_dim)], run_check=False)
         else:
-            raise ValueError(f"expecting input of {mod} to be a torch.Tensor or DTensor")
+            raise ValueError(f"expecting input of {mod} to be a torch.Tensor or DTensor, but got {input_tensor}")
 
     @staticmethod
     def _prepare_output_fn(use_local_output, mod, outputs, device_mesh):

@@ -189,7 +189,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             root_plan = {
                 "tok_embeddings": ColwiseParallel(output_layouts=Shard(1)),
                 "pos_embeddings": ColwiseParallel(output_layouts=Shard(0)),
-                "norm": SequenceParallel(sequence_dim=1),
+                "norm": SequenceParallel(),
             }
         else:
             root_plan = {
@@ -211,8 +211,8 @@ class DistTensorParallelExampleTest(DTensorTestBase):
                     desired_input_layouts=Replicate(),
                 )
                 # shard the RMSNorms
-                layer_parallelize_plan["attention_norm"] = SequenceParallel(sequence_dim=1)
-                layer_parallelize_plan["ffn_norm"] = SequenceParallel(sequence_dim=1)
+                layer_parallelize_plan["attention_norm"] = SequenceParallel()
+                layer_parallelize_plan["ffn_norm"] = SequenceParallel()
             layer_parallelize_plan["attention.wq"] = ColwiseParallel()
             layer_parallelize_plan["attention.wk"] = ColwiseParallel()
             layer_parallelize_plan["attention.wv"] = ColwiseParallel()
