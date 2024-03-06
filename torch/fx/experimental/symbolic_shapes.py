@@ -936,9 +936,6 @@ class StatelessSymbolicContext(SymbolicContext):
     # information on how to allocate symbols when recursively fakeifying the base
     # during view fake-ification.
     view_base_context: Optional[SymbolicContext] = None
-    # If the tensor has gradients, this should be populated. It contains information
-    # on how to allocate symbols when recursively fakeifying the grad field.
-    grad_context: Optional[SymbolicContext] = None
     # TODO: add storage offset and stride symbolic_context
 
     def __post_init__(self):
