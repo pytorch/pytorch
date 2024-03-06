@@ -179,7 +179,11 @@ class CppWrapperCpu(WrapperCodeGen):
                 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
                 #include <torch/csrc/inductor/inductor_ops.h>
                 #include <torch/types.h>
+                #ifndef AT_PER_OPERATOR_HEADERS
+                #include <ATen/Functions.h>
+                #else
                 #include <ATen/ops/bernoulli_native.h>
+                #endif
 
                 #define reinterpret_tensor torch::inductor::_reinterpret_tensor
                 #define alloc_from_pool torch::inductor::_alloc_from_pool
@@ -941,18 +945,31 @@ class CppWrapperCpu(WrapperCodeGen):
             """
         )
 
-    def generate_c_shim_extern_kernel_call(self, kernel, args):
-        # In the abi_compatible mode, we call fallback aten ops through a C shim layer
-        self.allow_stack_allocation = False
+    def get_c_shim_func_name(self, kernel):
+        if not config.abi_compatible:
+            return kernel
+
+        assert "::" in kernel, "Cpp kernel name: " + kernel + " does not contain '::'"
         kernel_tokens = kernel.split("::")
         kernel_suffix = kernel_tokens[-1]
         if kernel_suffix == "call":
             kernel_suffix = kernel_tokens[-2]
         if config.c_shim_version == "1":
-            shim_fn = f"aoti_torch_{kernel_suffix}"
+            # For sdpa, we need the v2 version since v1 didn't consider optional arg
+            # FIXME: no need to do this after we switch to the torchgen-ed C shim
+            shim_fn = (
+                f"aoti_torch_{kernel_suffix}_v2"
+                if kernel_suffix == "_scaled_dot_product_flash_attention"
+                else f"aoti_torch_{kernel_suffix}"
+            )
         else:
             shim_fn = f"aoti_torch_{self.device}_{kernel_suffix}"
+        return shim_fn
 
+    def generate_c_shim_extern_kernel_call(self, kernel, args):
+        # In the abi_compatible mode, we call fallback aten ops through a C shim layer
+        self.allow_stack_allocation = False
+        shim_fn = self.get_c_shim_func_name(kernel)
         # HACK: val_to_arg_str jams multiple arguments together using a comma. If that
         # ever breaks, it needs to be reworked to be able to return multiple arguments,
         # and the split-on-comma code here needs to be removed.
@@ -1014,12 +1031,7 @@ class CppWrapperCpu(WrapperCodeGen):
             else:
                 raise NotImplementedError("unsupported type of {output=}")
         args = args + output_args
-        assert (
-            fallback_kernel.abi_compatible_kernel is not None
-        ), f"abi_compatible_kernel is None for {fallback_kernel.python_kernel_name=}"
-        self.generate_c_shim_extern_kernel_call(
-            fallback_kernel.abi_compatible_kernel, args
-        )
+        self.generate_c_shim_extern_kernel_call(fallback_kernel.cpp_kernel_name, args)
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
 
@@ -1073,6 +1085,7 @@ class CppWrapperCpu(WrapperCodeGen):
     def generate_scatter_fallback(
         self, output, inputs, kernel, python_kernel_name, src_is_tensor, reduce, kwargs
     ):
+        # TODO: needs updates to use C shim v2
         # TODO: support other overload for cpp wrapper and remove the below assertions
         if config.abi_compatible:
             # call the ABI shim function instead of the ATen one
@@ -1092,7 +1105,8 @@ class CppWrapperCpu(WrapperCodeGen):
         self.writeline(line)
 
     def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
-        if V.graph.aot_mode and V.graph.cpp_wrapper and config.abi_compatible:
+        # TODO: needs updates to use C shim v2
+        if config.abi_compatible:
             # See the comment in codegen_reinterpret_view about why having something like
             # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the correponding
             # tensor prematurely deallocated, thus this std::vector().data() trick here.
