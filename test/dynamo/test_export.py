@@ -2423,7 +2423,7 @@ def forward(self, x):
 
         example_inputs = (copy(x), y)
         ep = torch.export.export(foo, example_inputs, dynamic_shapes=dynamic_shapes)
-        ep(torch.randn(3), y)  # no specialization error
+        ep.module()(torch.randn(3), y)  # no specialization error
 
     def test_export_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])

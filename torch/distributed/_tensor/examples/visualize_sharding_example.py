@@ -60,7 +60,7 @@ Row 2-3  cuda:1, cuda:3
 tensor = torch.randn(4, 4)
 mesh = DeviceMesh("cuda", [rank])
 dtensor = distribute_tensor(tensor, mesh, [Replicate()])
-visualize_sharding(dtensor, prompt=f"Example 5 rank {rank}:")
+visualize_sharding(dtensor, header=f"Example 5 rank {rank}:")
 """
 Example 5 rank 0:
          Col 0-3
