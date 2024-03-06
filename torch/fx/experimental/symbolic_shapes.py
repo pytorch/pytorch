@@ -2987,8 +2987,6 @@ class ShapeEnv:
                 input_guards.append((source, s))
                 constraint_violated = False
                 if isinstance(constraint, StrictMinMaxConstraint):
-                    # if s < constraint.vr.lower or s > constraint.vr.upper:
-                    #     constraint_violated = True
                     constraint_violated = True
                 elif isinstance(constraint, RelaxedUnspecConstraint):
                     # Don't complain about 0/1 specialization, we
