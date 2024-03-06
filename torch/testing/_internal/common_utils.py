@@ -2803,21 +2803,21 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 key = f"{self.__class__.__name__}.{self._testMethodName}"
                 from .dynamo_test_failures import dynamo_expected_failures, dynamo_skips
 
-                def expect_failure(f):
+                def expect_failure(f, test_name):
                     @wraps(f)
                     def wrapper(*args, **kwargs):
                         try:
                             f(*args, **kwargs)
                         except BaseException as e:
                             self.skipTest(e)
-                        raise RuntimeError("Unexpected success, please remove test from dynamo_test_failures.py")
+                        raise RuntimeError(f"Unexpected success, please remove `test/dynamo_expected_failures/{test_name}`")
                     return wrapper
 
                 if key in dynamo_expected_failures:
                     method = getattr(self, self._testMethodName)
-                    setattr(self, self._testMethodName, expect_failure(method))
+                    setattr(self, self._testMethodName, expect_failure(method, key))
 
-                def ignore_failure(f):
+                def ignore_failure(f, test_name):
                     @wraps(f)
                     def wrapper(*args, **kwargs):
                         try:
@@ -2828,12 +2828,12 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                         if getattr(method, "__unittest_expecting_failure__", False):
                             self.skipTest("unexpected success")
                         else:
-                            self.skipTest("This test passed, maybe we can remove the skip from dynamo_test_failures.py")
+                            self.skipTest(f"This test passed, maybe we can remove `test/dynamo_skips/{test_name}`")
                     return wrapper
 
                 if key in dynamo_skips:
                     method = getattr(self, self._testMethodName)
-                    setattr(self, self._testMethodName, ignore_failure(method))
+                    setattr(self, self._testMethodName, ignore_failure(method, key))
 
             super_run(result=result)
 
@@ -5018,6 +5018,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
 
     s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n    .+\n( +[~^]+ *\n)?', repl_frame, s)
     s = re.sub(r"line \d+", "line N", s)
+    s = re.sub(r".py:\d+", ".py:N", s)
     s = re.sub(file, os.path.basename(file), s)
     s = re.sub(os.path.join(os.path.dirname(torch.__file__), ""), "", s)
     s = re.sub(r"\\", "/", s)  # for Windows

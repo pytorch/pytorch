@@ -6,6 +6,9 @@ aten::_adaptive_avg_pool2d
 aten::_adaptive_avg_pool2d.out
 aten::_addmm_activation
 aten::_addmm_activation.out
+aten::_batch_norm_no_update
+aten::_batch_norm_with_update
+aten::_batch_norm_with_update_functional
 aten::_euclidean_dist.out
 aten::_fused_dropout
 aten::_fused_dropout.out
@@ -76,6 +79,7 @@ aten::atanh
 aten::atanh.out
 aten::atanh_
 aten::baddbmm_
+aten::batch_norm_backward
 aten::bitwise_and.Scalar
 aten::bitwise_and.Scalar_Tensor
 aten::bitwise_and.Scalar_Tensor_out

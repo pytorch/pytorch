@@ -1843,6 +1843,114 @@ def _native_batch_norm_legit_functional(
     return output, save_mean, save_rstd, new_running_mean, new_running_var
 
 
+def _get_batch_norm_reserve_tensor(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Tensor,
+    running_var: Tensor,
+    eps: float,
+    training: bool,
+) -> Tensor:
+    """
+    Return a reserve tensor for batch norm, used only by cudnn to pass forward state to the
+    backward pass. This is needed for `_batch_norm_with_update` and `_batch_norm_no_update`,
+    which support a variety of backends including cudnn. We create this tensor here to get
+    the correct shape in the traced graph if we detect that will call the cudnn kernel,
+    and rely on DCE to avoid materializing this tensor.
+    """
+    backend = torch._C._select_batch_norm_backend(  # type: ignore[attr-defined]
+        input, weight, bias, running_mean, running_var, True, eps
+    )
+    reserve_size = 0
+    if backend == torch._C._BatchNormBackend.Cudnn:  # type: ignore[attr-defined]
+        reserve_size = torch._C._get_cudnn_batch_norm_reserve_space_size(input, training)  # type: ignore[attr-defined]
+    return torch.empty(
+        reserve_size, dtype=torch.uint8, layout=input.layout, device=input.device
+    )
+
+
+@register_decomposition(aten._batch_norm_with_update.default)
+def _batch_norm_with_update(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Tensor,
+    running_var: Tensor,
+    momentum: float,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    output, save_mean, save_rstd, _, _ = native_batch_norm_helper(
+        input,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        True,  # training
+        momentum,
+        eps,
+        False,  # functional
+    )
+    reserve = _get_batch_norm_reserve_tensor(
+        input, weight, bias, running_mean, running_var, eps, training=True
+    )
+    return output, save_mean, save_rstd, reserve
+
+
+@register_decomposition(aten._batch_norm_with_update_functional.default)
+def _batch_norm_with_update_functional(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Tensor,
+    running_var: Tensor,
+    momentum: float,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    (
+        output,
+        save_mean,
+        save_rstd,
+        new_rm,
+        new_rv,
+    ) = native_batch_norm_helper(
+        input, weight, bias, running_mean, running_var, True, momentum, eps, True
+    )
+    reserve = _get_batch_norm_reserve_tensor(
+        input, weight, bias, running_mean, running_var, eps, training=True
+    )
+    assert new_rm is not None, "new_running_mean should not be None"
+    assert new_rv is not None, "new_running_var should not be None"
+    return (output, save_mean, save_rstd, reserve, new_rm, new_rv)
+
+
+@register_decomposition(aten._batch_norm_no_update.default)
+def _batch_norm_no_update(
+    input: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    running_mean: Tensor,
+    running_var: Tensor,
+    momentum: float,
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    output, save_mean, save_rstd, _, _ = native_batch_norm_helper(
+        input,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        False,  # training
+        momentum,
+        eps,
+        False,  # functional
+    )
+    reserve = _get_batch_norm_reserve_tensor(
+        input, weight, bias, running_mean, running_var, eps, training=False
+    )
+    return output, save_mean, save_rstd, reserve
+
+
 @register_decomposition(aten._fused_dropout)
 @out_wrapper("out0", "out1")
 @pw_cast_for_opmath
@@ -1858,19 +1966,6 @@ def device_hint(tensor):
         return tensor.fake_device
     else:
         return None
-
-
-def wrap_output_with_input_device_(x, common_device):
-    # wrap meta tensor
-    if common_device is not None and x.device.type == "meta":
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
-        fake_mode = FakeTensorMode()
-        fake_mode.in_kernel_invocation = True
-        converter = fake_mode.fake_tensor_converter
-        return converter.from_meta_and_device(fake_mode, x, common_device)
-
-    return x
 
 
 @register_decomposition(aten._to_copy)
@@ -1891,19 +1986,18 @@ def _to_copy(
         return x.clone()
     dtype_converted = False
     common_device = device_hint(x)
+
     if device is not None and device != x.device:
         # avoid conversions on cpu
         if dtype is not None and device.type == "cpu":
             x = torch._prims.convert_element_type(x, dtype)
             dtype_converted = True
         x = torch._prims.device_put(x, device)
+
     if dtype is not None and not dtype_converted:
         x = torch._prims.convert_element_type(x, dtype)
         dtype_converted = True
-    # In case of dtype promotion, faketensor converted into tensor.
-    # Need to convert into faketensor if input was a faketensor.
-    if dtype_converted:
-        x = wrap_output_with_input_device_(x, common_device)
+
     if memory_format is not None:  # no ref/prim for memory format
         return torch.clone(x, memory_format=memory_format)
     return x
@@ -1959,6 +2053,34 @@ def _broadcast_batch_norm_backward(x, broadcast_mask):
         if mask == 1 and not (axis < x.ndim and x.shape[axis] == broadcast_mask[axis]):
             x = x.unsqueeze(axis)
     return x
+
+
+@register_decomposition(aten.batch_norm_backward.default)
+def batch_norm_backward(
+    grad_out: Tensor,
+    input: Tensor,
+    weight: Optional[Tensor],
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
+    save_mean: Optional[Tensor],
+    save_invstd: Optional[Tensor],
+    train: bool,
+    eps: float,
+    output_mask: List[bool],
+    reserve: Tensor,
+) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
+    return native_batch_norm_backward(
+        grad_out,
+        input,
+        weight,
+        running_mean,
+        running_var,
+        save_mean,
+        save_invstd,
+        train,
+        eps,
+        output_mask,
+    )
 
 
 @register_decomposition(aten.native_batch_norm_backward.default)
@@ -4493,6 +4615,12 @@ def _weight_norm_interface(x, y, dim=0):
 @register_decomposition(aten.isin)
 @out_wrapper()
 def isin(elements, test_elements, *, assume_unique=False, invert=False):
+    # handle when either elements or test_elements are Scalars (they can't both be)
+    if not isinstance(elements, torch.Tensor):
+        elements = torch.tensor(elements, device=test_elements.device)
+    if not isinstance(test_elements, torch.Tensor):
+        test_elements = torch.tensor(test_elements, device=elements.device)
+
     if test_elements.numel() < 10.0 * pow(elements.numel(), 0.145):
         return isin_default(elements, test_elements, invert=invert)
     else:
@@ -4502,6 +4630,9 @@ def isin(elements, test_elements, *, assume_unique=False, invert=False):
 
 
 def isin_default(elements, test_elements, *, invert=False):
+    if elements.numel() == 0:
+        return torch.empty_like(elements, dtype=torch.bool)
+
     x = elements.view(*elements.shape, *((1,) * test_elements.ndim))
     if not invert:
         cmp = x == test_elements
