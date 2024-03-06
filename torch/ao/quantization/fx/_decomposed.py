@@ -481,3 +481,63 @@ def dequantize_per_channel_meta(
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
     return torch.empty_like(input, dtype=torch.float32)
+
+quantized_decomposed_lib.define(
+    "fake_quant_per_channel(Tensor input, Tensor scales, Tensor zero_points, int axis, "
+    "int quant_min, int quant_max) -> Tensor")
+
+class FakeQuantPerChannel(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input, scales, zero_points, axis, quant_min, quant_max):
+        with torch._C._AutoDispatchBelowAutograd():
+            if input.dtype == torch.bfloat16:
+                input = input.to(torch.float32)
+            assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+            assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
+            input_permuted, permute_axis_list = _permute_to_axis_zero(input, axis)
+            res = torch.zeros_like(input_permuted)
+            mask = torch.zeros_like(input_permuted, dtype=torch.int)
+
+            for i in range(input_permuted.size(0)):
+                temp = torch.round(input_permuted[i] * (1.0 / scales[i])) + zero_points[i]
+                res[i] = (
+                    torch.clamp(
+                        temp,
+                        quant_min,
+                        quant_max
+                    ) - zero_points[i]
+                ) * scales[i]
+                mask[i] = torch.logical_and((temp >= quant_min), (temp <= quant_max))
+
+            out = res.permute(tuple(permute_axis_list))
+            mask = mask.permute(tuple(permute_axis_list))
+
+        ctx.save_for_backward(mask)
+        return out
+
+    @staticmethod
+    def backward(ctx, gy):
+        mask, = ctx.saved_tensors
+        return gy * mask, None, None, None, None, None
+
+@impl(quantized_decomposed_lib, "fake_quant_per_channel", "AutogradCPU")
+def fake_quant_per_channel(
+        input: torch.Tensor,
+        scales: torch.Tensor,
+        zero_points: torch.Tensor,
+        axis: int,
+        quant_min: int,
+        quant_max: int,
+) -> torch.Tensor:
+    return FakeQuantPerChannel.apply(input, scales, zero_points, axis, quant_min, quant_max)
+
+@impl(quantized_decomposed_lib, "fake_quant_per_channel", "Meta")
+def fake_quant_per_channel_meta(
+        input: torch.Tensor,
+        scales: torch.Tensor,
+        zero_points: torch.Tensor,
+        axis: int,
+        quant_min: int,
+        quant_max: int,
+) -> torch.Tensor:
+    return torch.empty_like(input)
