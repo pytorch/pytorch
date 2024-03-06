@@ -825,6 +825,62 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    def test_cond_with_multiple_outputs(self):
+        inputs = (
+            torch.randn((10, 20), device=self.device),
+            torch.randn((10, 20), device=self.device),
+            torch.randn((30, 40), device=self.device),
+        )
+        dim0_ab = Dim("s0", min=2, max=1024)
+        dim0_c = Dim("s1", min=2, max=1024)
+        dynamic_shapes = {
+            "p": {},
+            "a": {0: dim0_ab, 1: None},
+            "b": {0: dim0_ab, 1: None},
+            "c": {0: dim0_c, 1: None},
+        }
+        self.check_model_with_multiple_inputs(
+            CondModels.MultipleOutputs(),
+            prepend_predicates(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
+    def test_cond_with_outer_code_before_after(self):
+        inputs = (
+            torch.randn((10, 20), device=self.device),
+            torch.randn((10, 20), device=self.device),
+        )
+        dim0_ab = Dim("s0", min=2, max=1024)
+        dynamic_shapes = {
+            "p": {},
+            "a": {0: dim0_ab, 1: None},
+            "b": {0: dim0_ab, 1: None},
+        }
+        self.check_model_with_multiple_inputs(
+            CondModels.OuterCode(),
+            prepend_predicates(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
+    def test_cond_use_buffers_from_outer_scope(self):
+        inputs = (
+            torch.randn((10, 20), device=self.device),
+            torch.randn((10, 20), device=self.device),
+            torch.randn((10, 20), device=self.device),
+        )
+        dim0_abc = Dim("s0", min=2, max=1024)
+        dynamic_shapes = {
+            "p": {},
+            "a": {0: dim0_abc, 1: None},
+            "b": {0: dim0_abc, 1: None},
+            "c": {0: dim0_abc, 1: None},
+        }
+        self.check_model_with_multiple_inputs(
+            CondModels.OuterBuffers(),
+            prepend_predicates(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
     def test_zero_grid_with_backed_symbols(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -1950,18 +2006,6 @@ CPU_TEST_FAILURES = {
     ),
     "test_zero_grid_with_backed_symbols": fail_with_and_without_stack_allocation(
         is_skip=True
-    ),
-    "test_cond_simple": fail_stack_allocation(
-        is_skip=True,
-    ),
-    "test_cond_nested": fail_stack_allocation(
-        is_skip=True,
-    ),
-    "test_cond_with_parameters": fail_stack_allocation(
-        is_skip=True,
-    ),
-    "test_cond_with_reinterpret_view_inputs_outputs": fail_stack_allocation(
-        is_skip=True,
     ),
 }
 
