@@ -35,12 +35,6 @@ enum class EventFlag {
   // backend flags
   BACKEND_DEFAULT,
   BACKEND_DISABLE_TIMING,  
-  // CUDA flags
-  CUDA_EVENT_DEFAULT,
-  CUDA_EVENT_DISABLE_TIMING, // PyTorch-default for CUDA
-  // HIP flags
-  HIP_EVENT_DEFAULT,
-  HIP_EVENT_DISABLE_TIMING, // PyTorch-default for HIP
   // FOR TESTING ONLY
   INVALID
 };
