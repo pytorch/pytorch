@@ -1423,6 +1423,10 @@ class CppVecOverrides(CppOverrides):
         other_code_vec = f"{V.kernel._get_vec_type(torch.float)}({other_code})"
         assert isinstance(new_mask, CppCSEVariable), new_mask
         if new_mask.is_vec or result.is_vec:
+            if result.dtype != torch.float:
+                raise CppVecUnsupportedError(
+                    "masked with non-float tensor is not supported in vectorized codegen"
+                )
             type = f"decltype({body_code_vec})"
             float_mask = f"to_float_mask({new_mask})"
             code = BracesBuffer()
@@ -1640,6 +1644,9 @@ class CppKernel(Kernel):
             if not config.cpp.dynamic_threads and self.num_threads == 1:
                 line = f"{var}[{cexpr_index(index)}] += {value};"
             else:
+                dtype = V.graph.get_dtype(name)
+                # mirroring static_cast<float>(...) in load:
+                value = f"static_cast<{DTYPE_TO_CPP[dtype]}>({value})"
                 line = f"atomic_add(&{var}[{cexpr_index(index)}], {value});"
         else:
             raise NotImplementedError(f"store mode={mode}")
