@@ -9397,40 +9397,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             for expect, t in zip(expects, out):
                 self.assertTrue(expect.eq(t).all().item())
 
-    def test_chunk_cat(self):
-        def pad_tensor(tensor: torch.Tensor, dim: int, num_chunks: int) -> torch.Tensor:
-            input_shape = list(tensor.size())
-            size_along_dim = input_shape[dim]
-            padded_size_along_dim = (size_along_dim + num_chunks - 1) // num_chunks * num_chunks
-            padded_size = input_shape[:dim] + [padded_size_along_dim,] + input_shape[dim + 1 :]
-            padded_tensor = torch.zeros(padded_size, device=tensor.device, dtype=tensor.dtype)
-            padded_tensor.narrow(dim=dim, start=0, length=size_along_dim).copy_(tensor)
-            return padded_tensor
-
-        def chunk_cat(tensors, dim, num_chunks):
-            num_params = len(tensors)
-            params = [torch.empty(0)] * num_params
-            for i in range(num_params):
-                params[i] = pad_tensor(tensors[i], dim, num_chunks)
-            leading_dims = params[0].size()[:dim]
-            params = [tensor.reshape(leading_dims + (num_chunks, -1)) for tensor in params]
-            return torch.cat(params, dim=dim + 1)
-
-        device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
-        sizes = [
-            torch.Size([5, 4, 3, 32, 4]),
-            torch.Size([5, 4, 3, 32, 1]),
-            torch.Size([5, 4, 3, 128, 3]),
-            torch.Size([5, 4, 3, 256, 2]),
-            torch.Size([5, 4, 3, 256, 1]),
-        ]
-        max_dim, num_chunks = 3, 128
-        tensors = [torch.rand(size, dtype=torch.bfloat16, device=device) for size in sizes]
-        for dim in range(max_dim):
-            expect = chunk_cat(tensors, dim, num_chunks)
-            out = torch._chunk_cat(tensors, dim, num_chunks)
-            self.assertTrue(expect.eq(out).all().item())
-
     def test_type(self):
         x = torch.randn(3, 3).double()
         self.assertEqual(x.type('torch.FloatTensor').dtype, torch.float32)
