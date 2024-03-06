@@ -436,8 +436,7 @@ def pad_bmm(
         return aten.bmm(mat1, mat2)[:, :-m_padded_length, :].contiguous()
 
 
-@functools.lru_cache(None)
-def _pad_mm_init():
+def _get_mm_patterns():
     from .joint_graph import patterns
 
     if torch.cuda.is_available():
@@ -485,21 +484,35 @@ def _pad_mm_init():
         ),
     ]:
         assert isinstance(workaround, dict)  # mypy is unable to infer the type properly
+        name = pattern.__name__
+
+        yield f"{name}_training", {
+            "search_fn": pattern,
+            "replace_fn": replacement,
+            "example_inputs": args,
+            "trace_fn": joint_fwd_bwd,
+            "pass_dicts": patterns,
+            "extra_check": extra_check,
+            "scalar_workaround": workaround,
+        }
+
+        yield f"{name}_inference", {
+            "search_fn": pattern,
+            "replace_fn": replacement,
+            "example_inputs": args,
+            "trace_fn": fwd_only,
+            "pass_dicts": patterns,
+            "extra_check": extra_check,
+            "scalar_workaround": workaround,
+        }
+
+
+@functools.lru_cache(None)
+def _pad_mm_init():
+    from .serialized_patterns.central_index import get_serialized_pattern
+
+    for key, register_replacement_kwargs in _get_mm_patterns():
+        search_fn_pattern = get_serialized_pattern(key)
         register_replacement(
-            pattern,
-            replacement,
-            args,
-            joint_fwd_bwd,
-            patterns,
-            extra_check=extra_check,
-            scalar_workaround=workaround,
-        )
-        register_replacement(
-            pattern,
-            replacement,
-            args,
-            fwd_only,
-            patterns,
-            extra_check=extra_check,
-            scalar_workaround=workaround,
+            **register_replacement_kwargs, search_fn_pattern=search_fn_pattern
         )

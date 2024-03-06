@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 # This is an auto-generated file. Please do not modify it by hand.
 # To re-generate, run:
 # cd ~/pytorch && python
@@ -21,6 +19,9 @@ from ._sfdp_pattern_14 import (_sfdp_pattern_14_training, _sfdp_pattern_14_infer
 from ._sfdp_pattern_15 import (_sfdp_pattern_15_training, _sfdp_pattern_15_inference, _sfdp_pattern_15_training_half, _sfdp_pattern_15_inference_half)
 from ._sfdp_pattern_16 import (_sfdp_pattern_16_training, _sfdp_pattern_16_inference, _sfdp_pattern_16_training_half, _sfdp_pattern_16_inference_half)
 from ._sfdp_pattern_17 import (_sfdp_pattern_17_training, _sfdp_pattern_17_inference, _sfdp_pattern_17_training_half, _sfdp_pattern_17_inference_half)
+from .mm_pattern import (mm_pattern_training, mm_pattern_inference)
+from .bmm_pattern import (bmm_pattern_training, bmm_pattern_inference)
+from .addmm_pattern import (addmm_pattern_training, addmm_pattern_inference)
 
 central_index = {
     '_sfdp_pattern_1_training': _sfdp_pattern_1_training,
@@ -91,6 +92,12 @@ central_index = {
     '_sfdp_pattern_16_inference_half': _sfdp_pattern_16_inference_half,
     '_sfdp_pattern_17_training_half': _sfdp_pattern_17_training_half,
     '_sfdp_pattern_17_inference_half': _sfdp_pattern_17_inference_half,
+    'mm_pattern_training': mm_pattern_training,
+    'mm_pattern_inference': mm_pattern_inference,
+    'bmm_pattern_training': bmm_pattern_training,
+    'bmm_pattern_inference': bmm_pattern_inference,
+    'addmm_pattern_training': addmm_pattern_training,
+    'addmm_pattern_inference': addmm_pattern_inference,
 }
 
 

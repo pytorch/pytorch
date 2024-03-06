@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import itertools
 import os
 import shutil
 from collections import defaultdict
@@ -7,6 +8,8 @@ from pathlib import Path
 import torch._inductor
 
 from torch._inductor.fx_passes.fuse_attention import _get_sfdp_patterns
+from torch._inductor.fx_passes.misc_patterns import _get_misc_patterns
+from torch._inductor.fx_passes.pad_mm import _get_mm_patterns
 from torch._inductor.pattern_matcher import (
     _TargetExpr,
     gen_pattern,
@@ -22,7 +25,10 @@ auto_generated_msg = """# This is an auto-generated file. Please do not modify i
 
 
 def get_file_template() -> str:
-    file_template = f"""# noqa: F401, E501
+    file_template = f"""\
+# mypy: ignore-errors
+
+# noqa: F401, E501
 {auto_generated_msg}
 import torch
 import torch._inductor
@@ -85,11 +91,18 @@ def serialize_functions() -> None:
     file_to_keys = defaultdict(list)
     seen_patterns = set()
 
+    sources = itertools.chain(
+        _get_sfdp_patterns(),
+        _get_mm_patterns(),
+        # The misc patterns depend on their args so they can't be serialized.
+        # _get_misc_patterns()
+    )
+
     file_template = get_file_template()
     for (
         key,
         kwargs,
-    ) in _get_sfdp_patterns():  # type: ignore[no-untyped-call]
+    ) in sources:  # type: ignore[no-untyped-call]
         pattern_name = kwargs["search_fn"].__name__
         gen_kwargs = {
             key: kwargs[key]
