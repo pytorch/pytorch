@@ -20,7 +20,6 @@ from torch.distributed.algorithms.ddp_comm_hooks import (
 )
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
-    run_with_both_funcol_impls,
     run_with_native_funcol,
     skip_if_lt_x_gpu,
     skip_if_rocm,
@@ -246,8 +245,6 @@ class ReplicateTest(MultiProcessTestCase):
                 bwd(loss)
 
         code = run_and_get_triton_code(functools.partial(bwd, loss=loss))
-        # if loop > 1:
-        # assert False, code
 
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         return code
@@ -261,7 +258,7 @@ class ReplicateTest(MultiProcessTestCase):
 
         # Gradient is None
         code = self._test_bucketing()
-        self.assertEquals(counters["inductor"]["ddp_buckets"], 3)
+        self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
         for i in range(3):
             fc.check("cpp_fused_").check(
@@ -274,7 +271,7 @@ class ReplicateTest(MultiProcessTestCase):
 
         # Gradient is None
         code = self._test_bucketing(init_process_group=False, loop=2)
-        self.assertEquals(counters["inductor"]["ddp_buckets"], 3)
+        self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
         for i in range(3):
             fc.check("cpp_fused_").check(
@@ -294,7 +291,7 @@ class ReplicateTest(MultiProcessTestCase):
 
         # Gradient is None
         code = self._test_bucketing()
-        self.assertEquals(counters["inductor"]["ddp_buckets"], 3)
+        self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
         for i in range(3):
             fc.check("aten.flatten.using_ints(").check("cpp_fused_").check(
@@ -306,7 +303,7 @@ class ReplicateTest(MultiProcessTestCase):
 
         # Gradient is not None
         code = self._test_bucketing(init_process_group=False, loop=2)
-        self.assertEquals(counters["inductor"]["ddp_buckets"], 3)
+        self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
         for i in range(3):
             fc.check("aten.flatten.using_ints(").check("cpp_fused_").check(
