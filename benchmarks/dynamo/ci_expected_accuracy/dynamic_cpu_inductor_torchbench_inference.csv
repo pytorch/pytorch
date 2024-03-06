@@ -138,10 +138,6 @@ llama,pass,0
 
 
 
-llava,fail_accuracy,0
-
-
-
 maml,pass_due_to_skip,0
 
 
