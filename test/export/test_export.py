@@ -3583,6 +3583,39 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertEqual(res[0], torch.tensor(20))
         self.assertEqual(res[1], 4)
 
+    def test_unbacked_sdpa(self):
+        import torch
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+        from torch.nn.functional import scaled_dot_product_attention
+
+        class Module(torch.nn.Module):
+            def forward(
+                self, query: torch.Tensor, cache: torch.Tensor, start_pos: torch.Tensor
+            ) -> torch.Tensor:
+                # x.sizes(): 1, 128, 16, 128
+                sp = start_pos.item()
+                torch._constrain_as_size(sp, min=0, max=126)
+                key = cache[:, : sp + 1, :, :]  # 1, sp+1, 16, 128
+                value = cache[:, : sp + 1, :, :]  # 1, sp+1, 16, 128
+                query = query.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
+                key = key.transpose(1, 2)
+                value = value.transpose(1, 2)
+                # https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/native/transformers/attention.cpp#L732
+                return scaled_dot_product_attention(query, key, value)
+
+
+        cache = torch.randn(1, 128, 16, 128, dtype=torch.float16)
+        query = torch.randn(1, 1, 16, 128, dtype=torch.float16)
+        start_pos = torch.tensor([0])
+        with sdpa_kernel(SDPBackend.MATH), torch.no_grad():
+            ep = torch.export.export(Module(), (query, cache, start_pos))
+            args = (query, cache, start_pos)
+            self.assertEqual(ep(*args), Module()(*args))
+            args = (query, cache, torch.tensor([3]))
+            self.assertEqual(ep(*args), Module()(*args))
+            args = (query, cache, torch.tensor([126]))
+            self.assertEqual(ep(*args), Module()(*args))
+
     def test_none_input_output(self):
         class Z(torch.nn.Module):
             def forward(self, x, y):
