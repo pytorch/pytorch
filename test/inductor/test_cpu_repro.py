@@ -370,6 +370,33 @@ class CPUReproTests(TestCase):
                     (v,),
                 )
 
+    @config.patch(freezing=True)
+    @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_conv_in_channel_1_dynamic_shapes(self):
+        class M(torch.nn.Module):
+            def __init__(self, in_channel, out_channel) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(in_channel, out_channel, 3)
+
+            def forward(self, x):
+                res = self.conv(x)
+                res = F.relu(res)
+                return res
+
+        # test the case where the channels dim of the input is 1
+        # Reproducer from the maml_omniglot model in Torchbench
+        in_channel = 1
+        out_channel = 3
+        mod = M(in_channel, out_channel).eval()
+        v = torch.randn(5, in_channel, 15, 15)
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
+
     @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     @torch._dynamo.config.patch(dynamic_shapes=True)

@@ -390,16 +390,13 @@ static inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const 
     return false;
   }
 
-  auto input_memory_format = input.suggest_memory_format();
-  auto weight_memory_format = weight.suggest_memory_format();
-
   bool can_use_mkldnn_channels_last_2d =
-      (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
-      (weight_memory_format == at::MemoryFormat::ChannelsLast);
+      (input.is_contiguous(at::MemoryFormat::ChannelsLast)) ||
+      (weight.is_contiguous(at::MemoryFormat::ChannelsLast));
 
   bool can_use_mkldnn_channels_last_3d =
-      (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
-      (weight_memory_format == at::MemoryFormat::ChannelsLast3d);
+      (input.is_contiguous(at::MemoryFormat::ChannelsLast3d)) ||
+      (weight.is_contiguous(at::MemoryFormat::ChannelsLast3d));
 
   return can_use_mkldnn_channels_last_2d || can_use_mkldnn_channels_last_3d;
 }
