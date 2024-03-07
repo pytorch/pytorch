@@ -1067,20 +1067,9 @@ class WrapperCodeGen(CodeGen):
         compile_wrapper = IndentedBuffer()
         compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
 
-        compile_wrapper.splice(
-            """
-            import triton
-            import triton.language as tl
-            from torch._inductor.utils import instance_descriptor
-            from torch._inductor.triton_heuristics import user_autotune
-            """,
-            strip=True,
-        )
+        from .triton import gen_common_triton_imports
 
-        from .triton import TritonKernel
-
-        if TritonKernel.gen_attr_descriptor_import():
-            compile_wrapper.splice(TritonKernel.gen_attr_descriptor_import())
+        compile_wrapper.splice(gen_common_triton_imports(), strip=True)
         compile_wrapper.newline()
 
         inductor_meta = {
@@ -1099,7 +1088,7 @@ class WrapperCodeGen(CodeGen):
 
         compile_wrapper.splice(
             f"""
-            @user_autotune(
+            @triton_heuristics.user_autotune(
                 configs={configs!r},
                 inductor_meta={inductor_meta!r},
                 triton_meta={triton_meta!r},
