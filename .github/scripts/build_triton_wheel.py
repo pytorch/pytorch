@@ -148,7 +148,7 @@ def build_triton(
             triton_pythondir / "triton" / "__init__.py",
             version=f"{version}",
             expected_version=None,
-        
+        )
 
         check_call(
             [sys.executable, "setup.py", "bdist_wheel"], cwd=triton_pythondir, env=env
