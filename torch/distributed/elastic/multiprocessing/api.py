@@ -184,10 +184,18 @@ class LogsDest:
 class LogsSpecs(ABC):
     """
     Defines logs processing and redirection for each worker process.
+
     Args:
-        log_dir: base directory where logs will be written
-        redirects: specifies which streams to redirect to files.
-        tee: specifies which streams to duplicate to stdout/stderr
+        log_dir:
+            Base directory where logs will be written.
+        redirects:
+            Streams to redirect to files. Pass a single ``Std``
+            enum to redirect for all workers, or a mapping keyed
+            by local_rank to selectively redirect.
+        tee:
+            Streams to duplicate to stdout/stderr.
+            Pass a single ``Std`` enum to duplicate streams for all workers,
+            or a mapping keyed by local_rank to selectively duplicate.
     """
 
     def __init__(
@@ -220,7 +228,8 @@ class LogsSpecs(ABC):
 class DefaultLogsSpecs(LogsSpecs):
     """
     Default LogsSpecs implementation:
-    - `log_dir` will be created if it doesn't exist and it is not set to os.devnull
+
+    - `log_dir` will be created if it doesn't exist and it is not set to `os.devnull`
     - Generates nested folders for each attempt and rank.
     """
     def __init__(
