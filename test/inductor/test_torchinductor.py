@@ -13,6 +13,7 @@ import random
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import typing
@@ -224,12 +225,25 @@ class TestCase(TorchTestCase):
         super().setUp()
         self._start = time.perf_counter()
 
+        # For all tests, mock the tmp directory populated by the inductor
+        # FxGraphCache, both for test isolation and to avoid filling disk.
+        self._inductor_cache_tmp_dir = tempfile.TemporaryDirectory()
+        self._inductor_cache_get_tmp_dir_patch = unittest.mock.patch(
+            "torch._inductor.codecache.FxGraphCache._get_tmp_dir"
+        )
+        mock_get_dir = self._inductor_cache_get_tmp_dir_patch.start()
+        mock_get_dir.return_value = self._inductor_cache_tmp_dir.name
+
     def tearDown(self):
         super().tearDown()
         torch._dynamo.reset()
         if os.environ.get("ERROR_ON_SLOW") == "1":
             elapsed = time.perf_counter() - self._start
             assert elapsed < 120
+
+        # Clean up the FxGraphCache tmp dir.
+        self._inductor_cache_get_tmp_dir_patch.stop()
+        self._inductor_cache_tmp_dir.cleanup()
 
 
 class ToTuple(torch.nn.Module):
@@ -956,7 +970,7 @@ class CommonTemplate:
             ),
         )
         self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 5)
-        assertGeneratedKernelCountEqual(self, 1 if self.device == GPU_TYPE else 3)
+        assertGeneratedKernelCountEqual(self, 1 if self.device == GPU_TYPE else 2)
 
     def test_index_propagation(self):
         def flip(x):

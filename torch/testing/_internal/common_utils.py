@@ -2654,7 +2654,7 @@ class TestCase(expecttest.TestCase):
                         parts = Path(abs_test_path).parts
                         for i, part in enumerate(parts):
                             if part == "test":
-                                base_dir = os.path.join(*parts[:i])
+                                base_dir = os.path.join(*parts[:i]) if i > 0 else ''
                                 return os.path.relpath(abs_test_path, start=base_dir)
 
                         # Can't determine containing dir; just return the test filename.
@@ -2886,15 +2886,6 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         if self._default_dtype_check_enabled:
             assert torch.get_default_dtype() == torch.float
 
-        # For all testing, mock the tmp directory populated by the inductor
-        # FxGraphCache, both for test isolation and to avoid filling up disk.
-        self._inductor_cache_tmp_dir = tempfile.TemporaryDirectory()
-        self._inductor_cache_get_tmp_dir_patch = unittest.mock.patch(
-            "torch._inductor.codecache.FxGraphCache._get_tmp_dir"
-        )
-        mock_get_dir = self._inductor_cache_get_tmp_dir_patch.start()
-        mock_get_dir.return_value = self._inductor_cache_tmp_dir.name
-
     def tearDown(self):
         # There exists test cases that override TestCase.setUp
         # definition, so we cannot assume that _check_invariants
@@ -2908,12 +2899,6 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
 
         if self._default_dtype_check_enabled:
             assert torch.get_default_dtype() == torch.float
-
-        # Clean up the FxGraphCache tmp dir.
-        if hasattr(self, '_inductor_cache_get_tmp_dir_patch'):
-            self._inductor_cache_get_tmp_dir_patch.stop()
-        if hasattr(self, '_inductor_cache_tmp_dir'):
-            self._inductor_cache_tmp_dir.cleanup()
 
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,

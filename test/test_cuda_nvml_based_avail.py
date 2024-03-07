@@ -33,6 +33,7 @@ class TestExtendedCUDAIsAvail(TestCase):
         "run_test.py or have added --subprocess to run each test in a different subprocess.")
 
     def setUp(self):
+        super().setUp()
         torch.cuda.device_count.cache_clear()  # clear the lru_cache on this method before our test
 
     @staticmethod
