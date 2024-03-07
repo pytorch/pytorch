@@ -40,6 +40,13 @@ on:
         default: "linux.2xlarge"
         description: |
           List of CUDA architectures CI build should target.
+      runner-group:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If defined, overrides `runner` property and selects a runner from the
+          specified group.
       test-matrix:
         required: false
         type: string
@@ -66,7 +73,7 @@ jobs:
   build:
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner-group != '' && {"group": inputs.runner-group} || inputs.runner }}
     timeout-minutes: 240
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
@@ -87,9 +94,16 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::391835788720:role/gha-pytorch-ci-artifacts-role
+          role-session-name: gha-arc-runner
+          aws-region: us-east-1
+
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@DanilBaibak/Build-Docker-Image-for-ARC
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
 
@@ -133,6 +147,7 @@ jobs:
         with:
           cache_dir: .pytest_cache
           job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
+          s3_bucket: pytorch-ci-artifacts
 
       - name: Build
         if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
@@ -187,7 +202,7 @@ jobs:
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'
         run: |
-          zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .additional_ci_files
+          sudo zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .additional_ci_files
 
       - name: Store PyTorch Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@v5
@@ -197,6 +212,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: artifacts.zip
+          s3-bucket: pytorch-ci-artifacts
 
       - name: Upload sccache stats
         if: steps.build.outcome != 'skipped'
@@ -207,6 +223,7 @@ jobs:
           retention-days: 365
           if-no-files-found: warn
           path: sccache-stats-*.json
+          s3-bucket: pytorch-ci-artifacts
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main

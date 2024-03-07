@@ -34,7 +34,7 @@ jobs:
       contents: read
     uses: ./.github/workflows/_linux-build-arc.yml
     with:
-      runner: "{\"group\": \"arc-lf-linux.2xlarge.arc-rootless-jschmidt.canary\"}"
+      runner-group: "arc-lf-linux.2xlarge.arc-rootless-jschmidt.canary"
       build-environment: linux-jammy-py3.8-gcc11
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
       test-matrix: |
