@@ -270,7 +270,7 @@ def _single_tensor_asgd(
 
         # averaging
         if capturable or mu.item() != 1:
-            ax.add_(param.sub(ax).mul(mu))
+            ax.add_(param.sub(ax).mul_(mu))
         else:
             ax.copy_(param)
 
