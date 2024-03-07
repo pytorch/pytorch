@@ -143,6 +143,9 @@ def visualize_sharding(dtensor, header=""):
     device_mesh = dtensor.device_mesh
     device_type = dtensor.device_mesh.device_type
 
+    if device_mesh.get_coordinate() is None:  # current rank is not in the mesh
+        return
+
     device_map = _mesh_to_coordinate(device_mesh, device_type)
     all_offsets = []
     for device in device_map:
