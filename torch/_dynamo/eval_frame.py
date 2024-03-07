@@ -381,6 +381,10 @@ class _TorchDynamoContext:
             if not isinstance(fn, _LazyGraphModule):
                 # replace fn with the real forward method
                 fn = lazy_gm.forward
+        elif isinstance(fn, GraphModule):
+            code_context.get_context(fn.forward.__code__)[
+                "orig_graphmodule"
+            ] = weakref.ref(fn)
 
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
