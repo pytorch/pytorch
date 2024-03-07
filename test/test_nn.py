@@ -35,8 +35,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
     IS_PPC, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION, \
-    PLATFORM_SUPPORTS_FLASH_ATTENTION
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
@@ -4147,7 +4146,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         dtype = torch.double
         self._test_RNN_cpu_vs_cudnn(0, dtype)
 
-    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_cpu_vs_cudnn_with_dropout(self):
         # Because of dropout randomness, can only compare dropout=0 and dropout=1
         self._test_RNN_cpu_vs_cudnn(1)
@@ -4206,8 +4205,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         warnings.simplefilter("always")
         self.assertEqual(m(inp)[0].cpu(), out_expected[0])
 
-
-    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @set_default_dtype(torch.double)
     def test_RNN_dropout(self):
         # checking the assumption that cuDNN sticks dropout in between
@@ -4251,6 +4249,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     self.assertEqual(hy.data[0][0][0], 10)
                     self.assertEqual(hy.data[1][0][0], output_val)
 
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @set_default_dtype(torch.double)
     def test_error_RNN_seq_len_zero(self):
         # checking error message when RNN has seq_len = 0
@@ -4279,7 +4278,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 # Check that backward does not cause a hard error
                 outs[0].sum().backward()
 
-    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_dropout_state(self):
         for p in (0, 0.1234):
             for train in (True, False):
@@ -4319,7 +4318,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         self.assertNotEqual(hy1, hy2)
                         self.assertNotEqual(hy1, hy3)
 
-    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @set_default_dtype(torch.double)
     def test_RNN_change_dropout(self):
         for train, cuda in product((True, False), repeat=2):
