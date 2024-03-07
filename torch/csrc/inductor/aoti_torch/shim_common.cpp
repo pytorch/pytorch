@@ -51,22 +51,6 @@ static c10::Device c10_device(int32_t device_type, int32_t device_index) {
         static_cast<c10::DeviceIndex>(device_index));
   }
 }
-
-template <class T>
-c10::optional<T> pointer_to_optional(T* ptr) {
-  return ptr ? c10::make_optional(*ptr) : c10::nullopt;
-}
-
-template <class T, class U, typename = std::enable_if_t<!std::is_same_v<T, U>>>
-c10::optional<T> pointer_to_optional(U* ptr) {
-  return ptr ? c10::make_optional<T>(T(*ptr)) : c10::nullopt;
-}
-
-AtenTensorHandle new_tensor_handle(at::Tensor&& tensor) {
-  at::Tensor* new_tensor = new at::Tensor(std::move(tensor));
-  return tensor_pointer_to_tensor_handle(new_tensor);
-}
-
 } // namespace
 
 int32_t aoti_torch_device_type_cpu() {
@@ -789,6 +773,17 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_view_dtype(
   });
 }
 
+AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
+    AtenTensorHandle self,
+    const char* msg) {
+  at::Tensor* t = tensor_handle_to_tensor_pointer(self);
+  std::cout << "[";
+  if (msg) {
+    std::cout << msg;
+  }
+  std::cout << "]:" << *t << "\n";
+}
+
 // ProxyExecutor
 AOTITorchError aoti_torch_proxy_executor_call_function(
     AOTIProxyExecutorHandle proxy_executor,
@@ -806,6 +801,17 @@ AOTITorchError aoti_torch_proxy_executor_call_function(
         num_tensors,
         flatten_tensor_args);
   });
+}
+
+void aoti_torch_check(
+    bool cond,
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* msg) {
+  if (C10_UNLIKELY_OR_CONST(!cond)) {
+    ::c10::detail::torchCheckFail(func, file, line, msg);
+  }
 }
 
 AOTITorchError aoti_torch__alloc_from_pool(

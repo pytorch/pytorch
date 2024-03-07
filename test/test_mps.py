@@ -246,9 +246,12 @@ def mps_ops_modifier(ops):
         'as_strided_scatter',
         'broadcast_tensors',
         'broadcast_to',
+        'chalf',
         'cfloat',
         'chunk',
         'clone',
+        'conj',
+        'conj_physical',
         'contiguous',
         'diag',
         'diag_embed',
@@ -266,6 +269,7 @@ def mps_ops_modifier(ops):
         'flatten',
         'fill',
         'full',
+        'H',
         'hsplit',
         'imag',
         'isfinite',
@@ -279,6 +283,7 @@ def mps_ops_modifier(ops):
         'logspace',
         'linspacetensor_overload',
         'logspacetensor_overload',
+        'mH',
         'mT',
         'masked_scatter',
         'masked_select',
@@ -288,6 +293,8 @@ def mps_ops_modifier(ops):
         'mul',
         'narrow',
         'narrow_copy',
+        'nn.functional.conv1d',
+        'nn.functional.conv_transpose1d',
         'nn.functional.padcircular',
         'nn.functional.feature_alpha_dropoutwithout_train',
         'nn.functional.unfold',
@@ -313,6 +320,7 @@ def mps_ops_modifier(ops):
         'squeeze',
         'squeezemultiple',
         'sub',
+        'svd',
         't',
         'tensor_split',
         'transpose',
@@ -337,15 +345,18 @@ def mps_ops_modifier(ops):
         'acos',
         'acosh',
         'all',
+        'allclose',
         'any',
+        'addcdiv',
+        'addcmul',
         'argwhere',
         'asin',
         'atan',
         'atanh',
+        'bfloat16',
         'bool',
         'cartesian_prod',
         'cat',
-        'chalf',
         'char',
         'column_stack',
         'combinations',
@@ -354,30 +365,50 @@ def mps_ops_modifier(ops):
         'cosh',
         'count_nonzero',
         'diff',
+        'div',
+        'divno_rounding_mode',
         'dot',
         'dstack',
+        'eq',
+        'equal',
         'exp2',
         'exp',
         'expm1',
+        'fft.fft',
+        'fft.fft2',
+        'fft.fftn',
         'fft.fftshift',
+        'fft.ifft',
+        'fft.ifft2',
+        'fft.ifftn',
         'fft.ifftshift',
         'flip',
         'fliplr',
         'flipud',
         'float',
+        'gradient',
         'half',
         'hstack',
         'int',
+        'isnan',
         'ldexp',
         'log10',
         'log1p',
         'log2',
         'log',
+        'logical_and',
         'logical_not',
+        'logical_or',
+        'logical_xor',
         'long',
+        'masked_fill',
+        'masked.mean',
         'masked.prod',
+        'masked.std',
         'masked.sum',
+        'masked.var',
         'mean',
+        'ne',
         'neg',
         'nn.functional.padconstant',
         'nn.functional.padreflect',
@@ -396,14 +427,19 @@ def mps_ops_modifier(ops):
         'sin',
         'sinh',
         'sqrt',
+        'square',
         'stack',
+        'stft',
         'sum',
         'sum_to_size',
         'tan',
         'tanh',
         'trace',
+        'trapz',
+        'trapezoid',
         'tril',
         'triu',
+        'true_divide',
         'vstack',
         'where',
     }
@@ -530,13 +566,13 @@ def mps_ops_modifier(ops):
         # - MPS output: tensor([102.6681, inf])
         # In the latter case, inf is probably correct (this is what scipy does).
         'polygamma': [torch.float32, torch.uint8],
-        'polygammapolygamma_n_0': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'polygammapolygamma_n_2': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'polygammapolygamma_n_1': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'polygammapolygamma_n_3': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'polygammapolygamma_n_4': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'special.polygamma': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'polygammapolygamma_n_0': [torch.float32, torch.int16, torch.int8],
+        'polygammapolygamma_n_2': [torch.float32, torch.int16, torch.int8],
+        'polygammapolygamma_n_1': [torch.float32, torch.int16, torch.int8],
+        'polygammapolygamma_n_3': [torch.float32, torch.int16, torch.int8],
+        'polygammapolygamma_n_4': [torch.float32, torch.int16, torch.int8],
+        'special.polygamma': [torch.float32, torch.int16, torch.int32, torch.int8],
+        'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int8],
 
         # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
         'tan': [torch.float32],
@@ -563,12 +599,6 @@ def mps_ops_modifier(ops):
         'masked.cumprod': [torch.int64],
         'linalg.vander': [torch.int64],
     }
-
-    MACOS_BEFORE_14_0_XFAILLIST = {
-        'cfloat': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8, torch.float16, torch.float32],
-        'chalf': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8, torch.float16, torch.float32],
-    }
-
 
     MACOS_AFTER_13_1_XFAILLIST = {
         # before macOS 13.2 it falls back to cpu and pass the forward pass
@@ -599,13 +629,13 @@ def mps_ops_modifier(ops):
         # - MPS output: tensor([102.6681, inf])
         # In the latter case, inf is probably correct (this is what scipy does).
         'polygamma': [torch.float32, torch.uint8],
-        'polygammapolygamma_n_0': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'polygammapolygamma_n_2': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'polygammapolygamma_n_1': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'polygammapolygamma_n_3': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'polygammapolygamma_n_4': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'special.polygamma': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
-        'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'polygammapolygamma_n_0': [torch.float32, torch.int16, torch.int8],
+        'polygammapolygamma_n_2': [torch.float32, torch.int16, torch.int8],
+        'polygammapolygamma_n_1': [torch.float32, torch.int16, torch.int8],
+        'polygammapolygamma_n_3': [torch.float32, torch.int16, torch.int8],
+        'polygammapolygamma_n_4': [torch.float32, torch.int16, torch.int8],
+        'special.polygamma': [torch.float32, torch.int16, torch.int32, torch.int8],
+        'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int8],
     }
 
     # Those ops are not expected to work
@@ -616,26 +646,9 @@ def mps_ops_modifier(ops):
         'log_sigmoid_forward': None,
         'linalg.eig': None,
         'linalg.eigvals': None,
-        'fft.fft': None,
-        'fft.fft2': None,
-        'fft.fftn': None,
-        'fft.hfft': None,
         'fft.hfft2': None,
         'fft.hfftn': None,
-        'fft.ifft': None,
-        'fft.ifft2': None,
-        'fft.ifftn': None,
-        'fft.ihfft': None,
-        'fft.ihfft2': None,
-        'fft.ihfftn': None,
-        'fft.irfft': None,
-        'fft.irfft2': None,
-        'fft.irfftn': None,
-        'fft.rfft': None,
-        'fft.rfft2': None,
-        'fft.rfftn': None,
         'put': None,
-        'stft': None,
         'nn.functional.conv_transpose3d': None,
         'rounddecimals_neg_3': None,
         'rounddecimals_3': None,
@@ -710,7 +723,6 @@ def mps_ops_modifier(ops):
         'nn.functional.adaptive_max_pool3d': None,
         'nn.functional.interpolatearea': None,
         'nn.functional.interpolatebicubic': None,
-        'nn.functional.interpolatelinear': None,
         'nn.functional.interpolatetrilinear': None,
         # TODO: max_pool2d for integral types fails the numerical test
         'nn.functional.max_pool2d': (integral_types() if product_version < 14.0 else
@@ -779,8 +791,6 @@ def mps_ops_modifier(ops):
         'special.spherical_bessel_j0': None,
         'special.xlog1py': None,
         'special.zeta': None,
-        'std_mean': None,
-        'std_meanunbiased': None,
         'svd_lowrank': None,
         'symeig': None,
         'take': None,
@@ -794,7 +804,6 @@ def mps_ops_modifier(ops):
         'geometric_': None,
         'log_normal_': None,
         'log_normal': None,
-        'bfloat16': None,
         'cdouble': None,
         'double': None,
         'nn.functional.softminwith_dtype': None,
@@ -868,6 +877,29 @@ def mps_ops_modifier(ops):
         # round not working properly for float16
         'round': [torch.float16],
     }
+
+    if product_version < 14.0:
+        # FFT and BFloat16 support was added in MacOS 14
+        UNIMPLEMENTED_XFAILLIST.update({
+            'bfloat16': None,
+            'fft.fft': None,
+            'fft.fft2': None,
+            'fft.fftn': None,
+            'fft.hfft': None,
+            'fft.ifft': None,
+            'fft.ifft2': None,
+            'fft.ifftn': None,
+            'fft.ihfft': None,
+            'fft.ihfft2': None,
+            'fft.ihfftn': None,
+            'fft.irfft': None,
+            'fft.irfft2': None,
+            'fft.irfftn': None,
+            'fft.rfft': None,
+            'fft.rfft2': None,
+            'fft.rfftn': None,
+            'stft': None,
+        })
 
     UNDEFINED_XFAILLIST = {
         # Top 60 operators
@@ -994,11 +1026,6 @@ def mps_ops_modifier(ops):
                          unittest.expectedFailure,
                          dtypes=MACOS_12_3_XFAILLIST[key]))
 
-        if key in MACOS_BEFORE_14_0_XFAILLIST and product_version < 14.0:
-            addDecorator(op, DecorateInfo(
-                         unittest.expectedFailure,
-                         dtypes=MACOS_BEFORE_14_0_XFAILLIST[key]))
-
         # If ops is not supported for complex types, expect it to fail
         if key not in SUPPORTED_COMPLEX_OPS and (key not in AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS or product_version < 14.0):
             addDecorator(op, DecorateInfo(unittest.expectedFailure, dtypes=[torch.complex32, torch.complex64]))
@@ -1042,12 +1069,6 @@ def mps_ops_error_inputs_modifier(ops):
         # unimplemented
         'logcumsumexp',
     }
-    if product_version < 14.0:
-        XFAILLIST.update({
-            # unsupported complex dtypes
-            'fft.hfft',
-            'fft.irfft',
-        })
 
     def addDecorator(op, d) -> None:
         op.decorators = list(op.decorators) if op.decorators is not None else []
@@ -11347,7 +11368,7 @@ class TestConsistency(TestCaseMPS):
         '__rdiv__', '__rmul__',
         'nn.functional.huber_loss',
         'true_divide', 'kron',
-        'gradient', 'var', 'std', 'ldexp',
+        'gradient', 'var', 'std', 'std_mean', 'ldexp',
         'linalg.vector_norm', 'lerp',
         'addr', 'var_mean',
         'var_mean_unbiased',
@@ -11459,6 +11480,11 @@ class TestConsistency(TestCaseMPS):
             elif op.name == "nn.functional.upsample_bilinear" and dtype == torch.uint8:
                 atol = 1.0
                 rtol = 0.0
+            elif op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.fft', 'fft.fftn', 'fft.rfft']:
+                # TODO: Investigate why this is needed
+                # See https://github.com/pytorch/pytorch/issues/120237
+                atol = 3e-5
+                rtol = 3e-5
             else:
                 atol = None
                 rtol = None
@@ -11521,6 +11547,11 @@ class TestConsistency(TestCaseMPS):
             elif op.name == "nn.functional.interpolate":
                 atol = 1e-3
                 rtol = 1e-4
+            elif op.name in ['fft.rfftn', 'fft.hfftn', 'fft.hfft2', 'fft.fft', 'fft.fftn', 'fft.rfft']:
+                # TODO: Investigate why this is needed
+                # See https://github.com/pytorch/pytorch/issues/120237
+                atol = 3e-5
+                rtol = 2e-5
             else:
                 atol = None
                 rtol = None
@@ -11587,6 +11618,27 @@ class TestErrorInputs(TestCase):
             with self.assertRaisesRegex(error_type, error_regex):
                 op(*mps_args, **mps_kwargs)
 
+class TestComplex(TestCase):
+    def test_tensor_scalar_binops(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/119088
+        def to_cpu(x):
+            return x.cpu() if isinstance(x, torch.Tensor) else x
+
+        # Allocate tensors on mps
+        with torch.device("mps"):
+            inputs = [torch.rand(2, dtype=dtype) for dtype in [torch.float, torch.half, torch.cfloat]]
+        self.assertTrue(all(x.device.type == "mps" for x in inputs))
+        # Add scalars
+        inputs.extend([7, 3.14, 2 + 3j, torch.tensor(4 + 5j, dtype=torch.chalf)])
+
+        # Iterate over all permutations of types(int, float, complex, half) and ops (excluding div)
+        for x, y in itertools.product(inputs, inputs):
+            for op_name in ["__add__", "__sub__", "__mul__"]:
+                x_cpu, y_cpu = map(to_cpu, (x, y))
+                res = getattr(x, op_name)(y)
+                res_cpu = getattr(x_cpu, op_name)(y_cpu)
+                self.assertEqual(to_cpu(res), res_cpu, f"{op_name}({x}, {y}) produces different results {res} vs {res_cpu}")
+
 
 # Copied from `TestCommon` in `test_ops.py`, just enough to duplicate the `test_numpy_ref` for MPS
 @skipIfSlowGradcheckEnv
@@ -11632,7 +11684,7 @@ class TestCommon(TestCase):
     def test_tensor_creation(self, device, dtype):
         def ones(device):
             return torch.ones((2, 2), dtype=dtype, device=device)
-        if dtype not in MPS_DTYPES + [torch.complex64]:
+        if dtype not in MPS_DTYPES + ([torch.bfloat16, torch.complex64] if product_version > 14.0 else [torch.complex64]):
             with self.assertRaises(TypeError):
                 ones(device)
         else:

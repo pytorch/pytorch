@@ -3,7 +3,7 @@ from collections import defaultdict
 from typing import Tuple, Dict, Optional, List
 
 import torch
-from torch._export import export
+from torch.export import export
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.pass_infra.node_metadata import NodeMetadata
 from torch._export.pass_infra.proxy_value import ProxyValue

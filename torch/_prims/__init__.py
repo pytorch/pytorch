@@ -113,6 +113,7 @@ __all__ = [
     "fmax",
     "fmin",
     "fmod",
+    "frexp",
     "gcd",
     "ge",
     "gt",
@@ -1900,11 +1901,15 @@ collapse = _make_prim(
 
 
 # TODO: review stride logic
+# NB: unlike torch.cat, this is more strict about empty tensors and dim is
+# never negative
 def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
     # Verifies same shape (except in the concat dimension)
+    assert dim >= 0
     shape = tensors[0].shape
     concat_length = 0
     for tensor_idx, tensor in enumerate(tensors):
+        assert len(shape) == len(tensor.shape)
         for idx, (common_length, length) in enumerate(zip(shape, tensor.shape)):
             if idx == dim:
                 concat_length = concat_length + length
@@ -3003,6 +3008,23 @@ fft_c2r = _make_prim(
     impl_aten=_fft_c2r_aten,
     return_type=RETURN_TYPE.NEW,
     doc=_fft_c2r_doc,
+)
+
+
+def _frexp_meta(self: TensorLikeType) -> Tuple[TensorLikeType, TensorLikeType]:
+    torch._check(
+        self.dtype.is_floating_point,
+        lambda: "torch.frexp() only supports floating-point dtypes",
+    )
+    return torch.empty_like(self), torch.empty_like(self, dtype=torch.int32)
+
+
+frexp = _make_prim(
+    schema="frexp(Tensor self) -> (Tensor mantissa, Tensor exponent)",
+    meta=_frexp_meta,
+    return_type=(RETURN_TYPE.NEW, RETURN_TYPE.NEW),
+    impl_aten=torch.frexp,
+    doc="",
 )
 
 register_rng_prims()
