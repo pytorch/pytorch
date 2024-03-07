@@ -535,9 +535,9 @@ class GuardBuilder(GuardBuilderBase):
             elif istype(source, GetItemSource):
                 assert base_guard_manager  # to make mypy happy
                 if isinstance(base_guard_manager, DictGuardManager):
-                    # TODO(janimesh) - Consider isolating GetItemSource and
+                    # TODO(anijain2305) - Consider isolating GetItemSource and
                     # DictGetItemSource (or maybe use ODictGetItemSource for
-                    # dicts)
+                    # dicts) so that GetItemSource is only for non dict objects.
                     return getitem_on_dict_manager(
                         source,
                         base_guard_manager,
@@ -545,10 +545,25 @@ class GuardBuilder(GuardBuilderBase):
                         example_value,
                     )
 
-                # Check that we don't have dict or its subclasses
-                assert not isinstance(
-                    base_example_value, (dict, collections.OrderedDict)
-                )
+                # TODO(anijain2305) - Ideally we should have an assert here that
+                # base_example_value should not be a dict subclass. It should be
+                # a dict manager and should already be handled. Infact PyTorch
+                # CI is happy with that assert. But lets wait for a few weeks
+                # with some more testing on real models before turning this into
+                # an assertion.
+                if isinstance(base_example_value, (dict, collections.OrderedDict)):
+                    guards_log.debug(
+                        "%s",
+                        (
+                            f"Using a generic GuardManager instead of DictGuardManager for {source_name}."
+                            " Could give a small perf improvement in guard eval with DictGuardManager.",
+                        ),
+                    )
+                    return base_guard_manager.dict_getitem_manager(
+                        key=source.index,
+                        source=source_name,
+                        example_value=example_value,
+                    )
                 index = source.index
                 if source.index_is_slice:
                     index = source.unpack_slice()
