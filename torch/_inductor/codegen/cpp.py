@@ -1759,9 +1759,9 @@ class CppKernel(Kernel):
 
         outer_loop_fusion = outer_loop_fusion_depth >= 1
         if outer_loop_fusion:
+            # The loop_nest in loop_nest_list should generate same outer loop code.
+            # Only do preprocess with the first loop_nest.
             assert isinstance(loop_nest_list, List)
-            # since the loop_nest in loop_nest_list should codegen same out loop code
-            # we only need to handle the first loop_nest
             loop_nest = loop_nest_list[0]
             metrics.cpp_fused_outer_loop_nest.append(len(loop_nest_list))
 
@@ -1851,60 +1851,44 @@ class CppKernel(Kernel):
                     _loop_level_nested_list: List[List[LoopLevel]],
                     outer_loop_fusion_depth,
                 ):
-                    # Generate the code for outer for_loops
+                    # Generate the code for outer loops
                     with contextlib.ExitStack() as stack:
-                        # We use the first loop_level_list in _loop_level_nested_list to
+                        # Use the first loop_level_list in _loop_level_nested_list to
                         # generate the outer loop code.
                         first_loop_level_list: List[
                             LoopLevel
                         ] = _loop_level_nested_list[0]
                         assert len(first_loop_level_list) == 1
-                        loop_lines = first_loop_level_list[0].lines()
-                        assert loop_lines is not None
-                        code.writelines(loop_lines)
+                        code.writelines(first_loop_level_list[0].lines())
                         stack.enter_context(code.indent())
 
                         outer_loop_fusion_depth -= 1
-                        assert outer_loop_fusion_depth >= 0
                         if outer_loop_fusion_depth > 0:
                             # Do the next level fused outer loop codegen
-                            _next_loop_level_nested_list: List[List[LoopLevel]] = []
-                            for _loop_level_list in _loop_level_nested_list:
-                                assert len(_loop_level_list) == 1
-                                _next_loop_level_nested_list.append(
-                                    _loop_level_list[0].inner
-                                )
+                            _next_loop_level_nested_list: List[List[LoopLevel]] = [
+                                _loop_level_list[0].inner
+                                for _loop_level_list in _loop_level_nested_list
+                            ]
                             gen_loops_with_outer_fusion(
                                 _next_loop_level_nested_list,
                                 outer_loop_fusion_depth,
                             )
                         else:
-                            # Finish the outer loop codegen
-                            # Generate the inner loops one by one
+                            # Generate the code of inner loops one by one
                             for _loop_level_list in _loop_level_nested_list:
-                                assert len(_loop_level_list) == 1
                                 loop = _loop_level_list[0]
-                                assert loop.inner
                                 gen_loops(loop.inner, loop.is_reduction())
 
-                loop_nest_root_list: List[List[LoopLevel]] = []
-                assert loop_nest_list is not None
-                for _loop_nest in loop_nest_list:
-                    assert (
-                        _loop_nest.root is not None
-                        and len(_loop_nest.root) == 1
-                        and isinstance(_loop_nest.root[0], LoopLevel)
-                        and _loop_nest.root[0].inner is not None
-                    )
-                    loop_nest_root_list.append(_loop_nest.root)
+                loop_nest_root_list: List[List[LoopLevel]] = [
+                    _loop_nest.root for _loop_nest in loop_nest_list
+                ]
                 gen_loops_with_outer_fusion(
                     loop_nest_root_list, outer_loop_fusion_depth
                 )
+            elif loop_nest.root:
+                gen_loops(loop_nest.root)
             else:
-                if loop_nest.root:
-                    gen_loops(loop_nest.root)
-                else:
-                    gen_kernel(loop_nest.kernel)
+                gen_kernel(loop_nest.kernel)
 
     def codegen_loops(self, code, worksharing):
         loop_nest = LoopNestWithSplit.build(self)
@@ -3529,8 +3513,6 @@ class CppKernelProxy(CppKernel):
     def codegen_loops(
         self, code, worksharing, loop_nest_list=None, outer_loop_fusion_depth=0
     ):
-        if outer_loop_fusion_depth >= 1:
-            assert loop_nest_list is not None
         self.codegen_loops_impl(
             None if (outer_loop_fusion_depth >= 1) else self.loop_nest,
             code,
@@ -3729,8 +3711,8 @@ class CppScheduling(BaseScheduling):
 
     def can_fuse_vertical(self, node1, node2):
         return self._can_fuse_horizontal_impl(node1, node2) and (
-            self._get_outer_loop_fusion_status()
-            or not node1.is_reduction()  # not node1.is_reduction() is only needed when not outer loop fusion
+            self._get_outer_loop_fusion_status()  # Skip check not node1.is_reduction() when outer loop fusion enabled
+            or not node1.is_reduction()
         )
 
     def finalize_lazy_kernels(self):
@@ -3740,9 +3722,6 @@ class CppScheduling(BaseScheduling):
         _lazy_nodes_list = self._outer_loop_fusion._lazy_nodes_list
         _outer_loop_fusion_depth = self._outer_loop_fusion._outer_loop_fusion_depth
         if len(_lazy_cpp_kernel_proxy_list) >= 1:
-            if len(_lazy_cpp_kernel_proxy_list) == 1:
-                # Only 1 lazy kernel which doesn't mean we will do outer loop fusion
-                assert _outer_loop_fusion_depth == 0
             self.kernel_group.finalize_kernel(
                 _lazy_cpp_kernel_proxy_list,
                 _lazy_nodes_list,
@@ -3768,10 +3747,10 @@ class CppScheduling(BaseScheduling):
                 __outer_loop_fusion: OuterLoopFusions,
                 __nodes: List[SchedulerNode],
             ):
-                # Implementation refers to Scheduler.can_fuse()
+                # List[SchedulerNode]
                 flatten_lazy_nodes_list, _ = torch.utils._pytree.tree_flatten(
                     __outer_loop_fusion._lazy_nodes_list,
-                )  # List[SchedulerNode]
+                )
                 assert all(
                     isinstance(_lazy_node, SchedulerNode)
                     for _lazy_node in flatten_lazy_nodes_list
@@ -3779,38 +3758,35 @@ class CppScheduling(BaseScheduling):
 
                 # Step 1:
                 # Cross check each node between flatten_lazy_nodes_list and __nodes
-                for node1 in flatten_lazy_nodes_list:
-                    for node2 in __nodes:
-                        if node2.get_names() & node1.ancestors:
-                            # any node in __nodes is ancestors node for one of _lazy_nodes_list's
-                            return False
-                        # TODO<Leslie> Further investigation is required to determine if
-                        # the below 2 checkers are necessary in practice
-                        if isinstance(node2._body, ir.LoopBody):
-                            if any(
-                                (
-                                    node2_used_buf in self.scheduler.mutation_renames
-                                    and node1.has_atomic_add(
-                                        self.scheduler.mutation_renames[node2_used_buf]
-                                    )
+                for node1, node2 in itertools.product(flatten_lazy_nodes_list, __nodes):
+                    # If any node in __nodes is ancestors node for one of _lazy_nodes_list's
+                    if node2.get_names() & node1.ancestors:
+                        return False
+                    # TODO <Leslie> Further investigation is required to determine if
+                    # the below 2 checkers are necessary in practice
+                    if isinstance(node2._body, ir.LoopBody):
+                        if any(
+                            (
+                                node2_used_buf in self.scheduler.mutation_renames
+                                and node1.has_atomic_add(
+                                    self.scheduler.mutation_renames[node2_used_buf]
                                 )
-                                for node2_used_buf in node2._body.reads_name2expr.keys()
-                            ):
-                                return False
-                        if node2.is_template() or (
-                            node1.is_template()
-                            and (
-                                node2.has_aliasing_or_mutation()
-                                or node2.is_reduction()
-                                or not config.epilogue_fusion
                             )
+                            for node2_used_buf in node2._body.reads_name2expr.keys()
                         ):
                             return False
+                    if node2.is_template() or (
+                        node1.is_template()
+                        and (
+                            node2.has_aliasing_or_mutation()
+                            or node2.is_reduction()
+                            or not config.epilogue_fusion
+                        )
+                    ):
+                        return False
 
                 # Step 2:
-                # Check the fusibility between
-                # * the last nodes in __outer_loop_fusion._lazy_nodes_list
-                # * __nodes
+                # Check the fusibility between last nodes of _lazy_nodes_list and __nodes
                 _node1 = (
                     FusedSchedulerNode(
                         self.scheduler, __outer_loop_fusion._lazy_nodes_list[-1]
@@ -3838,20 +3814,23 @@ class CppScheduling(BaseScheduling):
                     _right_loop_level: LoopLevel,
                     _loop_fusion_depth: int,
                 ) -> Tuple[bool, int]:
-                    # Check if can out loop fusion at this loop level
+                    # Check if we can do outer loop fusion at this loop level
+                    _outer_loops_attr_compare_list = [
+                        "var",
+                        "size",
+                        "offset",
+                        "steps",
+                        "kernel",
+                        "reduction_var_map",
+                    ]
                     if not (
-                        _left_loop_level.var == _right_loop_level.var
-                        and _left_loop_level.size == _right_loop_level.size
-                        and _left_loop_level.offset == _right_loop_level.offset
-                        and _left_loop_level.steps == _right_loop_level.steps
-                        and (
-                            _left_loop_level.kernel is None
-                            and _right_loop_level.kernel is None
+                        all(
+                            getattr(_left_loop_level, _attr_compare)
+                            == getattr(_right_loop_level, _attr_compare)
+                            for _attr_compare in _outer_loops_attr_compare_list
                         )
-                        and (
-                            _left_loop_level.reduction_var_map is None
-                            and _right_loop_level.reduction_var_map is None
-                        )
+                        and _left_loop_level.kernel is None
+                        and _left_loop_level.reduction_var_map is None
                     ):
                         return (False, _loop_fusion_depth)
 
@@ -3863,7 +3842,7 @@ class CppScheduling(BaseScheduling):
                         and _left_loop_level.inner[0].kernel is None
                         and _right_loop_level.inner[0].kernel is None
                     ):
-                        # Check if we can do out loop fusion in next loop level
+                        # Further check if we can do outer loop fusion in next loop level
                         return _inner(
                             _left_loop_level.inner[0],
                             _right_loop_level.inner[0],
@@ -3873,15 +3852,18 @@ class CppScheduling(BaseScheduling):
                         # Check the inners are has same loop attr
                         if len(_left_loop_level.inner) != len(_right_loop_level.inner):
                             return (False, _loop_fusion_depth)
+                        _inner_loops_attr_compare_list = [
+                            "size",
+                            "var",
+                            "offset",
+                            "steps",
+                            "collapsed",
+                        ]
                         for idx in range(len(_left_loop_level.inner)):
-                            inner_loop1 = _left_loop_level.inner[idx]
-                            inner_loop2 = _right_loop_level.inner[idx]
-                            if not (
-                                inner_loop1.size == inner_loop2.size
-                                and inner_loop1.var == inner_loop2.var
-                                and inner_loop1.offset == inner_loop2.offset
-                                and inner_loop1.steps == inner_loop2.steps
-                                and inner_loop1.collapsed == inner_loop2.collapsed
+                            if not all(
+                                getattr(_left_loop_level.inner[idx], _attr_compare)
+                                == getattr(_right_loop_level.inner[idx], _attr_compare)
+                                for _attr_compare in _inner_loops_attr_compare_list
                             ):
                                 return (False, _loop_fusion_depth)
 
@@ -3889,17 +3871,15 @@ class CppScheduling(BaseScheduling):
 
                 _left_loop_nest = _left_kernel_proxy.loop_nest
                 _right_loop_nest = _right_kernel_proxy.loop_nest
-                if not (
-                    isinstance(_left_loop_nest, LoopNestWithSplit)
-                    and isinstance(_right_loop_nest, LoopNestWithSplit)
-                    and _left_loop_nest.root is not None
-                    and _right_loop_nest.root is not None
-                    and len(_left_loop_nest.root) == 1
-                    and len(_right_loop_nest.root) == 1
-                    and _left_loop_nest.root[0].kernel is None
-                    and _right_loop_nest.root[0].kernel is None
-                    and _left_loop_nest.root[0].parent is None
-                    and _right_loop_nest.root[0].parent is None
+                if not all(
+                    (
+                        isinstance(_loop_nest, LoopNestWithSplit)
+                        and _loop_nest.root is not None
+                        and len(_loop_nest.root) == 1
+                        and _loop_nest.root[0].kernel is None
+                        and _loop_nest.root[0].parent is None
+                    )
+                    for _loop_nest in (_left_loop_nest, _right_loop_nest)
                 ):
                     return False
 
@@ -3911,7 +3891,7 @@ class CppScheduling(BaseScheduling):
                 else:
                     assert outer_loop_fusion_depth != 0
                     if __outer_loop_fusion._outer_loop_fusion_depth == 0:
-                        # First time, we found 2 loop_nest can do outer loop fusion
+                        # First time, 2 loop_nest found which can do outer loop fusion
                         __outer_loop_fusion._outer_loop_fusion_depth = (
                             outer_loop_fusion_depth
                         )
@@ -3923,24 +3903,18 @@ class CppScheduling(BaseScheduling):
                     )
 
             # Step 1: Check the nodes dependencies for fusibility
-            if not _check_node_dependency(
+            # Step 2: Check the loop attr for outer loops' fusibility
+            return _check_node_dependency(
                 _outer_loop_fusion,
                 _nodes,
-            ):
-                return False
-
-            # Step 2: Check the loop attr for outer loops' fusibility
-            if not (
+            ) and (
                 len(_outer_loop_fusion._lazy_cpp_kernel_proxy_list) >= 1
                 and _check_loop_level_attr(
                     _outer_loop_fusion,
                     _outer_loop_fusion._lazy_cpp_kernel_proxy_list[-1],
                     _cpp_kernel_proxy,
                 )
-            ):
-                return False
-
-            return True
+            )
 
         if len(
             self._outer_loop_fusion._lazy_cpp_kernel_proxy_list
@@ -3971,7 +3945,7 @@ class CppScheduling(BaseScheduling):
         pass
 
     def flush(self):
-        # finalize the remaining lazy kernels
+        # Finalize the remaining lazy kernels
         self.finalize_lazy_kernels()
 
         self.kernel_group.codegen_define_and_call(V.graph.wrapper_code)
@@ -3999,9 +3973,9 @@ class KernelGroup:
             assert len(nodes) > 1 and len(new_kernel) > 1
             for _nodes in nodes:
                 self.scheduled_nodes += _nodes
-            loop_nest_list: List[LoopNestWithSplit] = []
-            for kernel in new_kernel:
-                loop_nest_list.append(kernel.loop_nest)
+            loop_nest_list: List[LoopNestWithSplit] = [
+                kernel.loop_nest for kernel in new_kernel
+            ]
             new_kernel[0].codegen_loops(
                 code, ws, loop_nest_list, outer_loop_fusion_depth
             )
