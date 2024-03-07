@@ -269,9 +269,7 @@ def torch_save_to_dcp(
     # we don't need stateful behavior here because the expectation is anything loaded by
     # torch.load would not contain stateful objects.
     _save_state_dict(
-        state_dict,
-        storage_writer=FileSystemWriter(dcp_checkpoint_dir),
-        no_dist=True
+        state_dict, storage_writer=FileSystemWriter(dcp_checkpoint_dir), no_dist=True
     )
 
 
