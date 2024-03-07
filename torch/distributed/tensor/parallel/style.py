@@ -11,6 +11,7 @@ from torch.distributed._tensor import DeviceMesh, DTensor, Placement, Replicate,
 __all__ = [
     "ParallelStyle",
     "RowwiseParallel",
+    "SequenceParallel",
     "ColwiseParallel",
     "PrepareModuleInput",
     "PrepareModuleOutput",
@@ -421,7 +422,7 @@ class PrepareModuleOutput(ParallelStyle):
             The desired DTensor layouts of output tensors for the nn.Module, this is used to ensure the outputs of the nn.Module
             have the desired DTensor layouts.
         use_local_output (bool, optional):
-            Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module outputs, default: False.
+            Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module outputs, default: True.
     Returns:
         A ParallelStyle object that prepares the sharding layouts of the nn.Module's outputs.
 
