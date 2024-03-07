@@ -23,6 +23,7 @@
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
+#include <c10/util/thread_name.h>
 #include <libshm.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -192,6 +193,11 @@ static PyObject* THPModule_initExtension(
   torch::tensors::initialize_python_bindings();
   std::string path = THPUtils_unpackString(shm_manager_path);
   libshm_init(path.c_str());
+
+  // The main thread usually launches CPU/GPU/Accelerator kernels and therefore
+  // becomes latency sensitive. If the thread is named, we can debug performance
+  // issues easier.
+  c10::setThreadName("pt_main_thread");
 
   auto module = THPObjectPtr(PyImport_ImportModule("torch"));
   if (!module)
@@ -725,6 +731,24 @@ PyObject* THPModule_userEnabledMathSDP(PyObject* _unused, PyObject* noargs) {
   else
     Py_RETURN_FALSE;
 }
+PyObject* THPModule_setSDPUseCuDNN(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_sdp_use_cudnn expects a bool, "
+      "but got %s",
+      THPUtils_typename(arg));
+  at::globalContext().setSDPUseCuDNN(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+PyObject* THPModule_userEnabledCuDNNSDP(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().userEnabledCuDNNSDP())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
+
 PyObject* THPModule_setUserEnabledCuDNN(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -1276,6 +1300,11 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      METH_NOARGS,
      nullptr},
     {"_set_sdp_use_math", THPModule_setSDPUseMath, METH_O, nullptr},
+    {"_get_cudnn_sdp_enabled",
+     THPModule_userEnabledCuDNNSDP,
+     METH_NOARGS,
+     nullptr},
+    {"_set_sdp_use_cudnn", THPModule_setSDPUseCuDNN, METH_O, nullptr},
     {"_get_cudnn_enabled", THPModule_userEnabledCuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_enabled", THPModule_setUserEnabledCuDNN, METH_O, nullptr},
     {"_get_mkldnn_enabled", THPModule_userEnabledMkldnn, METH_NOARGS, nullptr},
@@ -1443,6 +1472,8 @@ void initModule(PyObject* module);
 
 #ifdef USE_XPU
 PyMethodDef* THXPModule_methods();
+void THXPStream_init(PyObject* module);
+void THXPEvent_init(PyObject* module);
 namespace torch::xpu {
 void initModule(PyObject* module);
 } // namespace torch::xpu
@@ -1584,6 +1615,11 @@ PyObject* initModule() {
   THCPStream_init(module);
   THCPEvent_init(module);
   THCPGraph_init(module);
+#endif
+
+#ifdef USE_XPU
+  THXPStream_init(module);
+  THXPEvent_init(module);
 #endif
 
   auto set_module_attr =
@@ -1828,7 +1864,8 @@ Call this whenever a new thread is created in order to propagate values from
       .value("ERROR", sdp::SDPBackend::error)
       .value("MATH", sdp::SDPBackend::math)
       .value("FLASH_ATTENTION", sdp::SDPBackend::flash_attention)
-      .value("EFFICIENT_ATTENTION", sdp::SDPBackend::efficient_attention);
+      .value("EFFICIENT_ATTENTION", sdp::SDPBackend::efficient_attention)
+      .value("CUDNN_ATTENTION", sdp::SDPBackend::cudnn_attention);
 
   py_module.def(
       "_can_use_flash_attention",

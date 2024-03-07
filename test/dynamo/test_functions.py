@@ -91,6 +91,16 @@ def inline_unused(x):
     return x + 5.6
 
 
+@functools.lru_cache
+def inline_lru_cache_fn_with_default_args(x, y, _=None):
+    return torch.sin(x * y)
+
+
+@torch.jit.script_if_tracing
+def inline_script_if_tracing_fn_with_default_args(x, y, _=None):
+    return torch.cos(x * y)
+
+
 class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_inline_jit_annotations(x):
@@ -98,6 +108,14 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         x = inline_ignore(x)
         x = inline_unused(x)
         return
+
+    @make_test
+    def test_inline_script_if_tracing_fn_with_default_args(a, b):
+        return inline_script_if_tracing_fn_with_default_args(a, 2, b)
+
+    @make_test
+    def test_inline_lru_cache_fn_with_default_args(a, b):
+        return inline_lru_cache_fn_with_default_args(a, 2, b)
 
     @make_test
     def test_add(a, b):
@@ -1462,6 +1480,21 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         triple = functools.partial(multiply, y=3)
         return triple(x)
 
+    @unittest.skipUnless(torch.distributed.is_available(), "requires torch.distributed")
+    @make_test
+    def test_flat_param_same_storage_size(x, y):
+        import torch.distributed.fsdp._flat_param as flat_param
+
+        if flat_param._same_storage_size(x, 100):
+            x = x + 1
+        else:
+            x = x - 1
+        if flat_param._same_storage_size(y, 123):
+            y = y + 1
+        else:
+            y = y - 1
+        return x, y
+
     @parametrize(
         "attr",
         (
@@ -2029,6 +2062,41 @@ class GraphModule(torch.nn.Module):
             t = tuple(idx_size)
             src_size = [random.randint(1, 5) + s for s in idx_size]
             idx = torch.empty(t)
+
+        fn()
+
+    def test_rand_tensor_partial(self):
+        from collections import namedtuple
+        from functools import partial
+
+        SdpaShape = namedtuple(
+            "Sdpa_Shape", ["batch", "num_heads", "seq_len", "head_dim"]
+        )
+
+        @torch.compile(backend="eager")
+        def func():
+            make_tensor = partial(
+                torch.rand, device="cpu", dtype=torch.float16, requires_grad=True
+            )
+
+            bsz, num_heads, seq_len_q, seq_len_kv, head_dim = (16, 16, 128, 128, 16)
+            make_q_tensor = partial(
+                make_tensor, SdpaShape(bsz, num_heads, seq_len_q, head_dim)
+            )
+            make_kv_tensor = partial(
+                make_tensor, SdpaShape(bsz, num_heads, seq_len_kv, head_dim)
+            )
+            t1 = make_q_tensor()
+            t2 = make_kv_tensor()
+            t3 = t1 + t2
+
+        func()
+
+    def test_to(self):
+        @torch.compile(backend="eager")
+        def fn():
+            t = torch.ones(2)
+            y = t.to("meta")
 
         fn()
 

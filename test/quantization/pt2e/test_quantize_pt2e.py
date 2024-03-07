@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 from typing import List, Tuple
+import sys
+import unittest
 
 import torch
 from torch._export import (
@@ -61,6 +63,7 @@ from torch.testing._internal.common_utils import (
 
 
 @skipIfNoQNNPACK
+@unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
 class TestQuantizePT2E(PT2EQuantizationTestCase):
     def test_simple_quantizer(self):
         # TODO: use OP_TO_ANNOTATOR
@@ -676,7 +679,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         assert conv_output_obs[0] == conv_output_obs[1]
 
         m(*example_inputs)
-        m = convert_pt2e(m, fold_quantize=True)
+        m = convert_pt2e(m)
 
         node_occurrence = {
             # two for input of the first conv, one for output for the first conv
@@ -739,7 +742,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         assert conv_output_obs[0] == conv_output_obs[1]
 
         m(*example_inputs)
-        m = convert_pt2e(m, fold_quantize=True)
+        m = convert_pt2e(m)
 
         node_occurrence = {
             # two for input of the first conv, one for output for the first conv
@@ -1202,7 +1205,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
-        m = convert_pt2e(m, fold_quantize=True)
+        m = convert_pt2e(m)
 
         for n in m.graph.nodes:
             if n.op == "get_attr" and "frozen_param" in n.target:
@@ -1619,7 +1622,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             m.train()
 
         # After convert: still not OK
-        m = convert_pt2e(m, fold_quantize=True)
+        m = convert_pt2e(m)
         with self.assertRaises(NotImplementedError):
             m.eval()
         with self.assertRaises(NotImplementedError):
@@ -1697,6 +1700,15 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m.train()
         _assert_ops_are_correct(m, train=True)
 
+    def test_model_is_exported(self):
+        m = TestHelperModules.ConvWithBNRelu(relu=True)
+        example_inputs = (torch.rand(3, 3, 5, 5),)
+        exported_gm = capture_pre_autograd_graph(m, example_inputs)
+        fx_traced_gm = torch.fx.symbolic_trace(m, example_inputs)
+        self.assertTrue(torch.ao.quantization.pt2e.export_utils.model_is_exported(exported_gm))
+        self.assertFalse(torch.ao.quantization.pt2e.export_utils.model_is_exported(fx_traced_gm))
+        self.assertFalse(torch.ao.quantization.pt2e.export_utils.model_is_exported(m))
+
     def test_reentrant(self):
         """Test we can safely call quantization apis multiple times"""
         m = TestHelperModules.ConvBnReLU2dAndLinearReLU()
@@ -1706,12 +1718,12 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m.conv_bn_relu = capture_pre_autograd_graph(m.conv_bn_relu, example_inputs)
         m.conv_bn_relu = prepare_qat_pt2e(m.conv_bn_relu, quantizer)
         m(*example_inputs)
-        m.conv_bn_relu = convert_pt2e(m.conv_bn_relu, fold_quantize=True)
+        m.conv_bn_relu = convert_pt2e(m.conv_bn_relu)
 
         quantizer = XNNPACKQuantizer().set_module_type(torch.nn.Linear, get_symmetric_quantization_config(is_per_channel=False))
         m = capture_pre_autograd_graph(m, example_inputs)
         m = prepare_pt2e(m, quantizer)
-        m = convert_pt2e(m, fold_quantize=True)
+        m = convert_pt2e(m)
 
         node_occurrence = {
             ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 4,
@@ -1744,7 +1756,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
     def test_observer_callback(self):
         from torch.library import Library, impl
-        test_lib = Library("test_int4", "DEF")
+        test_lib = Library("test_int4", "DEF")  # noqa: TOR901
         test_lib.define("quantize_per_tensor_int4(Tensor input, float scale, int zero_point) -> Tensor")
 
         @impl(test_lib, "quantize_per_tensor_int4", "CompositeExplicitAutograd")

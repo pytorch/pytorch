@@ -1,7 +1,7 @@
 #pragma once
 #include <c10/core/impl/TorchDispatchModeTLS.h>
-#include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/autograd/variable_info.h>
 #include <torch/csrc/utils/python_stub.h>
 #include <torch/csrc/utils/torch_dispatch_mode.h>
 #include <typeindex>
@@ -372,6 +372,10 @@ class CompiledNodeArgs {
   }
 
   int add_backward(c10::SafePyObject&& obj) {
+    return _compiler.emplace_hook(std::move(obj));
+  }
+
+  int add_backward_state(c10::SafePyObject&& obj) {
     return _compiler.emplace_hook(std::move(obj));
   }
 

@@ -13,6 +13,8 @@ collection support for PyTorch APIs.
 """
 
 import functools
+import sys
+import types
 import warnings
 from typing import (
     Any,
@@ -478,7 +480,10 @@ def tree_map_(
 
 Type2 = Tuple[Type[T], Type[S]]
 Type3 = Tuple[Type[T], Type[S], Type[U]]
-TypeAny = Union[Type[Any], Tuple[Type[Any], ...]]
+if sys.version_info >= (3, 10):
+    TypeAny = Union[Type[Any], Tuple[Type[Any], ...], types.UnionType]
+else:
+    TypeAny = Union[Type[Any], Tuple[Type[Any], ...]]
 
 Fn2 = Callable[[Union[T, S]], R]
 Fn3 = Callable[[Union[T, S, U]], R]
@@ -491,27 +496,34 @@ MapOnlyFn = Callable[[T], Callable[[Any], Any]]
 # These specializations help with type inference on the lambda passed to this
 # function
 @overload
-def map_only(__type_or_types: Type2[T, S]) -> MapOnlyFn[Fn2[T, S, Any]]:
+def map_only(__type_or_types_or_pred: Type2[T, S]) -> MapOnlyFn[Fn2[T, S, Any]]:
     ...
 
 
 @overload
-def map_only(__type_or_types: Type3[T, S, U]) -> MapOnlyFn[Fn3[T, S, U, Any]]:
+def map_only(__type_or_types_or_pred: Type3[T, S, U]) -> MapOnlyFn[Fn3[T, S, U, Any]]:
     ...
 
 
 @overload
-def map_only(__type_or_types: Type[T]) -> MapOnlyFn[Fn[T, Any]]:
+def map_only(__type_or_types_or_pred: Type[T]) -> MapOnlyFn[Fn[T, Any]]:
     ...
 
 
 # This specialization is needed for the implementations below that call
 @overload
-def map_only(__type_or_types: TypeAny) -> MapOnlyFn[FnAny[Any]]:
+def map_only(__type_or_types_or_pred: TypeAny) -> MapOnlyFn[FnAny[Any]]:
     ...
 
 
-def map_only(__type_or_types: TypeAny) -> MapOnlyFn[FnAny[Any]]:
+@overload
+def map_only(__type_or_types_or_pred: Callable[[Any], bool]) -> MapOnlyFn[FnAny[Any]]:
+    ...
+
+
+def map_only(
+    __type_or_types_or_pred: Union[TypeAny, Callable[[Any], bool]]
+) -> MapOnlyFn[FnAny[Any]]:
     """
     Suppose you are writing a tree_map over tensors, leaving everything
     else unchanged.  Ordinarily you would have to write:
@@ -530,11 +542,23 @@ def map_only(__type_or_types: TypeAny) -> MapOnlyFn[FnAny[Any]]:
 
     You can also directly use 'tree_map_only'
     """
+    if isinstance(__type_or_types_or_pred, (type, tuple)) or (
+        sys.version_info >= (3, 10)
+        and isinstance(__type_or_types_or_pred, types.UnionType)
+    ):
+
+        def pred(x: Any) -> bool:
+            return isinstance(x, __type_or_types_or_pred)  # type: ignore[arg-type]
+
+    elif callable(__type_or_types_or_pred):
+        pred = __type_or_types_or_pred  # type: ignore[assignment]
+    else:
+        raise TypeError("Argument must be a type, a tuple of types, or a callable.")
 
     def wrapper(func: Callable[[T], Any]) -> Callable[[Any], Any]:
         @functools.wraps(func)
         def wrapped(x: T) -> Any:
-            if isinstance(x, __type_or_types):
+            if pred(x):
                 return func(x)
             return x
 
@@ -545,7 +569,7 @@ def map_only(__type_or_types: TypeAny) -> MapOnlyFn[FnAny[Any]]:
 
 @overload
 def tree_map_only(
-    __type_or_types: Type[T],
+    __type_or_types_or_pred: Type[T],
     func: Fn[T, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
@@ -555,7 +579,7 @@ def tree_map_only(
 
 @overload
 def tree_map_only(
-    __type_or_types: Type2[T, S],
+    __type_or_types_or_pred: Type2[T, S],
     func: Fn2[T, S, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
@@ -565,7 +589,7 @@ def tree_map_only(
 
 @overload
 def tree_map_only(
-    __type_or_types: Type3[T, S, U],
+    __type_or_types_or_pred: Type3[T, S, U],
     func: Fn3[T, S, U, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
@@ -573,18 +597,28 @@ def tree_map_only(
     ...
 
 
+@overload
 def tree_map_only(
-    __type_or_types: TypeAny,
+    __type_or_types_or_pred: Callable[[Any], bool],
     func: FnAny[Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
-    return tree_map(map_only(__type_or_types)(func), tree, is_leaf=is_leaf)
+    ...
+
+
+def tree_map_only(
+    __type_or_types_or_pred: Union[TypeAny, Callable[[Any], bool]],
+    func: FnAny[Any],
+    tree: PyTree,
+    is_leaf: Optional[Callable[[PyTree], bool]] = None,
+) -> PyTree:
+    return tree_map(map_only(__type_or_types_or_pred)(func), tree, is_leaf=is_leaf)
 
 
 @overload
 def tree_map_only_(
-    __type_or_types: Type[T],
+    __type_or_types_or_pred: Type[T],
     func: Fn[T, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
@@ -594,7 +628,7 @@ def tree_map_only_(
 
 @overload
 def tree_map_only_(
-    __type_or_types: Type2[T, S],
+    __type_or_types_or_pred: Type2[T, S],
     func: Fn2[T, S, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
@@ -604,7 +638,7 @@ def tree_map_only_(
 
 @overload
 def tree_map_only_(
-    __type_or_types: Type3[T, S, U],
+    __type_or_types_or_pred: Type3[T, S, U],
     func: Fn3[T, S, U, Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
@@ -612,13 +646,23 @@ def tree_map_only_(
     ...
 
 
+@overload
 def tree_map_only_(
-    __type_or_types: TypeAny,
+    __type_or_types_or_pred: Callable[[Any], bool],
     func: FnAny[Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
-    return tree_map_(map_only(__type_or_types)(func), tree, is_leaf=is_leaf)
+    ...
+
+
+def tree_map_only_(
+    __type_or_types_or_pred: Union[TypeAny, Callable[[Any], bool]],
+    func: FnAny[Any],
+    tree: PyTree,
+    is_leaf: Optional[Callable[[PyTree], bool]] = None,
+) -> PyTree:
+    return tree_map_(map_only(__type_or_types_or_pred)(func), tree, is_leaf=is_leaf)
 
 
 def tree_all(

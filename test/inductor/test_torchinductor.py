@@ -28,6 +28,7 @@ import torch
 import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.debug_utils import aot_graph_input_parser
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
     expectedFailureCodegenDynamic,
@@ -42,6 +43,7 @@ from torch._inductor.utils import (
     run_and_get_triton_code,
 )
 from torch._inductor.virtualized import V
+from torch._prims_common import is_integer_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
@@ -57,15 +59,18 @@ from torch.testing._internal.common_device_type import (
     _has_sufficient_memory,
     get_desired_device_type_test_bases,
 )
-from torch.testing._internal.common_dtype import all_types
+from torch.testing._internal.common_dtype import all_types, get_all_dtypes
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
+    instantiate_parametrized_tests,
     IS_CI,
     IS_FBCODE,
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
+    parametrize,
     skipIfRocm,
+    subtest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
@@ -118,8 +123,50 @@ skip_if_x86_mac = functools.partial(
 )
 vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 
-libtest = torch.library.Library("test", "FRAGMENT")
+libtest = torch.library.Library("test", "FRAGMENT")  # noqa: TOR901
 ids = set()
+
+f32 = torch.float32
+i64 = torch.int64
+i32 = torch.int32
+
+
+def _large_cumprod_input(shape, dim, dtype, device):
+    # Construct a cumprod input which guaruntees not to overflow or underflow
+    if is_integer_dtype(dtype):
+        # Large products don't fit in integers, the best we can do
+        # is random +/-1 values to test the sign of the result
+        x = torch.randint(0, 1, shape, dtype=dtype, device=device)
+        return x * 2 - 1
+
+    comp_dtype = torch._prims_common.get_computation_dtype(dtype)
+    batch_size = 256
+    if comp_dtype != dtype:
+        batch_size = math.floor(math.log2(torch.finfo(dtype).max) / 3)
+
+    # Create random values with a uniform magnitude and uniform exponent
+    num_batches = (shape[dim] + 2 * batch_size - 1) // (2 * batch_size)
+    batch_shape = (
+        shape[:dim]
+        + (
+            num_batches,
+            batch_size,
+        )
+        + shape[dim + 1 :]
+    )
+    magnitude = 1 + torch.rand(batch_shape, dtype=comp_dtype, device=device)
+    exponent = torch.randint(-1, 1, batch_shape, device=device).to(comp_dtype)
+    batch = magnitude * exponent.exp2()
+
+    # Alternate each batch of values with their reciprocals so the product
+    # never gets too far away from 1
+    t = torch.cat((batch, batch.reciprocal()), dim=dim + 1)
+    t = t.flatten(dim, dim + 1)
+    t = aten.slice(t, dim=dim, start=0, end=shape[dim])
+
+    # Randomize sign
+    sign = torch.randint(0, 1, shape, device=device) * 2 - 1
+    return (t * sign).to(dtype)
 
 
 def define_custom_op_for_test(id_, fn_cpu, fn_cuda, fn_meta, tags=()):
@@ -287,6 +334,8 @@ def check_model(
     *,
     atol=None,
     rtol=None,
+    grad_atol=None,
+    grad_rtol=None,
     check_lowp=True,
     exact_dtype=True,
     nopython=True,
@@ -463,8 +512,8 @@ def check_model(
             self.assertEqual(
                 actual_grad,
                 expect_grad,
-                atol=atol,
-                rtol=rtol,
+                atol=grad_atol or atol,
+                rtol=grad_rtol or rtol,
                 equal_nan=True,
                 exact_dtype=exact_dtype,
             )
@@ -481,6 +530,8 @@ def check_model_gpu(
     *,
     atol=None,
     rtol=None,
+    grad_atol=None,
+    grad_rtol=None,
     check_lowp=True,
     exact_dtype=True,
     nopython=True,
@@ -507,6 +558,8 @@ def check_model_gpu(
         kwargs,
         atol=atol,
         rtol=rtol,
+        grad_atol=grad_atol,
+        grad_rtol=grad_rtol,
         exact_dtype=exact_dtype,
         nopython=nopython,
         reference_in_float=reference_in_float,
@@ -537,6 +590,8 @@ def check_model_gpu(
             kwargs,
             atol=atol,
             rtol=rtol,
+            grad_atol=grad_atol,
+            grad_rtol=grad_rtol,
             exact_dtype=exact_dtype,
             nopython=nopython,
             reference_in_float=reference_in_float,
@@ -550,7 +605,9 @@ def check_model_gpu(
 check_model_cuda = check_model_gpu
 
 
-def _run_and_assert_no_indirect_indexing(test_case, func, *args, **kwargs):
+def _run_and_assert_no_indirect_indexing(
+    test_case, func, *args, has_wrapping=None, **kwargs
+):
     result, source_codes = run_and_get_code(func, *args, **kwargs)
 
     for code in source_codes:
@@ -576,6 +633,11 @@ def _run_and_assert_no_indirect_indexing(test_case, func, *args, **kwargs):
             test_case.assertTrue(
                 "tmp" not in stmt,
                 msg=f"Found indirect indexing in statement '{stmt}' from code:\n{code}",
+            )
+        if has_wrapping is not None:
+            test_case.assertTrue(
+                ("where" in code or "?" in code) is has_wrapping,
+                msg=f"Wanted {has_wrapping=} but got\n{code}",
             )
 
     return result
@@ -632,6 +694,7 @@ class SweepInputs2:
                 cls.gen_template(name1, name2)
 
 
+@instantiate_parametrized_tests
 class CommonTemplate:
     def test_bool(self):
         def fn(a, b):
@@ -721,7 +784,7 @@ class CommonTemplate:
             _, code = run_and_get_code(fn, x, y)
             self.assertEqual(
                 " ".join(code).count(
-                    "::view_dtype" if config.cpp_wrapper else "aten.view"
+                    "view_dtype" if config.cpp_wrapper else "aten.view"
                 ),
                 3,
             )
@@ -759,6 +822,7 @@ class CommonTemplate:
 
         self.common(fn, [torch.linspace(-10, 10, 41)])
 
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     def test_scatter_bf16(self):
         def fn(inp, src, index):
             return inp.scatter_add(0, index, src)
@@ -887,7 +951,7 @@ class CommonTemplate:
             ),
         )
         self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 5)
-        assertGeneratedKernelCountEqual(self, 1 if self.device == GPU_TYPE else 3)
+        assertGeneratedKernelCountEqual(self, 1 if self.device == GPU_TYPE else 2)
 
     def test_index_propagation(self):
         def flip(x):
@@ -925,7 +989,9 @@ class CommonTemplate:
         repeat_opt = torch._dynamo.optimize("inductor")(repeat)
 
         # this should be collapsed to direct indexing
-        actual = _run_and_assert_no_indirect_indexing(self, repeat_opt, x, 3)
+        actual = _run_and_assert_no_indirect_indexing(
+            self, repeat_opt, x, 3, has_wrapping=False
+        )
         expect = x.repeat(3)
         self.assertEqual(expect, actual)
         self.assertEqual(actual, repeat(x, 3))
@@ -1172,6 +1238,90 @@ class CommonTemplate:
         self.common(fn, (torch.rand((16, 16, 352, 352), dtype=torch.float16),))
         self.common(fn, (torch.rand((14923), dtype=torch.float16),))
 
+    def test_split_cumsum(self):
+        def fn(a):
+            return torch.cumsum(a, -1)
+
+        for dtype in get_all_dtypes(
+            include_bfloat16=False,
+            include_bool=True,
+            include_complex=False,
+            include_half=False,
+        ):
+            # Use low=0 since when the mean value is 0, cumsum at all points
+            # tends towards zero which makes the relative error term blow up
+            inp = make_tensor(10, 3, 352, 352, low=0, dtype=dtype, device=self.device)
+            self.common(fn, (inp.view(-1),), rtol=1e-5, atol=1e-5, check_lowp=False)
+            self.common(fn, (inp.view(10, -1),), rtol=1e-5, atol=1e-5, check_lowp=False)
+
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(TEST_WITH_ROCM, "Computation not done in float on ROCm")
+    def test_split_cumsum_low_prec(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("ir.Scan nyi on CPU")
+
+        def fn(a):
+            return torch.cumsum(a.view(-1), 0)
+
+        self.common(
+            fn,
+            (torch.rand((10, 3, 352, 352), dtype=torch.float16),),
+            reference_in_float=True,
+            check_lowp=False,
+        )
+
+    def test_consecutive_split_cumsum(self):
+        def fn(a, b):
+            a = a.view(-1)
+            b = b.view(-1)
+            return torch.cumsum(a, 0) + torch.cumsum(b, 0)
+
+        a = make_tensor(10, 3, 352, 352, low=0, dtype=torch.float32, device=self.device)
+        b = make_tensor(10, 3, 352, 352, low=0, dtype=torch.float64, device=self.device)
+        self.common(fn, (a, b), rtol=1e-5, atol=1e-5, check_lowp=False)
+
+    def test_split_cumprod(self):
+        def fn(a):
+            return torch.cumprod(a, -1)
+
+        for dtype in [torch.float32, torch.float64, torch.int32, torch.int64]:
+            inp = _large_cumprod_input(
+                (10, 10000), dim=1, dtype=dtype, device=self.device
+            )
+            self.common(fn, (inp,), atol=1e-5, rtol=1e-4, check_lowp=False)
+
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    @skipCUDAIf(TEST_WITH_ROCM, "Computation not done in float on ROCm")
+    def test_split_cumprod_low_prec(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("ir.Scan nyi on CPU")
+
+        def fn(a):
+            return torch.cumprod(a.view(-1), 0)
+
+        for dtype in [torch.float16, torch.bfloat16]:
+            inp = _large_cumprod_input(
+                (10, 10000), dim=1, dtype=dtype, device=self.device
+            )
+            self.common(
+                fn,
+                (inp,),
+                reference_in_float=True,
+                check_lowp=False,
+            )
+
+    def test_consecutive_split_cumprod(self):
+        def fn(a, b):
+            return torch.cumprod(a, 0) + torch.cumprod(b, 0)
+
+        a = _large_cumprod_input(
+            (10000,), dim=0, dtype=torch.float32, device=self.device
+        )
+        b = _large_cumprod_input(
+            (10000,), dim=0, dtype=torch.float64, device=self.device
+        )
+        self.common(fn, (a, b), atol=1e-5, rtol=1e-5, check_lowp=False)
+
     def test_embedding_bag_byte_unpack(self):
         if self.device != "cpu":
             raise unittest.SkipTest(f"No {GPU_TYPE} implementation (it returns empty)")
@@ -1274,11 +1424,11 @@ class CommonTemplate:
             return x.cumsum(0), x.cumsum(1)
 
         # Persistent reductions
-        self.common(fn, (torch.rand(16, 32),), check_lowp=not TEST_WITH_ROCM)
-        self.common(fn, (torch.rand(20, 30),), check_lowp=not TEST_WITH_ROCM)
+        self.common(fn, (torch.rand(16, 32),), check_lowp=True)
+        self.common(fn, (torch.rand(20, 30),), check_lowp=True)
 
         # Non-persistent reduction
-        self.common(fn, (torch.rand(100, 4000),), check_lowp=not TEST_WITH_ROCM)
+        self.common(fn, (torch.rand(100, 4000),), check_lowp=True)
 
     def test_cumsum_zero_dim(self):
         def fn(x):
@@ -1287,9 +1437,39 @@ class CommonTemplate:
         a = torch.rand(())
         self.common(fn, (a,))
 
+    def test_cumsum_no_mask(self):
+        def fn(x):
+            return x.cumsum(-1)
+
+        # Persistent reduction
+        a = torch.rand((1, 1024))
+        self.common(fn, (a,), check_lowp=not TEST_WITH_ROCM)
+
+        # Non-persistent reduction
+        b = torch.rand((1, 8192))
+        self.common(fn, (b,), check_lowp=not TEST_WITH_ROCM)
+
     def test_cumprod_zero_dim(self):
         def fn(x):
             return x.cumprod(0), x.cumprod(-1)
+
+        a = torch.rand(())
+        self.common(fn, (a,))
+
+    def test_logcumsumexp(self):
+        def fn(x):
+            return x.logcumsumexp(0), x.logcumsumexp(1)
+
+        # Persistent reductions
+        self.common(fn, (torch.rand(16, 32),), check_lowp=not TEST_WITH_ROCM)
+        self.common(fn, (torch.rand(20, 30),), check_lowp=not TEST_WITH_ROCM)
+
+        # Non-persistent reduction
+        self.common(fn, (torch.rand(100, 4000),), check_lowp=not TEST_WITH_ROCM)
+
+    def test_logcumsumexp_zero_dim(self):
+        def fn(x):
+            return x.logcumsumexp(0), x.logcumsumexp(-1)
 
         a = torch.rand(())
         self.common(fn, (a,))
@@ -3001,6 +3181,85 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 0)
 
+    def test_adaptive_max_pool2d1(self):
+        def fn(x):
+            return aten.adaptive_max_pool2d(x, (6, 6))
+
+        self.common(
+            fn,
+            (torch.randn(2, 4, 16, 16),),
+            check_lowp=False,
+        )
+
+        # lowering to max_pool2d case
+        self.common(
+            fn,
+            (torch.randn(2, 4, 3, 3),),
+        )
+
+        # no-op case
+        self.common(
+            fn,
+            (torch.randn(2, 4, 6, 6),),
+        )
+
+    def test_adaptive_max_pool2d2(self):
+        # Big kernel size, use fallback
+        def fn(x):
+            return aten.adaptive_max_pool2d(x, (4, 4))
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            (torch.randn(2, 4, 21, 21),),
+            check_lowp=False,
+        )
+        assertGeneratedKernelCountEqual(self, 0)
+
+    def test_fractional_max_pool2d1(self):
+        def fn(x, samples):
+            return aten.fractional_max_pool2d(x, (3, 3), (2, 2), samples)
+
+        self.common(
+            fn, (torch.randn(1, 4, 16, 16), torch.rand(1, 4, 2)), check_lowp=False
+        )
+
+    def test_fractional_max_pool2d2(self):
+        # fallback for larger kernel size
+
+        def fn(x, samples):
+            return aten.fractional_max_pool2d(x, (6, 5), (3, 3), samples)
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            (torch.randn(2, 4, 36, 36), torch.rand(2, 4, 2)),
+            check_lowp=False,
+        )
+        assertGeneratedKernelCountEqual(self, 0)
+
+    def test_fractional_max_pool2d3(self):
+        def fn(x, samples):
+            return aten.fractional_max_pool2d(x, (1, 1), (16, 16), samples)
+
+        self.common(
+            fn, (torch.randn(2, 4, 16, 16), torch.rand(2, 4, 2)), check_lowp=False
+        )
+
+    @config.patch(fallback_random=True)
+    def test_fractional_max_pool2d4(self):
+        random.seed(1234)
+        torch.manual_seed(1234)
+
+        # check rectangular kernel/output size
+
+        def fn(x):
+            return torch.nn.functional.fractional_max_pool2d_with_indices(
+                x, (4, 3), (3, 2)
+            )
+
+        self.common(fn, (torch.randn(1, 4, 16, 16),), check_lowp=False)
+
     def test_multi_threading(self):
         model = torch.nn.Linear(2, 3).eval()
         inp = torch.randn(4, 2)
@@ -4056,6 +4315,94 @@ class CommonTemplate:
             ),
         )
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_cat_unbacked_legacy_empty(self):
+        def fn(x, y):
+            z = y.item()
+            return torch.cat([x, x.new_ones(z)])
+
+        self.common(
+            fn,
+            (
+                torch.randn([2, 3]),
+                torch.tensor([0]),
+            ),
+        )
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_cat_unbacked_empty_1d(self):
+        def fn(x, y):
+            z = y.item()
+            return torch.cat([x, x.new_ones(z)])
+
+        self.common(
+            fn,
+            (
+                torch.randn([2]),
+                torch.tensor([0]),
+            ),
+        )
+
+        self.common(
+            fn,
+            (
+                torch.randn([2]),
+                torch.tensor([3]),
+            ),
+        )
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_cat_unbacked_2d(self):
+        def fn(x, y):
+            z = y.item()
+            return torch.cat([x, x.new_ones(z, x.shape[1])])
+
+        self.common(
+            fn,
+            (
+                torch.randn([2, 3]),
+                torch.tensor([0]),
+            ),
+        )
+
+        self.common(
+            fn,
+            (
+                torch.randn([2, 3]),
+                torch.tensor([4]),
+            ),
+        )
+
+    def test_cat_negative_dim(self):
+        def fn(*tensors):
+            return torch.cat(tensors, dim=-1)
+
+        self.common(
+            fn,
+            (
+                torch.randn([2, 3]),
+                torch.randn([2, 4]),
+            ),
+        )
+
+        self.common(
+            fn,
+            (
+                torch.randn([2, 3]),
+                torch.randn([0]),
+                torch.randn([2, 4]),
+            ),
+        )
+
+        self.common(
+            fn,
+            (
+                torch.randn([0]),
+                torch.randn([2, 3]),
+                torch.randn([2, 4]),
+            ),
+        )
+
     @expectedFailureCodegenDynamic
     def test_cat_single_empty(self):
         # fails dynamic check for 'has a dynamic dimension'
@@ -4461,7 +4808,7 @@ class CommonTemplate:
                     dtype=torch.float32,
                     device=a.device,
                 ),
-                torch.zeros(2, 3, names=None),
+                torch.zeros(2, 3),
                 a + torch.ones(8, device=a.device),
                 torch.full((2, 3), 3.1416, device=a.device),
             )
@@ -6155,6 +6502,144 @@ class CommonTemplate:
         self.assertTrue((d >= 0).all())
         self.assertTrue((d < 1).all())
 
+    @config.patch(implicit_fallbacks=True)
+    def test_fallback_mutable_op_basic(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+
+            def impl(a, b, c, d, e=2):
+                a.add_(b[0] * c * e),
+                if d is not None:
+                    d.add_(b[1])
+
+            m.define(
+                "inplace_(Tensor(a!) a, Tensor[] b, SymInt c, *, Tensor(b!)? d, SymInt e=2) -> ()"
+            )
+            m.impl("inplace_", impl, "CompositeExplicitAutograd")
+
+            # We do some clones and copy_ to test that Inductor doesn't reorder
+            # the copy_ w.r.t. inplace_.
+            def f(a, b1, b2, c, d):
+                a_ = a.clone()
+                d_ = d if d is None else d.clone()
+                torch.ops.mylib.inplace_(a_, (b1, b2), c, d=d_)
+                a.copy_(a_)
+                if d is not None:
+                    d.copy_(d_)
+                return ()
+
+            a = torch.tensor([0.0, 1.0, 2])
+            b = [torch.tensor([2.0, 3.0, 5.0]), torch.tensor([1.0, 4.0, 6.0])]
+            c = 4
+            d = torch.tensor([2.0, 1, 0])
+            args = (a, b[0], b[1], c, d)
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+            mod = make_fx(f)(*cloned_args)
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+            compiled_f = compile_fx_inner(mod, cloned_args)
+
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+            compiled_f(list(cloned_args))
+            f(*args)
+            self.assertEqual(cloned_args, args)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_fallback_mutable_op_with_return(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+
+            def impl(a, b, c, d, e=2):
+                a.add_(b[0] * c * e),
+                if d is not None:
+                    d.add_(b[1])
+                return b[0] + b[1]
+
+            m.define(
+                "inplace_(Tensor(a!) a, Tensor[] b, SymInt c, *, Tensor(b!)? d, SymInt e=2) -> Tensor"
+            )
+            m.impl("inplace_", impl, "CompositeExplicitAutograd")
+
+            # We do some clones and copy_ to test that Inductor doesn't reorder
+            # the copy_ w.r.t. inplace_.
+            def f(a, b0, b1, c, d):
+                a_ = a.clone()
+                d_ = d if d is None else d.clone()
+                res = torch.ops.mylib.inplace_(a_, (b0, b1), c, d=d_)
+                a.copy_(a_)
+                if d is not None:
+                    d.copy_(d_)
+                return (res,)
+
+            a = torch.tensor([0.0, 1.0, 2])
+            b = [torch.tensor([2.0, 3.0, 5.0]), torch.tensor([1.0, 4.0, 6.0])]
+            c = 4
+            d = torch.tensor([2.0, 1, 0])
+            args = (a, b[0], b[1], c, d)
+
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+            mod = make_fx(f)(*cloned_args)
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+            compiled_f = compile_fx_inner(mod, cloned_args)
+
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+            compiled_out = compiled_f(list(cloned_args))
+            out = f(*args)
+            self.assertEqual(cloned_args, args)
+            self.assertEqual(compiled_out, out)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_fallback_mutable_op_no_mutated_tensors(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+
+            def impl(a, b):
+                if b is not None:
+                    b.add_(1)
+
+            m.define("inplace_(Tensor a, Tensor(b!)? b) -> ()")
+            m.impl("inplace_", impl, "CompositeExplicitAutograd")
+
+            def f(a):
+                torch.ops.mylib.inplace_(a, None)
+                return ()
+
+            a = torch.tensor([0.0, 1.0, 2])
+            args = (a,)
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+            mod = make_fx(f)(*cloned_args)
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+            compiled_f = compile_fx_inner(mod, cloned_args)
+
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+            compiled_f(list(cloned_args))
+            f(*args)
+            self.assertEqual(cloned_args, args)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_fallback_mutable_op_list(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+
+            def impl(a, b):
+                for bi in b:
+                    bi.add_(a)
+
+            m.define("inplace_(Tensor a, Tensor(a!)[] b) -> ()")
+            m.impl("inplace_", impl, "CompositeExplicitAutograd")
+
+            def f(a, b):
+                torch.ops.mylib.inplace_(a, b)
+                return ()
+
+            a = torch.tensor([0.0, 1.0, 2])
+            b = [torch.tensor([2.0, 3.0, 5.0]), torch.tensor([1.0, 4.0, 6.0])]
+            args = (a, b)
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+            mod = make_fx(f)(*cloned_args)
+            cloned_args = pytree.tree_map_only(torch.Tensor, torch.clone, args)
+
+            with self.assertRaisesRegex(
+                torch._inductor.exc.LoweringException,
+                "NYI: Can't generate FallbackKernel",
+            ):
+                compiled_f = compile_fx_inner(mod, cloned_args)
+
     def test_functionalize_rng_wrappers(self):
         # Ideally, we would like to use torch.compile for these operators. But
         # currently the plan is to introduce these operators at the partitioner
@@ -6682,7 +7167,7 @@ class CommonTemplate:
         )
 
         if self.device == GPU_TYPE:
-            self.assertEqual(fw_code.count("tl.rand"), 1)
+            self.assertEqual(fw_code.count("tl.rand"), 2)
             self.assertEqual(bw_code.count("tl.rand"), 0)
         expected_kernel = 4
 
@@ -6701,7 +7186,7 @@ class CommonTemplate:
         _, source_codes = run_and_get_code(fn1)
         if self.device == GPU_TYPE:
             self.assertEqual(len(source_codes), 1)
-            self.assertEqual(source_codes[0].count("async_compile.triton"), 1)
+            self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
 
     def test_roll(self):
         def fn(a):
@@ -6965,6 +7450,121 @@ class CommonTemplate:
             for shape, stride, dtype in args
         ]
         self.common(forward, args)
+
+    @requires_gpu()
+    def test_tmp_not_defined_issue3(self):
+        from torch import device
+
+        def forward(
+            self,
+            primals_1: "f32[1001, 6]",
+            primals_2: "f32[1001]",
+            primals_3: "f32[1001, 64]",
+            primals_4: "f32[4190]",
+            primals_5: "f32[4190]",
+            primals_6: "f32[1739, 4190]",
+            primals_48: "f32[6144, 4191]",
+        ):
+            _tensor_constant0: "i64[4190]" = self._tensor_constant0
+            lift_fresh_copy: "i64[4190]" = torch.ops.aten.lift_fresh_copy.default(
+                _tensor_constant0
+            )
+
+            index: "f32[6144, 4190]" = torch.ops.aten.index.Tensor(
+                primals_48, [None, lift_fresh_copy]
+            )
+
+            _tensor_constant1: "i64[6]" = self._tensor_constant1
+            lift_fresh_copy_1: "i64[6]" = torch.ops.aten.lift_fresh_copy.default(
+                _tensor_constant1
+            )
+            index_1: "f32[6144, 6]" = torch.ops.aten.index.Tensor(
+                primals_48, [None, lift_fresh_copy_1]
+            )
+            primals_48 = lift_fresh_copy_1 = None
+            permute: "f32[6, 1001]" = torch.ops.aten.permute.default(primals_1, [1, 0])
+            addmm: "f32[6144, 1001]" = torch.ops.aten.addmm.default(
+                primals_2, index_1, permute
+            )
+            amax: "f32[6144, 1]" = torch.ops.aten.amax.default(addmm, [-1], True)
+            sub: "f32[6144, 1001]" = torch.ops.aten.sub.Tensor(addmm, amax)
+            exp: "f32[6144, 1001]" = torch.ops.aten.exp.default(sub)
+            sum_1: "f32[6144, 1]" = torch.ops.aten.sum.dim_IntList(exp, [-1], True)
+            div: "f32[6144, 1001]" = torch.ops.aten.div.Tensor(exp, sum_1)
+
+            full_default: "i32[6144, 1001]" = torch.ops.aten.full.default(
+                [6144, 1001],
+                1,
+                dtype=torch.int32,
+                layout=torch.strided,
+                device=device(type="cuda", index=0),
+                pin_memory=False,
+            )
+
+            iota: "i32[1001]" = torch.ops.prims.iota.default(
+                1001,
+                start=0,
+                step=1,
+                dtype=torch.int32,
+                device=device(type="cuda"),
+                requires_grad=False,
+            )
+
+            mul: "i32[6144, 1001]" = torch.ops.aten.mul.Tensor(full_default, iota)
+            iota_1: "i32[6144]" = torch.ops.prims.iota.default(
+                6144,
+                start=0,
+                step=1001,
+                dtype=torch.int32,
+                device=device(type="cuda", index=0),
+                requires_grad=False,
+            )
+            view: "i32[6150144]" = torch.ops.aten.reshape.default(mul, [-1])
+            view_1: "f32[6150144]" = torch.ops.aten.reshape.default(div, [-1])
+            _embedding_bag = torch.ops.aten._embedding_bag.default(
+                primals_3, view, iota_1, False, 0, False, view_1
+            )
+            getitem: "f32[6144, 64]" = _embedding_bag[0]
+            getitem_1: "i32[6150144]" = _embedding_bag[1]
+            getitem_2: "i32[6144]" = _embedding_bag[2]
+            getitem_3: "i32[0]" = _embedding_bag[3]
+            unsqueeze: "f32[6144, 1, 64]" = torch.ops.aten.unsqueeze.default(getitem, 1)
+            var_mean = torch.ops.aten.var_mean.correction(
+                index, [1], correction=0, keepdim=True
+            )
+            getitem_4: "f32[6144, 1]" = var_mean[0]
+            getitem_5: "f32[6144, 1]" = var_mean[1]
+            add: "f32[6144, 1]" = torch.ops.aten.add.Tensor(getitem_4, 1e-05)
+            rsqrt: "f32[6144, 1]" = torch.ops.aten.rsqrt.default(add)
+            sub_1: "f32[6144, 4190]" = torch.ops.aten.sub.Tensor(index, getitem_5)
+            mul_1: "f32[6144, 4190]" = torch.ops.aten.mul.Tensor(sub_1, rsqrt)
+            mul_2: "f32[6144, 4190]" = torch.ops.aten.mul.Tensor(mul_1, primals_4)
+            add_1: "f32[6144, 4190]" = torch.ops.aten.add.Tensor(mul_2, primals_5)
+            permute_1: "f32[4190, 1739]" = torch.ops.aten.permute.default(
+                primals_6, [1, 0]
+            )
+
+            return [
+                index,
+                index_1,
+                addmm,
+                amax,
+                sum_1,
+                iota_1,
+                view,
+                view_1,
+                getitem_1,
+                getitem_2,
+                getitem_3,
+                unsqueeze,
+                getitem_5,
+                rsqrt,
+                add_1,
+                permute_1,
+            ]
+
+        kwargs = aot_graph_input_parser(forward, device="cuda")
+        self.common(forward, [], kwargs=kwargs)
 
     def test_misaligned_address_issue1(self):
         def forward(sub_tensor_1, unsqueeze_default):
@@ -8405,6 +9005,7 @@ class CommonTemplate:
         actual = torch.compile(fn)(x)
         self.assertEqual(ref, actual)
 
+    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
     def test_bfloat16_to_int16(self):
         def fn(a, b):
             x = a + b
@@ -8467,17 +9068,107 @@ class CommonTemplate:
             # should_pad_bench always returns False if has_triton returns False
             self.assertFalse(should_pad)
 
-    def test_bessel_j0(self):
-        def fn(x):
-            return torch.special.bessel_j0(x)
+    @parametrize(
+        "name, op",
+        [
+            subtest((name, getattr(torch.special, name)), name=name)
+            for name in torch.special.__all__
+            if name not in {"softmax", "log_softmax", "logsumexp"}
+        ],
+    )
+    def test_pointwise(self, name, op):
+        dtype = torch.float32
+        check_lowp = True
+        if self.device == "cuda" and name in {
+            "airy_ai",
+            "bessel_i0",
+            "bessel_i1",
+            "bessel_j0",
+            "bessel_j1",
+            "bessel_y0",
+            "bessel_y1",
+            "erfcx",
+            "gammainc",
+            "gammaincc",
+            "i1",
+            "i1e",
+            "modified_bessel_i0",
+            "modified_bessel_i1",
+            "modified_bessel_k0",
+            "modified_bessel_k1",
+            "ndtri",
+            "scaled_modified_bessel_k0",
+            "scaled_modified_bessel_k1",
+            "spherical_bessel_j0",
+            "zeta",
+            "chebyshev_polynomial_t",
+            "chebyshev_polynomial_v",
+            "chebyshev_polynomial_u",
+            "chebyshev_polynomial_w",
+            "legendre_polynomial_p",
+            "shifted_chebyshev_polynomial_t",
+            "shifted_chebyshev_polynomial_u",
+            "shifted_chebyshev_polynomial_v",
+            "shifted_chebyshev_polynomial_w",
+            "hermite_polynomial_h",
+            "hermite_polynomial_he",
+            "laguerre_polynomial_l",
+        }:
+            # <func>_cuda not implemented for Half
+            check_lowp = False
 
-        self.common(fn, (torch.randn(8, 8),))
+        if name in {"gammainc", "gammaincc"}:
+            args = (
+                torch.randn(8, 8, dtype=dtype, device=self.device),
+                torch.empty(8, 8, dtype=dtype, device=self.device).uniform_(1, 2),
+            )
 
-    def test_bessel_j1(self):
-        def fn(x):
-            return torch.special.bessel_j1(x)
+            def fn(x, y):
+                return op(x, y)
 
-        self.common(fn, (torch.randn(8, 8),))
+        elif name in {"xlog1py", "xlogy", "zeta"}:
+            args = (
+                torch.randn(8, 8, dtype=dtype, device=self.device),
+                torch.empty(8, 8, dtype=dtype, device=self.device).uniform_(1, 2),
+            )
+
+            def fn(x, y):
+                return op(x, y)
+
+        elif name == "multigammaln":
+            args = (
+                torch.empty(8, 8, dtype=dtype, device=self.device).uniform_(1, 2),
+                2,
+            )
+
+            def fn(x, p):
+                return op(x, p)
+
+        elif name == "polygamma":
+            args = (
+                1,
+                torch.empty(8, 8, dtype=dtype, device=self.device).uniform_(1, 10),
+            )
+
+            def fn(n, x):
+                return op(n, x)
+
+        elif "_polynomial_" in name:
+            args = (
+                torch.randn(8, 8, dtype=dtype, device=self.device),
+                2,
+            )
+
+            def fn(x, n):
+                return op(x, n)
+
+        else:
+            args = (torch.randn(8, 8, dtype=dtype, device=self.device),)
+
+            def fn(x):
+                return op(x)
+
+        self.common(fn, args, check_lowp=check_lowp)
 
 
 @dataclasses.dataclass
