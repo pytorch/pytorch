@@ -145,17 +145,15 @@ def get_scheduling_for_device(device: str):
 
 
 def get_wrapper_codegen_for_device(device: str, cpp_wrapper: bool = False):
-    wrapper_codegen_obj: DeviceCodegen = (
-        device_codegens[device] if device in device_codegens else None
-    )
-    if wrapper_codegen_obj is None:
+    if device in device_codegens:
+        wrapper_codegen_obj: DeviceCodegen = device_codegens[device]
+        return (
+            wrapper_codegen_obj.cpp_wrapper_codegen
+            if cpp_wrapper
+            else wrapper_codegen_obj.wrapper_codegen
+        )
+    else:
         return None
-
-    return (
-        wrapper_codegen_obj.cpp_wrapper_codegen
-        if cpp_wrapper
-        else wrapper_codegen_obj.wrapper_codegen
-    )
 
 
 def index_prevent_reordering(index: List[sympy.Expr], index_vars, sizes):
