@@ -15,7 +15,12 @@ from torchgen.api.python import (
 )
 from torchgen.gen import parse_native_yaml, parse_tags_yaml
 
-from torchgen.model import _TorchDispatchModeKey, DispatchKey, Variant
+from torchgen.model import (
+    _TorchDispatchModeKey,
+    _TorchFunctionModeKey,
+    DispatchKey,
+    Variant,
+)
 from torchgen.utils import FileManager
 
 from tools.autograd.gen_python_functions import (
@@ -1368,6 +1373,9 @@ def gen_pyi(
     torch_dispatch_mode_key_hints = [
         f"{k.name}: _TorchDispatchModeKey = ..." for k in _TorchDispatchModeKey
     ]
+    torch_function_mode_key_hints = [
+        f"{k.name}: _TorchFunctionModeKey = ..." for k in _TorchFunctionModeKey
+    ]
 
     # Tags Enum type hints
     # ~~~~~~~~~~~~~~~~~~~~
@@ -1389,6 +1397,7 @@ def gen_pyi(
         "dtype_class_hints": dtype_class_hints,
         "dispatch_key_hints": dispatch_key_hints,
         "torch_dispatch_mode_key_hints": torch_dispatch_mode_key_hints,
+        "torch_function_mode_key_hints": torch_function_mode_key_hints,
         "all_directive": all_directive,
         "tag_attributes": tag_attributes,
     }

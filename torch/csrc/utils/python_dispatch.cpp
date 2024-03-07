@@ -842,6 +842,10 @@ void initDispatchBindings(PyObject* module) {
       .value("FUNCTIONAL", TorchDispatchModeKey::FUNCTIONAL)
       .value("PROXY", TorchDispatchModeKey::PROXY)
       .value("FAKE", TorchDispatchModeKey::FAKE);
+
+  using at::impl::TorchFunctionModeKey;
+  py::enum_<TorchFunctionModeKey>(m, "_TorchFunctionModeKey")
+      .value("PROXY", TorchFunctionModeKey::PROXY);
 }
 
 // TODO: dedupe with the kernel

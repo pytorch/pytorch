@@ -217,6 +217,10 @@ class _TorchDispatchModeKey(Enum):
     FUNCTIONAL = auto()
 
 
+class _TorchFunctionModeKey(Enum):
+    PROXY = auto()
+
+
 def codegen_per_backend_entries() -> str:
     r = []
     for fk in FUNCTIONALITY_KEYS:

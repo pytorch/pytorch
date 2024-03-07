@@ -564,7 +564,13 @@ for name in dir(_C):
         if (isinstance(obj, Callable) or inspect.isclass(obj)):  # type: ignore[arg-type]
             if (obj.__module__ != 'torch'):
                 # TODO: fix their module from C++ side
-                if name not in ['DisableTorchFunctionSubclass', 'DisableTorchFunction', 'Generator']:
+                skip_list = [
+                    'DisableTorchFunctionSubclass',
+                    'DisableTorchFunctionNonInfraSubclass',
+                    'DisableTorchFunction',
+                    'Generator'
+                ]
+                if name not in skip_list:
                     obj.__module__ = 'torch'
     elif name == 'TensorBase':
         # issue 109438 / pr 109940. Prevent TensorBase from being copied into torch.

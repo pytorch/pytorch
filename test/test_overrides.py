@@ -1493,8 +1493,6 @@ class TestTorchFunctionMode(TestCase):
         self.assertFalse(called)
 
     def test_disable_enable_subclass(self):
-        called = False
-
         class A(torch.Tensor):
             pass
 
@@ -1505,6 +1503,53 @@ class TestTorchFunctionMode(TestCase):
                 self.assertIsInstance(torch.sum(x), A)
             finally:
                 del g
+
+        counter = [0]
+
+        class Foo():
+            def __init__(self, t):
+                self._t = t
+
+            _mode_key = torch._C._TorchFunctionModeKey.PROXY
+
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                counter[0] += 1
+                return func(args[0]._t)
+
+        a = Foo(torch.tensor(1.))
+
+        with torch._C.DisableTorchFunctionNonInfraSubclass():
+            torch.sin(a)
+            self.assertTrue(counter[0] == 1)
+
+        with self.assertRaises(TypeError):
+            with torch._C.DisableTorchFunctionSubclass():
+                torch.sin(a)
+
+        self.assertTrue(torch._C._is_torch_function_enabled())
+        self.assertTrue(torch._C._is_torch_function_infra_subclasses_enabled())
+
+        with torch._C.DisableTorchFunctionSubclass():
+            self.assertFalse(torch._C._is_torch_function_enabled())
+            self.assertFalse(torch._C._is_torch_function_infra_subclasses_enabled())
+
+        with torch._C.DisableTorchFunctionNonInfraSubclass():
+            self.assertFalse(torch._C._is_torch_function_enabled())
+            self.assertTrue(torch._C._is_torch_function_infra_subclasses_enabled())
+
+        with torch._C.DisableTorchFunctionSubclass():
+            with torch._C.DisableTorchFunctionNonInfraSubclass():
+                self.assertFalse(torch._C._is_torch_function_enabled())
+                self.assertFalse(torch._C._is_torch_function_infra_subclasses_enabled())
+
+        with torch._C.DisableTorchFunctionNonInfraSubclass():
+            with torch._C.DisableTorchFunctionSubclass():
+                self.assertFalse(torch._C._is_torch_function_enabled())
+                self.assertFalse(torch._C._is_torch_function_infra_subclasses_enabled())
+
+        torch._C._EnableTorchFunction()
+
 
     def test_subclass_hash(self):
         class DiagTensor(torch.Tensor):
