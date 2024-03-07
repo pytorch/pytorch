@@ -8,7 +8,7 @@ from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch._ops import _get_dispatch_mode_pre_dispatch
 from torch.utils._python_dispatch import (
     _detect_functional_mode,
-    _push_mode,
+    _disable_infra_mode,
     return_and_correct_aliasing,
     TorchDispatchMode,
 )
@@ -457,47 +457,8 @@ class FunctionalTensorMode(TorchDispatchMode):
 
 
 @contextlib.contextmanager
-def maybe_disable_functional_mode():
-    maybe_func_mode = torch._C._unset_dispatch_mode(
-        torch._C._TorchDispatchModeKey.FUNCTIONAL
-    )
-    try:
-        yield
-    finally:
-        if maybe_func_mode is not None:
-            torch._C._set_dispatch_mode(maybe_func_mode)
-
-
-# TODO: clean up the redundancy here,
-# unify on a single context manager for all mode keys.
-@contextlib.contextmanager
-def unset_functional_temporarily():
-    from torch._ops import unset_mode_pre_dispatch
-
-    old_mode_from_aot_dispatch = torch._C._unset_dispatch_mode(
-        torch._C._TorchDispatchModeKey.FUNCTIONAL
-    )
-    old_mode_from_pre_dispatch = unset_mode_pre_dispatch(
-        torch._C._TorchDispatchModeKey.FUNCTIONAL
-    )
-
-    if old_mode_from_aot_dispatch:
-        assert old_mode_from_pre_dispatch is None, "Can only have one mode available"
-    if old_mode_from_pre_dispatch:
-        assert old_mode_from_aot_dispatch is None, "Can only have one mode available"
-
-    try:
-        if old_mode_from_aot_dispatch:
-            yield old_mode_from_aot_dispatch
-        elif old_mode_from_pre_dispatch:
-            yield old_mode_from_pre_dispatch
-        else:
-            yield
-    finally:
-        if old_mode_from_aot_dispatch is not None:
-            torch._C._set_dispatch_mode(old_mode_from_aot_dispatch)
-        if old_mode_from_pre_dispatch is not None:
-            _push_mode(old_mode_from_aot_dispatch, torch._C.DispatchKey.PreDispatch)
+def disable_functional_mode():
+    return _disable_infra_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
 
 
 # This is similar to torch.func.functionalize, but:
