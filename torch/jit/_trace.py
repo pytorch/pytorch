@@ -539,6 +539,20 @@ def _check_trace(
                                 atol=default_tolerances(orig, ref)[1],
                                 equal_nan=True,
                             )
+                        elif getattr(orig, "is_nested", None) or getattr(
+                            ref, "is_nested", None
+                        ):
+                            assert getattr(orig, "is_nested", None) == getattr(
+                                ref, "is_nested", None
+                            )
+                            for t_orig, t_ref in zip(orig.unbind(), ref.unbind()):
+                                torch.testing.assert_close(
+                                    t_orig.double(),
+                                    t_ref.double(),
+                                    rtol=check_tolerance,
+                                    atol=default_tolerances(t_orig, t_ref)[1],
+                                    equal_nan=True,
+                                )
                         else:
                             torch.testing.assert_close(
                                 orig.double(),
