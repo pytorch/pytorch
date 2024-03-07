@@ -194,7 +194,7 @@ def async_save(
         >>> state_dict = {"model": my_model}
 
         >>> fs_storage_writer = torch.distributed.checkpoint.FileSystemWriter("/checkpoint/1")
-        >>> checkpoint_future = torch.distributed.checkpoint.save(
+        >>> checkpoint_future = torch.distributed.checkpoint.async_save(
         >>>     state_dict=state_dict,
         >>>     storage_writer=fs_storage_writer,
         >>> )
