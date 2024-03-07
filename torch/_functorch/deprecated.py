@@ -81,16 +81,16 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
            chunk_size: Optional[int] = None,
            _preallocate_and_copy=False):
     warn_deprecated('jacrev')
-    return jacrev(func, argnums, has_aux=has_aux, chunk_size=chunk_size,
-                  _preallocate_and_copy=_preallocate_and_copy)
+    return _impl.jacrev(func, argnums, has_aux=has_aux, chunk_size=chunk_size,
+                        _preallocate_and_copy=_preallocate_and_copy)
 
 def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, randomness: str = "error"):
     warn_deprecated('jacfwd')
-    return jacfwd(func, argnums, has_aux, randomness=randomness)
+    return _impl.jacfwd(func, argnums, has_aux, randomness=randomness)
 
 def hessian(func, argnums=0):
     warn_deprecated('hessian')
-    return hessian(func, argnums=argnums)
+    return _impl.hessian(func, argnums=argnums)
 
 def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
     warn_deprecated('functionalize')
