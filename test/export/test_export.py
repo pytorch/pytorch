@@ -767,9 +767,6 @@ class TestExport(TestCase):
             dynamic_shapes={"x": {0: dx, 1: None}, "y": {0: dx+1, 1: None}}
         )
         ep.module()(torch.randn(3, 2), (torch.randn(4, 2)))
-        # print(ep)
-        # non-strict issue for constraints
-        ep.module()(torch.randn(1, 2), (torch.randn(2, 2)))
         with self.assertRaisesRegex(
             RuntimeError,
             "Expected input .* to be of the form s0, where s0 is an integer"
