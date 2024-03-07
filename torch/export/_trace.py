@@ -5,7 +5,6 @@ import logging
 import re
 import time
 import warnings
-from collections.abc import Mapping
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -43,7 +42,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.utils._pytree import SUPPORTED_NODES
-from torch.utils._sympy.value_ranges import ValueRangeError, ValueRanges
+from torch.utils._sympy.value_ranges import ValueRangeError
 
 from ._safeguard import AutogradStateOpsFailSafeguard
 
