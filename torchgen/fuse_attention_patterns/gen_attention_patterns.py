@@ -8,7 +8,6 @@ from pathlib import Path
 import torch._inductor
 
 from torch._inductor.fx_passes.fuse_attention import _get_sfdp_patterns
-from torch._inductor.fx_passes.misc_patterns import _get_misc_patterns
 from torch._inductor.fx_passes.pad_mm import _get_mm_patterns
 from torch._inductor.pattern_matcher import (
     _TargetExpr,
