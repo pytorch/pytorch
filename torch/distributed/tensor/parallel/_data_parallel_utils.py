@@ -36,6 +36,8 @@ def _unflatten_tensor(tensor, spec, *, device_handle=None, compute_stream=None):
         spec.mesh,
         spec.placements,
         run_check=False,
+        shape=spec.shape,
+        stride=spec.stride,
     )
     if tensor.requires_grad:
         # only register the hook if the tensor requires grad

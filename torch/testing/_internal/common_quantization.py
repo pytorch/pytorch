@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 r"""Importing this file includes common utility methods and base clases for
 checking quantization api and properties of resulting modules.
 """
@@ -12,10 +14,7 @@ from torch.ao.nn.intrinsic import _FusedModule
 import torch.distributed as dist
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
 
-from torch._export import (
-    capture_pre_autograd_graph,
-    dynamic_dim,
-)
+from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization import (
     QuantType,
     default_dynamic_qat_qconfig,
@@ -416,6 +415,22 @@ def skipIfNoDynamoSupport(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         if not torchdynamo.is_dynamo_supported():
+            raise unittest.SkipTest(reason)
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+def skipIfNoInductorSupport(fn):
+    reason = "inductor doesn't support."
+    if isinstance(fn, type):
+        if not torchdynamo.is_inductor_supported():
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = reason
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not torchdynamo.is_inductor_supported():
             raise unittest.SkipTest(reason)
         else:
             fn(*args, **kwargs)
@@ -1167,10 +1182,14 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
 
         # program capture
         m = copy.deepcopy(m_eager)
+        dynamic_shapes = tuple(
+            {0: torch.export.Dim("dim")} if i == 0 else None
+            for i in range(len(example_inputs))
+        )
         m = capture_pre_autograd_graph(
             m,
             example_inputs,
-            constraints=[dynamic_dim(example_inputs[0], 0)] if export_with_dynamic_shape else [],
+            dynamic_shapes=dynamic_shapes if export_with_dynamic_shape else None,
         )
 
         if is_qat:
@@ -1179,7 +1198,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             m = prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
-        m = convert_pt2e(m, fold_quantize=True)
+        m = convert_pt2e(m)
 
         pt2_quant_output = m(*example_inputs)
         ns = NodeSpec
@@ -1206,7 +1225,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             m_fx = capture_pre_autograd_graph(
                 m_fx,
                 example_inputs,
-                constraints=[dynamic_dim(example_inputs[0], 0)] if export_with_dynamic_shape else [],
+                dynamic_shapes=dynamic_shapes if export_with_dynamic_shape else None,
             )
             node_occurrence = {}
             for k, v in PT2EQuantizationTestCase._MAP_TO_FX_TRACED_OPS.items():
@@ -1226,7 +1245,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         )
         m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
-        m = convert_pt2e(m, fold_quantize=True)
+        m = convert_pt2e(m)
         return m
 
     def _get_pt2e_quantized_linear(self, is_per_channel=False) -> torch.fx.GraphModule:

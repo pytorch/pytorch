@@ -1,38 +1,114 @@
+"""
+This file provides a number of "global" variables/handlers that are actually
+thread local and dynamically scoped, with Inductor patching them to various
+implementations depending on the situation.
+
+These handlers are interacted with in a fairly stylized way.  Typically,
+we will import V from this module::
+
+    from .virtualized import V
+
+Various handlers are accessible as attributes on this module; for example,
+you might access ``V.graph.sizevars.size_hint`` to resolve a size hint associated with
+a number.
+
+There are a few distinct usage patterns for virtualized global variables:
+
+1. Implicit argument passing.  Examples: ``V.current_node``, ``V.aot_compilation``.
+   Use ``V.set_current_node`` to change what the current node is while we're
+   executing some region of code, so code inside that region can query ``V.current_node``
+   to find out what it is.  This is often more convenient than manually threading
+   the current node as an argument through all call stacks.
+
+2. Per-compilation global state.  Examples: ``V.fake_mode``, ``V.graph``.  For a
+   given ``compile_fx`` invocation, these typically don't change, but they are
+   associated with some internal state so they cannot just be global functions.
+   We install these objects at the beginning of compilation and then you can
+   conveniently access them without having to pass them around.
+
+3. Alternate define-by-run interpretations.  Examples: ``V.ops``, ``V.kernel``.
+   A commonly used IR in Inductor is define-by-run: instead of maintaining
+   explicit syntax data structures, we instead represent loop bodies as
+   callable functions, which internally invoke operations defined on
+   ``V.ops``.  To perform semantic analysis, print or code generate these
+   operations, we dynamically patch ``V.ops`` with an alternate handler with
+   the intended semantics and then run the callable function.  For example, to
+   extract out a traditional (FX) graph representation of the define-by-run
+   IR, simply install a handler that records each ``ops`` call to a graph.
+
+   TODO: Define a parent class / protocol that defines all of the operations
+   V.ops is expected to support.
+
+It is typically an error to access a virtualized global without having installed
+an appropriate handler (you will get a NullHandler), although in some cases we
+provide a default implementation.
+
+One last thing: although most virtualized globals are accessed via ``V``, ``ops`` is
+ubiquitous enough to have its own top level variable, so you will typically see
+``ops.constant(...)`` rather than ``V.ops.constant(...)``.  In fact, these are not
+equivalent; the former interface supports arithmetic overloads like ``x + y``
+instead of forcing ``ops.add(x, y)``, so it should be preferred.
+
+Some operators are seemingly unused, but they are implicitly used by ops_wrapper.
+In particular, we typically have an operator for every basic pointwise PyTorch operation
+supported.
+"""
+
 from __future__ import annotations
 
-import itertools
-from contextlib import contextmanager
-from itertools import chain
+from contextlib import AbstractContextManager, contextmanager
 from threading import local
-from typing import Any, Callable, TYPE_CHECKING, Union
-from unittest.mock import patch
+from typing import Any, Callable, Generic, List, Type, TYPE_CHECKING, TypeVar, Union
 
-import sympy
-
-from torch._inductor.utils import IndentedBuffer
-
-from torch.fx.graph import inplace_methods, magic_methods
-
-from .utils import reduction_num_outputs, sympy_str, sympy_symbol
+from .ops_handler import (  # noqa: F401
+    KernelFormatterHandler,
+    MockHandler,
+    OpsHandler,
+    ReductionType,
+    StoreMode,
+    WrapperHandler,
+)
 
 if TYPE_CHECKING:
+    import torch
+    from torch._inductor.debug import DebugContext
     from torch._inductor.graph import GraphLowering
+    from torch._inductor.ir import InterpreterShim
+    from torch._subclasses import FakeTensorMode
 
 threadlocal = local()
 
+T = TypeVar("T")
 
-class Virtualized:
+
+class NullHandler:
     """
-    A global variable that redirects via thread local variable
+    Sentinel indicating that a global variable is unset ala None.  Typically,
+    attempting to access the global variable before it's set is an error, but with
+    NullHandler it won't fail until you try to access an attribute on it.
+    """
+
+    pass
+
+
+class Virtualized(Generic[T]):
+    """
+    Implements a global variable that redirects via thread local variable
+    (NB: construct this class to create the global variable; this is not
+    a singleton class!)
 
     This allows us to swap in different op implementations in codegen.
+
+    NB: Despite the fact that we typically call these "handlers" (e.g., NullHandler is
+    the default value of the variable), we sometimes use these variables to
+    store other things, like booleans.
     """
 
-    def __init__(self, vname: str, default):
+    def __init__(self, vname: str, default: Union[Callable[[], T], Type[NullHandler]]):
         self._key: str = f"__torchinductor_{vname}"
         self._default = default
 
-    def _set_handler(self, value):
+    def _set_handler(self, value: T) -> AbstractContextManager[None]:
         prior = self._get_handler()
         setattr(threadlocal, self._key, value)
 
@@ -45,18 +121,17 @@ class Virtualized:
 
         return ctx()
 
-    def _get_handler(self):
+    def _get_handler(self) -> T:
         try:
             return getattr(threadlocal, self._key)
         except AttributeError:
-            return self._default()
+            # TODO: To be honest, I feel we probably should just error in this
+            # case, instead of making a null handler that will probably error
+            # when you getattr on it
+            return self._default()  # type: ignore[return-value]
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return getattr(self._get_handler(), name)
-
-
-class NullHandler:
-    pass
 
 
 class NullKernelHandler(NullHandler):
@@ -75,124 +150,17 @@ class NullKernelHandler(NullHandler):
         self.index_dtype = "tl.int64"
 
 
-def _arg_str(a) -> str:
-    if isinstance(a, sympy.Expr):
-        return sympy_str(a)
-    return str(a)
-
-
-class MockHandler:
-    def __getattr__(self, name):
-        if name == "name":
-            return "MockHandler"
-
-        def inner(*args, **kwargs):
-            fargs = [_arg_str(a) for a in args]
-            fargs.extend(f"{k}={v}" for k, v in kwargs.items())
-            return f"ops.{name}({', '.join(fargs)})"
-
-        return inner
-
-    @staticmethod
-    def masked(mask, body, other) -> str:
-        return f"ops.masked({mask}, {body()}, {other})"
-
-    @staticmethod
-    def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
-        return sympy_symbol(f"({str(index_var)})")
-
-    @classmethod
-    def _init_cls(cls):
-        def make_handler(format_string):
-            @staticmethod  # type: ignore[misc]
-            def inner(*args):
-                return format_string.format(*args)
-
-            return inner
-
-        for name, format_string in chain(
-            magic_methods.items(), inplace_methods.items()
-        ):
-            setattr(cls, name, make_handler(format_string))
-
-
-class KernelFormatterHandler:
-    def __init__(self, parent_handler):
-        self.parent_handler = parent_handler
-        self.output = IndentedBuffer(1)
-        self.var_counter = itertools.count()
-
-    @staticmethod
-    def ir_to_string(ir_fn, index, rindex=None) -> str:
-        from .ir import FlexibleLayout
-
-        args = [index, rindex] if rindex is not None else [index]
-        names = ["index", "rindex"] if rindex is not None else ["index"]
-        formatter = KernelFormatterHandler(MockHandler())
-
-        with formatter.output.indent(-1):
-            formatter.output.writeline(f"def inner_fn({', '.join(names)}):")
-        for name, arg in zip(names, args):
-            if arg:
-                lhs = ", ".join(
-                    [
-                        str("_" if isinstance(v, (int, sympy.Integer)) else v)
-                        for v in arg
-                    ]
-                )
-                formatter.output.writeline(f"{lhs} = {name}")
-
-        with V.set_ops_handler(formatter), patch.object(
-            FlexibleLayout, "allow_indexing", True
-        ):
-            result = ir_fn(*args)
-            return formatter.getvalue(result)
-
-    def __getattr__(self, name) -> Callable[..., str]:
-        def inner(*args, **kwargs):
-            line = getattr(self.parent_handler, name)(*args, **kwargs)
-            if name == "indirect_indexing":
-                return line
-            # replace line with a new variable name
-            varname = f"tmp{next(self.var_counter)}"
-            self.output.writeline(f"{varname} = {line}")
-            return varname
-
-        return inner
-
-    def reduction(
-        self, dtype, src_dtype, reduction_type, value
-    ) -> Union[tuple[str, ...], str]:
-        line = self.parent_handler.reduction(dtype, src_dtype, reduction_type, value)
-        num_values = reduction_num_outputs(reduction_type)
-        varnames = [f"tmp{next(self.var_counter)}" for _ in range(num_values)]
-        self.output.writeline(f"{','.join(varnames)} = {line}")
-        return tuple(varnames) if num_values > 1 else varnames[0]
-
-    def getvalue(self, result):
-        self.output.writeline(f"return {result}")
-        return self.output.getvalue()
-
-
-class WrapperHandler:
-    def __init__(self, inner):
-        self._inner = inner
-
-    def __getattr__(self, item):
-        return getattr(self._inner, item)
-
-
-MockHandler._init_cls()
-
-_ops = Virtualized("ops", MockHandler)
-_graph = Virtualized("graph", NullHandler)
-_real_inputs = Virtualized("real_inputs", NullHandler)
-_fake_mode = Virtualized("fake_mode", NullHandler)
-_kernel = Virtualized("kernel", NullKernelHandler)
-_debug = Virtualized("debug", NullHandler)
-_interpreter = Virtualized("interpreter", NullHandler)
-_aot_compilation = Virtualized("aot_compilation", NullHandler)
-_current_node = Virtualized("current_node", NullHandler)
+_ops: Virtualized[OpsHandler[Any]] = Virtualized("ops", MockHandler)
+_graph: Virtualized[GraphLowering] = Virtualized("graph", NullHandler)
+_real_inputs: Virtualized[List[torch.Tensor]] = Virtualized("real_inputs", NullHandler)
+_fake_mode: Virtualized[FakeTensorMode] = Virtualized("fake_mode", NullHandler)
+_kernel: Virtualized[NullKernelHandler] = Virtualized(
+    "kernel", NullKernelHandler
+)  # TODO: improve type
+_debug: Virtualized[DebugContext] = Virtualized("debug", NullHandler)
+_interpreter: Virtualized[InterpreterShim] = Virtualized("interpreter", NullHandler)
+_aot_compilation: Virtualized[bool] = Virtualized("aot_compilation", NullHandler)
+_current_node: Virtualized[torch.fx.Node] = Virtualized("current_node", NullHandler)
 
 
 class OpsValue:
@@ -244,6 +212,42 @@ class OpsValue:
     def __pow__(self, other):
         return ops.pow(self, other)
 
+    def __lt__(self, other):
+        return ops.lt(self, other)
+
+    def __le__(self, other):
+        return ops.le(self, other)
+
+    def __eq__(self, other):
+        return ops.eq(self, other)
+
+    def __ne__(self, other):
+        return ops.ne(self, other)
+
+    def __gt__(self, other):
+        return ops.gt(self, other)
+
+    def __ge__(self, other):
+        return ops.ge(self, other)
+
+    def __and__(self, other):
+        return ops.bitwise_and(self, other)
+
+    def __or__(self, other):
+        return ops.bitwise_or(self, other)
+
+    def __xor__(self, other):
+        return ops.bitwise_xor(self, other)
+
+    def __invert__(self):
+        return ops.bitwise_not(self)
+
+    def __rshfit__(self, n):
+        return ops.bitwise_right_shift(self, n)
+
+    def __lshift__(self, n):
+        return ops.bitwise_left_shift(self, n)
+
 
 class OpsWrapper:
     """This wraps any returned IR values into an `OpsValue` instance, so that we
@@ -281,8 +285,6 @@ class OpsWrapper:
 
 ops = OpsWrapper()
 
-_MockHandler = MockHandler
-
 
 class _V:
     MockHandler = MockHandler
@@ -299,13 +301,13 @@ class _V:
     set_kernel_handler: Callable[[Any], Any] = _kernel._set_handler
     set_debug_handler: Callable[[Any], Any] = _debug._set_handler
     set_interpreter_handler: Callable[[Any], Any] = _interpreter._set_handler
-    set_aot_compilation: Callable[[Any], Any] = _aot_compilation._set_handler
+    set_aot_compilation: Callable[[bool], Any] = _aot_compilation._set_handler
     get_aot_compilation: Callable[[], Any] = _aot_compilation._get_handler
     set_current_node: Callable[[Any], Any] = _current_node._set_handler
     get_current_node: Callable[[], Any] = _current_node._get_handler
 
     @property
-    def ops(self) -> _MockHandler:
+    def ops(self) -> OpsHandler[Any]:
         """The operator handler specific to the current codegen task"""
         return _ops._get_handler()
 

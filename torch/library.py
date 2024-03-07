@@ -6,6 +6,7 @@ import weakref
 import functools
 import inspect
 import re
+import contextlib
 import sys
 
 __all__ = [
@@ -171,10 +172,27 @@ class Library:
         self._op_impls.add(key)
 
     def _destroy(self):
+        if self.m is not None:
+            self.m.reset()
         self.m = None
         for handle in self._registration_handles:
             handle.destroy()
         self._registration_handles.clear()
+        for name in self._op_defs:
+            # Delete the cached torch.ops.ns.foo if it was registered.
+            # Otherwise, accessing it leads to a segfault.
+            # It's possible that we only registered an overload in this Library
+            # and another library owns an alive overload.
+            # That's OK - the next time torch.ops.ns.foo gets called, it'll be
+            # recomputed to point at the right collection of overloads.
+            ns, name_with_overload = name.split("::")
+            name = name_with_overload.split(".")[0]
+            if not hasattr(torch.ops, ns):
+                continue
+            namespace = getattr(torch.ops, ns)
+            if not hasattr(namespace, name):
+                continue
+            delattr(namespace, name)
 
 
 def _del_library(captured_impls, op_impls, captured_defs, op_defs, registration_handles):
@@ -184,7 +202,16 @@ def _del_library(captured_impls, op_impls, captured_defs, op_defs, registration_
         handle.destroy()
 
 
-_keep_alive = []
+@contextlib.contextmanager
+def _scoped_library(*args, **kwargs):
+    try:
+        lib = Library(*args, **kwargs)
+        yield lib
+    finally:
+        lib._destroy()
+
+
+_keep_alive: List[Library] = []
 
 
 NAMELESS_SCHEMA = re.compile(r"\(.*\) -> .*")
@@ -467,20 +494,23 @@ def _check_pystubs_once(func, qualname, actual_module_name):
             op._schema.name,
             op._schema.overload_name)
         if not maybe_pystub:
+            namespace = op.namespace
+            cpp_filename = op._handle().debug()
             raise RuntimeError(
                 f"Operator '{qualname}' was defined in C++ and has a Python "
-                f"abstract impl. In this situation, it is required to have a "
-                f"C++ `m.impl_abstract_pystub` call, but we could not find one."
-                f"Please add a call to `m.impl_abstract_pystub(\"{actual_module_name}\");` "
-                f"to the C++ TORCH_LIBRARY block the operator was "
-                f"defined in.")
+                f"abstract impl. In this situation, we require there to also be a "
+                f"companion C++ `m.impl_abstract_pystub(\"{actual_module_name}\")` "
+                f"call, but we could not find one. Please add that to "
+                f"to the top of the C++ TORCH_LIBRARY({namespace}, ...) block the "
+                f"operator was registered in ({cpp_filename})")
         pystub_module = maybe_pystub[0]
         if actual_module_name != pystub_module:
+            cpp_filename = op._handle().debug()
             raise RuntimeError(
                 f"Operator '{qualname}' specified that its python abstract impl "
                 f"is in the Python module '{pystub_module}' but it was actually found "
                 f"in '{actual_module_name}'. Please either move the abstract impl "
-                f"or correct the m.impl_abstract_pystub call.")
+                f"or correct the m.impl_abstract_pystub call ({cpp_filename})")
         checked = True
         return func(*args, **kwargs)
     return inner

@@ -58,7 +58,7 @@ The following types define the planner interface used during checkpoint:
 .. autoclass:: torch.distributed.checkpoint.SavePlan
   :members:
 
-.. autoclass:: torch.distributed.checkpoint.WriteItem
+.. autoclass:: torch.distributed.checkpoint.planner.WriteItem
   :members:
 
 We provide a filesystem based storage layer:
@@ -94,4 +94,21 @@ an experimental feature and is subject to change.
 .. autofunction:: torch.distributed.checkpoint.state_dict.set_optimizer_state_dict
 
 .. autoclass:: torch.distributed.checkpoint.state_dict.StateDictOptions
+   :members:
+
+For users which are used to using and sharing models in the `torch.save` format, the following methods are provided which provide offline utilities for converting betweeing formats.
+
+.. automodule:: torch.distributed.checkpoint.format_utils
+
+.. currentmodule:: torch.distributed.checkpoint.format_utils
+
+.. autofunction:: dcp_to_torch_save
+.. autofunction:: torch_save_to_dcp
+
+The following classes can also be utilized for online loading and resharding of models from the torch.save format.
+
+.. autoclass:: torch.distributed.checkpoint.format_utils.BroadcastingTorchSaveReader
+   :members:
+
+.. autoclass:: torch.distributed.checkpoint.format_utils.DynamicMetaLoadPlanner
    :members:

@@ -6,6 +6,7 @@ from typing import List
 import random
 import unittest
 from unittest.mock import patch
+import contextlib
 import numpy as np
 import torch
 from torch._C import FileCheck
@@ -30,6 +31,7 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     _dynamo_dist_per_rank_init,
 )
+from torch.testing._internal.common_utils import requires_cuda
 import torch._dynamo.logging
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
@@ -267,6 +269,27 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
 
         opt_model = torch._dynamo.optimize("aot_eager")(model)
         opt_model()
+
+
+    @patch.object(config, "optimize_ddp", True)
+    def test_symbol_splitting(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight1 = nn.Parameter(torch.randn(512, 512))
+                self.weight2 = nn.Parameter(torch.randn(512, 512))
+
+            def forward(self, x):
+                x = torch.cat([x, x])
+                y = x @ self.weight1
+                z = x + y @ self.weight2
+                return z
+
+        model = Model()
+        model = FakeDDP(model)
+
+        opt_model = torch.compile(dynamic=True)(model)
+        opt_model(torch.randn(20, 512))
 
 
 # Are these tests failing?  Check and see if TestFakeDistributedSingleProc has a
@@ -525,6 +548,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
 
 @requires_nccl()
+@requires_cuda
 class TestSingleProc(DynamoDistributedSingleProcTestCase):
     """
     Test harness initializes dist process group.
@@ -662,9 +686,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
 
     @torch._inductor.config.patch({"layout_optimization": True, "keep_output_stride": False})
     @patch.object(config, "optimize_ddp", True)
-    @patch.object(config, "optimize_ddp_lazy_compile", True)
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    def test_graph_split_inductor_layout_optimizations(self):
+    def _test_graph_split_inductor_layout_optimizations_impl(self, context):
         assert config.optimize_ddp
         channel_dim = 512
         # channel dim must be > 64 for inductor to do layout optimization and use NHWC
@@ -689,16 +711,24 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             outputs = m(inputs)
             return m, inputs, outputs
 
-        m, inputs, correct_outputs = get_model()
-        ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
+        with context():
+            m, inputs, correct_outputs = get_model()
+            ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
 
-        @torch._dynamo.optimize("inductor")
-        def opt_fn(inputs):
-            return ddp_m(inputs)
+            @torch._dynamo.optimize("inductor")
+            def opt_fn(inputs):
+                return ddp_m(inputs)
 
-        opt_outputs = opt_fn(inputs)
-        self.assertTrue(same(correct_outputs, opt_outputs))
+            opt_outputs = opt_fn(inputs)
+            self.assertTrue(same(correct_outputs, opt_outputs))
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_graph_split_inductor_layout_optimizations_training(self):
+        self._test_graph_split_inductor_layout_optimizations_impl(contextlib.nullcontext)
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_graph_split_inductor_layout_optimizations_inference(self):
+        self._test_graph_split_inductor_layout_optimizations_impl(torch.no_grad)
 
     @patch.object(config, "optimize_ddp", True)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")

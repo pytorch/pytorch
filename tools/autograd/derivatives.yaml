@@ -1503,6 +1503,11 @@
   grad_output: grad.slice_symint(dim, start, end, step)
   result: auto_linear
 
+- name: slice_inverse(Tensor(a) self, Tensor src, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor(a)
+  self: grad.slice_symint(dim, start, end, step)
+  src: slice_scatter_symint(grad, zeros_like(self), dim, start, end, step)
+  result: auto_linear
+
 - name: slice_scatter(Tensor self, Tensor src, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor
   self: slice_scatter_symint(grad, zeros_like(src), dim, start, end, step)
   src: grad.slice_symint(dim, start, end, step)

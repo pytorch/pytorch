@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/onnx/onnx.h>
-#include <vector>
 
 namespace torch::autograd {
 

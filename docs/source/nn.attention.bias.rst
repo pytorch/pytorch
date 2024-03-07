@@ -10,7 +10,13 @@ torch.nn.attention.bias
 CausalBias
 ==========
 
-.. autoclass:: CausalBias
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classnoinheritance.rst
+
+    CausalBias
+
 
 .. autosummary::
     :toctree: generated

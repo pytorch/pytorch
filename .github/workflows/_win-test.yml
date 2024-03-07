@@ -25,7 +25,7 @@ on:
       timeout-minutes:
         required: false
         type: number
-        default: 300
+        default: 240
         description: |
           Set the maximum (in minutes) how long the workflow should take to finish
 
@@ -114,6 +114,10 @@ jobs:
         run: |
           tree /F C:\$Env:GITHUB_RUN_ID\build-results
 
+      - name: Download TD artifacts
+        continue-on-error: true
+        uses: ./.github/actions/download-td-artifacts
+
       - name: Get workflow job id
         id: get-job-id
         uses: ./.github/actions/get-workflow-job-id
@@ -132,14 +136,26 @@ jobs:
           test-matrix: ${{ inputs.test-matrix }}
           job-name: ${{ steps.get-job-id.outputs.job-name }}
 
+      - name: Set Test step time
+        id: test-timeout
+        shell: bash
+        env:
+          JOB_TIMEOUT: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
+        run: |
+          echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
+
       - name: Test
         id: test
         shell: bash
+        timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
         env:
           USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
           INSTALL_WINDOWS_SDK: 1
           PYTHON_VERSION: 3.8
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
+          VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
+          NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
+          NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
           VS_VERSION: "16.8.6"

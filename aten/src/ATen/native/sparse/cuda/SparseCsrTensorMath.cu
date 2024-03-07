@@ -45,8 +45,7 @@
 #include <thrust/for_each.h>
 #include <thrust/sequence.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -134,7 +133,7 @@ void convert_indices_from_csr_to_coo_cuda(const Tensor& indices, const Tensor& c
 } // namespace
 
 using namespace at::sparse_csr;
-// certain utiliy functions are usable from sparse COO.
+// certain utility functions are usable from sparse COO.
 using namespace at::sparse;
 
 Tensor& add_out_dense_sparse_compressed_cuda(
@@ -737,5 +736,4 @@ Tensor _sparse_csr_prod_cuda(const Tensor& input, IntArrayRef dims_to_reduce, bo
   return result;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

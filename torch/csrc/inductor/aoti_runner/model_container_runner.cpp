@@ -9,12 +9,12 @@ namespace torch::inductor {
 AOTIModelContainerRunner::AOTIModelContainerRunner(
     const std::string& model_so_path,
     size_t num_models,
-    bool is_cpu,
+    const std::string& device_str,
     const std::string& cubin_dir) {
   model_so_ = std::make_unique<at::DynamicLibrary>(model_so_path.c_str());
   TORCH_CHECK(model_so_, "Failed to load model: ", model_so_path);
   create_func_ = reinterpret_cast<decltype(create_func_)>(
-      model_so_->sym("AOTInductorModelContainerCreate"));
+      model_so_->sym("AOTInductorModelContainerCreateWithDevice"));
   delete_func_ = reinterpret_cast<decltype(delete_func_)>(
       model_so_->sym("AOTInductorModelContainerDelete"));
   get_num_outputs_func_ = reinterpret_cast<decltype(get_num_outputs_func_)>(
@@ -38,6 +38,8 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
       reinterpret_cast<decltype(update_inactive_constant_buffer_func_)>(
           model_so_->sym(
               "AOTInductorModelContainerUpdateInactiveConstantBuffer"));
+  run_const_fold_func_ = reinterpret_cast<decltype(run_const_fold_func_)>(
+      model_so_->sym("AOTInductorModelContainerRunConstantFolding"));
   swap_constant_buffer_func_ =
       reinterpret_cast<decltype(swap_constant_buffer_func_)>(
           model_so_->sym("AOTInductorModelContainerSwapConstantBuffer"));
@@ -47,7 +49,7 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
   AOTI_RUNTIME_ERROR_CODE_CHECK(create_func_(
       &container_handle_,
       num_models,
-      is_cpu,
+      device_str.c_str(),
       cubin_dir.empty() ? nullptr : cubin_dir.c_str()));
 }
 
@@ -134,6 +136,16 @@ void AOTIModelContainerRunner::update_inactive_constant_buffer(
     const TensorConstantMap& const_map) {
   AOTI_RUNTIME_ERROR_CODE_CHECK(update_inactive_constant_buffer_func_(
       container_handle_, (AOTInductorConstantMapHandle)&const_map));
+}
+
+void AOTIModelContainerRunner::run_const_fold(
+    bool use_inactive,
+    AOTInductorStreamHandle cuda_stream_handle) {
+  AOTI_RUNTIME_ERROR_CODE_CHECK(run_const_fold_func_(
+      container_handle_,
+      use_inactive,
+      cuda_stream_handle,
+      proxy_executor_handle_));
 }
 
 void AOTIModelContainerRunner::swap_constant_buffer() {

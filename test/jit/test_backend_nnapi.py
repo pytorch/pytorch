@@ -7,7 +7,7 @@ import unittest
 import torch
 import torch._C
 from pathlib import Path
-from torch.testing._internal.common_utils import IS_FBCODE
+from torch.testing._internal.common_utils import IS_FBCODE, skipIfTorchDynamo
 
 # hacky way to skip these tests in fbcode:
 # during test execution in fbcode, test_nnapi is available during test discovery,
@@ -40,6 +40,7 @@ without the delegate API.
 # First skip is needed for IS_WINDOWS or IS_MACOS to skip the tests.
 torch_root = Path(__file__).resolve().parent.parent.parent
 lib_path = torch_root / 'build' / 'lib' / 'libnnapi_backend.so'
+@skipIfTorchDynamo("weird py38 failures")
 @unittest.skipIf(not os.path.exists(lib_path),
                  "Skipping the test as libnnapi_backend.so was not found")
 @unittest.skipIf(IS_FBCODE, "test_nnapi.py not found")

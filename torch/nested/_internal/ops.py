@@ -7,6 +7,7 @@ from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
 
 from .nested_tensor import NestedTensor
 from typing import *  # noqa: F403
+import torch.nn.functional as F
 from torch.fx.operator_schemas import normalize_function
 
 __all__: List[Any] = []
@@ -21,14 +22,16 @@ def _outer_to_inner_dim(ndim, dim):
     return 0 if dim < 2 else dim - 1
 
 
-def _wrap_jagged_dim(ndim, dim, op_name, convert_to_inner_dim=True):
+def _wrap_jagged_dim(
+    ndim, dim, op_name, convert_to_inner_dim=True, allow_batch_dim=False
+):
     from torch._prims_common import canonicalize_dims
 
     wrapped = canonicalize_dims(ndim, dim)
-    if wrapped < 2:
-        raise RuntimeError(
-            f"{op_name}(): not supported for NestedTensor on dim=0 or dim=1"
-        )
+    if wrapped == 1:
+        raise RuntimeError(f"{op_name}(): not supported for NestedTensor on dim=1")
+    elif wrapped == 0 and not allow_batch_dim:
+        raise RuntimeError(f"{op_name}(): not supported for NestedTensor on dim=0")
     return _outer_to_inner_dim(ndim, wrapped) if convert_to_inner_dim else wrapped
 
 
@@ -191,10 +194,10 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
         # Assume there aren't additional tensors that aren't the "unary/binary" args
         num_tensor_args = sum([isinstance(x, torch.Tensor) for x in args])
         if num_tensor_args == 1:
-            check_schema("self: jt, ...", func, *args, **kwargs)
+            check_schema("self: jt_all, ...", func, *args, **kwargs)
             return functools.partial(jagged_unary_pointwise, func)
         elif num_tensor_args == 2:
-            check_schema("lhs: any, rhs: any", func, *args, **kwargs)
+            check_schema("lhs: any, rhs: any, ...", func, *args, **kwargs)
             return functools.partial(jagged_binary_pointwise, func)
 
     return None
@@ -204,6 +207,7 @@ def extract_kwargs(arg):
     kwargs = {
         "offsets": arg.offsets(),
         "_metadata_cache": arg._metadata_cache,
+        "_ragged_idx": arg._ragged_idx,
     }
     return kwargs
 
@@ -374,10 +378,6 @@ def is_contiguous_general(func, *args, **kwargs):
     if inp.lengths() is not None:
         return False
 
-    # If jagged dim is not 1 it's not contiguous
-    if inp._ragged_idx != 1:
-        return False
-
     new_kwargs["memory_format"] = new_kwargs.get(
         "memory_format", torch.contiguous_format
     )
@@ -424,7 +424,7 @@ def linear_backward_default(func, *args, **kwargs):
     return (ds, dw, db)
 
 
-@register_jagged_func(torch.ops.aten._to_copy.default, "self: jt")
+@register_jagged_func(torch.ops.aten._to_copy.default, "self: jt_all")
 def to_copy_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -441,12 +441,13 @@ def to_copy_default(func, *args, **kwargs):
 
 register_jagged_func(
     [
+        torch.ops.aten.empty_like.default,
         torch.ops.aten.ones_like.default,
         torch.ops.aten.zeros_like.default,
         torch.ops.aten.randn_like.default,
         torch.ops.aten.detach.default,
     ],
-    "self: jt",
+    "self: jt_all",
 )(jagged_unary_pointwise)
 
 
@@ -550,12 +551,38 @@ def chunk_default(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
 
-    new_kwargs["dim"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim"], "chunk")
+    new_kwargs["dim"] = _wrap_jagged_dim(
+        inp.dim(), new_kwargs["dim"], "chunk", allow_batch_dim=True
+    )
 
-    return [
-        NestedTensor(values=x, **extract_kwargs(inp))
-        for x in func(inp._values, **new_kwargs)
-    ]
+    if new_kwargs["dim"] == 0:
+        chunks = new_kwargs["chunks"]
+        dim0_size = inp._size[0]
+        chunk_size = math.ceil(dim0_size / chunks)
+
+        # get _offsets of the chunks
+        lengths = inp._offsets.diff()
+        chunked_lengths = lengths.chunk(chunks)
+        chunked_offsets = [torch.cumsum(x, dim=0) for x in chunked_lengths]
+        chunked_offsets = [F.pad(x, (1, 0), value=0) for x in chunked_offsets]
+        nested_kwargs = [
+            {"offsets": per_offsets, "_ragged_idx": inp._ragged_idx}
+            for per_offsets in chunked_offsets
+        ]
+
+        # get _values of the chunks
+        split_sizes = [x.sum().item() for x in chunked_lengths]
+        chunk_values = inp._values.split(split_sizes)
+
+        return [
+            NestedTensor(values=chunk_values[i], **(nested_kwargs[i]))
+            for i in range(0, chunk_size)
+        ]
+    else:
+        return [
+            NestedTensor(values=x, **extract_kwargs(inp))
+            for x in func(inp._values, **new_kwargs)
+        ]
 
 
 @register_jagged_func(torch.ops.aten.unbind.int, "self: jt_all, dim: any?")
@@ -731,7 +758,9 @@ def is_pinned_default(func, *args, **kwargs):
     return func(inp._values, **new_kwargs)
 
 
-@register_jagged_func(torch.ops.aten.is_same_size.default, "self: jt, other: jt")
+@register_jagged_func(
+    torch.ops.aten.is_same_size.default, "self: jt_all, other: jt_all"
+)
 def is_same_size_default(func, *args, **kwargs):
     return args[0]._size == args[1]._size
 
@@ -791,13 +820,14 @@ def transpose_int(func, *args, **kwargs):
             to_dim = dim1
         else:
             to_dim = dim0
+        inp_kwargs = extract_kwargs(inp)
+        inp_kwargs["_ragged_idx"] = to_dim
         return NestedTensor(
             inp.values().transpose(
                 _outer_to_inner_dim(len(inp._size), dim0),
                 _outer_to_inner_dim(len(inp._size), dim1),
             ),
-            **extract_kwargs(inp),
-            _ragged_idx=to_dim,
+            **inp_kwargs,
         )
 
     new_kwargs["dim0"] = _wrap_jagged_dim(inp.dim(), new_kwargs["dim0"], "transpose")
@@ -806,7 +836,10 @@ def transpose_int(func, *args, **kwargs):
     return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(inp))
 
 
-@register_jagged_func(torch.ops.aten.view.default, "self: jt, size: any")
+@register_jagged_func(
+    [torch.ops.aten.view.default, torch.ops.aten._unsafe_view.default],
+    "self: jt_all, size: any",
+)
 def view_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -815,12 +848,40 @@ def view_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     size = new_kwargs.pop("size")
 
+    if inp._ragged_idx != 1 and tuple(inp._size) != tuple(size):
+        raise RuntimeError(
+            f"view(): does not support ragged_idx != 1 except when inp._size == size. "
+            f"inp._size is ({inp._size}) and size is ({size})."
+        )
+
     # Ensure specified size still includes batch and ragged dims
     if len(size) < 3 or not raggedness_matches(inp, size):
         raise RuntimeError(f"view(): cannot view shape {inp._size} as {size}")
 
-    jagged_size = [inp._values.shape[0]] + size[2:]
-    return NestedTensor(func(inp._values, jagged_size), **extract_kwargs(inp))
+    # outer size: the size of the NT, e.g. [3, j0, 10]
+    # inner size: the size of the values, e.g. [8, 10] (e.g. for offsets = [0, 3, 5, 8])
+    # this function gets inner_size[inner_idx] for a given inner_idx.
+    #
+    # example: for outer size [a, b, c, j0, d, e, f]
+    #                         assume that j0 is ragged, other are concrete integers
+    #                         and ragged_idx=3
+    # inner size will be      [b, c, inp._values.size(ragged_idx), d, e, f]
+    # therefore:
+    #    inner_size[0] = outer_size[1]
+    #    inner_size[1] = outer_size[2]
+    #    inner_size[0] = inp._values.size(ragged_idx - 1)
+    #    inner_size[3] = outer_size[4]
+    #    inner_size[4] = outer_size[5]
+    def get_inner_size(inner_idx):
+        nonlocal inp, size
+        if inner_idx == inp._ragged_idx - 1:
+            return inp._values.size(inner_idx)
+        else:
+            return size[inner_idx + 1]
+
+    inner_size = [get_inner_size(i) for i in range(len(size) - 1)]
+
+    return NestedTensor(func(inp._values, inner_size), **extract_kwargs(inp))
 
 
 @register_jagged_func(

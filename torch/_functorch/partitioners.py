@@ -1,8 +1,11 @@
+# mypy: ignore-errors
+
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     hint_int, free_symbols, is_symbol_binding_fx_node, find_symbol_binding_fx_nodes
 )
+from torch.fx.experimental._backward_state import BackwardState
 import torch
 import torch.fx as fx
 import operator
@@ -18,6 +21,7 @@ from typing import List, Optional, Set, Tuple, Union
 from .compile_utils import fx_graph_cse, get_aten_target
 from . import config
 import functools
+
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
 
@@ -122,6 +126,9 @@ def _is_bwd_seed_offset(node):
 def _is_fwd_seed_offset(node):
     return node.op == "placeholder" and ("fwd_seed" in node.target or "fwd_base_offset" in node.target)
 
+def _is_backward_state(node):
+    return node.op == "placeholder" and isinstance(node.meta.get("val"), BackwardState)
+
 
 def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule, *, num_fwd_outputs):
     outputs = pytree.arg_tree_leaves(*(node.args for node in joint_module.graph.nodes if node.op == 'output'))
@@ -130,38 +137,49 @@ def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule, *, num_fwd_outputs):
     return fwd_outputs, bwd_outputs
 
 
+def _remove_by_name(saved_values, name):
+    for saved_value in saved_values:
+        if saved_value.name == name:
+            saved_values.remove(saved_value)
+            break
+
+def _placeholders(nodes):
+    # Avoid making an entire pass over the graph if we only care about the input placeholders
+    result = []
+    for node in nodes:
+        if node.op == 'placeholder':
+            result.append(node)
+        else:
+            break  # placeholders are all at the start of graph
+    return result
+
+
 def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_sym_nodes, *, num_fwd_outputs):
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
-    primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
-    tangent_inputs = list(filter(_is_tangent, joint_module.graph.nodes))
-    fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
-    bwd_seed_offset_inputs = list(filter(_is_bwd_seed_offset, joint_module.graph.nodes))
+    placeholders = _placeholders(joint_module.graph.nodes)
+    primal_inputs = [*filter(_is_primal, placeholders)]
+    tangent_inputs = [*filter(_is_tangent, placeholders)]
+    fwd_seed_offset_inputs = [*filter(_is_fwd_seed_offset, placeholders)]
+    bwd_seed_offset_inputs = [*filter(_is_bwd_seed_offset, placeholders)]
+    backward_state_inputs = [*filter(_is_backward_state, placeholders)]
 
-    # Construct the forward module
-    # Keep symints separate from tensors, passed between fwd/bwd graphs, and in the right order.
-    fwd_graph = _extract_graph_with_inputs_outputs(
-        joint_module.graph,
-        primal_inputs + fwd_seed_offset_inputs,
-        fwd_outputs + saved_values + saved_sym_nodes
-    )
     bwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
         saved_sym_nodes + saved_values + tangent_inputs + bwd_seed_offset_inputs,
         bwd_outputs
     )
 
-    # This is to filter out saved values that don't actually end up being used by the backwards pass
-    for node in bwd_graph.nodes:
-        if node.op == 'placeholder' and not node.users:
-            for saved_value in saved_values:
-                if saved_value.name == node.name:
-                    saved_values.remove(saved_value)
-                    break
+    for node in _placeholders(bwd_graph.nodes):
+        assert node.op == 'placeholder'
+        # This is to filter out saved values that don't actually end up being used by the backwards pass
+        if not node.users:
+            _remove_by_name(saved_values, node.name)
+            _remove_by_name(saved_sym_nodes, node.name)
+        elif _is_backward_state(node):
+            # BackwardState is saved directly
+            _remove_by_name(saved_values, node.name)
+            assert backward_state_inputs
 
-            for saved_sym in saved_sym_nodes:
-                if saved_sym.name == node.name:
-                    saved_sym_nodes.remove(saved_sym)
-                    break
 
     # Now that we have the finalized list of saved values, we need to ensure
     # we propagate all symbols which are referenced by backwards inputs.
@@ -214,12 +232,12 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
     )
     bwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
-        saved_sym_nodes + saved_values + tangent_inputs + bwd_seed_offset_inputs,
+        saved_sym_nodes + saved_values + tangent_inputs + bwd_seed_offset_inputs + backward_state_inputs,
         bwd_outputs
     )
 
-    fwd_module = fx.GraphModule(joint_module, fwd_graph)
-    bwd_module = fx.GraphModule(joint_module, bwd_graph)
+    fwd_module = fx._lazy_graph_module._make_graph_module(joint_module, fwd_graph)
+    bwd_module = fx._lazy_graph_module._make_graph_module(joint_module, bwd_graph)
     return fwd_module, bwd_module
 
 
@@ -289,8 +307,8 @@ def default_partition(
                 saved_sym_nodes.extend(backward_usages)
             else:
                 saved_values.append(node)
-    saved_values = list({k: None for k in saved_values}.keys())
-    saved_sym_nodes = list({k: None for k in saved_sym_nodes}.keys())
+    saved_values = list(dict.fromkeys(saved_values).keys())
+    saved_sym_nodes = list(dict.fromkeys(saved_sym_nodes).keys())
 
     return _extract_fwd_bwd_modules(joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
 
@@ -690,9 +708,9 @@ def min_cut_rematerialization_partition(
                              if node.op != 'output'}
         unclaimed_nodes = {node for node in joint_module.graph.nodes
                            if node not in required_fw_nodes and node not in required_bw_nodes}
-        return fwd_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes
+        return fwd_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes, inputs
 
-    orig_fw_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes = classify_nodes(joint_module)
+    orig_fw_outputs, required_fw_nodes, required_bw_nodes, unclaimed_nodes, inputs = classify_nodes(joint_module)
 
     # networkx blows up on graphs with no required backward nodes
     # Since there's nothing to partition anyway, and the default partitioner can "handle"
@@ -748,12 +766,6 @@ def min_cut_rematerialization_partition(
         print("Ops banned from rematerialization: ", ops_ignored)
         print()
 
-    # `AGGRESSIVE_RECOMPUTATION` is a mode that recomputes everything except
-    # random ops and compute-intensive ops.
-    # It's an internal-only debug mode and is not related to user-facing
-    # (selective) activation checkpointing.
-    AGGRESSIVE_RECOMPUTATION = False
-
     def is_materialized_backwards(node):
         cur_nodes = {node}
         while len(cur_nodes) > 0:
@@ -769,7 +781,7 @@ def min_cut_rematerialization_partition(
     def ban_recomputation(node):
         if "recompute" in node.meta:
             return node.meta["recompute"] == 0
-        elif AGGRESSIVE_RECOMPUTATION:
+        elif config.aggressive_recomputation:
             ignored_ops = random_ops + compute_intensive_ops
             return (node.op == 'call_function' and get_aten_target(node) in ignored_ops)
         else:
@@ -838,8 +850,18 @@ def min_cut_rematerialization_partition(
             continue
 
         if node in required_bw_nodes:
-            nx_graph.add_edge(node.name + "_in", "sink", capacity=math.inf)
-            continue
+            if node not in inputs:
+                nx_graph.add_edge(node.name + "_in", "sink", capacity=math.inf)
+                continue
+            # If someone saves a input for backward as-is and backward
+            # returns that tensor as-is as a grad input, then the node x would
+            # be both a required_bw_node and an input. In this case we
+            # (1) connect x_in to to the source, (2) x_out to the sink, and
+            # (3) assign the proper weight to the x_in-x_out edge, so that
+            # x would be part of cut nodes. A case where this happens is if
+            # NestedTensor saves a offset tensor as part of the singleton int
+            # in sizes.
+            nx_graph.add_edge(node.name + "_out", "sink", capacity=math.inf)
 
         if _is_primal(node) or _is_fwd_seed_offset(node):
             nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
@@ -857,7 +879,7 @@ def min_cut_rematerialization_partition(
         if is_sym_node(node):
             weight = sym_node_size(node)
         elif is_non_tensor_node:
-            weight = math.inf
+            weight = 0 if isinstance(node.meta.get("val"), BackwardState) else math.inf
         else:
             weight = get_node_weight(node)
 

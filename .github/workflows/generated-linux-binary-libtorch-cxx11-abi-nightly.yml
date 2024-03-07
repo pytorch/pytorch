@@ -4,6 +4,7 @@
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: linux-binary-libtorch-cxx11-abi
 
+
 on:
   push:
     # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
@@ -76,6 +77,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cpu-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
     needs: libtorch-cpu-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -91,8 +95,6 @@ jobs:
       build_name: libtorch-cpu-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -139,6 +141,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cuda11_8-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
     needs: libtorch-cuda11_8-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -155,8 +160,6 @@ jobs:
       build_name: libtorch-cuda11_8-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -203,6 +206,9 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
   libtorch-cuda12_1-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
     needs: libtorch-cuda12_1-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -219,8 +225,6 @@ jobs:
       build_name: libtorch-cuda12_1-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -308,6 +312,9 @@ jobs:
         uses: ./.github/actions/teardown-rocm
   libtorch-rocm5_7-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
     needs: libtorch-rocm5_7-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -324,8 +331,6 @@ jobs:
       build_name: libtorch-rocm5_7-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
@@ -413,6 +418,9 @@ jobs:
         uses: ./.github/actions/teardown-rocm
   libtorch-rocm6_0-shared-with-deps-cxx11-abi-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
     needs: libtorch-rocm6_0-shared-with-deps-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
@@ -429,8 +437,6 @@ jobs:
       build_name: libtorch-rocm6_0-shared-with-deps-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-      aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-      aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml

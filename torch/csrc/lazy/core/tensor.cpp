@@ -358,8 +358,8 @@ LazyTensorPtr TryGetLtcTensor(const at::Tensor& tensor) {
 
 LazyTensorPtr GetLtcTensor(const at::Tensor& tensor) {
   auto lazy_tensor = TryGetLtcTensor(tensor);
-  CHECK(lazy_tensor) << "Input tensor is not a lazy tensor: "
-                     << tensor.toString();
+  TORCH_CHECK(
+      lazy_tensor, "Input tensor is not a lazy tensor: ", tensor.toString());
   return lazy_tensor;
 }
 

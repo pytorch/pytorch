@@ -573,6 +573,7 @@ class X86InductorQuantizer(Quantizer):
         unary_patterns = [
             [torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU],
             [torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.Hardtanh],
+            [torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.Hardswish],
             [torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU6],
         ]
         for unary_pattern in unary_patterns:
@@ -751,6 +752,7 @@ class X86InductorQuantizer(Quantizer):
         unary_patterns = [
             [torch.nn.Conv2d, torch.nn.ReLU],
             [torch.nn.Conv2d, torch.nn.Hardtanh],
+            [torch.nn.Conv2d, torch.nn.Hardswish],
             [torch.nn.Conv2d, torch.nn.ReLU6],
         ]
         for unary_pattern in unary_patterns:

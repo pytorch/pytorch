@@ -172,7 +172,7 @@ struct TORCH_API ExecutionTraceObserver {
   enum class RunState { uninitialized, disabled, enabled };
 
   // Mutex for multithreaded access to the shared containers.
-  std::mutex g_mutex{};
+  std::recursive_mutex g_mutex{};
   // Stream to write output JSON.
   std::ofstream out{};
 
@@ -449,7 +449,7 @@ static void recordOperatorStart(
   auto tid = fn.threadId();
 
   try {
-    const std::lock_guard<std::mutex> lock(ob.g_mutex);
+    const std::lock_guard<std::recursive_mutex> lock(ob.g_mutex);
 
     // if current thread stack is empty, push the root node to the stack first
     if (ob.op_stack[tid].empty()) {
@@ -583,7 +583,7 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
     std::vector<std::string> output_shapes;
     std::vector<std::string> output_values;
     try {
-      const std::lock_guard<std::mutex> lock(ob->g_mutex);
+      const std::lock_guard<std::recursive_mutex> lock(ob->g_mutex);
       // remove current op id from stack
 
       ob->op_stack[fn.threadId()].pop();
@@ -679,7 +679,7 @@ void removeExecutionTraceObserver() {
 }
 
 void enableExecutionTraceObserver() {
-  VLOG(1) << "enableExecutionTraceObserver() ";
+  LOG(WARNING) << "Enabling Execution Trace Observer";
   auto& ob = *ObserverManager::get();
   // Make sure we are not already enabled.
   if (ob.getState() == ExecutionTraceObserver::RunState::enabled) {
@@ -691,7 +691,7 @@ void enableExecutionTraceObserver() {
 }
 
 void disableExecutionTraceObserver() {
-  VLOG(1) << "disableExecutionTraceObserver()";
+  LOG(WARNING) << "Disabling Execution Trace Observer";
   auto& ob = *ObserverManager::get();
   if (ob.getState() != ExecutionTraceObserver::RunState::disabled) {
     ob.setState(ExecutionTraceObserver::RunState::disabled);

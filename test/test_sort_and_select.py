@@ -137,6 +137,13 @@ class TestSortAndSelect(TestCase):
             self.assertIsOrdered('descending', x, res2val, res2ind,
                                  'random with NaNs')
 
+    def test_sort_stable_none(self):
+        # Called sort with stable=None used to trigger an assertion
+        # See https://github.com/pytorch/pytorch/issues/117255
+        x = torch.ones(10)
+        y = x.sort(stable=None).values
+        self.assertTrue(torch.all(y == torch.ones(10)).item())
+
     @onlyCUDA
     def test_sort_large_slice(self, device):
         # tests direct cub path

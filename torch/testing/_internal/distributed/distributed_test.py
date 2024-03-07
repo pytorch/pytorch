@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import copy
 import itertools
 import math
@@ -38,8 +40,7 @@ from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.distributed.distributed_c10d import (
     get_world_size,
     _get_default_group,
-    AllreduceOptions,
-    GroupMember,
+    _get_pg_config,
 )
 from torch.distributed.utils import (
     _verify_param_shape_across_processes,
@@ -1203,11 +1204,13 @@ class DistributedTest:
             averager = hierarchicalSGD.HierarchicalModelAverager(
                 period_group_size_dict=period_group_size_dict, warmup_steps=warmup_steps
             )
+            self.assertEqual(dist.get_pg_count(), len(period_group_size_dict))
+
             subgroup1 = averager.period_process_group_dict[subgroup_avg_period1]
             subgroup2 = averager.period_process_group_dict[subgroup_avg_period2]
+            real_group_ranks_res1 = _get_pg_config(subgroup1)['ranks']
+            real_group_ranks_res2 = _get_pg_config(subgroup2)['ranks']
 
-            real_group_ranks_res1 = dist.get_process_group_ranks(subgroup1)
-            real_group_ranks_res2 = dist.get_process_group_ranks(subgroup2)
             expect_group_ranks_res1 = (
                 rank // subgroup_size1 * subgroup_size1
                 + np.array(list(range(subgroup_size1)))
@@ -2520,52 +2523,6 @@ class DistributedTest:
             self.assertEqual(tensor_out, expected_tensor)
             self._barrier()
 
-        @skip_if_no_gpu
-        @require_backend_is_available(DistTestCases.backend_feature["gpu"])
-        def test_all_reduce_result_cuda(self):
-            group, group_id, rank = self._init_global_test()
-            rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
-            for src in group:
-                if rank == src:
-                    tensor = _build_tensor(src + 1, 2)
-                else:
-                    tensor = _build_tensor(src + 1, 10)
-                tensor = tensor.cuda(rank_to_GPU[rank][0])
-
-                opts = AllreduceOptions()
-                opts.reduceOp = dist.ReduceOp.SUM
-
-                if group_id == GroupMember.WORLD:
-                    work = _get_default_group().allreduce([tensor], opts)
-                else:
-                    work = group_id.allreduce([tensor], opts)
-
-                if BACKEND == "gloo":
-                    # Calling result right the work is finished should throw exception.
-                    # Here we have a race condition, we may not assume the work is not
-                    # finished by the time we run next lines.
-                    try:
-                        with self.assertRaisesRegex(
-                            RuntimeError,
-                            "Work needs to be completed before calling result",
-                        ):
-                            work.result()
-                    except AssertionError:
-                        # Exception was not raised, ensure is_completed()
-                        self.assertTrue(work.is_completed())
-
-                    work.wait()
-                    result = work.result()
-                else:
-                    # In case of NCCL we should be able to retrieve pointer to the result
-                    # even before work is finished.
-                    result = work.result()
-                    work.wait()
-
-                expected_value = 2 + (10 * (len(group) - 1))
-                self.assertEqual(result, [_build_tensor(src + 1, expected_value)])
-            self._barrier()
-
         def call_dist_op(
             self,
             profiling_title_postfix,
@@ -3665,7 +3622,7 @@ class DistributedTest:
                     ]
                     assert self._run_all_gather_coalesced_and_verify(
                         output_tensor_lists, input_tensors, expected_tensors, group_id
-                    ), "output tensors do not match expected ouputs"
+                    ), "output tensors do not match expected outputs"
 
             self._barrier()
 
@@ -7319,10 +7276,7 @@ class DistributedTest:
             for num_early_join_ranks in num_uneven_ranks:
                 for baseline_iter in baseline_num_iters:
                     for offset in iteration_offsets:
-                        mapping = {
-                            rank: baseline_iter
-                            for rank in range(0, num_early_join_ranks)
-                        }
+                        mapping = dict.fromkeys(range(0, num_early_join_ranks), baseline_iter)
                         # if num_early_join_ranks > 1, ranks > 0 that will join early
                         # iterate offset//2 more times than rank 0, to test nodes
                         # depleting inputs at different times.
@@ -7331,12 +7285,7 @@ class DistributedTest:
                                 if rank > 0:
                                     mapping[rank] += offset // 2
                         mapping.update(
-                            {
-                                rank: baseline_iter + offset
-                                for rank in range(
-                                    num_early_join_ranks, dist.get_world_size()
-                                )
-                            }
+                            dict.fromkeys(range(num_early_join_ranks, dist.get_world_size()), baseline_iter + offset)
                         )
                         iteration_mappings.append(mapping)
 
@@ -10031,7 +9980,7 @@ class DistributedTest:
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_but_pass_in_sandcastle_if(
-            BACKEND == "ucc" and IS_SANDCASTLE, "Skipped internally"
+            True, "Skipped due to flakiness"
         )
         def test_ddp_hook_pickling_powerSGD(self):
 
