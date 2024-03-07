@@ -566,7 +566,7 @@ for name in dir(_C):
                 # TODO: fix their module from C++ side
                 skip_list = [
                     'DisableTorchFunctionSubclass',
-                    'DisableTorchFunctionNonInfraSubclass',
+                    '_DisableTorchFunctionNonInfraSubclass',
                     'DisableTorchFunction',
                     'Generator'
                 ]

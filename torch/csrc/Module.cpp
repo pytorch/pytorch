@@ -2106,8 +2106,8 @@ Call this whenever a new thread is created in order to propagate values from
       (PyObject*)THPModule_DisableTorchFunctionSubclassType(),
       /* incref= */ false));
   ASSERT_TRUE(set_module_attr(
-      "DisableTorchFunctionNonInfraSubclass",
-      (PyObject*)THPModule_DisableTorchFunctionNonInfraSubclassType(),
+      "_DisableTorchFunctionNonInfraSubclass",
+      (PyObject*)THPModule__DisableTorchFunctionNonInfraSubclassType(),
       /* incref= */ false));
   ASSERT_TRUE(set_module_attr(
       "DisableTorchFunction",
