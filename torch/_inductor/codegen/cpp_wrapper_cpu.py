@@ -1750,6 +1750,9 @@ class CppWrapperCpu(WrapperCodeGen):
 
         self.extern_call_ops.add(cpp_kernel_key)
 
+    def generate_reset_kernel_saved_flags(self):
+        pass
+
     def generate_save_uncompiled_kernels(self):
         pass
 

@@ -725,6 +725,9 @@ class WrapperCodeGen(CodeGen):
             else:
                 self.memory_plan_reuse()
 
+            if config.triton.store_cubin:
+                self.generate_reset_kernel_saved_flags()
+
             for line in self.lines:
                 if isinstance(line, WrapperLine):
                     line.codegen(self.wrapper_call)
@@ -1220,6 +1223,15 @@ class WrapperCodeGen(CodeGen):
     def generate_end_graph(self):
         self.wrapper_call.writeline("end_graph()")
 
+    def generate_reset_kernel_saved_flags(self):
+        self.wrapper_call.splice(
+            """
+            for kernel in globals().values():
+                if isinstance(kernel, torch._inductor.triton_heuristics.CachingAutotuner):
+                    kernel.cuda_kernel_saved = False
+            """
+        )
+
     def generate_save_uncompiled_kernels(self):
         """
         Precompile and save the CUBINs of the Triton kernels that haven't
@@ -1233,7 +1245,7 @@ class WrapperCodeGen(CodeGen):
         """
         self.wrapper_call.splice(
             """
-            for name, kernel in globals().items():
+            for kernel in globals().values():
                 if isinstance(kernel, torch._inductor.triton_heuristics.CachingAutotuner):
                     if not kernel.cuda_kernel_saved:
                         if len(kernel.launchers) == 0:
