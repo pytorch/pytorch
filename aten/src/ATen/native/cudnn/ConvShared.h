@@ -6,10 +6,6 @@
 #include <ATen/cudnn/cudnn-wrapper.h>
 #include <ATen/native/ConvUtils.h>
 
-#if CUDNN_VERSION < 8000
-#define AT_CUDNN_CONV_BIAS_RELU_FALLBACK
-#endif
-
 namespace at {
 namespace native {
 
