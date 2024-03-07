@@ -228,16 +228,6 @@ def _transfer_attrs(fr, to):
         ):
             setattr(to, attr_name, attr_val)
 
-def _unique_name(root, name_prefix: str) -> str:
-    i = 0
-    while True:
-        name = f"{name_prefix}{i}"
-        if not hasattr(root, name):
-            break
-        i += 1
-    return name
-
-
 
 @compatibility(is_backward_compatible=True)
 class Tracer(TracerBase):
@@ -376,30 +366,22 @@ class Tracer(TracerBase):
         # a get_attr to retrieve that tensor. Otherwise, we'll store away the
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
-        if isinstance(a, torch.Tensor):
+        if isinstance(a, (torch.Tensor, ScriptObject)):
             qualname: Optional[str] = self.tensor_attrs.get(a)
 
             # Tensor was not found in the Module hierarchy, stow it away in a
             # special attribute and set the qualname to refer to that
             if not qualname:
-                qualname = _unique_name(self.root, "_tensor_constant")
+                i = 0
+                while True:
+                    qualname = f"_tensor_constant{i}"
+                    if not hasattr(self.root, qualname):
+                        break
+                    i += 1
                 self.tensor_attrs[a] = qualname
                 setattr(self.root, qualname, a)
 
             return self.create_node("get_attr", qualname, (), {})
-
-        # We treat ScriptObjects in a similar way as tensor constants and
-        # store it as an attribute on the Module and retrieve it with a get_attr
-        if isinstance(a, ScriptObject):
-            script_obj_qualname: Optional[str] = self.tensor_attrs.get(a)
-
-            fake_obj = a
-            if not script_obj_qualname:
-                script_obj_qualname = _unique_name(self.root, "_script_obj")
-                self.tensor_attrs[fake_obj] = script_obj_qualname
-                setattr(self.root, script_obj_qualname, fake_obj)
-
-            return self.create_node("get_attr", script_obj_qualname, (), {})
 
         if type(a) in _proxyable_classes:
             # This is an instance of a proxyable class for which we did not

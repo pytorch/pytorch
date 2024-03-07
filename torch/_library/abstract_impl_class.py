@@ -113,7 +113,6 @@ def impl_abstract_class(qualname, fake_class=None):
     """
 
     def inner(fake_class):
-        global global_abstract_class_registry
         ns, name = parse_namespace(qualname)
 
         # Check whether the refered torch::class_ exists.
@@ -139,7 +138,6 @@ def impl_abstract_class(qualname, fake_class=None):
 
 
 def deregister_abstract_impl(qualname):
-    global global_abstract_class_registry
     return global_abstract_class_registry.deregister(_full_qual_class_name(qualname))
 
 

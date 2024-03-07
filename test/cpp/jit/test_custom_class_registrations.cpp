@@ -459,11 +459,6 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
   m.class_<ContainsTensor>("_ContainsTensor")
       .def(torch::init<at::Tensor>())
       .def("get", &ContainsTensor::get)
-      .def_meta(
-          // __getstate__
-          [](const c10::intrusive_ptr<ContainsTensor>& self) -> at::Tensor {
-            return self->t_;
-          })
       .def_pickle(
           // __getstate__
           [](const c10::intrusive_ptr<ContainsTensor>& self) -> at::Tensor {

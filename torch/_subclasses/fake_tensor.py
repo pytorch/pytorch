@@ -816,12 +816,6 @@ def _fakify_script_object(x):
     splits = full_qualname.split(".")
     assert len(splits) == 5, breakpoint()
     _torch, torch_ns, classes, ns, class_name = splits
-    if not hasattr(x, "__get_metadata__"):
-        raise RuntimeError(
-            f"Trying to fakify ScriptObject {full_qualname} "
-            f" but the script object doesn't have a __get_metadata__ method. "
-            f" Please add a __get_metadata__ method to the script object with .def_meta()."
-        )
 
     fake_class = torch._library.abstract_impl_class.find_fake_impl(full_qualname)
     if fake_class is None:
