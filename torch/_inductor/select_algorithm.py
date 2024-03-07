@@ -28,7 +28,13 @@ from .codegen.common import (
     KernelTemplate,
     PrimitiveInfoType,
 )
-from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
+from .codegen.triton import (
+    gen_common_triton_imports,
+    texpr,
+    TritonKernel,
+    TritonPrinter,
+    TritonScheduling,
+)
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
 from .utils import (
