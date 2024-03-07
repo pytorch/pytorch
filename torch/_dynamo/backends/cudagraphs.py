@@ -2,7 +2,6 @@
 
 import functools
 import operator
-import warnings
 from collections import defaultdict
 from typing import Dict, List, Optional
 
