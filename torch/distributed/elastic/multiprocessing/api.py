@@ -200,12 +200,12 @@ class LogsSpecs(ABC):
 
     def __init__(
         self,
-        log_dir: Optional[str] = os.devnull,
+        log_dir: Optional[str] = None,
         redirects: Union[Std, Dict[int, Std]] = Std.NONE,
         tee: Union[Std, Dict[int, Std]] = Std.NONE,
         local_ranks_filter: Optional[Set[int]] = None,
     ) -> None:
-        self._root_log_dir = log_dir or os.devnull
+        self._root_log_dir = log_dir
         self._redirects = redirects
         self._tee = tee
         self._local_ranks_filter = local_ranks_filter
@@ -229,36 +229,31 @@ class DefaultLogsSpecs(LogsSpecs):
     """
     Default LogsSpecs implementation:
 
-    - `log_dir` will be created if it doesn't exist and it is not set to `os.devnull`
+    - `log_dir` will be created if it doesn't exist
     - Generates nested folders for each attempt and rank.
     """
     def __init__(
         self,
-        log_dir: Optional[str] = os.devnull,
+        log_dir: Optional[str] = None,
         redirects: Union[Std, Dict[int, Std]] = Std.NONE,
         tee: Union[Std, Dict[int, Std]] = Std.NONE,
         local_ranks_filter: Optional[Set[int]] = None,
     ) -> None:
-
-        log_dir = log_dir or os.devnull
-
         if log_dir != os.devnull:
-            if not os.path.exists(log_dir):
+            if not log_dir:
+                log_dir = tempfile.mkdtemp(prefix="torchelastic_")
+            elif not os.path.exists(log_dir):
                 os.makedirs(log_dir)
             else:
                 if os.path.isfile(log_dir):
                     raise NotADirectoryError(f"log_dir: {log_dir} is a file")
-                if os.listdir(log_dir):
-                    raise RuntimeError(
-                        f"log_dir: {log_dir} is not empty, please provide an empty log_dir"
-                    )
         super().__init__(log_dir, redirects, tee, local_ranks_filter)
         # initialized only once
         self._run_log_dir = None
 
     @property
     def root_log_dir(self) -> str:
-        return self._root_log_dir
+        return str(self._root_log_dir)
 
     def _make_log_dir(self, log_dir: Optional[str], rdzv_run_id: str):
         base_log_dir = log_dir or tempfile.mkdtemp(prefix="torchelastic_")
