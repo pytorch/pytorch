@@ -3762,28 +3762,6 @@ class CppScheduling(BaseScheduling):
                     # If any node in __nodes is ancestors node for one of _lazy_nodes_list's
                     if node2.get_names() & node1.ancestors:
                         return False
-                    # TODO <Leslie> Further investigation is required to determine if
-                    # the below 2 checkers are necessary in practice
-                    if isinstance(node2._body, ir.LoopBody):
-                        if any(
-                            (
-                                node2_used_buf in self.scheduler.mutation_renames
-                                and node1.has_atomic_add(
-                                    self.scheduler.mutation_renames[node2_used_buf]
-                                )
-                            )
-                            for node2_used_buf in node2._body.reads_name2expr.keys()
-                        ):
-                            return False
-                    if node2.is_template() or (
-                        node1.is_template()
-                        and (
-                            node2.has_aliasing_or_mutation()
-                            or node2.is_reduction()
-                            or not config.epilogue_fusion
-                        )
-                    ):
-                        return False
 
                 # Step 2:
                 # Check the fusibility between last nodes of _lazy_nodes_list and __nodes
