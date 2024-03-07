@@ -25,7 +25,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    uses: ./.github/workflows/_linux-build-arc.yml
+    uses: ./.github/workflows/_linux-build.yml
     with:
       runner: "{\"group\": \"arc-lf-linux.2xlarge.arc-rootless-jschmidt.canary\"}"
       build-environment: linux-jammy-py3.8-gcc11
@@ -51,7 +51,6 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3_8-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_8-gcc11-build.outputs.test-matrix }}
       s3-bucket: pytorch-ci-artifacts
-      is-arc: true
 
   linux-docs:
     name: linux-docs
@@ -61,7 +60,6 @@ jobs:
       build-environment: linux-jammy-py3.8-gcc11
       docker-image: ${{ needs.linux-jammy-py3_8-gcc11-build.outputs.docker-image }}
       s3-bucket: pytorch-ci-artifacts
-      is-arc: true
 
   linux-jammy-py3_8-gcc11-no-ops:
     name: linux-jammy-py3.8-gcc11-no-ops
