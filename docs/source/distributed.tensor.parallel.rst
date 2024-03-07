@@ -54,3 +54,10 @@ the ``parallelize_plan`` when calling ``parallelize_module``:
 For models like Transformer, we recommend users to use ``ColwiseParallel``
 and ``RowwiseParallel`` together in the parallelize_plan for achieve the desired
 sharding for the entire model (i.e. Attention and MLP).
+
+Parallelized cross-entropy loss computation (loss parallelism), is supported via the following context manager:
+
+.. autofunction:: torch.distributed.tensor.parallel.loss_parallel
+
+.. warning ::
+    The loss_parallel API is experimental and subject to change.

@@ -99,6 +99,11 @@ void Context::flush() {
   command_pool_.flush();
   descriptor_pool_.flush();
 
+  // If there is an existing command buffer, invalidate it
+  if (cmd_) {
+    cmd_.invalidate();
+  }
+
   std::lock_guard<std::mutex> bufferlist_lock(buffer_clearlist_mutex_);
   std::lock_guard<std::mutex> imagelist_lock(image_clearlist_mutex_);
   buffers_to_clear_.clear();
