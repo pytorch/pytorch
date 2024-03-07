@@ -289,7 +289,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self._test_mark_static_address(guarded=False)
 
     def test_class_methods(self):
-        class A():
+        class A:
             @classmethod
             def my_class_method(cls, arg1):
                 return cls, arg1
@@ -338,7 +338,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(v6, (B, 6))
         self.assertEqual(v7, (C, 7))
         self.assertEqual(v8, (C, 8))
-        
+
         self.assertEqual(cnt.frame_count, 1)
 
 
