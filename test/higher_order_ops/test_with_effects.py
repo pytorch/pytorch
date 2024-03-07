@@ -70,7 +70,6 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(len(gs.input_tokens), 1)
         self.assertEqual(len(gs.output_tokens), 1)
 
-    @unittest.expectedFailure  # Will enable this once we enable tokens in export
     def test_torchbind_custom_op(self):
         class M(torch.nn.Module):
             def __init__(self):
