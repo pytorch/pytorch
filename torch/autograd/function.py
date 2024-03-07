@@ -315,7 +315,9 @@ def warn_traceable_deprecated():
     warnings.warn(
         "The is_traceable field on torch.autograd.Function is deprecated "
         "and will be removed in PyTorch 2.4.",
-        stacklevel=3)
+        stacklevel=3,
+    )
+
 
 class FunctionMeta(type):
     """Function metaclass.
@@ -351,7 +353,8 @@ class FunctionMeta(type):
             warnings.warn(
                 "The is_traceable field on torch.autograd.Function is deprecated "
                 "and will be removed in PyTorch 2.4.",
-                stacklevel=2)
+                stacklevel=2,
+            )
         return super().__setattr__(name, value)
 
 
@@ -670,7 +673,8 @@ def traceable(fn_cls):
     warnings.warn(
         "torch.autograd.function.traceable is deprecated "
         "and will be removed in PyTorch 2.4.",
-        stacklevel=2)
+        stacklevel=2,
+    )
     fn_cls.is_traceable = True
     return fn_cls
 
