@@ -778,16 +778,12 @@ def hash_configs(configs: List[Config]):
 
 
 def load_cached_autotuning(
-    cache_filename: str, configs_hash: str, configs: List[Config]
+    best_config,
+    configs_hash: str,
+    configs: List[Config],
 ):
-    """
-    Read a cached autotuning result from disk
-    """
-    if not os.path.exists(cache_filename):
+    if best_config is None:
         return None
-
-    with open(cache_filename) as fd:
-        best_config = json.loads(fd.read())
     if best_config.pop("configs_hash", None) != configs_hash:
         return None
 
@@ -829,27 +825,74 @@ def cached_autotune(
     save_cache_hook: Optional[Callable[[Any, Any], Any]]
     inductor_meta = {} if inductor_meta is None else inductor_meta
 
-    # on disk caching logic
+    # on disk caching logic and/or remote caching
     if filename is not None and (len(configs) > 1 or config.coordinate_descent_tuning):
-        cache_filename = os.path.splitext(filename)[0] + ".best_config"
         configs_hash = hash_configs(configs)
-        best_config = load_cached_autotuning(cache_filename, configs_hash, configs)
+
+        cache_filename = None
+        remote_cache = None
+        remote_cache_key = None
+        if config.use_autotune_local_cache:
+            cache_filename = os.path.splitext(filename)[0] + ".best_config"
+        if config.use_autotune_remote_cache or (
+            config.is_fbcode()
+            and torch._utils_internal.justknobs_check(
+                "pytorch/autotune_remote_cache:enable"
+            )
+        ):
+            backend_hash = inductor_meta.get("backend_hash", None)
+            if backend_hash is not None:
+                key = backend_hash + configs_hash + "autotune-best-config"
+                key = hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+                try:
+                    if config.is_fbcode():
+                        remote_cache = (
+                            triton.runtime.fb_memcache.FbMemcacheRemoteCacheBackend(
+                                key, is_autotune=True
+                            )
+                        )
+                    else:
+                        remote_cache = triton.runtime.cache.RedisRemoteCacheBackend(key)
+                except Exception:
+                    remote_cache = None
+                    log.warning("Unable to create a remote cache", exc_info=True)
+                # we already sha256 hash the source contents
+                remote_cache_key = os.path.basename(filename)
+            else:
+                log.debug(
+                    "backend_hash is not passed on the inductor_meta, unable to use autotune remote cache"
+                )
+
+        best_config = None
+        if cache_filename is not None and os.path.exists(cache_filename):
+            with open(cache_filename) as fd:
+                best_config = json.loads(fd.read())
+        elif remote_cache is not None and remote_cache_key is not None:
+            cache_outs = remote_cache.get([remote_cache_key])
+            cache_out = cache_outs.get(remote_cache_key, None)
+            best_config = json.loads(cache_out) if cache_out else None
+
+        best_config = load_cached_autotuning(best_config, configs_hash, configs)
         if best_config:
             configs = [best_config]
 
         def save_cache_hook(cfg, found_by_coordesc=False):
-            with open(cache_filename, "w") as fd:
-                fd.write(
-                    json.dumps(
-                        {
-                            **cfg.kwargs,
-                            "num_warps": cfg.num_warps,
-                            "num_stages": cfg.num_stages,
-                            "configs_hash": configs_hash,
-                            "found_by_coordesc": found_by_coordesc,
-                        }
-                    )
-                )
+            data = json.dumps(
+                {
+                    **cfg.kwargs,
+                    "num_warps": cfg.num_warps,
+                    "num_stages": cfg.num_stages,
+                    "configs_hash": configs_hash,
+                    "found_by_coordesc": found_by_coordesc,
+                }
+            )
+            if cache_filename is not None:
+                with open(cache_filename, "w") as fd:
+                    fd.write(data)
+            if remote_cache is not None and remote_cache_key is not None:
+                remote_cache.put(remote_cache_key, data)
+
             if log.isEnabledFor(logging.DEBUG):
                 type_str = "coordesc" if found_by_coordesc else "heuristic"
                 log.debug("Save %s tuning result to %s", type_str, cache_filename)
