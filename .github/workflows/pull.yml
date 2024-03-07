@@ -372,7 +372,7 @@ jobs:
       cuda-version: "12.1"
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 1, runner: "linux-gpu.large.arc.v.i" },
         ]}
 
   linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single:
