@@ -1453,55 +1453,58 @@ class CppWrapperCpu(WrapperCodeGen):
         if not config.abi_compatible:
             super().codegen_multi_output(name, value)
 
-    def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
-        try:
-            self.push_codegened_graph(subgraph.graph)
-            self.writeline(f"{self.comment} subgraph: {subgraph.name}")
-            for inner_input, outer_input in zip(
-                subgraph.graph.graph_inputs, outer_inputs
-            ):
-                if config.abi_compatible:
-                    self.writeline(f"AtenTensorHandle {inner_input}_handle;")
-                    self.writeline(
-                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_tensor({outer_input}, &{inner_input}_handle));"
-                    )
-                    self.writeline(
-                        f"RAIIAtenTensorHandle {inner_input}({inner_input}_handle);"
-                    )
-                else:
-                    self.writeline(
-                        f"{self.declare}{inner_input} = {outer_input}{self.ending}"
-                    )
-            parent_graph = V.graph
-            with V.set_graph_handler(subgraph.graph):
-                subgraph.graph.codegen_subgraph(
-                    parent_graph=parent_graph,
+    def codegen_subgraph_prefix(self, subgraph, outer_inputs, outer_outputs):
+        for inner_input, outer_input in zip(subgraph.graph.graph_inputs, outer_inputs):
+            if config.abi_compatible:
+                # in ABI-compatible mode, we copy the underlying at::Tensor of the conditional
+                # input (outer_input) into another at::Tensor to be used as a subgraph input
+                # (inner_input) in the nested scope. we can't std::move here, as the codegened
+                # outer input may be an expression / rvalue (e.g., reinterpret_view(x)), so we
+                # can't necessarily std::move it back to the origin (x).
+                self.writeline(f"AtenTensorHandle {inner_input}_handle;")
+                self.writeline(
+                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_tensor({outer_input}, &{inner_input}_handle));"
                 )
-            for inner_output, outer_output in zip(
-                subgraph.graph.graph_outputs, outer_outputs
-            ):
-                src = inner_output.codegen_reference()
-                if config.abi_compatible:
-                    src = f"std::move({src})"
-                self.writeline(f"{outer_output} = {src}{self.ending}")
-        finally:
-            self.pop_codegened_graph()
+                self.writeline(
+                    f"RAIIAtenTensorHandle {inner_input}({inner_input}_handle);"
+                )
+            else:
+                self.writeline(
+                    f"{self.declare}{inner_input} = {outer_input}{self.ending}"
+                )
+
+    def codegen_subgraph_suffix(self, subgraph, outer_inputs, outer_outputs):
+        for inner_output, outer_output in zip(
+            subgraph.graph.graph_outputs, outer_outputs
+        ):
+            src = inner_output.codegen_reference()
+            if config.abi_compatible:
+                # in ABI-compatible mode, we need to std::move subgraph output (inner_output)
+                # to the conditional output (outer_output), as RAIIAtenTensorHandle's copy
+                # constructor is deleted.
+                src = f"std::move({src})"
+            self.writeline(f"{outer_output} = {src}{self.ending}")
 
     def codegen_conditional(self, conditional):
         name = conditional.get_name()
-
         outer_inputs = [f"{buf.codegen_reference()}" for buf in conditional.operands]
         if config.abi_compatible:
             outer_outputs = []
             for out in conditional.outputs:
+                # in ABI-compatible mode, ir.MultiOutput is not codegened,
+                # hence pre-declare output variables directly and separately
                 self.writeline(f"RAIIAtenTensorHandle {out.get_name()};")
                 outer_outputs.append(out.get_name())
             predicate = f"{conditional.predicate.get_name()}_scalar"
             self.writeline(f"bool {predicate};")
+            # in ABI-compatible mode, we need to use the ABI shim function
+            # to extract a C++ bool from the unrelying scalar bool Tensor
             self.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_bool({conditional.predicate.codegen_reference()}, &{predicate}));"
             )
         else:
+            # in non-ABI-compatible mode, we can codegen the conditional outputs
+            # as array of at::Tensor instances, as the ir.MultiOutput is codegened
             outer_outputs = [f"{name}[{i}]" for i in range(len(conditional.outputs))]
             self.writeline(f"at::Tensor {name}[{len(conditional.outputs)}];")
             predicate = f"{conditional.predicate.codegen_reference()}.item<bool>()"

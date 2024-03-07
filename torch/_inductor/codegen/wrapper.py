@@ -432,6 +432,11 @@ class WrapperCodeGen(CodeGen):
         self.allow_stack_allocation: Optional[bool] = None
         self.stack_allocated_buffers: Dict[BufferName, ir.Buffer] = {}
         self.computed_sizes: Set[sympy.Symbol] = set()
+
+        # this is used for tracking which GraphLowering instance---parent graph
+        # or (nested) subgraph---is currently codegened; the primary use case is
+        # including the graph instance into a cache key to avoid cross-graph
+        # caching during lowering of nested subgraphs
         self.codegened_graph_stack = [V.graph]
 
         self.write_header()
@@ -1217,14 +1222,14 @@ class WrapperCodeGen(CodeGen):
 
     def generate_save_uncompiled_kernels(self):
         """
-        Precompile and save the CUBINs of the Triton kernels
-        that haven't been precompiled and saved during the
-        run of the generated model. This can happen when the
-        model contains control flow, only one pass through
-        which covers the kernels that are saved. The main
-        purpose is to compile and save the Triton kernels
-        outside the active control flow path for subsequent
-        AOTInductor code generation and compilation.
+        Precompile and save the CUBINs of the Triton kernels that haven't
+        been precompiled and saved as a side effect of running the generated
+        JIT model (Python wrapper). This can happen when the model contains
+        control flow: only one pass through the control flow operators covers
+        the kernels that are saved, the remaining kernels are not launched,
+        hence not saved. The main purpose of this codegen is to compile and
+        save the Triton kernels outside the active control flow path for
+        subsequent AOTInductor code generation and compilation.
         """
         self.wrapper_call.splice(
             """
@@ -1234,8 +1239,8 @@ class WrapperCodeGen(CodeGen):
                         if len(kernel.launchers) == 0:
                             kernel.precompile()
                         kernel.save_cuda_kernel(
-                            grid=(0, 0, 0),
-                            stream="stream",
+                            grid=(0, 0, 0),   # use dummy grid
+                            stream="stream",  # use dummy stream
                             launcher=kernel.launchers[0],
                         )
             """
@@ -1464,15 +1469,11 @@ class WrapperCodeGen(CodeGen):
             self.unbacked_symbol_decls.add(name)
             return self.declare + name
 
-    def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
-        self.writeline(f"{self.comment} subgraph: {subgraph.name}")
+    def codegen_subgraph_prefix(self, subgraph, outer_inputs, outer_outputs):
         for inner_input, outer_input in zip(subgraph.graph.graph_inputs, outer_inputs):
             self.writeline(f"{self.declare}{inner_input} = {outer_input}{self.ending}")
-        parent_graph = V.graph
-        with V.set_graph_handler(subgraph.graph):
-            subgraph.graph.codegen_subgraph(
-                parent_graph=parent_graph,
-            )
+
+    def codegen_subgraph_suffix(self, subgraph, outer_inputs, outer_outputs):
         for inner_output, outer_output in zip(
             subgraph.graph.graph_outputs, outer_outputs
         ):
@@ -1480,13 +1481,25 @@ class WrapperCodeGen(CodeGen):
                 f"{outer_output} = {inner_output.codegen_reference()}{self.ending}"
             )
 
+    def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
+        try:
+            self.push_codegened_graph(subgraph.graph)
+            self.writeline(f"{self.comment} subgraph: {subgraph.name}")
+            self.codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
+            parent_graph = V.graph
+            with V.set_graph_handler(subgraph.graph):
+                subgraph.graph.codegen_subgraph(
+                    parent_graph=parent_graph,
+                )
+            self.codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
+        finally:
+            self.pop_codegened_graph()
+
     def codegen_conditional(self, conditional):
         name = conditional.get_name()
         outer_inputs = [buf.codegen_reference() for buf in conditional.operands]
         outer_outputs = [f"{name}[{i}]" for i in range(len(conditional.outputs))]
 
-        # predefine the list of outer outputs before entering the conditional
-        # TODO(aakhundov): make this work for C++ wrapper codegen (and ABI mode)
         self.writeline(f"{name} = [None] * {len(conditional.outputs)}")
         self.writeline(f"if {conditional.predicate.codegen_reference()}.item():")
         self.writeline(EnterSubgraphLine(self, conditional.true_subgraph.graph))
