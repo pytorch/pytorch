@@ -83,9 +83,16 @@ at::Tensor get_nested_int_vec(const c10::SymNodeImpl* node) {
   return at::Tensor(c10::intrusive_ptr<c10::TensorImpl>::reclaim_copy(node->nested_int_vec()));
 }
 
+namespace {
+  UnionFind nested_int_union_find_{};
+} // namespace
+
 UnionFind& get_nested_int_union_find() {
-  static UnionFind nested_int_union_find;
-  return nested_int_union_find;
+  return nested_int_union_find_;
+}
+
+void set_nested_int_union_find(UnionFind& nested_int_union_find) {
+  nested_int_union_find_ = nested_int_union_find;
 }
 
 

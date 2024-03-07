@@ -39,25 +39,34 @@ class TensorIntMap:
         return self._int_to_tensor[i]()
 
 
-class UnionFindWrapper:
-    # Wrapper around an union-find data structure over ints that exposes an API
-    # for union-find over tensors. We also maintain extra state on canonical entries:
-    # 1) metadata dict that can hold arbitrary data.
-    # 2) a set of weak ref to Tensors that are in it.
-    def __init__(self, union_find_int, tensor_int_map):
-        self._union_find_int = union_find_int
-        self._tensor_int_map = tensor_int_map
-        # Extra state to be stored on canonical entries
+class TensorUnionFind:
+    # This class provides additional functionality over a union-find over ints:
+    # - additional handling to allow union-find over tensors rather than ints
+    # - maintainence of extra state 1:1 with canonical entries that needs to be
+    #   kept in sync as entries are merged.
+    #   1) metadata dict that can hold arbitrary data
+    #   2) a set of weak ref to Tensors that are in it
+    # - managing of lifetime of the canonical entries and their associated state
+    def __init__(self, union_find_int=None, tensor_int_map=None):
+        self._union_find_int = (
+            union_find_int if union_find_int is not None else torch._C._UnionFind()
+        )
+        self._tensor_int_map = (
+            tensor_int_map if tensor_int_map is not None else TensorIntMap()
+        )
+        # Extra state on canonical entries
         self._metadata = DefaultWeakTensorKeyDictionary(dict)
         self._equiv_sets = DefaultWeakTensorKeyDictionary(set)
         # Used to manage lifetime
-        self._tensors = WeakTensorKeyDictionary()
+        self._refs = WeakTensorKeyDictionary()
         # Sentinel value to indicate that an entry has been invalidated
-        self._INVALID = object()
+        self._INVALID_ENTRY = object()
 
     def merge(self, x, y):
         x_root = self.find(x)
         y_root = self.find(y)
+        if x_root is y_root:
+            return
         self._union_find_int.merge(
             self._tensor_int_map.get_int(x),
             self._tensor_int_map.get_int(y)
@@ -65,20 +74,18 @@ class UnionFindWrapper:
         # src and tgt depend on which direction we merged in the actual impl
         tgt, src = (x_root, y_root) if self.find(x_root) is x_root else (y_root, x_root)
 
-        # To maintain that for every valid entry in _metadata, the key is the
-        # canonical tensor of some set, when two equiv sets are merged, since
-        # only one tensor remains canonical, merge the metadata of the
-        # non-canonical set into that of the canonical set, invalidate the
-        # non-canonical tensor's entry.
-        self._metadata[src].update(self._metadata[tgt])
-        self._metadata[tgt] = self._metadata[src]
-        self._metadata[src] = self._INVALID
+        # Maintain that for every valid entry in _metadata, the key is the
+        # canonical tensor of some set.
+        self._metadata[tgt].update(self._metadata[src])
+        self._metadata[src] = self._INVALID_ENTRY
+        self._equiv_sets[src].add(weakref.ref(src))
+        self._equiv_sets[tgt].add(weakref.ref(tgt))
         self._equiv_sets[tgt].update(self._equiv_sets[src])
-        self._equiv_sets[src] = self._INVALID
+        self._equiv_sets[src] = self._INVALID_ENTRY
 
         # Maintains that the the canonical tensor and by extension the metadata
         # and equiv sets are kept alive by any tensors alive in the set.
-        self._tensors[src] = tgt
+        self._refs[src] = tgt
 
     def find(self, tensor):
         canonical_id = self._union_find_int.find(
@@ -88,48 +95,41 @@ class UnionFindWrapper:
 
     def get_metadata(self, tensor):
         ret = self._metadata[self.find(tensor)]
-        assert ret is not self._INVALID
+        assert ret is not self._INVALID_ENTRY
         return ret
 
-    def get_equiv_set(self, tensor):
+    def get_equiv_tensors(self, tensor):
         equiv_set = self._equiv_sets[self.find(tensor)]
-        assert equiv_set is not self._INVALID
-        return equiv_set
+        assert equiv_set is not self._INVALID_ENTRY
+        to_remove = set()
+        for weak_tensor in equiv_set:
+            mb_tensor = weak_tensor()
+            if mb_tensor is not None:
+                yield mb_tensor
+            else:
+                to_remove.add(weak_tensor)
+        equiv_set -= to_remove
 
     def validate_invariants(self):
         # for testing only
-        for vec, val in self._metadata.items():
-            assert (self.find(vec) is vec) == (val is self._INVALID)
-        for vec, val in self._equiv_sets.items():
-            assert (self.find(vec) is vec) == (val is self._INVALID)
+        for t, v in self._metadata.items():
+            assert (self.find(t) is t) == (v is not self._INVALID_ENTRY)
+        for t, v in self._equiv_sets.items():
+            assert (self.find(t) is t) == (v is not self._INVALID_ENTRY)
 
     def print_metadata(self):
-        for vec, val in self._metadata.items():
-            print(f"vec: {id(vec)}, val: {val}")
+        for t, metadata in self._metadata.items():
+            print(f"tenosr: {id(t)}, metadata: {metadata}")
 
 
 class NestedTensorState:
     # Class that encapsulates all the global state needed for NestedTensor
     def __init__(self):
         self._tensor_int_map = TensorIntMap()
-        self._union_find = UnionFindWrapper(
-            # TODO: allow setting this for testing purposes
+        self.uf = TensorUnionFind(
             torch._C._get_nested_int_union_find(),
             self._tensor_int_map,
         )
-
-    def union_find_merge(self, src, tgt):
-        if src is not tgt:
-             self._union_find.merge(src, tgt)
-
-    def get_metadata(self, tensor):
-        return self._union_find.get_metadata(tensor)
-
-    def get_equiv_tensors(self, tensor):
-        for weak_tensor in self._union_find.get_equiv_set(tensor):
-            mb_tensor = weak_tensor()
-            if mb_tensor is not None:
-                yield mb_tensor
 
     def create_nested_int(self, tensor, ctor_fn=None):
         # Parameters:
@@ -154,7 +154,7 @@ def get_nt_state() -> NestedTensorState:
 
 def trust_me_assert_equal(vec1, vec2, _nt_state=None):
     nt_state = get_nt_state() if _nt_state is None else _nt_state
-    nt_state.union_find_merge(vec1, vec2)
+    nt_state.uf.merge(vec1, vec2)
 
 
 # SDPA metadata; max / min seqlens are needed for e.g. flash
@@ -233,7 +233,7 @@ class NestedTensor(torch.Tensor):
         # TODO: why does printing break stuff when more than one test is ran
         # nt_state.print_metadata()
         # nt_state.validate_invariants()
-        metadata = nt_state.get_metadata(ragged_source)
+        metadata = nt_state.uf.get_metadata(ragged_source)
         metadata["sum_vec"] = values.shape[0]
 
         self._ragged_idx = kwargs.get("_ragged_idx", 1)

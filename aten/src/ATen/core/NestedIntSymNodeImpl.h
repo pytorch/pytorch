@@ -278,4 +278,6 @@ public:
 
 TORCH_API UnionFind& get_nested_int_union_find();
 
+TORCH_API void set_nested_int_union_find(UnionFind& nested_int_union_find);
+
 } // namespace c10
