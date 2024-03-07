@@ -3884,7 +3884,7 @@ class CppScheduling(BaseScheduling):
                     return False
 
                 outer_loop_fusionable, outer_loop_fusion_depth = _inner(
-                    _left_loop_nest.root[0], _right_loop_nest.root[0], 0
+                    _left_loop_nest.root[0], _right_loop_nest.root[0], 0  # type: ignore[union-attr]
                 )
                 if not outer_loop_fusionable:
                     return False
