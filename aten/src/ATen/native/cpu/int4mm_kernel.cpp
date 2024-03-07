@@ -449,13 +449,11 @@ inline void tinygemm_kernel(
 //
 void weight_to_int4pack_kernel(
     const Tensor& weight_packed,
-    const Tensor& weight) {
+    const Tensor& weight,
+    int N, int K) {
 
-  uint8_t* weight_packed_data = weight_packed.data_ptr<uint8_t>();
-  const int32_t* weight_data = weight.data_ptr<int32_t>();
-
-  int N = weight.size(0);
-  int K = weight.size(1);
+  auto weight_packed_data = reinterpret_cast<uint8_t*>(weight_packed.data_ptr());
+  const auto weight_data = weight.data_ptr<int32_t>();
 
   // 64 for avx512 and 64 for avx2/non-vectorized
   constexpr int BLOCK_N = vec::Vectorized<float>::size() * 4;
@@ -531,17 +529,16 @@ void int4pack_mm_kernel(
     const Tensor& C,
     const Tensor& A,
     const Tensor& B,
-    int64_t qGroupSize,
-    const Tensor& qScaleAndZeros) {
+    int qGroupSize,
+    const Tensor& qScaleAndZeros,
+    int N, int K) {
 
   const auto* A_data = A.data_ptr<BFloat16>();
-  const auto* B_data = B.data_ptr<uint8_t>();
+  const auto* B_data = reinterpret_cast<uint8_t*>(B.data_ptr());
   auto* C_data = C.data_ptr<BFloat16>();
   const auto* S_data = qScaleAndZeros.data_ptr<BFloat16>();
 
   int M = A.size(0);
-  int N = B.size(0);
-  int K = A.size(1);
 
   constexpr int BLOCK_M = 4;
   // 64 for avx512 and 32 for avx2/non-vectorized
