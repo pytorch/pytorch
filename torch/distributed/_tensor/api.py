@@ -556,13 +556,19 @@ def distribute_tensor(
     device_mesh = device_mesh or _mesh_resources.get_current_mesh()
     device_type = device_mesh.device_type
     if device_type == "xla":
-        # call PyTorch/XLA SPMD for `xla` backend type device mesh.
-        # This returns XLAShardedTensor
-        from torch.distributed._tensor._xla import xla_distribute_tensor
+        try:
+            # call PyTorch/XLA SPMD for `xla` backend type device mesh.
+            # This returns XLAShardedTensor
+            from torch_xla.distributed.spmd import (  # type:ignore[import]
+                xla_distribute_tensor,
+            )
 
-        return xla_distribute_tensor(
-            tensor, device_mesh, placements
-        )  # type:ignore[return-value]
+            return xla_distribute_tensor(
+                tensor, device_mesh, placements
+            )  # type:ignore[return-value]
+        except ImportError as e:
+            msg = "To use DTensor API with xla, you must install the torch_xla package!"
+            raise ImportError(msg) from e
 
     # instantiate a RNG tracker if haven't. By default DTensor uses an
     # OffsetBasedRNGTracker to perform random operators.

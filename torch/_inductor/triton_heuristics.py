@@ -845,14 +845,18 @@ def cached_autotune(
                 key = backend_hash + configs_hash + "autotune-best-config"
                 key = hashlib.sha256(key.encode("utf-8")).hexdigest()
 
-                if config.is_fbcode():
-                    remote_cache = (
-                        triton.runtime.fb_memcache.FbMemcacheRemoteCacheBackend(
-                            key, is_autotune=True
+                try:
+                    if config.is_fbcode():
+                        remote_cache = (
+                            triton.runtime.fb_memcache.FbMemcacheRemoteCacheBackend(
+                                key, is_autotune=True
+                            )
                         )
-                    )
-                else:
-                    remote_cache = triton.runtime.cache.RedisRemoteCacheBackend(key)
+                    else:
+                        remote_cache = triton.runtime.cache.RedisRemoteCacheBackend(key)
+                except Exception:
+                    remote_cache = None
+                    log.warning("Unable to create a remote cache", exc_info=True)
                 # we already sha256 hash the source contents
                 remote_cache_key = os.path.basename(filename)
             else:
