@@ -845,7 +845,7 @@ class TestConvolutionNN(NNTestCase):
 
     def test_permute_conv2d_issue_120211(self):
         def reproducer(radius: int):
-            image = torch.rand([1, 1024, 1024, 3], dtype=torch.float32, device=torch.device('cpu'))
+            image = torch.rand(1, 1024, 1024, 3)
             image = image.permute(0, 3, 1, 2)
             kernel_x = torch.zeros([3, 1, 1, radius * 2 + 1], device=image.device)
             image = torch.nn.functional.conv2d(image, kernel_x, groups=image.shape[-3])
