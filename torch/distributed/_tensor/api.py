@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import inspect
 import warnings
-from typing import Callable, cast, Optional, Sequence, Tuple
+from typing import Any, Callable, cast, Optional, Sequence, Tuple
 
 import torch
 
@@ -555,13 +556,19 @@ def distribute_tensor(
     device_mesh = device_mesh or _mesh_resources.get_current_mesh()
     device_type = device_mesh.device_type
     if device_type == "xla":
-        # call PyTorch/XLA SPMD for `xla` backend type device mesh.
-        # This returns XLAShardedTensor
-        from torch.distributed._tensor._xla import xla_distribute_tensor
+        try:
+            # call PyTorch/XLA SPMD for `xla` backend type device mesh.
+            # This returns XLAShardedTensor
+            from torch_xla.distributed.spmd import (  # type:ignore[import]
+                xla_distribute_tensor,
+            )
 
-        return xla_distribute_tensor(
-            tensor, device_mesh, placements
-        )  # type:ignore[return-value]
+            return xla_distribute_tensor(
+                tensor, device_mesh, placements
+            )  # type:ignore[return-value]
+        except ImportError as e:
+            msg = "To use DTensor API with xla, you must install the torch_xla package!"
+            raise ImportError(msg) from e
 
     # instantiate a RNG tracker if haven't. By default DTensor uses an
     # OffsetBasedRNGTracker to perform random operators.
@@ -643,8 +650,8 @@ def distribute_module(
     module: nn.Module,
     device_mesh: Optional[DeviceMesh] = None,
     partition_fn: Optional[Callable[[str, nn.Module, DeviceMesh], None]] = None,
-    input_fn: Optional[Callable[..., None]] = None,
-    output_fn: Optional[Callable[..., None]] = None,
+    input_fn: Optional[Callable[[nn.Module, Any, DeviceMesh], None]] = None,
+    output_fn: Optional[Callable[[nn.Module, Any, DeviceMesh], None]] = None,
 ) -> nn.Module:
     """
     This function converts all module parameters to :class:`DTensor` parameters
@@ -704,11 +711,43 @@ def distribute_module(
 
     # register input_fn as module forward pre hook
     if input_fn is not None:
-        module.register_forward_pre_hook(lambda _, inputs: input_fn(inputs, device_mesh))  # type: ignore[misc]
-    # register input_fn as module forward hook
+        # check the input_fn signature
+        num_args = len(inspect.signature(input_fn).parameters)
+        if num_args == 2:
+            # input_fn only takes in inputs and device mesh
+            warnings.warn(
+                "Deprecating input_fn that takes two arguments (inputs, device_mesh), "
+                "please use input_fn that takes in (module, inputs, device_mesh) instead!",
+            )
+            module.register_forward_pre_hook(lambda _, inputs: input_fn(inputs, device_mesh))  # type: ignore[call-arg]
+        elif num_args == 3:
+            # input_fn takes in module, inputs, device mesh
+            module.register_forward_pre_hook(
+                lambda mod, inputs: input_fn(mod, inputs, device_mesh)
+            )
+        else:
+            raise ValueError(
+                f"input_fn should take in 3 arguments, but got {num_args} arguments!"
+            )
+    # register output_fn as module forward hook
     if output_fn is not None:
-        module.register_forward_hook(
-            lambda mod, inputs, outputs: output_fn(outputs, device_mesh)  # type: ignore[misc]
-        )
+        num_args = len(inspect.signature(output_fn).parameters)
+        if num_args == 2:
+            # output_fn only takes in outputs and device mesh
+            warnings.warn(
+                "Deprecating output_fn that takes two arguments (inputs, device_mesh), "
+                "please use output_fn that takes in (module, inputs, device_mesh) instead!",
+            )
+            module.register_forward_hook(
+                lambda mod, inputs, outputs: output_fn(outputs, device_mesh)  # type: ignore[call-arg]
+            )
+        elif num_args == 3:
+            module.register_forward_hook(
+                lambda mod, inputs, outputs: output_fn(mod, outputs, device_mesh)
+            )
+        else:
+            raise ValueError(
+                f"output_fn should take in 3 arguments, but got {num_args} arguments!"
+            )
 
     return module

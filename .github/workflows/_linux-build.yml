@@ -47,6 +47,11 @@ on:
           An option JSON description of what test configs to run later on. This
           is moved here from the Linux test workflow so that we can apply filter
           logic using test-config labels earlier and skip unnecessary builds
+      is_arc:
+        description: A flag indicating that we are using an arc runner.
+        type: boolean
+        required: false
+        default: false
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -92,6 +97,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@DanilBaibak/Build-Docker-Image-for-ARC
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
+          is-arc: inputs.is_arc
 
       - name: Use following to pull public copy of the image
         id: print-ghcr-mirror
@@ -173,6 +179,7 @@ jobs:
             -e PR_LABELS \
             -e OUR_GITHUB_JOB_ID \
             -e HUGGING_FACE_HUB_TOKEN \
+            -e IS_ARC \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \

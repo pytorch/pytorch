@@ -235,7 +235,7 @@ auto build_graph_and_tensors(
       fe::graph::Tensor_attributes()
           .set_name("Q")
           .set_dim(
-              std::vector<int64_t>(params.q_dim.begin(), params.q_stride.end()))
+              std::vector<int64_t>(params.q_dim.begin(), params.q_dim.end()))
           .set_stride(std::vector<int64_t>(
               params.q_stride.begin(), params.q_stride.end())));
   auto K = mha_graph->tensor(

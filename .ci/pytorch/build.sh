@@ -91,6 +91,12 @@ else
   fi
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
+  export USE_MKLDNN=1
+  export USE_MKLDNN_ACL=1
+  export ACL_ROOT_DIR=/ComputeLibrary
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
   POSSIBLE_JAVA_HOMES=()
   POSSIBLE_JAVA_HOMES+=(/usr/local)
@@ -235,6 +241,10 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
     tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" //...
   fi
 else
+  if [ "$IS_ARC" = "true" ]; then
+    git config --global --add safe.directory /var/lib/jenkins/workspace
+  fi
+
   # check that setup.py would fail with bad arguments
   echo "The next three invocations are expected to fail with invalid command error messages."
   ( ! get_exit_code python setup.py bad_argument )
@@ -256,6 +266,11 @@ else
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
+
+    if [ "$IS_ARC" = "true" ]; then
+      # remove extra folder
+      if [ -d "aws/" ]; then rm -rf aws/; fi
+    fi
 
     assert_git_not_dirty
     # Copy ninja build logs to dist folder

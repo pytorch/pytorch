@@ -878,10 +878,10 @@ Tensor rand(IntArrayRef size,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-  return native::rand(size, static_cast<c10::optional<Generator>>(c10::nullopt), dtype, layout, device, pin_memory);
+  return native::rand(size, static_cast<const std::optional<Generator>&>(c10::nullopt), dtype, layout, device, pin_memory);
 }
 
-Tensor rand(IntArrayRef size, c10::optional<Generator> generator,
+Tensor rand(IntArrayRef size, const std::optional<Generator>& generator,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -897,7 +897,7 @@ Tensor& rand_out(IntArrayRef size, Tensor& result) {
   return native::rand_out(size, c10::nullopt, result);
 }
 
-Tensor& rand_out(IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
+Tensor& rand_out(IntArrayRef size, const std::optional<Generator>& generator, Tensor& result) {
   result.resize_(size);
   return result.uniform_(0, 1, std::move(generator));
 }
@@ -929,7 +929,7 @@ Tensor randint(int64_t high, IntArrayRef size,
 Tensor randint(
     int64_t high,
     IntArrayRef size,
-    c10::optional<Generator> generator,
+    const std::optional<Generator>& generator,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -952,7 +952,7 @@ Tensor randint(
     int64_t low,
     int64_t high,
     IntArrayRef size,
-    c10::optional<Generator> generator,
+    const std::optional<Generator>& generator,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -970,7 +970,7 @@ Tensor& randint_out(int64_t high, IntArrayRef size, Tensor& result) {
 
 Tensor& randint_out(int64_t high,
     IntArrayRef size,
-    c10::optional<Generator> generator,
+    const std::optional<Generator>& generator,
     Tensor& result) {
   result.resize_(size);
   return result.random_(0, high, std::move(generator));
@@ -983,7 +983,7 @@ Tensor& randint_out(int64_t low, int64_t high, IntArrayRef size, Tensor& result)
 Tensor& randint_out(int64_t low,
     int64_t high,
     IntArrayRef size,
-    c10::optional<Generator> generator,
+    const std::optional<Generator>& generator,
     Tensor& result) {
   result.resize_(size);
   return result.random_(low, high, std::move(generator));
@@ -1027,10 +1027,10 @@ Tensor randn(IntArrayRef size,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-  return native::randn(size, static_cast<c10::optional<Generator>>(c10::nullopt), dtype, layout, device, pin_memory);
+  return native::randn(size, static_cast<const std::optional<Generator>&>(c10::nullopt), dtype, layout, device, pin_memory);
 }
 
-Tensor randn(IntArrayRef size, c10::optional<Generator> generator,
+Tensor randn(IntArrayRef size, const std::optional<Generator>& generator,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -1046,13 +1046,13 @@ Tensor& randn_out(IntArrayRef size, Tensor& result) {
   return native::randn_out(size, c10::nullopt, result);
 }
 
-Tensor& randn_out(IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
+Tensor& randn_out(IntArrayRef size, const std::optional<Generator>& generator, Tensor& result) {
   result.resize_(size);
   return result.normal_(0, 1, std::move(generator));
 }
 
 Tensor normal(double mean, double std, IntArrayRef size,
-              c10::optional<Generator> generator,
+              const std::optional<Generator>& generator,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -1065,7 +1065,7 @@ Tensor normal(double mean, double std, IntArrayRef size,
 }
 
 Tensor& normal_out(double mean, double std,
-                   IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
+                   IntArrayRef size, const std::optional<Generator>& generator, Tensor& result) {
   result.resize_(size);
   return result.normal_(mean, std, std::move(generator));
 }
@@ -1120,7 +1120,7 @@ Tensor randperm(int64_t n,
   return native::randperm(n, c10::nullopt, dtype, layout, device, pin_memory);
 }
 
-Tensor randperm(int64_t n, c10::optional<Generator> generator,
+Tensor randperm(int64_t n, const std::optional<Generator>& generator,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -1140,7 +1140,7 @@ Tensor& randperm_out(int64_t n, Tensor& result) {
   return at::randperm_out(result, n, c10::nullopt);
 }
 
-Tensor& randperm_out_cpu(int64_t n, c10::optional<Generator> generator, Tensor& result) {
+Tensor& randperm_out_cpu(int64_t n, const std::optional<Generator>& generator, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
   TORCH_CHECK(!generator.has_value() || (generator.has_value() && result.device() == generator->device()), "Expected a '", result.device(), "' generator device but found '", generator->device(), "'");
   check_supported_max_int_with_precision(n, result);
@@ -1809,7 +1809,7 @@ Tensor randn(
 
 Tensor randn(
     IntArrayRef size,
-    c10::optional<Generator> generator,
+    const std::optional<Generator>& generator,
     optional<DimnameList> names,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
@@ -1834,7 +1834,7 @@ Tensor rand(
 
 Tensor rand(
     IntArrayRef size,
-    c10::optional<Generator> generator,
+    const std::optional<Generator>& generator,
     optional<DimnameList> names,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
