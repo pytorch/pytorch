@@ -950,10 +950,8 @@ class GraphModule(torch.nn.Module):
         # without unwrapping and calling torch._C.DisableTorchFunctionSubclass()
         # the torch function-ness will survive into AOTAutograd (when normally
         # we may expect the torch function to be inlined away during dynamo).
-        #
-        # We must make sure to disable all non-infra TorchFunction subclasses
-        # In order to avoid running into issues like:
-        # https://github.com/pytorch/pytorch/issues/120124
+        # If this happens, we should make sure to not run the torch function
+        # logic a second time.
         class SubTensor(torch.Tensor):
             @staticmethod
             def __new__(cls, t):

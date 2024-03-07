@@ -1548,8 +1548,6 @@ class TestTorchFunctionMode(TestCase):
                 self.assertFalse(torch._C._is_torch_function_enabled())
                 self.assertFalse(torch._C._is_torch_function_infra_subclasses_enabled())
 
-        torch._C._EnableTorchFunction()
-
 
     def test_subclass_hash(self):
         class DiagTensor(torch.Tensor):
