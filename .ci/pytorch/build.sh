@@ -257,7 +257,8 @@ else
     # set only when building other architectures
     # or building non-XLA tests.
     if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
-          "$BUILD_ENVIRONMENT" != *xla* ]]; then
+          "$BUILD_ENVIRONMENT" != *xla* &&
+          "$BUILD_ENVIRONMENT" != *xpu* ]]; then
       if [[ "$BUILD_ENVIRONMENT" != *py3.8* ]]; then
         # Install numpy-2.0 release candidate for builds
         # Which should be backward compatible with Numpy-1.X
