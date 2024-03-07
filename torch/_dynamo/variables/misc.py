@@ -26,7 +26,6 @@ from ..utils import (
 )
 from .base import VariableTracker
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
-from .nn_module import NNModuleVariable
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -59,7 +58,7 @@ class SuperVariable(VariableTracker):
             return getattr(self.typevar.as_python_constant(), name)
         search_type = self.typevar.as_python_constant()
 
-        # This function does two things:
+        # The rest of this function does two things:
         #   - Walk the mro to find where the attribute comes from to be
         #     able to provide accurate source
         #   - Call the getattr to get the object
@@ -90,35 +89,7 @@ class SuperVariable(VariableTracker):
                     break
 
         # TODO(jansel): there is a small chance this could trigger user code, prevent that
-        # It is important to call with objvar here to ensure that when we get methods,
-        # they are bound appropriately
-        # Note that what gets bound here for methods depend on how the name method is defined
-        # and does not depend on objvar being self or cls in the current function.
-        objvar_python = (
-            self.objvar.module
-            if isinstance(self.objvar, NNModuleVariable)
-            else self.objvar.value
-        )
-        bound_method = getattr(super(search_type, objvar_python), name)
-
-        add_objvar = None
-        if isinstance(bound_method, (types.MethodWrapperType, types.BuiltinMethodType)):
-            # There is not API provided by CPython to unbind "wrapper-method" or "builtin-method"
-            # So we manually unbind them for the case we know how to handle
-            bound_method = getattr(super(search_type, type_to_use), name)
-            # Do NOT add any classmethod to this list unless you add support for it for add_objvar
-            if bound_method not in (
-                object.__init__,
-                collections.OrderedDict.__getitem__,
-                collections.OrderedDict.__setitem__,
-            ):
-                raise NotImplementedError()
-            # All functions above are regular method (taking self) and their parent is
-            # also a regular method (taking self).
-            # It is thus ok to pass in objvar as the first argument manually
-            add_objvar = True
-
-        return bound_method, source, add_objvar
+        return getattr(super(search_type, type_to_use), name), source
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         # Check if getattr is a constant. If not, delay the actual work by
@@ -129,7 +100,7 @@ class SuperVariable(VariableTracker):
         # special when it comes to finding sources. Compared to other VTs, super
         # requires the attr name to walk the mro and find the actual source (and
         # not just AttrSource).
-        value, source, _ = self._resolved_getattr_and_source(self, name)
+        value, source = self._resolved_getattr_and_source(self, name)
         if not variables.ConstantVariable.is_literal(value):
             return GetAttrVariable(self, name)
         if source:
@@ -144,13 +115,11 @@ class SuperVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        inner_fn, source, add_objvar = self._resolved_getattr_and_source(self, name)
+        inner_fn, source = self._resolved_getattr_and_source(self, name)
 
-        unbound_inner_fn = getattr(inner_fn, "__func__", inner_fn)
-
-        if unbound_inner_fn is object.__init__:
+        if inner_fn is object.__init__:
             return LambdaVariable(identity)
-        elif unbound_inner_fn is torch.nn.Module.__init__:
+        elif inner_fn is torch.nn.Module.__init__:
             objvar = self.objvar
             from ..side_effects import AttributeMutationNew
 
@@ -167,8 +136,16 @@ class SuperVariable(VariableTracker):
                 return variables.ConstantVariable.create(None)
             else:
                 unimplemented("super() nn.Module.__init__")
+        elif isinstance(inner_fn, types.FunctionType):
+            return variables.UserFunctionVariable(
+                inner_fn, source=source
+            ).call_function(tx, [self.objvar] + args, kwargs)
+        elif isinstance(inner_fn, types.MethodType):
+            return variables.UserMethodVariable(
+                inner_fn.__func__, self.objvar, source=source
+            ).call_function(tx, args, kwargs)
         elif (
-            unbound_inner_fn is collections.OrderedDict.__getitem__
+            inner_fn is collections.OrderedDict.__getitem__
             and isinstance(self.objvar, variables.UserDefinedObjectVariable)
             and self.objvar.source
             and len(args) == 1
@@ -178,41 +155,17 @@ class SuperVariable(VariableTracker):
             from .builder import VariableBuilder
 
             key = args[0].as_python_constant()
-            assert add_objvar, "Invalid super() resolution"
             return VariableBuilder(tx, ODictGetItemSource(self.objvar.source, key))(
                 collections.OrderedDict.__getitem__(self.objvar.value, key)
             )
-        elif unbound_inner_fn in (
+        elif inner_fn in (
             collections.OrderedDict.__setitem__,
             object.__setattr__,
         ) and isinstance(self.objvar, variables.CustomizedDictVariable):
-            assert add_objvar, "Invalid super() resolution"
             assert not kwargs and len(args) == 2
             return super(variables.CustomizedDictVariable, self.objvar).call_method(
                 tx, "__setitem__", args, kwargs
             )
-        elif isinstance(inner_fn, types.FunctionType):
-            # When the function is defined as a staticmethod
-            return variables.UserFunctionVariable(
-                inner_fn, source=source
-            ).call_function(tx, args, kwargs)
-        elif isinstance(inner_fn, types.MethodType):
-            # When the function is defined as a method or classmethod
-            first_arg = self.objvar
-            objvar_python = (
-                first_arg.module
-                if isinstance(first_arg, NNModuleVariable)
-                else first_arg.value
-            )
-            if objvar_python is not inner_fn.__self__:
-                first_arg = self.objvar.python_type()
-                assert (
-                    first_arg == inner_fn.__self__
-                ), f"{first_arg}|{inner_fn.__self__}"
-                # Don't we need to wrap the raw python type into a VariableTracker here?
-            return variables.UserMethodVariable(
-                inner_fn.__func__, first_arg, source=source
-            ).call_function(tx, args, kwargs)
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
 
