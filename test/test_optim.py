@@ -550,7 +550,7 @@ class TestOptimRenewed(TestCase):
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info, skip=("differentiable",))
         for optim_input in all_optim_inputs:
-            # See https://github.com/pytorch/pytorch/issues/117836 and #118230
+            # See https://github.com/pytorch/pytorch/issues/118230
             if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
                     and not optim_input.kwargs.get("foreach", False)):
                 continue
@@ -591,7 +591,7 @@ class TestOptimRenewed(TestCase):
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info, skip=("differentiable",))
         for optim_input in all_optim_inputs:
-            # See https://github.com/pytorch/pytorch/issues/117836 and #118230
+            # See https://github.com/pytorch/pytorch/issues/118230
             if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
                     and not optim_input.kwargs.get("foreach", False)):
                 continue
