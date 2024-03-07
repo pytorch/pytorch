@@ -838,7 +838,7 @@ class MLP(nn.Module):
     def __init__(
         self,
         dim: int,
-        device: torch.device = torch.device("cpu"),
+        device: Optional[torch.device] = None,
         with_buffer: bool = False,
         dim_multiplier: int = 4,
     ):
@@ -855,9 +855,13 @@ class MLP(nn.Module):
         z = F.relu(z)
         z = self.out_proj(z)
         z = F.relu(z)
-        if self.buffer:
-            z += self.buffer
+        if self.buffer is not None:
+            z = z + self.buffer
         return z
+
+    def reset_parameters(self):
+        if self.buffer is not None:
+            torch.nn.init.normal_(self.buffer)
 
 
 class DoubleLinear(nn.Module):
