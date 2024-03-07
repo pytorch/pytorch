@@ -353,6 +353,9 @@ _save_config_ignore = {
     "skipfiles_inline_module_allowlist",
 }
 
+# for backend="cudagraphs", mutations on input be sent to the cudagraph backend
+# or replayed in aot_autograd epilogue. default is False because mutation on inputs
+# can prevent cudagraphing.
 cudagraph_backend_keep_input_mutation = False
 
 # When True, only ops that have the torch.Tag.pt2_compliant tag

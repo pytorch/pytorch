@@ -34,7 +34,7 @@ def get_mutation_stack_trace(
             break
 
     if stack_trace:
-        msg = f"skipping cudagraphs due to mutaton on input. Found from : \n {stack_trace}"
+        msg = f"skipping cudagraphs due to mutation on input. Found from : \n {stack_trace}"
         return msg
 
     return format_default_skip_message("mutated inputs")
@@ -100,6 +100,6 @@ def check_lowering_disable_cudagraph(
 class BoxedDeviceIndex:
     value: Optional[int]
 
-    def set(self, device_idx):
+    def set(self, device_idx: Optional[int]):
         assert device_idx is None or isinstance(device_idx, int)
         self.value = device_idx
