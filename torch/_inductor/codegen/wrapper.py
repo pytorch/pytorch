@@ -262,7 +262,9 @@ class EnterDeviceContextManagerLine(WrapperLine):
             else:
                 if self.last_seen_device_guard_index is None:
                     code.writeline(
-                        f"at::cuda::CUDAGuard device_guard({self.device_idx});"
+                        f"AOTICudaGuard device_guard({self.device_idx});"
+                        if config.abi_compatible
+                        else f"at::cuda::CUDAGuard device_guard({self.device_idx});"
                     )
                 else:
                     code.writeline(f"device_guard.set_index({self.device_idx});")
