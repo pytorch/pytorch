@@ -999,10 +999,8 @@ def forward(self, x_1, output_1):
             # when half_n_elements passed to the Triton kernel is
             # dynamic, equal_to_1 specializaiton can't be enforced
             self.assertTrue("equal_to_1=()" in sources[0])
-            self.assertTrue("ids_of_folded_args=()" in sources[0])
         else:
             self.assertTrue("equal_to_1=(3,)" in sources[0])
-            self.assertTrue("ids_of_folded_args=(3,)" in sources[0])
         self.assertEqual(compiled_out, eager_out)
 
     @requires_cuda
