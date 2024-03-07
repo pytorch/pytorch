@@ -307,7 +307,13 @@ class TensorVariable(VariableTracker):
         # Add a guard for type matching, these guards are checked before tensor guards
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
         # <tensor> is later changed to another type
-        if result is not None and self.source is not None:
+        if (
+            result is not None
+            and self.source is not None
+            and not (
+                name not in ("grad", "requires_grad") and result.is_python_constant()
+            )
+        ):
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
             result.source = AttrSource(self.source, name)
 

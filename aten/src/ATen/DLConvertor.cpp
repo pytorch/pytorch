@@ -283,12 +283,8 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   atDLMTensor->tensor.dl_tensor.device = getDLDevice(src, device_id);
   atDLMTensor->tensor.dl_tensor.ndim = src.dim();
   atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src);
-  atDLMTensor->tensor.dl_tensor.shape =
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      const_cast<int64_t*>(view.sizes().data());
-  atDLMTensor->tensor.dl_tensor.strides =
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      const_cast<int64_t*>(view.strides().data());
+  atDLMTensor->tensor.dl_tensor.shape = view.sizes().data();
+  atDLMTensor->tensor.dl_tensor.strides = view.strides().data();
   atDLMTensor->tensor.dl_tensor.byte_offset = 0;
   return &(atDLMTensor->tensor);
 }

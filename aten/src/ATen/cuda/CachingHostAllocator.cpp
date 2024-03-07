@@ -492,7 +492,7 @@ void CachingHostAllocator_emptyCache() {
 }
 
 struct CUDAHostAllocatorWrapper final : public at::Allocator {
-  at::DataPtr allocate(size_t size) const override {
+  at::DataPtr allocate(size_t size) override {
     auto ptr_and_ctx = getCUDAHostAllocator().allocate(size);
     return {
         ptr_and_ctx.first,
