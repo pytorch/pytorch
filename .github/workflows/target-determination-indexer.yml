@@ -13,6 +13,33 @@ jobs:
     runs-on: linux.g5.4xlarge.nvidia.gpu # 1 GPU A10G 24GB each
     environment: target-determinator-env
     steps:
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Calculate docker image
+        id: calculate-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+          docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
+
+      - name: Use following to pull public copy of the image
+        id: print-ghcr-mirror
+        env:
+          ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        shell: bash
+        run: |
+          tag=${ECR_DOCKER_IMAGE##*/}
+          echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
+
+      - name: Pull docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+
+      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        id: install-nvidia-driver
+        uses: pytorch/test-infra/.github/actions/setup-nvidia@main
+
       - name: Clone PyTorch
         uses: actions/checkout@v3
         with:
@@ -31,12 +58,6 @@ jobs:
           repository: osalpekar/llm-target-determinator
           ref: v0.0.1
           path: llm-target-determinator
-
-      - name: Setup Conda
-        uses: conda-incubator/setup-miniconda@v2.1.1
-        with:
-          miniconda-version: "py39_4.12.0"
-          python-version: 3.9
 
       - name: Install Requirements
         shell: bash -l {0}

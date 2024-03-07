@@ -481,7 +481,7 @@ class BuiltinVariable(VariableTracker):
         name = self.fn.__name__
         assert self.fn.__module__ == "builtins"
         assert name not in codegen.tx.f_globals, "shadowed global"
-        return [codegen.create_load_global(name, False, add=True)]
+        codegen.append_output(codegen.create_load_global(name, False, add=True))
 
     def constant_args(self, *args, **kwargs):
         return check_constant_args(args, kwargs)
@@ -679,24 +679,28 @@ class BuiltinVariable(VariableTracker):
                     return res
 
         handler = getattr(self, f"call_{self.fn.__name__}", None)
-        if handler:
-            try:
-                inspect.signature(handler).bind(tx, *args, **kwargs)
-            except TypeError as exc:
-                has_constant_handler = self.has_constant_handler(args, kwargs)
-                if not has_constant_handler:
-                    log.warning(
-                        "incorrect arg count %s %s and no constant handler",
-                        handler,
-                        exc,
-                    )
-                handler = None
 
         if handler:
             try:
                 result = handler(tx, *args, **kwargs)
                 if result is not None:
                     return result
+            except TypeError:
+                # Check if binding is bad. inspect signature bind is expensive.
+                # So check only when handler call fails.
+                try:
+                    inspect.signature(handler).bind(tx, *args, **kwargs)
+                except TypeError as e:
+                    has_constant_handler = self.has_constant_handler(args, kwargs)
+                    if not has_constant_handler:
+                        log.warning(
+                            "incorrect arg count %s %s and no constant handler",
+                            handler,
+                            e,
+                        )
+                        unimplemented(f"invalid handler args {handler} {args} {kwargs}")
+                else:
+                    raise
             except Unsupported as exc:
                 has_constant_handler = self.has_constant_handler(args, kwargs)
                 if not has_constant_handler:
@@ -923,7 +927,7 @@ class BuiltinVariable(VariableTracker):
                         obj.source.make_guard(GuardBuilder.TUPLE_ITERATOR_LEN)
                     )
                 else:
-                    install_guard(obj.source.make_guard(GuardBuilder.LIST_LENGTH))
+                    install_guard(obj.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
 
             return cls(
                 list(obj.unpack_var_sequence(tx)),
@@ -1218,7 +1222,7 @@ class BuiltinVariable(VariableTracker):
         if not name_var.is_python_constant():
             unimplemented("non-const getattr() name")
 
-        if tx.output.side_effects.is_attribute_mutation(obj) and name != "grad":
+        if tx.output.side_effects.is_attribute_mutation(obj):
             try:
                 # re-read a pending side effect?
                 return tx.output.side_effects.load_attr(obj, name)
@@ -1257,55 +1261,6 @@ class BuiltinVariable(VariableTracker):
 
         if isinstance(obj, variables.NNModuleVariable):
             return obj.var_getattr(tx, name)
-        elif isinstance(obj, variables.TensorVariable) and name == "grad":
-            if source:
-                # We are going to be raising this tensor as grapharg. So, ensure
-                # that we have real grad value instead of fake tensor value.
-                # Walk through the inputs of the subgraph and find if we already
-                # have the original tensor stored in the graphargs.
-                for grapharg in tx.output.graphargs:
-                    if grapharg.source == source.base:
-                        old_grad = grapharg.example.grad
-                        new_grad = obj.as_proxy().node.meta["example_value"].grad
-
-                        def _grad_changed(old, new):
-                            if old is None or new is None:
-                                return new is not old
-                            try:
-                                if old.shape != new.shape:
-                                    return True
-                                if old.stride() != new.stride():
-                                    return True
-                                return False
-                            except TypeError as te:
-                                # There is a rare edge case in which
-                                # we seem to get symbol mismatches
-                                # for jagged tensor comparison.
-                                # See PYTORCH_TEST_WITH_DYNAMO=1 python test/test_nestedtensor.py
-                                #   -k test_dropout_backward_layout_torch_jagged_cpu
-                                unimplemented(str(te))
-
-                        if _grad_changed(old_grad, new_grad):
-                            if new_grad is not None:
-                                grad_shape_specialized = [
-                                    int(x) for x in new_grad.shape
-                                ]
-                                # We lazily update the grad on the example to its real state as tracked by fake tensor.
-                                # This allocation is fine - it is just a hint. It will not make it to runtime, but it coerces
-                                # the underlying value to always be correct.
-                                grapharg.example.grad = torch.zeros(
-                                    grad_shape_specialized, device=new_grad.device
-                                )
-                            else:
-                                grapharg.example.grad = None
-                        return VariableBuilder(tx, source)(grapharg.example.grad)
-
-                return obj.dynamic_getattr(tx, name)
-            else:
-                example_value = obj.as_proxy().node.meta["example_value"]
-                if example_value.grad is not None:
-                    unimplemented("getattr on non-None grad - NYI")
-                return ConstantVariable(None)
         elif isinstance(
             obj,
             (
@@ -1323,7 +1278,9 @@ class BuiltinVariable(VariableTracker):
         elif isinstance(obj, TorchInGraphFunctionVariable):
             # Get OpOverload from an OpOverloadPacket, e.g., torch.ops.aten.add.default.
             member = getattr(obj.value, name)
-            if trace_rules.is_aten_op_or_tensor_method(member):
+            if isinstance(
+                member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
+            ) and trace_rules.is_aten_op_or_tensor_method(member):
                 return TorchInGraphFunctionVariable(member, **options)
         elif isinstance(obj, (PythonModuleVariable, DummyModule)):
             if obj.is_torch:
@@ -1698,10 +1655,10 @@ class BuiltinVariable(VariableTracker):
             ):
                 return ConstantVariable(op(left.value, right.value))
 
-        if op.__name__ == "is_":
-            # If the two objects are of different type, we can safely return False
+        if op.__name__.startswith("is_"):
+            # If the two objects are of different type, we can safely return False and True for `is` and `is not`, respectively
             if type(left) is not type(right):
-                return ConstantVariable.create(False)
+                return ConstantVariable.create(op.__name__ != "is_")
 
         if isinstance(left, BuiltinVariable) and isinstance(right, BuiltinVariable):
             return ConstantVariable.create(op(left.fn, right.fn))

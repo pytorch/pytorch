@@ -6,16 +6,15 @@ from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
-    _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
+    reenter_make_fx,
     UnsupportedAliasMutationException,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
-    make_fx,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
@@ -97,7 +96,7 @@ def while_loop(cond_fn, body_fn, operands):
         - 'while_loop' only supports **inference** right now. Autograd will be supported in the future.
 
     """
-    if torch._dynamo.is_compiling():
+    if torch.compiler.is_dynamo_compiling():
         return while_loop_op(cond_fn, body_fn, operands)
 
     def _validate_input(cond_fn, body_fn, operands):
@@ -159,14 +158,9 @@ while_loop_op.py_impl(DispatchKey.Autograd)(
 def while_loop_tracing(mode, cond_fn, body_fn, operands):
     def _trace_while_loop(proxy_mode, while_loop_op, cond_fn, body_fn, operands):
         pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
-
         with disable_proxy_modes_tracing():
-            cond_graph = make_fx(
-                _maybe_run_with_interpreter(cond_fn), pre_dispatch=pre_dispatch
-            )(*operands)
-            body_graph = make_fx(
-                _maybe_run_with_interpreter(body_fn), pre_dispatch=pre_dispatch
-            )(*operands)
+            cond_graph = reenter_make_fx(cond_fn, pre_dispatch)(*operands)
+            body_graph = reenter_make_fx(body_fn, pre_dispatch)(*operands)
 
         next_name = None
         i = 0
@@ -215,17 +209,22 @@ def while_loop_func(ctx, cond_fn, body_fn, operands):
     with ctx.redispatch_to_next() as m:
         functional_cond_fn = ctx.functionalize(cond_fn)
         functional_body_fn = ctx.functionalize(body_fn)
+        pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         for fn, fn_name in [
             (functional_cond_fn, "cond_fn"),
             (functional_body_fn, "body_fn"),
         ]:
-            if _has_potential_branch_input_mutation(fn, unwrapped_operands):
+            if _has_potential_branch_input_mutation(
+                fn, unwrapped_operands, pre_dispatch=pre_dispatch
+            ):
                 raise UnsupportedAliasMutationException(
                     f"torch.while_loop's {fn_name} might be modifying the input!"
                 )
 
         for fn in [functional_cond_fn, functional_body_fn]:
-            if _has_potential_branch_input_alias(fn, unwrapped_operands):
+            if _has_potential_branch_input_alias(
+                fn, unwrapped_operands, pre_dispatch=pre_dispatch
+            ):
                 raise UnsupportedAliasMutationException(
                     f"torch.while_loop's {fn_name} might be aliasing the input!"
                 )

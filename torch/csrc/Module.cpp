@@ -23,6 +23,7 @@
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
+#include <c10/util/thread_name.h>
 #include <libshm.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -192,6 +193,11 @@ static PyObject* THPModule_initExtension(
   torch::tensors::initialize_python_bindings();
   std::string path = THPUtils_unpackString(shm_manager_path);
   libshm_init(path.c_str());
+
+  // The main thread usually launches CPU/GPU/Accelerator kernels and therefore
+  // becomes latency sensitive. If the thread is named, we can debug performance
+  // issues easier.
+  c10::setThreadName("pt_main_thread");
 
   auto module = THPObjectPtr(PyImport_ImportModule("torch"));
   if (!module)
@@ -1467,6 +1473,7 @@ void initModule(PyObject* module);
 #ifdef USE_XPU
 PyMethodDef* THXPModule_methods();
 void THXPStream_init(PyObject* module);
+void THXPEvent_init(PyObject* module);
 namespace torch::xpu {
 void initModule(PyObject* module);
 } // namespace torch::xpu
@@ -1612,6 +1619,7 @@ PyObject* initModule() {
 
 #ifdef USE_XPU
   THXPStream_init(module);
+  THXPEvent_init(module);
 #endif
 
   auto set_module_attr =
