@@ -102,6 +102,7 @@ def gen_attr_descriptor_import():
     else:
         return ""
 
+
 @lru_cache(None)
 def gen_common_triton_imports():
     imports = IndentedBuffer()
@@ -297,7 +298,9 @@ def triton_reshape(value: str, old_shape: List[str], new_shape: List[str]):
 class TritonPrinter(PythonPrinter):
     def _print_floor(self, expr):
         assert len(expr.args) == 1
-        return f"libdevice.floor({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+        return (
+            f"libdevice.floor({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+        )
 
     def _print_ceiling(self, expr):
         assert len(expr.args) == 1
@@ -384,7 +387,9 @@ class TritonPrinter(PythonPrinter):
 
     def _print_Round(self, expr):
         assert len(expr.args) == 1
-        return f"libdevice.llrint({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+        return (
+            f"libdevice.llrint({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+        )
 
     def _print_RoundDecimal(self, expr):
         assert len(expr.args) == 2
