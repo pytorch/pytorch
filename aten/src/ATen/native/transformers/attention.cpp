@@ -640,9 +640,18 @@ Tensor scaled_dot_product_attention(
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
   if (query_.device().type() == DeviceType::CUDA
       || query_.device().type() == DeviceType::CPU
-      || query_.device().type() == DeviceType::HIP){
-    choice_int = _fused_sdp_choice_stub(query_.device().type(),
+      || query_.device().type() == DeviceType::HIP
+      || query_.device().type() == DeviceType::PrivateUse1){
+    if (query_.device().type() == DeviceType::PrivateUse1){
+      try {
+        choice_int = _fused_sdp_choice_stub(query_.device().type(),
+        query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+      } catch(const ::c10::Error& e){
+      }
+    } else {
+      choice_int = _fused_sdp_choice_stub(query_.device().type(),
       query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+    }
   }
   sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
   c10::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
