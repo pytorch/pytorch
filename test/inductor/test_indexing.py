@@ -213,7 +213,7 @@ class ExprPrinterTests(TorchTestCase):
                 self.assertExpectedInline(pexpr(expr), """math.floor((1/2)*s1)""")
                 self.assertExpectedInline(
                     texpr(expr),
-                    """triton_helpers.libdevice.floor((1/2)*s1).to(tl.int64)""",
+                    """libdevice.floor((1/2)*s1).to(tl.int64)""",
                 )
                 self.assertExpectedInline(cexpr(expr), """std::floor((1.0/2.0)*s1)""")
 
@@ -235,7 +235,7 @@ class ExprPrinterTests(TorchTestCase):
         self.assertExpectedInline(pexpr(expr), """round((1/2)*x)""")
         self.assertExpectedInline(cexpr(expr), """std::lrint((1.0/2.0)*x)""")
         self.assertExpectedInline(
-            texpr(expr), """triton_helpers.libdevice.llrint((1/2)*x).to(tl.int64)"""
+            texpr(expr), """libdevice.llrint((1/2)*x).to(tl.int64)"""
         )
 
     @parametrize("ndigits", [-1, 0, 1])
@@ -248,7 +248,7 @@ class ExprPrinterTests(TorchTestCase):
         )
         self.assertEqual(
             texpr(expr),
-            f"triton_helpers.libdevice.nearbyint(1e{ndigits} * ((1/2)*x)) * 1e{-ndigits}",
+            f"libdevice.nearbyint(1e{ndigits} * ((1/2)*x)) * 1e{-ndigits}",
         )
 
         expr = RoundDecimal(sympy.Symbol("x", integer=True), ndigits)
