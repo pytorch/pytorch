@@ -45,6 +45,11 @@ if(USE_ROCM)
   configure_file(hip/HIPConfig.h.in "${CMAKE_CURRENT_SOURCE_DIR}/hip/HIPConfig.h")
 endif()
 
+if(NOT MSVC)
+  # cudaProfilerInitialize must go away
+  set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/native/cpu/BlasKernel.cpp PROPERTIES COMPILE_FLAGS "-O3 -fvectorize -ftree-vectorize -ffp-contract=on -faggressive-loop-optimizations -march=native")
+endif()
+
 # NB: If you edit these globs, you'll have to update setup.py package_data as well
 file(GLOB_RECURSE ATen_CORE_HEADERS  "core/*.h")
 file(GLOB_RECURSE ATen_CORE_SRCS "core/*.cpp")
