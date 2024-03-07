@@ -102,6 +102,7 @@ def gen_attr_descriptor_import():
     else:
         return ""
 
+
 @lru_cache(None)
 def gen_common_triton_imports():
     imports = IndentedBuffer()
