@@ -406,12 +406,12 @@ inline bool has_torch_function_attr(PyObject* obj) {
 }
 
 inline bool is_infra_torch_function(PyObject* obj) {
-  auto obj_class = PyObject_FastGetAttrString(obj, "__class__");
-  auto attr = PyObject_FastGetAttrString(obj_class.ptr(), "_mode_key");
+  auto attr = PyObject_FastGetAttrString(obj, "_mode_key");
   if (attr.ptr() == nullptr ||
       !py::isinstance<at::impl::TorchFunctionModeKey>(attr)) {
     return false;
   }
+  // The only valid mode key for infra classes today is PROXY
   TORCH_INTERNAL_ASSERT(
       attr.cast<at::impl::TorchFunctionModeKey>() ==
       at::impl::TorchFunctionModeKey::PROXY);
