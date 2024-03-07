@@ -89,8 +89,6 @@ class ELU(torch.nn.ELU):
                  device=None, dtype=None) -> None:
         super().__init__(alpha)
         factory_kwargs = {'device': device, 'dtype': dtype}
-        self.scale = scale
-        self.zero_point = zero_point
         self.register_buffer('scale', torch.tensor(scale, **factory_kwargs))
         self.register_buffer('zero_point', torch.tensor(zero_point, **factory_kwargs))
 
