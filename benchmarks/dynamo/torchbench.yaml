@@ -173,6 +173,8 @@ skip:
       # timeout
       - sam
       # model is CUDA only
+      - sam_fast
+      # model is CUDA only
       - llama_v2_7b_16h
       # flaky
       - stable_diffusion
