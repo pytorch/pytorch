@@ -4394,6 +4394,9 @@ def _avg_poolnd(
             fallback = fallback_avg_pool2d
         elif dim == 3:
             fallback = fallback_avg_pool3d
+        else:
+            raise ValueError(f"Unknown dim: {dim}")
+
         return fallback(
             x,
             kernel_size,
