@@ -217,8 +217,6 @@ manual_torch_name_rule_map = {
     # functorch/jacfwd
     "torch._functorch.eager_transforms.jacfwd": UserFunctionVariable,
     "torch._functorch.eager_transforms._construct_standard_basis_for": UserFunctionVariable,
-    "torch._functorch.eager_transforms.error_if_complex": UserFunctionVariable,
-    "torch._functorch.eager_transforms._chunked_standard_basis_for_": UserFunctionVariable,
     "torch._functorch.eager_transforms.safe_unflatten": UserFunctionVariable,
     #
     "torch._constrain_as_size": UserFunctionVariable,
