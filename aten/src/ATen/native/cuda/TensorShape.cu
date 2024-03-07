@@ -3,6 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/TensorShape.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -441,44 +442,6 @@ static __global__ void chunk_cat_cuda_kernel(
   }
 }
 
-// Checks if chunk_cat inputs are valid on CUDA devices:
-// 1. tensors are non-empty
-// 2. all tensors have the same shape for `(0,1,...,dim-1)`-th dimensions
-// 3. all tensors are on cuda
-void is_valid_chunk_cat_inputs(TensorList tensors, uint64_t dim) {
-  TORCH_CHECK(!tensors.empty(),
-           "chunk_cat expects a non-empty TensorList");
-  const auto num_tensors = tensors.size();
-  TORCH_CHECK(
-    num_tensors > 0,
-    "assert_leading_dimension_matches() has invalid args: should have at least 1 input tensors"
-  );
-  std::vector<c10::SymInt> leading_dim_sizes;
-  for (const auto i : c10::irange(dim)) {
-    TORCH_CHECK(tensors[0].size(i) > 0, "assert_leading_dimension_matches() error: tensor size should be positive.");
-    leading_dim_sizes.push_back(tensors[0].size(i));
-  }
-  auto expected_dtype = tensors[0].dtype();
-  c10::Device expected_device = tensors[0].device();
-  for (const auto i : c10::irange(num_tensors)) {
-    at::Tensor tensor = tensors[i];
-    TORCH_CHECK(tensor.numel() > 0, "assert_leading_dimension_matches() error: tensor should have at least 1 element");
-    auto sizes = tensor.sizes();
-    TORCH_CHECK(sizes.size() >= dim, "assert_leading_dimension_matches() error: invalid dim");
-    for(const auto j : c10::irange(dim)) {
-      TORCH_CHECK(
-        tensor.size(j) == leading_dim_sizes[j],
-        "chunk_cat_cuda() has invalid args: tensors should have same sizes in the first dim dimensions"
-      );
-    }
-    TORCH_CHECK(
-      tensor.dtype() == expected_dtype,
-      "chunk_cat_cuda() has invalid args: tensors should have same sizes in the first dim dimensions"
-    );
-    TORCH_CHECK(tensor.device() == expected_device, "chunk_cat_cuda() error: non-cuda input tensors");
-  }
-}
-
 bool all_contiguous(TensorList tensors) {
   bool contiguous = true;
   for (const auto& t : tensors) {
@@ -787,8 +750,7 @@ Tensor _chunk_cat_cuda(
   int64_t dim,
   int64_t num_chunks
 ) {
-  dim = at::maybe_wrap_dim(dim, tensors[0].dim());
-  detail::is_valid_chunk_cat_inputs(tensors, (uint64_t)dim);
+  dim = at::native::preprocess_chunk_cat_inputs(tensors, dim, num_chunks);
   if(detail::all_contiguous(tensors)) {
     return detail::_chunk_cat_cuda_contiguous_no_cast(tensors, dim, num_chunks);
   } else {
@@ -802,8 +764,7 @@ Tensor& _chunk_cat_out_cuda(
   int64_t num_chunks,
   Tensor &out
 ) {
-  dim = at::maybe_wrap_dim(dim, tensors[0].dim());
-  detail::is_valid_chunk_cat_inputs(tensors, (uint64_t)dim);
+  dim = at::native::preprocess_chunk_cat_inputs(tensors, dim, num_chunks);
   TORCH_CHECK(tensors[0].device() == out.device(),
     "_chunk_cat_out_cuda: mismatch between input and out tensor devices");
   bool is_same_type = tensors[0].dtype() == out.dtype();
