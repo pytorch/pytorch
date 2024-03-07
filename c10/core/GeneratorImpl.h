@@ -73,9 +73,9 @@ struct C10_API GeneratorImpl : public c10::intrusive_ptr_target {
   virtual uint64_t seed() = 0;
   virtual void set_state(const c10::TensorImpl& new_state) = 0;
   virtual c10::intrusive_ptr<c10::TensorImpl> get_state() const = 0;
-  virtual size_t register_state_with_index(const c10::TensorImpl& new_state);
-  virtual void set_state_index(size_t index);
-  virtual size_t get_state_index() const;
+  virtual void graphsafe_set_state(
+      c10::intrusive_ptr<c10::GeneratorImpl> new_state);
+  virtual c10::intrusive_ptr<c10::GeneratorImpl> graphsafe_get_state() const;
   Device device() const;
 
   // See Note [Acquire lock when using random generators]

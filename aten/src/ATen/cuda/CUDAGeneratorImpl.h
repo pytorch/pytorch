@@ -1,12 +1,17 @@
 #pragma once
 
+#include <ATen/Context.h>
 #include <ATen/core/Generator.h>
 #include <ATen/cuda/PhiloxCudaState.h>
-#include <ATen/Context.h>
-#include <limits>
 #include <atomic>
-
+#include <limits>
+#include <memory>
 namespace at {
+
+namespace cuda {
+struct CUDAGraph;
+}
+
 /**
  * Note [CUDA Graph-safe RNG states]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -87,32 +92,34 @@ namespace at {
  *
  */
 
-struct CUDAGeneratorState {
+struct CUDAGeneratorState : public c10::intrusive_ptr_target {
   uint64_t seed_;
   uint64_t philox_offset_per_thread_;
-  int64_t* seed_extragraph_;
-  int64_t* offset_extragraph_;
   uint32_t offset_intragraph_;
-  bool graph_expects_this_gen_;
+  bool capturing_{};
+  std::unique_ptr<at::Tensor> seed_extragraph_;
+  std::unique_ptr<at::Tensor> offset_extragraph_;
+  uint64_t wholegraph_increment_{};
+  cuda::CUDAGraph* current_graph_{};
 
   CUDAGeneratorState(
-      uint64_t seed = default_rng_seed_val,
-      uint64_t philox_offset_per_thread = 0,
-      int64_t* seed_extragraph = nullptr,
-      int64_t* offset_extragraph = nullptr,
-      uint32_t offset_intragraph = 0,
-      bool graph_expects_this_gen = false)
-      : seed_(seed),
-        philox_offset_per_thread_(philox_offset_per_thread),
-        seed_extragraph_(seed_extragraph),
-        offset_extragraph_(offset_extragraph),
-        offset_intragraph_(offset_intragraph),
-        graph_expects_this_gen_(graph_expects_this_gen) {}
+      uint64_t seed_ = default_rng_seed_val,
+      uint64_t philox_offset_per_thread_ = 0,
+      uint32_t offset_intragraph_ = 0);
+
+  void increase(uint64_t increment);
+  void register_capturing_graph(cuda::CUDAGraph* graph);
+  void capture_epilogue();
+  void replay_prologue();
+  c10::intrusive_ptr<CUDAGeneratorState> clone();
 };
 
 struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   // Constructors
   CUDAGeneratorImpl(DeviceIndex device_index = -1);
+  CUDAGeneratorImpl(
+      DeviceIndex device_index,
+      c10::intrusive_ptr<CUDAGeneratorState> state_);
   ~CUDAGeneratorImpl() override = default;
 
   // CUDAGeneratorImpl methods
@@ -124,27 +131,21 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   uint64_t seed() override;
   void set_state(const c10::TensorImpl& new_state) override;
   c10::intrusive_ptr<c10::TensorImpl> get_state() const override;
-
-  // Registers a new state with the generator and returns its index.
-  size_t register_state_with_index(const c10::TensorImpl& new_state) override;
-  void set_state_index(size_t index) override;
-  size_t get_state_index() const override;
-
-  std::vector<uint64_t> seed_list() const;
+  void graphsafe_set_state(c10::intrusive_ptr<GeneratorImpl> state) override;
+  c10::intrusive_ptr<c10::GeneratorImpl> graphsafe_get_state() const override;
 
   void set_philox_offset_per_thread(uint64_t offset);
   uint64_t philox_offset_per_thread() const;
-  void capture_prologue(
-      const std::vector<int64_t*>& seeds_device_ptr,
-      const std::vector<int64_t*>& offsets_device_ptr);
-  std::vector<uint64_t> capture_epilogue();
-
+  void capture_prologue(cuda::CUDAGraph* graph);
+  void capture_epilogue() {
+    state_->capture_epilogue();
+  }
+  void replay_prologue() {
+    state_->replay_prologue();
+  }
   // Generates a PhiloxCudaState with a specified increment, and increment
   // current state
   PhiloxCudaState philox_cuda_state(uint64_t increment);
-  // Creates a list of PhiloxCudaState objects, and increments on all state.
-  std::vector<PhiloxCudaState> philox_cuda_state_list(
-      std::vector<uint64_t> increment_list);
 
   bool reset_rnn_state() {
     return !no_reset_rnn_state_.test_and_set();
@@ -158,11 +159,8 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
 
  private:
   CUDAGeneratorImpl* clone_impl() const override;
-  CUDAGeneratorState& state();
-  const CUDAGeneratorState& state() const;
 
-  size_t current_state_id_ = 0;
-  std::vector<CUDAGeneratorState> states_;
+  c10::intrusive_ptr<CUDAGeneratorState> state_;
   std::atomic_flag no_reset_rnn_state_;
 };
 

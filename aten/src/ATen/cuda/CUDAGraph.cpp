@@ -89,6 +89,11 @@ CUDAGraph::CUDAGraph()
 #endif
 }
 
+void CUDAGraph::register_generator_state(
+    c10::intrusive_ptr<at::CUDAGeneratorState> state) {
+  captured_generator_states_.insert(state);
+}
+
 void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capture_mode) {
 #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   TORCH_CHECK(!has_graph_exec_,
@@ -103,20 +108,9 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
       c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
 
-  auto options = TensorOptions().device(at::kCUDA).dtype(at::kLong);
-  std::vector<uint64_t> seeds = gen->seed_list();
-  std::vector<int64_t*> seeds_device_ptr, offsets_device_ptr;
-  for (auto seed : seeds) {
-    auto seed_extragraph = at::empty({1}, options);
-    auto offset_extragraph = at::empty({1}, options);
-    seed_extragraph_list_.push_back(seed_extragraph);
-    offset_extragraph_list_.push_back(offset_extragraph);
-
-    seed_extragraph.fill_(int64_t(seed));
-    seeds_device_ptr.emplace_back(seed_extragraph.data_ptr<int64_t>());
-    offsets_device_ptr.emplace_back(offset_extragraph.data_ptr<int64_t>());
-  }
-  gen->capture_prologue(seeds_device_ptr, offsets_device_ptr);
+  auto gen_ptr =
+      c10::intrusive_ptr<CUDAGeneratorImpl>::unsafe_reclaim_from_nonowning(gen);
+  gen->capture_prologue(this);
 
   auto stream = at::cuda::getCurrentCUDAStream();
 
@@ -126,7 +120,6 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
               "default stream.)");
 
   capture_stream_ = stream;
-  capture_gen_ = gen;
   capture_dev_ = c10::cuda::current_device();
 
   id_ = capture_sequence_id();
@@ -226,13 +219,9 @@ void CUDAGraph::capture_end() {
 
   has_graph_exec_ = true;
 
-  auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
-      c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
-  TORCH_CHECK(gen == capture_gen_,
-              "Default CUDA RNG generator on current device at capture end "
-              "is different from default generator on current device "
-              "when capture began");
-  wholegraph_increment_list_ = gen->capture_epilogue();
+  for (auto& generator_state : captured_generator_states_) {
+    generator_state->capture_epilogue();
+  }
 
   size_t numCUDAGraphNodes = 0;
   AT_CUDA_CHECK(cudaGraphGetNodes(graph_, NULL, &numCUDAGraphNodes));
@@ -262,21 +251,10 @@ void CUDAGraph::replay() {
 
   c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
 
-  // Just like any RNG consumer kernel!
-  auto* gen = get_generator_or_default<CUDAGeneratorImpl>(
-      c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
-  std::vector<PhiloxCudaState> rng_engine_inputs_list;
-  {
-    std::lock_guard<std::mutex> lock(gen->mutex_);
-    rng_engine_inputs_list =
-        gen->philox_cuda_state_list(wholegraph_increment_list_);
+  for (auto& generator_state : captured_generator_states_) {
+    generator_state->replay_prologue();
   }
-  std::vector<uint64_t> seeds = gen->seed_list();
-  for (size_t i = 0; i < seeds.size(); i++) {
-    seed_extragraph_list_[i].fill_(int64_t(seeds[i]));
-    offset_extragraph_list_[i].fill_(
-        int64_t(rng_engine_inputs_list[i].offset_.val));
-  }
+
   // graph_exec_ may be replayed in any stream.
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));
 

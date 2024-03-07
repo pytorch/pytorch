@@ -107,17 +107,9 @@ struct TORCH_API Generator {
 
   at::Tensor get_state() const;
 
-  // Register state using an index. Switch between states using state index.
-  // This is currently supported for only CUDA Generators.
-  size_t register_state_with_index(const at::Tensor& new_state);
+  void graphsafe_set_state(const Generator& new_state);
 
-  void set_state_index(size_t index) {
-    impl_->set_state_index(index);
-  }
-
-  size_t get_state_index() const {
-    return impl_->get_state_index();
-  }
+  Generator graphsafe_get_state() const;
 
   std::mutex& mutex() {
     return impl_->mutex_;

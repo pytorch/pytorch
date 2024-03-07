@@ -31,41 +31,23 @@ c10::intrusive_ptr<GeneratorImpl> GeneratorImpl::clone() const {
   return c10::intrusive_ptr<GeneratorImpl>::reclaim(res);
 }
 
+void GeneratorImpl::graphsafe_set_state(
+    c10::intrusive_ptr<c10::GeneratorImpl> state) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false, "graphsafe_set_state is not supported in this Generator");
+}
+
+c10::intrusive_ptr<c10::GeneratorImpl> GeneratorImpl::graphsafe_get_state()
+    const {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false, "graphsafe_get_state is not supported in this Generator");
+}
+
 /**
  * Gets the device of a generator.
  */
 Device GeneratorImpl::device() const {
   return device_;
-}
-
-/**
- * Registers a new state with the generator and returns its index.
- * This function is used to manage multiple generator states, with each state
- * being identified by a unique index.
- */
-size_t GeneratorImpl::register_state_with_index(
-    const c10::TensorImpl& new_state) {
-  TORCH_CHECK(
-      false, "This Generator cannot handle index-based state operations.");
-}
-
-/**
- * Sets the generator's current state to the one identified by the provided
- * index. This function allows switching between different registered states of
- * the generator.
- */
-void GeneratorImpl::set_state_index(size_t index) {
-  TORCH_CHECK(
-      false, "This Generator cannot handle index-based state operations.");
-}
-
-/**
- * Returns the index of the generator's current state.
- * The index corresponds to a specific registered state currently in use.
- */
-size_t GeneratorImpl::get_state_index() const {
-  TORCH_CHECK(
-      false, "This Generator cannot handle index-based state operations.");
 }
 
 namespace detail {

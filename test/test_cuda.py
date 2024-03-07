@@ -171,7 +171,6 @@ class TestCuda(TestCase):
         tensor.fill_(1)
         self.assertTrue((tensor == 1).all())
 
-
     @unittest.skipIf(TEST_CUDAMALLOCASYNC or IS_JETSON, "Segmentation fault (core dumped)")
     def test_out_of_memory_retry(self):
         torch.cuda.empty_cache()
@@ -383,7 +382,6 @@ class TestCuda(TestCase):
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = not orig
         self.assertEqual(torch._C._get_cublas_allow_bf16_reduced_precision_reduction(), not orig)
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig
-
 
     def test_cudnn_allow_tf32_get_set(self):
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
@@ -1463,8 +1461,6 @@ torch.cuda.synchronize()
             for op, args in self.autocast_lists.nn_fp16:
                 self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
 
-
-
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_nn_bf16(self):
         with torch.backends.cudnn.flags(enabled=True, deterministic=True):
@@ -1783,66 +1779,67 @@ torch.cuda.synchronize()
 
         self.assertTrue(b.sum().item() == 11000.)
 
-    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_graph_set_get_rng_state_index(self):
-        
-        # Registers the current state of the generator and returns the indices of the original and new states.
-        def register_state(generator):
-            original_state_index = generator.get_state_index()
-            new_state_index = generator.register_state_with_index(generator.get_state())
-            return original_state_index, new_state_index
+
+        def create_states(generator):
+            generator.manual_seed(0)
+            # old_state is a Generator that point to old GeneratorImpl
+            old_state = generator.graphsafe_get_state()
+            # old_state is a Generator that point to cloned GeneratorImpl
+            new_state = generator.clone_state()
+            return generator, old_state, new_state
 
         # Performs random number generation steps to increment the offset of the original state once and the new state twice.
-        def perform_random_generation_steps(original_state_index, new_state_index, generator):
-            generator.set_state_index(original_state_index)
-            torch.rand(5, device='cuda', generator=generator)
+        def perform_random_generation_steps(generator_state):
+            generator, old_state, new_state = generator_state
 
-            generator.set_state_index(new_state_index)
-            torch.rand(5, device='cuda', generator=generator)
-            torch.rand(5, device='cuda', generator=generator)
+            # we set the genrator point to new GeneratorImpl
+            generator.graphsafe_set_state(new_state)
+            torch.rand(5, device="cuda", generator=generator)
 
-            generator.set_state_index(original_state_index)
-
+            # we set the genrator point to old GeneratorImpl
+            generator.graphsafe_set_state(old_state)
+            torch.rand(5, device="cuda", generator=generator)
+            torch.rand(5, device="cuda", generator=generator)
 
         # Retrieves the final offsets of the original and new states.
-        def get_final_offsets_of_states(original_state_index, new_state_index, generator):
-            generator.set_state_index(original_state_index)
-            original_state_offset = generator.get_offset()
+        def get_final_offsets_of_states(generator_state):
+            generator, old_state, new_state = generator_state
+            generator.graphsafe_set_state(old_state)
+            old_state_offset = generator.get_offset()
 
-            generator.set_state_index(new_state_index)
+            generator.graphsafe_set_state(new_state)
             new_state_offset = generator.get_offset()
 
-            return original_state_offset, new_state_offset
+            return old_state_offset, new_state_offset
 
         # Test with a new CUDA generator
-        new_generator = torch.Generator(device='cuda')
-        new_generator.manual_seed(0)
-
-        orig_state_index, new_state_index = register_state(new_generator)
-        perform_random_generation_steps(orig_state_index, new_state_index, new_generator)
+        generator = torch.Generator(device="cuda")
+        generator_state = create_states(generator)
+        perform_random_generation_steps(generator_state)
 
         # Test with the default CUDA generator within a CUDA Graph
         # States are not allowed to change (get/set) under CUDAGraph
         # State indecies are allowed to change under CUDAGraph
-        s = torch.cuda.Stream()
         default_generator = torch.cuda.default_generators[0]
-        default_generator.manual_seed(0)
-
-        orig_state_index, new_state_index = register_state(default_generator)
+        default_generator_state = create_states(default_generator)
 
         g = torch.cuda.CUDAGraph()
+        s = torch.cuda.Stream()
         with torch.cuda.stream(s):
             g.capture_begin()
-            perform_random_generation_steps(orig_state_index, new_state_index, default_generator)
+            perform_random_generation_steps(default_generator_state)
             g.capture_end()
 
         torch.cuda.current_stream().wait_stream(s)
         g.replay()
 
         # Comparing the final offsets of states for both generators
-        offset = get_final_offsets_of_states(orig_state_index, new_state_index, new_generator)
-        graph_offset = get_final_offsets_of_states(orig_state_index, new_state_index, default_generator)
-
+        offset = get_final_offsets_of_states(generator_state)
+        graph_offset = get_final_offsets_of_states(default_generator_state)
         self.assertTrue(offset == graph_offset, "Offsets for new_generator and default_generator should be equal.")
 
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
@@ -3145,8 +3142,6 @@ exit(2)
             cuda_driver_api_call = f"ctypes.CDLL('{libcuda_name}').cuDeviceGetCount(ctypes.byref(x))"
             rc = check_output(f"import torch; import ctypes;x=ctypes.c_int(-1);print({cuda_driver_api_call})")
             self.assertEqual(rc, "3")
-
-
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest

@@ -13723,60 +13723,55 @@ Example::
 )
 
 add_docstr(
-    torch.Generator.set_state_index,
+    torch.Generator.graphsafe_set_state,
     r"""
-Generator.set_state_index(index) -> void
+Generator.graphsafe_set_state(state) -> None
 
-Sets the generator's current state to the one identified by the provided index.
+Sets the state of the generator to the specified state in a manner that is safe for use in graph capture. 
+This method is crucial for ensuring that the generator's state can be captured in the CUDA graph.
 
 Arguments:
-    index (int): The desired state index.
+    state (torch.Generator): A Generator point to the new state for the generator, typically obtained from `graphsafe_get_state`.
 
-Example::
-
+Example:
     >>> g_cuda = torch.Generator(device='cuda')
     >>> g_cuda_other = torch.Generator(device='cuda')
-    >>> g_cuda.set_state_index(g_cuda_other.get_state_index())
+    >>> current_state = g_cuda_other.graphsafe_get_state()
+    >>> g_cuda.graphsafe_set_state(current_state)
 """,
 )
 
 add_docstr(
-    torch.Generator.get_state_index,
+    torch.Generator.graphsafe_get_state,
     r"""
-Generator.get_state_index() -> int
+Generator.graphsafe_get_state() -> torch.Generator
 
-Returns the index of the generator's current state.
+Retrieves the current state of the generator in a manner that is safe for graph capture. 
+This method is crucial for ensuring that the generator's state can be captured in the CUDA graph.
 
 Returns:
-    Tensor: A ``torch.ByteTensor`` which contains all the necessary bits
-    to restore a Generator to a specific point in time.
+    torch.Generator: A Generator point to the current state of the generator
 
-Example::
-
+Example:
     >>> g_cuda = torch.Generator(device='cuda')
-    >>> g_cuda.get_state_index()
+    >>> current_state = g_cuda.graphsafe_get_state()
 """,
 )
 
 add_docstr(
-    torch.Generator.register_state_with_index,
+    torch.Generator.clone_state,
     r"""
-Generator.register_state_with_index(new_state) -> int
+Generator.clone_state() -> torch.Generator
 
-Registers a new state with the generator and returns its index.
-
-Arguments:
-    new_state (torch.ByteTensor): The desired state.
+Clones the current state of the generator and returns a new generator pointing to this cloned state. 
+This method is beneficial for preserving a particular state of a generator to restore at a later point.
 
 Returns:
-    index (int): The state index of the registered new state.
+    torch.Generator: A Generator pointing to the newly cloned state.
 
-
-Example::
-
+Example:
     >>> g_cuda = torch.Generator(device='cuda')
-    >>> g_cuda_other = torch.Generator(device='cuda')
-    >>> g_cuda.register_state_with_index(g_cuda_other.get_state_index())
+    >>> cloned_state = g_cuda.clone_state()
 """,
 )
 
