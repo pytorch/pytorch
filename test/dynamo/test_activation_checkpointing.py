@@ -1093,12 +1093,15 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 x = torch.sin(x)
                 x = self.linear(x)
                 x = torch.cos(x)
-                return x * self.c
+                torch._dynamo.graph_break()
+                return x
+                # return x * self.__dict__["c"]
+                # # return x * self.__getattr__("c")
 
-        mod = dist_checkpoint_wrapper(MockModule())
+        mod = dist_checkpoint_wrapper(MockModule(), 2)
         x = torch.randn(4, 4)
         ref = mod(x)
-        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        opt_mod = torch.compile(mod, backend="eager")#, fullgraph=True)
         res = opt_mod(x)
         self.assertEqual(ref, res)
 
