@@ -472,6 +472,9 @@ class FreeUnbackedSymbolsOpsHandler:
         self.symbols |= free_unbacked_symbols(size)
         return sympy_index_symbol(f"({str(index_var)})")
 
+    def frexp(self, x):
+        return (None,) * 2
+
     def reduction(
         self,
         dtype: torch.dtype,

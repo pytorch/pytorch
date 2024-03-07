@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import collections
 import functools
 import inspect
 import itertools
@@ -13,9 +14,10 @@ from ..bytecode_transformation import create_call_function, create_rot_n
 from ..exc import unimplemented, Unsupported
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
-from ..utils import get_first_attr, identity, istype, make_cell
-from .base import typestr, VariableTracker
+from ..utils import check_constant_args, get_first_attr, identity, istype, make_cell
+from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
+from .distributed import ProcessGroupVariable
 
 if TYPE_CHECKING:
     from torch._guards import Source
@@ -552,7 +554,79 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             codegen.extend_output(create_rot_n(2))
             codegen.extend_output(create_call_function(1, True))
 
-        return []
+
+class SkipFunctionVariable(VariableTracker):
+    def __init__(self, value, reason=None, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+        self.reason = reason
+
+    def python_type(self):
+        return type(self.value)
+
+    def as_python_constant(self):
+        return self.value
+
+    @classmethod
+    def create_with_source(cls, value, source):
+        install_guard(source.make_guard(GuardBuilder.FUNCTION_MATCH))
+        return cls(
+            value,
+            source=source,
+        )
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def fold_through_function_to_wrapper():
+        return {
+            collections.namedtuple: variables.UserDefinedClassVariable,
+        }
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
+            unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
+        # Fold through the functions(e.g, collections.namedtuple)
+        # that inputs & outputs are all python constants
+        elif (
+            self.value in self.fold_through_function_to_wrapper().keys()
+            and check_constant_args(args, kwargs)
+        ):
+            value = self.value(
+                *[x.as_python_constant() for x in args],
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            )
+            return self.fold_through_function_to_wrapper().get(self.value)(
+                value, mutable_local=MutableLocal()
+            )
+        elif (
+            self.value is functools.wraps
+            and not kwargs
+            and len(args) == 1
+            and (
+                args[0].source is not None or args[0].can_reconstruct(tx.output.root_tx)
+            )
+        ):
+
+            def wraps(fn):
+                if isinstance(fn, variables.NestedUserFunctionVariable):
+                    if args[0].source:
+                        reconstructible = args[0].source
+                    else:
+                        reconstructible = args[0]
+                    return fn.clone(wrapped_reconstructible=reconstructible)
+                unimplemented(f"functools.wraps({fn})")
+
+            return variables.LambdaVariable(wraps)
+        else:
+            try:
+                path = inspect.getfile(self.value)
+            except TypeError:
+                path = f"Builtin {self.value.__name__}"
+            msg = f"'skip function {self.value.__qualname__} in file {path}'"
+            msg += f"', {self.reason}'" if self.reason else ""
+            unimplemented(msg)
 
 
 def _traceable_collective_remaps():
@@ -618,10 +692,21 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         # call_function must check any unsupported arguments and graph-break.
         # It's safe to assume args/kwargs from orig_fn map 1:1 to args/kwargs of remapped_fn,
         # since that's the contract for putting a mapping in `traceable_collective_remaps`
+
+        # Merge args into kwargs so positional and keyword args
+        # can be processed the same way.
+        signature = inspect.signature(self.fn)
+        kwargs = dict(signature.bind(*args, **kwargs).arguments)
+        args = ()
+
         if "async_op" in kwargs and kwargs["async_op"].as_python_constant():
             unimplemented(
                 f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.fn}"
             )
+
+        if kwargs.get("group") is None or kwargs["group"].value is None:
+            kwargs["group"] = ProcessGroupVariable.get_global_pg_variable()
+
         return self.replacement_var.call_function(tx, args, kwargs)
 
 
@@ -640,13 +725,17 @@ class FunctoolsPartialVariable(VariableTracker):
         if self.args:
             codegen.foreach(self.args)
         if not self.keywords:
-            return create_call_function(len(self.args) + 1, True)
+            codegen.extend_output(create_call_function(len(self.args) + 1, True))
+            return
 
         codegen.foreach(self.keywords.values())
         keys = tuple(self.keywords.keys())
-        return codegen.create_call_function_kw(
-            len(keys) + len(self.args) + 1, keys, True
+        codegen.extend_output(
+            codegen.create_call_function_kw(len(keys) + len(self.args) + 1, keys, True)
         )
+
+    def get_function(self):
+        return self.as_python_constant()
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -717,6 +806,9 @@ class TritonKernelVariable(VariableTracker):
                     and defaults["prune_configs_by"].default
                     != kernel.early_config_prune
                 )
+                # Set via reset_to_zero argument
+                or len(kernel.reset_idx) != 0
+                or len(kernel.restore_idx) != 0
             ):
                 raise Unsupported(
                     "Only configs and keys are supported for triton.autotune"
