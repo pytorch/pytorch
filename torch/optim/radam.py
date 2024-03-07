@@ -318,11 +318,7 @@ def _single_tensor_radam(
 
         # update step
         step_t += 1
-
-        if capturable:
-            step = step_t
-        else:
-            step = _get_value(step_t)
+        step = step_t if capturable else _get_value(step_t)
 
         if weight_decay != 0:
             if decoupled_weight_decay:
@@ -345,33 +341,32 @@ def _single_tensor_radam(
         # compute the length of the approximated SMA
         rho_t = rho_inf - 2 * step * (beta2 ** step) / bias_correction2
 
+        def _compute_rect():
+            return (
+                (rho_t - 4)
+                * (rho_t - 2)
+                * rho_inf
+                / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
+            ) ** 0.5
+
+        def _compute_adaptive_lr():
+            exp_avg_sq_sqrt = exp_avg_sq.sqrt()
+            if differentiable:
+                exp_avg_sq_sqrt = exp_avg_sq_sqrt.add(eps)
+            else:
+                exp_avg_sq_sqrt = exp_avg_sq_sqrt.add_(eps)
+
+            return (bias_correction2 ** 0.5) / exp_avg_sq_sqrt
+
         # Compute the variance rectification term and update parameters accordingly
-        rect = (
-            (rho_t - 4)
-            * (rho_t - 2)
-            * rho_inf
-            / ((rho_inf - 4) * (rho_inf - 2) * rho_t)
-        ) ** 0.5
-
         if capturable:
-            rect = torch.where(rho_t > 5.0, rect, 0.0)
+            update = torch.where(rho_t > 5.0, _compute_rect() * _compute_adaptive_lr(), 1.0)
+            param.add_(bias_corrected_exp_avg * lr * update, alpha=-1.0)
         else:
-            rect = rect if rho_t > 5.0 else 0.0
-
-        exp_avg_sq_sqrt = exp_avg_sq.sqrt()
-        if differentiable:
-            exp_avg_sq_sqrt = exp_avg_sq_sqrt.add(eps)
-        else:
-            exp_avg_sq_sqrt = exp_avg_sq_sqrt.add_(eps)
-
-        adaptive_lr = (bias_correction2 ** 0.5) / exp_avg_sq_sqrt
-
-        if capturable:
-            update = torch.where(rect > 0, adaptive_lr * rect, 1.0)
-        else:
-            update = adaptive_lr * rect if rect > 0 else 1.0
-
-        param.add_(bias_corrected_exp_avg * lr * update, alpha=-1.0)
+            if rho_t > 5.0:
+                param.add_(bias_corrected_exp_avg * lr * _compute_adaptive_lr() * _compute_rect(), alpha=-1.0)
+            else:
+                param.add_(bias_corrected_exp_avg * lr, alpha=-1.0)
 
 
 def _multi_tensor_radam(
