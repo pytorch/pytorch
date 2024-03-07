@@ -2696,9 +2696,9 @@ exit(2)
         # Needs generalization if we want to extend this test to non-Adam-like optimizers.
         cases = [
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "foreach": foreach,
-                              "decoupled_weight_decay": decoupled_weight_decay})
-            for optimizer_ctor, foreach, decoupled_weight_decay in product(
-                (torch.optim.NAdam,), (False, True), (False, True),)
+                              "decoupled_weight_decay": decoupled_weight_decay, "weight_decay": weight_decay})
+            for optimizer_ctor, foreach, decoupled_weight_decay, weight_decay in product(
+                (torch.optim.NAdam, torch.optim.RAdam,), (False, True,), (False, True,), (0.0, 0.1,))
         ] + [
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "foreach": foreach, "amsgrad": amsgrad})
             for optimizer_ctor, foreach, amsgrad in product(
@@ -2713,10 +2713,6 @@ exit(2)
         ] + [
             (optimizer_ctor, {"lr": 0.1, "foreach": True, "maximize": maximize, "weight_decay": weight_decay})
             for optimizer_ctor, maximize, weight_decay in product((torch.optim.ASGD,), (False, True), (0, 0.1))
-        ] + [
-            (torch.optim.RAdam, {"lr": 0.1, "foreach": True, "decoupled_weight_decay": decoupled_weight_decay,
-                                 "weight_decay": weight_decay})
-            for decoupled_weight_decay, weight_decay in product((False, True), (0.0, 0.1))
         ]
 
         for optimizer_ctor, kwargs in cases:
@@ -2728,7 +2724,7 @@ exit(2)
         # mimicking `_test_graphed_optimizer` maladroitly to pass two param_groups to optimizer.__init__
         n_warmup, n_replay = 3, 2
         for optimizer, second_param_group_capturable in product((torch.optim.Adam, torch.optim.AdamW, torch.optim.Adamax,
-                                                                 torch.optim.NAdam), (True, False)):
+                                                                 torch.optim.NAdam, torch.optim.RAdam), (True, False)):
             ref_p1, param1 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
             ref_p2, param2 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
             grads1, grads2 = ([torch.randn_like(param1) for _ in range(n_warmup + n_replay)] for _ in range(2))
