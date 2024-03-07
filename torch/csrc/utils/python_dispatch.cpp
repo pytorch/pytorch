@@ -31,9 +31,7 @@
 
 namespace py = pybind11;
 
-namespace torch {
-namespace impl {
-namespace dispatch {
+namespace torch::impl::dispatch {
 
 // NB: I'd like to index this on OperatorHandle, but I can't, as I can't
 // guarantee that the main interpreter has finish doing all registrations before
@@ -890,6 +888,4 @@ void python_op_registration_trampoline_impl(
   pushPyOutToStack(op, stack, obj, "PythonKernelHolder");
 }
 
-} // namespace dispatch
-} // namespace impl
-} // namespace torch
+} // namespace torch::impl::dispatch

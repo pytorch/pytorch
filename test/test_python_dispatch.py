@@ -46,7 +46,7 @@ class TestPythonRegistration(TestCase):
         if hasattr(torch.ops, self.test_ns):
             del torch.ops._test_python_registration
 
-    def test_torch_compile_registration(self):
+    def test_torch_compile_override_cpu_registration(self):
         dynamic = True
         namespace_name = "aten"
         dispatch_key = "CPU"
@@ -97,8 +97,10 @@ class TestPythonRegistration(TestCase):
                         reg_name = schema.name
                         if schema.overload_name:
                             reg_name = f"{reg_name}.{schema.overload_name}"
-                        torch_compile_op_lib_impl.impl(  # noqa: F821
-                            reg_name, make_elementwise(_op_name), dispatch_key, compile_mode=True
+                        torch_compile_op_lib_impl._impl_t_c(  # noqa: F821
+                            reg_name,
+                            make_elementwise(_op_name),
+                            dispatch_key
                         )
                     except Exception as e:
                         continue
