@@ -1232,6 +1232,53 @@ class CPUReproTests(TestCase):
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
+    def test_per_channel_fake_quant_module_uint8(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.scales = torch.ones((3,)).to(torch.float64)
+                self.zero_points = torch.zeros((3,)).to(torch.int64)
+                self.axis = 1
+                self.quant_min = 0
+                self.quant_max = 255
+                self.dtype = torch.uint8
+
+            def forward(self, input):
+                input = torch.ops.quantized_decomposed.quantize_per_channel(
+                    input,
+                    self.scales,
+                    self.zero_points,
+                    self.axis,
+                    self.quant_min,
+                    self.quant_max,
+                    self.dtype,
+                )
+                input = torch.ops.quantized_decomposed.dequantize_per_channel(
+                    input,
+                    self.scales,
+                    self.zero_points,
+                    self.axis,
+                    self.quant_min,
+                    self.quant_max,
+                    self.dtype,
+                )
+                return input
+
+        m = Mod().eval()
+        x = torch.clamp(
+            torch.randn((1, 3, 224, 224), dtype=torch.float32) * 100,
+            0,
+            255,
+        )
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(m, (x,))
+            assert metrics.generated_cpp_vec_kernel_count == 1
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
     def test_per_channel_fake_quant_int8(self):
         self._test_per_channel_fake_quant_helper(torch.int8)
 
