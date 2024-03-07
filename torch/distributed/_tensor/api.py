@@ -699,14 +699,6 @@ def distribute_module(
         except ImportError as e:
             msg = "To use DTensor API with xla, you must install the torch_xla package!"
             raise ImportError(msg) from e
-    if device_type == "xla":
-        # call PyTorch/XLA SPMD for `xla` backend type device mesh.
-        # This returns annotated module for PyTorch/XLA SPMD.
-        from torch.distributed._tensor._xla import xla_distribute_module
-
-        return xla_distribute_module(
-            module, device_mesh, partition_fn, input_fn, output_fn
-        )  # type:ignore[return-value]
 
     def replicate_module_params_buffers(m: nn.Module, mesh: DeviceMesh) -> None:
         # This function loop over the immediate module parameters and
