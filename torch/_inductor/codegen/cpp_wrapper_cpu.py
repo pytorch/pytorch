@@ -15,7 +15,7 @@ from ..codecache import CudaKernelParamCache
 from ..utils import cache_on_self, sympy_product
 from ..virtualized import V
 from .common import IndentedBuffer
-from .wrapper import pexpr, WrapperCodeGen
+from .wrapper import EnterSubgraphLine, ExitSubgraphLine, pexpr, WrapperCodeGen
 
 
 class CppWrapperCpu(WrapperCodeGen):
@@ -1230,7 +1230,11 @@ class CppWrapperCpu(WrapperCodeGen):
 
     @functools.lru_cache(None)
     def codegen_int_array_var(
-        self, int_array: str, writer=None, known_statically=False
+        self,
+        int_array: str,
+        writer=None,
+        known_statically=False,
+        graph=None,  # for per-graph caching
     ):
         # Because the memory planning is done in two passes (see the implementation
         # of self.generate), the writeline behavior is different in the two passes.
@@ -1273,11 +1277,13 @@ class CppWrapperCpu(WrapperCodeGen):
                 size,
                 self.wrapper_call,
                 known_statically=self.is_statically_known_list_of_ints(shape),
+                graph=self.get_codegened_graph(),
             )
             stride_array_var = self.codegen_int_array_var(
                 stride,
                 self.wrapper_call,
                 known_statically=self.is_statically_known_list_of_ints(orig_stride),
+                graph=self.get_codegened_graph(),
             )
             device_type, device_id = device_str.split(",")
             device_idx = "this->device_idx_" if V.graph.aot_mode else device_id
@@ -1342,8 +1348,12 @@ class CppWrapperCpu(WrapperCodeGen):
                 pexpr(offset),  # bytes not numel
                 self.codegen_dtype(dtype),
                 str(len(shape)),
-                self.codegen_int_array_var(size, self.wrapper_call),
-                self.codegen_int_array_var(stride, self.wrapper_call),
+                self.codegen_int_array_var(
+                    size, self.wrapper_call, graph=self.get_codegened_graph()
+                ),
+                self.codegen_int_array_var(
+                    stride, self.wrapper_call, graph=self.get_codegened_graph()
+                ),
                 f"&{tmp_name}",
             ]
             self.wrapper_call.writeline(f"AtenTensorHandle {tmp_name};")
@@ -1386,11 +1396,13 @@ class CppWrapperCpu(WrapperCodeGen):
                     size,
                     writer,
                     known_statically=self.is_statically_known_list_of_ints(size_list),
+                    graph=self.get_codegened_graph(),
                 ),
                 self.codegen_int_array_var(
                     stride,
                     writer,
                     known_statically=self.is_statically_known_list_of_ints(stride_list),
+                    graph=self.get_codegened_graph(),
                 ),
                 offset,
             ]
@@ -1459,11 +1471,71 @@ class CppWrapperCpu(WrapperCodeGen):
         if not config.abi_compatible:
             super().codegen_multi_output(name, value)
 
-    def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
-        raise NotImplementedError("Control flow NYI in C++ wrapper codegen.")
+    def codegen_subgraph_prefix(self, subgraph, outer_inputs, outer_outputs):
+        for inner_input, outer_input in zip(subgraph.graph.graph_inputs, outer_inputs):
+            if config.abi_compatible:
+                # in ABI-compatible mode, we copy the underlying at::Tensor of the conditional
+                # input (outer_input) into another at::Tensor to be used as a subgraph input
+                # (inner_input) in the nested scope. we can't std::move here, as the codegened
+                # outer input may be an expression / rvalue (e.g., reinterpret_view(x)), so we
+                # can't necessarily std::move it back to the origin (x).
+                self.writeline(f"AtenTensorHandle {inner_input}_handle;")
+                self.writeline(
+                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors_out({outer_input}, &{inner_input}_handle));"
+                )
+                self.writeline(
+                    f"RAIIAtenTensorHandle {inner_input}({inner_input}_handle);"
+                )
+            else:
+                self.writeline(
+                    f"{self.declare}{inner_input} = {outer_input}{self.ending}"
+                )
+
+    def codegen_subgraph_suffix(self, subgraph, outer_inputs, outer_outputs):
+        for inner_output, outer_output in zip(
+            subgraph.graph.graph_outputs, outer_outputs
+        ):
+            src = inner_output.codegen_reference()
+            if config.abi_compatible:
+                # in ABI-compatible mode, we need to std::move subgraph output (inner_output)
+                # to the conditional output (outer_output), as RAIIAtenTensorHandle's copy
+                # constructor is deleted.
+                src = f"std::move({src})"
+            self.writeline(f"{outer_output} = {src}{self.ending}")
 
     def codegen_conditional(self, conditional):
-        raise NotImplementedError("Control flow NYI in C++ wrapper codegen.")
+        name = conditional.get_name()
+        outer_inputs = [f"{buf.codegen_reference()}" for buf in conditional.operands]
+        if config.abi_compatible:
+            outer_outputs = []
+            for out in conditional.outputs:
+                # in ABI-compatible mode, ir.MultiOutput is not codegened,
+                # hence pre-declare output variables directly and separately
+                self.writeline(f"RAIIAtenTensorHandle {out.get_name()};")
+                outer_outputs.append(out.get_name())
+            predicate = f"{conditional.predicate.get_name()}_scalar"
+            self.writeline(f"bool {predicate};")
+            # in ABI-compatible mode, we need to use the ABI shim function
+            # to extract a C++ bool from the unrelying scalar bool Tensor
+            self.writeline(
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_bool({conditional.predicate.codegen_reference()}, &{predicate}));"
+            )
+        else:
+            # in non-ABI-compatible mode, we can codegen the conditional outputs
+            # as array of at::Tensor instances, as the ir.MultiOutput is codegened
+            outer_outputs = [f"{name}[{i}]" for i in range(len(conditional.outputs))]
+            self.writeline(f"at::Tensor {name}[{len(conditional.outputs)}];")
+            predicate = f"{conditional.predicate.codegen_reference()}.item<bool>()"
+
+        self.writeline(f"if ({predicate}) {{")
+        self.writeline(EnterSubgraphLine(self, conditional.true_subgraph.graph))
+        self.codegen_subgraph(conditional.true_subgraph, outer_inputs, outer_outputs)
+        self.writeline(ExitSubgraphLine(self))
+        self.writeline("} else {")
+        self.writeline(EnterSubgraphLine(self, conditional.false_subgraph.graph))
+        self.codegen_subgraph(conditional.false_subgraph, outer_inputs, outer_outputs)
+        self.writeline(ExitSubgraphLine(self))
+        self.writeline("}")
 
     def generate_extern_kernel_args_decl_if_needed(
         self, op_overload, raw_args, output_args
@@ -1696,6 +1768,12 @@ class CppWrapperCpu(WrapperCodeGen):
 
         self.extern_call_ops.add(cpp_kernel_key)
 
+    def generate_reset_kernel_saved_flags(self):
+        pass
+
+    def generate_save_uncompiled_kernels(self):
+        pass
+
     def val_to_cpp_arg_str(self, type_, val, is_legacy_abi) -> str:
         if (
             config.abi_compatible
@@ -1760,7 +1838,12 @@ class CppWrapperCpu(WrapperCodeGen):
             if config.abi_compatible:
                 static = self.is_statically_known_list_of_ints(val)
                 # Need to pass the array length because we can't use std::vector
-                return f"{self.codegen_int_array_var(result, known_statically=static)}, {len(val)}"
+                int_var_array = self.codegen_int_array_var(
+                    result,
+                    known_statically=static,
+                    graph=self.get_codegened_graph(),
+                )
+                return f"{int_var_array}, {len(val)}"
             else:
                 return result
         else:
