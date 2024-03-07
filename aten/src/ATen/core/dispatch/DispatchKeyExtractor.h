@@ -89,7 +89,7 @@ namespace detail {
         ts = ts | gen.key_set();
       }
     }
-    void operator()(const c10::optional<at::Generator>& gen) {
+    void operator()(const std::optional<at::Generator>& gen) {
       if (gen.has_value() && gen->defined()) {
         ts = ts | gen->key_set();
       }

@@ -24,8 +24,9 @@ class CppWrapperCpu(WrapperCodeGen):
     """
 
     def __init__(self):
+        if not hasattr(self, "device"):
+            self.device = "cpu"
         super().__init__()
-
         self.declare = "auto "
         self.declare_maybe_reference = "decltype(auto) "
         self.ending = ";"
@@ -101,7 +102,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 grid_fn,
             )
         else:
-            if V.graph.aot_mode and config.abi_compatible:
+            if config.abi_compatible:
                 assert arg_types is not None and len(call_args) == len(
                     arg_types
                 ), "Mismatch call_args and arg_types in generate_kernel_call"
@@ -149,10 +150,26 @@ class CppWrapperCpu(WrapperCodeGen):
             )
 
         if config.abi_compatible:
-            self.header.splice("#include <torch/csrc/inductor/aoti_torch/c/shim.h>")
+            if config.c_shim_version == "1":
+                self.header.splice("#include <torch/csrc/inductor/aoti_torch/c/shim.h>")
+            else:
+                self.header.splice(
+                    f"#include <torch/csrc/inductor/aoti_torch/generated/c_shim_{self.device}.h>"
+                )
+            self.header.splice(
+                """
+                #include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
+                #include <torch/csrc/inductor/aoti_runtime/thread_local.h>
+                #include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
+                """
+            )
+            if V.graph.aot_mode:
+                self.header.splice(
+                    """
+                    #include <torch/csrc/inductor/aoti_runtime/model.h>
+                    """
+                )
         else:
-            if not V.graph.aot_mode:
-                self.header.splice("#include <pybind11/pybind11.h>")
             self.header.splice(
                 """
                 #include <ATen/ATen.h>
@@ -168,14 +185,17 @@ class CppWrapperCpu(WrapperCodeGen):
                 #define alloc_from_pool torch::inductor::_alloc_from_pool
                 """
             )
-            if V.graph.cuda:
-                self.header.splice(
-                    """
-                    #include <ATen/cuda/EmptyTensor.h>
-                    """
-                )
 
         self.header.splice("#include <c10/util/generic_math.h>")
+
+        if not V.graph.aot_mode:
+            self.header.splice(
+                """
+                #include <pybind11/pybind11.h>
+
+                using namespace torch::aot_inductor;
+                """
+            )
 
         from .memory_planning import ALIGN_BYTES
 
@@ -359,31 +379,31 @@ class CppWrapperCpu(WrapperCodeGen):
         with self.prefix.indent():
             # assign inputs and outputs in both cases so the later codegen can be simplified
             if not config.use_minimal_arrayref_interface:
-                if V.graph.aot_mode:
-                    if not V.graph.is_const_graph:
-                        if config.abi_compatible:
-                            self.prefix.splice(
-                                """
-                                    auto inputs = steal_from_raw_handles_to_raii_handles(input_handles, num_inputs());
-                                """
-                            )
-                        else:
-                            # This looks dumb, but can avoid creating two versions of code in the AOTInductor runtime.
-                            self.prefix.splice(
-                                """
-                                    auto inputs = alloc_tensors_by_stealing_from_handles(input_handles, num_inputs());
-                                """
-                            )
-                else:
-                    # The use of alloc_tensors_by_stealing_from_handles will be consolidated
-                    num_args = len(V.graph.graph_inputs) + len(V.graph.constants)
-                    self.prefix.splice(
-                        f"""
-                            pybind11::gil_scoped_release release;
+                if not V.graph.is_const_graph:
+                    if V.graph.aot_mode:
+                        num_args = len(V.graph.graph_inputs)
+                    else:
+                        # Weights are promoted in the JIT mode
+                        num_args = len(V.graph.graph_inputs) + len(V.graph.constants)
+                        self.prefix.splice(
+                            """
+                                pybind11::gil_scoped_release release;
+                            """
+                        )
 
-                            auto inputs = torch::aot_inductor::alloc_tensors_by_stealing_from_handles(input_handles, {num_args});
-                        """
-                    )
+                    if config.abi_compatible:
+                        self.prefix.splice(
+                            f"""
+                                auto inputs = steal_from_raw_handles_to_raii_handles(input_handles, {num_args});
+                            """
+                        )
+                    else:
+                        # This looks dumb, but can avoid creating two versions of code in the AOTInductor runtime.
+                        self.prefix.splice(
+                            f"""
+                                auto inputs = alloc_tensors_by_stealing_from_handles(input_handles, {num_args});
+                            """
+                        )
 
             if inputs_len != 0:
                 for idx, input_key in enumerate(V.graph.graph_inputs.keys()):
@@ -404,12 +424,16 @@ class CppWrapperCpu(WrapperCodeGen):
                             dtype is not None
                         ), "Fails to get the dtype of the sympy.Expr"
                         cpp_dtype = DTYPE_TO_CPP[dtype]
-                        assert (
-                            not config.abi_compatible
-                        ), "Need to add .item support for abi_compatible AOTInductor codegen"
-                        self.prefix.writeline(
-                            f"{cpp_dtype} {input_key} = inputs[{idx}].item<{cpp_dtype}>();"
-                        )
+                        if config.abi_compatible:
+                            self.prefix.writeline(f"{cpp_dtype} {input_key};")
+                            dtype_str = str(dtype).split(".")[-1]
+                            self.prefix.writeline(
+                                f"aoti_torch_item_{dtype_str}(inputs[{idx}], &{input_key});"
+                            )
+                        else:
+                            self.prefix.writeline(
+                                f"{cpp_dtype} {input_key} = inputs[{idx}].item<{cpp_dtype}>();"
+                            )
                     else:
                         self.prefix.writeline(
                             f"auto {input_key} = std::move(inputs[{idx}]);"
@@ -895,7 +919,7 @@ class CppWrapperCpu(WrapperCodeGen):
             # Append constants to the input args for cpp wrapper.
             # Python wrapper directly gets the value inside the wrapper call
             # as a global variable passed when calling exec(code, mod.__dict__, mod.__dict__).
-            # For cpp wrapper, we need to pass this python value to the inductor_entry_cpp function explicitly.
+            # For cpp wrapper, we need to pass this python value to the inductor_entry_impl function explicitly.
             assert all(
                 isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
             ), "Expect all constants to be Tensor"
@@ -924,7 +948,11 @@ class CppWrapperCpu(WrapperCodeGen):
         kernel_suffix = kernel_tokens[-1]
         if kernel_suffix == "call":
             kernel_suffix = kernel_tokens[-2]
-        shim_fn = f"aoti_torch_{kernel_suffix}"
+        if config.c_shim_version == "1":
+            shim_fn = f"aoti_torch_{kernel_suffix}"
+        else:
+            shim_fn = f"aoti_torch_{self.device}_{kernel_suffix}"
+
         # HACK: val_to_arg_str jams multiple arguments together using a comma. If that
         # ever breaks, it needs to be reworked to be able to return multiple arguments,
         # and the split-on-comma code here needs to be removed.
@@ -955,7 +983,7 @@ class CppWrapperCpu(WrapperCodeGen):
         self.writeline(f"RAIIAtenTensorHandle {name}({output_handle_name});")
 
     def generate_extern_kernel_alloc(self, extern_kernel, args):
-        if V.graph.aot_mode and config.abi_compatible:
+        if config.abi_compatible:
             self.generate_c_shim_extern_kernel_alloc(extern_kernel, args)
         else:
             super().generate_extern_kernel_alloc(extern_kernel, args)
@@ -996,7 +1024,7 @@ class CppWrapperCpu(WrapperCodeGen):
             self.writeline(raii_handle)
 
     def generate_fallback_kernel(self, fallback_kernel, args):
-        if V.graph.aot_mode and config.abi_compatible:
+        if config.abi_compatible:
             self.generate_c_shim_fallback_kernel(fallback_kernel, args)
         else:
             super().generate_fallback_kernel(fallback_kernel, args)
@@ -1011,7 +1039,7 @@ class CppWrapperCpu(WrapperCodeGen):
         else:
             args.insert(0, f"{codegen_reference}")
 
-        if V.graph.aot_mode and config.abi_compatible:
+        if config.abi_compatible:
             self.generate_c_shim_extern_kernel_call(kernel, args)
         else:
             self.writeline(self.wrap_kernel_call(kernel, args))
@@ -1046,7 +1074,7 @@ class CppWrapperCpu(WrapperCodeGen):
         self, output, inputs, kernel, python_kernel_name, src_is_tensor, reduce, kwargs
     ):
         # TODO: support other overload for cpp wrapper and remove the below assertions
-        if V.graph.aot_mode and config.abi_compatible:
+        if config.abi_compatible:
             # call the ABI shim function instead of the ATen one
             kernel = kernel.replace("at::", "aoti_torch_")
         line = f"{kernel}({output}, {','.join(map(str, inputs))}"
@@ -1067,7 +1095,7 @@ class CppWrapperCpu(WrapperCodeGen):
         if V.graph.aot_mode and V.graph.cpp_wrapper and config.abi_compatible:
             # See the comment in codegen_reinterpret_view about why having something like
             # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the correponding
-            # tensor prematurely deallocated, thus this std:vector().data() trick here.
+            # tensor prematurely deallocated, thus this std::vector().data() trick here.
             indices_str = (
                 f"std::vector<AtenTensorHandle>{{{', '.join(indices)}}}.data()"
             )
@@ -1090,7 +1118,7 @@ class CppWrapperCpu(WrapperCodeGen):
         return self.expr_printer(V.graph.sizevars.simplify(x))
 
     def codegen_tuple_access(self, basename: str, name: str, index: str) -> str:
-        if V.graph.aot_mode and config.abi_compatible:
+        if config.abi_compatible:
             # in the abi_compatible mode, outputs are returned via arguments
             return name
         else:
@@ -1676,12 +1704,24 @@ class CppWrapperCpu(WrapperCodeGen):
         ):
             if val is None:
                 return "0"  # nullptr is not available in C
-            if isinstance(val, (bool, int, str, float)):
+            if not isinstance(type_.getElementType(), torch.TensorType):
                 var_name = f"var_{next(self.arg_var_id)}"
                 self.writeline(f"auto {var_name} = {self.val_to_arg_str(val)};")
                 return f"&{var_name}"
-            if not isinstance(type_.getElementType(), torch.TensorType):
-                return f"&{self.val_to_arg_str(val)}"
+            elif config.c_shim_version == "2":
+                # Similar to other data type, use pointer to denote optional tensor arg in v2 C shim
+                base_handle = self.val_to_arg_str(val)
+                if "wrap_with_raii_handle_if_needed" in base_handle:
+                    # wrap_with_raii_handle_if_needed creates a temp RAIIAtenTensorHandle, so we need to
+                    # explicitly store it. Otherwise, it will be destroyed before the fallback kernel call.
+                    tmp_var_name = f"var_{next(self.arg_var_id)}"
+                    self.writeline(
+                        f"RAIIAtenTensorHandle {tmp_var_name} = {base_handle};"
+                    )
+                    base_handle = tmp_var_name
+                var_name = f"var_{next(self.arg_var_id)}"
+                self.writeline(f"AtenTensorHandle {var_name} = {base_handle}.get();")
+                return f"&{var_name}"
 
         return self.val_to_arg_str(val)
 
