@@ -187,9 +187,12 @@ command = [
 code = 'CLANGTIDY'
 include_patterns = [
     'aten/src/ATen/core/*.cpp',
+    # Enable coverage of headers in aten/src/ATen
+    # and excluding most sub-directories for now.
+    'aten/src/ATen/*.h',
+    'aten/src/ATen/*.cpp',
     'c10/**/*.cpp',
     'c10/**/*.h',
-    # Enable coverage of headers in torch/csrc and excluding sub-directories for now.
     'torch/csrc/*.h',
     'torch/csrc/*.cpp',
     'torch/csrc/**/*.h',
