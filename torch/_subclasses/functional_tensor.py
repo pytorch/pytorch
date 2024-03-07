@@ -521,24 +521,7 @@ def dispatch_functionalize(func, mode: FunctionalTensorMode = FunctionalTensorMo
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
 
-        # FIXME (tmanlaibaatar) This is little weird.
-        # when map_impl.autograd is invoked, we shouldn't be
-        # tracing through predispach mode stack. But since this mode is
-        # saved before this happens on the PythonFunctinalizeAPI object,
-        # it will still try to dispatch through PreDispach FunctionalTensorMode
-        # This is wrong because at this time, PreDispatch mode stack is already
-        # not active. So we hack it to manually dispatch to aot-dispatch FunctionalTensorMode
-        # if we figure there is no PreDispatch mode active. Seems very hacky??
-        dispatch_sets = (
-            torch._C._dispatch_tls_local_include_set()
-            - torch._C._dispatch_tls_local_exclude_set()
-        )
-        mode_to_dispatch = (
-            FunctionalTensorMode()
-            if not dispatch_sets.has(torch._C.DispatchKey.PreDispatch)
-            else mode
-        )
-        with disable_above, mode_to_dispatch:
+        with disable_above, mode:
             func_args = pytree.tree_map_only(torch.Tensor, to_fun, args)
             func_kwargs = pytree.tree_map_only(torch.Tensor, to_fun, kwargs)
             func_outputs = func(*func_args, **func_kwargs)
