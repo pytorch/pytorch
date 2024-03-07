@@ -1569,17 +1569,6 @@ class CheckFunctionManager:
         if config.enable_cpp_guard_manager:
             self.guard_manager = GuardManager()
         self.output_graph = output_graph
-
-        # Note: right overrides left
-        def combine_scopes(left, right):
-            if left is None:
-                return right
-
-            if right is None:
-                return left
-
-            return {**left, **right}
-
         w_builder = None
 
         def source_ref(source):

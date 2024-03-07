@@ -124,7 +124,7 @@ struct ZeroTensorAllocator final : public at::Allocator {
   static void deleter(void* const pointer) {
     TORCH_INTERNAL_ASSERT(!pointer);
   }
-  DataPtr allocate(const size_t /*nbytes*/) const override {
+  DataPtr allocate(const size_t /*nbytes*/) override {
     return {nullptr, nullptr, &deleter, device_};
   }
   DeleterFnPtr raw_deleter() const override {

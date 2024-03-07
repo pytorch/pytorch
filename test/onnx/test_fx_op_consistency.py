@@ -37,7 +37,17 @@ from __future__ import annotations
 import copy
 import itertools
 import os
-from typing import Any, Callable, Collection, Mapping, Optional, Tuple, Type, Union
+from typing import (
+    Any,
+    Callable,
+    Collection,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+    Type,
+    Union,
+)
 
 import error_reproduction
 
@@ -1652,6 +1662,16 @@ OP_WITH_SKIPPED_XFAIL_SUBTESTS = frozenset(meta.op_name for meta in SKIP_XFAIL_S
 ALL_OPS_IN_DB = frozenset(op_info.name for op_info in OPS_DB)
 
 
+def _torch_size_flatten_spec(d: List[Any], spec: Any) -> List[Any]:
+    return [d[i] for i in range(spec.num_children)]
+
+
+torch.fx._pytree.register_pytree_flatten_spec(
+    torch.Size,
+    _torch_size_flatten_spec,
+)
+
+
 class SingleOpModel(torch.nn.Module):
     """Test model to wrap around a single op for export."""
 
@@ -1729,7 +1749,10 @@ def _compare_onnx_and_torch_exported_program(
     # Thus, ONNXProgram() must run before ref_model() to prevent ref_model.forward() from changing the state_dict.
     # Otherwise, the ref_model can change buffers on state_dict which would be used by ONNXProgram.__call__()
     onnx_outputs = onnx_exported_program(*input_args, **input_kwargs)
-    torch_outputs = torch_exported_program(*input_args, **input_kwargs)
+    if isinstance(torch_exported_program, torch.export.ExportedProgram):
+        torch_outputs = torch_exported_program.module()(*input_args, **input_kwargs)
+    else:
+        torch_outputs = torch_exported_program(*input_args, **input_kwargs)
     torch_outputs_onnx_format = onnx_exported_program.adapt_torch_outputs_to_onnx(
         torch_outputs
     )
