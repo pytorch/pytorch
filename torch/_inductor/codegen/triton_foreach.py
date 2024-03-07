@@ -12,7 +12,7 @@ from ..scheduler import SchedulerNode
 from ..utils import ceildiv, Placeholder
 from ..virtualized import V
 from .common import IndentedBuffer, Kernel
-from .triton import TritonKernel, gen_common_triton_imports
+from .triton import gen_common_triton_imports, TritonKernel
 from .triton_utils import config_of, signature_to_meta
 
 
