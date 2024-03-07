@@ -101,7 +101,6 @@ def find_input_mutations(g):
     inputs = defaultdict(set)
     input_idx = 0
     mutated_inputs = set()
-    mutated_node = {}
     for n in g.nodes:
         if n.op == "placeholder":
             if isinstance(meta_fk(n.meta), torch.Tensor):
@@ -198,7 +197,6 @@ def cudagraphs(dynamo_model, dynamo_inputs):
         fixed = count_tangents(aot_model)
         if skip_msg := check_for_skip(aot_model, fixed):
             perf_log.warning("skipping cudagraphs due to %s", skip_msg)
-            warnings.warn(skip_msg)
             return aot_model
 
         model = partition_cudagraphs(aot_model, aot_inputs)
