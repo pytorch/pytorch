@@ -10,12 +10,9 @@ from typing import Optional
 SCRIPT_DIR = Path(__file__).parent
 REPO_DIR = SCRIPT_DIR.parent.parent
 
-# TODO: Remove me once Triton version is again in sync for vanilla and ROCm
-ROCM_TRITION_VERSION = "2.1.0"
 
-
-def read_triton_pin(rocm_hash: bool = False) -> str:
-    triton_file = "triton.txt" if not rocm_hash else "triton-rocm.txt"
+def read_triton_pin() -> str:
+    triton_file = "triton.txt"
     with open(REPO_DIR / ".ci" / "docker" / "ci_commit_pins" / triton_file) as f:
         return f.read().strip()
 
@@ -73,7 +70,6 @@ def build_triton(
     version: str,
     commit_hash: str,
     build_conda: bool = False,
-    build_rocm: bool = False,
     py_version: Optional[str] = None,
     release: bool = False,
 ) -> Path:
@@ -92,12 +88,8 @@ def build_triton(
     with TemporaryDirectory() as tmpdir:
         triton_basedir = Path(tmpdir) / "triton"
         triton_pythondir = triton_basedir / "python"
-        if build_rocm:
-            triton_repo = "https://github.com/ROCmSoftwarePlatform/triton"
-            triton_pkg_name = "pytorch-triton-rocm"
-        else:
-            triton_repo = "https://github.com/openai/triton"
-            triton_pkg_name = "pytorch-triton"
+        triton_repo = "https://github.com/openai/triton"
+        triton_pkg_name = "pytorch-triton"
         check_call(["git", "clone", triton_repo], cwd=tmpdir)
         check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
         if build_conda:
@@ -155,19 +147,8 @@ def build_triton(
         patch_init_py(
             triton_pythondir / "triton" / "__init__.py",
             version=f"{version}",
-            expected_version=ROCM_TRITION_VERSION if build_rocm else None,
-        )
-
-        if build_rocm:
-            # TODO: Remove me when ROCM triton is updated
-            patch_setup_py(
-                triton_pythondir / "setup.py",
-                name=triton_pkg_name,
-                version=f"{version}",
-                expected_version=ROCM_TRITION_VERSION,
-            )
-            check_call("scripts/amd/setup_rocm_libs.sh", cwd=triton_basedir, shell=True)
-            print("ROCm libraries setup for triton installation...")
+            expected_version=None,
+        
 
         check_call(
             [sys.executable, "setup.py", "bdist_wheel"], cwd=triton_pythondir, env=env
@@ -175,9 +156,6 @@ def build_triton(
 
         whl_path = next(iter((triton_pythondir / "dist").glob("*.whl")))
         shutil.copy(whl_path, Path.cwd())
-
-        if build_rocm:
-            check_call("scripts/amd/fix_so.sh", cwd=triton_basedir, shell=True)
 
         return Path.cwd() / whl_path.name
 
@@ -188,17 +166,15 @@ def main() -> None:
     parser = ArgumentParser("Build Triton binaries")
     parser.add_argument("--release", action="store_true")
     parser.add_argument("--build-conda", action="store_true")
-    parser.add_argument("--build-rocm", action="store_true")
     parser.add_argument("--py-version", type=str)
     parser.add_argument("--commit-hash", type=str)
     parser.add_argument("--triton-version", type=str, default=read_triton_version())
     args = parser.parse_args()
 
     build_triton(
-        build_rocm=args.build_rocm,
         commit_hash=args.commit_hash
         if args.commit_hash
-        else read_triton_pin(args.build_rocm),
+        else read_triton_pin(),
         version=args.triton_version,
         build_conda=args.build_conda,
         py_version=args.py_version,
