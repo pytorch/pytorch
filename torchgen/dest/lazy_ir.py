@@ -16,6 +16,7 @@ from torchgen.api.translate import translate
 from torchgen.api.types import (
     BaseCType,
     Binding,
+    ConstRefCType,
     deviceT,
     DispatcherSignature,
     kernel_signature,
@@ -245,7 +246,9 @@ class GenLazyIR(ABC):
         value_args = schema.filtered_args(values=True, scalars=False)
         scalar_args = schema.filtered_args(values=False, scalars=True)
 
-        ctor_args = [f"const {i.lazy_type.cpp_type()}& {i.name}" for i in all_args]
+        ctor_args = [
+            f"{ConstRefCType(i.lazy_type).cpp_type()} {i.name}" for i in all_args
+        ]
         reuse_ctor_args = ", ".join(ctor_args)
         if self.use_lazy_shape and schema.properties.ShapePrecompute:
             ctor_args.append("std::vector<torch::lazy::Shape>&& shapes")
