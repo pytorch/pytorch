@@ -35,7 +35,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
 )
-from torch.testing._internal.triton_utils import requires_cuda
 from torch.utils._foreach_utils import (
     _get_foreach_kernels_supported_devices,
     _get_fused_kernels_supported_devices,
@@ -470,18 +469,6 @@ def optim_inputs_func_adamax(device):
 
 def optim_error_inputs_func_adamax(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
-    if "cuda" in str(device):
-        error_inputs += [
-            ErrorOptimizerInput(
-                OptimizerInput(
-                    params=None,
-                    kwargs=dict(foreach=False, capturable=True),
-                    desc="single tensor capturable not supported",
-                ),
-                error_type=ValueError,
-                error_regex="Capturable not supported with single tensor Adamax",
-            )
-        ]
     if str(device) == "cpu":
         error_inputs += [
             ErrorOptimizerInput(
@@ -1214,12 +1201,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
             ),
-            DecorateInfo(
-                requires_cuda,
-                "CompiledOptimizerParityTests",
-                "test_correctness",
-                device_type="cuda",
-            ),
         ),
     ),
     OptimizerInfo(
@@ -1227,7 +1208,6 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adamax,
         optim_error_inputs_func=optim_error_inputs_func_adamax,
         supported_impls=("foreach", "differentiable"),
-        only_supports_capturable_on_foreach=True,  # Remove this line when #117836 is done!
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
@@ -1295,87 +1275,31 @@ optim_db: List[OptimizerInfo] = [
                 "test_deepcopy_copies_all_public_attrs",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "cpu fails due to #115607; both devices fail cuz #117836"
-                ),
+                skipIfTorchDynamo("cpu fails due to #115607"),
                 "TestOptimRenewed",
                 "test_can_load_older_state_dict",
+                device_type="cpu",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
+                    "capturable path no longer called after hitting cache limit, see #121178"
                 ),
                 "TestOptimRenewed",
-                "test_step_is_noop_for_zero_grads",
+                "test_save_load_equality_with_weights_only",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
-                ),
-                "TestOptimRenewed",
-                "test_step_is_noop_when_params_have_no_grad",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
+                    "capturable path no longer called after hitting cache limit, see #121178"
                 ),
                 "TestOptimRenewed",
                 "test_load_nontensor_step",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
-                ),
-                "TestOptimRenewed",
-                "test_param_groups_weight_decay",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
+                    "capturable path no longer called after hitting cache limit, see #121178"
                 ),
                 "TestOptimRenewed",
                 "test_param_groups_lr",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_with_cuda_params",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
-                ),
-                "TestOptimRenewed",
-                "test_mixed_device_dtype",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
-                ),
-                "TestOptimRenewed",
-                "test_step_post_hook",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
-                ),
-                "TestOptimRenewed",
-                "test_step_pre_hook",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
-                ),
-                "TestOptimRenewed",
-                "test_step_all_hooks",
-            ),
-            DecorateInfo(
-                requires_cuda,
-                "CompiledOptimizerParityTests",
-                "test_correctness",
-                device_type="cuda",
             ),
         ),
     ),
@@ -1791,6 +1715,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_step_all_hooks",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_save_load_equality_with_weights_only",
             ),
         ),
     ),
