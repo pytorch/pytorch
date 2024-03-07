@@ -32,7 +32,7 @@ def loss_parallel():
 
     Within this context manager, one can use :func:`~torch.nn.functional.cross_entropy` or
     :class:`~torch.nn.CrossEntropyLoss` as usual, with the following assumptions on the input parameters.
-    The corresponding backward call, if any, also needs to happen under this context manager.
+    The corresponding ``backward()`` call, if any, also needs to happen under this context manager.
 
     Args:
         input (:class:`DTensor`):
