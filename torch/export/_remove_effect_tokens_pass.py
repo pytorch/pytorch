@@ -4,7 +4,13 @@ from typing import List
 import torch
 from torch._higher_order_ops.effects import with_effects
 from .exported_program import ExportedProgram
-from .graph_signature import InputKind, InputSpec, OutputKind, OutputSpec, TensorArgument
+from .graph_signature import (
+    InputKind,
+    InputSpec,
+    OutputKind,
+    OutputSpec,
+    TensorArgument,
+)
 
 
 def remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
