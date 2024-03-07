@@ -467,7 +467,7 @@ class _SpectralNorm(Module):
             # The proper way of computing this should be through F.bilinear, but
             # it seems to have some efficiency issues:
             # https://github.com/pytorch/pytorch/issues/58093
-            sigma = torch.dot(u.conj(), torch.mv(weight_mat, v))
+            sigma = torch.vdot(u, torch.mv(weight_mat, v))
             return weight / sigma
 
     def right_inverse(self, value: torch.Tensor) -> torch.Tensor:
