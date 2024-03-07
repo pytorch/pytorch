@@ -5,6 +5,7 @@ import os
 
 from typing import (
     Any,
+    Callable,
     Dict,
     Final,
     List,
@@ -704,6 +705,12 @@ class OrtBackendOptions:
     ort_session_options: Optional["onnxruntime.SessionOptions"] = None
     """Options for the ``onnxruntime.InferenceSession`` used by the ``OrtBackend``."""
 
+    pre_ort_model_transforms: Optional[  # type: ignore[name-defined]
+        Sequence[Callable[["onnx.ModelProto"], None]]
+    ] = None
+    """A list of graph transforms to be applied to the ONNX model before it
+    is fed to ONNXRuntime's InferenceSession."""
+
 
 @compatibility(is_backward_compatible=False)
 class OrtBackend:
@@ -919,6 +926,13 @@ class OrtBackend:
                 opset_version=self._resolved_onnx_exporter_options.onnx_registry.opset_version,
             )
 
+            # Modify ONNX model using pre-registered graph transforms.
+            # They are in-place modifications for avoiding unnecessary
+            # copy of ONNX initializers.
+            if self._options.pre_ort_model_transforms:
+                for transform in self._options.pre_ort_model_transforms:
+                    transform(onnx_model)
+
             onnx_model_bytes = onnx_model.SerializeToString()
             if os.environ.get("ONNXRT_DUMP_PATH", None):
                 # If not empty, environment variable ONNXRT_DUMP_PATH defined the path
@@ -1118,6 +1132,7 @@ class OrtBackend:
                 or a.default_execution_providers != b.default_execution_providers
                 or a.preallocate_output != b.preallocate_output
                 or a.use_aot_autograd != b.use_aot_autograd
+                or a.pre_ort_model_transforms != b.pre_ort_model_transforms
             ):
                 return False
 

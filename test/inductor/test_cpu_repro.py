@@ -2947,7 +2947,7 @@ class CPUReproTests(TestCase):
                     batch_size, seq_len, self.num_heads, self.head_size
                 ).permute(0, 2, 1, 3)
                 attention_weights = (
-                    torch.matmul(query, key).div(self.inv_scale).softmax(dim=-1)
+                    torch.matmul(query, key).mul(self.inv_scale).softmax(dim=-1)
                 )
                 output = torch.matmul(attention_weights, value)
                 return output
