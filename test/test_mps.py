@@ -343,7 +343,6 @@ def mps_ops_modifier(ops):
 
     AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS = {
         '__rdiv__',
-        '_chunk_cat',
         'acos',
         'acosh',
         'all',
