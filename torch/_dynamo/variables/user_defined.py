@@ -757,7 +757,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return trace_rules.lookup(func)(func)
         elif isinstance(subobj, classmethod):
             return variables.UserMethodVariable(
-                subobj.__func__, type(subobj), source=source
+                subobj.__func__, self.var_getattr(tx, "__class__"), source=source
             )
         elif isinstance(subobj, types.FunctionType) or (
             isinstance(subobj, types.MethodType)
