@@ -2,19 +2,11 @@ name: Setup Linux
 
 description: Set up Docker workspace on EC2
 
-inputs:
-  is_arc:
-    description: A flag indicating that we are using an arc runner.
-    type: boolean
-    required: false
-    default: false
-
 runs:
   using: composite
   steps:
     - name: Display EC2 information
       shell: bash
-      if: ${{ inputs.is_arc == 'false' }}
       run: |
         set -euo pipefail
         function get_ec2_metadata() {

@@ -241,10 +241,6 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
     tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" //...
   fi
 else
-  if [ "$IS_ARC" = "true" ]; then
-    git config --global --add safe.directory /var/lib/jenkins/workspace
-  fi
-
   # check that setup.py would fail with bad arguments
   echo "The next three invocations are expected to fail with invalid command error messages."
   ( ! get_exit_code python setup.py bad_argument )
@@ -266,11 +262,6 @@ else
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
-
-    if [ "$IS_ARC" = "true" ]; then
-      # remove extra folder
-      if [ -d "aws/" ]; then rm -rf aws/; fi
-    fi
 
     assert_git_not_dirty
     # Copy ninja build logs to dist folder

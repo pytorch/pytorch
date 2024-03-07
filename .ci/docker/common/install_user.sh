@@ -2,11 +2,6 @@
 
 set -ex
 
-if id -u jenkins ; then
-    echo "jenkins user already exists, skipping"
-    exit 0
-fi
-
 # Mirror jenkins user in container
 # jenkins user as ec2-user should have the same user-id
 echo "jenkins:x:1000:1000::/var/lib/jenkins:" >> /etc/passwd

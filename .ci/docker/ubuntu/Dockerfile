@@ -18,8 +18,6 @@ COPY ./common/install_clang.sh install_clang.sh
 RUN bash ./install_clang.sh && rm install_clang.sh
 
 # Install user
-ARG IS_ARC
-ENV IS_ARC=${IS_ARC}
 COPY ./common/install_user.sh install_user.sh
 RUN bash ./install_user.sh && rm install_user.sh
 

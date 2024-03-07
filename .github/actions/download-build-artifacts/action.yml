@@ -18,7 +18,7 @@ runs:
   using: composite
   steps:
     - name: Download PyTorch Build Artifacts from S3
-      if: ${{ !inputs.use-gha && inputs.is-arc == 'false' }}
+      if: ${{ !inputs.use-gha }}
       uses: seemethere/download-artifact-s3@v4
       with:
         name: ${{ inputs.name }}
@@ -30,21 +30,9 @@ runs:
       with:
         name: ${{ inputs.name }}
 
-    - name: Download artifacts from LF
-      if: ${{ inputs.is-arc == 'true' }}
-      shell: bash
-      env:
-        REPO: ${{ github.repository }}
-        RUN_ID: ${{ github.run_id }}
-        NAME: ${{ inputs.name }}
-      run: |
-        curl -o artifacts.zip https://pytorch-ci-artifacts.s3.amazonaws.com/$REPO/$RUN_ID/$NAME/artifacts.zip
-
     - name: Unzip artifacts
       shell: bash
-      run: |
-        ls -la
-        unzip -o artifacts.zip
+      run: unzip -o artifacts.zip
 
     - name: Output disk space left
       shell: bash

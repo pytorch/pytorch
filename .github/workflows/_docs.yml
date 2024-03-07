@@ -33,11 +33,6 @@ on:
         required: false
         type: string
         default: "gha-artifacts"
-      is-arc:
-        description: Check that we upload the artifact from the LF bucket.
-        type: boolean
-        required: false
-        default: false
 
     secrets:
       GH_PYTORCHBOT_TOKEN:
@@ -108,7 +103,6 @@ jobs:
         with:
           name: ${{ inputs.build-environment }}
           s3-bucket: ${{ inputs.s3-bucket }}
-          is-arc: ${{ inputs.is-arc }}
 
       - name: Generate netrc (only for docs-push)
         if: inputs.push
