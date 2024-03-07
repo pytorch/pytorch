@@ -33,7 +33,7 @@ class Int16Tensor(torch.Tensor):
         def wrap(t):
             if isinstance(t, torch.Tensor):
                 with no_dispatch():
-                    return Int16Tensor(t.view(torch.bits16))
+                    return t.view(torch.bits16)
             return t
         out = tree_map(wrap, out)
         return out
