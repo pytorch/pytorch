@@ -196,7 +196,28 @@ def run_fw_bw_and_get_code(fn):
     return run_and_get_code(run_with_backward)
 
 
-class TestCase(TorchTestCase):
+class TestCaseBase(TorchTestCase):
+    def setUp(self):
+        super().setUp()
+
+        # For all tests, mock the tmp directory populated by the inductor
+        # FxGraphCache, both for test isolation and to avoid filling disk.
+        self._inductor_cache_tmp_dir = tempfile.TemporaryDirectory()
+        self._inductor_cache_get_tmp_dir_patch = unittest.mock.patch(
+            "torch._inductor.codecache.FxGraphCache._get_tmp_dir"
+        )
+        mock_get_dir = self._inductor_cache_get_tmp_dir_patch.start()
+        mock_get_dir.return_value = self._inductor_cache_tmp_dir.name
+
+    def tearDown(self):
+        super().tearDown()
+
+        # Clean up the FxGraphCache tmp dir.
+        self._inductor_cache_get_tmp_dir_patch.stop()
+        self._inductor_cache_tmp_dir.cleanup()
+
+
+class TestCase(TestCaseBase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -225,25 +246,12 @@ class TestCase(TorchTestCase):
         super().setUp()
         self._start = time.perf_counter()
 
-        # For all tests, mock the tmp directory populated by the inductor
-        # FxGraphCache, both for test isolation and to avoid filling disk.
-        self._inductor_cache_tmp_dir = tempfile.TemporaryDirectory()
-        self._inductor_cache_get_tmp_dir_patch = unittest.mock.patch(
-            "torch._inductor.codecache.FxGraphCache._get_tmp_dir"
-        )
-        mock_get_dir = self._inductor_cache_get_tmp_dir_patch.start()
-        mock_get_dir.return_value = self._inductor_cache_tmp_dir.name
-
     def tearDown(self):
         super().tearDown()
         torch._dynamo.reset()
         if os.environ.get("ERROR_ON_SLOW") == "1":
             elapsed = time.perf_counter() - self._start
             assert elapsed < 120
-
-        # Clean up the FxGraphCache tmp dir.
-        self._inductor_cache_get_tmp_dir_patch.stop()
-        self._inductor_cache_tmp_dir.cleanup()
 
 
 class ToTuple(torch.nn.Module):
