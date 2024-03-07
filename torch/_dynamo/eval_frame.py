@@ -356,18 +356,32 @@ class _TorchDynamoContext:
         fn = innermost_fn(fn)
 
         # add context containing GraphModule to any GraphModule forward functions
-        if isinstance(fn, torch.fx.GraphModule):
+        from torch.fx._lazy_graph_module import _LazyGraphModule
+
+        if isinstance(fn, _LazyGraphModule) or (
+            isinstance(getattr(fn, "__self__", None), _LazyGraphModule)
+            and fn.__name__ == "_lazy_forward"
+        ):
             # Since dynamo will run the forward method for the GraphModule shortly
             # anyways, it does not hurt to do the real recompilation here if
             # this is a _LazyGraphModule. This makes it easier for dynamo to
             # optimize a _LazyGraphModule.
-            from torch.fx._lazy_graph_module import _LazyGraphModule
 
-            _LazyGraphModule.force_recompile(fn)
+            lazy_gm = fn if isinstance(fn, _LazyGraphModule) else fn.__self__
+
+            _LazyGraphModule.force_recompile(lazy_gm)
 
             # Assume that the underlying node metadata of `fn`,
             # a GraphModule instance, accurately represents
             # all instances of type(fn).
+            code_context.get_context(lazy_gm.forward.__code__)[
+                "orig_graphmodule"
+            ] = weakref.ref(lazy_gm)
+
+            if not isinstance(fn, _LazyGraphModule):
+                # replace fn with the real forward method
+                fn = lazy_gm.forward
+        elif isinstance(fn, GraphModule):
             code_context.get_context(fn.forward.__code__)[
                 "orig_graphmodule"
             ] = weakref.ref(fn)
