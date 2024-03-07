@@ -62,6 +62,22 @@ ignored_c_binding_in_graph_function_names = {
     "torch._test_parallel_materialize",
     "torch._C._storage_address",
     "torch._C._pickle_save",
+    "torch.sparse_bsr_tensor",
+    "torch._validate_sparse_compressed_tensor_args",
+    "torch._linalg_eigvals",
+    "torch._validate_sparse_csr_tensor_args",
+    "torch._validate_sparse_compressed_tensor_args",
+    "torch._validate_sparse_bsr_tensor_args",
+    "torch._validate_sparse_csc_tensor_args",
+    "torch._validate_sparse_coo_tensor_args",
+    "torch._validate_sparse_bsc_tensor_args",
+    "torch._validate_compressed_sparse_indices",
+    "torch.sparse_compressed_tensor",
+    "torch.sparse_csc_tensor",
+    "torch.sparse_bsc_tensor",
+    "torch.sparse_coo_tensor",
+    "torch.sparse_csr_tensor",
+    "torch.cuda._get_device_properties"
 }
 if torch._C._llvm_enabled():
     ignored_c_binding_in_graph_function_names |= {
