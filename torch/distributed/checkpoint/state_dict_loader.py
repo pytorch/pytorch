@@ -164,7 +164,7 @@ def load(
             storage_reader=storage_reader,
             process_group=process_group,
             no_dist=no_dist,
-            planner=planner
+            planner=planner,
         )
         for key in keys:
             if key not in state_dict:
