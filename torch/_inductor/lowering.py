@@ -2176,16 +2176,6 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
 FALLBACK_ALLOW_LIST = {
     "torchvision::roi_align",
 }
-make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
-make_fallback(aten.convolution_backward, constrain_to_fx_strides)
-make_fallback(aten._cudnn_rnn, require_dense)
-make_fallback(aten._cudnn_rnn_backward, require_contiguous)
-make_fallback(aten._embedding_bag, require_contiguous)
-make_fallback(aten._embedding_bag_forward_only, require_contiguous)
-make_fallback(aten._fused_moving_avg_obs_fq_helper)
-make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
-make_fallback(aten.grid_sampler_2d_backward, require_dense)
-make_fallback(aten.randperm)  # needs sort
 
 
 def sdpa_constraint(fx_node, *args, **kwargs):
@@ -2245,6 +2235,162 @@ def sdpa_constraint(fx_node, *args, **kwargs):
     return args, kwargs
 
 
+# WIP
+make_fallback(aten.index_reduce)  # @pearu
+make_fallback(aten._adaptive_avg_pool3d)  # @isuruf
+make_fallback(aten.adaptive_max_pool3d)  # @isuruf
+make_fallback(aten.avg_pool3d)  # @isuruf
+make_fallback(aten.fractional_max_pool3d)  # @isuruf
+make_fallback(aten.max_pool3d_with_indices)  # @isuruf (can this one be implemented?)
+make_fallback(aten.cummax)  # @isuruf
+make_fallback(aten.cummin)  # @isuruf
+
+
+# 1) Easy
+make_fallback(aten.uniform, warn=False)
+make_fallback(aten.exponential.default, warn=False)  # (fails accuracy on test_torch.py)
+make_fallback(aten._pdist_forward)  # Has decomp. Needs benchmarks
+make_fallback(aten.soft_margin_loss_backward, warn=False)  # py_impl?
+make_fallback(aten.searchsorted)  # bucketized is implemented (see eager impl)
+
+
+# 1.5) Easy or Impossible
+make_fallback(aten._cdist_forward)  # p=2 should be feasible
+make_fallback(aten._cdist_backward)
+# See resize_storage_bytes
+make_fallback(aten.resize)
+make_fallback(aten.resize_)
+make_fallback(aten.resize_as)
+make_fallback(aten.resize_as_)
+
+
+# 2) Medium
+make_fallback(aten.max_unpool2d)
+make_fallback(aten.max_unpool3d)
+make_fallback(aten._trilinear)
+
+
+# 3) Difficult
+# Scans
+# See the discussion at
+# https://dev-discuss.pytorch.org/t/pytorch-sparse-gnn-compiler-rfc/1644/19
+make_fallback(aten.segment_reduce.default)
+make_fallback(aten._segment_reduce_backward.default)
+
+# Histogram (need to implement Histogram IR)
+make_fallback(aten.histc)
+make_fallback(aten.histogram.bin_ct)
+make_fallback(aten._histogramdd_bin_edges.default)
+make_fallback(aten._histogramdd_from_bin_cts.default)
+
+# Need templated kernel
+make_fallback(aten.addbmm)
+make_fallback(aten.addmv, warn=False)
+make_fallback(aten._addmm_activation, warn=False)
+
+# Need templated kernel. Probably impossible to write efficiently
+make_fallback(aten.convolution_backward, constrain_to_fx_strides)
+make_fallback(aten._cudnn_rnn, require_dense)
+make_fallback(aten._cudnn_rnn_backward, require_contiguous)
+
+# Haven't checked but sound difficult / impossible
+make_fallback(aten._embedding_bag, require_contiguous)
+make_fallback(aten._embedding_bag_forward_only, require_contiguous)
+make_fallback(aten._embedding_bag_dense_backward)
+make_fallback(aten._embedding_bag_per_sample_weights_backward)
+make_fallback(aten._embedding_bag_per_sample_weights_backward)
+make_fallback(aten._fused_moving_avg_obs_fq_helper)
+make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
+
+
+# 4) Backwards (try py_impl'ing them) when fwd is written as a decomp
+make_fallback(aten.avg_pool3d_backward)
+make_fallback(aten.max_pool3d_with_indices_backward)
+make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
+make_fallback(aten._adaptive_avg_pool3d_backward)
+make_fallback(aten.adaptive_max_pool2d_backward)
+make_fallback(aten.adaptive_max_pool3d_backward)
+make_fallback(aten.fractional_max_pool2d_backward)
+make_fallback(aten.fractional_max_pool3d_backward)
+make_fallback(aten.replication_pad1d_backward)
+make_fallback(aten.replication_pad2d_backward)
+make_fallback(aten.upsample_linear1d_backward)
+make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
+make_fallback(aten.upsample_trilinear3d_backward)
+make_fallback(aten.grid_sampler_2d_backward, require_dense)
+make_fallback(aten._pdist_backward)
+
+
+# 5) Impossible (missing triton/CPU features)
+
+# Sorting / Sorting-like
+make_fallback(aten.sort)
+make_fallback(aten.sort.stable)
+make_fallback(aten.kthvalue)
+make_fallback(aten.topk)
+make_fallback(aten.mode)
+make_fallback(aten.median)
+make_fallback(aten.nanmedian)
+make_fallback(aten.randperm)
+
+# Linalg
+make_fallback(aten._linalg_det)
+make_fallback(aten.linalg_householder_product)
+make_fallback(aten.linalg_inv_ex)
+make_fallback(aten.linalg_ldl_factor_ex)
+make_fallback(aten.linalg_ldl_solve)
+make_fallback(aten.linalg_lu)
+make_fallback(aten.linalg_lu_factor_ex)
+make_fallback(aten.linalg_lu_solve)
+make_fallback(aten.linalg_matrix_exp)
+make_fallback(aten.linalg_qr)
+make_fallback(aten._linalg_slogdet)
+make_fallback(aten._linalg_solve_ex)
+make_fallback(aten.linalg_solve_triangular)
+make_fallback(aten._linalg_svd)
+make_fallback(aten.lu_unpack)
+make_fallback(aten.ormqr)
+make_fallback(aten._linalg_check_errors)
+make_fallback(aten.linalg_pinv.atol_rtol_tensor)
+make_fallback(aten._linalg_eigh)
+make_fallback(aten.triangular_solve)
+make_fallback(aten.linalg_cholesky_ex)
+make_fallback(aten.cholesky_inverse)
+make_fallback(aten.cholesky_solve)
+make_fallback(aten.geqrf)
+make_fallback(aten._fft_r2c)  # needs complex as well
+
+# Data dependent (are these necessary?)
+make_fallback(aten.nonzero.default)
+
+# Misc
+make_fallback(aten.gcd.default, warn=False)
+make_fallback(aten._thnn_fused_lstm_cell, require_dense)
+make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
+make_fallback(torch._prims.rng_prims.run_with_rng_state)
+
+# Implmented / Half implemented
+# Scans. Implemented for CUDA, missing CPU
+make_fallback(aten.masked_scatter)
+make_fallback(aten.masked_scatter_backward)
+
+# Complex number support
+make_fallback(aten.view_as_complex, require_contiguous)
+make_fallback(aten.angle)  # needs complex
+
+# Needs efficentzerotensor
+make_fallback(aten._efficientzerotensor)
+
+# Needs Sparse
+make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
+make_fallback(aten.to_sparse)
+make_fallback(aten._to_sparse)
+
+# Needs dimname support
+make_fallback(aten.zeros.names)
+
+
+# 6) Pattern-matched
 make_fallback(
     aten._scaled_dot_product_efficient_attention.default,
     sdpa_constraint,
@@ -2279,111 +2425,7 @@ make_fallback(aten._flash_attention_forward.default, sdpa_constraint)
 make_fallback(aten._flash_attention_backward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_forward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
-make_fallback(aten.sort)
-make_fallback(aten.sort.stable)
-make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
-make_fallback(aten._thnn_fused_lstm_cell, require_dense)
-make_fallback(aten.topk)
-make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
 make_fallback(aten._scaled_mm.default, constrain_to_fx_strides)
-
-# TODO: This is done, just need to enable support in TorchInductor for complex types.
-make_fallback(aten.view_as_complex, require_contiguous)
-
-# The following were added as a result of https://github.com/pytorch/pytorch/pull/94039 to pass tests
-# It's not necessarily a priority to implement these
-make_fallback(aten.upsample_linear1d_backward)
-make_fallback(aten.upsample_trilinear3d_backward)
-make_fallback(aten._adaptive_avg_pool3d)
-make_fallback(aten.adaptive_max_pool3d)
-make_fallback(aten.addbmm)
-make_fallback(aten.addmv, warn=False)
-make_fallback(aten._addmm_activation, warn=False)
-make_fallback(aten.avg_pool3d)
-make_fallback(aten._cdist_forward)
-make_fallback(aten.cummax)
-make_fallback(aten.cummin)
-make_fallback(aten._efficientzerotensor)
-make_fallback(aten._embedding_bag_per_sample_weights_backward)
-make_fallback(aten._efficientzerotensor)
-make_fallback(aten._embedding_bag_per_sample_weights_backward)
-make_fallback(aten.fractional_max_pool3d)
-make_fallback(aten.geqrf)
-make_fallback(aten.histc)
-make_fallback(aten.kthvalue)
-make_fallback(aten.linalg_cholesky_ex)
-make_fallback(aten._linalg_det)
-make_fallback(aten.linalg_householder_product)
-make_fallback(aten.linalg_inv_ex)
-make_fallback(aten.linalg_ldl_factor_ex)
-make_fallback(aten.linalg_ldl_solve)
-make_fallback(aten.linalg_lu)
-make_fallback(aten.linalg_lu_factor_ex)
-make_fallback(aten.linalg_lu_solve)
-make_fallback(aten.linalg_matrix_exp)
-make_fallback(aten.linalg_qr)
-make_fallback(aten._linalg_slogdet)
-make_fallback(aten._linalg_solve_ex)
-make_fallback(aten.linalg_solve_triangular)
-make_fallback(aten._linalg_svd)
-make_fallback(aten.lu_unpack)
-make_fallback(aten.max_pool3d_with_indices)
-make_fallback(aten.max_unpool2d)
-make_fallback(aten.max_unpool3d)
-make_fallback(aten.median)
-make_fallback(aten.mode)
-make_fallback(aten.nanmedian)
-make_fallback(aten.ormqr)
-make_fallback(aten._pdist_forward)
-make_fallback(aten.resize)
-make_fallback(aten.resize_)
-make_fallback(aten.resize_as)
-make_fallback(aten.resize_as_)
-make_fallback(aten.searchsorted)
-make_fallback(aten._trilinear)
-make_fallback(aten.uniform, warn=False)
-make_fallback(aten._adaptive_avg_pool3d_backward)
-make_fallback(aten.adaptive_max_pool2d_backward)
-make_fallback(aten.adaptive_max_pool3d_backward)
-make_fallback(aten.avg_pool3d_backward)
-make_fallback(aten._cdist_backward)
-make_fallback(aten._embedding_bag_dense_backward)
-make_fallback(aten.fractional_max_pool2d_backward)
-make_fallback(aten.fractional_max_pool3d_backward)
-make_fallback(aten._linalg_check_errors)
-make_fallback(aten.max_pool3d_with_indices_backward)
-make_fallback(aten._pdist_backward)
-make_fallback(aten.replication_pad1d_backward)
-make_fallback(aten.replication_pad2d_backward)
-make_fallback(aten.soft_margin_loss_backward, warn=False)
-make_fallback(aten.linalg_pinv.atol_rtol_tensor)
-make_fallback(aten.segment_reduce.default)
-make_fallback(aten._segment_reduce_backward.default)
-make_fallback(aten.angle)  # needs complex
-make_fallback(aten.cholesky_inverse)
-make_fallback(aten.cholesky_solve)
-make_fallback(aten._fft_r2c)
-make_fallback(aten.histogram.bin_ct)
-make_fallback(aten._histogramdd_bin_edges.default)
-make_fallback(aten._histogramdd_from_bin_cts.default)
-make_fallback(aten.index_reduce)
-make_fallback(aten.masked_scatter)
-make_fallback(aten.masked_scatter_backward)
-make_fallback(aten.to_sparse)
-make_fallback(aten._to_sparse)
-make_fallback(aten.triangular_solve)
-make_fallback(aten.gcd.default, warn=False)
-make_fallback(aten._linalg_eigh)
-make_fallback(aten.zeros.names)
-
-# these are data-dependent, highly unlikely you can write a lowering
-make_fallback(aten.nonzero.default)
-
-make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
-make_fallback(torch._prims.rng_prims.run_with_rng_state)
-
-# fails accuracy on test_torch.py, and explicit fallback required to avoid warn=True on implicit
-make_fallback(aten.exponential.default, warn=False)
 
 
 # Register with type_promotion_kind None.

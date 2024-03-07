@@ -151,19 +151,27 @@ def run_torchrec_table_wise_sharding_example(rank, world_size):
     table_to_dtensor = {}  # same purpose as _model_parallel_name_to_sharded_tensor
     table_wise_sharding_placements = [Replicate()]  # table-wise sharding
 
-    # create a submesh that only contains the current rank
-    # note that we cannot use ``init_device_mesh'' to create a submesh
-    # so we choose to use the `DeviceMesh` api to directly create a DeviceMesh
-    device_submesh = DeviceMesh(
-        device_type=device_type,
-        mesh=torch.tensor(
-            [rank], dtype=torch.int64
-        ),
-    )
     for table_id, local_shard in table_to_local_shard.items():
+        # create a submesh that only contains the rank we place the table
+        # note that we cannot use ``init_device_mesh'' to create a submesh
+        # so we choose to use the `DeviceMesh` api to directly create a DeviceMesh
+        device_submesh = DeviceMesh(
+            device_type=device_type,
+            mesh=torch.tensor(
+                [table_id], dtype=torch.int64
+            ),  # table ``table_id`` is placed on rank ``table_id``
+        )
         # create a DTensor from the local shard for the current table
+        # note: for uneven sharding, we need to specify the shape and stride because
+        # DTensor would assume even sharding and compute shape/stride based on the
+        # assumption. Torchrec needs to pass in this information explicitely.
         dtensor = DTensor.from_local(
-            local_shard, device_submesh, table_wise_sharding_placements, run_check=False
+            local_shard,
+            device_submesh,
+            table_wise_sharding_placements,
+            run_check=False,
+            shape=emb_table_shape,  # this is required for uneven sharding
+            stride=(embedding_dim, 1),
         )
         table_to_dtensor[table_id] = dtensor
 
@@ -171,11 +179,11 @@ def run_torchrec_table_wise_sharding_example(rank, world_size):
     for table_id, dtensor in table_to_dtensor.items():
         visualize_sharding(
             dtensor,
-            prompt=(
-                "DTensor's sharding be-like in table-wise sharding"
-                f"for Table {table_id}:"
-            ),
+            header=f"Table-wise sharding example in DTensor for Table {table_id}",
         )
+        # check the dtensor has the correct shape and stride on all ranks
+        assert dtensor.shape == emb_table_shape
+        assert dtensor.stride() == (embedding_dim, 1)
 
     ###########################################################################
     # example 2: transform DTensor into torch.Tensor
