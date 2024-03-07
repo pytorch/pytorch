@@ -220,7 +220,9 @@ def mark_dynamic(t, index, *, min=None, max=None):
     if is_traceable_wrapper_subclass(t):
         # default behavior: mirror mark_dynamic() on all inner tensors with same dim as t
         # TODO: Make this configurable via a supported public API
-        _apply_func_to_inner_tensors_of_same_dim(mark_dynamic, t, index, min=min, max=max)
+        _apply_func_to_inner_tensors_of_same_dim(
+            mark_dynamic, t, index, min=min, max=max
+        )
 
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_dynamic_indices"):
