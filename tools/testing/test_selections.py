@@ -49,24 +49,14 @@ class ShardJob:
         self.serial: List[ShardedTest] = []
         self.parallel: List[ShardedTest] = []
 
-    def _get_time_helper(self, get_test_time: Callable[[ShardedTest], float]) -> float:
+    def get_total_time(self, default: float = 0.0) -> float:
+        """Default is the value for which to substitute if a test has no time"""
         procs = [0.0 for _ in range(NUM_PROCS_FOR_SHARDING_CALC)]
         for test in self.parallel:
             min_index = procs.index(min(procs))
-            procs[min_index] += get_test_time(test)
-        time = max(procs) + sum(get_test_time(test) for test in self.serial)
+            procs[min_index] += test.get_time(default)
+        time = max(procs) + sum(test.get_time(default) for test in self.serial)
         return time
-
-    def get_total_time(self) -> float:
-        return self._get_time_helper(lambda test: test.get_time())
-
-    def get_assumed_time(self) -> float:
-        # This is an incorrect calculation of the time that assumes tests with
-        # no time information take DEFAULT_TIME
-        def _get_time(test: ShardedTest) -> float:
-            return test.time if test.time is not None else DEFAULT_TIME
-
-        return self._get_time_helper(_get_time)
 
     def convert_to_tuple(self) -> Tuple[float, List[ShardedTest]]:
         return (self.get_total_time(), self.serial + self.parallel)
@@ -98,6 +88,8 @@ def get_duration(
     test_file_times: Dict[str, float],
     test_class_times: Dict[str, Dict[str, float]],
 ) -> Optional[float]:
+    """Calculate the time for a TestRun based on the given test_file_times and
+    test_class_times.  Returns None if the time is unknown."""
     file_duration = test_file_times.get(test.test_file, None)
     if test.is_full_file():
         return file_duration
@@ -147,7 +139,7 @@ def shard(
         return
 
     def _get_min_sharded_job(sharded_jobs: List[ShardJob]) -> ShardJob:
-        return min(sharded_jobs, key=lambda j: j.get_assumed_time())
+        return min(sharded_jobs, key=lambda j: j.get_total_time(default=DEFAULT_TIME))
 
     def _shard_serial(
         tests: Sequence[ShardedTest], sharded_jobs: List[ShardJob]
@@ -157,7 +149,8 @@ def shard(
         for test in tests:
             if (
                 len(sharded_jobs) > 1
-                and sharded_jobs[-1].get_assumed_time() > estimated_time_limit
+                and sharded_jobs[-1].get_total_time(default=DEFAULT_TIME)
+                > estimated_time_limit
             ):
                 new_sharded_jobs = sharded_jobs[:-1]
             min_sharded_job = _get_min_sharded_job(new_sharded_jobs)
@@ -216,12 +209,8 @@ def calculate_shards(
     ]
     parallel_tests = [test for test in pytest_sharded_tests if test not in serial_tests]
 
-    serial_time = sum(
-        test.time if test.time is not None else DEFAULT_TIME for test in serial_tests
-    )
-    parallel_time = sum(
-        test.time if test.time is not None else DEFAULT_TIME for test in parallel_tests
-    )
+    serial_time = sum(test.get_time(DEFAULT_TIME) for test in serial_tests)
+    parallel_time = sum(test.get_time(DEFAULT_TIME) for test in parallel_tests)
     total_time = serial_time + parallel_time / NUM_PROCS_FOR_SHARDING_CALC
     estimated_time_per_shard = total_time / num_shards
     # Separate serial tests from parallel tests as much as possible to maximize
