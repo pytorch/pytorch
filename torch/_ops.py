@@ -461,13 +461,18 @@ def unset_mode_pre_dispatch(mode_key):
         torch._C._TorchDispatchModeKey.PROXY,
         torch._C._TorchDispatchModeKey.FUNCTIONAL,
     )
-    current_mode = None
-    if mode_key == torch._C._TorchDispatchModeKey.PROXY:
-        current_mode = current_mode_stack_pre_dispatch.get(0)
-        mode_stack_state_for_pre_dispatch().set(0, None)
-    else:
-        current_mode = current_mode_stack_pre_dispatch.get(1)
-        mode_stack_state_for_pre_dispatch().set(1, None)
+
+    def _unset_mode():
+        if mode_key == torch._C._TorchDispatchModeKey.PROXY:
+            current_mode = current_mode_stack_pre_dispatch.get(0)
+            mode_stack_state_for_pre_dispatch().set(0, None)
+            return current_mode
+        else:
+            current_mode = current_mode_stack_pre_dispatch.get(1)
+            mode_stack_state_for_pre_dispatch().set(1, None)
+            return current_mode
+
+    current_mode = _unset_mode()
 
     new_pre_dispatch_len = _len_torch_dispatch_stack_pre_dispatch()
     if new_pre_dispatch_len == 0:
