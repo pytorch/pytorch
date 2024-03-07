@@ -1146,14 +1146,13 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 msg=f"InstanceNorm module API failed, qY_ref\n{qY_ref} vs qY\n{qY}")
 
     def _test_activation_module_impl(self, name, float_module_class, quantized_module_class, extra_kwargs):
-        """Tests the correctness of the ELU module.
+        """Tests the correctness of the activation modules.
         The correctness is defined against the functional implementation.
         """
         x_scale = 10.0 / 256
         x_zero_point = 0
         y_scale = 5.0 / 256
         y_zero_point = 127
-        alpha = 1.5
 
         dims = (1, 4, 8)
 
@@ -1187,17 +1186,39 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(quant_mod_original.scale, quant_mod_new.scale)
         self.assertEqual(quant_mod_original.zero_point, quant_mod_new.zero_point)
 
+    def _test_elu_serialization(self):
+        scale_original = 10.0 / 256
+        zero_point_original = 1.0
+
+        quant_mod_original = nnq.ELU(scale_original, zero_point_original)
+        state_dict = quant_mod_original.state_dict()
+
+        scale_new = 5.0 / 256
+        zero_point_new = 2.0
+        quant_mod_new = nnq.ELU(scale_new, zero_point_new)
+        quant_mod_new.load_state_dict(state_dict)
+
+        self.assertEqual(quant_mod_original.scale, quant_mod_new.scale)
+        self.assertEqual(quant_mod_original.zero_point, quant_mod_new.zero_point)
+
     def test_elu(self):
         """Tests the correctness of the ELU module.
         The correctness is defined against the functional implementation.
         """
         self._test_activation_module_impl("ELU", nn.ELU, nnq.ELU, {"alpha": 1.5})
+        self._test_elu_serialization()
 
     def test_leaky_relu(self):
+        """Tests the correctness of the LeakyReLU module.
+        The correctness is defined against the functional implementation.
+        """
         self._test_activation_module_impl("LeakyReLU", nn.LeakyReLU, nnq.LeakyReLU, {"negative_slope": 0.2})
         self._test_leaky_relu_serialization()
 
     def test_sigmoid(self):
+        """Tests the correctness of the Sigmoid module.
+        The correctness is defined against the functional implementation.
+        """
         self._test_activation_module_impl("Sigmoid", nn.Sigmoid, nnq.Sigmoid, {})
 
     def _test_hard_swish_serialization(self):
@@ -1216,6 +1237,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self.assertEqual(quant_mod_original.zero_point, quant_mod_new.zero_point)
 
     def test_hard_swish(self):
+        """Tests the correctness of the Hardswish module.
+        The correctness is defined against the functional implementation.
+        """
         self._test_activation_module_impl("Hardswish", nn.Hardswish, nnq.Hardswish, {})
         self._test_hard_swish_serialization()
 
