@@ -1,0 +1,37 @@
+name: Labeler
+
+on:
+  # We need pull_request_target to be able to add labels to PRs from forks.
+  # Only allow pull_request_target when targeting main, not some historical branch.
+  #
+  # Make sure to don't introduce explicit checking out and installing/running
+  # untrusted user code into this workflow!
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+  # To add labels on ghstack PRs.
+  # Note: as pull_request doesn't trigger on PRs targeting main,
+  # to test changes to the workflow itself one needs to create
+  # a PR that targets a gh/**/base branch.
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [gh/**/base]
+
+jobs:
+  triage:
+    permissions:
+      contents: read
+      pull-requests: write
+    runs-on: ubuntu-latest
+    # Do not auto-label nightly builds PR
+    if: ${{ github.event.pull_request.number != 26921 && github.repository_owner == 'pytorch' }}
+    steps:
+    - uses: actions/labeler@v4
+      with:
+        repo-token: "${{ secrets.GITHUB_TOKEN }}"
+        sync-labels: ''
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
