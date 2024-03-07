@@ -4430,16 +4430,22 @@ def _avg_poolnd(
             return ops.mul(fn_sum(idx, x_loader), ops.constant(scale, dtype))
 
     else:
-        ones_loader = constant_boundary_condition(
-            ones_like(x),
-            0.0,
-            padding if count_include_pad else None,
-            dim=dim,
-        )
 
         def fn(idx):
-            # TODO(jansel): optimize to do `int(x<h)` rather than `x<h?1:0`
-            return ops.truediv(fn_sum(idx, x_loader), fn_sum(idx, ones_loader))
+            prefix = idx[:-dim]
+            bh = idx[-dim:]
+
+            divide_factors = []
+            for i in range(dim):
+                hstart = bh[i] * stride[i] - padding[i]
+                hend = sympy.Min(hstart + kernel_size[i], h[i] + padding[i])
+                if not count_include_pad:
+                    hstart = sympy.Max(hstart, 0)
+                    hend = sympy.Min(hend, h[i])
+                factor = ops.index_expr(hend - hstart, torch.int32)
+                divide_factors.append(factor)
+            divide_factor = functools.reduce(ops.mul, divide_factors)
+            return ops.div(fn_sum(idx, x_loader), divide_factor)
 
     rv = Pointwise.create(
         device=x.get_device(),
