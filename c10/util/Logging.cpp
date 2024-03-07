@@ -357,9 +357,16 @@ MessageLogger::MessageLogger(const char* file, int line, int severity)
 #endif // ANDROID
 
   time_t rawtime = 0;
-  struct tm timeinfo = {0};
   time(&rawtime);
-  localtime_r(&rawtime, &timeinfo);
+
+#ifndef _WIN32
+  struct tm raw_timeinfo = {0};
+  struct tm* timeinfo = &raw_timeinfo;
+  localtime_r(&rawtime, timeinfo);
+#else
+  // is thread safe on Windows
+  struct tm* timeinfo = localtime(&rawtime);
+#endif
 
 #ifndef _WIN32
   // Get the current nanoseconds since epoch
@@ -374,10 +381,10 @@ MessageLogger::MessageLogger(const char* file, int line, int severity)
     stream_ << "[rank" << GLOBAL_RANK << "]:";
   }
   stream_ << "[" << CAFFE2_SEVERITY_PREFIX[std::min(4, GLOG_FATAL - severity_)]
-          << (timeinfo.tm_mon + 1) * 100 + timeinfo.tm_mday << std::setfill('0')
-          << " " << std::setw(2) << timeinfo.tm_hour << ":" << std::setw(2)
-          << timeinfo.tm_min << ":" << std::setw(2) << timeinfo.tm_sec << "."
-          << std::setw(9) << ns << " "
+          << (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
+          << std::setfill('0') << " " << std::setw(2) << timeinfo->tm_hour
+          << ":" << std::setw(2) << timeinfo->tm_min << ":" << std::setw(2)
+          << timeinfo->tm_sec << "." << std::setw(9) << ns << " "
           << c10::detail::StripBasename(std::string(file)) << ":" << line
           << "] ";
 }
