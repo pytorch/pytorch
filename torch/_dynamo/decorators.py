@@ -169,14 +169,14 @@ def forbid_in_graph(fn):
 # Helper function to flatten a tensor subclass and apply a function to
 # all inner tensors that match the outer dim. Used to reduce duplication
 # across the various marking APIs.
-def _apply_func_to_inner_tensors_of_same_dim(func, t, *args):
+def _apply_func_to_inner_tensors_of_same_dim(func, t, *args, **kwargs):
     assert is_traceable_wrapper_subclass(t)
 
     attrs, ctx = t.__tensor_flatten__()
     for attr in attrs:
         inner = getattr(t, attr)
         if inner.dim() == t.dim():
-            func(inner, *args)
+            func(inner, *args, **kwargs)
 
 
 @dataclass(frozen=True)
@@ -220,7 +220,7 @@ def mark_dynamic(t, index, *, min=None, max=None):
     if is_traceable_wrapper_subclass(t):
         # default behavior: mirror mark_dynamic() on all inner tensors with same dim as t
         # TODO: Make this configurable via a supported public API
-        _apply_func_to_inner_tensors_of_same_dim(mark_dynamic, t, index, min, max)
+        _apply_func_to_inner_tensors_of_same_dim(mark_dynamic, t, index, min=min, max=max)
 
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_dynamic_indices"):
