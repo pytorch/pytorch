@@ -13,6 +13,7 @@ import random
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import typing
@@ -130,6 +131,9 @@ f32 = torch.float32
 i64 = torch.int64
 i32 = torch.int32
 
+# Test the FX graph code cache:
+config.fx_graph_cache = True
+
 
 def _large_cumprod_input(shape, dim, dtype, device):
     # Construct a cumprod input which guaruntees not to overflow or underflow
@@ -192,7 +196,28 @@ def run_fw_bw_and_get_code(fn):
     return run_and_get_code(run_with_backward)
 
 
-class TestCase(TorchTestCase):
+class TestCaseBase(TorchTestCase):
+    def setUp(self):
+        super().setUp()
+
+        # For all tests, mock the tmp directory populated by the inductor
+        # FxGraphCache, both for test isolation and to avoid filling disk.
+        self._inductor_cache_tmp_dir = tempfile.TemporaryDirectory()
+        self._inductor_cache_get_tmp_dir_patch = unittest.mock.patch(
+            "torch._inductor.codecache.FxGraphCache._get_tmp_dir"
+        )
+        mock_get_dir = self._inductor_cache_get_tmp_dir_patch.start()
+        mock_get_dir.return_value = self._inductor_cache_tmp_dir.name
+
+    def tearDown(self):
+        super().tearDown()
+
+        # Clean up the FxGraphCache tmp dir.
+        self._inductor_cache_get_tmp_dir_patch.stop()
+        self._inductor_cache_tmp_dir.cleanup()
+
+
+class TestCase(TestCaseBase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -918,6 +943,7 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 1)
 
+    @config.patch({"fx_graph_cache": False})
     def test_forced_buffer_realize(self):
         # Test torch._test_inductor_realize forces a buffer to be realized
         def fn(a):
@@ -927,6 +953,7 @@ class CommonTemplate:
         self.common(fn, (torch.randn(10),))
         self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 2)
 
+    @config.patch({"fx_graph_cache": False})
     def test_scheduler_vertical_fusion1(self):
         realize = test_operators.realize
 
@@ -8890,6 +8917,7 @@ class CommonTemplate:
         self.assertEqual(rot.grad, rot_e.grad)
         self.assertEqual(trans.grad, trans_e.grad)
 
+    @config.patch({"fx_graph_cache": False})
     def test_inner_fn_str_and_stride(self):
         def f(x):
             x = x + 1
