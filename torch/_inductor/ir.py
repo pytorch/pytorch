@@ -6478,6 +6478,8 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
         layout,
         inputs,
         constant_args=(),
+        has_bias=True,
+        x_scale_zp_are_tensors=False,
     ):
         """
         if bias is not None
@@ -6489,21 +6491,32 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             - const_args is: [bias, x_scale, x_zp, o_inv_scale, o_zp,
               fp32_output, unary_attr, unary_scalars, unary_algorithm]
         """
-        self.has_bias = len(inputs) == 5
+        self.has_bias = has_bias
+        self.x_scale_zp_are_tensors = x_scale_zp_are_tensors
         super().__init__(
             layout,
             inputs,
             constant_args,
             None,
-            python_kernel_name="torch.ops.onednn.qlinear_pointwise",
+            python_kernel_name=(
+                "torch.ops.onednn.qlinear_pointwise.tensor"
+                if x_scale_zp_are_tensors
+                else "torch.ops.onednn.qlinear_pointwise.default"
+            ),
             cpp_kernel_name="onednn::qlinear_pointwise",
         )
+        self.cpp_kernel_overload_name = "tensor" if x_scale_zp_are_tensors else ""
         self.cpp_kernel_key = "qlinear_pointwise"
-        self.cpp_op_schema = """
+        x_scale_type_str, x_zp_type_str = (
+            ("at::Tensor", "at::Tensor")
+            if x_scale_zp_are_tensors
+            else ("double", "int64_t")
+        )
+        self.cpp_op_schema = f"""
             at::Tensor(
                 at::Tensor act,
-                double act_scale,
-                int64_t act_zero_point,
+                {x_scale_type_str} act_scale,
+                {x_zp_type_str} act_zero_point,
                 at::Tensor weight,
                 at::Tensor weight_scales,
                 at::Tensor weight_zero_points,
@@ -6525,16 +6538,29 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
         packed_weight = args[1]
         bias = args[2] if self.has_bias else const_args[0]
         w_scale, w_zp = args[-2], args[-1]
-        (
-            x_scale,
-            x_zp,
-            o_inv_scale,
-            o_zp,
-            output_dtype,
-            unary_attr,
-            unary_scalars,
-            unary_algorithm,
-        ) = const_args[-8:]
+        if self.x_scale_zp_are_tensors:
+            assert len(args) >= 4
+            x_scale, x_zp = args[-4], args[-3]
+            (
+                o_inv_scale,
+                o_zp,
+                output_dtype,
+                unary_attr,
+                unary_scalars,
+                unary_algorithm,
+            ) = const_args[-6:]
+        else:
+            assert len(const_args) >= 8
+            (
+                x_scale,
+                x_zp,
+                o_inv_scale,
+                o_zp,
+                output_dtype,
+                unary_attr,
+                unary_scalars,
+                unary_algorithm,
+            ) = const_args[-8:]
 
         codegen_args = (
             x,
@@ -6557,6 +6583,7 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             codegen_args,
             self.cpp_op_schema,
             self.cpp_kernel_key,
+            self.cpp_kernel_overload_name,
         )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
@@ -6585,12 +6612,19 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             bias,
         )
 
+        if isinstance(x_scale, TensorBox) and isinstance(x_zp, TensorBox):
+            x_scale.realize()
+            x_zp.realize()
+            inputs = inputs + [x_scale, x_zp]
+            x_scale_zp_are_tensors = True
+        else:
+            assert isinstance(x_scale, float) and isinstance(x_zp, int)
+            constant_args = constant_args + [x_scale, x_zp]
+            x_scale_zp_are_tensors = False
         w_scale.realize()
         w_zp.realize()
         inputs = inputs + [w_scale, w_zp]
         constant_args = constant_args + [
-            x_scale,
-            x_zp,
             o_inv_scale,
             output_zero_point,
             output_dtype,
@@ -6609,6 +6643,8 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
             layout=kernel_layout,
             inputs=inputs,
             constant_args=constant_args,
+            has_bias=(bias is not None),
+            x_scale_zp_are_tensors=x_scale_zp_are_tensors,
         )
 
 

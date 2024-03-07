@@ -219,6 +219,15 @@ skip:
   multiprocess:
     - simple_gpt
 
+  # for these models, conv-batchnorm fusing causes big numerical churn.
+  # Skip them
+  freezing:
+    - mnasnet1_0
+    - moco
+    - shufflenet_v2_x1_0
+
+
+
 
 accuracy:
   skip:
