@@ -1768,6 +1768,72 @@ class CPUReproTests(TestCase):
             res_grad = test_args_for_opt["input"].grad
             self.assertEqual(ref_grad, res_grad)
 
+    def test_decomposed_fake_quant_per_channel(self):
+        def fq(input, scales, zero_points, axis, quant_min, quant_max):
+            res = torch.fake_quantize_per_channel_affine(
+                input, scales, zero_points, axis, quant_min, quant_max
+            )
+            return res
+
+        def qdq(input, scales, zero_points, axis, quant_min, quant_max):
+            res = torch.ops.quantized_decomposed.fake_quant_per_channel(
+                input, scales, zero_points, axis, quant_min, quant_max
+            )
+            return res
+
+        def run_eager_aten_fake_quant(
+            input, scales, zero_points, axis, quant_min, quant_max
+        ):
+            input.grad = None
+            res = fq(input, scales, zero_points, axis, quant_min, quant_max)
+            res.sum().backward()
+            return res, input.grad
+
+        def run_eager_decomposed_fake_quant(
+            input, scales, zero_points, axis, quant_min, quant_max
+        ):
+            input.grad = None
+            res = qdq(input, scales, zero_points, axis, quant_min, quant_max)
+            res.sum().backward()
+            return res, input.grad
+
+        def run_compile_decomposed_fake_quant(
+            input, scales, zero_points, axis, quant_min, quant_max
+        ):
+            input.grad = None
+            compiled_qdq = torch.compile(qdq)
+            res = compiled_qdq(input, scales, zero_points, axis, quant_min, quant_max)
+            res.sum().backward()
+            return res, input.grad
+
+        input = torch.randn(2, 3, 224, 224)
+        input[1, 2, 3, 4] = 257
+        input.requires_grad_()
+        scales = torch.ones((3,))
+        zero_points = torch.zeros((3,))
+        axis = 1
+        quant_min = -128
+        quant_max = 127
+
+        aten_input = copy.deepcopy(input)
+        compiler_input = copy.deepcopy(input)
+
+        res_aten_eager, input_grad_aten_eager = run_eager_aten_fake_quant(
+            aten_input, scales, zero_points, axis, quant_min, quant_max
+        )
+        res_decomp_eager, input_grad_decomp_eager = run_eager_decomposed_fake_quant(
+            input, scales, zero_points, axis, quant_min, quant_max
+        )
+        res, input_grad = run_compile_decomposed_fake_quant(
+            compiler_input, scales, zero_points, axis, quant_min, quant_max
+        )
+
+        self.assertEqual(res_aten_eager, res)
+        self.assertEqual(res_decomp_eager, res)
+        self.assertEqual(input_grad_aten_eager, input_grad)
+        self.assertEqual(input_grad_decomp_eager, input_grad)
+        self.assertEqual(input_grad[1, 2, 3, 4], torch.tensor(0.0))
+
     @patch("torch.cuda.is_available", lambda: False)
     def test_scatter_using_atomic_add(self):
         def fn(a, dim, index, b):
