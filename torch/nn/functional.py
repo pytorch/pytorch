@@ -2584,7 +2584,7 @@ def rms_norm(
     """
     if has_torch_function_variadic(input, weight):
         return handle_torch_function(
-            rms_norm, (input, weight), input, weight=weight, eps=eps
+            rms_norm, (input, weight), input, normalized_shape, weight=weight, eps=eps
         )
     if input.shape[-len(normalized_shape):] != normalized_shape:
         raise ValueError("Input must have shape that ends with normalized_shape")
