@@ -466,183 +466,177 @@ class GuardBuilder(GuardBuilderBase):
                     key, get_verbose_code_parts(f"{key_source} == {key}", guard)
                 )
 
-    def get_guard_manager_from_source(self, originating_source):
+    def get_guard_manager_from_source(self, source):
         assert self.guard_manager  # to make mypy happy
         root_guard_manager = self.guard_manager.root
         global_manager = root_guard_manager.globals_dict_manager(
             f_globals=self.scope["G"], source="G", example_value=None
         )
 
-        def build(source):
-            example_value = None
-            source_name = source.name()
-            if source_name != "":
-                example_value = self.get(source_name)
+        example_value = None
+        source_name = source.name()
+        if source_name != "":
+            example_value = self.get(source_name)
 
-            # Get base manager related information
-            base_source_name = None
-            base_example_value = None
-            base_guard_manager = None
-            if isinstance(source, ChainedSource):
-                base_source_name = source.base.name()
-                base_example_value = self.get(base_source_name)
-                base_guard_manager = build(source.base)
+        # Get base manager related information
+        base_source_name = None
+        base_example_value = None
+        base_guard_manager = None
+        if isinstance(source, ChainedSource):
+            base_source_name = source.base.name()
+            base_example_value = self.get(base_source_name)
+            base_guard_manager = self.get_guard_manager_from_source(source.base)
 
-            # Use istype instead of isinstance to check for exact type of source.
-            if istype(source, LocalSource):
-                # RootGuardManager accepts a dict but still its not a
-                # DictGuardManager because we will eventually move to
-                # fastlocals.
-                return root_guard_manager.dict_getitem_manager(
-                    key=source.local_name,
-                    source=source_name,
-                    example_value=example_value,
-                )
-            elif istype(source, GlobalSource):
-                # Global manager accepts a dict but it is not a DictGuardManager
-                # because globals dict is big and we typically guard on a very
-                # selected items on globals.
-                return global_manager.dict_getitem_manager(
-                    key=source.global_name,
-                    source=source_name,
-                    example_value=example_value,
-                )
-            elif istype(source, GlobalWeakRefSource):
-                return global_manager.global_weakref_manager(
-                    global_name=source.global_name,
-                    source=source_name,
-                    example_value=example_value,
-                )
-            elif istype(source, GlobalStateSource):
-                # Don't do anything here. We guard on global state completely in
-                # C++. So just return the root mgr.
-                return root_guard_manager
-            elif istype(source, ShapeEnvSource):
-                return root_guard_manager
-            elif istype(source, TypeSource):
-                assert base_guard_manager  # to make mypy happy
-                return base_guard_manager.type_manager(
-                    source=source_name, example_value=example_value
-                )
-            elif istype(
-                source, (NNModuleSource, NotNNModuleSource, FSDPNNModuleSource)
-            ):
-                assert base_guard_manager  # to make mypy happy
-                return base_guard_manager
-            elif istype(source, AttrSource):
-                assert base_guard_manager  # to make mypy happy
-                return base_guard_manager.getattr_manager(
-                    attr=source.member, source=source_name, example_value=example_value
-                )
-            elif istype(source, GetItemSource):
-                assert base_guard_manager  # to make mypy happy
-                if isinstance(base_guard_manager, DictGuardManager):
-                    # TODO(anijain2305) - Consider isolating GetItemSource and
-                    # DictGetItemSource (or maybe use ODictGetItemSource for
-                    # dicts) so that GetItemSource is only for non dict objects.
-                    return getitem_on_dict_manager(
-                        source,
-                        base_guard_manager,
-                        base_example_value,
-                        example_value,
-                    )
-
-                # TODO(anijain2305) - Ideally we should have an assert here that
-                # base_example_value should not be a dict subclass. It should be
-                # a dict manager and should already be handled. Infact PyTorch
-                # CI is happy with that assert. But lets wait for a few weeks
-                # with some more testing on real models before turning this into
-                # an assertion.
-                if isinstance(base_example_value, (dict, collections.OrderedDict)):
-                    guards_log.debug(
-                        "%s",
-                        (
-                            f"Using a generic GuardManager instead of DictGuardManager for {source_name}."
-                            " Could give a small perf improvement in guard eval with DictGuardManager.",
-                        ),
-                    )
-                    return base_guard_manager.dict_getitem_manager(
-                        key=source.index,
-                        source=source_name,
-                        example_value=example_value,
-                    )
-                index = source.index
-                if source.index_is_slice:
-                    index = source.unpack_slice()
-                return base_guard_manager.getitem_manager(
-                    key=index, source=source_name, example_value=example_value
-                )
-            elif istype(source, ODictGetItemSource):
-                assert isinstance(base_guard_manager, DictGuardManager)
+        # Use istype instead of isinstance to check for exact type of source.
+        if istype(source, LocalSource):
+            # RootGuardManager accepts a dict but still its not a
+            # DictGuardManager because we will eventually move to
+            # fastlocals.
+            return root_guard_manager.dict_getitem_manager(
+                key=source.local_name,
+                source=source_name,
+                example_value=example_value,
+            )
+        elif istype(source, GlobalSource):
+            # Global manager accepts a dict but it is not a DictGuardManager
+            # because globals dict is big and we typically guard on a very
+            # selected items on globals.
+            return global_manager.dict_getitem_manager(
+                key=source.global_name,
+                source=source_name,
+                example_value=example_value,
+            )
+        elif istype(source, GlobalWeakRefSource):
+            return global_manager.global_weakref_manager(
+                global_name=source.global_name,
+                source=source_name,
+                example_value=example_value,
+            )
+        elif istype(source, GlobalStateSource):
+            # Don't do anything here. We guard on global state completely in
+            # C++. So just return the root mgr.
+            return root_guard_manager
+        elif istype(source, ShapeEnvSource):
+            return root_guard_manager
+        elif istype(source, TypeSource):
+            assert base_guard_manager  # to make mypy happy
+            return base_guard_manager.type_manager(
+                source=source_name, example_value=example_value
+            )
+        elif istype(source, (NNModuleSource, NotNNModuleSource, FSDPNNModuleSource)):
+            assert base_guard_manager  # to make mypy happy
+            return base_guard_manager
+        elif istype(source, AttrSource):
+            assert base_guard_manager  # to make mypy happy
+            return base_guard_manager.getattr_manager(
+                attr=source.member, source=source_name, example_value=example_value
+            )
+        elif istype(source, GetItemSource):
+            assert base_guard_manager  # to make mypy happy
+            if isinstance(base_guard_manager, DictGuardManager):
+                # TODO(anijain2305) - Consider isolating GetItemSource and
+                # DictGetItemSource (or maybe use ODictGetItemSource for
+                # dicts) so that GetItemSource is only for non dict objects.
                 return getitem_on_dict_manager(
                     source,
                     base_guard_manager,
                     base_example_value,
                     example_value,
                 )
-            elif istype(source, DefaultsSource):
-                assert base_guard_manager  # to make mypy happy
-                assert callable(base_example_value)
-                if not source.is_kw:
-                    return base_guard_manager.func_defaults_manager(
-                        source=base_source_name,
-                        example_value=base_example_value.__defaults__,
-                    ).getitem_manager(
-                        key=source.idx_key,
-                        source=source_name,
-                        example_value=example_value,
-                    )
-                else:
-                    # kwdefauts is a dict, so use a DictGuardManager
-                    kwdefaults = base_example_value.__kwdefaults__
-                    assert base_source_name is not None
-                    kw_source = base_source_name + ".__kwdefaults__"
-                    dict_mgr = base_guard_manager.func_kwdefaults_manager(
-                        source=kw_source,
-                        example_value=kwdefaults,
-                    )
-                    assert isinstance(dict_mgr, DictGuardManager)
-                    index = get_key_index(kwdefaults, source.idx_key)
-                    key_source = get_key_index_source(kw_source, index)
 
-                    # Add key manager and equals match guard
-                    dict_mgr.get_key_manager(
-                        index=index, source=key_source, example_value=source.idx_key
-                    ).add_equals_match_guard(
-                        source.idx_key, [f"{key_source} == {source.idx_key}"]
-                    )
-
-                    # Add value manager and return it
-                    return dict_mgr.get_value_manager(
-                        index=index, source=source_name, example_value=example_value
-                    )
-            elif istype(source, NumpyTensorSource):
-                assert base_guard_manager  # to make mypy happy
-                return base_guard_manager.lambda_manager(
-                    python_lambda=from_numpy,
+            # TODO(anijain2305) - Ideally we should have an assert here that
+            # base_example_value should not be a dict subclass. It should be
+            # a dict manager and should already be handled. Infact PyTorch
+            # CI is happy with that assert. But lets wait for a few weeks
+            # with some more testing on real models before turning this into
+            # an assertion.
+            if isinstance(base_example_value, (dict, collections.OrderedDict)):
+                guards_log.debug(
+                    "%s",
+                    (
+                        f"Using a generic GuardManager instead of DictGuardManager for {source_name}."
+                        " Could give a small perf improvement in guard eval with DictGuardManager.",
+                    ),
+                )
+                return base_guard_manager.dict_getitem_manager(
+                    key=source.index,
                     source=source_name,
                     example_value=example_value,
                 )
-            elif istype(source, TupleIteratorGetItemSource):
-                assert base_guard_manager  # to make mypy happy
-                return base_guard_manager.tuple_iterator_getitem_manager(
-                    index=source.index, source=source_name, example_value=example_value
-                )
-            elif isinstance(source, ConstDictKeySource):
-                if not isinstance(base_guard_manager, DictGuardManager):
-                    raise AssertionError(
-                        "ConstDictKeySource can only work on DictGuardManager"
-                    )
-                return base_guard_manager.get_key_manager(
-                    index=source.index, source=source_name, example_value=example_value
+            index = source.index
+            if source.index_is_slice:
+                index = source.unpack_slice()
+            return base_guard_manager.getitem_manager(
+                key=index, source=source_name, example_value=example_value
+            )
+        elif istype(source, ODictGetItemSource):
+            assert isinstance(base_guard_manager, DictGuardManager)
+            return getitem_on_dict_manager(
+                source,
+                base_guard_manager,
+                base_example_value,
+                example_value,
+            )
+        elif istype(source, DefaultsSource):
+            assert base_guard_manager  # to make mypy happy
+            assert callable(base_example_value)
+            if not source.is_kw:
+                return base_guard_manager.func_defaults_manager(
+                    source=base_source_name,
+                    example_value=base_example_value.__defaults__,
+                ).getitem_manager(
+                    key=source.idx_key,
+                    source=source_name,
+                    example_value=example_value,
                 )
             else:
-                raise AssertionError(
-                    f"missing guard manager builder {source} - {source.name()}"
+                # kwdefauts is a dict, so use a DictGuardManager
+                kwdefaults = base_example_value.__kwdefaults__
+                assert base_source_name is not None
+                kw_source = base_source_name + ".__kwdefaults__"
+                dict_mgr = base_guard_manager.func_kwdefaults_manager(
+                    source=kw_source,
+                    example_value=kwdefaults,
+                )
+                assert isinstance(dict_mgr, DictGuardManager)
+                index = get_key_index(kwdefaults, source.idx_key)
+                key_source = get_key_index_source(kw_source, index)
+
+                # Add key manager and equals match guard
+                dict_mgr.get_key_manager(
+                    index=index, source=key_source, example_value=source.idx_key
+                ).add_equals_match_guard(
+                    source.idx_key, [f"{key_source} == {source.idx_key}"]
                 )
 
-        mgr = build(originating_source)
-        return mgr
+                # Add value manager and return it
+                return dict_mgr.get_value_manager(
+                    index=index, source=source_name, example_value=example_value
+                )
+        elif istype(source, NumpyTensorSource):
+            assert base_guard_manager  # to make mypy happy
+            return base_guard_manager.lambda_manager(
+                python_lambda=from_numpy,
+                source=source_name,
+                example_value=example_value,
+            )
+        elif istype(source, TupleIteratorGetItemSource):
+            assert base_guard_manager  # to make mypy happy
+            return base_guard_manager.tuple_iterator_getitem_manager(
+                index=source.index, source=source_name, example_value=example_value
+            )
+        elif isinstance(source, ConstDictKeySource):
+            if not isinstance(base_guard_manager, DictGuardManager):
+                raise AssertionError(
+                    "ConstDictKeySource can only work on DictGuardManager"
+                )
+            return base_guard_manager.get_key_manager(
+                index=source.index, source=source_name, example_value=example_value
+            )
+        else:
+            raise AssertionError(
+                f"missing guard manager builder {source} - {source.name()}"
+            )
 
     def get_guard_manager(self, guard: Guard):
         return self.get_guard_manager_from_source(guard.originating_source)
@@ -1868,12 +1862,6 @@ class CheckFunctionManager:
         # when the CacheEntry is constructed
         guard_fn.cache_entry = None
         guard_fn.extra_state = None
-
-        # TODO(anijain2305) - It is unclear why do we even need these. Maybe there
-        # is some circular ref because of GraphBuilder and CheckFnManager.  This
-        # is exposed only after introducing get_guard_manager helper.
-        builder.tensor_check_examples = []
-        builder.scope = {}
         return guard_fn
 
     def invalidate(self):
