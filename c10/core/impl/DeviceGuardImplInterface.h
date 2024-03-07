@@ -30,11 +30,10 @@ class DataPtr;
  * should map one-to-one with actual event flags for those backends.
  */
 enum class EventFlag {
+  // Disable timing
   PYTORCH_DEFAULT,
-  PYTORCH_DISABLE_TIMING,
-  // backend flags
+  // Enable timing
   BACKEND_DEFAULT,
-  BACKEND_DISABLE_TIMING,  
   // FOR TESTING ONLY
   INVALID
 };
