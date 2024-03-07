@@ -748,6 +748,63 @@ class TestSplitCatFxPasses(TestCase):
             counters.clear()
 
     @patch
+    def test_merge_getitem_stack(self):
+        def mutate_stack_node_with_some_getitmes(x):
+            l1_out = torch.unbind(x, dim=0)
+            item0 = l1_out[0]
+            item1 = l1_out[1]
+            item2 = l1_out[2]
+            item3 = l1_out[3]
+            item4 = l1_out[4]
+            item5 = l1_out[5]
+            item6 = l1_out[6]
+            item7 = l1_out[7]
+            item8 = l1_out[8]
+            item9 = l1_out[9]
+            stack_1 = torch.stack(
+                (
+                    item5,
+                    item6,
+                    item7,
+                    item8,
+                    item9,
+                ),
+                dim=0,
+            )
+            stack_2 = torch.stack(
+                (
+                    item0,
+                    item1,
+                    item2,
+                    item3,
+                    item4,
+                ),
+                dim=0,
+            )
+            return torch.cat((stack_1, stack_2), dim=0)
+
+        args = [
+            torch.randn(10, 10, 5),
+        ]
+        for (
+            fn,
+            expected_merge_getitem_stack,
+        ) in [
+            (mutate_stack_node_with_some_getitmes, 2),
+        ]:
+            print()
+            print(fn)
+            expected = fn(*args)
+            actual = torch.compile(fn)(*args)
+
+            torch.testing.assert_close(actual, expected)
+            self.assertEqual(
+                counters["inductor"]["merge_getitem_stack"],
+                expected_merge_getitem_stack,
+            )
+            counters.clear()
+
+    @patch
     def test_unbind_stack(self):
         def unbind_stack(x):
             return torch.stack(torch.unbind(x, 1), 1)

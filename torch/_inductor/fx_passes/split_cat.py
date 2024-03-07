@@ -29,6 +29,7 @@ from ..pattern_matcher import (
 from .group_batch_fusion import is_node_meta_valid
 from .pre_grad import (
     merge_getitem_cat_pass,
+    merge_getitem_stack_pass,
     merge_splits_pass,
     normalization_pass,
     split_cat_pass,
@@ -1202,6 +1203,85 @@ def calculate_fused_tensor_size(split_node: torch.fx.Node, indices: List[int]) -
         if i in indices:
             fused_tensor_size += split_node.args[1][i]  # type: ignore[operator, assignment, index]
     return fused_tensor_size
+
+
+# noqa: W605
+# ############pattern to be optimized is#########
+
+#                 unbind_node(dim=1)
+#       /     \         ...       /         \
+# getitem    getitem          getitem     getitem   -> user=1
+#    \       /                     \       /
+#      stack (user=mul, dim=1)           stack(user=mul, dim=1)
+#       |            \                   |          \
+
+# ################after transformation#############
+
+#                 unbind_node(dim=1)
+#       /              ...                  \
+#     getitem                             slice_of_input
+#     |    \                                   /  \
+
+
+@register_graph_pattern(
+    CallFunction(
+        torch.stack,
+        getitem_unbind,
+        dim=Ignored(),
+        _users=MULTIPLE,
+    ),
+    pass_dict=merge_getitem_stack_pass,
+    extra_check=config_flag("split_cat_fx_passes"),
+)
+def merge_getitem_stack(match: Match, unbind_input: torch.fx.Node, dim: int):
+    unbind_node = next(node for node in match.nodes if node.target == torch.unbind)
+    graph = match.graph
+    next_users = find_next_users(unbind_node)
+    for stack_user in next_users:
+        if stack_user.target == torch.stack:
+            stack_dim = get_arg_value(stack_user, 1, "dim")
+            unbind_dim = get_arg_value(unbind_node, 1, "dim")
+            # check the all getitems in the stack_user from the same node
+            # check the input of the stack has all getitem from the unbind
+            # check all getitem only has one single user
+            if unbind_dim != stack_dim or not has_same_parent_node(stack_user):
+                continue
+            # find the index of getitems to be stacked
+            indices, idx_to_getitem = [], {}
+            for getitem in stack_user.args[0]:  # type: ignore[union-attr]
+                indices.append(getitem.args[1])  # type: ignore[union-attr]
+                idx_to_getitem[getitem.args[1]] = getitem  # type: ignore[union-attr]
+            # the gettitems to be stacked must be consecutive, otherwise
+            # returned sliced tensor could be wrong
+            if not is_sorted_and_consecutive(indices):
+                continue
+            # case 1: the stack uses all getitems from the split
+            if len(unbind_node.users) == len(stack_user.args[0]):  # type: ignore[arg-type]
+                # replace the users of the stack node to be the input of the split node
+                stack_user.replace_all_uses_with(unbind_input)
+                # remove the stack node
+                graph.erase_node(stack_user)
+                counters["inductor"]["merge_getitem_stack"] += 1
+            # case 2: the stack uses some getitems from the unbind
+            elif is_node_meta_valid(unbind_input):
+                # check the unbind dim, and construct the slice tuple
+                slice_list = []
+                for i in range(len(unbind_input.meta["example_value"].shape)):  # type: ignore[union-attr]
+                    if i != unbind_dim:
+                        slice_list.append(slice(None, None, None))
+                    else:
+                        slice_list.append(slice(indices[0], indices[-1] + 1, None))
+                with graph.inserting_after(unbind_node):
+                    slice_node = graph.call_function(
+                        operator.getitem,
+                        args=(unbind_input, tuple(slice_list)),
+                    )
+                    stack_user.replace_all_uses_with(slice_node)
+                    slice_node.meta.update(stack_user.meta)
+
+                # remove the cat node
+                graph.erase_node(stack_user)
+                counters["inductor"]["merge_getitem_stack"] += 1
 
 
 @register_graph_pattern(

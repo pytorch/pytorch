@@ -46,6 +46,9 @@ efficient_conv_bn_eval_pass = PatternMatcherPass(
 merge_getitem_cat_pass = PatternMatcherPass(
     prevent_match_across_mutations=True, pass_name="merge_getitem_cat_pass"
 )
+merge_getitem_stack_pass = PatternMatcherPass(
+    prevent_match_across_mutations=True, pass_name="merge_getitem_stack_pass"
+)
 predispatch_pass = PatternMatcherPass(
     prevent_match_across_mutations=True, pass_name="predispatch_pass"
 )
@@ -62,6 +65,7 @@ pattern_matcher_passes: List[PatternMatcherPass] = [
     merge_splits_pass,
     split_cat_pass,
     unbind_stack_pass,
+    merge_getitem_stack_pass,
     efficient_conv_bn_eval_pass,
 ]
 pattern_matcher_passes_aten: List[PatternMatcherPass] = [
