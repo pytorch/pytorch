@@ -1290,6 +1290,17 @@ class TestNNParametrization(NNTestCase):
 
                         gradcheck(fn, (m.parametrizations.weight.original,))
 
+    def test_new_spectral_norm_cdouble(self):
+        dtype = torch.cfloat
+        net = nn.Linear(2, 2).to(dtype)
+        # top singular value is 2 = spectral norm
+        t = torch.diag(torch.tensor([2., 1.], dtype=dtype))
+        net.weight = nn.Parameter(t)
+        # weights should be rescaled by spectral norm
+        torch.nn.utils.parametrizations.spectral_norm(net, n_power_iterations=400)
+        # weights should now be diag(1., 0.5)
+        self.assertEqual(net.weight, torch.diag(torch.tensor([1., 0.5], dtype=dtype)))
+
     def test_new_spectral_norm_load_state_dict(self):
         for activate_times in (0, 3):
             inp = torch.randn(2, 3)
