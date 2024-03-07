@@ -1,3 +1,4 @@
+#if !defined(C10_MOBILE) && !defined(ANDROID)
 #include <torch/csrc/inductor/aoti_eager/aoti_kernel_holder.h>
 
 #include <ATen/ATen.h>
@@ -306,3 +307,4 @@ std::shared_ptr<AOTIEagerKernelRunner> AOTIPythonKernelHolder::
 }
 
 } // namespace torch::inductor
+#endif
