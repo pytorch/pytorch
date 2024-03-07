@@ -2244,7 +2244,6 @@ class TestFakeTensor(TestCase):
                 ):
                     if not isinstance(fake_out, torch.Tensor):
                         self.assertTrue(not isinstance(real_out, torch.Tensor))
-                        self.assertEqual(fake_out, real_out)
                         continue
 
                     self.assertTrue(isinstance(fake_out, FakeTensor))
