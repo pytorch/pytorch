@@ -143,6 +143,9 @@ def visualize_sharding(dtensor, header=""):
     device_mesh = dtensor.device_mesh
     device_type = dtensor.device_mesh.device_type
 
+    if device_mesh.get_coordinate() is None:  # current rank is not in the mesh
+        return
+
     # Only display the visualization once for each DTensor, on the rank whose
     # coordinate is 0 on all dimensions. For example, if the mesh is a full mesh,
     # we will only print on rank 0.
