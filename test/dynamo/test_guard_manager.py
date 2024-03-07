@@ -574,6 +574,21 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(debug_info.result)
         self.assertTrue("Test" in debug_info.verbose_code_parts[0])
 
+    def test_dict_contains_guard(self):
+        foo = {"a": 1, "b": 2}
+        guard = guards.DICT_CONTAINS(True, "a", ["has a"])
+
+        self.assertTrue(guard(foo))
+        self.assertTrue(guard({"a": 1, "b": 2}))
+        self.assertFalse(guard({"b": 2, "c": 3}))
+        self.assertFalse(guard({}))
+
+        guard = guards.DICT_CONTAINS(False, "c", ["not has c"])
+        self.assertTrue(guard(foo))
+        self.assertTrue(guard({"a": 1, "b": 2}))
+        self.assertFalse(guard({"b": 2, "c": 3}))
+        self.assertTrue(guard({}))
+
     def test_dict_guard_manager(self):
         root = RootGuardManager()
 
@@ -593,7 +608,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         # Check that no one can add a leaf guard
         with self.assertRaises(RuntimeError):
-            dict_mgr.add_length_check_guard(3, "len check")
+            dict_mgr.add_id_match_guard(id_type(f_locals), "id match")
 
         # Check that no one can add an arbitrary accessor
         with self.assertRaises(RuntimeError):
@@ -606,23 +621,15 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(root.check(f_locals_prime))
 
         # Add key-value manager ("a" : 1)
-        mgr0 = dict_mgr.get_key_value_manager(0)
+        mgr0 = dict_mgr.get_index_manager(0)
         self.assertTrue(root.check(f_locals))
         mgr0.get_key_manager("a").add_equals_match_guard("a", ["dict.keys()[0] == a"])
         self.assertTrue(root.check(f_locals))
         mgr0.get_value_manager(1).add_equals_match_guard(1, ["d[0] == 1"])
         self.assertTrue(root.check(f_locals))
 
-        # Check that we can't add a guard to a key-value manager
-        with self.assertRaises(RuntimeError):
-            mgr0.add_length_check_guard(2, "len check")
-
-        # Check that we can't add an accessor to the key-value manager
-        with self.assertRaises(RuntimeError):
-            mgr0.getitem_manager("a", f_locals["d"]["a"])
-
         # Add key-value manager (nothing : {"z" : 3})
-        mgr1 = dict_mgr.get_key_value_manager(1)
+        mgr1 = dict_mgr.get_index_manager(1)
         self.assertTrue(root.check(f_locals))
         mgr1.get_key_manager(nothing).add_lambda_guard(
             lambda x: x is nothing, ["x is nothing"]
@@ -635,11 +642,11 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         # Check structure
         # Check that we are only guarding on two keys. This is common in
         # LazyVariableTracker.
-        self.assertEqual(len(dict_mgr.get_child_managers()), 2)
+        self.assertEqual(len(dict_mgr.get_index_managers()), 2)
         self.assertTrue(isinstance(mgr0, KeyValueDictGuardManager))
         self.assertTrue(isinstance(mgr1, KeyValueDictGuardManager))
-        self.assertEqual(len(mgr0.get_child_managers()), 2)
-        self.assertEqual(len(mgr1.get_child_managers()), 2)
+        self.assertEqual(len(mgr0.get_key_value_managers()), 2)
+        self.assertEqual(len(mgr1.get_key_value_managers()), 2)
 
         f_locals["d"]["a"] = 2
         self.assertFalse(root.check(f_locals))

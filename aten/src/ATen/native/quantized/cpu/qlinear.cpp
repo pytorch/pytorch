@@ -1161,6 +1161,33 @@ class QLinearOnednn final {
 #endif
     TORCH_CHECK(false, "Unimplemented (int8 linear with packed weight and bias)");
   }
+
+  static Tensor run_pointwise_tensor(
+      Tensor act, // int8 CPU tensor, not QTensor
+      Tensor act_scale,
+      Tensor act_zero_point,
+      Tensor onednn_weight, // int8 tensor from MkldnnCPU
+      Tensor weight_scales,
+      Tensor weight_zero_points,
+      c10::optional<Tensor> bias,
+      double output_scale,
+      int64_t output_zero_point,
+      c10::optional<c10::ScalarType> output_dtype,
+      std::string post_op_name,
+      torch::List<c10::optional<at::Scalar>> post_op_args,
+      std::string post_op_algorithm) {
+#if AT_MKLDNN_ENABLED()
+    TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() == 1,
+        "onednn int8 linear: act scale/zp size should be 1");
+    return linear_int8_with_onednn_weight(
+        act, act_scale.item().toDouble(), act_zero_point.item().toLong(),
+        onednn_weight, weight_scales, weight_zero_points,
+        bias, output_scale, output_zero_point, output_dtype,
+        post_op_name, post_op_args, post_op_algorithm
+    );
+#endif
+    TORCH_CHECK(false, "Unimplemented (int8 linear with packed weight and bias)");
+  }
 };
 
 
@@ -1185,6 +1212,8 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
 TORCH_LIBRARY_IMPL(onednn, MkldnnCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise"),
       TORCH_FN(QLinearOnednn::run_pointwise));
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise.tensor"),
+      TORCH_FN(QLinearOnednn::run_pointwise_tensor));
 }
 
 } // namespace

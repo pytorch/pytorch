@@ -96,6 +96,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             self.device,
             MixedPrecisionPolicy(),
         )
+        fsdp_param_group.lazy_init()
         return fsdp_param_group
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
@@ -226,8 +227,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             orig_dtype=orig_params[0].dtype,
             reduce_dtype=reduce_scatter_dtype,
             device=self.device,
-            predivide_factor=fsdp_param_group._grad_predivide_factor,
-            postdivide_factor=fsdp_param_group._grad_postdivide_factor,
+            divide_factors=fsdp_param_group._grad_divide_factors,
         )
         torch.cuda.current_stream().wait_event(view_out_event)
 
