@@ -1726,12 +1726,12 @@ class DeviceCachingAllocator {
     result.reserve(alloc_trace->size());
     result.insert(
         result.end(),
-        alloc_trace->begin() + alloc_trace_next,
+        alloc_trace->begin() + static_cast<std::vector<TraceEntry>::difference_type>(alloc_trace_next),
         alloc_trace->end());
     result.insert(
         result.end(),
         alloc_trace->begin(),
-        alloc_trace->begin() + alloc_trace_next);
+        alloc_trace->begin() + static_cast<std::vector<TraceEntry>::difference_type>(alloc_trace_next));
 
     // Convert all the timestamps from tsc to epoch time in microseconds.
     for (auto& te : result) {
