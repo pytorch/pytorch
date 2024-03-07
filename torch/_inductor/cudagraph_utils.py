@@ -33,7 +33,7 @@ def get_mutation_stack_trace(
             break
 
     if stack_trace:
-        msg = f"skipping cudagraphs due to mutaton on input. Found from : \n {stack_trace}"
+        msg = f"skipping cudagraphs due to mutation on input. Found from : \n {stack_trace}"
         return msg
 
     return format_default_skip_message("mutated inputs")
