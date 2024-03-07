@@ -452,9 +452,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         def test_open_device_scalar_type_fallback():
             torch.utils.rename_privateuse1_backend('foo')
             z_cpu = torch.Tensor([[0, 0, 0, 1, 1, 2], [0, 1, 2, 1, 2, 2]]).to(torch.int64)
-            print(z_cpu)
             z = torch.triu_indices(3,3,device='foo')
-            print(z)
             self.assertEqual(z_cpu, z)
 
         def test_open_device_tensor_type_fallback():
