@@ -3,9 +3,18 @@
 #include <ATen/native/mkldnn/Utils.h>
 #include <c10/util/irange.h>
 #include <torch/library.h>
+#include <bitset>
 
 #if AT_ONEDNN_GRAPH_ENABLED()
 #include <oneapi/dnnl/dnnl_graph.hpp>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_to_dense_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#endif
 
 namespace std {
 template <>
@@ -57,6 +66,8 @@ struct cp_entry {
   RunArgs outputLLGATensors_;
   LogicalTensors inputLogicalTensors_;
   LogicalTensors outputLogicalTensors_;
+  std::vector<std::vector<int64_t>> outputTensorShapes_;
+  std::vector<std::vector<int64_t>> outputTensorStrides_;
 };
 
 using key_value_pair_t = std::pair<std::vector<int64_t>, cp_entry>;
@@ -64,14 +75,14 @@ using list_iterator_t = std::list<key_value_pair_t>::iterator;
 
 void insert_in_fused_kernel_cache(std::vector<int64_t>& map_key, cp_entry& cp);
 
-void insert_in_partition_cache(int64_t partitionID, partition& p);
+void insert_in_partition_cache(std::bitset<12>& partitionID, partition& p);
 
 void change_pos_in_list(list_iterator_t& kvpair);
 
-std::unordered_map<int64_t, dnnl::graph::partition>::iterator
-partition_map_lookup(int64_t patternID);
+std::unordered_map<std::bitset<12>, dnnl::graph::partition>::iterator
+partition_map_lookup(std::bitset<12>& patternID);
 
-std::unordered_map<int64_t, dnnl::graph::partition>::iterator
+std::unordered_map<std::bitset<12>, dnnl::graph::partition>::iterator
 partition_map_end();
 
 std::unordered_map<std::vector<int64_t>, list_iterator_t>::iterator cache_lookup(
@@ -86,9 +97,11 @@ compiled_partition compile_partition(
 
 data_type aten_to_onednn_graph_dtype(at::ScalarType dt);
 
-// TODO: use an enum instead
-#define ONEDNN_GRAPH_SDPA_PATTERN_18_FP32 0
-#define ONEDNN_GRAPH_SDPA_PATTERN_18_BF16 1
+void execute_partition(
+    std::vector<Tensor>& input_tensors,
+    Tensor& output_tensor,
+    cp_entry& cp,
+    bool inplace = false);
 
 } // end namespace onednn_graph
 } // end namespace native

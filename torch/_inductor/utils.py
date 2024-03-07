@@ -56,6 +56,23 @@ _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
 
+# Some fusions would only work on Xeon SP processors gen 2 & above
+@functools.lru_cache(None)
+def is_avx512_vnni_supported() -> bool:
+    return torch.cpu._is_cpu_support_vnni()
+
+
+# Some BF16 fusions would only work on Xeon SP processors gen 3 (Cooper Lake) & above
+@functools.lru_cache(None)
+def is_avx512_bf16_supported() -> bool:
+    # Can't use mkldnn._is_mkldnn_bf16_supported() because it also returns True on CLX
+    if sys.platform != "linux":
+        return False
+    with open("/proc/cpuinfo", encoding="ascii") as f:
+        lines = f.read()
+    return "avx512_bf16" in lines
+
+
 def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float:
     """
     Returns benchmark results by examining torch profiler events.

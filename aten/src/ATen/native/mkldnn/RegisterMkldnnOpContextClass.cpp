@@ -73,7 +73,7 @@ TORCH_LIBRARY(mkldnn, m) {
       "mkldnn::_reorder_mkldnn_rnn_layer_weight(Tensor weight0, Tensor weight1, int hidden_size, bool reverse, bool has_biases, bool batch_first, int[]? input_size=None) -> Tensor[] Y"));
 #if AT_ONEDNN_GRAPH_ENABLED()
   m.def(TORCH_SELECTIVE_SCHEMA(
-      "mkldnn::_graph_sdpa_pattern(Tensor Query, Tensor Key, Tensor Value, Tensor? scale, Tensor? inverse_scale, Tensor? attn_mask, Tensor? causal_mask, Tensor? causal_mask_value, bool transpose_query=False, bool transpose_key_twice=False, bool transpose_value=False, bool transpose_key_once=False, bool output_requires_transpose_and_reorder=False) -> Tensor Y"));
+      "mkldnn::_graph_sdpa_fusion(Tensor Query, Tensor Key, Tensor Value, Tensor? scale, Tensor? inverse_scale, Tensor? attn_mask, Tensor? causal_mask, Tensor? causal_mask_value, bool transpose_query=False, bool transpose_key_twice=False, bool transpose_key_once=False, bool transpose_value=False, bool apply_mask_before_scale=False, bool choose_causal_mask_over_attn_score=False, bool output_requires_transpose_and_reorder=False) -> Tensor Y"));
 #endif
   m.def("_is_mkldnn_bf16_supported", &is_mkldnn_bf16_supported);
   m.def("_is_mkldnn_fp16_supported", &is_mkldnn_fp16_supported);

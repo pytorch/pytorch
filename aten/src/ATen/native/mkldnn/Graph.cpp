@@ -8,7 +8,8 @@ namespace onednn_graph {
 
 // Thread local data-structures are required if multiple thread-pools
 // of a PyTorch process would be used for inference.
-thread_local std::unordered_map<int64_t, dnnl::graph::partition> partition_map_;
+thread_local std::unordered_map<std::bitset<12>, dnnl::graph::partition>
+    partition_map_;
 // Compiled partition (fused kernel) cache
 // Adopted from
 // https://github.com/lamerman/cpp-lru-cache/blob/master/include/lrucache.hpp
@@ -45,17 +46,17 @@ std::unordered_map<std::vector<int64_t>, list_iterator_t>::iterator cache_end() 
   return fused_kernel_cache_map_.end();
 }
 
-std::unordered_map<int64_t, dnnl::graph::partition>::iterator
-partition_map_lookup(int64_t patternID) {
+std::unordered_map<std::bitset<12>, dnnl::graph::partition>::iterator
+partition_map_lookup(std::bitset<12>& patternID) {
   return partition_map_.find(patternID);
 }
 
-std::unordered_map<int64_t, dnnl::graph::partition>::iterator
+std::unordered_map<std::bitset<12>, dnnl::graph::partition>::iterator
 partition_map_end() {
   return partition_map_.end();
 }
 
-void insert_in_partition_cache(int64_t patternID, partition& p) {
+void insert_in_partition_cache(std::bitset<12>& patternID, partition& p) {
   partition_map_[patternID] = std::move(p);
 }
 
@@ -87,6 +88,35 @@ data_type aten_to_onednn_graph_dtype(at::ScalarType dt) {
     default:
       return data_type::undef;
   }
+}
+
+// Execute fused kernel
+// Can be extended to create multiple outputs
+void execute_partition(
+    std::vector<Tensor>& input_tensors,
+    at::Tensor& output_tensor,
+    cp_entry& cp,
+    bool inplace) {
+  int i = 0;
+
+  for (auto& each_tensor : input_tensors) {
+    cp.inputLLGATensors_[i++].set_data_handle(each_tensor.data_ptr());
+  }
+
+  if (inplace) {
+    // there's no copy, so it's fine
+    output_tensor = input_tensors[0];
+  } else {
+    output_tensor = at::detail::empty_strided_cpu(
+        cp.outputTensorShapes_[0],
+        cp.outputTensorStrides_[0],
+        input_tensors[1].scalar_type());
+  }
+  cp.outputLLGATensors_[0].set_data_handle(output_tensor.data_ptr());
+  cp.cp_.execute(
+      onednn_graph::Stream::getStream(),
+      cp.inputLLGATensors_,
+      cp.outputLLGATensors_);
 }
 
 } // end namespace onednn_graph

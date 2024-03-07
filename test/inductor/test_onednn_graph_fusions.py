@@ -43,9 +43,10 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         dtype=torch.float,
         uses_causal_mask=False,
         rtol=1.3e-6,
+        batch_size=4,
     ):
         if args1 is None:
-            tensor_shape = (4, 2, 16, 32)
+            tensor_shape = (batch_size, 2, 16, 32)
             args1 = [
                 torch.randn(tensor_shape, device=self.device, dtype=dtype),
                 torch.randn(tensor_shape, device=self.device, dtype=dtype),
@@ -63,7 +64,10 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 args1.append(
                     torch.full((), -3.4028234663852886e38, dtype=dtype, device="cpu")
                 )
-                args1.append(torch.ones(1, 1, 2, 2).to(torch.bool))
+                if batch_size == 1:
+                    args1.append(torch.ones(1, 1, 16, 16).to(torch.bool))
+                else:
+                    args1.append(torch.ones(1, 1, 2, 2).to(torch.bool))
         else:
             args1 = list(args1)
         args2 = self._clone_inputs(args1)
@@ -118,6 +122,26 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(sfdp_pattern_18, uses_causal_mask=True)
         self._check_common(checkpoint_wrapper(sfdp_pattern_18), uses_causal_mask=True)
 
+    def _test_sdpa_rewriter_19(self):
+        def sfdp_pattern_19(
+            query, key, value, inv_scale, causal_mask_value, causal_mask
+        ):
+            # for hf_GPT2 with dropout (batch size 1)
+            attn_weights = torch.matmul(query, key.permute(0, 1, 3, 2))
+            attn_weights = attn_weights.div(inv_scale)
+            attn_weights = torch.where(causal_mask, attn_weights, causal_mask_value)
+            return (
+                torch.nn.functional.dropout(attn_weights.softmax(dim=-1), 0.0)
+                .matmul(value)
+                .permute([0, 2, 1, 3])
+                .contiguous()
+            )
+
+        self._check_common(sfdp_pattern_19, uses_causal_mask=True, batch_size=1)
+        self._check_common(
+            checkpoint_wrapper(sfdp_pattern_19), uses_causal_mask=True, batch_size=1
+        )
+
 
 if HAS_CPU:
 
@@ -125,6 +149,9 @@ if HAS_CPU:
         device = "cpu"
         test_sdpa_rewriter_18_cpu = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_18
+        )
+        test_sdpa_rewriter_19_cpu = (
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_19
         )
 
 

@@ -2,7 +2,6 @@ import functools
 import inspect
 import logging
 import math
-import sys
 
 import torch
 from ..._dynamo.utils import counters
@@ -13,31 +12,10 @@ from ..pattern_matcher import (
     joint_fwd_bwd,
     register_replacement,
 )
+from ..utils import is_avx512_bf16_supported, is_avx512_vnni_supported
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
-
-
-# Some fusions would only work on Xeon SP processors gen 2 & above
-def is_avx512_vnni_supported():
-    if sys.platform != "linux":
-        return False
-    with open("/proc/cpuinfo", encoding="ascii") as f:
-        lines = f.read()
-    return "vnni" in lines
-
-
-# Some BF16 fusions would only work on Xeon SP processors gen 3 (Cooper Lake) & above
-def is_avx512_bf16_supported():
-    if sys.platform != "linux":
-        return False
-    with open("/proc/cpuinfo", encoding="ascii") as f:
-        lines = f.read()
-    return "avx512_bf16" in lines
-
-
-IS_AVX512_VNNI_SUPPORTED = is_avx512_vnni_supported()
-IS_AVX512_BF16_SUPPORTED = is_avx512_bf16_supported()
 
 
 def _sfdp_pattern_1(query, key, value, inv_scale):
@@ -412,12 +390,16 @@ def _sfdp_pattern_16(query, key, value, attn_mask, inv_scale, dropout_p):
     q = query.permute([0, 2, 1, 3])
     k = key.permute([0, 2, 1, 3])
     v = value.permute([0, 2, 1, 3])
-    return torch.nn.functional.dropout(
-        (torch.matmul(q, k.transpose(-2, -1)).div(inv_scale) + attn_mask).softmax(
-            dim=-1
-        ),
-        dropout_p,
-    ).matmul(v)
+    return (
+        torch.nn.functional.dropout(
+            (torch.matmul(q, k.transpose(-2, -1)).div(inv_scale) + attn_mask).softmax(
+                dim=-1
+            ),
+            dropout_p,
+        )
+        .to(dtype=query.dtype)
+        .matmul(v)
+    )
 
 
 def _sfdp_replacement_16(query, key, value, attn_mask, inv_scale, dropout_p):
@@ -500,7 +482,7 @@ def _sfdp_replacement_18(query, key, value, inv_scale, causal_mask_value, causal
     value_permuted = value.permute([0, 2, 1, 3])
     attn_bias = torch.zeros(1, 1, query.size(1), query.size(1))
     return (
-        torch.ops.mkldnn._graph_sdpa_pattern(
+        torch.ops.mkldnn._graph_sdpa_fusion(
             query_permuted,
             key_permuted.transpose(-1, -2),
             value_permuted,
@@ -509,11 +491,13 @@ def _sfdp_replacement_18(query, key, value, inv_scale, causal_mask_value, causal
             attn_bias,  # oneDNN v3.5 will not require this workaround
             causal_mask,
             causal_mask_value,
-            False,
-            False,
-            False,
-            False,
-            True,
+            transpose_query=False,
+            transpose_key_twice=False,
+            transpose_key_once=False,
+            transpose_value=False,
+            apply_mask_before_scale=True,
+            choose_causal_mask_over_attn_score=False,
+            output_requires_transpose_and_reorder=True,
         ),
         key_permuted,
         value_permuted,
@@ -536,7 +520,7 @@ def _sfdp_pattern_19(query, key, value, inv_scale, causal_mask_value, causal_mas
 def _sfdp_replacement_19(query, key, value, inv_scale, causal_mask_value, causal_mask):
     counters["inductor"]["fuse_attention"] += 1
     attn_bias = torch.zeros(1, 1, query.size(2), query.size(2))
-    return torch.ops.mkldnn._graph_sdpa_pattern(
+    return torch.ops.mkldnn._graph_sdpa_fusion(
         query,
         key.transpose(-1, -2),
         value,
@@ -545,11 +529,13 @@ def _sfdp_replacement_19(query, key, value, inv_scale, causal_mask_value, causal
         attn_bias,  # oneDNN v3.5 will not require this workaround
         causal_mask,
         causal_mask_value,
-        False,
-        False,
-        False,
-        False,
-        True,
+        transpose_query=False,
+        transpose_key_twice=False,
+        transpose_key_once=False,
+        transpose_value=False,
+        apply_mask_before_scale=True,
+        choose_causal_mask_over_attn_score=False,
+        output_requires_transpose_and_reorder=True,
     )
 
 
@@ -571,9 +557,14 @@ def _sfdp_params_check(match):
             return False
         attn_mask = attn_mask_node.meta["val"]  # type: ignore[union-attr]
         # Make sure attn_mask.dtype == query.dtype or attn_mask.dtype == torch.bool
+        # attn_mask.dtype == torch.float for models like albert.
         if (
             not isinstance(attn_mask, torch.Tensor)
-            or not (attn_mask.dtype == query.dtype or attn_mask.dtype == torch.bool)
+            or not (
+                attn_mask.dtype == query.dtype
+                or attn_mask.dtype == torch.bool
+                or attn_mask.dtype == torch.float
+            )
             or query.device != attn_mask.device
         ):
             return False
@@ -582,7 +573,9 @@ def _sfdp_params_check(match):
 
 def _onednn_graph_extra_check(match):
     if not (
-        config.onednn_graph and torch._C._has_onednn_graph and IS_AVX512_VNNI_SUPPORTED
+        config.onednn_graph
+        and torch._C._has_onednn_graph
+        and is_avx512_vnni_supported()
     ):
         return False
     query = match.kwargs["query"].meta["val"]
@@ -590,7 +583,7 @@ def _onednn_graph_extra_check(match):
         return False
     if str(query.device) != "cpu":
         return False
-    if (query.dtype == torch.bfloat16) and not IS_AVX512_BF16_SUPPORTED:
+    if (query.dtype == torch.bfloat16) and not is_avx512_bf16_supported():
         return False
     return _sfdp_params_check(match)
 
@@ -656,11 +649,6 @@ def _get_sfdp_patterns():
     m_inp = functools.partial(torch.empty, (2, 1, 1, 4), device=device)
     # inv_scale
     c_inp = functools.partial(torch.tensor, 2.0, device=device)
-    # causal_mask
-    gpt2_cmask = functools.partial(torch.empty, (1, 1, 4, 4), device=device)
-    gpt2_cmask_q_not_permuted = functools.partial(
-        torch.empty, (1, 1, 8, 8), device=device
-    )
     # workaround https://github.com/pytorch/pytorch/issues/97894
     # 0.113377 is a "magic" value that lets us recover the lost input arg relationship
     d = {"dropout_p": 0.113377}
@@ -670,19 +658,38 @@ def _get_sfdp_patterns():
         torch.empty, (1024, 128, 128), device=device, requires_grad=True
     )
 
+    # reshape in matmul decomposition generates a clone when batch_size>1 due to the memory layout change.
+    # however when batch_size=1, reshape does not change the memory layout, so clone would not be generated.
+    # here we need to trace with input of batch_size=1 to generate a pattern graph without clone.
+    g_bs1_inp = functools.partial(
+        torch.empty, (1, 4, 8, 16), device=device, requires_grad=True
+    )
+    m_bs1_inp = functools.partial(torch.empty, (1, 1, 1, 4), device=device)
+
+    # causal_mask
+    cmask_inp = functools.partial(torch.empty, (1, 1, 4, 4), device=device)
+    cmask_q_post_permute_inp = functools.partial(
+        torch.empty, (1, 1, 8, 8), device=device
+    )
+
     # softmax will generate a dtype conversion on inputs if they are in half,
     # but will not in float, so we generate a pattern for both
-
     for dtype in [torch.float, torch.half]:
         g = functools.partial(g_inp, dtype=dtype)
         b = functools.partial(b_inp, dtype=dtype)
         m = functools.partial(m_inp, dtype=dtype)
+        m_float = functools.partial(m_inp, dtype=torch.float)
         c = functools.partial(c_inp, dtype=dtype)
         g_3d = functools.partial(g_3d_inp, dtype=dtype)
-        gpt2_c = functools.partial(gpt2_cmask, dtype=torch.bool)
-        gpt2_c_2 = functools.partial(gpt2_cmask_q_not_permuted, dtype=torch.bool)
+        g_bs1 = functools.partial(g_bs1_inp, dtype=dtype)
+        m_bs1 = functools.partial(m_bs1_inp, dtype=dtype)
+        m_bs1_float = functools.partial(m_bs1_inp, dtype=torch.float)
+        cmask = functools.partial(cmask_inp, dtype=torch.bool)
+        cmask_q_post_permute = functools.partial(
+            cmask_q_post_permute_inp, dtype=torch.bool
+        )
 
-        for pattern, replacement, args, workaround, extra_check, register_training in [
+        candidates = [
             (
                 _sfdp_pattern_1,
                 _sfdp_replacement_1,
@@ -813,6 +820,14 @@ def _get_sfdp_patterns():
                 True,
             ),
             (
+                _sfdp_pattern_16,
+                _sfdp_replacement_16,
+                [g_bs1(), g_bs1(), g_bs1(), m_bs1(), c()],
+                d,
+                _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
+                True,
+            ),
+            (
                 _sfdp_pattern_17,
                 _sfdp_replacement_17,
                 [g(), g(), g(), m(), c()],
@@ -823,7 +838,7 @@ def _get_sfdp_patterns():
             (
                 _sfdp_pattern_18,
                 _sfdp_replacement_18,
-                [g(), g(), g(), c(), c(), gpt2_c()],
+                [g(), g(), g(), c(), c(), cmask()],
                 {},
                 _onednn_graph_extra_check,
                 False,
@@ -831,25 +846,61 @@ def _get_sfdp_patterns():
             (
                 _sfdp_pattern_19,
                 _sfdp_replacement_19,
-                [g(), g(), g(), c(), c(), gpt2_c_2()],
+                [g(), g(), g(), c(), c(), cmask_q_post_permute()],
                 {},
                 _onednn_graph_extra_check,
                 False,
             ),
-        ]:
+        ]
+        mask_fp32_patterns = ["pattern_16"]
+        if dtype == torch.half:
+            # Add inputs of bf16 q/k/v and fp32 mask, for models like albert.
+            candidates.append(
+                (
+                    _sfdp_pattern_16,
+                    _sfdp_replacement_16,
+                    [g(), g(), g(), m_float(), c()],
+                    d,
+                    _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
+                    True,
+                )
+            )
+            candidates.append(
+                (
+                    _sfdp_pattern_16,
+                    _sfdp_replacement_16,
+                    [g_bs1(), g_bs1(), g_bs1(), m_bs1_float(), c()],
+                    d,
+                    _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
+                    True,
+                )
+            )
+
+        for (
+            pattern,
+            replacement,
+            args,
+            workaround,
+            extra_check,
+            register_training_pattern,
+        ) in candidates:
             # XXX: when adding a new pattern, re-run `gen_attention_patterns` so the pattern
             # gets serialized to a python file and does not require tracing at runtime.
             assert isinstance(workaround, dict)
             name = pattern.__name__
 
-            # currently, only inference patterns are supported with oneDNN Graph
-            # but "register_training" could be used for other patterns as well
-            if register_training:
-                training_name = (
-                    f"{name}_training"
-                    if dtype == torch.float
-                    else f"{name}_training_half"
-                )
+            if dtype != torch.float:
+                name += "_half"
+                if (
+                    any(p in name for p in mask_fp32_patterns)
+                    and args[3].dtype == torch.float32
+                ):
+                    name += "_mask_fp32"
+            if args[0].size(0) == 1:
+                name += "_bs1"
+
+            if register_training_pattern:
+                training_name = name + "_training"
                 yield training_name, {
                     "search_fn": pattern,
                     "replace_fn": replacement,
@@ -869,11 +920,7 @@ def _get_sfdp_patterns():
                     )
                     workaround = {}
 
-            inference_name = (
-                f"{name}_inference"
-                if dtype == torch.float
-                else f"{name}_inference_half"
-            )
+            inference_name = name + "_inference"
             yield inference_name, {
                 "search_fn": pattern,
                 "replace_fn": replacement,

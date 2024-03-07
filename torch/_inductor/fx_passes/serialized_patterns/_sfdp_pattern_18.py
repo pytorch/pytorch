@@ -96,7 +96,7 @@ bmm_default_1 = CallFunction(aten.bmm.default, view_default_3, view_default_4)
 view_default_5 = CallFunction(aten.view.default, bmm_default_1, Ignored())
 permute_default_4 = CallFunction(aten.permute.default, view_default_5, Ignored())
 clone_default_4 = CallFunction(aten.clone.default, permute_default_4, memory_format=torch.contiguous_format)
-_sfdp_pattern_18_inference_half = MultiOutputPattern([clone_default_4,
+_sfdp_pattern_18_half_inference = MultiOutputPattern([clone_default_4,
   permute_default_1,
   permute_default_3
 ])
