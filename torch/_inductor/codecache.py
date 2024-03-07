@@ -31,7 +31,6 @@ from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from copy import copy
 from ctypes import c_void_p, cdll, CDLL
-from dataclasses import field
 from functools import partial
 from pathlib import Path
 from threading import Thread
@@ -46,7 +45,7 @@ from torch._dynamo.device_interface import (
     get_registered_device_interfaces,
 )
 from torch._dynamo.utils import counters, dynamo_timed
-from torch._inductor import config, exc
+from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.utils import cache_dir, developer_warning, is_linux
 from torch._subclasses.fake_tensor import (
@@ -420,6 +419,12 @@ def _reduce_tensor(t):
     """
     See FxGraphCachePickler. Custom reducer to pickle Tensors.
     """
+    if t.is_mkldnn:
+        # TODO: These tensors don't currently pickle, so we can't cache a
+        # compiled graph containing them. Just fail now. If mkldnn tensors
+        # get pickling support, we can remove this.
+        raise BypassFxGraphCache()
+
     # If we see tensors, we know they're constants stored as attributes on
     # the GraphModule. See tensor lowering; small constants are inlined. If
     # we see a small tensor, therefore, no reference will ultimately remain
@@ -506,6 +511,14 @@ class OrderedSetHolder:
     items: List[Any]
 
 
+class BypassFxGraphCache(Exception):
+    """
+    Exception to indicate that the FxGraphCache should be bypassed.
+    """
+
+    pass
+
+
 class FxGraphHashDetails:
     """
     Object to capture all the details for a compiled FX graph relevant to computing
@@ -535,13 +548,33 @@ class FxGraphHashDetails:
                 else:
                     self.fx_kwargs[k] = fx_kwargs[k]
 
-        # Also hash on various system info (including the triton compiler version), as
-        # well as the inductor configuration and code.
+        # 'Deterministic algorithms' can affect codegen via lowering to cuda kernels.
+        self.deterministic_algorithms_settings = (
+            torch.are_deterministic_algorithms_enabled(),
+            torch.is_deterministic_algorithms_warn_only_enabled(),
+            torch.utils.deterministic.fill_uninitialized_memory,  # type: ignore[attr-defined]
+        )
+
+        # Global settings affecting matmul codegen.
+        self.cuda_matmul_settings = (
+            torch.backends.cuda.matmul.allow_tf32,
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction,
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction,
+        )
+
+        # Also hash on various system info (including the triton compiler version).
         self.torch_version = torch.__version__
         self.system_info = CacheBase.get_system()
 
-        self.inductor_config = config.save_config()
+        # And the inductor configuration and code.
         self.inductor_code_hash = get_inductor_code_hash()
+        try:
+            self.inductor_config = config.save_config()
+        except TypeError as e:
+            # Some configs options are callables, e.g., post_grad_custom_pre_pass,
+            # and may not pickle.
+            log.debug("Can't pickle inductor config: %s", e)
+            raise BypassFxGraphCache() from e
 
     def debug_str(self) -> str:
         """
@@ -642,11 +675,14 @@ class FxGraphCache:
         return [s for s in inputs if isinstance(s, torch.SymInt)]
 
     @staticmethod
-    def _get_shape_env() -> ShapeEnv:
+    def _get_shape_env() -> Optional[ShapeEnv]:
         """
         Helper to get the shape env from the tracing context.
         """
-        return torch._guards.TracingContext.get().fake_mode.shape_env
+        ctx = torch._guards.TracingContext.try_get()
+        if not ctx:
+            return None
+        return ctx.fake_mode.shape_env
 
     @staticmethod
     def _lookup_graph(
@@ -661,19 +697,24 @@ class FxGraphCache:
         if not os.path.exists(subdir):
             return None
 
+        shape_env = FxGraphCache._get_shape_env()
+        assert shape_env is not None
+
         # Iterate over any entries in the subdir for this key and evaluate
         # their guards to determine whether there's a hit.
+        graph = None
+
         for path in sorted(os.listdir(subdir)):
             with open(os.path.join(subdir, path), "rb") as f:
-                graph: CompiledFxGraph = pickle.load(f)
+                candidate: CompiledFxGraph = pickle.load(f)
 
-            guards_expr = graph.guards_expr
+            guards_expr = candidate.guards_expr
             if not guards_expr:
-                # No guards to evaluate
-                return graph
+                # No guards to evaluate, so this is a hit.
+                graph = candidate
+                break
 
             # Evaluate the guard expression in the current context.
-            shape_env = FxGraphCache._get_shape_env()
             symints = FxGraphCache._filter_symints(example_inputs)
 
             # If there's not a cache hit, we don't want the evaluation to
@@ -694,13 +735,18 @@ class FxGraphCache:
                 check = bool(shape_env.evaluate_guards_expression(guards_expr, symints))
                 assert check is True
                 log.debug(
-                    "fx graph cache key %s post-load guards: %s",
-                    key,
-                    shape_env.guards,
+                    "fx graph cache key %s post-load guards: %s", key, shape_env.guards
                 )
-                return graph
+                graph = candidate
+                break
 
-        return None
+        # Increment the cached metrics by the amounts recorded when the FX
+        # graph was compiled for this cache entry. Pretending these counters
+        # were incremented normally is useful for testing with the cache enabled.
+        if graph is not None:
+            metrics.CachedMetricsHelper.apply_deltas(graph.metrics_deltas)
+
+        return graph
 
     @staticmethod
     def _save_graph(
@@ -719,10 +765,16 @@ class FxGraphCache:
         # Tensor shapes are already captured in the hash for the cache key. Any
         # Tensor arg with a symbolic shape will have a SymInt arg for the graph.
         shape_env = FxGraphCache._get_shape_env()
+        assert shape_env is not None
         symints = FxGraphCache._filter_symints(example_inputs)
         disk_compiled_graph.guards_expr = shape_env.produce_guards_expression(symints)
 
-        content = pickle.dumps(disk_compiled_graph)
+        try:
+            content = pickle.dumps(disk_compiled_graph)
+        except Exception as e:
+            log.debug("fx graph cache unable to serialize compiled graph: %s", e)
+            counters["inductor"]["fxgraph_cache_pickle_error"] += 1
+            return
 
         subdir = FxGraphCache._get_tmp_dir_for_key(key)
         if not os.path.exists(subdir):
@@ -733,6 +785,22 @@ class FxGraphCache:
         # iterating over all entries in the parent subdir.
         path = os.path.join(subdir, sha256_hash(content))
         write_atomic(path, content)
+
+    @staticmethod
+    def _check_can_cache():
+        """
+        Check some conditions that would preclude caching and raise BypassFxGraphCache
+        to bypass in case caching is not possible.
+        """
+        if config.freezing or config.aot_inductor.use_runtime_constant_folding:
+            # Freezing can embed constants that wouldn't be static across runs.
+            raise BypassFxGraphCache()
+
+        if FxGraphCache._get_shape_env() is None:
+            # The treatment of guards in the caching implementation requires that
+            # we have a shape env.
+            log.debug("fx graph cache no shape env")
+            raise BypassFxGraphCache()
 
     @staticmethod
     def load(
@@ -747,29 +815,39 @@ class FxGraphCache:
         """
         from filelock import FileLock
 
-        key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs)
+        compiled_graph = None
+        try:
+            FxGraphCache._check_can_cache()
+            key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs)
 
-        lock_dir = get_lock_dir()
-        lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
-        with lock:
-            compiled_graph = FxGraphCache._lookup_graph(key, example_inputs)
-            if compiled_graph is None:
-                log.debug("fx graph cache miss for key %s", key)
-                counters["inductor"]["fxgraph_cache_miss"] += 1
-                compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
-                FxGraphCache._save_graph(key, compiled_graph, example_inputs)
-            else:
-                log.debug("fx graph cache hit for key %s", key)
-                counters["inductor"]["fxgraph_cache_hit"] += 1
+            lock_path = os.path.join(get_lock_dir(), key + ".lock")
+            with FileLock(lock_path, timeout=LOCK_TIMEOUT):
+                compiled_graph = FxGraphCache._lookup_graph(key, example_inputs)
+                if compiled_graph is None:
+                    log.debug("fx graph cache miss for key %s", key)
+                    counters["inductor"]["fxgraph_cache_miss"] += 1
+                    compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
+                    FxGraphCache._save_graph(key, compiled_graph, example_inputs)
+                else:
+                    log.debug("fx graph cache hit for key %s", key)
+                    counters["inductor"]["fxgraph_cache_hit"] += 1
+        except BypassFxGraphCache:
+            counters["inductor"]["fxgraph_cache_bypass"] += 1
 
-            return compiled_graph
+        if not compiled_graph:
+            compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
+
+        return compiled_graph
 
     @staticmethod
     def clear():
         """
         Clear out the on-disk cache.
         """
-        shutil.rmtree(FxGraphCache._get_tmp_dir())
+        try:
+            shutil.rmtree(FxGraphCache._get_tmp_dir())
+        except FileNotFoundError:
+            pass
 
 
 @dataclasses.dataclass
@@ -779,27 +857,27 @@ class CompiledFxGraph:
     to support FxGraph caching.
     """
 
-    compiled_artifact: Optional[Callable[..., Any]] = None
-    current_callable: Optional[Callable[..., Any]] = None
-    cache_key: Optional[str] = None
-    artifact_path: Optional[str] = None
-    cache_linemap: Optional[List[Tuple[int, str]]] = None
-    device_types: Set[str] = field(default_factory=set)
-    device_idxs: Set[int] = field(default_factory=set)
-    mutated_inputs: Set[str] = field(default_factory=set)
-    mutated_input_idxs: Set[int] = field(default_factory=set)
-    constants: Dict[str, torch.Tensor] = field(default_factory=dict)
-    output_strides: Optional[List[Optional[Tuple[int, ...]]]] = None
+    compiled_artifact: Optional[Callable[..., Any]]
+    current_callable: Optional[Callable[..., Any]]
+    cache_key: Optional[str]
+    artifact_path: Optional[str]
+    cache_linemap: Optional[List[Tuple[int, str]]]
+    device_types: Set[str]
+    device_idxs: Set[int]
+    mutated_inputs: Set[str]
+    mutated_input_idxs: Set[int]
+    constants: Dict[str, torch.Tensor]
+    output_strides: Optional[List[Optional[Tuple[int, ...]]]]
+    disabled_cudagraphs_reason: Optional[str]
+    metrics_deltas: metrics.CachedMetricsDeltas
     # This is a string representation of an expression we serialize
     # with the object so the guards can be evaluated in a different
     # context in order to verify the validity of serving a cached
     # fx graph. The expression must be generated by:
     # ShapeEnv.produce_guards_expression()
-    guards_expr: Optional[str] = None
+    guards_expr: Optional[str]
 
     _boxed_call: Optional[bool] = None
-
-    disabled_cudagraphs_reason: Optional[str] = None
 
     def __init__(
         self,
@@ -807,8 +885,10 @@ class CompiledFxGraph:
         graph: GraphLowering,
         output_strides: List[Optional[Tuple[int, ...]]],
         disabled_cudagraphs_reason: Optional[str],
+        metrics_deltas: metrics.CachedMetricsDeltas,
     ):
         self.compiled_artifact = compiled_artifact
+        self.current_callable = None
         self.cache_key = graph.cache_key
         self.artifact_path = graph.cache_path
         self.cache_linemap = graph.cache_linemap
@@ -818,8 +898,9 @@ class CompiledFxGraph:
         self.mutated_input_idxs = set(graph.mutated_input_idxs)
         self.constants = graph.constants
         self.output_strides = output_strides
-        self.guards_expr = None
         self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
+        self.metrics_deltas = metrics_deltas
+        self.guards_expr = None
 
     def __call__(self, inputs: List[Any]) -> Any:
         return self.get_current_callable()(inputs)
