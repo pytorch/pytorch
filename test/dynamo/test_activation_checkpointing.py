@@ -15,6 +15,9 @@ from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    checkpoint_wrapper as dist_checkpoint_wrapper,
+)
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
@@ -1078,6 +1081,26 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
                 op=torch.ops.aten._scaled_dot_product_flash_attention.default,
             )
         )
+
+    def test_distributed_utils_checkpoint_wrapper(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.c = 2
+
+            def forward(self, x):
+                x = torch.sin(x)
+                x = self.linear(x)
+                x = torch.cos(x)
+                return x * self.c
+
+        mod = dist_checkpoint_wrapper(MockModule())
+        x = torch.randn(4, 4)
+        ref = mod(x)
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        res = opt_mod(x)
+        self.assertEqual(ref, res)
 
 
 if __name__ == "__main__":
