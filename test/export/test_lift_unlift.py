@@ -3,7 +3,11 @@ import unittest
 from typing import Any, Dict, Optional, OrderedDict, Tuple
 
 import torch
-from torch._export.passes.lift_constants_pass import lift_constants_pass
+from torch._export.passes.lift_constants_pass import (
+    ConstantAttrMap,
+    lift_constants_pass,
+)
+from torch.export._unlift import _unlift_exported_program_lifted_states
 from torch.export.exported_program import (
     ExportGraphSignature,
     InputKind,
@@ -138,7 +142,7 @@ class GraphBuilder:
         )
 
 
-class TestLiftUnlift(TestCase):
+class TestLift(TestCase):
     def setUp(self):
         if IS_MACOS:
             raise unittest.SkipTest("non-portable load_library call used in test")
@@ -183,7 +187,7 @@ class TestLiftUnlift(TestCase):
         root = {"const_tensor": const_tensor, "const_obj": const_obj}
         gm = torch.fx.GraphModule(root, graph)
         graph_signature = builder.gen_graph_signature()
-        constants = lift_constants_pass(gm, graph_signature)
+        constants = lift_constants_pass(gm, graph_signature, {})
         gm.graph.lint()
 
         self.assertEqual(len(constants), 2)
@@ -257,7 +261,7 @@ class TestLiftUnlift(TestCase):
         graph_signature = builder.gen_graph_signature()
         gm = torch.fx.GraphModule(root, graph)
 
-        constants = lift_constants_pass(gm, graph_signature)
+        constants = lift_constants_pass(gm, graph_signature, {})
         gm.graph.lint()
 
         self.assertEqual(len(constants), 1)
@@ -328,7 +332,7 @@ class TestLiftUnlift(TestCase):
         root = {"const_tensor": const, "const_obj": const_obj, "const_obj2": const_obj}
         gm = torch.fx.GraphModule(root, graph)
 
-        constants = lift_constants_pass(gm, graph_signature)
+        constants = lift_constants_pass(gm, graph_signature, {})
         gm.graph.lint()
 
         self.assertEqual(len(constants), 2)
@@ -346,6 +350,64 @@ class TestLiftUnlift(TestCase):
         constant_input_spec = graph_signature.input_specs[0]
         self.assertEqual(constant_input_spec.kind, InputKind.CONSTANT_TENSOR)
         self.assertIsInstance(constant_input_spec.arg, TensorArgument)
+
+    def test_unlift_nonpersistent_buffer(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "non_persistent_buf", torch.zeros(1), persistent=False
+                )
+
+            def forward(self, x):
+                self.non_persistent_buf.add_(1)
+                return x.sum() + self.non_persistent_buf.sum()
+
+        foo = Foo()
+        exported = torch.export.export(foo, (torch.ones(5, 5),), strict=False)
+        stateful_gm = _unlift_exported_program_lifted_states(exported)
+
+        # Check the unlifted stateful_gm contains the original non-persistent buffer
+        self.assertTrue(hasattr(stateful_gm, "non_persistent_buf"))
+        non_persistent_buf = stateful_gm.get_buffer("non_persistent_buf")
+        self.assertEqual(non_persistent_buf, foo.get_buffer("non_persistent_buf"))
+        self.assertIn("non_persistent_buf", stateful_gm._non_persistent_buffers_set)
+        self.assertNotIn("non_persistent_buf", stateful_gm.state_dict())
+
+
+class ConstantAttrMapTest(TestCase):
+    def setUp(self):
+        if IS_MACOS:
+            raise unittest.SkipTest("non-portable load_library call used in test")
+        elif IS_SANDCASTLE or IS_FBCODE:
+            torch.ops.load_library(
+                "//caffe2/test/cpp/jit:test_custom_class_registrations"
+            )
+        elif IS_WINDOWS:
+            lib_file_path = find_library_location("torchbind_test.dll")
+            torch.ops.load_library(str(lib_file_path))
+        else:
+            lib_file_path = find_library_location("libtorchbind_test.so")
+            torch.ops.load_library(str(lib_file_path))
+
+    def test_dict_api(self):
+        constant_attr_map = ConstantAttrMap()
+        const_obj = torch.classes._TorchScriptTesting._Foo(10, 20)
+        const_tensor = torch.ones(2, 3)
+        constant_attr_map[const_obj] = "foo.bar"
+        constant_attr_map[const_tensor] = "foo.bar.baz"
+        self.assertEqual(len(constant_attr_map), 2)
+        self.assertEqual(list(constant_attr_map), [const_obj, const_tensor])
+        self.assertEqual(list(constant_attr_map.keys()), [const_obj, const_tensor])
+        self.assertEqual(list(constant_attr_map.values()), ["foo.bar", "foo.bar.baz"])
+        self.assertEqual(constant_attr_map[const_obj], "foo.bar")
+        self.assertEqual(constant_attr_map[const_tensor], "foo.bar.baz")
+        self.assertTrue(const_obj in constant_attr_map)
+        with self.assertRaises(TypeError):
+            constant_attr_map[1] = "foo.bar"
+
+        del constant_attr_map[const_obj]
+        self.assertEqual(len(constant_attr_map), 1)
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ from typing import Optional
 
 import torch
 from torch.utils import _pytree
-from ._utils import _dummy_type
+from .._utils import _dummy_type
 
 if not hasattr(torch._C, "_CudaStreamBase"):
     # Define dummy base classes
@@ -384,8 +384,8 @@ def make_graphed_callables(
         per_callable_static_grad_inputs.append(static_grad_inputs)
 
     # Reverses the most recent two lists
-    per_callable_static_grad_outputs = list(reversed(per_callable_static_grad_outputs))
-    per_callable_static_grad_inputs = list(reversed(per_callable_static_grad_inputs))
+    per_callable_static_grad_outputs.reverse()
+    per_callable_static_grad_inputs.reverse()
     # Now for every per_callable list, per_callable_*[i] holds the stuff for the ith callable.
 
     def make_graphed_autograd_function(

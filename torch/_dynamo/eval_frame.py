@@ -23,18 +23,7 @@ import warnings
 import weakref
 from enum import Enum
 from os.path import dirname, join
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    Set,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Union
 from unittest.mock import patch
 
 import torch
@@ -43,6 +32,7 @@ import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch import _guards
 from torch._subclasses import fake_tensor
+from torch._utils_internal import log_export_usage
 from torch.export import Constraint
 from torch.export.dynamic_shapes import _process_dynamic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
@@ -58,21 +48,14 @@ from .backends.registry import CompilerFn, lookup_backend
 
 from .hooks import Hooks
 
-if TYPE_CHECKING:
-    from torch._C._dynamo.eval_frame import (  # noqa: F401
-        reset_code,
-        set_eval_frame,
-        set_guard_error_hook,
-        skip_code,
-        unsupported,
-    )
-else:
-    for name in dir(torch._C._dynamo.eval_frame):
-        if name.startswith("__"):
-            continue
-        globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
+# see discussion at https://github.com/pytorch/pytorch/issues/120699
+reset_code = torch._C._dynamo.eval_frame.reset_code  # noqa: F401
+set_eval_frame = torch._C._dynamo.eval_frame.set_eval_frame  # noqa: F401
+set_guard_error_hook = torch._C._dynamo.eval_frame.set_guard_error_hook  # noqa: F401
+skip_code = torch._C._dynamo.eval_frame.skip_code  # noqa: F401
+unsupported = torch._C._dynamo.eval_frame.unsupported  # noqa: F401
 
-from . import config, convert_frame, external_utils, skipfiles, utils
+from . import config, convert_frame, external_utils, trace_rules, utils
 from .code_context import code_context
 from .exc import CondOpArgsMismatchError, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
@@ -208,10 +191,10 @@ class OptimizedModule(torch.nn.Module):
 
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
-        if isinstance(self._orig_mod.forward, types.MethodType) and skipfiles.check(
+        if isinstance(self._orig_mod.forward, types.MethodType) and trace_rules.check(
             self._orig_mod.forward
         ):
-            # This may be a torch.nn.* instance in skipfiles.py which
+            # This may be a torch.nn.* instance in trace_rules.py which
             # won't trigger a frame evaluation workaround to add an extra
             # frame we can capture
             self.forward = self.dynamo_ctx(external_utils.wrap_inline(self._orig_mod))
@@ -410,7 +393,7 @@ class _TorchDynamoContext:
         except TypeError:
             filename = None
         if (
-            (filename is None or skipfiles.check(fn))
+            (filename is None or trace_rules.check(fn))
             and (
                 getattr(fn, "__name__", "") not in ["_call_impl", "_wrapped_call_impl"]
             )
@@ -592,8 +575,6 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
 
 
 def check_if_dynamo_supported():
-    if sys.platform == "win32":
-        raise RuntimeError("Windows not yet supported for torch.compile")
     if sys.version_info >= (3, 12):
         raise RuntimeError("Python 3.12+ not yet supported for torch.compile")
 
@@ -601,6 +582,21 @@ def check_if_dynamo_supported():
 def is_dynamo_supported():
     try:
         check_if_dynamo_supported()
+        return True
+    except Exception:
+        return False
+
+
+def check_if_inductor_supported():
+    check_if_dynamo_supported()
+
+    if sys.platform == "win32":
+        raise RuntimeError("Windows not yet supported for inductor")
+
+
+def is_inductor_supported():
+    try:
+        check_if_inductor_supported()
         return True
     except Exception:
         return False
@@ -1102,6 +1098,7 @@ def export(
     assume_static_by_default: bool = False,
     same_signature: bool = True,
     disable_constraint_solver: bool = False,
+    _log_export_usage: bool = True,
     **extra_kwargs,
 ) -> Callable[..., ExportResult]:
     """
@@ -1166,6 +1163,9 @@ def export(
 
     Note - this headerdoc was authored by ChatGPT, with slight modifications by the author.
     """
+    if _log_export_usage:
+        log_export_usage(event="export.private_api", flags={"_dynamo"})
+
     # Deal with "local variable referenced before assignment"
     _f = f
     _assume_static_by_default = assume_static_by_default
@@ -1173,13 +1173,14 @@ def export(
     def inner(*args, **kwargs):
         nonlocal constraints
         if constraints is not None:
-            warnings.warn(
-                "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
-                "and will not be supported in the future. "
-                "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+            if _log_export_usage:
+                warnings.warn(
+                    "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
+                    "and will not be supported in the future. "
+                    "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
         else:
             constraints = _process_dynamic_shapes(_f, args, kwargs, dynamic_shapes)
         f = _f
@@ -1246,8 +1247,8 @@ def export(
 
                 with ambient_fake_mode, enable_python_dispatcher():
                     params_and_buffers = {
-                        **dict(named_parameters),
-                        **dict(named_buffers),
+                        **named_parameters,
+                        **named_buffers,
                     }
                     fake_params_buffers = dict()
 
@@ -1302,7 +1303,10 @@ def export(
             not disable_constraint_solver
             and (shape_env := getattr(fake_mode, "shape_env", None)) is not None
             and (dim_constraints := shape_env.dim_constraints) is not None
-            and not skipfiles.check(call_to_inspect)
+            and not isinstance(
+                call_to_inspect, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
+            )
+            and not trace_rules.check(call_to_inspect)
         ):
             dim_constraints.solve()
             dim_constraints.remove_redundant_dynamic_results()
