@@ -135,7 +135,7 @@ def visualize_sharding(dtensor, header=""):
     Visualizes sharding in 1D-2D dtensors
     Requires tabulate, install with `pip install tabulate`
     """
-    if (dtensor.numel() == 0):  # we do not print for empty tensors
+    if (dtensor.numel() == 0):  # we do not print for empty dtensors
         return
 
     if len(dtensor.shape) >= 3:
@@ -145,6 +145,9 @@ def visualize_sharding(dtensor, header=""):
     placements = dtensor.placements
     device_mesh = dtensor.device_mesh
     device_type = dtensor.device_mesh.device_type
+
+    if device_mesh.get_coordinate() is None:  # current rank is not in the mesh
+        return
 
     device_map = _mesh_to_coordinate(device_mesh, device_type)
     all_offsets = []
