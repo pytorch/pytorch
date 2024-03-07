@@ -1,7 +1,6 @@
 # mypy: ignore-errors
 
 import operator
-import warnings
 from collections import defaultdict
 from typing import Dict, Optional, Set
 
