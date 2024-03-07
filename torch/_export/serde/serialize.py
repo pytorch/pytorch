@@ -1381,13 +1381,12 @@ class GraphModuleDeserializer:
             fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))
 
             # assign nn_module_stack metadata to submodule/subgraph nodes for higher order ops
-            if serialized_node.target == "torch.ops.higher_order.cond":
-                fx_node._args[1].meta["nn_module_stack"] = copy.copy(fx_node.meta["nn_module_stack"])
-                fx_node._args[2].meta["nn_module_stack"] = copy.copy(fx_node.meta["nn_module_stack"])
-            elif serialized_node.target == "torch.ops.higher_order.map_impl":
-                fx_node._args[0].meta["nn_module_stack"] = copy.copy(fx_node.meta["nn_module_stack"])
-            elif serialized_node.target == "torch._higher_order_ops.wrap.wrap_with_set_grad_enabled":
-                fx_node._args[1].meta["nn_module_stack"] = copy.copy(fx_node.meta["nn_module_stack"])
+            if serialized_node.target.startswith(('torch.ops.higher_order', 'torch._higher_order_ops')):
+                for node in fx_node._args:
+                    if not isinstance(node, torch.fx.Node):
+                        continue
+                    if node.op not in ["placeholder", "output"] and node.meta.get("nn_module_stack") is None:
+                        node.meta["nn_module_stack"] = copy.copy(fx_node.meta["nn_module_stack"])
 
         elif isinstance(target, torch._ops.OpOverload):
             # For convenience: if this node returns a single tensor, name the
