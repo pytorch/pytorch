@@ -86,8 +86,6 @@ jobs:
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
-        with:
-          is_arc: true
 
       - name: configure aws credentials
         uses: aws-actions/configure-aws-credentials@v3
@@ -101,7 +99,6 @@ jobs:
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@DanilBaibak/Build-Docker-Image-for-ARC # TODO - clean it before merge
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
-          is-arc: ${{ inputs.is_arc }}
 
       - name: Use following to pull public copy of the image
         id: print-ghcr-mirror
@@ -165,7 +162,6 @@ jobs:
           DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
-          IS_ARC: ${{ inputs.is_arc }}
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
@@ -184,7 +180,6 @@ jobs:
             -e PR_LABELS \
             -e OUR_GITHUB_JOB_ID \
             -e HUGGING_FACE_HUB_TOKEN \
-            -e IS_ARC \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
