@@ -47,11 +47,6 @@ on:
           An option JSON description of what test configs to run later on. This
           is moved here from the Linux test workflow so that we can apply filter
           logic using test-config labels earlier and skip unnecessary builds
-      is_arc:
-        description: A flag indicating that we are using an arc runner.
-        type: boolean
-        required: false
-        default: true
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
