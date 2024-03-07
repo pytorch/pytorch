@@ -19,6 +19,11 @@ try:
 except ModuleNotFoundError:
     np = None
 
+try:
+    from torch.utils._cxx_pytree import PyTreeSpec
+except ImportError:
+    PyTreeSpec = type(None)
+
 import torch._dynamo.config
 
 import torch.nn
@@ -697,7 +702,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def _getattr_static(self, name):
         if (
-            isinstance(self.value, torch.nn.Module)
+            isinstance(self.value, (torch.nn.Module, PyTreeSpec))
             or "__slots__" in self.value.__class__.__dict__
             or type(self.value) == threading.local
         ):

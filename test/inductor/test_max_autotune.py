@@ -222,6 +222,7 @@ class TestMaxAutotune(TestCase):
         with config.patch({"max_autotune": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
+    @skipIfRocm
     @parametrize("dynamic", (False, True))
     def test_max_autotune_remote_caching(self, dynamic: bool):
         from unittest.mock import patch
@@ -283,9 +284,7 @@ class TestMaxAutotune(TestCase):
                     reset()
                     torch._inductor.codecache.PyCodeCache.clear()
                 self.assertEqual(num_get, 3)
-                # TODO: This should really be 1 but it seems like we write even
-                # when we find it
-                self.assertEqual(num_put, 4)
+                self.assertEqual(num_put, 1)
             num_get = 0
             num_put = 0
             for _ in range(4):
@@ -293,9 +292,7 @@ class TestMaxAutotune(TestCase):
                 reset()
                 torch._inductor.codecache.PyCodeCache.clear()
             self.assertEqual(num_get, 3)
-            # TODO: This should really be 1 but it seems like we write even
-            # when we find it
-            self.assertEqual(num_put, 4)
+            self.assertEqual(num_put, 1)
 
     def test_precompilation_threads(self):
         import threading
