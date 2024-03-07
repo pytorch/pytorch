@@ -443,9 +443,12 @@ def create_aot_dispatcher_function(
         enable_python_dispatcher() if shape_env is not None else nullcontext()
     )
 
-    with torch.autograd.set_multithreading_enabled(
-        False
-    ), preserve_rng_state(), fake_mode, python_dispatcher_mode, PhiloxStateTracker():
+    with torch.autograd.set_multithreading_enabled(False), \
+            preserve_rng_state(), \
+            fake_mode, \
+            python_dispatcher_mode, \
+            PhiloxStateTracker(), \
+            torch._C.DisableTorchFunctionNonInfraSubclass():
 
         def process_inputs(flat_args):
             def convert(idx, x):
