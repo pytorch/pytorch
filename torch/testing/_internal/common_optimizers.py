@@ -1366,6 +1366,13 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/117836"
+                ),
+                "TestOptimRenewed",
+                "test_save_load_equality_with_weights_only",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
                     "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
                 ),
                 "TestOptimRenewed",
@@ -1791,6 +1798,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_step_all_hooks",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Should be fixed by https://github.com/pytorch/pytorch/issues/118230"
+                ),
+                "TestOptimRenewed",
+                "test_save_load_equality_with_weights_only",
             ),
         ),
     ),

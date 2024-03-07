@@ -6,7 +6,7 @@ Tensor Parallelism - torch.distributed.tensor.parallel
 
 Tensor Parallelism(TP) is built on top of the PyTorch DistributedTensor
 (`DTensor <https://github.com/pytorch/pytorch/blob/main/torch/distributed/_tensor/README.md>`__)
-and provides different parallelism styles: Colwise and Rowwise Parallelism.
+and provides different parallelism styles: Colwise, Rowwise, and Sequence Parallelism.
 
 .. warning ::
     Tensor Parallelism APIs are experimental and subject to change.
@@ -26,6 +26,10 @@ Tensor Parallelism supports the following parallel styles:
   :undoc-members:
 
 .. autoclass:: torch.distributed.tensor.parallel.RowwiseParallel
+  :members:
+  :undoc-members:
+
+.. autoclass:: torch.distributed.tensor.parallel.SequenceParallel
   :members:
   :undoc-members:
 
