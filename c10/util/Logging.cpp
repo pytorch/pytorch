@@ -351,7 +351,6 @@ MessageLogger::MessageLogger(const char* file, int line, int severity)
 #else // !ANDROID
   tag_ = "";
 #endif // ANDROID
-  /*
   time_t rawtime;
   struct tm * timeinfo;
   time(&rawtime);
@@ -359,18 +358,17 @@ MessageLogger::MessageLogger(const char* file, int line, int severity)
   std::chrono::nanoseconds ns =
       std::chrono::duration_cast<std::chrono::nanoseconds>(
           std::chrono::high_resolution_clock::now().time_since_epoch());
-  */
   if (GLOBAL_RANK != -1) {
     stream_ << "[rank" << GLOBAL_RANK << "]:";
   }
   stream_ << "["
           << CAFFE2_SEVERITY_PREFIX[std::min(4, GLOG_FATAL - severity_)]
-          //<< (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
-          //<< std::setfill('0')
-          //<< " " << std::setw(2) << timeinfo->tm_hour
-          //<< ":" << std::setw(2) << timeinfo->tm_min
-          //<< ":" << std::setw(2) << timeinfo->tm_sec
-          //<< "." << std::setw(9) << ns.count() % 1000000000
+          << (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
+          << std::setfill('0')
+          << " " << std::setw(2) << timeinfo->tm_hour
+          << ":" << std::setw(2) << timeinfo->tm_min
+          << ":" << std::setw(2) << timeinfo->tm_sec
+          << "." << std::setw(9) << ns.count() % 1000000000
           << " " << c10::detail::StripBasename(std::string(file)) << ":" << line
           << "] ";
 }
