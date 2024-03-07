@@ -98,7 +98,7 @@ post_grad_custom_post_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = N
 # use post-grad passes.
 pre_grad_custom_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
 
-# Optimize away split cat patterns (Experimental)
+# Optimize away split cat patterns
 split_cat_fx_passes = True
 
 # Optimize conv-batchnorm if batchnorm is in eval mode. Slightly reduces numerical stability.
@@ -130,6 +130,9 @@ post_grad_fusion_options: Dict[str, Dict[str, Any]] = {}
 
 # enable reordering pass for improving memory locality
 reorder_for_locality = True
+
+# Find more opportunities for optimizing the graph (Experimental)
+optimus_opportunity_finder = False
 
 # Scale down RBLOCK for better occupancy
 dynamic_scale_rblock = os.environ.get("TORCHINDUCTOR_DYNAMIC_SCALE_RBLOCK", "1") == "1"

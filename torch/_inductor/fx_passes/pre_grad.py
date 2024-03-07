@@ -25,6 +25,7 @@ from ..pattern_matcher import (
 from ..utils import is_cpu_device, pass_execution_and_save
 from .group_batch_fusion import group_batch_fusion_passes
 from .misc_patterns import numpy_compat_normalization
+from .optimus_opportunity_finder import optimus_opportunity_finder_passes
 
 log = logging.getLogger(__name__)
 
@@ -150,6 +151,10 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
 
     if config.pre_grad_custom_pass is not None:
         config.pre_grad_custom_pass(gm.graph)
+
+    if config.optimus_opportunity_finder:
+        optimus_opportunity_finder_passes(gm.graph)
+
     stable_topological_sort(gm.graph)
     gm.graph.lint()
     gm.recompile()
