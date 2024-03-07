@@ -812,54 +812,54 @@ def _export(
             elif isinstance(combined_args, torch.Tensor):
                 yield (combined_args, dynamic_shapes)
 
-        if dynamic_shapes is not None:
-            new_range_constraints = {}
-            user_input_names = set(
-                spec.arg.name
-                for spec in ep_non_strict.sig.input_specs
-                if spec.kind == InputKind.USER_INPUT
-            )
-            user_input_nodes = [
-                node for node in gm.graph.nodes if node.name in user_input_names
-            ]
+        # if dynamic_shapes is not None:
+        #     new_range_constraints = {}
+        #     user_input_names = set(
+        #         spec.arg.name
+        #         for spec in ep_non_strict.sig.input_specs
+        #         if spec.kind == InputKind.USER_INPUT
+        #     )
+        #     user_input_nodes = [
+        #         node for node in gm.graph.nodes if node.name in user_input_names
+        #     ]
 
-            signature = (
-                inspect.signature(mod.forward)
-                if isinstance(mod, torch.nn.Module)
-                else inspect.signature(mod)
-            )
-            combined_args = signature.bind(*args, **kwargs).arguments
-            combined_args = (
-                combined_args
-                if isinstance(dynamic_shapes, Mapping)
-                else list(combined_args.values())
-            )
-            for (_, dynamic_dim), input_node in zip(
-                tree_zip(combined_args, dynamic_shapes), user_input_nodes
-            ):
-                shapes = input_node.meta["val"].size()
-                if dynamic_dim is None:
-                    continue
-                for dim, shape in enumerate(shapes):
-                    if isinstance(dynamic_dim, Mapping) and dim not in dynamic_dim:
-                        continue
-                    if isinstance(dynamic_dim, (tuple, list)) and dim >= len(
-                        dynamic_dim
-                    ):
-                        continue
-                    if dynamic_dim[dim]:
-                        new_range_constraints[shape.node._expr] = ValueRanges(
-                            lower=dynamic_dim[dim].min, upper=dynamic_dim[dim].max
-                        )
+        #     signature = (
+        #         inspect.signature(mod.forward)
+        #         if isinstance(mod, torch.nn.Module)
+        #         else inspect.signature(mod)
+        #     )
+        #     combined_args = signature.bind(*args, **kwargs).arguments
+        #     combined_args = (
+        #         combined_args
+        #         if isinstance(dynamic_shapes, Mapping)
+        #         else list(combined_args.values())
+        #     )
+        #     for (_, dynamic_dim), input_node in zip(
+        #         tree_zip(combined_args, dynamic_shapes), user_input_nodes
+        #     ):
+        #         shapes = input_node.meta["val"].size()
+        #         if dynamic_dim is None:
+        #             continue
+        #         for dim, shape in enumerate(shapes):
+        #             if isinstance(dynamic_dim, Mapping) and dim not in dynamic_dim:
+        #                 continue
+        #             if isinstance(dynamic_dim, (tuple, list)) and dim >= len(
+        #                 dynamic_dim
+        #             ):
+        #                 continue
+        #             if dynamic_dim[dim]:
+        #                 new_range_constraints[shape.node._expr] = ValueRanges(
+        #                     lower=dynamic_dim[dim].min, upper=dynamic_dim[dim].max
+        #                 )
 
-            # filter out non-symbols (exprs)
-            # new_range_constraints = {
-            #     k: v
-            #     for k, v in new_range_constraints.items()
-            # }
-            # new_range_constraints.update(range_constraints)
-            # range_constraints = new_range_constraints
-            range_constraints.update(new_range_constraints)
+        #     # filter out non-symbols (exprs)
+        #     # new_range_constraints = {
+        #     #     k: v
+        #     #     for k, v in new_range_constraints.items()
+        #     # }
+        #     # new_range_constraints.update(range_constraints)
+        #     # range_constraints = new_range_constraints
+        #     range_constraints.update(new_range_constraints)
 
         module_call_signatures = {
             strip_root(fqn): ModuleCallSignature(inputs=[], outputs=[], **specs)
