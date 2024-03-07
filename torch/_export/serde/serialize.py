@@ -1496,9 +1496,18 @@ class GraphModuleDeserializer:
                 shape_env=self.shape_env,
             )
             self.symbol_name_to_symbol: Dict[str, sympy.Symbol] = {}
-            self.symbol_name_to_range = {} if symbol_name_to_range is None else symbol_name_to_range
             self.signature = self.deserialize_signature(serialized_graph_module.signature)
             self.constants = deserialize_torch_artifact(constants)
+
+            # deserialization does analysis with checks on 0/1, so we create fake range constraints and
+            # restore the original range constraints afterwards
+            self.symbol_name_to_range = {}
+            for k, vr in symbol_name_to_range.items():
+                lower = int(vr.lower)
+                if vr.upper >= 2:  # no specialization on 0/1
+                    lower = max(2, lower)
+                self.symbol_name_to_range[k] = symbolic_shapes.ValueRanges(_int_to_sympy_int(lower), vr.upper)
+
             self.deserialize_graph(serialized_graph_module.graph)
 
             module_call_graph = self.deserialize_module_call_graph(serialized_graph_module.module_call_graph)
@@ -1820,24 +1829,17 @@ class ExportedProgramDeserializer:
                 f"does not match our current schema version {SCHEMA_VERSION}."
             )
 
-        # deserialization does analysis with checks on 0/1, so we create fake range constraints and
-        # restore the original range constraints afterwards
-        symbol_name_to_range = {}
-        fake_symbol_name_to_range = {}
-        for k, v in serialized_artifact.exported_program.range_constraints.items():
-            symbol_name_to_range[k] = symbolic_shapes.ValueRanges(_int_to_sympy_int(v.min_val), _int_to_sympy_int(v.max_val))
-            lower = v.min_val
-            if v.max_val >= 2:  # no specialization on 0/1
-                lower = max(2, lower)
-            fake_symbol_name_to_range[k] = symbolic_shapes.ValueRanges(_int_to_sympy_int(lower), _int_to_sympy_int(v.max_val))
-
+        symbol_name_to_range = {
+            k: symbolic_shapes.ValueRanges(_int_to_sympy_int(v.min_val), _int_to_sympy_int(v.max_val))
+            for k, v in serialized_artifact.exported_program.range_constraints.items()
+        }
         res = (
             GraphModuleDeserializer()
             .deserialize(
                 serialized_artifact.exported_program.graph_module,
                 serialized_artifact.state_dict,
                 serialized_artifact.constants,
-                fake_symbol_name_to_range
+                symbol_name_to_range
             )
         )
         range_constraints = self.deserialize_range_constraints(
