@@ -956,8 +956,20 @@ class GraphModule(torch.nn.Module):
             @staticmethod
             def __new__(cls, t):
                 return torch.Tensor._make_wrapper_subclass(
-                    cls, t.shape, t.stride(), t.storage_offset(), torch.contiguous_format, t.dtype,
-                    torch.strided, t.device, False, t.requires_grad, "sizes", False, False, None
+                    cls,
+                    t.shape,
+                    t.stride(),
+                    t.storage_offset(),
+                    torch.contiguous_format,
+                    t.dtype,
+                    torch.strided,
+                    t.device,
+                    False,
+                    t.requires_grad,
+                    "sizes",
+                    False,
+                    False,
+                    None,
                 )
 
             def __init__(self, t):
@@ -988,7 +1000,9 @@ class GraphModule(torch.nn.Module):
                 kwargs = {} if kwargs is None else kwargs
                 new_args = pytree.tree_map_only(SubTensor, lambda s: s._t, args)
                 output = func(*new_args, **kwargs)
-                output = pytree.tree_map_only(torch.Tensor, lambda t: SubTensor(t), output)
+                output = pytree.tree_map_only(
+                    torch.Tensor, lambda t: SubTensor(t), output
+                )
                 return output
 
         @torch.compile(dynamic=True)

@@ -1506,7 +1506,7 @@ class TestTorchFunctionMode(TestCase):
 
         counter = [0]
 
-        class Foo():
+        class Foo:
             def __init__(self, t):
                 self._t = t
 
