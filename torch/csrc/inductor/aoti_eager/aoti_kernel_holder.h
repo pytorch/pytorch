@@ -1,3 +1,4 @@
+#if !defined(C10_MOBILE) && !defined(ANDROID)
 #pragma once
 
 #include <ATen/ATen.h>
@@ -35,3 +36,4 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
 };
 
 } // namespace torch::inductor
+#endif
