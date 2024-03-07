@@ -424,7 +424,6 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.squeeze.dim,
             aten.std,
             aten.std_mean,
-            aten._chunk_cat,
             aten.stack,
             aten.sum.default,
             aten.sum.out,

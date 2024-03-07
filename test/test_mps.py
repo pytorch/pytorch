@@ -343,6 +343,7 @@ def mps_ops_modifier(ops):
 
     AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS = {
         '__rdiv__',
+        '_chunk_cat',
         'acos',
         'acosh',
         'all',
@@ -828,7 +829,6 @@ def mps_ops_modifier(ops):
         'nn.functional.batch_norm': [torch.float32],
         'ones_like': None,
         'zeros_like': None,
-        '_chunk_cat': ([torch.bool] if product_version >= 14.0 else []),
 
         # Convolution for integral types is not supported on MPS
         'nn.functional.conv1d': [torch.int64],
