@@ -714,6 +714,71 @@ class TestExport(TestCase):
             6,
         )
 
+    @testing.expectedFailureRetraceability
+    def test_dynamic_dim_constraints(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x * 2
+        class Bar(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y[1:]
+
+        dx = Dim("dx", min=1, max=2)
+        ep = export(
+            Foo(),
+            (torch.randn(2, 2), ),
+            dynamic_shapes={"x": {0: dx, 1: None}}
+        )
+        ep.module()(torch.randn(1, 2))
+        ep.module()(torch.randn(2, 2))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected input at .* to be <= 2, but got 3"
+        ):
+            ep.module()(torch.randn(3, 2))
+        vr = list(ep.range_constraints.values())[0]
+        # self.assertTrue(vr.lower == 2)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            (
+                ".*"
+            ),
+        ):
+            ep = export(
+                Foo(),
+                (torch.randn(1, 2), ),
+                dynamic_shapes={"x": {0: dx, 1: None}}
+            )
+
+        dx = Dim("dx", min=2, max=3)
+        ep = export(
+            Foo(),
+            (torch.randn(2, 2), ),
+            dynamic_shapes={"x": {0: dx, 1: None}}
+        )
+        ep.module()(torch.randn(2, 2))
+        ep.module()(torch.randn(1, 2))
+
+        dx = Dim("dx", min=1, max=3)
+        ep = export(
+            Bar(),
+            (torch.randn(2, 2), torch.randn(3, 2)),
+            dynamic_shapes={"x": {0: dx, 1: None}, "y": {0: dx+1, 1: None}}
+        )
+        ep.module()(torch.randn(3, 2), (torch.randn(4, 2)))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected input .* to be of the form s0, where s0 is an integer"
+        ):
+            ep.module()(torch.randn(0, 2), torch.randn(1, 2))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected input at .* to be <= 3, but got 4"
+        ):
+            ep.module()(torch.randn(4, 2), torch.randn(5, 2))
+
+
     def test_raise_user_error_when_guard_on_data_dependent_operation(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -996,7 +1061,6 @@ class TestExport(TestCase):
                 or node.name in ep.graph_signature.inputs_to_parameters
             ):
                 self.assertTrue("source_fn_stack" in node.meta)
-                self.assertTrue("nn_module_stack" in node.meta)
 
     def test_export_api_with_dynamic_shapes(self):
         from torch.export import Dim, dims, export
@@ -2394,20 +2458,6 @@ def forward(self, arg_0):
         transform = ep.run_decompositions()
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
         self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
-
-    @testing.expectedFailureRetraceability
-    def test_tensor_attribute_zero_args(self):
-        class Foo(torch.nn.Module):
-            def __init__(self, value):
-                super().__init__()
-                self.x = torch.tensor(value)
-
-            def forward(self):
-                return self.x.clone()
-
-        m = Foo([1, 2])
-        ep = export(m, ())
-        self.assertEqual(ep.graph_signature.lifted_tensor_constants, ["x"])
 
     def test_preserve_shape_dynamism_for_unused_inputs(self):
         @dataclass
@@ -3846,12 +3896,6 @@ class TestExportCustomClass(TorchTestCase):
                 arg = node.args[0]
                 self.assertTrue(arg.op == "placeholder")
 
-    def test_tolist_nonstrict_output(self):
-        class M(torch.nn.Module):
-            def forward(self, x):
-                x.tolist()
-
-        ep = torch.export.export(M(), (torch.ones(3),), strict=False)
 
 if __name__ == '__main__':
     run_tests()

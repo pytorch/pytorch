@@ -30,7 +30,7 @@ class _Dim(type):
 
     @staticmethod
     def readable(name, min_, max_):
-        if min_ == 0:
+        if min_ == 2:
             min_ = None
         if max_ == sys.maxsize - 1:
             max_ = None
@@ -236,7 +236,7 @@ class _Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
     shared: Optional[_ConstraintTarget] = None
     debug_name: Optional[str] = None
 
-    def _clone_with_range(self, lower=0, upper=math.inf):
+    def _clone_with_range(self, lower=2, upper=math.inf):
         # Import sympy locally
         from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
         from torch.utils._sympy.value_ranges import ValueRanges

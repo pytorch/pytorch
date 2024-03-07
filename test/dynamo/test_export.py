@@ -2364,9 +2364,10 @@ def forward(self, x):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Not all values.*valid.*inferred to be equal to(.*\n)*.*"
+            "Constraints violated .*!(.*\n)*.*"
             "The values of.*must always be related to the values of.*"
-            "by dim0 = 2\\*dim1",
+            "by dim0 = 2\\*dim1(.*\n)*.*"
+            "Not all values of dim1 .* satisfy the generated guard 2 <= .* and .* <= 5(.*\n)*.*",
         ):
             torch.export.export(foo, (t,), dynamic_shapes=dynamic_shapes)
 
