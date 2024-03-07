@@ -1710,8 +1710,12 @@ class CppWrapperCpu(WrapperCodeGen):
 
         self.extern_call_ops.add(cpp_kernel_key)
 
-    def val_to_cpp_arg_str(self, type_, val) -> str:
-        if config.abi_compatible and isinstance(type_, torch.OptionalType):
+    def val_to_cpp_arg_str(self, type_, val, is_legacy_abi) -> str:
+        if (
+            config.abi_compatible
+            and not is_legacy_abi
+            and isinstance(type_, torch.OptionalType)
+        ):
             if val is None:
                 return "0"  # nullptr is not available in C
             if not isinstance(type_.getElementType(), torch.TensorType):
