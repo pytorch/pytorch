@@ -448,7 +448,7 @@ def create_aot_dispatcher_function(
             fake_mode, \
             python_dispatcher_mode, \
             PhiloxStateTracker(), \
-            torch._C.DisableTorchFunctionNonInfraSubclass():
+            torch._C._DisableTorchFunctionNonInfraSubclass():
 
         def process_inputs(flat_args):
             def convert(idx, x):
