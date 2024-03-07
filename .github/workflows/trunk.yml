@@ -26,7 +26,7 @@ jobs:
       id-token: write
       contents: read
 
-  Build PyTorch with BUILD_CAFFE2=ON
+  # Build PyTorch with BUILD_CAFFE2=ON
   caffe2-linux-jammy-py3_8-gcc11-build:
     name: caffe2-linux-jammy-py3.8-gcc11
     uses: ./.github/workflows/_linux-build.yml
