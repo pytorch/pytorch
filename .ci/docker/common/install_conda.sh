@@ -10,9 +10,6 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   MINOR_PYTHON_VERSION=$(echo "$ANACONDA_PYTHON_VERSION" | cut -d . -f 2)
 
   case "$MAJOR_PYTHON_VERSION" in
-    2)
-      CONDA_FILE="Miniconda2-latest-Linux-x86_64.sh"
-    ;;
     3)
       CONDA_FILE="Miniconda3-latest-Linux-x86_64.sh"
     ;;

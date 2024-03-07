@@ -5,15 +5,13 @@
 #pragma once
 
 #include <cuda.h>
+#include <vector>
 
-#ifdef OLD_GENERATOR_PATH
-#include <ATen/CUDAGeneratorImpl.h>
-#else
-#include <ATen/cuda/CUDAGeneratorImpl.h>
-#endif
+#include <ATen/cuda/PhiloxUtils.cuh>
 
-#include <ATen/cuda/CUDAGraphsUtils.cuh> // For at::cuda::philox::unpack
-namespace pytorch_flash {
+namespace pytorch_flash{
+
+
 constexpr int TOTAL_DIM = 0;
 constexpr int H_DIM = 1;
 constexpr int D_DIM = 2;
@@ -21,7 +19,7 @@ constexpr int D_DIM = 2;
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 struct Qkv_params {
-    using index_t = int64_t;
+    using index_t = uint32_t;
     // The QKV matrices.
     void *__restrict__ q_ptr;
     void *__restrict__ k_ptr;
@@ -98,12 +96,7 @@ struct Flash_fwd_params : public Qkv_params {
     void * __restrict__ rotary_sin_ptr;
 
     // The indices to index into the KV cache.
-    int * __restrict__ cache_batch_idx;
-
-    // Paged KV cache
-    int * __restrict__ block_table;
-    index_t block_table_batch_stride;
-    int page_block_size;
+    int *__restrict__ cache_batch_idx;
 
     // The dropout probability (probability of keeping an activation).
     float p_dropout;
@@ -133,9 +126,6 @@ struct Flash_fwd_params : public Qkv_params {
     bool is_rotary_interleaved;
 
     int num_splits;  // For split-KV version
-
-    void * __restrict__ alibi_slopes_ptr;
-    index_t alibi_slopes_batch_stride;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -175,9 +165,6 @@ struct Flash_bwd_params : public Flash_fwd_params {
 
     // The pointer to the softmax d sum.
     void *__restrict__ dsoftmax_sum;
-
-    bool deterministic;
-    index_t dq_accum_split_stride;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -185,6 +172,7 @@ struct Flash_bwd_params : public Flash_fwd_params {
 template<typename T, int Headdim> void run_mha_fwd_(Flash_fwd_params &params, cudaStream_t stream);
 template<typename T, int Headdim> void run_mha_fwd_splitkv_dispatch(Flash_fwd_params &params, cudaStream_t stream);
 
-template<typename T, int Headdim> void run_mha_bwd_(Flash_bwd_params &params, cudaStream_t stream);
+template<typename T, int Headdim> void run_mha_bwd_(Flash_bwd_params &params, cudaStream_t stream, const bool configure);
+
 
 } // namespace pytorch_flash

@@ -12,6 +12,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/cpu/int_mm_kernel.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/ReduceOps.h>
@@ -29,12 +30,15 @@
 #else
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_compute_linear_combination_native.h>
+#include <ATen/ops/_convert_weight_to_int4pack_native.h>
 #include <ATen/ops/_linalg_check_errors.h>
 #include <ATen/ops/_linalg_det.h>
 #include <ATen/ops/_linalg_det_native.h>
 #include <ATen/ops/_linalg_slogdet.h>
 #include <ATen/ops/_linalg_slogdet_native.h>
 #include <ATen/ops/_unsafe_view.h>
+#include <ATen/ops/_weight_int4pack_mm_native.h>
+#include <ATen/ops/_weight_int8pack_mm_native.h>
 #include <ATen/ops/addbmm_native.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addr.h>
@@ -1835,6 +1839,8 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
                 r, r, batch1.select(0, b), batch2.select(0, b), 0, 1);
           }
         };
+        // Materialize if COW, since we cannot do so during parallel_for
+        self_or_result.mutable_data_ptr();
         at::parallel_for(0, bs, 1, bmm_out_fn);
       } else {
         for (const auto b : c10::irange(bs)) {
@@ -1851,6 +1857,8 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
                 batch1.select(0, b), batch2.select(0, b), beta, alpha);
           }
         };
+        // Materialize if COW, since we cannot do so during parallel_for
+        self_or_result.mutable_data_ptr();
         at::parallel_for(0, bs, 1, bmm_fn);
       } else {
         for (const auto b : c10::irange(bs)) {
@@ -3382,6 +3390,104 @@ Tensor& kron_out(const Tensor& self, const Tensor& other, Tensor& result) {
 
 Tensor kron(const Tensor& self, const Tensor& other) {
   return KronImpl(self, other).kron();
+}
+
+// Weight Only Quantization Gemm
+DEFINE_DISPATCH(weight_to_int4pack_stub);
+DEFINE_DISPATCH(int4pack_mm_stub);
+DEFINE_DISPATCH(int8pack_mm_stub);
+
+Tensor _convert_weight_to_int4pack_cpu(
+    const Tensor& in,
+    int64_t innerKTiles) {
+
+  TORCH_CHECK(in.dim() == 2,
+      "_convert_weight_to_int4pack: expect weight to be 2D tensor.");
+  TORCH_CHECK(in.dtype() == at::kInt,
+      "_convert_weight_to_int4pack: expect weight to be kInt.");
+
+  auto weight = in.contiguous();
+  auto N = weight.size(0);
+  auto K = weight.size(1);
+
+  TORCH_CHECK(N % 16 == 0,
+      "_convert_weight_to_int4pack: expect N to be dividable by 16");
+  TORCH_CHECK(K % 2 == 0,
+      "_convert_weight_to_int4pack: expect K to be dividable by 2");
+
+  auto weight_packed = at::empty({N, K / 2}, weight.options().dtype(kByte));
+  weight_to_int4pack_stub(kCPU, weight_packed, weight);
+  return weight_packed;
+}
+
+Tensor _weight_int4pack_mm_cpu(
+    const Tensor& A,
+    const Tensor& B,
+    int64_t qGroupSize,
+    const Tensor& qScaleAndZeros) {
+
+  auto M = A.size(0);
+  auto N = B.size(0);
+  auto K = A.size(1);
+
+  TORCH_CHECK(A.dtype() == kBFloat16,
+      __func__, " : expect A to be bfloat16 tensor.");
+  TORCH_CHECK(A.is_contiguous(),
+      __func__, " : expect A to be contiguous.");
+  TORCH_CHECK(A.dim() == 2,
+      __func__, " : expect A to be 2D tensor.");
+
+  TORCH_CHECK(B.dtype() == kByte,
+      __func__, " : expect B to be uint8 tensor.");
+  TORCH_CHECK(B.is_contiguous(),
+      __func__, " : expect B to be contiguous.");
+  TORCH_CHECK(B.size(1) == K / 2,
+      __func__, " : expect B.size(1) to be K/2, got ", B.size(1));
+
+  TORCH_CHECK(qGroupSize == 32 || qGroupSize == 64 || qGroupSize == 128
+      || qGroupSize == 256,
+      __func__, ": expect qGroupSize to be 32, 64, 128 or 256, got ", qGroupSize);
+
+  TORCH_CHECK(qScaleAndZeros.dim() == 3 && qScaleAndZeros.size(1) == N
+      && qScaleAndZeros.size(2) == 2,
+      __func__, ": expect qScaleAndZeros to be 3d tensor with sizes [:, ", N, ", 2]");
+
+  auto C = at::empty({M, N}, A.options());
+  int4pack_mm_stub(kCPU, C, A, B, qGroupSize, qScaleAndZeros);
+
+  return C;
+}
+
+Tensor _weight_int8pack_mm_cpu(
+    const Tensor& A,
+    const Tensor& B,
+    const Tensor& scales) {
+
+  auto M = A.size(0);
+  auto N = B.size(0);
+  auto K = A.size(1);
+
+  TORCH_CHECK(A.dtype() == kBFloat16,
+      __func__, " : expect A to be bfloat16 tensor.");
+  TORCH_CHECK(A.is_contiguous(),
+      __func__, " : expect A to be contiguous.");
+  TORCH_CHECK(A.dim() == 2,
+      __func__, " : expect A to be 2D tensor.");
+
+  TORCH_CHECK(B.dtype() == kChar,
+      __func__, " : expect B to be int8 tensor.");
+  TORCH_CHECK(B.is_contiguous(),
+      __func__, " : expect B to be contiguous.");
+  TORCH_CHECK(B.size(1) == K,
+      __func__, " : expect B.size(1) == ", K);
+
+  TORCH_CHECK(scales.dim() == 1 && scales.size(0) == N,
+      __func__, " : expect scales to be 1d tensor with size ", N);
+
+  auto C = at::empty({M, N}, A.options());
+  int8pack_mm_stub(kCPU, C, A, B, scales);
+
+  return C;
 }
 
 } // namespace native

@@ -720,12 +720,12 @@ Tensor nll_loss_nd_symint(
     input_ = input_.contiguous();
     target_ = target_.contiguous();
     // support empty batches, see #15870
-    if (input_.numel() > 0) {
+    if (input_.sym_numel() > 0) {
       input_ = input_.view_symint({n, std::move(c), 1, -1});
     } else {
       input_ = input_.view_symint({n, std::move(c), 0, 0});
     }
-    if (target_.numel() > 0) {
+    if (target_.sym_numel() > 0) {
       target_ = target_.view_symint({std::move(n), 1, -1});
     } else {
       target_ = target_.view_symint({std::move(n), 0, 0});

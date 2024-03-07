@@ -5032,7 +5032,8 @@ Args:
     query (Tensor): Query tensor; shape :math:`(N, ..., L, E)`.
     key (Tensor): Key tensor; shape :math:`(N, ..., S, E)`.
     value (Tensor): Value tensor; shape :math:`(N, ..., S, Ev)`.
-    attn_mask (optional Tensor): Attention mask; shape :math:`(N, ..., L, S)`. Two types of masks are supported.
+    attn_mask (optional Tensor): Attention mask; shape must be broadcastable to the shape of attention weights,
+        which is :math:`(N,..., L, S)`. Two types of masks are supported.
         A boolean mask where a value of True indicates that the element *should* take part in attention.
         A float mask of the same type as query, key, value that is added to the attention score.
     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
