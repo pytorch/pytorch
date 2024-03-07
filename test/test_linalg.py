@@ -4717,36 +4717,48 @@ class TestLinalg(TestCase):
         if dtype == torch.double:
             raise unittest.SkipTest("hipblasLt doesn't support doubles yet")
 
-        # enable hipblaslt path via env variable.
-        import os
-        DISABLE_ADDMM_HIP_LT = "DISABLE_ADDMM_HIP_LT"
-        prev_val = os.getenv(DISABLE_ADDMM_HIP_LT)
-        try:
-            os.environ[DISABLE_ADDMM_HIP_LT] = "0"
-            # common case
-            M = torch.randn(128, device=device, dtype=dtype)
-            m1 = torch.randn(2048, 2400, device=device, dtype=dtype)
-            m2 = torch.randn(128, 2400, device=device, dtype=dtype)
-            out1 = torch.nn.functional.linear(m1, m2, M)
-            M_cpu = M.to('cpu')
-            m1_cpu = m1.to('cpu')
-            m2_cpu = m2.to('cpu')
-            out1_cpu = torch.nn.functional.linear(m1_cpu, m2_cpu, M_cpu)
-            self.assertTrue(torch.allclose(out1_cpu, out1.cpu(), rtol=1e-2, atol=1e-2))
+        # common case
+        M = torch.randn(128, device=device, dtype=dtype)
+        m1 = torch.randn(2048, 2400, device=device, dtype=dtype)
+        m2 = torch.randn(128, 2400, device=device, dtype=dtype)
+        out1 = torch.nn.functional.linear(m1, m2, M)
+        M_cpu = M.to('cpu')
+        m1_cpu = m1.to('cpu')
+        m2_cpu = m2.to('cpu')
+        out1_cpu = torch.nn.functional.linear(m1_cpu, m2_cpu, M_cpu)
+        self.assertTrue(torch.allclose(out1_cpu, out1.cpu(), rtol=1e-2, atol=1e-2))
 
-            # common case without bias
-            m1 = torch.randn(2048, 2400, device=device, dtype=dtype)
-            m2 = torch.randn(128, 2400, device=device, dtype=dtype)
-            out2 = torch.nn.functional.linear(m1, m2, bias=None)
-            m1_cpu = m1.to('cpu')
-            m2_cpu = m2.to('cpu')
-            out2_cpu = torch.nn.functional.linear(m1_cpu, m2_cpu, bias=None)
-            self.assertTrue(torch.allclose(out2_cpu, out2.cpu(), rtol=1e-2, atol=1e-2))
-        finally:
-            if prev_val is None:
-                del os.environ[DISABLE_ADDMM_HIP_LT]
-            else:
-                os.environ[DISABLE_ADDMM_HIP_LT] = prev_val
+        # common case without bias
+        m1 = torch.randn(2048, 2400, device=device, dtype=dtype)
+        m2 = torch.randn(128, 2400, device=device, dtype=dtype)
+        out2 = torch.nn.functional.linear(m1, m2, bias=None)
+        m1_cpu = m1.to('cpu')
+        m2_cpu = m2.to('cpu')
+        out2_cpu = torch.nn.functional.linear(m1_cpu, m2_cpu, bias=None)
+        self.assertTrue(torch.allclose(out2_cpu, out2.cpu(), rtol=1e-2, atol=1e-2))
+
+        # inplace addmm
+        m1 = torch.randn(128, 256, device=device, dtype=dtype)
+        m2 = torch.randn(256, 128, device=device, dtype=dtype)
+        out3 = torch.randn(128, 128, device=device, dtype=dtype)
+        out3_cpu = out3.clone().cpu()
+        m1_cpu = m1.to('cpu')
+        m2_cpu = m2.to('cpu')
+
+        out3.addmm_(m1, m2)
+        out3_cpu.addmm_(m1_cpu, m2_cpu)
+        self.assertTrue(torch.allclose(out3_cpu, out3.cpu(), rtol=1e-2, atol=1e-2))
+
+        # addmm out of place - hipblaslt doesn't support 2D bias
+        m1 = torch.randn(128, 256, device=device, dtype=dtype)
+        m2 = torch.randn(256, 128, device=device, dtype=dtype)
+        bias = torch.randn(128, 128, device=device, dtype=dtype)
+        m1_cpu = m1.to('cpu')
+        m2_cpu = m2.to('cpu')
+
+        out4 = bias.addmm(m1, m2)
+        out4_cpu = bias.cpu().addmm(m1_cpu, m2_cpu)
+        self.assertTrue(torch.allclose(out4_cpu, out4.cpu(), rtol=1e-2, atol=1e-2))
 
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   torch.half,
