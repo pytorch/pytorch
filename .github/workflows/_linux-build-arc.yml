@@ -93,7 +93,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v3
         with:
           role-to-assume: arn:aws:iam::391835788720:role/gha-pytorch-ci-artifacts-role
-          role-session-name: gha-arc-runner
+          role-session-name: gha-linux-build
           aws-region: us-east-1
 
       - name: Calculate docker image
