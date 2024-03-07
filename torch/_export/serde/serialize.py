@@ -1820,17 +1820,24 @@ class ExportedProgramDeserializer:
                 f"does not match our current schema version {SCHEMA_VERSION}."
             )
 
-        symbol_name_to_range = {
-            k: symbolic_shapes.ValueRanges(_int_to_sympy_int(v.min_val), _int_to_sympy_int(v.max_val))
-            for k, v in serialized_artifact.exported_program.range_constraints.items()
-        }
+        # deserialization does analysis with checks on 0/1, so we create fake range constraints and
+        # restore the original range constraints afterwards
+        symbol_name_to_range = {}
+        fake_symbol_name_to_range = {}
+        for k, v in serialized_artifact.exported_program.range_constraints.items():
+            symbol_name_to_range[k] = symbolic_shapes.ValueRanges(_int_to_sympy_int(v.min_val), _int_to_sympy_int(v.max_val))
+            lower = v.min_val
+            if v.max_val >= 2:  # no specialization on 0/1
+                lower = max(2, lower)
+            fake_symbol_name_to_range[k] = symbolic_shapes.ValueRanges(_int_to_sympy_int(lower), _int_to_sympy_int(v.max_val))
+
         res = (
             GraphModuleDeserializer()
             .deserialize(
                 serialized_artifact.exported_program.graph_module,
                 serialized_artifact.state_dict,
                 serialized_artifact.constants,
-                symbol_name_to_range,
+                fake_symbol_name_to_range
             )
         )
         range_constraints = self.deserialize_range_constraints(

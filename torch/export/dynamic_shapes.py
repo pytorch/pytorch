@@ -236,7 +236,7 @@ class _Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
     shared: Optional[_ConstraintTarget] = None
     debug_name: Optional[str] = None
 
-    def _clone_with_range(self, lower=2, upper=math.inf):
+    def _clone_with_range(self, lower=0, upper=math.inf):
         # Import sympy locally
         from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
         from torch.utils._sympy.value_ranges import ValueRanges
@@ -478,7 +478,7 @@ def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
         id(t),
         index,
         StrictMinMaxConstraint(
-            vr=ValueRanges(lower=2, upper=sympy.oo), warn_only=False
+            vr=ValueRanges(lower=0, upper=sympy.oo), warn_only=False
         ),
         debug_name=debug_name,
     )
