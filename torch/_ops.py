@@ -434,7 +434,11 @@ def key_extractor(tensors, key_mask):
 class _ModeStackStateForPreDispatch:
     def __init__(self):
         self.__infra_modes = [None, None]
-        self._has_removed_pre_dispatch_from_exclude_set = (
+        # This flag indicates whether we removed PreDispatch key
+        # from local dispatch key exclude set. This is useful to
+        # figure out when to turn on and off PreDispatch key when
+        # there is no active mode on the stack.
+        self._has_removed_pre_dispatch_from_exclude_set_flag = (
             torch._C._dispatch_tls_local_exclude_set().has(
                 torch._C.DispatchKey.PreDispatch
             )
@@ -475,16 +479,23 @@ def unset_mode_pre_dispatch(mode_key):
     current_mode = _unset_mode()
 
     new_pre_dispatch_len = _len_torch_dispatch_stack_pre_dispatch()
+    # When we are unsetting a mode, we need to check if there is
+    # active mode left on the PreDispatch key. If there is nothing
+    # active, we need to remove PreDispatch key from local dispatch include
+    # set. Also if we have removed PreDispatch key from local dispatch exclude
+    # set, we need to add it back.
     if new_pre_dispatch_len == 0:
         torch._C._dispatch_tls_set_dispatch_key_included(
             torch._C.DispatchKey.PreDispatch, False
         )
 
-        if current_mode_stack_pre_dispatch._has_removed_pre_dispatch_from_exclude_set:
+        if (
+            current_mode_stack_pre_dispatch._has_removed_pre_dispatch_from_exclude_set_flag
+        ):
             torch._C._dispatch_tls_set_dispatch_key_excluded(
                 torch._C.DispatchKey.PreDispatch, True
             )
-            current_mode_stack_pre_dispatch._has_removed_pre_dispatch_from_exclude_set = (
+            current_mode_stack_pre_dispatch._has_removed_pre_dispatch_from_exclude_set_flag = (
                 True
             )
 
@@ -507,18 +518,24 @@ def _set_mode_pre_dispatch(mode):
         assert current_mode is None
         mode_stack_state_for_pre_dispatch().set(0, mode)
 
+    # When we are setting a mode, we need to check if there is
+    # active mode left on the PreDispatch key. If there was nothing
+    # active before setting this mode, it means that PreDispatch key
+    # was turned off. So we need to turn it on again. Also, if we previously
+    # removed PreDispatch key from local dispatch exclude set, we need to add it back.
+    # Also if we see PreDispatch key in the exclude set, we need to remove it.
     if previous_mode_stack_len == 0:
         torch._C._dispatch_tls_set_dispatch_key_included(
             torch._C.DispatchKey.PreDispatch, True
         )
 
-        if (
-            mode_stack_state_for_pre_dispatch()._has_removed_pre_dispatch_from_exclude_set
+        if torch._C._dispatch_tls_local_exclude_set().has(
+            torch._C.DispatchKey.PreDispatch
         ):
             torch._C._dispatch_tls_set_dispatch_key_excluded(
                 torch._C.DispatchKey.PreDispatch, False
             )
-            mode_stack_state_for_pre_dispatch()._has_removed_pre_dispatch_from_exclude_set = (
+            mode_stack_state_for_pre_dispatch()._has_removed_pre_dispatch_from_exclude_set_flag = (
                 True
             )
 
