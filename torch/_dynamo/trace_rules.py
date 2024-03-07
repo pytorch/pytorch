@@ -1487,6 +1487,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._use_cudnn_rnn_flatten_weight",
         "torch._values_copy",
         "torch._weight_int4pack_mm",
+        "torch._weight_int8pack_mm",
         "torch._weight_norm_interface",
         "torch._weight_norm",
         "torch.abs_",
