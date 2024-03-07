@@ -2,6 +2,7 @@ import torch
 from torch.library import Library, impl
 from torch.ao.quantization.utils import determine_qparams, validate_qmin_qmax
 from typing import Tuple
+from torch._refs import _unsqueeze_multiple
 
 
 # Note: decomposed means decomposed quantized tensor, using decomposed so that the
@@ -492,25 +493,18 @@ class FakeQuantPerChannel(torch.autograd.Function):
         with torch._C._AutoDispatchBelowAutograd():
             if input.dtype == torch.bfloat16:
                 input = input.to(torch.float32)
+            if scales.dtype != torch.float32:
+                scales = scales.to(torch.float32)
+            if zero_points.dtype != torch.int32:
+                zero_points = zero_points.to(torch.int32)
             assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
             assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
-            input_permuted, permute_axis_list = _permute_to_axis_zero(input, axis)
-            res = torch.zeros_like(input_permuted)
-            mask = torch.zeros_like(input_permuted, dtype=torch.int)
-
-            for i in range(input_permuted.size(0)):
-                temp = torch.round(input_permuted[i] * (1.0 / scales[i])) + zero_points[i]
-                res[i] = (
-                    torch.clamp(
-                        temp,
-                        quant_min,
-                        quant_max
-                    ) - zero_points[i]
-                ) * scales[i]
-                mask[i] = torch.logical_and((temp >= quant_min), (temp <= quant_max))
-
-            out = res.permute(tuple(permute_axis_list))
-            mask = mask.permute(tuple(permute_axis_list))
+            broadcast_dims = list(range(0, axis)) + list(range(axis + 1, input.ndim))
+            unsqueeze_scales = _unsqueeze_multiple(scales, broadcast_dims)
+            unsqueeze_zero_points = _unsqueeze_multiple(zero_points, broadcast_dims)
+            temp = torch.round(input * (1.0 / unsqueeze_scales)) + unsqueeze_zero_points
+            out = (torch.clamp(temp, quant_min, quant_max) - unsqueeze_zero_points) * unsqueeze_scales
+            mask = torch.logical_and((temp >= quant_min), (temp <= quant_max))
 
         ctx.save_for_backward(mask)
         return out
