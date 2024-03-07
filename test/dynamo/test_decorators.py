@@ -305,6 +305,9 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             def my_class_method(self, arg1):
                 return super().my_class_method(arg1)
 
+            def my_static_method(self, arg1):
+                return super().my_static_method(arg1)
+
         class C(A):
             @classmethod
             def my_class_method(cls, arg1):
@@ -322,13 +325,14 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             v4 = A.my_static_method(4)
             v5 = a.my_regular_method(5)
             v6 = b.my_class_method(6)
-            v7 = c.my_class_method(7)
-            v8 = C.my_class_method(8)
+            v7 = b.my_static_method(7)
+            v8 = c.my_class_method(8)
+            v9 = C.my_class_method(9)
             torch.rand(2)
-            return v1, v2, v3, v4, v5, v6, v7, v8
+            return v1, v2, v3, v4, v5, v6, v7, v8, v9
 
         a, b, c = A(), B(), C()
-        v1, v2, v3, v4, v5, v6, v7, v8 = fn(a, b, c)
+        v1, v2, v3, v4, v5, v6, v7, v8, v9 = fn(a, b, c)
 
         self.assertEqual(v1, (A, 1))
         self.assertEqual(v2, (A, 2))
@@ -338,8 +342,9 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         # TODO fix me: we do not resolve classmethods properly
         # from a regular method
         # self.assertEqual(v6, (B, 6))
-        self.assertEqual(v7, (C, 7))
+        self.assertEqual(v7, (None, 7))
         self.assertEqual(v8, (C, 8))
+        self.assertEqual(v9, (C, 9))
 
         self.assertEqual(cnt.frame_count, 1)
 
