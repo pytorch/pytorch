@@ -2395,6 +2395,20 @@ def forward(self, arg_0):
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
         self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
 
+    @testing.expectedFailureRetraceability
+    def test_tensor_attribute_zero_args(self):
+        class Foo(torch.nn.Module):
+            def __init__(self, value):
+                super().__init__()
+                self.x = torch.tensor(value)
+
+            def forward(self):
+                return self.x.clone()
+
+        m = Foo([1, 2])
+        ep = export(m, ())
+        self.assertEqual(ep.graph_signature.lifted_tensor_constants, ["x"])
+
     def test_preserve_shape_dynamism_for_unused_inputs(self):
         @dataclass
         class Input:
@@ -3832,6 +3846,12 @@ class TestExportCustomClass(TorchTestCase):
                 arg = node.args[0]
                 self.assertTrue(arg.op == "placeholder")
 
+    def test_tolist_nonstrict_output(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x.tolist()
+
+        ep = torch.export.export(M(), (torch.ones(3),), strict=False)
 
 if __name__ == '__main__':
     run_tests()
