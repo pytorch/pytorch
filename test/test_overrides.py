@@ -1519,7 +1519,7 @@ class TestTorchFunctionMode(TestCase):
 
         a = Foo(torch.tensor(1.))
 
-        with torch._C.DisableTorchFunctionNonInfraSubclass():
+        with torch._C._DisableTorchFunctionNonInfraSubclass():
             torch.sin(a)
             self.assertTrue(counter[0] == 1)
 
@@ -1534,16 +1534,16 @@ class TestTorchFunctionMode(TestCase):
             self.assertFalse(torch._C._is_torch_function_enabled())
             self.assertFalse(torch._C._is_torch_function_infra_subclasses_enabled())
 
-        with torch._C.DisableTorchFunctionNonInfraSubclass():
+        with torch._C._DisableTorchFunctionNonInfraSubclass():
             self.assertFalse(torch._C._is_torch_function_enabled())
             self.assertTrue(torch._C._is_torch_function_infra_subclasses_enabled())
 
         with torch._C.DisableTorchFunctionSubclass():
-            with torch._C.DisableTorchFunctionNonInfraSubclass():
+            with torch._C._DisableTorchFunctionNonInfraSubclass():
                 self.assertFalse(torch._C._is_torch_function_enabled())
                 self.assertFalse(torch._C._is_torch_function_infra_subclasses_enabled())
 
-        with torch._C.DisableTorchFunctionNonInfraSubclass():
+        with torch._C._DisableTorchFunctionNonInfraSubclass():
             with torch._C.DisableTorchFunctionSubclass():
                 self.assertFalse(torch._C._is_torch_function_enabled())
                 self.assertFalse(torch._C._is_torch_function_infra_subclasses_enabled())

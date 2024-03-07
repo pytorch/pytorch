@@ -138,13 +138,13 @@ typedef struct {
   PyObject_HEAD
       /* Type-specific fields go here. */
       at::impl::TorchFunctionDisabledState old_state;
-} DisableTorchFunctionNonInfraSubclass;
+} _DisableTorchFunctionNonInfraSubclass;
 
-PyObject* DisableTorchFunctionNonInfraSubclass__enter(
+PyObject* _DisableTorchFunctionNonInfraSubclass__enter(
     PyObject* self,
     PyObject* unused) {
   const auto old_state = at::impl::PythonTorchFunctionTLS::get_disabled_state();
-  ((DisableTorchFunctionNonInfraSubclass*)self)->old_state = old_state;
+  ((_DisableTorchFunctionNonInfraSubclass*)self)->old_state = old_state;
   if (old_state <
       at::impl::TorchFunctionDisabledState::NON_INFRA_SUBCLASSES_DISABLED) {
     at::impl::PythonTorchFunctionTLS::set_disabled_state(
@@ -153,30 +153,30 @@ PyObject* DisableTorchFunctionNonInfraSubclass__enter(
   Py_RETURN_NONE;
 }
 
-PyObject* DisableTorchFunctionNonInfraSubclass__exit(
+PyObject* _DisableTorchFunctionNonInfraSubclass__exit(
     PyObject* self,
     PyObject* unused) {
   at::impl::PythonTorchFunctionTLS::set_disabled_state(
-      ((DisableTorchFunctionNonInfraSubclass*)self)->old_state);
+      ((_DisableTorchFunctionNonInfraSubclass*)self)->old_state);
   Py_RETURN_NONE;
 }
 
-static PyMethodDef DisableTorchFunctionNonInfraSubclass_methods[] = { // NOLINT
+static PyMethodDef _DisableTorchFunctionNonInfraSubclass_methods[] = { // NOLINT
     {"__enter__",
-     DisableTorchFunctionNonInfraSubclass__enter,
+     _DisableTorchFunctionNonInfraSubclass__enter,
      METH_NOARGS,
      nullptr},
     {"__exit__",
-     DisableTorchFunctionNonInfraSubclass__exit,
+     _DisableTorchFunctionNonInfraSubclass__exit,
      METH_VARARGS,
      nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
-PyTypeObject DisableTorchFunctionNonInfraSubclassType = {
+PyTypeObject _DisableTorchFunctionNonInfraSubclassType = {
     PyVarObject_HEAD_INIT(
         nullptr,
-        0) "torch._C.DisableTorchFunctionNonInfraSubclass", /* tp_name */
-    sizeof(DisableTorchFunctionNonInfraSubclass), /* tp_basicsize */
+        0) "torch._C._DisableTorchFunctionNonInfraSubclass", /* tp_name */
+    sizeof(_DisableTorchFunctionNonInfraSubclass), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
     0, /* tp_vectorcall_offset */
@@ -201,7 +201,7 @@ PyTypeObject DisableTorchFunctionNonInfraSubclassType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    DisableTorchFunctionNonInfraSubclass_methods, /* tp_methods */
+    _DisableTorchFunctionNonInfraSubclass_methods, /* tp_methods */
     nullptr, /* tp_members */
     nullptr, /* tp_getset */
     nullptr, /* tp_base */
@@ -214,12 +214,12 @@ PyTypeObject DisableTorchFunctionNonInfraSubclassType = {
     PyType_GenericNew, /* tp_new */
 };
 
-PyObject* THPModule_DisableTorchFunctionNonInfraSubclassType() {
-  if (PyType_Ready(&DisableTorchFunctionNonInfraSubclassType) < 0) {
+PyObject* THPModule__DisableTorchFunctionNonInfraSubclassType() {
+  if (PyType_Ready(&_DisableTorchFunctionNonInfraSubclassType) < 0) {
     return nullptr;
   }
 
-  return (PyObject*)(&DisableTorchFunctionNonInfraSubclassType);
+  return (PyObject*)(&_DisableTorchFunctionNonInfraSubclassType);
 }
 
 typedef struct {
