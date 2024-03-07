@@ -666,8 +666,8 @@ def meta__scaled_dot_product_flash(fake_mode, func, *args, **kwargs):
         None,
         max_seqlen_batch_q,
         max_seqlen_batch_k,
-        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device),
-        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device),
+        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu"),
+        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu"),
         debug_mask,
     )
 
@@ -716,12 +716,8 @@ def meta__scaled_dot_product_efficient(fake_mode, func, *args, **kwargs):
     res = res.transpose(1, 2)
 
     # See Note [Seed and Offset]:
-    seed = convert_tensor(
-        torch.empty((), dtype=torch.long, device="meta"), query.device
-    )
-    offset = convert_tensor(
-        torch.empty((), dtype=torch.long, device="meta"), query.device
-    )
+    seed = convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu")
+    offset = convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu")
 
     return res, logsum_exp, seed, offset
 
@@ -791,8 +787,8 @@ def meta__flash_attention_forward(fake_mode, func, *args, **kwargs):
     return (
         attention,
         logsumexp,
-        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device),
-        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device),
+        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu"),
+        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu"),
         debug_mask,
     )
 
@@ -846,12 +842,8 @@ def meta__efficient_attention_forward(fake_mode, func, *args, **kwargs):
     )
 
     # See Note [Seed and Offset]:
-    seed = convert_tensor(
-        torch.empty((), dtype=torch.long, device="meta"), query.device
-    )
-    offset = convert_tensor(
-        torch.empty((), dtype=torch.long, device="meta"), query.device
-    )
+    seed = convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu")
+    offset = convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu")
 
     return res, logsum_exp, seed, offset, actual_max_seqlen_q, actual_max_seqlen_k
 

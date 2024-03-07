@@ -107,7 +107,7 @@ int intraop_default_num_threads() {
     nthreads = TaskThreadPoolBase::defaultNumThreads();
 #endif
   }
-  return nthreads;
+  return static_cast<int>(nthreads);
 #endif
 }
 
