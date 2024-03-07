@@ -14,8 +14,6 @@
 namespace torch::inductor {
 
 class AOTIPythonKernelHolder : public c10::OperatorKernel {
-  // std::unique_ptr<torch::impl::dispatch::PythonKernelHolder>
-  // python_kernel_holder_;
   torch::impl::dispatch::PythonKernelHolder python_kernel_holder_;
   c10::DispatchKey dispatch_key_;
   std::string op_name_;

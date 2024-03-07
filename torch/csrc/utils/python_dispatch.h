@@ -7,10 +7,7 @@
 #include <ATen/core/boxing/KernelFunction.h>
 #include <c10/core/SafePyObject.h>
 
-namespace torch {
-namespace impl {
-namespace dispatch {
-
+namespace torch::impl::dispatch {
 void initDispatchBindings(PyObject* module);
 
 void python_op_registration_trampoline_impl(
@@ -30,6 +27,4 @@ class PythonKernelHolder : public c10::OperatorKernel {
       torch::jit::Stack* stack);
 };
 
-} // namespace dispatch
-} // namespace impl
-} // namespace torch
+} // namespace torch::impl::dispatch
