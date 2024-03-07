@@ -1117,6 +1117,7 @@ def valid_vec_isa_list() -> List[VecISA]:
     if platform.machine() == "s390x":
         return [VecZVECTOR()]
 
+    # Try to load the cpuinfo from persist cache
     base_name = "cpu_info"
     from filelock import FileLock
     lock = FileLock(os.path.join(get_lock_dir(), f"{base_name}.lock"), timeout=LOCK_TIMEOUT)
@@ -1129,7 +1130,7 @@ def valid_vec_isa_list() -> List[VecISA]:
 
     if cpu_info_str:
         try:
-            isa_list = []
+            # Parse persist cache
             json_data = json.load(cpu_info_str)
             assert isinstance(json_data, list)
             valid_vec_isas: Dict(str, VecISA) = {}
@@ -1145,6 +1146,7 @@ def valid_vec_isa_list() -> List[VecISA]:
         except Exception as e:
             return []
 
+    # Cannot get the cpuinfo from persist cache, then we need to parse it from /proc/cpuinfo
     isa_list = []
     with open("/proc/cpuinfo") as _cpu_info:
         _cpu_info_content = _cpu_info.read()
@@ -1157,6 +1159,7 @@ def valid_vec_isa_list() -> List[VecISA]:
             ):
                 isa_list.append(isa)
 
+    # Save cache
     with lock:
         if not os.path.exists(cpu_info_conf) and isa_list:
             with open(cpu_info_conf, "w") as _cpu_info_conf:
