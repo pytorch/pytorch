@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import types
 import warnings
+from collections import namedtuple
 from typing import (
     Any,
     Callable,
@@ -243,7 +244,7 @@ class ExportedProgram:
     @property
     @compatibility(is_backward_compatible=False)
     def call_spec(self):
-        from torch._export.exported_program import CallSpec
+        CallSpec = namedtuple("CallSpec", ["in_spec", "out_spec"])
 
         if len(self.module_call_graph) == 0:
             return CallSpec(in_spec=None, out_spec=None)
@@ -273,17 +274,40 @@ class ExportedProgram:
     def constants(self):
         return self._constants
 
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        import torch._export.error as error
+    def _get_flat_args_with_check(self, args, kwargs):
+        """Flatten args, kwargs using pytree, then, check specs.
 
+        Args:
+            args: List[Any] original args passed to __call__
+            kwargs: Dict[str, Any] original kwargs passed to __call
+
+        Returns:
+            A tuple of (flat_args, received_spec)
+            flat_args is flattend args / kwargs
+            received_spec is the pytree spec produced while flattening the
+            tuple (args, kwargs)
+        """
         in_spec = self.call_spec.in_spec
         if in_spec is not None:
             kwargs = reorder_kwargs(kwargs, in_spec)
-
         flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
             (args, kwargs)
         )  # type: ignore[possibly-undefined]
+        self._check_input_constraints(flat_args_with_path)
+        flat_args = tuple(x[1] for x in flat_args_with_path)
+        return flat_args, received_spec
 
+    def _graph_module_flat_inputs(self, args: Any, kwargs: Any) -> Any:
+        """Transform args, kwargs of __call__ to args for graph_module.
+
+        self.graph_module takes stuff from state dict as inputs.
+        The invariant is for ep: ExportedProgram is
+        ep(args, kwargs) ==
+          ep.postprocess(ep.graph_module(ep.graph_module_flat_inputs(args, kwargs)))
+        """
+
+        in_spec = self.call_spec.in_spec
+        flat_args, received_spec = self._get_flat_args_with_check(args, kwargs)
         if in_spec is not None and not is_equivalent(
             received_spec, in_spec, _fx_collection_equivalence_fn
         ):
@@ -315,17 +339,25 @@ class ExportedProgram:
                 additional_inputs.append(self.constants[input_.target])
         additional_inputs = tuple(additional_inputs)
 
-        self._check_input_constraints(flat_args_with_path)
-        flat_args = [x[1] for x in flat_args_with_path]
-
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.
         # See: torch/_functorch/aot_autograd.py#L1034
-        res = torch.fx.Interpreter(self.graph_module).run(
-            *additional_inputs,
-            *flat_args,
-            enable_io_processing=False,
+        return additional_inputs + flat_args
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError(
+            "Unable to call ExportedProgram directly. "
+            "You should use `exported_program.module()` instead."
         )
 
+    def _postprocess_graph_module_outputs(self, res, orig_args, orig_kwargs):
+        """Process potential mutations to the input.
+
+        Because self.graph_module is functional, so mutations has to be written
+        back after execution of graph_module.
+        """
+        import torch._export.error as error
+
+        flat_args, _ = self._get_flat_args_with_check(orig_args, orig_kwargs)
         if self.call_spec.out_spec is not None:
             buffer_mutation = self.graph_signature.buffers_to_mutate
             user_input_mutation = self.graph_signature.user_inputs_to_mutate
@@ -370,7 +402,6 @@ class ExportedProgram:
                         flat_args[index].copy_(value)
                     else:
                         raise AssertionError(f"Unexpected kind: {output_spec.kind}")
-
         return res
 
     def __str__(self) -> str:
@@ -419,7 +450,10 @@ class ExportedProgram:
         from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
             _AddRuntimeAssertionsForInlineConstraintsPass,
         )
-        from torch._export.passes.lift_constants_pass import lift_constants_pass
+        from torch._export.passes.lift_constants_pass import (
+            ConstantAttrMap,
+            lift_constants_pass,
+        )
         from torch._export.passes.replace_sym_size_ops_pass import (
             _replace_sym_size_ops_pass,
         )
@@ -513,7 +547,7 @@ class ExportedProgram:
 
         new_range_constraints = _get_updated_range_constraints(gm)
 
-        constants = lift_constants_pass(gm, new_graph_signature)
+        constants = lift_constants_pass(gm, new_graph_signature, ConstantAttrMap())
         for k, v in constants.items():
             assert k not in self.constants
             self.constants[k] = v

@@ -523,7 +523,7 @@ def _disallow_eval_train(model: GraphModule):
         Please call `torch.ao.quantization.move_exported_model_to_train(model)` (or eval) instead.
 
         If you cannot replace the calls to `model.train()` and `model.eval()`, you may override
-        the behavior for these methods by calling `torch.ao.quantization.allow_exported_model_train_eval_for_special_ops(model)`,
+        the behavior for these methods by calling `torch.ao.quantization.allow_exported_model_train_eval(model)`,
         which does the above automatically for you. Note that this has limited effect on switching
         behavior between train and eval modes, and should be used only for special ops such as dropout
         and batchnorm.
