@@ -52,16 +52,21 @@ static void clamp_mps_graph(CachedGraph* cachedGraph,
     maxTensor = castMPSTensor(mpsGraph, cachedGraph->maxTensor, input_dtype);
   }
   if (cachedGraph->minTensor && cachedGraph->maxTensor) {
-    cachedGraph->outputTensor = [mpsGraph clampWithTensor:cachedGraph->inputTensor
-                                           minValueTensor:minTensor
-                                           maxValueTensor:maxTensor
-                                                     name:nil];
+    // clampWithTensor doesn't handle NaN well so we perform minimumWithNaNPropagationWithPrimaryTensor
+    // then maximumWithNaNPropagationWithPrimaryTensor
+    cachedGraph->outputTensor =
+      [mpsGraph maximumWithNaNPropagationWithPrimaryTensor:
+        [mpsGraph minimumWithNaNPropagationWithPrimaryTensor:cachedGraph->inputTensor
+                                             secondaryTensor:minTensor
+                                                        name:nil]
+                                           secondaryTensor:maxTensor
+                                                      name:nil];
   } else if (cachedGraph->maxTensor) {
-    cachedGraph->outputTensor = [mpsGraph minimumWithPrimaryTensor:cachedGraph->inputTensor
+    cachedGraph->outputTensor = [mpsGraph minimumWithNaNPropagationWithPrimaryTensor:cachedGraph->inputTensor
                                                    secondaryTensor:maxTensor
                                                               name:nil];
   } else if (cachedGraph->minTensor) {
-    cachedGraph->outputTensor = [mpsGraph maximumWithPrimaryTensor:cachedGraph->inputTensor
+    cachedGraph->outputTensor = [mpsGraph maximumWithNaNPropagationWithPrimaryTensor:cachedGraph->inputTensor
                                                    secondaryTensor:minTensor
                                                               name:nil];
   }
