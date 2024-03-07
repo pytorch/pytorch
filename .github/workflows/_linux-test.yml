@@ -1,9 +1,5 @@
 name: linux-test
 
-permissions:
-  id-token: write
-  contents: read
-
 on:
   workflow_call:
     inputs:
