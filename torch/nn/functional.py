@@ -2572,6 +2572,25 @@ def layer_norm(
         )
     return torch.layer_norm(input, normalized_shape, weight, bias, eps, torch.backends.cudnn.enabled)
 
+def rms_norm(
+    input: Tensor,
+    normalized_shape: List[int],
+    weight: Optional[Tensor] = None,
+    eps: float = 1e-6,
+) -> Tensor:
+    r"""Apply Root Mean Square Layer Normalization.
+
+    See :class:`~torch.nn.RMSNorm` for details.
+    """
+    if has_torch_function_variadic(input, weight):
+        return handle_torch_function(
+            rms_norm, (input, weight), input, weight=weight, eps=eps
+        )
+    if input.shape[-len(normalized_shape):] != normalized_shape:
+        raise ValueError("Input must have shape that ends with normalized_shape")
+    if weight is not None and weight.shape != normalized_shape:
+        raise ValueError("Weight must be of normalized shape")
+    return torch.rms_norm(input, normalized_shape, weight, eps)
 
 def group_norm(
     input: Tensor, num_groups: int, weight: Optional[Tensor] = None, bias: Optional[Tensor] = None, eps: float = 1e-5

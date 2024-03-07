@@ -18,6 +18,9 @@
 #include <ATen/ops/native_layer_norm.h>
 #include <ATen/ops/native_layer_norm_backward_native.h>
 #include <ATen/ops/native_layer_norm_native.h>
+#include <ATen/ops/pow.h>
+#include <ATen/ops/rsqrt.h>
+#include <ATen/ops/rms_norm.h>
 #include <ATen/ops/zeros_like_native.h>
 #endif
 
@@ -257,5 +260,27 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   mean = mean.view(stat_shape);
   rstd = rstd.view(stat_shape);
   return std::make_tuple(out, mean, rstd);
+}
+
+Tensor rms_norm_symint(
+    const Tensor& input,
+    c10::SymIntArrayRef normalized_shape,
+    const c10::optional<Tensor>& weight_opt /* optional */,
+    double eps) {
+
+  std::vector<int64_t> dims_to_reduce;
+  for (const auto i : c10::irange(normalized_shape.size())) {
+    dims_to_reduce.push_back(input.dim() - i - 1);
+  }
+  IntArrayRef dims_to_reduce_ref = IntArrayRef(dims_to_reduce);
+
+  auto result = input.mul(at::rsqrt(at::pow(input, 2).mean(dims_to_reduce_ref, /*keep_dim=*/true).add_(eps)));
+
+  if (weight_opt.has_value()) {
+    result = result.mul(weight_opt.value());
+  }
+
+  return result;
+
 }
 } // namespace at::native
