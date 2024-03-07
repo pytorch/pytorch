@@ -65,6 +65,7 @@ class CppWrapperCuda(CppWrapperCpu):
                 """
                 #include <c10/cuda/CUDAGuard.h>
                 #include <c10/cuda/CUDAStream.h>
+                #include <ATen/cuda/EmptyTensor.h>
                 """
             )
 
@@ -141,8 +142,9 @@ class CppWrapperCuda(CppWrapperCpu):
 
     def write_get_raw_stream(self, index, graph=None):
         name = f"stream{index}"
+        self.writeline(f"cudaStream_t {name};")
         self.writeline(
-            f"cudaStream_t {name} = at::cuda::getCurrentCUDAStream({index});"
+            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_current_cuda_stream({index}, (void**)&{name}));"
         )
         return name
 
