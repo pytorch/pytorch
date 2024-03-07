@@ -108,7 +108,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
       size_t i);
 
   std::atomic<size_t> m_max_split_size;
-  std::vector<size_t> m_roundup_power2_divisions{};
+  std::vector<size_t> m_roundup_power2_divisions;
   std::atomic<double> m_garbage_collection_threshold;
   std::atomic<size_t> m_pinned_num_register_threads;
   std::atomic<bool> m_expandable_segments;

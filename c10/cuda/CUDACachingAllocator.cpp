@@ -812,6 +812,7 @@ static std::string reportProcessMemoryInfo(c10::DeviceIndex device) {
   cudaDeviceProp prop{};
   C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
 
+  // NOLINTNEXTLINE(*-c-arrays)
   char pci_id[80];
   snprintf(
       pci_id,
@@ -929,11 +930,13 @@ class DeviceCachingAllocator {
   std::vector<AllocatorTraceTracker> trace_trackers_;
 
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   DeviceCachingAllocator()
       : large_blocks(/*small=*/false),
         small_blocks(/*small=*/true),
         alloc_trace(new std::vector<TraceEntry>()) {
-    stats.max_split_size = CUDAAllocatorConfig::max_split_size();
+    stats.max_split_size =
+        static_cast<int64_t>(CUDAAllocatorConfig::max_split_size());
     context_recorder_.store(nullptr);
   }
 
@@ -1089,7 +1092,7 @@ class DeviceCachingAllocator {
       stats.num_ooms += 1;
 
       c10::reportOutOfMemoryToProfiler(
-          size,
+          static_cast<int64_t>(size),
           stats.allocated_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
               .current,
           stats.reserved_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
@@ -1196,6 +1199,7 @@ class DeviceCachingAllocator {
       remaining->prev = block;
       remaining->ptr = static_cast<char*>(remaining->ptr) + size;
       remaining->size -= size;
+      // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
       bool inserted = pool->insert_into_blocks(remaining).second;
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
@@ -1232,6 +1236,7 @@ class DeviceCachingAllocator {
         block->device,
         block->context_when_allocated);
 
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     bool inserted = active_blocks.insert(block).second;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
@@ -1247,7 +1252,7 @@ class DeviceCachingAllocator {
 
     c10::reportMemoryUsageToProfiler(
         block->ptr,
-        block->size,
+        static_cast<int64_t>(block->size),
         stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
         stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
         c10::Device(c10::DeviceType::CUDA, device));
@@ -1300,7 +1305,7 @@ class DeviceCachingAllocator {
 
     c10::reportMemoryUsageToProfiler(
         orig_block_ptr,
-        -orig_block_size,
+        -static_cast<int64_t>(orig_block_size),
         stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
         stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
         c10::Device(c10::DeviceType::CUDA, block->device));
@@ -1341,7 +1346,8 @@ class DeviceCachingAllocator {
     size_t device_free = 0;
     size_t device_total = 0;
     C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
-    allowed_memory_maximum = static_cast<size_t>(fraction * device_total);
+    allowed_memory_maximum =
+        static_cast<size_t>(fraction * static_cast<double>(device_total));
     set_fraction = true;
   }
 
@@ -1672,7 +1678,7 @@ class DeviceCachingAllocator {
       result.emplace_back();
       SegmentInfo& segment_info = result.back();
       segment_info.device = head_block->device;
-      segment_info.address = reinterpret_cast<int64_t>(head_block->ptr);
+      segment_info.address = reinterpret_cast<size_t>(head_block->ptr);
       segment_info.stream = head_block->stream;
       segment_info.is_large = (!head_block->pool->is_small);
       segment_info.is_expandable = head_block->expandable_segment_;
@@ -1726,12 +1732,16 @@ class DeviceCachingAllocator {
     result.reserve(alloc_trace->size());
     result.insert(
         result.end(),
-        alloc_trace->begin() + static_cast<std::vector<TraceEntry>::difference_type>(alloc_trace_next),
+        alloc_trace->begin() +
+            static_cast<std::vector<TraceEntry>::difference_type>(
+                alloc_trace_next),
         alloc_trace->end());
     result.insert(
         result.end(),
         alloc_trace->begin(),
-        alloc_trace->begin() + static_cast<std::vector<TraceEntry>::difference_type>(alloc_trace_next));
+        alloc_trace->begin() +
+            static_cast<std::vector<TraceEntry>::difference_type>(
+                alloc_trace_next));
 
     // Convert all the timestamps from tsc to epoch time in microseconds.
     for (auto& te : result) {
@@ -1841,6 +1851,7 @@ class DeviceCachingAllocator {
     if (uc == 0) {
       // Allows free_cached_blocks to begin cudaFreeing this pool's memory,
       // and makes sure this pool wasn't somehow made freeable already.
+      // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
       bool inserted =
           graph_pools_freeable.insert({mempool_id, it->second.get()}).second;
       TORCH_INTERNAL_ASSERT(inserted);
@@ -2090,6 +2101,7 @@ class DeviceCachingAllocator {
     active_blocks.erase(block);
     // Makes sure the Block* isn't already present in the pool we're freeing it
     // back into.
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     bool inserted = pool.insert_into_blocks(block).second;
     TORCH_INTERNAL_ASSERT(inserted);
 
@@ -2159,6 +2171,7 @@ class DeviceCachingAllocator {
     }
     const size_t subsumed_size = src->size;
     dst->size += subsumed_size;
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     auto erased =
         src->mapped ? pool.blocks.erase(src) : pool.unmapped.erase(src);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(erased == 1);
@@ -2776,7 +2789,7 @@ class DeviceCachingAllocator {
 
   void record_trace(
       TraceEntry::Action action,
-      int64_t addr,
+      size_t addr,
       size_t size,
       cudaStream_t stream,
       c10::DeviceIndex device,
@@ -2855,6 +2868,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   void add_allocated_block(Block* block) {
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     const auto mutex_shard_id = get_mutex_shard_id(block->ptr);
     std::lock_guard<std::mutex> lock(mutex[mutex_shard_id].m);
     allocated_blocks[mutex_shard_id][block->ptr] = block;
@@ -2972,7 +2986,7 @@ class NativeCachingAllocator : public CUDAAllocator {
 
   void attachOutOfMemoryObserver(OutOfMemoryObserver observer) override {
     for (auto& allocator : device_allocator) {
-      allocator->attachOutOfMemoryObserver(std::move(observer));
+      allocator->attachOutOfMemoryObserver(observer);
     }
   }
 

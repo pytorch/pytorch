@@ -33,7 +33,8 @@ struct UsageStream {
   UsageStream() = default;
   UsageStream(cudaStream_t s, c10::DeviceIndex d) : stream(s), device(d) {}
   UsageStream(const UsageStream& us) = default;
-  UsageStream(const UsageStream&& us) noexcept : stream(us.stream), device(us.device) {}
+  UsageStream(const UsageStream&& us) noexcept
+      : stream(us.stream), device(us.device) {}
   UsageStream& operator=(UsageStream other) {
     stream = other.stream;
     device = other.device;
