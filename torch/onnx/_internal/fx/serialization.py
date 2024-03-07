@@ -3,7 +3,6 @@ from __future__ import annotations
 import io
 import logging
 import os
-import tempfile
 from typing import Tuple, TYPE_CHECKING, Union
 
 import torch
@@ -84,16 +83,16 @@ def _create_tensor_proto_with_external_data(
     return tensor_proto
 
 
-def _convert_safetensors_to_torch_format(safetensors_file, torch_file):
+def _convert_safetensors_to_torch_format(safetensors_file):
     # It this function is called, safetensors is guaranteed to exist
     # because the HF model with safetensors was already loaded and exported to ONNX
     from safetensors import safe_open  # type: ignore[import-not-found]
 
     tensors = {}
-    with safe_open(safetensors_file, framework="pt", device=0) as f:  # type: ignore[attr-defined]
+    with safe_open(safetensors_file, framework="pt", device="cpu") as f:  # type: ignore[attr-defined]
         for k in f.keys():
             tensors[k] = f.get_tensor(k).cpu()
-    torch.save(tensors, torch_file)
+    return tensors
 
 
 # TODO: generalize to allow more checkpoints formats (torch or gguf)
@@ -149,9 +148,7 @@ def save_model_with_external_data(
             state_dict = el
         else:
             if isinstance(el, str) and el.endswith(".safetensors"):
-                with tempfile.NamedTemporaryFile() as el_tmp:
-                    _convert_safetensors_to_torch_format(el, el_tmp.name)
-                    state_dict = torch.load(el_tmp.name, map_location="cpu", mmap=True)
+                state_dict = _convert_safetensors_to_torch_format(el)
             else:
                 try:
                     # Loads checkpoint using memory-map on CPU to support really large models
