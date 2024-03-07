@@ -86,7 +86,11 @@ class ShapeEnvEvent:
 
     # Replay itself, but using shape_env as self.
     def run(self, shape_env=None) -> Any:
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymTypes
+        from torch.fx.experimental.symbolic_shapes import (
+            is_symbolic,
+            ShapeEnv,
+            SymTypes,
+        )
 
         # Special handling for the constructor event.
         if self.f is ShapeEnv:
@@ -105,7 +109,7 @@ class ShapeEnvEvent:
         # Replace any argument of type SymTypes by a new instance,
         # replacing its ShapeEnv reference.
         args, kwargs = pytree.tree_map_only(
-            SymTypes,
+            lambda x: isinstance(x, SymTypes) and is_symbolic(x),
             lambda a: type(a)(a.node.with_shape_env(shape_env)),
             (args, kwargs),
         )
@@ -172,7 +176,7 @@ class ShapeEnvEvent:
 # If we find more than one object of any of the above types, we
 # also check that the ShapeEnv instance is the same for all of them.
 def _extract_shape_env_and_assert_equal(args, kwargs):
-    from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymTypes
+    from torch.fx.experimental.symbolic_shapes import is_symbolic, ShapeEnv, SymTypes
 
     def assert_equal(old: Optional[ShapeEnv], new: ShapeEnv) -> ShapeEnv:
         if old is not None:
@@ -183,7 +187,7 @@ def _extract_shape_env_and_assert_equal(args, kwargs):
     for val in itertools.chain(args, kwargs.values()):
         if isinstance(val, ShapeEnv):
             shape_env = assert_equal(shape_env, val)
-        if isinstance(val, SymTypes):
+        if isinstance(val, SymTypes) and is_symbolic(val):
             shape_env = assert_equal(shape_env, val.node.shape_env)
 
     return shape_env

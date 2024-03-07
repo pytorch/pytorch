@@ -19,6 +19,7 @@ from torch.fx.experimental.symbolic_shapes import (
     StatelessSymbolicContext,
 )
 from torch.nested._internal.nested_tensor import (
+    buffer_from_jagged,
     jagged_from_list,
     jagged_from_tensor_and_lengths,
     ViewBufferFromNested,
@@ -99,6 +100,8 @@ class ScaledTensor(torch.Tensor):
         cls,
         data: torch.Tensor,
         scale: torch.Tensor,
+        *,
+        constant: int = 0,
     ):
         return torch.Tensor._make_wrapper_subclass(
             cls,
@@ -111,24 +114,29 @@ class ScaledTensor(torch.Tensor):
             device=data.device,
         )
 
-    def __init__(self, data: torch.Tensor, scale: torch.Tensor):
+    def __init__(self, data: torch.Tensor, scale: torch.Tensor, constant: int = 0):
         self._data = data
         self._scale = scale
+        self._constant = constant
 
     def __tensor_flatten__(self):
-        ctx = {}
+        ctx = {"_constant": self._constant}
         return ["_data", "_scale"], ctx
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
         assert len(inner_tensors) == 2
-        return ScaledTensor(inner_tensors["_data"], inner_tensors["_scale"])
+        return ScaledTensor(
+            inner_tensors["_data"],
+            inner_tensors["_scale"],
+            constant=metadata["_constant"],
+        )
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs=None):
         scaled_tensor = args[0]
         out = func(scaled_tensor._data, *args[1:], **kwargs)
-        return ScaledTensor(out, scaled_tensor._scale)
+        return ScaledTensor(out, scaled_tensor._scale, constant=scaled_tensor._constant)
 
     def __repr__(self):
         return f"{self._data.__repr__()}\n{self._scale.__repr__()}"
@@ -824,24 +832,19 @@ class GraphModule(torch.nn.Module):
 
                 return DoubleSizeMaybeAddGeThreeTensor(out_inner)
 
-        lower_bound_str = None
-        upper_bound_str = None
         curr_var_to_val = None
         curr_var_to_sources = None
+        guards = None
 
         def backend(gm, args):
-            print(gm.code)
             context = torch._guards.TracingContext.get()
-            val_to_guards = list(context.fake_mode.shape_env.var_to_guards.values())
 
             # Grab info on sources and guards from the shapeenv
-            nonlocal lower_bound_str
-            nonlocal upper_bound_str
             nonlocal curr_var_to_val
             nonlocal curr_var_to_sources
+            nonlocal guards
 
-            lower_bound_str = str(val_to_guards[0][0].expr)
-            upper_bound_str = str(val_to_guards[0][1].expr)
+            guards = [str(g.expr) for g in context.fake_mode.shape_env.guards]
             curr_var_to_val = {
                 str(k): v for k, v in context.fake_mode.shape_env.var_to_val.items()
             }
@@ -873,14 +876,15 @@ class GraphModule(torch.nn.Module):
             "s0": "L['x'].size()[0]",
             "s1": "L['x'].inner_elem.size()[0]",
         }
-        # lower bound comes from code underneath torch_dispatch  (operating on the inner tensor size)
-        expected_lower_bound = "s1 > 3"
-        # upper bound comes from user code (operating on the wrapper size)
-        expected_upper_bound = "2*s1 < 10"
         self.assertEqual(curr_var_to_val, expected_var_to_val)
         self.assertEqual(curr_var_to_sources, expected_var_to_sources)
-        self.assertEqual(lower_bound_str, expected_lower_bound)
-        self.assertEqual(upper_bound_str, expected_upper_bound)
+        self.assertExpectedInline(
+            "\n".join(guards),
+            """\
+Eq(2*s1, s0)
+2*s1 < 10
+s1 > 3""",
+        )
 
     def test_wrapper_subclass_with_same_sized_inner_tensor(self):
         # shouldn't recompile for different sizes when dynamic=True
@@ -1030,6 +1034,16 @@ class GraphModule(torch.nn.Module):
             ],
         )
 
+    def test_wrapper_subclass_dynamo_attribute_access_on_intermediate(self):
+        def f(x_subclass):
+            tmp_subclass = torch.add(x, 1)
+            return torch.mul(tmp_subclass._scale, tmp_subclass._constant)
+
+        x = ScaledTensor(torch.randn(2, 4), torch.randn(3), constant=2)
+        out_ref = f(x)
+        out_test = torch.compile(f, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(out_ref, out_test)
+
     def test_support_bases(self):
         import abc
 
@@ -1153,6 +1167,39 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
     def test_basic_autograd_inductor(self):
         self._test_autograd("inductor")
 
+    def test_subclass_with_mutation_in_graph(self):
+        # In this graph, we have an in-graph mutation, i.e. a mutation that is allowed
+        # to remain in the graph. Normally this is allowed, but it's not allowed if
+        # the graph handles subclasses at all.
+        # Whether the mutation is allowed or not allowed in the graph alters the number
+        # of outputs from the forward graph. Previously, a bug in this handling meant
+        # that sometimes the expected number and actual number of outputs from the
+        # joint graph did not match, causing assertion failures.
+        def fn(x, y):
+            z = x.sin()
+            y.sin_()
+            return z.cos(), y.cos()
+
+        fn_c = torch.compile(fn, backend="inductor")
+
+        values = [torch.rand((i, 8), requires_grad=True) for i in range(1, 6)]
+        values_copy = [x.detach().clone().requires_grad_(True) for x in values]
+
+        nt, offsets = jagged_from_list(values, None)
+        nt_copy, offsets = jagged_from_list(values_copy, offsets)
+        y = torch.rand((4, 8))
+        y_copy = y.clone()
+
+        ret = fn_c(nt, y)[0]
+        ref = fn(nt_copy, y_copy)[0]
+
+        self.assertEqual(buffer_from_jagged(ret), buffer_from_jagged(ref))
+
+        buffer_from_jagged(ret).sum().backward()
+        buffer_from_jagged(ref).sum().backward()
+        for ref_v, res_v in zip(values_copy, values):
+            self.assertEqual(ref_v.grad, res_v.grad)
+
     def test_unbind(self):
         # NB: If we have shape e.g. (3, j0, 3), duck sizing will give us (s0, s1, s0).
         # This causes a recompile later on when it realizes the batch and last dim
@@ -1235,11 +1282,23 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
             self.assertTrue(out.stride() == out_ref.stride())
             self.assertTrue(torch.allclose(out.values(), out_ref.values()))
 
-            # Check that no guards are incurred
+            # Check that no upper/lower bound guards are incurred
             def backend(gm, args):
                 context = torch._guards.TracingContext.get()
-                val_to_guards = context.fake_mode.shape_env.var_to_guards.values()
-                self.assertEqual(len(val_to_guards), 0)
+                guards = [str(g.expr) for g in context.fake_mode.shape_env.guards]
+                ranges = [
+                    f"{s}: [{vr.lower}, {vr.upper}]"
+                    for s, vr in context.fake_mode.shape_env.var_to_range.items()
+                ]
+                self.assertExpectedInline("\n".join(guards), """Eq(s3 - 1, s0)""")
+                self.assertExpectedInline(
+                    "\n".join(ranges),
+                    """\
+s0: [2, 9223372036854775805]
+s2: [2, 9223372036854775806]
+s3: [3, 9223372036854775806]
+s4: [2, 9223372036854775806]""",
+                )
                 return gm
 
             torch._dynamo.reset()

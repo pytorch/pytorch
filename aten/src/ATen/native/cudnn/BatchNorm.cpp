@@ -78,15 +78,8 @@ cudnnBatchNormMode_t getCudnnBatchNormMode(
     return CUDNN_BATCHNORM_PER_ACTIVATION;
   } else if (training && memory_format == at::MemoryFormat::ChannelsLast) {
     return CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
-
   } else if (training && memory_format == at::MemoryFormat::ChannelsLast3d) {
-
-#if CUDNN_VERSION >= 8100
     return CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
-#else
-    return CUDNN_BATCHNORM_SPATIAL;
-#endif // CUDNN_VERSION >= 8100
-
   } else {
     // TODO: The new CUDNN_BATCHNORM_SPATIAL_PERSISTENT mode was
     // introduced in CuDNN 7 for performance optimization, but it results in

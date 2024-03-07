@@ -1,8 +1,8 @@
-from typing import List, NamedTuple, Optional
+from typing import List, NamedTuple, Optional, Tuple
 
 import torch
 import torch.distributed as dist
-from torch.utils._contextlib import _DecoratorContextManager
+from torch.distributed.distributed_c10d import ReduceOp
 from ._fsdp_common import (
     _get_dim0_padded_size,
     _raise_assert_with_print,
@@ -26,7 +26,6 @@ def foreach_all_gather(
     all_gather_copy_in_stream: torch.cuda.Stream,
     all_gather_stream: torch.cuda.Stream,
     device: torch.device,
-    dtype: torch.dtype,
 ) -> Optional[AllGatherResult]:
     world_size, rank = group.size(), group.rank()
     # - Copy in
@@ -34,6 +33,11 @@ def foreach_all_gather(
         param_all_gather_inputs = [
             fsdp_param.all_gather_input for fsdp_param in fsdp_params
         ]
+        dtype = param_all_gather_inputs[0].dtype
+        if not all(t.dtype == dtype for t in param_all_gather_inputs):
+            raise NotImplementedError(
+                f"Mixed dtype not supported yet: {[t.dtype for t in param_all_gather_inputs]}"
+            )
         inp_split_sizes = [inp.numel() for inp in param_all_gather_inputs]
         all_gather_input_numel = sum(inp_split_sizes)
         all_gather_output = torch.empty(
@@ -45,9 +49,7 @@ def foreach_all_gather(
         foreach_copy_dsts = torch.split(all_gather_input, inp_split_sizes)
         torch._foreach_copy_(foreach_copy_dsts, param_all_gather_inputs)
         del param_all_gather_inputs
-        all_gather_copy_in_event = torch.cuda.Event()
-        all_gather_copy_in_event.record()
-    all_gather_stream.wait_event(all_gather_copy_in_event)
+    all_gather_stream.wait_stream(all_gather_copy_in_stream)
     with torch.cuda.stream(all_gather_stream):
         # - All-gather
         all_gather_work = dist.all_gather_into_tensor(
@@ -56,13 +58,13 @@ def foreach_all_gather(
             group=group,
             async_op=async_op,
         )
-        all_gather_event = torch.cuda.Event()
-        all_gather_event.record()
+        all_gather_event = all_gather_stream.record_event()
         return AllGatherResult(
             all_gather_output, all_gather_event, all_gather_work, inp_split_sizes
         )
 
 
+@torch.no_grad()
 def foreach_all_gather_copy_out(
     all_gather_result: AllGatherResult,
     fsdp_params: List[FSDPParam],
@@ -89,10 +91,9 @@ def foreach_all_gather_copy_out(
     out = [
         fsdp_param.all_gather_output.view(world_size, -1) for fsdp_param in fsdp_params
     ]
-    # TODO: Use `torch.split_with_sizes_copy` fast path once it lands.
-    splits = torch.split(all_gather_output, all_gather_input_numels, dim=1)
-    with _unsafe_preserve_version_counters(out):
-        torch._foreach_copy_(out, splits)  # one `copy_` per parameter
+    torch.split_with_sizes_copy(
+        all_gather_output, all_gather_input_numels, dim=1, out=out
+    )
 
 
 @torch.no_grad()
@@ -104,8 +105,7 @@ def foreach_reduce_scatter(
     orig_dtype: torch.dtype,
     reduce_dtype: Optional[torch.dtype],
     device: torch.device,
-    predivide_factor: float,
-    postdivide_factor: float,
+    divide_factors: Optional[Tuple[float, float]],
 ) -> torch.cuda.Event:
     """
     ``unsharded_grads`` owns the references to the gradients computed by
@@ -135,21 +135,16 @@ def foreach_reduce_scatter(
         foreach_reduce_scatter_copy_in(
             unsharded_grads, reduce_scatter_input, world_size
         )
-        _div_if_needed(reduce_scatter_input, predivide_factor)
-        # Record to mark the end of the reduce-scatter copy-in in the RS stream
-        copy_in_event = torch.cuda.Event()
-        copy_in_event.record()
         # Only after the copy-in finishes can we free the gradients, which were
         # computed in the default stream
-        current_stream.wait_event(copy_in_event)
+        current_stream.wait_stream(reduce_scatter_stream)
         unsharded_grads.clear()
         reduce_scatter_output = reduce_scatter_input.new_empty(
             (reduce_scatter_output_numel,)
         )
-        dist.reduce_scatter_tensor(
-            output=reduce_scatter_output, input=reduce_scatter_input, group=group
+        _reduce_scatter(
+            reduce_scatter_output, reduce_scatter_input, group, divide_factors
         )
-        _div_if_needed(reduce_scatter_output, postdivide_factor)
         reduce_scatter_output = _to_dtype_if_needed(reduce_scatter_output, orig_dtype)
         # - View out and accumulate
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
@@ -170,8 +165,7 @@ def foreach_reduce_scatter(
                 fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
             padded_sharded_numel = padded_unsharded_size.numel() // world_size
             flat_grad_offset += padded_sharded_numel
-        reduce_scatter_view_out_event = torch.cuda.Event()
-        reduce_scatter_view_out_event.record()
+        reduce_scatter_view_out_event = reduce_scatter_stream.record_event()
     # The RS output is allocated in the RS stream and used in the default
     # stream (for optimizer). To ensure its memory is not reused for later
     # RSs, we do not need extra synchronization since the sharded parameters
@@ -201,26 +195,23 @@ def foreach_reduce_scatter_copy_in(
     torch.cat(grad_views, dim=-1, out=reduce_scatter_input.view(world_size, -1))
 
 
+def _reduce_scatter(
+    output: torch.Tensor,
+    input: torch.Tensor,
+    group: dist.ProcessGroup,
+    divide_factors: Optional[Tuple[float, float]],
+) -> None:
+    if divide_factors:
+        predivide_factor, postdivide_factor = divide_factors
+        _div_if_needed(input, predivide_factor)
+        dist.reduce_scatter_tensor(output, input, group=group)
+        _div_if_needed(output, postdivide_factor)
+    else:
+        # Using NCCL's reduce-scatter to do the division by world size saves
+        # extra memory read/write from a separate division kernel
+        dist.reduce_scatter_tensor(output, input, op=ReduceOp.AVG, group=group)
+
+
 def _div_if_needed(tensor: torch.Tensor, div_factor: float) -> None:
     if div_factor > 1:
         tensor.div_(div_factor)
-
-
-# We need this context for the backward all-gather, which would otherwise
-# raise an error when writing to the all-gather output tensors in-place, e.g.:
-# RuntimeError: one of the variables needed for gradient computation has been
-# modified by an inplace operation: [torch.cuda.FloatTensor [15, 3]], which is
-# output 0 of AsStridedBackward0, is at version 3; expected version 2 instead.
-class _unsafe_preserve_version_counters(_DecoratorContextManager):
-    # Same as `_unsafe_preserve_version_counter` but only entering/exiting the
-    # context manager once for a list of tensors to reduce CPU overhead
-    def __init__(self, tensors: List[torch.Tensor]) -> None:
-        self.tensors = tensors
-        self.prev_versions = [t._version for t in tensors]
-
-    def __enter__(self) -> None:
-        pass
-
-    def __exit__(self, *args) -> None:
-        for tensor, prev_version in zip(self.tensors, self.prev_versions):
-            torch._C._autograd._unsafe_set_version_counter(tensor, prev_version)

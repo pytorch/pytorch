@@ -9,6 +9,8 @@ import torch.nn as nn
 from torch.autograd.graph import Node
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
 from torch.utils._pytree import tree_flatten, tree_unflatten
+from torch.utils.hooks import RemovableHandle
+from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_collectives import (
     AllGatherResult,
     foreach_all_gather,
@@ -17,6 +19,8 @@ from ._fsdp_collectives import (
 )
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo, TrainingState
 from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
+
+_ModuleToHandleDict = Dict[nn.Module, RemovableHandle]  # for state dict
 
 
 """
@@ -72,6 +76,9 @@ class AllGatherState(NamedTuple):
 class FSDPParamGroup:
     """This class represents a parameter group to communicate together."""
 
+    _orig_dtype: torch.dtype
+    _reduce_dtype: Optional[torch.dtype]
+
     def __init__(
         self,
         params: List[nn.Parameter],
@@ -79,21 +86,28 @@ class FSDPParamGroup:
         mesh_info: FSDPMeshInfo,
         post_forward_mesh_info: Optional[FSDPMeshInfo],
         device: torch.device,
+        mp_policy: MixedPrecisionPolicy,
     ):
         self.module = module  # permit ref cycle because 1:1 lifetime
         param_module_infos = _get_param_module_infos(params, module)
         self.fsdp_params = [
-            FSDPParam(param, module_info, mesh_info, post_forward_mesh_info, device)
+            FSDPParam(
+                param, module_info, mesh_info, post_forward_mesh_info, device, mp_policy
+            )
             for param, module_info in zip(params, param_module_infos)
         ]
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
+        self.mp_policy = mp_policy
         self._training_state = TrainingState.IDLE
         # Group's sharded state always matches its parameters' sharded states
         self._sharded_state = ShardedState.SHARDED
-        self._init_mp_dtypes()
         self._module_fqn: Optional[str] = None  # prefixed from root module
+
+        # - Hook state
+        self._module_to_pre_save_state_dict_hook_handle: _ModuleToHandleDict = {}
+        self._module_to_pre_load_state_dict_hook_handle: _ModuleToHandleDict = {}
 
         # - Communication and communication/computation overlap
         self.comm_ctx = FSDPCommContext()
@@ -104,7 +118,11 @@ class FSDPParamGroup:
         # of the output's grad fns and later query the autograd engine whether
         # any grad fn will execute in the current backward to know to prefetch.
         self.all_forward_output_grad_fns: Set[Tuple[Node, ...]] = set()
-        self._init_grad_divide_factors()
+        # Whether to reduce-scatter or all-reduce gradients, respectively
+        # (can be set to false to save communication during gradient
+        # accumulation); all-reducing without reduce-scatter is disallowed
+        self.reduce_scatter_grads: bool = True
+        self.all_reduce_grads: bool = True
 
         # - CUDA events for stream synchronization
         # Holds the all-gather output buffer, sync objects, and metadata
@@ -119,6 +137,8 @@ class FSDPParamGroup:
 
     # Initialization #
     def _init_mp_dtypes(self) -> None:
+        for fsdp_param in self.fsdp_params:
+            fsdp_param.init_dtype_attrs(self.mp_policy)
         orig_dtypes = {fsdp_param.orig_dtype for fsdp_param in self.fsdp_params}
         if len(orig_dtypes) != 1:
             # This can be relaxed if we copy-out for the reduce-scatter
@@ -126,28 +146,56 @@ class FSDPParamGroup:
                 f"FSDP expects uniform original parameter dtype but got {orig_dtypes}"
             )
         self._orig_dtype = next(iter(orig_dtypes))
-        self._param_dtype = self._orig_dtype
+        reduce_dtypes = {fsdp_param.reduce_dtype for fsdp_param in self.fsdp_params}
+        if len(reduce_dtypes) != 1:
+            # This can be relaxed if we issue one reduce-scatter per reduce
+            # dtype (but we would need a way for users to specify multiple
+            # reduce dtypes)
+            raise AssertionError(
+                f"FSDP expects uniform reduce dtype but got {reduce_dtypes}"
+            )
+        self._reduce_dtype = next(iter(reduce_dtypes))
 
     def _init_grad_divide_factors(self):
-        """
-        For N data parallel workers, each worker computes g_i, and they
-        collectively reduce to compute (g_1 + ... + g_N) / N. To avoid overflow
-        and underflow, we divide by ~sqrt(N) before and after the reduction.
-        """
         data_parallel_world_size = 1
         data_parallel_world_size *= self.mesh_info.shard_mesh_size
         if isinstance(self.mesh_info, HSDPMeshInfo):
             data_parallel_world_size *= self.mesh_info.replicate_mesh_size
+        if self._reduce_dtype == torch.float32:
+            # Use NCCL's AVG op to divide after reduction since it is more
+            # performant and fp32 has sufficient precision
+            self._grad_divide_factors: Optional[Tuple[float, float]] = None
+            return
+        # For N data parallel workers, each worker computes g_i, and they
+        # collectively reduce (g_1 + ... + g_N) / N. To avoid overflow and
+        # underflow, we divide by ~sqrt(N) before and after the reduction.
         factor: int = 1
         while (
             data_parallel_world_size % factor == 0
             and data_parallel_world_size / factor > factor
         ):
             factor *= 2
-        self._grad_predivide_factor: float = float(factor)
-        self._grad_postdivide_factor: float = (
-            data_parallel_world_size / self._grad_predivide_factor
-        )
+        factor = float(factor)
+        self._grad_divide_factors = (factor, data_parallel_world_size / factor)
+
+    def lazy_init(self):
+        param_names_on_meta = [
+            fsdp_param._param_fqn
+            for fsdp_param in self.fsdp_params
+            if fsdp_param.sharded_param.device.type == "meta"
+        ]
+        if param_names_on_meta:
+            raise RuntimeError(
+                "FSDP parameters should be materialized from meta device before training, "
+                f"but the following were still on meta device: {param_names_on_meta}\n"
+                "For example, call module.to_empty(device) to materialize to device and "
+                "call module.reset_parameters() on each module to initialize values."
+            )
+        # Initialize mixed precision attributes lazily in case the user changes
+        # the parameter dtypes after construction time but before forward
+        self._init_mp_dtypes()
+        self._init_grad_divide_factors()
+        self._register_state_dict_hooks()
 
     # Runtime #
     def unshard(self, async_op: bool = False):
@@ -166,7 +214,6 @@ class FSDPParamGroup:
             async_op,
             *self.comm_ctx.get_all_gather_streams(self._training_state),
             self.device,
-            self._param_dtype,
         )
 
     def wait_for_unshard(self):
@@ -251,6 +298,9 @@ class FSDPParamGroup:
     def post_backward(self, *unused: Any):
         self._training_state = TrainingState.POST_BACKWARD
         with torch.profiler.record_function("FSDP::post_backward_reshard"):
+            if not self.reduce_scatter_grads:
+                self.reshard()
+                return
             # Save the autograd-computed gradients before resharding to only
             # access the unsharded parameters when their data is present
             fsdp_params_with_grad: List[FSDPParam] = []
@@ -270,10 +320,9 @@ class FSDPParamGroup:
                 self._reduce_scatter_process_group,
                 self.comm_ctx.reduce_scatter_stream,
                 self._orig_dtype,
-                self._orig_dtype,
+                self._reduce_dtype,
                 self.device,
-                self._grad_predivide_factor,
-                self._grad_postdivide_factor,
+                self._grad_divide_factors,
             )
 
     def finalize_backward(self):
@@ -370,6 +419,24 @@ class FSDPParamGroup:
         args = tree_unflatten(args_list, args_spec)
         kwargs = tree_unflatten(kwargs_list, kwargs_spec)
         return args, kwargs
+
+    def _register_state_dict_hooks(self) -> None:
+        assert len(self._module_to_pre_save_state_dict_hook_handle) == 0
+        assert len(self._module_to_pre_load_state_dict_hook_handle) == 0
+        modules_with_fsdp_params: Set[nn.Module] = {
+            fsdp_param._module_info.module for fsdp_param in self.fsdp_params
+        }
+
+        def to_sharded_hook(*args: Any, **kwargs: Any) -> None:
+            self._to_sharded()
+
+        for module in modules_with_fsdp_params:
+            self._module_to_pre_save_state_dict_hook_handle[
+                module
+            ] = module.register_state_dict_pre_hook(to_sharded_hook)
+            self._module_to_pre_load_state_dict_hook_handle[
+                module
+            ] = module._register_load_state_dict_pre_hook(to_sharded_hook)
 
     # Properties #
     @property

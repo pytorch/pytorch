@@ -6,18 +6,23 @@ import sys
 from typing import Optional, Tuple
 import unittest
 from functools import partial
+import math
 
 import numpy as np
 import torch
 import torch.nn
 import torch.nn.functional as F
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import (
+    SM70OrLater, SM80OrLater, PLATFORM_SUPPORTS_FUSED_ATTENTION,
+)
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
+    skipCUDAIf,
+    skipCUDAIfRocm,
     skipMeta,
     PYTORCH_CUDA_MEMCHECK,
 )
@@ -28,9 +33,11 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     instantiate_parametrized_tests,
     IS_FBCODE,
+    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfSlowGradcheckEnv,
+    skipIfTorchDynamo,
     markDynamoStrictTest,
     xfailIfTorchDynamo,
     subtest,
@@ -3023,9 +3030,9 @@ class TestNestedTensorSubclass(TestCase):
                                     "directly calling torch.ops.aten.size"):
             torch.ops.aten.size.default(nt)
 
-        singleton_int = torch.nested._internal.nested_tensor.get_tensor_symint(_offsets, coeff=1)
-        self.assertEqual(nt.size(), (3, singleton_int, 3))
-        self.assertEqual(nt.shape, (3, singleton_int, 3))
+        nested_int = torch.nested._internal.nested_tensor.get_tensor_symint(_offsets, coeff=1)
+        self.assertEqual(nt.size(), (3, nested_int, 3))
+        self.assertEqual(nt.shape, (3, nested_int, 3))
         self.assertEqual(nt.dim(), 3)
         self.assertEqual(nt.numel(), 27)
 
@@ -3158,7 +3165,7 @@ class TestNestedTensorSubclass(TestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"split\(\): not supported for NestedTensor on dim=0 or dim=1",
+            r"split\(\): not supported for NestedTensor on dim=1",
         ):
             torch.split(nt, 2, 1)
 
@@ -3178,7 +3185,7 @@ class TestNestedTensorSubclass(TestCase):
         )
         with self.assertRaisesRegex(
             RuntimeError,
-            r"split_with_sizes\(\): not supported for NestedTensor on dim=0 or dim=1",
+            r"split_with_sizes\(\): not supported for NestedTensor on dim=1",
         ):
             torch.split(nt, [1, 2], 1)
 
@@ -3273,22 +3280,29 @@ class TestNestedTensorSubclass(TestCase):
     def test_chunk(self, device):
         # normal case
         D = 30
-        nt = random_nt_from_dims(
-            [4, None, D], device=device, dtype=torch.float32, layout=torch.jagged)
+        B = 8
+        nt = random_nt_from_dims([B, None, D], device=device, dtype=torch.float32, layout=torch.jagged)
         NUM_CHUNKS = 3
         chunks = nt.chunk(NUM_CHUNKS, dim=-1)
         self.assertEqual(len(chunks), NUM_CHUNKS)
         for i in range(NUM_CHUNKS):
             self.assertEqual(chunks[i].shape[-1], D // NUM_CHUNKS)
 
-        # chunk on batch dim not supported
-        with self.assertRaisesRegex(
-                RuntimeError, "chunk.* not supported for NestedTensor on dim=0 or dim=1"):
-            nt.chunk(2, dim=0)
+        # chunk on batch dim
+        chunks = nt.chunk(NUM_CHUNKS, dim=0)
+        self.assertEqual(len(chunks), NUM_CHUNKS)
+        chunk_size = math.ceil(B / NUM_CHUNKS)
+        for i in range(NUM_CHUNKS):
+            if i < NUM_CHUNKS - 1:
+                self.assertEqual(chunks[i].shape[0], chunk_size)
+            else:
+                self.assertEqual(chunks[i].shape[0], B - chunk_size * (NUM_CHUNKS - 1))
+            offsets_expected = nt._offsets[i * chunk_size + 1 : (i + 1) * chunk_size + 1] - nt._offsets[i * chunk_size]
+            self.assertEqual(chunks[i]._offsets[1:], offsets_expected)
+        self.assertEqual(nt._values, torch.cat([x._values for x in chunks], dim=0))
 
         # chunk on ragged dim not supported
-        with self.assertRaisesRegex(
-                RuntimeError, "chunk.* not supported for NestedTensor on dim=0 or dim=1"):
+        with self.assertRaisesRegex(RuntimeError, "chunk.* not supported for NestedTensor on dim=1"):
             nt.chunk(2, dim=1)
 
     def test_squeeze(self, device):
@@ -3316,12 +3330,12 @@ class TestNestedTensorSubclass(TestCase):
 
         # squeeze on batch dim not supported
         with self.assertRaisesRegex(
-                RuntimeError, "squeeze.* not supported for NestedTensor on dim=0 or dim=1"):
+                RuntimeError, "squeeze.* not supported for NestedTensor on dim=0"):
             nt.squeeze(0)
 
         # squeeze on ragged dim not supported
         with self.assertRaisesRegex(
-                RuntimeError, "squeeze.* not supported for NestedTensor on dim=0 or dim=1"):
+                RuntimeError, "squeeze.* not supported for NestedTensor on dim=1"):
             nt.squeeze(1)
 
     def test_binary_pointwise_broadcasting(self, device):
@@ -3348,6 +3362,21 @@ class TestNestedTensorSubclass(TestCase):
         for t_size in t_sizes:
             t = torch.rand(t_size, requires_grad=True, device=device, dtype=torch.float64)
             gradcheck(grad_test_func, inputs=(t, *ts), check_batched_grad=False)
+
+    def test_threshold_backward(self, device):
+        ts1 = self._get_list_for_jagged_tensor(((2, 3, 4), 16), device=device, requires_grad=False)
+        ts2 = self._get_list_for_jagged_tensor(((2, 3, 4), 16), device=device, requires_grad=False)
+
+        nt1, offsets = jagged_from_list(ts1, None)
+        nt2, offsets = jagged_from_list(ts2, offsets)
+        buf1 = buffer_from_jagged(nt1).detach().clone()
+        buf2 = buffer_from_jagged(nt2).detach().clone()
+
+        res_nt = torch.ops.aten.threshold_backward(nt1, nt2, 0.0)
+        res_dense = torch.ops.aten.threshold_backward(buf1, buf2, 0.0)
+
+        self.assertEqual(res_dense, buffer_from_jagged(res_nt))
+
 
     @parametrize("keepdim", [False, True])
     def test_sum_int_DimList(self, device, keepdim):
@@ -3633,6 +3662,28 @@ class TestNestedTensorSubclass(TestCase):
         self.assertTrue(not nt_noncontiguous.is_contiguous(memory_format=torch.contiguous_format))
         self.assertTrue(nt_contiguous_narrow.is_contiguous(memory_format=torch.contiguous_format))
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    @parametrize("func", [torch.empty_like, torch.randn_like],
+                 name_fn=lambda f: f.__name__)
+    def test_like_shape(self, func):
+        nt = random_nt_from_dims([2, None, 3], torch.device('cpu'), torch.float32, layout=torch.jagged)
+        nt_like = func(nt)
+
+        for nt_ub in nt_like.unbind():
+            t_like = func(nt_ub)
+            self.assertEqual(nt_ub.shape, t_like.shape)
+
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    @parametrize("func", [torch.ones_like, torch.zeros_like],
+                 name_fn=lambda f: f.__name__)
+    def test_like_value(self, func):
+        nt = random_nt_from_dims([2, None, 3], torch.device('cpu'), torch.float32, layout=torch.jagged)
+        nt_like = func(nt)
+
+        for nt_ub in nt_like.unbind():
+            t_like = func(nt_ub)
+            self.assertEqual(nt_ub, t_like)
+
     def test_noncontiguous_pointwise(self, device):
         a = torch.randn(2, 3, 4, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, 4, requires_grad=True, dtype=torch.float64, device=device)
@@ -3812,11 +3863,13 @@ class TestNestedTensorSubclass(TestCase):
             if not (str(device).startswith("cuda") and dtype == torch.bfloat16):
                 check_forward_backward()
 
-    # This requires NT -> NT views to work in inductor, which is a TODO
-    @unittest.expectedFailure  # noqa: E301
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    # Guarding with sqrt() doesn't work on ROCm?
+    @skipCUDAIfRocm
     @onlyCUDA
-    @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if
-                 SM80OrLater else [torch.float16, torch.float32])
+    @dtypes(*([torch.float16, torch.bfloat16, torch.float32] if SM80OrLater
+            else [torch.float16, torch.float32]))
     def test_sdpa_compile(self, device, dtype):
         batch_size = 1
         emb_dims = 1024
@@ -3842,9 +3895,9 @@ class TestNestedTensorSubclass(TestCase):
         k_d2 = key(x_d2).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
         v_d2 = value(x_d2).view(batch_size, -1, n_heads, head_dims).transpose(1, 2)
 
-        q_nt = query(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
-        k_nt = key(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
-        v_nt = value(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).transpose(1, 2)
+        q_nt = query(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).detach().transpose(1, 2)
+        k_nt = key(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).detach().transpose(1, 2)
+        v_nt = value(x_nt).view(*x_nt.size()[0:2], n_heads, head_dims).detach().transpose(1, 2)
 
         # High Precision Math Reference
         q_d1_f32 = q_d1.to(torch.float32)
@@ -3882,6 +3935,51 @@ class TestNestedTensorSubclass(TestCase):
         # should be equivalent to just running the buffers through
         output_dense = F.scaled_dot_product_attention(query._values, key._values, value._values)
         self.assertEqual(output._values, output_dense)
+
+    @onlyCUDA
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FUSED_ATTENTION,
+        "Platform doesn't support flash or mem-efficient attention"
+    )
+    @dtypes(*([torch.float16, torch.bfloat16, torch.float32] if SM80OrLater
+            else [torch.float16, torch.float32]))
+    def test_sdpa_with_packed_in_proj(self, device, dtype):
+        # shape (B, *, D)
+        input_packed = random_nt_from_dims(
+            [5, None, 10], device=device, dtype=dtype, layout=torch.jagged)
+
+        # Do input projection.
+        num_heads = 2
+        # should be multiple of 4 for efficient kernels (e.g. flash / mem-efficient)
+        head_dim = 8
+        qkv_linear = torch.nn.Linear(10, num_heads * head_dim * 3).to(device=device, dtype=dtype)
+
+        def in_proj(input_packed, qkv_linear=qkv_linear):
+            qkv_post_proj = qkv_linear(input_packed)
+            # these are non-contiguous to trigger _is_safe_to_get_storage_as_tensor()
+            q, k, v = qkv_post_proj.chunk(3, dim=-1)
+            q = q.unflatten(-1, [num_heads, head_dim]).transpose(-2, -3)
+            k = k.unflatten(-1, [num_heads, head_dim]).transpose(-2, -3)
+            v = v.unflatten(-1, [num_heads, head_dim]).transpose(-2, -3)
+            return q, k, v
+
+        q, k, v = in_proj(input_packed)
+        output = F.scaled_dot_product_attention(q, k, v, attn_mask=None)
+
+        # compare to individually running unbound components through
+        for in_component, out_component in zip(
+            input_packed.unbind(),
+            output.transpose(-2, -3).unbind()
+        ):
+            q, k, v = in_proj(in_component)
+            out = F.scaled_dot_product_attention(q, k, v).transpose(-2, -3)
+
+            # Low Precision Math Reference
+            out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
+                q, k, v)[0].transpose(-2, -3)
+            output_ref_atol, output_ref_rtol = get_tolerances(out, out_lp_ref)
+
+            self.assertEqual(out, out_component, atol=output_ref_atol, rtol=output_ref_rtol)
 
 
 instantiate_parametrized_tests(TestNestedTensor)

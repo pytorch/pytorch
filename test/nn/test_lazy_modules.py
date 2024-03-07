@@ -583,8 +583,8 @@ class TestLazyModules(TestCase):
 
     @suppress_warnings
     def test_optimizer_pass(self):
-        # Add Adamax and RAdam when #118230 and #117836 are complete
-        optimizers = [torch.optim.Adadelta, torch.optim.Adagrad, torch.optim.Adam,
+        # Add RAdam when #118230 is complete
+        optimizers = [torch.optim.Adadelta, torch.optim.Adagrad, torch.optim.Adamax, torch.optim.Adam,
                       torch.optim.AdamW, torch.optim.ASGD, torch.optim.SGD, torch.optim.Rprop,
                       torch.optim.RMSprop, torch.optim.LBFGS]
 
