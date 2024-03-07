@@ -529,18 +529,6 @@ def optim_inputs_func_asgd(device):
 
 def optim_error_inputs_func_asgd(device, dtype):
     error_inputs = get_error_inputs_for_all_optims(device, dtype)
-    if "cuda" in str(device):
-        error_inputs += [
-            ErrorOptimizerInput(
-                OptimizerInput(
-                    params=None,
-                    kwargs=dict(foreach=False, capturable=True),
-                    desc="single tensor capturable not supported",
-                ),
-                error_type=ValueError,
-                error_regex="Capturable not supported with single tensor ASGD",
-            )
-        ]
     if str(device) == "cpu":
         error_inputs += [
             ErrorOptimizerInput(
@@ -1359,7 +1347,6 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_asgd,
         optim_error_inputs_func=optim_error_inputs_func_asgd,
         supported_impls=("foreach", "differentiable"),
-        only_supports_capturable_on_foreach=True,  # Remove this line when #116052 is done!
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo(
