@@ -1131,20 +1131,26 @@ def valid_vec_isa_list() -> List[VecISA]:
     # Try to load the cpuinfo from persist cache
     base_name = "cpu_info"
     from filelock import FileLock
-    lock = FileLock(os.path.join(get_lock_dir(), f"{base_name}.lock"), timeout=LOCK_TIMEOUT)
-    cpu_info_str = ""
+
+    lock = FileLock(
+        os.path.join(get_lock_dir(), f"{base_name}.lock"), timeout=LOCK_TIMEOUT
+    )
+
+    json_data = None
     with lock:
         cpu_info_conf = os.path.join(cache_dir(), f"{base_name}.json")
         if os.path.exists(cpu_info_conf):
             with open(cpu_info_conf, "r") as f:
-                cpu_info_str = f.read()
+                try:
+                    json_data = json.load(f)
+                except Exception as e:
+                    pass
 
-    if cpu_info_str:
+    isa_list = []
+    if json_data is not None:
         try:
-            # Parse persist cache
-            json_data = json.load(cpu_info_str)
             assert isinstance(json_data, list)
-            valid_vec_isas: Dict(str, VecISA) = {}
+            valid_vec_isas: Dict[str, VecISA] = {}
             for isa in supported_vec_isa_list:
                 valid_vec_isas[str(isa)] = isa
 
@@ -1158,7 +1164,6 @@ def valid_vec_isa_list() -> List[VecISA]:
             return []
 
     # Cannot get the cpuinfo from persist cache, then we need to parse it from /proc/cpuinfo
-    isa_list = []
     with open("/proc/cpuinfo") as _cpu_info:
         _cpu_info_content = _cpu_info.read()
         for isa in supported_vec_isa_list:

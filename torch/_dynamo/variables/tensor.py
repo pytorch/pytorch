@@ -856,7 +856,12 @@ class TensorVariable(VariableTracker):
     def method_new(self, *args, **kwargs):
         # Convert x.new(torch.Size) into x.new_empty(torch.Size),
         # as Tensor.new acts differently with a Size input versus a tuple input.
-        if len(args) == 1 and isinstance(args[0], SizeVariable):
+        if (len(args) == 1 and isinstance(args[0], SizeVariable)) or (
+            len(args) >= 1
+            and all(
+                isinstance(a, ConstantVariable) and a.python_type() == int for a in args
+            )
+        ):
             from ..symbolic_convert import InstructionTranslator
 
             return self.call_method(
