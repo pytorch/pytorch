@@ -496,8 +496,11 @@ class triton:
     # TODO - need to debug why this prevents cleanup
     cudagraph_trees_history_recording = False
 
+    # synchronize after cudagraph invocation
     force_cudagraph_sync = False
 
+    # always run cudagraphs in the eager warmup stage
+    # instead of recording and executing cudagraphs
     force_cudagraphs_warmup = False
 
     # assertions on the fast path
