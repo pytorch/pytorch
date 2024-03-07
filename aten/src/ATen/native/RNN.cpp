@@ -209,7 +209,7 @@ struct CellParams : public CellParamsBase {
     TORCH_INTERNAL_ASSERT(false, "Not yet implemented");
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
-      CellParamsSerializationType state) {
+      const CellParamsSerializationType& state) {
     TORCH_INTERNAL_ASSERT(false, "Not yet implemented");
   }
 };
@@ -289,9 +289,9 @@ struct QuantizedCellParams : public CellParamsBase {
                                                zero_point_hh.toLong()};
     return CellParamsSerializationType(
         "quantized",
-        std::move(tensors_to_serialize),
-        std::move(doubles_to_serialize),
-        std::move(longs_to_serialize),
+        tensors_to_serialize,
+        doubles_to_serialize,
+        longs_to_serialize,
         {});
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
@@ -355,10 +355,10 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params(
       /*packed_hh=*/std::move(packed_hh),
       /*col_offsets_ih=*/std::move(col_offsets_ih),
       /*col_offsets_hh=*/std::move(col_offsets_hh),
-      /*scale_ih=*/std::move(scale_ih),
-      /*scale_hh=*/std::move(scale_hh),
-      /*zero_point_ih=*/std::move(zero_point_ih),
-      /*zero_point_hh=*/std::move(zero_point_hh));
+      /*scale_ih=*/scale_ih,
+      /*scale_hh=*/scale_hh,
+      /*zero_point_ih=*/zero_point_ih,
+      /*zero_point_hh=*/zero_point_hh);
 }
 
 // QuantizedCellParams vs. QuantizedCellParamsDynamic
@@ -431,10 +431,10 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
     // reduce_range parameter is serialized along with the int field values.
     return CellParamsSerializationType(
         "quantized_dynamic",
-        std::move(tensors_to_serialize),
+        tensors_to_serialize,
         {},
         {reduce_range_},
-        std::move(packed_params_to_serialize));
+        packed_params_to_serialize);
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
       CellParamsSerializationType state) {
@@ -507,7 +507,7 @@ struct QuantizedCellParamsFP16 : public CellParamsBase {
         packed_params_to_serialize{packed_ih, packed_hh};
 
     return CellParamsSerializationType(
-        "quantized_fp16", {}, {}, {}, std::move(packed_params_to_serialize));
+        "quantized_fp16", {}, {}, {}, packed_params_to_serialize);
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
       CellParamsSerializationType state) {

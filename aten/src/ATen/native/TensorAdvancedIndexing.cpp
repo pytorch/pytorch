@@ -460,7 +460,7 @@ TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
     }
   }
 
-  auto info = at::native::make_info(self, std::move(indices));
+  auto info = at::native::make_info(self, indices);
   build_index_op(*this, info, result);
   return TORCH_PRECOMPUTE_STRUCT2(index, Tensor)()
       .set_sizes(std::move(info.indexed_sizes))
@@ -2104,7 +2104,7 @@ inline std::tuple<Tensor, Tensor, int64_t> _take_along_dim_helper(
 
   return std::make_tuple(std::move(self_broadcasted),
                          std::move(indices_broadcasted),
-                         std::move(dim));
+                         dim);
 }
 
 static inline void checkDevice(CheckedFrom c, const Tensor& t, Device device) {
