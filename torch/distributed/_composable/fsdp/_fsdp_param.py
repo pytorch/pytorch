@@ -104,6 +104,7 @@ class FSDPParam:
     _contiguous_orig_stride: Tuple[int, ...]
     sharded_size: torch.Size  # ND
     contiguous_sharded_stride: Tuple[int, ...]
+    padded_sharded_param_size: torch.Size  # ND
     sharded_post_forward_size: torch.Size  # ND
     contiguous_sharded_post_forward_stride: Tuple[int, ...]
     _sharded_param_data: torch.Tensor  # 1D
@@ -130,26 +131,15 @@ class FSDPParam:
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
-        self._init_dtype_attrs(param, mp_policy)
         self._init_sharded_param(param, device)
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
         self.all_gather_output = torch.empty(0)
         self._param_fqn: Optional[str] = None  # prefixed from root module
 
-    def _init_dtype_attrs(self, param: nn.Parameter, mp_policy: MixedPrecisionPolicy):
-        param_dtype, reduce_dtype = (mp_policy.param_dtype, mp_policy.reduce_dtype)
-        self.orig_dtype = param.dtype
-        # Clamp `param_dtype` to `None` if no casting is required
-        if param_dtype == self.orig_dtype:
-            param_dtype = None
-        self.param_dtype = param_dtype
-        self.reduce_dtype = reduce_dtype
-        # None indicates that the mixed precision is not enabled
-
     @torch.no_grad()
     def _init_sharded_param(self, param: nn.Parameter, device: torch.device):
-        if param.device != device:
+        if param.device != device and param.device.type != "meta":
             raise AssertionError(
                 f"Expects the parameter to already be moved to device {device} but got {param.device}"
             )
@@ -212,6 +202,7 @@ class FSDPParam:
         self.contiguous_sharded_stride = make_contiguous_strides_for(self.sharded_size)
         padded_sharded_size = chunks[0].size()  # 0th always padded
         padded_sharded_param = param_data.new_zeros(padded_sharded_size)
+        self.padded_sharded_param_size = padded_sharded_param.size()
         if sharded_param.numel() > 0:
             padded_sharded_param[: sharded_param.size(0)].copy_(sharded_param)
         self._sharded_param_data = padded_sharded_param.view(-1)
@@ -235,6 +226,16 @@ class FSDPParam:
         self.contiguous_sharded_post_forward_stride = make_contiguous_strides_for(
             self.sharded_post_forward_size
         )
+
+    def init_dtype_attrs(self, mp_policy: MixedPrecisionPolicy):
+        param_dtype, reduce_dtype = (mp_policy.param_dtype, mp_policy.reduce_dtype)
+        self.orig_dtype = self.sharded_param.dtype
+        # Clamp `param_dtype` to `None` if no casting is required
+        if param_dtype == self.orig_dtype:
+            param_dtype = None
+        self.param_dtype = param_dtype
+        self.reduce_dtype = reduce_dtype
+        # None indicates that the mixed precision is not enabled
 
     def init_all_gather_output(
         self,
