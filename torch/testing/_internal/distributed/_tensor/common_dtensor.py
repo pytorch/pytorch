@@ -53,6 +53,20 @@ if torch.cuda.is_available() and torch.cuda.device_count() > 1:
 T = TypeVar("T")
 
 
+# simple RMSNorm layer for testing
+class RMSNormPython(torch.nn.Module):
+    def __init__(self, dim: int, eps: float = 1e-6):
+        super().__init__()
+        self.eps = eps
+        self.weight = torch.nn.Parameter(torch.ones(dim))
+
+    def _norm(self, x):
+        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+
+    def forward(self, x):
+        output = self._norm(x)
+        return output * self.weight
+
 class MLPModule(nn.Module):
     def __init__(self, device):
         super().__init__()

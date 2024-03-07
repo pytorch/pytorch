@@ -2688,7 +2688,12 @@ class ShapeEnv:
             self.log.debug("create_symbol %s duck sized %s", r, source.name())
 
         if isinstance(r, sympy.Symbol):
-            self.var_to_sources[r].append(source)
+            r_sources = self.var_to_sources[r]
+            r_sources.append(source)
+            if not source.is_ephemeral() and r_sources[0].is_ephemeral():
+                # prefer non-ephemeral source first since it may be guarded on later
+                r_sources[0], r_sources[-1] = r_sources[-1], r_sources[0]
+
             # This ensures we get zeros in symbol_guard_counts, which makes
             # some queries simpler (since we will accumulate mass on 0 this
             # way)
@@ -3796,8 +3801,21 @@ class ShapeEnv:
         # In case of really gnarly expression, we don't blow up
         if len(free) > 5:
             return
-        # NB: prioritize unbacked symints for solving by ordering them last
-        free = sorted(free, key=lambda x: (self.size_hint(x, allow_none=True) or sys.maxsize, x.name), reverse=True)  # type: ignore[attr-defined]
+
+        # Prioritize unbacked symints for solving by ordering them last.
+        # Prefer to simplify out lexicographically higher symbols (i.e. simplify out s4 over s3).
+        #   (NB: this unfortunately isn't strictly equivalent to simplifying out newer symbols)
+        # Prefer to simplify out symbols with ephemeral sources.
+        def _smart_symbol_sort(x):
+            has_only_ephemeral_sources = (
+                x in self.var_to_sources and all(s.is_ephemeral() for s in self.var_to_sources[x])
+            )
+            size = self.size_hint(x, allow_none=True) or sys.maxsize
+            name = x.name
+            # 1 puts ephemeral sourced symbols first when sorting in reverse
+            return (1 if has_only_ephemeral_sources else 0, size, name)
+
+        free = sorted(free, key=_smart_symbol_sort, reverse=True)  # type: ignore[attr-defined]
         lhs = expr.lhs
         rhs = expr.rhs
 
