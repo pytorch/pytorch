@@ -2340,7 +2340,9 @@ class FuncDefaultsGuardAccessor : public GuardAccessor {
     if (x == nullptr) {
       PyErr_Clear();
       return GuardDebugInfo(
-          false, std::string("Not a function on ") + get_source(), 0);
+          false,
+          std::string(repr() + ": Not a function on ") + get_source(),
+          0);
     }
 
     return _guard_manager->check_verbose_nopybind(x);
@@ -2372,7 +2374,7 @@ class FuncKwDefaultsGuardAccessor : public GuardAccessor {
     } else if (PyInstanceMethod_Check(obj)) {
       func = PyInstanceMethod_GET_FUNCTION(obj); // borrowed ref
     }
-    PyObject* x = PyFunction_GetKwDefaults(obj); // borrowed ref
+    PyObject* x = PyFunction_GetKwDefaults(func); // borrowed ref
     if (x == nullptr) {
       PyErr_Clear();
       return false;
@@ -2388,11 +2390,13 @@ class FuncKwDefaultsGuardAccessor : public GuardAccessor {
     } else if (PyInstanceMethod_Check(obj)) {
       func = PyInstanceMethod_GET_FUNCTION(obj); // borrowed ref
     }
-    PyObject* x = PyFunction_GetKwDefaults(obj);
+    PyObject* x = PyFunction_GetKwDefaults(func);
     if (x == nullptr) {
       PyErr_Clear();
       return GuardDebugInfo(
-          false, std::string("Not a function on ") + get_source(), 0);
+          false,
+          std::string(repr() + ": Not a function on ") + get_source(),
+          0);
     }
 
     return _guard_manager->check_verbose_nopybind(x);
