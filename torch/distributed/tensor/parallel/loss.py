@@ -57,9 +57,9 @@ def loss_parallel():
         >>> from torch.distributed.device_mesh import init_device_mesh
         >>> ...
         >>> device_mesh = init_device_mesh("cuda", (8,))
-        >>> input = torch.randn(3, 5, device="cuda", requires_grad=True)
+        >>> input = torch.randn(4, 16, device="cuda", requires_grad=True)
         >>> dist_input = distribute_tensor(input, device_mesh, placements=[Shard(1)])
-        >>> target = torch.randint(5, (3,), device="cuda")
+        >>> target = torch.randint(16, (4,), device="cuda")
         >>> with loss_parallel():
         >>>     loss = F.cross_entropy(dist_input, target, reduction="mean")
         >>>     loss.backward()
