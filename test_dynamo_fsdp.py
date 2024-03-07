@@ -118,8 +118,8 @@ def init():
         nn.Linear(hidden_dim, hidden_dim, device=device_type),
         nn.ReLU(),
         nn.Linear(hidden_dim, hidden_dim, device=device_type),  # FC->RELU->FC is a good test
-        # nn.ReLU(),
-        # nn.Linear(hidden_dim, hidden_dim, device=device_type),
+        nn.ReLU(),
+        nn.Linear(hidden_dim, hidden_dim, device=device_type),
     )
     if per_param_fsdp:
         torch.distributed._composable.fsdp.fully_shard(model, reshard_after_forward=True)
@@ -186,6 +186,7 @@ def main_compiled(n_iter):
         return torch.compile(gm, backend="inductor", fullgraph=True, dynamic=dynamic)
 
     torch._dynamo.config.trace_distributed = True
+    torch._inductor.config.triton.unique_kernel_names = True
 
     # if dist.get_rank() == 0:
     #     # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
