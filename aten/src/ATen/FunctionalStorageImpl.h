@@ -4,6 +4,10 @@
 
 namespace at::functionalization {
 
+using ViewMetaForwardFunctionType = Tensor(const Tensor&, int64_t);
+using ViewMetaReverseFunctionType =
+    Tensor(const Tensor&, const Tensor&, int64_t);
+
 // See Note [Functionalization Pass In Core]
 
 // ViewMeta is a class used by the functionalization pass to navigate between
@@ -29,8 +33,8 @@ namespace at::functionalization {
 // View Inverses] for details.
 struct ViewMeta {
   ViewMeta(
-      std::function<Tensor(const Tensor&, int64_t)> forward,
-      std::function<Tensor(const Tensor&, const Tensor&, int64_t)> reverse,
+      std::function<ViewMetaForwardFunctionType> forward,
+      std::function<ViewMetaReverseFunctionType> reverse,
       bool is_multi_output = false,
       int64_t out_idx = 0)
       : forward_fn(std::move(forward)),
@@ -38,8 +42,8 @@ struct ViewMeta {
         out_index(out_idx),
         is_multi_output(is_multi_output) {}
 
-  std::function<Tensor(const Tensor&, int64_t)> forward_fn;
-  std::function<Tensor(const Tensor&, const Tensor&, int64_t)> reverse_fn;
+  std::function<ViewMetaForwardFunctionType> forward_fn;
+  std::function<ViewMetaReverseFunctionType> reverse_fn;
   // See Note [out_idx in ViewMeta]
   int64_t out_index;
 

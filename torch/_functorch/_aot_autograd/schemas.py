@@ -57,13 +57,22 @@ OutputType = Enum(
 # Wrapper around a FunctionalTensorWrapper for comparing only the resulting metadata
 # after applying all the ViewMeta operations.
 class FunctionalTensorMetadataEq:
-    def __init__(self, tensor: torch.Tensor) -> None:
+    def __init__(self, tensor: torch.Tensor, offset: int = 0) -> None:
         assert torch._is_functional_tensor(tensor)
         self.tensor = tensor
+        self.offset = offset
 
     def __eq__(self, other: object) -> bool:
+        # If other is None, then it probably means that we weren't able to recreate
+        # the FunctionalTensorMetadataEq. One of this cases is when we update the
+        # view metadata by calling: create_synthetic_base_metadata.
+        if other is None:
+            return True
+
+        # Comparison agains any other type is not implemented.
         if not isinstance(other, FunctionalTensorMetadataEq):
             return NotImplemented
+
         return (
             self.tensor.shape == other.tensor.shape
             and self.tensor.stride() == other.tensor.stride()

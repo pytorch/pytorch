@@ -214,7 +214,19 @@ def gen_alias_from_base(
     # to replay them (view functions) on the aliased_base_tensor.
     if target_functional_tensor is not None:
         functional_tensor = target_functional_tensor.tensor
+
+        # First, retrieve the actual base tensor.
         base = torch._functionalize_base(functional_tensor)
+
+        # Then, apply the necessary ViewMeta so that we reach the offset.
+        # These are ViewMeta that should already be applied to aliased_base_tensor.
+        if target_functional_tensor.offset > 0:
+            base = torch._functionalize_apply_view_metas(
+                target_functional_tensor.tensor,
+                base=base,
+                start=0,
+                end=target_functional_tensor.offset,
+            )
 
         if base.shape == aliased_base_tensor.shape:
             # Only apply these functions if the new base (aliased_base_tensor) has the
@@ -231,7 +243,9 @@ def gen_alias_from_base(
             #      target_meta_tensor
             try:
                 out = torch._functionalize_apply_view_metas(
-                    target_functional_tensor.tensor, aliased_base_tensor
+                    target_functional_tensor.tensor,
+                    base=aliased_base_tensor,
+                    start=target_functional_tensor.offset,
                 )
 
                 assert out.shape == target_meta_tensor.shape, (
