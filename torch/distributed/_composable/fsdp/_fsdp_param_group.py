@@ -99,10 +99,10 @@ class FSDPParamGroup:
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
+        self.mp_policy = mp_policy
         self._training_state = TrainingState.IDLE
         # Group's sharded state always matches its parameters' sharded states
         self._sharded_state = ShardedState.SHARDED
-        self._init_mp_dtypes()
         self._module_fqn: Optional[str] = None  # prefixed from root module
 
         # - Hook state
@@ -137,6 +137,8 @@ class FSDPParamGroup:
 
     # Initialization #
     def _init_mp_dtypes(self) -> None:
+        for fsdp_param in self.fsdp_params:
+            fsdp_param.init_dtype_attrs(self.mp_policy)
         orig_dtypes = {fsdp_param.orig_dtype for fsdp_param in self.fsdp_params}
         if len(orig_dtypes) != 1:
             # This can be relaxed if we copy-out for the reduce-scatter
@@ -177,6 +179,21 @@ class FSDPParamGroup:
         self._grad_divide_factors = (factor, data_parallel_world_size / factor)
 
     def lazy_init(self):
+        param_names_on_meta = [
+            fsdp_param._param_fqn
+            for fsdp_param in self.fsdp_params
+            if fsdp_param.sharded_param.device.type == "meta"
+        ]
+        if param_names_on_meta:
+            raise RuntimeError(
+                "FSDP parameters should be materialized from meta device before training, "
+                f"but the following were still on meta device: {param_names_on_meta}\n"
+                "For example, call module.to_empty(device) to materialize to device and "
+                "call module.reset_parameters() on each module to initialize values."
+            )
+        # Initialize mixed precision attributes lazily in case the user changes
+        # the parameter dtypes after construction time but before forward
+        self._init_mp_dtypes()
         self._init_grad_divide_factors()
         self._register_state_dict_hooks()
 
