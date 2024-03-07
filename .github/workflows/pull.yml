@@ -233,9 +233,9 @@ jobs:
       docker-image-name: pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc9
       test-matrix: |
         { include: [
-          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "arc-lf-linux-gpu.large.arc" },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "arc-lf-linux-gpu.large.arc" },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "arc-lf-linux-gpu.large.arc" },
         ]}
 
   linux-focal-cuda11_8-py3_10-gcc9-test:
@@ -258,12 +258,12 @@ jobs:
       docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "deploy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 5, runner: "arc-lf-linux-gpu.large.arc" },
+          { config: "default", shard: 2, num_shards: 5, runner: "arc-lf-linux-gpu.large.arc" },
+          { config: "default", shard: 3, num_shards: 5, runner: "arc-lf-linux-gpu.large.arc" },
+          { config: "default", shard: 4, num_shards: 5, runner: "arc-lf-linux-gpu.large.arc" },
+          { config: "default", shard: 5, num_shards: 5, runner: "arc-lf-linux-gpu.large.arc" },
+          { config: "deploy", shard: 1, num_shards: 1, runner: "arc-lf-linux-gpu.large.arc" },
         ]}
 
   linux-focal-cuda12_1-py3_10-gcc9-test:
@@ -370,7 +370,7 @@ jobs:
       cuda-version: "12.1"
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 1, runner: "arc-lf-linux-gpu.large.arc" },
         ]}
 
   linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single:
@@ -432,11 +432,11 @@ jobs:
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 5, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 5, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 5, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 5, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 5, runner: "arc-lf-linux-gpu.large.arc" },
+          { config: "default", shard: 2, num_shards: 5, runner: "arc-lf-linux-gpu.large.arc" },
+          { config: "default", shard: 3, num_shards: 5, runner: "arc-lf-linux-gpu.large.arc" },
+          { config: "default", shard: 4, num_shards: 5, runner: "arc-lf-linux-gpu.large.arc" },
+          { config: "default", shard: 5, num_shards: 5, runner: "arc-lf-linux-gpu.large.arc" },
         ]}
 
   linux-focal-cuda12_1-py3_10-gcc9-sm86-test:
