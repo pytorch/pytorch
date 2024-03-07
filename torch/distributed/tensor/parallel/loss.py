@@ -26,10 +26,13 @@ __all__ = ["loss_parallel"]
 @contextlib.contextmanager
 def loss_parallel():
     """
-    A context manager which enables loss parallelism, where efficient parallelized cross-entropy loss
-    computation can be performed when the input is sharded on the class dimension. Within this context
-    manager, one can use :func:`~torch.nn.functional.cross_entropy` or :class:`~torch.nn.CrossEntropyLoss`
-    as usual, with the following assumptions on the input parameters.
+    A context manager that enables loss parallelism, where efficient parallelized loss computation
+    can be performed when the input is sharded on the class dimension. Currently only the cross-entropy
+    loss is supported.
+
+    Within this context manager, one can use :func:`~torch.nn.functional.cross_entropy` or
+    :class:`~torch.nn.CrossEntropyLoss` as usual, with the following assumptions on the input parameters.
+    The corresponding backward call, if any, also needs to happen under this context manager.
 
     Args:
         input (:class:`DTensor`):
