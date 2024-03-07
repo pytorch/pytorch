@@ -772,15 +772,16 @@ def _export(
         fake_params_buffers = make_fake_params_buffers(
             fake_mode, _get_params_buffers(mod)
         )
-        ep_non_strict = _export_non_strict(
-            mod,
-            fake_args,
-            fake_kwargs,
-            fake_params_buffers,
-            constant_attrs,
-            pre_dispatch=pre_dispatch,
-            transform=_tuplify_outputs,
-        )
+        with fake_mode:
+            ep_non_strict = _export_non_strict(
+                mod,
+                fake_args,
+                fake_kwargs,
+                fake_params_buffers,
+                constant_attrs,
+                pre_dispatch=pre_dispatch,
+                transform=_tuplify_outputs,
+            )
         try:
             range_constraints = make_constraints(
                 fake_mode,

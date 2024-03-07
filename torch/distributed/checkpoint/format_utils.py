@@ -1,4 +1,6 @@
+import argparse
 import os
+from enum import Enum
 from typing import cast, Dict, List, Optional, Union
 
 import torch
@@ -266,3 +268,40 @@ def torch_save_to_dcp(
 
     state_dict = torch.load(torch_save_path)
     dcp.save(state_dict, checkpoint_id=dcp_checkpoint_dir, no_dist=True)
+
+
+if __name__ == "__main__":
+
+    class FormatMode(Enum):
+        TORCH_TO_DCP = "torch_to_dcp"
+        DCP_TO_TORCH = "dcp_to_torch"
+
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "mode",
+        type=str,
+        help="Conversion mode",
+        choices=[m.value for m in FormatMode],
+        default=FormatMode.TORCH_TO_DCP,
+    )
+    parser.add_argument("src", type=str, help="Path to the source model")
+    parser.add_argument("dst", type=str, help="Path to the destination model")
+    args = parser.parse_args()
+
+    print(
+        f"Converting checkpoint from {args.src} to {args.dst} using method: '{args.mode}'"
+    )
+    checkpoint_missing_warning = (
+        f"No checkpoint found at {args.src}. Skipping conversion."
+    )
+    if args.mode == FormatMode.TORCH_TO_DCP:
+        if os.path.isfile(args.src):
+            torch_save_to_dcp(args.src, args.dst)
+        else:
+            print(checkpoint_missing_warning)
+    elif args.mode == FormatMode.DCP_TO_TORCH:
+        if os.path.isdir(args.src):
+            dcp_to_torch_save(args.src, args.dst)
+        else:
+            print(checkpoint_missing_warning)

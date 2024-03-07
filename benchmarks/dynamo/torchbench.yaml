@@ -182,6 +182,7 @@ skip:
       # works on cuda, accuracy failure on cpu
       - hf_Whisper
       - stable_diffusion_text_encoder
+      - llava
 
     cuda: []
 
