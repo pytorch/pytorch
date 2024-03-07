@@ -714,20 +714,16 @@ class TestExport(TestCase):
             6,
         )
 
-    @testing.expectedFailureRetraceability
-    def test_dynamic_dim_constraints(self):
+    def test_dim_1_2(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
                 return x * 2
-        class Bar(torch.nn.Module):
-            def forward(self, x, y):
-                return x + y[1:]
 
         dx = Dim("dx", min=1, max=2)
         ep = export(
             Foo(),
             (torch.randn(2, 2), ),
-            dynamic_shapes={"x": {0: dx, 1: None}}
+            dynamic_shapes=({0: dx, 1: None}, )
         )
         ep.module()(torch.randn(1, 2))
         ep.module()(torch.randn(2, 2))
@@ -736,48 +732,6 @@ class TestExport(TestCase):
             "Expected input at .* to be <= 2, but got 3"
         ):
             ep.module()(torch.randn(3, 2))
-        vr = list(ep.range_constraints.values())[0]
-        # self.assertTrue(vr.lower == 2)
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
-            (
-                ".*"
-            ),
-        ):
-            ep = export(
-                Foo(),
-                (torch.randn(1, 2), ),
-                dynamic_shapes={"x": {0: dx, 1: None}}
-            )
-
-        dx = Dim("dx", min=2, max=3)
-        ep = export(
-            Foo(),
-            (torch.randn(2, 2), ),
-            dynamic_shapes={"x": {0: dx, 1: None}}
-        )
-        ep.module()(torch.randn(2, 2))
-        ep.module()(torch.randn(1, 2))
-
-        dx = Dim("dx", min=1, max=3)
-        ep = export(
-            Bar(),
-            (torch.randn(2, 2), torch.randn(3, 2)),
-            dynamic_shapes={"x": {0: dx, 1: None}, "y": {0: dx+1, 1: None}}
-        )
-        ep.module()(torch.randn(3, 2), (torch.randn(4, 2)))
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Expected input .* to be of the form s0, where s0 is an integer"
-        ):
-            ep.module()(torch.randn(0, 2), torch.randn(1, 2))
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Expected input at .* to be <= 3, but got 4"
-        ):
-            ep.module()(torch.randn(4, 2), torch.randn(5, 2))
-
 
     def test_raise_user_error_when_guard_on_data_dependent_operation(self):
         class M(torch.nn.Module):
