@@ -71,6 +71,7 @@ def mps_ops_grad_modifier(ops):
         # Unimplemented ops
         '__getitem__': [torch.float16],
         '_segment_reduce': [torch.float16, torch.float32],
+        '_chunk_cat': [torch.float16, torch.float32],
         'unfold_copy': [torch.float16, torch.float32],  # unfold_backward is not implemented
         'unfold': [torch.float16, torch.float32],
         'sparse.mmreduce': [torch.float32],  # csr not supported
@@ -827,6 +828,7 @@ def mps_ops_modifier(ops):
         'nn.functional.batch_norm': [torch.float32],
         'ones_like': None,
         'zeros_like': None,
+        '_chunk_cat': ([torch.bool] if product_version >= 14.0 else []),
 
         # Convolution for integral types is not supported on MPS
         'nn.functional.conv1d': [torch.int64],

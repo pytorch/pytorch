@@ -1374,15 +1374,28 @@ def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
+            original_fully_shard = torch.distributed._composable.fsdp.fully_shard
             for fully_shard_patch in FullyShardPatch:
                 if fully_shard_patch != FullyShardPatch.EAGER and not has_triton():
                     warnings.warn("Inductor on GPU needs Triton and recent GPU arch")
                     continue
+                imported_fully_shard = (
+                    f"{func.__module__}.{original_fully_shard.__name__}"
+                )
                 with mock.patch(
-                    f"{func.__module__}.{torch.distributed._composable.fsdp.fully_shard.__name__}",
+                    imported_fully_shard,
                     fully_shard_patch.value,
                 ):
                     func(*args, **kwargs)
+                    torch.distributed.barrier()
+                # mock.patch.__exit__ does not work with multi-thread
+                # thread 1 set {func.__module__}.fully_shard
+                # thread 2 read {func.__module__}.fully_shard and thought it is original
+                # hence we manually reset them after __exit__
+                import_path, _ = mock._get_target(imported_fully_shard)  # type: ignore[attr-defined]
+                setattr(
+                    import_path(), original_fully_shard.__name__, original_fully_shard
+                )
 
         return wrapper
 

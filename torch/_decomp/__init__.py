@@ -330,6 +330,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.isposinf,
             aten.l1_loss,
             aten._lazy_clone,
+            aten._test_parallel_materialize,
             aten.leaky_relu_,
             aten.leaky_relu_backward,
             aten.lerp,
@@ -446,7 +447,9 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.unsafe_split.Tensor,
             aten.unsafe_split_with_sizes,
             aten._unsafe_view,
+            aten.upsample_linear1d,
             aten.upsample_bilinear2d,
+            aten.upsample_trilinear3d,
             aten.upsample_nearest2d_backward,
             aten.view_as_complex,
             aten.xlogy,
@@ -455,6 +458,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.zero_,
             aten.zeros,
             aten.zeros_like,
+            aten._chunk_cat,
             aten._weight_norm_interface,
         ]
     )

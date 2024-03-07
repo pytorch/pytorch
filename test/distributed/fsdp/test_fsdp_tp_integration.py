@@ -82,11 +82,11 @@ class RMSNormPython(torch.nn.Module):
 
 
 def distribute_rmsnorm(module, device_mesh):
-    def prepare_input_fn(inputs, device_mesh):
+    def prepare_input_fn(mod, inputs, device_mesh):
         shard_tensor = DTensor.from_local(inputs[0], device_mesh, [Shard(0)])
         return shard_tensor
 
-    def prepare_output_fn(outputs, device_mesh):
+    def prepare_output_fn(mod, outputs, device_mesh):
         return outputs.to_local()
 
     return distribute_module(

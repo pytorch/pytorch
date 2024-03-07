@@ -892,6 +892,9 @@ class DistributedDataParallel(Module, Joinable):
             if not self.require_backward_grad_sync:
                 return
 
+            if param.grad is None:
+                return
+
             if self._comm_hooks:
                 for hook, state in self._comm_hooks:
                     hook(state, (param.grad, param))

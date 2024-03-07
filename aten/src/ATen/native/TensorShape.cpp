@@ -2068,7 +2068,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
             auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).data_ptr<int64_t>();
             auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).data_ptr<int64_t>();
             auto* ptr_tid_int_counts = int_counts.select(0, tid).data_ptr<int64_t>();
-            const auto* ptr_src = src.data_ptr<int64_t>() + start;
+            const auto* ptr_src = src.const_data_ptr<int64_t>() + start;
 
             for (const auto i : c10::irange(start, end)) {
               const auto src_val = *ptr_src++;
@@ -2126,9 +2126,9 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
             const auto start = tid * chunk_size_src;
             const auto end = std::min(start + chunk_size_src, src_len);
             const auto tid_offset = thread_offsets.const_data_ptr<int64_t>()[tid];
-            const auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).data_ptr<int64_t>();
-            const auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).data_ptr<int64_t>();
-            const auto* ptr_tid_int_counts = int_counts.select(0, tid).data_ptr<int64_t>();
+            const auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).const_data_ptr<int64_t>();
+            const auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).const_data_ptr<int64_t>();
+            const auto* ptr_tid_int_counts = int_counts.select(0, tid).const_data_ptr<int64_t>();
             auto* ptr_tid_selected_sorted = ptr_selected_sorted + tid_offset;
             auto* ptr_tid_selected_src = ptr_selected_src + tid_offset;
 
@@ -2326,9 +2326,9 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
             const auto end = std::min(start + chunk_size, src_len);
             auto* ptr_src_tid = ptr_src + start;
             const auto* ptr_src_counts_per_thread
-              = src_counts_per_thread.select(0, tid).data_ptr<int64_t>();
+              = src_counts_per_thread.select(0, tid).const_data_ptr<int64_t>();
             const auto* ptr_src_offset_counts_per_thread
-              = src_offset_counts_per_thread.select(0, tid).data_ptr<int64_t>();
+              = src_offset_counts_per_thread.select(0, tid).const_data_ptr<int64_t>();
             auto tid_counts = at::zeros({size}, src.options());
             auto* ptr_tid_counts = tid_counts.data_ptr<int64_t>();
 
@@ -2725,17 +2725,58 @@ static void check_stack_inputs(TensorList tensors, int64_t dim) {
   }
 }
 
+static bool have_same_ndims(TensorList tensors) {
+  auto ndim = tensors[0].dim();
+  for (const auto tensor_idx : c10::irange(tensors.size())) {
+    if(tensors[tensor_idx].dim() != ndim) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static void leading_dimension_matches(TensorList tensors, int64_t dim) {
+  auto tensor_zero_size = tensors[0].sizes();
+  std::vector<c10::SymInt> leading_dim_sizes(tensor_zero_size.begin(), tensor_zero_size.begin() + dim);
+  for (const auto i : c10::irange(tensors.size())) {
+    at::Tensor tensor = tensors[i];
+    for(const auto j : c10::irange(dim)) {
+      TORCH_CHECK(
+        tensor.size(j) == leading_dim_sizes[j],
+        "_chunk_cat expects same sizes of 0,...,dim-1 dimensions for all tensors"
+      );
+    }
+  }
+}
+
+static int64_t preprocess_chunk_cat_inputs(TensorList tensors, int64_t dim, int64_t num_chunks) {
+  TORCH_CHECK(num_chunks >= 1, "_chunk_cat expects positive num_chunks");
+  TORCH_CHECK(!tensors.empty(),
+           "_chunk_cat expects a non-empty input tensor list");
+  auto expected_dtype = tensors[0].dtype();
+  auto expected_device = tensors[0].device();
+  for(const auto i : c10::irange(tensors.size())) {
+    TORCH_CHECK(tensors[i].numel() > 0, "_chunk_cat expects non-empty tensor");
+    TORCH_CHECK(tensors[i].dtype() == expected_dtype, "_chunk_cat expects all input tensors with the same dtype");
+    TORCH_CHECK(tensors[i].device() == expected_device, "_chunk_cat expects all inputs tensors on the same device");
+  }
+  if (have_same_ndims(tensors)) {
+    dim = maybe_wrap_dim(dim, tensors[0].dim());
+  } else {
+    TORCH_CHECK(dim >= 0, "_chunk_cat expects non-negative dim when input tensors have different ndims")
+    for(const auto i : c10::irange(tensors.size())) {
+      TORCH_CHECK(dim < tensors[i].ndimension(), "_chunk_cat expects dim < ndim for all input tensors");
+    }
+  }
+  leading_dimension_matches(tensors, dim);
+  return dim;
+}
+
 // Pads each tensor on `dim`-th dimension such that padded_dim % num_chunks == 0.
 static std::vector<Tensor> _pad_chunk(TensorList tensors, int64_t dim, int64_t num_chunks) {
-  TORCH_CHECK(!tensors.empty(),
-           "chunk_cat expects a non-empty TensorList");
   auto num_tensors = tensors.size();
-  std::vector<Tensor> tensor_views;
-  std::vector<Tensor> tensors_to_copy;
-  std::vector<Tensor> padded_tensor_slices;
-  tensor_views.reserve(num_tensors);
-  tensors_to_copy.reserve(num_tensors);
-  padded_tensor_slices.reserve(num_tensors);
+  std::vector<Tensor> padded_tensors;
+  padded_tensors.reserve(num_tensors);
   for (const auto & tensor : tensors) {
     auto tensor_size = tensor.sizes();
     std::vector<int64_t> padded_size(tensor_size.vec());
@@ -2743,26 +2784,22 @@ static std::vector<Tensor> _pad_chunk(TensorList tensors, int64_t dim, int64_t n
     Tensor padded_tensor = tensor;
     if (padded_size != tensor_size) {
       padded_tensor = tensor.new_zeros(padded_size);
-      padded_tensor_slices.push_back(padded_tensor.narrow(dim, 0, tensor_size[dim]));
-      tensors_to_copy.push_back(tensor);
+      padded_tensor.narrow(dim, 0, tensor_size[dim]).copy_(tensor);
     }
-    std::vector<int64_t> view_sizes = std::vector<int64_t>(tensor_size.begin(), tensor_size.begin()+dim);
+    std::vector<int64_t> view_sizes(tensor_size.begin(), tensor_size.begin()+dim);
     view_sizes.insert(view_sizes.end(), {num_chunks, -1});
-    tensor_views.push_back(padded_tensor.view(view_sizes));
+    padded_tensors.push_back(padded_tensor.view(view_sizes));
   }
-  if (padded_tensor_slices.size() > 0) {
-    at::_foreach_copy_(padded_tensor_slices, tensors_to_copy);
-  }
-  return tensor_views;
+  return padded_tensors;
 }
 
 Tensor _chunk_cat(TensorList tensors, int64_t dim, int64_t num_chunks) {
-  auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].dim());
+  auto wrapped_dim = preprocess_chunk_cat_inputs(tensors, dim, num_chunks);
   return at::cat(_pad_chunk(tensors, wrapped_dim, num_chunks), wrapped_dim+1);
 }
 
 Tensor& _chunk_cat_out(TensorList tensors, int64_t dim, int64_t num_chunks, Tensor& out) {
-  auto wrapped_dim = maybe_wrap_dim(dim, tensors[0].dim());
+  auto wrapped_dim = preprocess_chunk_cat_inputs(tensors, dim, num_chunks);
   at::cat_out(out, _pad_chunk(tensors, wrapped_dim, num_chunks), wrapped_dim+1);
   return out;
 }
@@ -3463,6 +3500,10 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
 }
 
 Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim, Dimname out_dim) {
+  start_dim = maybe_wrap_dim(start_dim, self.dim());
+  end_dim = maybe_wrap_dim(end_dim, self.dim());
+  TORCH_CHECK(start_dim <= end_dim, "flatten() has invalid args: start_dim cannot come after end_dim");
+
   auto outnames = self.names().vec();
   outnames.erase(outnames.begin() + start_dim, outnames.begin() + end_dim + 1);
   outnames.insert(outnames.begin() + start_dim, out_dim);

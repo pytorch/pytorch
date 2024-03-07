@@ -123,7 +123,6 @@ class FSDPParamGroup:
         # accumulation); all-reducing without reduce-scatter is disallowed
         self.reduce_scatter_grads: bool = True
         self.all_reduce_grads: bool = True
-        self._init_grad_divide_factors()
 
         # - CUDA events for stream synchronization
         # Holds the all-gather output buffer, sync objects, and metadata
@@ -156,27 +155,29 @@ class FSDPParamGroup:
         self._reduce_dtype = next(iter(reduce_dtypes))
 
     def _init_grad_divide_factors(self):
-        """
-        For N data parallel workers, each worker computes g_i, and they
-        collectively reduce to compute (g_1 + ... + g_N) / N. To avoid overflow
-        and underflow, we divide by ~sqrt(N) before and after the reduction.
-        """
         data_parallel_world_size = 1
         data_parallel_world_size *= self.mesh_info.shard_mesh_size
         if isinstance(self.mesh_info, HSDPMeshInfo):
             data_parallel_world_size *= self.mesh_info.replicate_mesh_size
+        if self._reduce_dtype == torch.float32:
+            # Use NCCL's AVG op to divide after reduction since it is more
+            # performant and fp32 has sufficient precision
+            self._grad_divide_factors: Optional[Tuple[float, float]] = None
+            return
+        # For N data parallel workers, each worker computes g_i, and they
+        # collectively reduce (g_1 + ... + g_N) / N. To avoid overflow and
+        # underflow, we divide by ~sqrt(N) before and after the reduction.
         factor: int = 1
         while (
             data_parallel_world_size % factor == 0
             and data_parallel_world_size / factor > factor
         ):
             factor *= 2
-        self._grad_predivide_factor: float = float(factor)
-        self._grad_postdivide_factor: float = (
-            data_parallel_world_size / self._grad_predivide_factor
-        )
+        factor = float(factor)
+        self._grad_divide_factors = (factor, data_parallel_world_size / factor)
 
     def lazy_init(self):
+        self._init_grad_divide_factors()
         self._register_state_dict_hooks()
 
     # Runtime #
@@ -304,8 +305,7 @@ class FSDPParamGroup:
                 self._orig_dtype,
                 self._reduce_dtype,
                 self.device,
-                self._grad_predivide_factor,
-                self._grad_postdivide_factor,
+                self._grad_divide_factors,
             )
 
     def finalize_backward(self):
