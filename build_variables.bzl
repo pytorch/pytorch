@@ -123,6 +123,7 @@ core_trainer_sources = [
     "torch/csrc/autograd/autograd_not_implemented_fallback.cpp",
     "torch/csrc/autograd/cpp_hook.cpp",
     "torch/csrc/autograd/custom_function.cpp",
+    "torch/csrc/autograd/variable_info.cpp",
     "torch/csrc/autograd/engine.cpp",
     "torch/csrc/autograd/function.cpp",
     "torch/csrc/autograd/input_metadata.cpp",

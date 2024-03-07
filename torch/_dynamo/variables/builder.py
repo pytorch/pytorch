@@ -27,6 +27,7 @@ from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
 from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
+from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
@@ -129,6 +130,7 @@ from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     ComptimeVariable,
+    DebuggingVariable,
     GetAttrVariable,
     GetSetDescriptorVariable,
     InspectSignatureVariable,
@@ -429,6 +431,7 @@ class VariableBuilder:
             }
             return ConstDictVariable(result, type(value))
         elif value is sys.modules:
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return PythonSysModulesVariable(source=self.source)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             if not value and self.get_source().is_nn_module():
@@ -468,10 +471,13 @@ class VariableBuilder:
             )
 
             if istype(value, collections.defaultdict):
+                factory_source = AttrSource(self.source, "default_factory")
                 result = DefaultDictVariable(
                     result,
                     type(value),
-                    default_factory=self._wrap(value.default_factory),
+                    default_factory=VariableBuilder(self.tx, factory_source)(
+                        value.default_factory
+                    ),
                     source=self.source,
                 )
             else:
@@ -492,6 +498,11 @@ class VariableBuilder:
         elif isinstance(value, enum.Enum):
             self.install_guards(GuardBuilder.ID_MATCH)
             return EnumVariable(value=value, source=self.source)
+        elif DebuggingVariable.is_reorderable_logging_function(value):
+            # Put this above builtin_callable so that print() can be handled
+            # along with other builtin debugging functions
+            self.install_guards(GuardBuilder.BUILTIN_MATCH)
+            return DebuggingVariable(value, source=self.source)
         elif is_utils_checkpoint(value):
             return build_checkpoint_variable(source=self.source)
         elif isinstance(value, functools.partial):
@@ -780,6 +791,11 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type):
+            if value in (torch.utils.hooks.BackwardHook,):
+                # TODO(jansel): combine this case with the one above
+                return trace_rules.lookup(value).create_with_source(
+                    value, source=self.source
+                )
             # This is a userdefined class, so install an ID_MATCH even if its a
             # global variable.
             self.install_guards(GuardBuilder.ID_MATCH)
@@ -1044,6 +1060,11 @@ class VariableBuilder:
         ):
             unimplemented("torch.compile does not support strided NestedTensor")
 
+        if is_sparse_any(value):
+            unimplemented(
+                f"torch.compile does not support sparse Tensor with {value.layout} layout"
+            )
+
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
             proxy=tensor_proxy,
@@ -1096,7 +1117,13 @@ class VariableBuilder:
 
         readonly = not value.flags.writeable
         if readonly:
-            value.flags.writeable = True
+            try:
+                value.flags.writeable = True
+            except ValueError:
+                # One can not easily make nditer elements writable,
+                # but warning is not the end of the world
+                assert isinstance(value.base, np.nditer)
+                pass
 
         try:
             tensor_value = _util._try_convert_to_tensor(value)
