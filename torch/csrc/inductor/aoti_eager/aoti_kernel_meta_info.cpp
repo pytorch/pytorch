@@ -1,3 +1,4 @@
+#if !defined(C10_MOBILE) && !defined(ANDROID)
 #include <torch/csrc/inductor/aoti_eager/aoti_kernel_meta_info.h>
 
 #include <filesystem>
@@ -175,3 +176,4 @@ size_t AOTIKernelMetaInfoHash::operator()(
 }
 
 } // namespace torch::inductor
+#endif

@@ -1,4 +1,3 @@
-from unittest.mock import patch
 from ._ops import OpOverload
 from typing import Any, Optional, Set, List
 import traceback
