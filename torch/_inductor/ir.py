@@ -3995,7 +3995,7 @@ class ExternKernel(InputsKernel):
                     type_ = self.arg_properties[i].get("type")
                     args.append(
                         V.graph.wrapper_code.val_to_cpp_arg_str(  # type: ignore[arg-type]
-                            type_, x
+                            type_, x, self.is_legacy_abi_kernel()
                         )
                     )
                 else:
@@ -4010,6 +4010,9 @@ class ExternKernel(InputsKernel):
             return self.kwarg_properties.get(arg_name).get("default_value")  # type: ignore[union-attr]
         else:
             raise AssertionError(f"{arg_name} not in self.kwarg_properties")
+
+    def is_legacy_abi_kernel(self):
+        return False
 
     def codegen_kwargs(self):
         if V.graph.cpp_wrapper:
@@ -4026,7 +4029,7 @@ class ExternKernel(InputsKernel):
                     )
                     kwargs.append(
                         V.graph.wrapper_code.val_to_cpp_arg_str(  # type: ignore[arg-type]
-                            type_, v
+                            type_, v, self.is_legacy_abi_kernel()
                         )
                     )
         else:
@@ -4897,6 +4900,12 @@ class FallbackKernel(ExternKernelAlloc):
         self.cpp_op_schema = get_cpp_op_schema(kernel)
         self.init_args_default_value(kernel._schema)
 
+    def is_legacy_abi_kernel(self):
+        return (
+            config.c_shim_version == "1"
+            and "_scaled_dot_product_flash_attention" in str(self.python_kernel_name)
+        )
+
     def init_args_default_value(self, schema):
         self.args_default_value = [
             {
@@ -4954,7 +4963,9 @@ class FallbackKernel(ExternKernelAlloc):
 
         if V.graph.cpp_wrapper and isinstance(self.op_overload, torch._ops.OpOverload):
             args = [
-                V.graph.wrapper_code.val_to_cpp_arg_str(param.real_type, x)
+                V.graph.wrapper_code.val_to_cpp_arg_str(
+                    param.real_type, x, self.is_legacy_abi_kernel()
+                )
                 for param, x in zip(self.op_overload._schema.arguments, args)
             ]
         else:
