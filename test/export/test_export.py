@@ -3784,6 +3784,45 @@ def forward(self, arg0_1):
         self.assertEqual(ep.constants["nested.constant"], m.nested.constant)
         self.assertEqual(ep.module()(torch.ones(2, 3)), m(torch.ones(2, 3)))
 
+    def test_nested_retrace(self):
+        class Nested(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(3))
+
+            def forward(self, x):
+                return x + self.param
+
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.nested = Nested()
+
+            def forward(self, x):
+                return x + self.nested(x)
+
+        # first export
+        foo = Foo().to("meta")
+        inputs = (torch.ones(3, device="meta"),)
+        foo(*inputs)
+        ep = torch.export.export(foo, inputs, strict=False)
+
+        # second export
+        foo_1 = ep.module()
+        ep_1 = torch.export.export(foo_1, inputs, strict=False)
+
+        for node1, node2 in zip(ep.graph.nodes, ep_1.graph.nodes):
+            nn_module_stack_1 = node1.meta.get("nn_module_stack", None)
+            nn_module_stack_2 = node2.meta.get("nn_module_stack", None)
+
+            if nn_module_stack_1 is None:
+                self.assertTrue(nn_module_stack_2 is None)
+            else:
+                for v1, v2 in zip(nn_module_stack_1.values(), nn_module_stack_2.values()):
+                    self.assertEqual(v1, v2)
+
+
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestExportCustomClass(TorchTestCase):
     def setUp(self):
