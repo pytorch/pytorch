@@ -1140,7 +1140,7 @@ def valid_vec_isa_list() -> List[VecISA]:
     with lock:
         cpu_info_conf = os.path.join(cache_dir(), f"{base_name}.json")
         if os.path.exists(cpu_info_conf):
-            with open(cpu_info_conf, "r") as f:
+            with open(cpu_info_conf) as f:
                 try:
                     json_data = json.load(f)
                 except Exception as e:
