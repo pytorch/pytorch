@@ -2203,6 +2203,18 @@ def pad_listlike(l: Union[Tuple[int, ...], int], d: int) -> Tuple[int, ...]:
         return l
 
 
+def _unrolled_sum(x: Tensor, dim: Tuple[int, ...]) -> Tensor:
+    result = 0
+    for reduction_idx in product(*[range(x.shape[d]) for d in dim]):
+        idx: List[Any] = [None] * x.dim()
+        for i, d in enumerate(dim):
+            idx[d] = torch.tensor(reduction_idx[i], device=x.device)
+        result = result + aten._unsafe_index(x, idx)
+
+    assert isinstance(result, Tensor)
+    return result
+
+
 def _avg_poolnd(
     x: Tensor,
     kernel_size: Union[Tuple[int, ...], int],
@@ -2212,6 +2224,7 @@ def _avg_poolnd(
     count_include_pad: bool,
     divisor_override: Optional[int],
     dim: int,
+    unroll_threshold: Optional[int] = None,
 ):
     if not stride:
         stride = kernel_size
@@ -2279,7 +2292,13 @@ def _avg_poolnd(
         out = aten._unsafe_index(x, [*[None] * len(batch), *out_indices])
 
     out = out.reshape(*batch, *reshape)
-    out = torch.sum(out, dim=[len(batch) + 1 + 2 * i for i in range(dim)])
+
+    if unroll_threshold and window_size < unroll_threshold:
+        sum_func = _unrolled_sum  # type: ignore[assignment]
+    else:
+        sum_func = torch.sum  # type: ignore[assignment]
+
+    out = sum_func(out, dim=tuple(len(batch) + 1 + 2 * i for i in range(dim)))
 
     if not had_padding or divisor_override:
         if divisor_override:

@@ -1,4 +1,3 @@
-import contextlib
 import functools
 import logging
 import math
@@ -18,8 +17,8 @@ from torch._decomp import (
     remove_decompositions,
 )
 from torch._decomp.decompositions import (
+    _avg_poolnd as decomp_avg_poolnd,
     _grid_sampler_2d as decomp_grid_sampler_2d,
-    avg_pool2d as decomp_avg_pool2d,
     pad_listlike,
     pw_cast_for_opmath,
 )
@@ -674,21 +673,14 @@ def avg_pool2d(
     # TODO: remove this when #100331 is merged. We only do this
     # for window_size <=25 to avoid performance regressions compared
     # to the previous algorithm which unrolled manually for <=25
-    context = (
-        config.patch(unroll_reductions_threshold=25)
-        if window_size <= 25
-        else contextlib.nullcontext()
+    return decomp_avg_poolnd(
+        x,
+        kernel_size,
+        stride,
+        padding,
+        ceil_mode,
+        count_include_pad,
+        divisor_override,
+        dim=2,
+        unroll_threshold=25,
     )
-
-    with context:
-        result = decomp_avg_pool2d(
-            x,
-            kernel_size,
-            stride,
-            padding,
-            ceil_mode,
-            count_include_pad,
-            divisor_override,
-        )
-
-    return result
