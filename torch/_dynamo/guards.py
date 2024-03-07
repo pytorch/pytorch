@@ -119,7 +119,6 @@ class GuardManager:
     def __init__(self):
         self.root = RootGuardManager()
 
-        # TODO(anijain2305) - Better document where these are useful.
         self.closure_vars = None
         self.args = None
         self.code_parts = None
@@ -341,6 +340,14 @@ def get_tensor_guard_code_part(value, name, sizes, strides):
     return guard_str
 
 
+def get_key_index(dct, key):
+    return list(dct.keys()).index(key)
+
+
+def get_key_index_source(source, index):
+    return f"{source}.keys()[{index}]"
+
+
 def getitem_on_dict_manager(
     source, base_guard_manager, base_example_value, example_value
 ):
@@ -349,12 +356,10 @@ def getitem_on_dict_manager(
     if isinstance(source.index, ConstDictKeySource):
         index = source.index.index
     else:
-        # TODO (anijain2305) - Consider DictGetItemSource with
-        # invariant that index is always ConstDictKeySource
         assert isinstance(base_example_value, dict)
-        index = list(base_example_value.keys()).index(source.index)
+        index = get_key_index(base_example_value, source.index)
 
-    key_source = f"{base_source_name}.keys()[{index}]"
+    key_source = get_key_index_source(base_source_name, index)
     value_source = f"{base_source_name}[{key_source}]"
     if not isinstance(source.index, ConstDictKeySource):
         # We have to insert a key manager guard here
@@ -513,9 +518,6 @@ class GuardBuilder(GuardBuilderBase):
                 # C++. So just return the root mgr.
                 return root_guard_manager
             elif istype(source, ShapeEnvSource):
-                # TODO(anijain2305) - Currently SHAPE_ENV guards are set via a
-                # lambda guard on root mgr. Consider moving the symbolic shape
-                # guards to C++.
                 return root_guard_manager
             elif istype(source, TypeSource):
                 assert base_guard_manager  # to make mypy happy
@@ -580,8 +582,8 @@ class GuardBuilder(GuardBuilderBase):
                 )
             elif istype(source, DefaultsSource):
                 assert base_guard_manager  # to make mypy happy
+                assert callable(base_example_value)
                 if not source.is_kw:
-                    assert callable(base_example_value)
                     return base_guard_manager.func_defaults_manager(
                         source=base_source_name,
                         example_value=base_example_value.__defaults__,
@@ -591,17 +593,28 @@ class GuardBuilder(GuardBuilderBase):
                         example_value=example_value,
                     )
                 else:
-                    # TODO(anijain2305) - Would dictGuardManager be better here?
-                    # If we set example_value =
-                    # base_example_value.__kwdefaults__, we will get a
-                    # DictGuardManager.
-                    return base_guard_manager.func_kwdefaults_manager(
-                        source=base_source_name,
-                        example_value=None,
-                    ).dict_getitem_manager(
-                        key=str(source.idx_key),
-                        source=source_name,
-                        example_value=example_value,
+                    # kwdefauts is a dict, so use a DictGuardManager
+                    kwdefaults = base_example_value.__kwdefaults__
+                    assert base_source_name is not None
+                    kw_source = base_source_name + ".__kwdefaults__"
+                    dict_mgr = base_guard_manager.func_kwdefaults_manager(
+                        source=kw_source,
+                        example_value=kwdefaults,
+                    )
+                    assert isinstance(dict_mgr, DictGuardManager)
+                    index = get_key_index(kwdefaults, source.idx_key)
+                    key_source = get_key_index_source(kw_source, index)
+
+                    # Add key manager and equals match guard
+                    dict_mgr.get_key_manager(
+                        index=index, source=key_source, example_value=source.idx_key
+                    ).add_equals_match_guard(
+                        source.idx_key, [f"{key_source} == {source.idx_key}"]
+                    )
+
+                    # Add value manager and return it
+                    return dict_mgr.get_value_manager(
+                        index=index, source=source_name, example_value=example_value
                     )
             elif istype(source, NumpyTensorSource):
                 assert base_guard_manager  # to make mypy happy
