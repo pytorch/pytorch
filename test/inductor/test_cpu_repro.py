@@ -1743,7 +1743,7 @@ class CPUReproTests(TestCase):
             )
             return res
 
-        def test_eager_aten_fake_quant(
+        def run_eager_aten_fake_quant(
             input, scales, zero_points, axis, quant_min, quant_max
         ):
             input.grad = None
@@ -1751,7 +1751,7 @@ class CPUReproTests(TestCase):
             res.sum().backward()
             return res, input.grad
 
-        def test_eager_decomposed_fake_quant(
+        def run_eager_decomposed_fake_quant(
             input, scales, zero_points, axis, quant_min, quant_max
         ):
             input.grad = None
@@ -1759,7 +1759,7 @@ class CPUReproTests(TestCase):
             res.sum().backward()
             return res, input.grad
 
-        def test_compile_decomposed_fake_quant(
+        def run_compile_decomposed_fake_quant(
             input, scales, zero_points, axis, quant_min, quant_max
         ):
             input.grad = None
@@ -1780,13 +1780,13 @@ class CPUReproTests(TestCase):
         aten_input = copy.deepcopy(input)
         compiler_input = copy.deepcopy(input)
 
-        res_aten_eager, input_grad_aten_eager = test_eager_aten_fake_quant(
+        res_aten_eager, input_grad_aten_eager = run_eager_aten_fake_quant(
             aten_input, scales, zero_points, axis, quant_min, quant_max
         )
-        res_decomp_eager, input_grad_decomp_eager = test_eager_decomposed_fake_quant(
+        res_decomp_eager, input_grad_decomp_eager = run_eager_decomposed_fake_quant(
             input, scales, zero_points, axis, quant_min, quant_max
         )
-        res, input_grad = test_compile_decomposed_fake_quant(
+        res, input_grad = run_compile_decomposed_fake_quant(
             compiler_input, scales, zero_points, axis, quant_min, quant_max
         )
 
