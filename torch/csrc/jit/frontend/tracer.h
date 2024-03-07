@@ -340,7 +340,7 @@ TORCH_API void addInputs(
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const c10::optional<at::Generator>& value);
+    const std::optional<at::Generator>& value);
 
 inline void addInputs(
     Node* n,
