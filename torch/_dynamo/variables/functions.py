@@ -32,9 +32,9 @@ def wrap_bound_arg(tx, val, source=None):
 
         return SourcelessBuilder()(tx, val)
     else:
-        from torch._dynamo.variables.builder import VariableBuilder
-
-        return VariableBuilder(tx, source=source)(val)
+        # Create a lazy variable to avoid guarding on __defaults__ unless really
+        # needed.
+        return variables.LazyVariableTracker.create(val, source)
 
 
 def wrap_args_kwargs(tx, result):
