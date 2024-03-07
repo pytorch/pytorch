@@ -406,283 +406,152 @@ def error_if_complex(func_name, args, is_input):
                        f"to be real but received complex tensor at flattened input idx: {idx}")
             raise RuntimeError(err_msg)
 
-@exposed_in("torch.func")
-def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False,
-           chunk_size: Optional[int] = None,
-           _preallocate_and_copy=False):
-    """
-    Computes the Jacobian of ``func`` with respect to the arg(s) at index
-    ``argnum`` using reverse mode autodiff
 
-    .. note::
-        Using :attr:`chunk_size=1` is equivalent to computing the jacobian
-        row-by-row with a for-loop i.e. the constraints of :func:`vmap` are
-        not applicable.
+def jacrev_impl(func: Callable, argnums: Union[int, Tuple[int]], has_aux: bool,
+                chunk_size: Optional[int], _preallocate_and_copy: bool, args):
 
-    Args:
-        func (function): A Python function that takes one or more arguments,
-            one of which must be a Tensor, and returns one or more Tensors
-        argnums (int or Tuple[int]): Optional, integer or tuple of integers,
-            saying which arguments to get the Jacobian with respect to.
-            Default: 0.
-        has_aux (bool): Flag indicating that ``func`` returns a
-            ``(output, aux)`` tuple where the first element is the output of
-            the function to be differentiated and the second element is
-            auxiliary objects that will not be differentiated.
-            Default: False.
-        chunk_size (None or int): If None (default), use the maximum chunk size
-            (equivalent to doing a single vmap over vjp to compute the jacobian).
-            If 1, then compute the jacobian row-by-row with a for-loop.
-            If not None, then compute the jacobian :attr:`chunk_size` rows at a time
-            (equivalent to doing multiple vmap over vjp). If you run into memory issues computing
-            the jacobian, please try to specify a non-None chunk_size.
+    error_if_complex("jacrev", args, is_input=True)
+    vjp_out = _vjp_with_argnums(func, *args, argnums=argnums, has_aux=has_aux)
+    if has_aux:
+        output, vjp_fn, aux = vjp_out
+    else:
+        output, vjp_fn = vjp_out
 
-    Returns:
-        Returns a function that takes in the same inputs as ``func`` and
-        returns the Jacobian of ``func`` with respect to the arg(s) at
-        ``argnums``. If ``has_aux is True``, then the returned function
-        instead returns a ``(jacobian, aux)`` tuple where ``jacobian``
-        is the Jacobian and ``aux`` is auxiliary objects returned by ``func``.
+    # See NOTE: [Computing jacobian with vmap and vjp for multiple outputs]
+    flat_output, output_spec = tree_flatten(output)
 
-    A basic usage with a pointwise, unary operation will give a diagonal array
-    as the Jacobian
+    error_if_complex("jacrev", flat_output, is_input=False)
 
-        >>> from torch.func import jacrev
-        >>> x = torch.randn(5)
-        >>> jacobian = jacrev(torch.sin)(x)
-        >>> expected = torch.diag(torch.cos(x))
-        >>> assert torch.allclose(jacobian, expected)
+    # NB: vjp already checks that all outputs are tensors
+    # Step 1: Construct grad_outputs by splitting the standard basis
+    flat_output_numels = tuple(out.numel() for out in flat_output)
 
-    If you would like to compute the output of the function as well as the
-    jacobian of the function, use the ``has_aux`` flag to return the output
-    as an auxiliary object:
+    primals = _slice_argnums(args, argnums)
+    flat_primals, primals_spec = tree_flatten(primals)
 
-        >>> from torch.func import jacrev
-        >>> x = torch.randn(5)
-        >>>
-        >>> def f(x):
-        >>>   return x.sin()
-        >>>
-        >>> def g(x):
-        >>>   result = f(x)
-        >>>   return result, result
-        >>>
-        >>> jacobian_f, f_x = jacrev(g, has_aux=True)(x)
-        >>> assert torch.allclose(f_x, f(x))
+    def compute_jacobian_stacked():
+        # Helper function to compute chunked Jacobian
+        # The intermediate chunked calculation are only
+        # scoped at this function level.
+        chunked_results = []
+        for flat_basis_chunk in _chunked_standard_basis_for_(flat_output,
+                                                             flat_output_numels,
+                                                             chunk_size=chunk_size):
+            if chunk_size == 1:
+                # sanity check.
+                for t in flat_basis_chunk:
+                    assert t.size(0) == 1
 
-    :func:`jacrev` can be composed with vmap to produce batched
-    Jacobians:
+                flat_basis_chunk = tree_map(lambda t: torch.squeeze(t, 0), flat_basis_chunk)
 
-        >>> from torch.func import jacrev, vmap
-        >>> x = torch.randn(64, 5)
-        >>> jacobian = vmap(jacrev(torch.sin))(x)
-        >>> assert jacobian.shape == (64, 5, 5)
+            basis = tree_unflatten(flat_basis_chunk, output_spec)
 
-    Additionally, :func:`jacrev` can be composed with itself to produce
-    Hessians
+            if chunk_size == 1:
+                # Behaviour with `chunk_size=1` is same as `for-loop`
+                # i.e. user shouldn't deal with the limitations of vmap.
+                chunked_result = vjp_fn(basis)
+            else:  # chunk_size is None or chunk_size != 1
+                chunked_result = vmap(vjp_fn)(basis)
 
-        >>> from torch.func import jacrev
-        >>> def f(x):
-        >>>   return x.sin().sum()
-        >>>
-        >>> x = torch.randn(5)
-        >>> hessian = jacrev(jacrev(f))(x)
-        >>> assert torch.allclose(hessian, torch.diag(-x.sin()))
+            flat_results = pytree.tree_leaves(chunked_result)
 
-    By default, :func:`jacrev` computes the Jacobian with respect to the first
-    input. However, it can compute the Jacboian with respect to a different
-    argument by using ``argnums``:
+            if chunk_size == 1:
+                flat_results = tree_map(lambda t: torch.unsqueeze(t, 0), flat_results)
 
-        >>> from torch.func import jacrev
-        >>> def f(x, y):
-        >>>   return x + y ** 2
-        >>>
-        >>> x, y = torch.randn(5), torch.randn(5)
-        >>> jacobian = jacrev(f, argnums=1)(x, y)
-        >>> expected = torch.diag(2 * y)
-        >>> assert torch.allclose(jacobian, expected)
+            chunked_results.append(flat_results)
 
-    Additionally, passing a tuple to ``argnums`` will compute the Jacobian
-    with respect to multiple arguments
+        if len(chunked_results) == 1:
+            # Short-circuit if we used a single chunk
+            return chunked_results[0]
 
-        >>> from torch.func import jacrev
-        >>> def f(x, y):
-        >>>   return x + y ** 2
-        >>>
-        >>> x, y = torch.randn(5), torch.randn(5)
-        >>> jacobian = jacrev(f, argnums=(0, 1))(x, y)
-        >>> expectedX = torch.diag(torch.ones_like(x))
-        >>> expectedY = torch.diag(2 * y)
-        >>> assert torch.allclose(jacobian[0], expectedX)
-        >>> assert torch.allclose(jacobian[1], expectedY)
+        # Concatenate chunks.
+        flat_results = []
+        # Iterate and concat the jacobians of different
+        # inputs.
+        for idx in range(len(flat_primals)):
+            r = tuple(r_[idx] for r_ in chunked_results)
+            flat_results.append(torch.cat(r, 0))
 
-    .. note::
-        Using PyTorch ``torch.no_grad`` together with ``jacrev``.
-        Case 1: Using ``torch.no_grad`` inside a function:
+        return flat_results
 
-            >>> def f(x):
-            >>>     with torch.no_grad():
-            >>>         c = x ** 2
-            >>>     return x - c
+    def compute_jacobian_preallocate_and_copy():
+        # Helper function to compute chunked Jacobian
+        # The intermediate chunked calculation are only
+        # scoped at this function level.
+        out_vec_size = sum(flat_output_numels)
 
-        In this case, ``jacrev(f)(x)`` will respect the inner ``torch.no_grad``.
+        # Don't pre-allocate if we have a single chunk.
+        if not (chunk_size is None or chunk_size >= out_vec_size):
+            stacked_results = [primal.new_zeros(out_vec_size, *primal.shape) for primal in flat_primals]
 
-        Case 2: Using ``jacrev`` inside ``torch.no_grad`` context manager:
+        for idx, flat_basis_chunk in enumerate(_chunked_standard_basis_for_(flat_output,
+                                                                            flat_output_numels,
+                                                                            chunk_size=chunk_size)):
+            if chunk_size == 1:
+                # sanity check.
+                for t in flat_basis_chunk:
+                    assert t.size(0) == 1
 
-            >>> with torch.no_grad():
-            >>>     jacrev(f)(x)
+                flat_basis_chunk = [torch.squeeze(t, 0) for t in flat_basis_chunk]
 
-        In this case, ``jacrev`` will respect the inner ``torch.no_grad``, but not the
-        outer one. This is because ``jacrev`` is a "function transform": its result
-        should not depend on the result of a context manager outside of ``f``.
-    """
-    if not (chunk_size is None or chunk_size > 0):
-        raise ValueError("jacrev: `chunk_size` should be greater than 0.")
+            basis = tree_unflatten(flat_basis_chunk, output_spec)
 
-    @wraps(func)
-    def wrapper_fn(*args):
-        error_if_complex("jacrev", args, is_input=True)
-        vjp_out = _vjp_with_argnums(func, *args, argnums=argnums, has_aux=has_aux)
-        if has_aux:
-            output, vjp_fn, aux = vjp_out
-        else:
-            output, vjp_fn = vjp_out
+            if chunk_size == 1:
+                # Behaviour with `chunk_size=1` is same as `for-loop`
+                # i.e. user shouldn't deal with the limitations of vmap.
+                chunked_result = vjp_fn(basis)
+            else:  # chunk_size is None or chunk_size != 1
+                chunked_result = vmap(vjp_fn)(basis)
 
-        # See NOTE: [Computing jacobian with vmap and vjp for multiple outputs]
-        flat_output, output_spec = tree_flatten(output)
+            flat_results = pytree.tree_leaves(chunked_result)
 
-        error_if_complex("jacrev", flat_output, is_input=False)
-
-        # NB: vjp already checks that all outputs are tensors
-        # Step 1: Construct grad_outputs by splitting the standard basis
-        flat_output_numels = tuple(out.numel() for out in flat_output)
-
-        primals = _slice_argnums(args, argnums)
-        flat_primals, primals_spec = tree_flatten(primals)
-
-        def compute_jacobian_stacked():
-            # Helper function to compute chunked Jacobian
-            # The intermediate chunked calculation are only
-            # scoped at this function level.
-            chunked_results = []
-            for flat_basis_chunk in _chunked_standard_basis_for_(flat_output,
-                                                                 flat_output_numels,
-                                                                 chunk_size=chunk_size):
-                if chunk_size == 1:
-                    # sanity check.
-                    for t in flat_basis_chunk:
-                        assert t.size(0) == 1
-
-                    flat_basis_chunk = tree_map(lambda t: torch.squeeze(t, 0), flat_basis_chunk)
-
-                basis = tree_unflatten(flat_basis_chunk, output_spec)
-
-                if chunk_size == 1:
-                    # Behaviour with `chunk_size=1` is same as `for-loop`
-                    # i.e. user shouldn't deal with the limitations of vmap.
-                    chunked_result = vjp_fn(basis)
-                else:  # chunk_size is None or chunk_size != 1
-                    chunked_result = vmap(vjp_fn)(basis)
-
-                flat_results = pytree.tree_leaves(chunked_result)
-
-                if chunk_size == 1:
+            # Short-circuit if we have a single chunk.
+            if chunk_size is None or chunk_size >= out_vec_size:
+                if chunk_size == 1:  # and out_vec_size == 1
+                    # Since we squeezed the output dim
                     flat_results = tree_map(lambda t: torch.unsqueeze(t, 0), flat_results)
+                return flat_results
 
-                chunked_results.append(flat_results)
+            for r, sr in zip(flat_results, stacked_results):
+                sr[idx * chunk_size: (idx + 1) * chunk_size].copy_(r)
 
-            if len(chunked_results) == 1:
-                # Short-circuit if we used a single chunk
-                return chunked_results[0]
+        return stacked_results
 
-            # Concatenate chunks.
-            flat_results = []
-            # Iterate and concat the jacobians of different
-            # inputs.
-            for idx in range(len(flat_primals)):
-                r = tuple(r_[idx] for r_ in chunked_results)
-                flat_results.append(torch.cat(r, 0))
+    if _preallocate_and_copy:
+        flat_jacobians_per_input = compute_jacobian_preallocate_and_copy()
+    else:
+        flat_jacobians_per_input = compute_jacobian_stacked()
 
-            return flat_results
+    # Step 2: The returned jacobian is one big tensor per input. In this step,
+    # we split each Tensor by output.
+    flat_jacobians_per_input = [result.split(flat_output_numels, dim=0) for result in flat_jacobians_per_input]
+    flat_input_flat_output = [
+        tuple(split.view(out.shape + primal.shape)
+              for split, out in zip(splits, flat_output))
+        for splits, primal in zip(flat_jacobians_per_input, flat_primals)
+    ]
 
-        def compute_jacobian_preallocate_and_copy():
-            # Helper function to compute chunked Jacobian
-            # The intermediate chunked calculation are only
-            # scoped at this function level.
-            out_vec_size = sum(flat_output_numels)
+    # Step 3: Right now, `jacobian` is a List[List[Tensor]].
+    # The outer List corresponds to the number of primals,
+    # the inner List corresponds to the number of outputs.
+    # We need to:
+    # a. Exchange the order of the outer List and inner List
+    # b. tree_unflatten the inner Lists (which correspond to the primals)
+    # c. handle the argnums=int case
+    # d. tree_unflatten the outer List (which corresponds to the outputs)
+    flat_output_flat_input = tuple(zip(*flat_input_flat_output))
 
-            # Don't pre-allocate if we have a single chunk.
-            if not (chunk_size is None or chunk_size >= out_vec_size):
-                stacked_results = [primal.new_zeros(out_vec_size, *primal.shape) for primal in flat_primals]
+    flat_output_input = tuple(tree_unflatten(flat_input, primals_spec)
+                              for flat_input in flat_output_flat_input)
 
-            for idx, flat_basis_chunk in enumerate(_chunked_standard_basis_for_(flat_output,
-                                                                                flat_output_numels,
-                                                                                chunk_size=chunk_size)):
-                if chunk_size == 1:
-                    # sanity check.
-                    for t in flat_basis_chunk:
-                        assert t.size(0) == 1
+    if isinstance(argnums, int):
+        flat_output_input = tuple(_safe_zero_index(flat_input)
+                                  for flat_input in flat_output_input)
+    output_input = tree_unflatten(flat_output_input, output_spec)
+    if has_aux:
+        return output_input, aux
+    return output_input
 
-                    flat_basis_chunk = [torch.squeeze(t, 0) for t in flat_basis_chunk]
-
-                basis = tree_unflatten(flat_basis_chunk, output_spec)
-
-                if chunk_size == 1:
-                    # Behaviour with `chunk_size=1` is same as `for-loop`
-                    # i.e. user shouldn't deal with the limitations of vmap.
-                    chunked_result = vjp_fn(basis)
-                else:  # chunk_size is None or chunk_size != 1
-                    chunked_result = vmap(vjp_fn)(basis)
-
-                flat_results = pytree.tree_leaves(chunked_result)
-
-                # Short-circuit if we have a single chunk.
-                if chunk_size is None or chunk_size >= out_vec_size:
-                    if chunk_size == 1:  # and out_vec_size == 1
-                        # Since we squeezed the output dim
-                        flat_results = tree_map(lambda t: torch.unsqueeze(t, 0), flat_results)
-                    return flat_results
-
-                for r, sr in zip(flat_results, stacked_results):
-                    sr[idx * chunk_size: (idx + 1) * chunk_size].copy_(r)
-
-            return stacked_results
-
-        if _preallocate_and_copy:
-            flat_jacobians_per_input = compute_jacobian_preallocate_and_copy()
-        else:
-            flat_jacobians_per_input = compute_jacobian_stacked()
-
-        # Step 2: The returned jacobian is one big tensor per input. In this step,
-        # we split each Tensor by output.
-        flat_jacobians_per_input = [result.split(flat_output_numels, dim=0) for result in flat_jacobians_per_input]
-        flat_input_flat_output = [
-            tuple(split.view(out.shape + primal.shape)
-                  for split, out in zip(splits, flat_output))
-            for splits, primal in zip(flat_jacobians_per_input, flat_primals)
-        ]
-
-        # Step 3: Right now, `jacobian` is a List[List[Tensor]].
-        # The outer List corresponds to the number of primals,
-        # the inner List corresponds to the number of outputs.
-        # We need to:
-        # a. Exchange the order of the outer List and inner List
-        # b. tree_unflatten the inner Lists (which correspond to the primals)
-        # c. handle the argnums=int case
-        # d. tree_unflatten the outer List (which corresponds to the outputs)
-        flat_output_flat_input = tuple(zip(*flat_input_flat_output))
-
-        flat_output_input = tuple(tree_unflatten(flat_input, primals_spec)
-                                  for flat_input in flat_output_flat_input)
-
-        if isinstance(argnums, int):
-            flat_output_input = tuple(_safe_zero_index(flat_input)
-                                      for flat_input in flat_output_input)
-        output_input = tree_unflatten(flat_output_input, output_spec)
-        if has_aux:
-            return output_input, aux
-        return output_input
-    return wrapper_fn
 
 # NOTE: [Computing jacobian with vmap and vjp for multiple outputs]
 #
@@ -1041,204 +910,53 @@ def safe_unflatten(tensor, dim, shape):
     return tensor.unflatten(dim, shape)
 
 
-@exposed_in("torch.func")
-def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, randomness: str = "error"):
-    """
-    Computes the Jacobian of ``func`` with respect to the arg(s) at index
-    ``argnum`` using forward-mode autodiff
+def jacfwd_impl(func: Callable, argnums: argnums_t, has_aux: bool, randomness: str, args):
+    error_if_complex("jacfwd", args, is_input=True)
+    primals = args if argnums is None else _slice_argnums(args, argnums)
+    flat_primals, primals_spec = tree_flatten(primals)
+    flat_primals_numels = tuple(p.numel() for p in flat_primals)
+    flat_basis = _construct_standard_basis_for(flat_primals, flat_primals_numels)
+    basis = tree_unflatten(flat_basis, primals_spec)
 
-    Args:
-        func (function): A Python function that takes one or more arguments,
-            one of which must be a Tensor, and returns one or more Tensors
-        argnums (int or Tuple[int]): Optional, integer or tuple of integers,
-            saying which arguments to get the Jacobian with respect to.
-            Default: 0.
-        has_aux (bool): Flag indicating that ``func`` returns a
-            ``(output, aux)`` tuple where the first element is the output of
-            the function to be differentiated and the second element is
-            auxiliary objects that will not be differentiated.
-            Default: False.
-        randomness(str): Flag indicating what type of randomness to use.
-            See :func:`vmap` for more detail. Allowed: "different", "same", "error".
-            Default: "error"
-
-    Returns:
-        Returns a function that takes in the same inputs as ``func`` and
-        returns the Jacobian of ``func`` with respect to the arg(s) at
-        ``argnums``. If ``has_aux is True``, then the returned function
-        instead returns a ``(jacobian, aux)`` tuple where ``jacobian``
-        is the Jacobian and ``aux`` is auxiliary objects returned by ``func``.
-
-    .. note::
-        You may see this API error out with "forward-mode AD not implemented
-        for operator X". If so, please file a bug report and we will prioritize it.
-        An alternative is to use :func:`jacrev`, which has better operator coverage.
-
-    A basic usage with a pointwise, unary operation will give a diagonal array
-    as the Jacobian
-
-        >>> from torch.func import jacfwd
-        >>> x = torch.randn(5)
-        >>> jacobian = jacfwd(torch.sin)(x)
-        >>> expected = torch.diag(torch.cos(x))
-        >>> assert torch.allclose(jacobian, expected)
-
-    :func:`jacfwd` can be composed with vmap to produce batched
-    Jacobians:
-
-        >>> from torch.func import jacfwd, vmap
-        >>> x = torch.randn(64, 5)
-        >>> jacobian = vmap(jacfwd(torch.sin))(x)
-        >>> assert jacobian.shape == (64, 5, 5)
-
-    If you would like to compute the output of the function as well as the
-    jacobian of the function, use the ``has_aux`` flag to return the output
-    as an auxiliary object:
-
-        >>> from torch.func import jacfwd
-        >>> x = torch.randn(5)
-        >>>
-        >>> def f(x):
-        >>>   return x.sin()
-        >>>
-        >>> def g(x):
-        >>>   result = f(x)
-        >>>   return result, result
-        >>>
-        >>> jacobian_f, f_x = jacfwd(g, has_aux=True)(x)
-        >>> assert torch.allclose(f_x, f(x))
-
-    Additionally, :func:`jacrev` can be composed with itself or :func:`jacrev`
-    to produce Hessians
-
-        >>> from torch.func import jacfwd, jacrev
-        >>> def f(x):
-        >>>   return x.sin().sum()
-        >>>
-        >>> x = torch.randn(5)
-        >>> hessian = jacfwd(jacrev(f))(x)
-        >>> assert torch.allclose(hessian, torch.diag(-x.sin()))
-
-    By default, :func:`jacfwd` computes the Jacobian with respect to the first
-    input. However, it can compute the Jacboian with respect to a different
-    argument by using ``argnums``:
-
-        >>> from torch.func import jacfwd
-        >>> def f(x, y):
-        >>>   return x + y ** 2
-        >>>
-        >>> x, y = torch.randn(5), torch.randn(5)
-        >>> jacobian = jacfwd(f, argnums=1)(x, y)
-        >>> expected = torch.diag(2 * y)
-        >>> assert torch.allclose(jacobian, expected)
-
-    Additionally, passing a tuple to ``argnums`` will compute the Jacobian
-    with respect to multiple arguments
-
-        >>> from torch.func import jacfwd
-        >>> def f(x, y):
-        >>>   return x + y ** 2
-        >>>
-        >>> x, y = torch.randn(5), torch.randn(5)
-        >>> jacobian = jacfwd(f, argnums=(0, 1))(x, y)
-        >>> expectedX = torch.diag(torch.ones_like(x))
-        >>> expectedY = torch.diag(2 * y)
-        >>> assert torch.allclose(jacobian[0], expectedX)
-        >>> assert torch.allclose(jacobian[1], expectedY)
-
-    """
-    @wraps(func)
-    def wrapper_fn(*args):
-        error_if_complex("jacfwd", args, is_input=True)
-        primals = args if argnums is None else _slice_argnums(args, argnums)
-        flat_primals, primals_spec = tree_flatten(primals)
-        flat_primals_numels = tuple(p.numel() for p in flat_primals)
-        flat_basis = _construct_standard_basis_for(flat_primals, flat_primals_numels)
-        basis = tree_unflatten(flat_basis, primals_spec)
-
-        def push_jvp(basis):
-            output = _jvp_with_argnums(func, args, basis, argnums=argnums, has_aux=has_aux)
-            # output[0] is the output of `func(*args)`
-            error_if_complex("jacfwd", output[0], is_input=False)
-            if has_aux:
-                _, jvp_out, aux = output
-                return jvp_out, aux
-            _, jvp_out = output
-            return jvp_out
-
-        results = vmap(push_jvp, randomness=randomness)(basis)
+    def push_jvp(basis):
+        output = _jvp_with_argnums(func, args, basis, argnums=argnums, has_aux=has_aux)
+        # output[0] is the output of `func(*args)`
+        error_if_complex("jacfwd", output[0], is_input=False)
         if has_aux:
-            results, aux = results
-            # aux is in the standard basis format, e.g. NxN matrix
-            # We need to fetch the first element as original `func` output
-            flat_aux, aux_spec = tree_flatten(aux)
-            flat_aux = [value[0] for value in flat_aux]
-            aux = tree_unflatten(flat_aux, aux_spec)
+            _, jvp_out, aux = output
+            return jvp_out, aux
+        _, jvp_out = output
+        return jvp_out
 
-        jac_outs, spec = tree_flatten(results)
-        # Most probably below output check can never raise an error
-        # as jvp should test the output before
-        # assert_non_empty_output(jac_outs, 'jacfwd(f, ...)(*args)')
+    results = vmap(push_jvp, randomness=randomness)(basis)
+    if has_aux:
+        results, aux = results
+        # aux is in the standard basis format, e.g. NxN matrix
+        # We need to fetch the first element as original `func` output
+        flat_aux, aux_spec = tree_flatten(aux)
+        flat_aux = [value[0] for value in flat_aux]
+        aux = tree_unflatten(flat_aux, aux_spec)
 
-        jac_outs_ins = tuple(
-            tuple(
-                safe_unflatten(jac_out_in, -1, primal.shape)
-                for primal, jac_out_in in
-                zip(flat_primals, jac_out.movedim(0, -1).split(flat_primals_numels, dim=-1))
-            )
-            for jac_out in jac_outs
+    jac_outs, spec = tree_flatten(results)
+    # Most probably below output check can never raise an error
+    # as jvp should test the output before
+    # assert_non_empty_output(jac_outs, 'jacfwd(f, ...)(*args)')
+
+    jac_outs_ins = tuple(
+        tuple(
+            safe_unflatten(jac_out_in, -1, primal.shape)
+            for primal, jac_out_in in
+            zip(flat_primals, jac_out.movedim(0, -1).split(flat_primals_numels, dim=-1))
         )
-        jac_outs_ins = tuple(tree_unflatten(jac_ins, primals_spec) for jac_ins in jac_outs_ins)
+        for jac_out in jac_outs
+    )
+    jac_outs_ins = tuple(tree_unflatten(jac_ins, primals_spec) for jac_ins in jac_outs_ins)
 
-        if isinstance(argnums, int):
-            jac_outs_ins = tuple(jac_ins[0] for jac_ins in jac_outs_ins)
-        if has_aux:
-            return tree_unflatten(jac_outs_ins, spec), aux
-        return tree_unflatten(jac_outs_ins, spec)
-    return wrapper_fn
-
-
-@exposed_in("torch.func")
-def hessian(func, argnums=0):
-    """
-    Computes the Hessian of ``func`` with respect to the arg(s) at index
-    ``argnum`` via a forward-over-reverse strategy.
-
-    The forward-over-reverse strategy (composing ``jacfwd(jacrev(func))``) is
-    a good default for good performance. It is possible to compute Hessians
-    through other compositions of :func:`jacfwd` and :func:`jacrev` like
-    ``jacfwd(jacfwd(func))`` or ``jacrev(jacrev(func))``.
-
-    Args:
-        func (function): A Python function that takes one or more arguments,
-            one of which must be a Tensor, and returns one or more Tensors
-        argnums (int or Tuple[int]): Optional, integer or tuple of integers,
-            saying which arguments to get the Hessian with respect to.
-            Default: 0.
-
-    Returns:
-        Returns a function that takes in the same inputs as ``func`` and
-        returns the Hessian of ``func`` with respect to the arg(s) at
-        ``argnums``.
-
-    .. note::
-        You may see this API error out with "forward-mode AD not implemented
-        for operator X". If so, please file a bug report and we will prioritize it.
-        An alternative is to use ``jacrev(jacrev(func))``, which has better
-        operator coverage.
-
-    A basic usage with a R^N -> R^1 function gives a N x N Hessian:
-
-        >>> from torch.func import hessian
-        >>> def f(x):
-        >>>   return x.sin().sum()
-        >>>
-        >>> x = torch.randn(5)
-        >>> hess = hessian(f)(x)  # equivalent to jacfwd(jacrev(f))(x)
-        >>> assert torch.allclose(hess, torch.diag(-x.sin()))
-
-    """
-    return jacfwd(jacrev(func, argnums), argnums)
+    if isinstance(argnums, int):
+        jac_outs_ins = tuple(jac_ins[0] for jac_ins in jac_outs_ins)
+    if has_aux:
+        return tree_unflatten(jac_outs_ins, spec), aux
+    return tree_unflatten(jac_outs_ins, spec)
 
 
 @doesnt_support_saved_tensors_hooks

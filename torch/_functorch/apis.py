@@ -4,9 +4,10 @@
 #       and there isn't a mechanism to selectively expose only some functions (eg. grad) from a file
 #       to Dynamo.
 from torch._functorch.vmap import (vmap_impl, _check_randomness_arg,
-                                   Callable, in_dims_t, out_dims_t, _check_out_dims_is_int_or_int_pytree,
+                                   in_dims_t, out_dims_t, _check_out_dims_is_int_or_int_pytree,
                                    _process_batched_inputs, _chunked_vmap)
 from torch._functorch.utils import exposed_in, argnums_t
+from typing import Callable, Union, Tuple, Optional
 import functools
 
 # vmap(func)(inputs) wraps all Tensor inputs to be batched in BatchedTensors,
@@ -399,3 +400,311 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False
     def wrapper(*args, **kwargs):
         return eager_transforms.grad_and_value_impl(func, argnums, has_aux, args, kwargs)
     return wrapper
+
+
+@exposed_in("torch.func")
+def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, randomness: str = "error"):
+    """
+    Computes the Jacobian of ``func`` with respect to the arg(s) at index
+    ``argnum`` using forward-mode autodiff
+
+    Args:
+        func (function): A Python function that takes one or more arguments,
+            one of which must be a Tensor, and returns one or more Tensors
+        argnums (int or Tuple[int]): Optional, integer or tuple of integers,
+            saying which arguments to get the Jacobian with respect to.
+            Default: 0.
+        has_aux (bool): Flag indicating that ``func`` returns a
+            ``(output, aux)`` tuple where the first element is the output of
+            the function to be differentiated and the second element is
+            auxiliary objects that will not be differentiated.
+            Default: False.
+        randomness(str): Flag indicating what type of randomness to use.
+            See :func:`vmap` for more detail. Allowed: "different", "same", "error".
+            Default: "error"
+
+    Returns:
+        Returns a function that takes in the same inputs as ``func`` and
+        returns the Jacobian of ``func`` with respect to the arg(s) at
+        ``argnums``. If ``has_aux is True``, then the returned function
+        instead returns a ``(jacobian, aux)`` tuple where ``jacobian``
+        is the Jacobian and ``aux`` is auxiliary objects returned by ``func``.
+
+    .. note::
+        You may see this API error out with "forward-mode AD not implemented
+        for operator X". If so, please file a bug report and we will prioritize it.
+        An alternative is to use :func:`jacrev`, which has better operator coverage.
+
+    A basic usage with a pointwise, unary operation will give a diagonal array
+    as the Jacobian
+
+        >>> from torch.func import jacfwd
+        >>> x = torch.randn(5)
+        >>> jacobian = jacfwd(torch.sin)(x)
+        >>> expected = torch.diag(torch.cos(x))
+        >>> assert torch.allclose(jacobian, expected)
+
+    :func:`jacfwd` can be composed with vmap to produce batched
+    Jacobians:
+
+        >>> from torch.func import jacfwd, vmap
+        >>> x = torch.randn(64, 5)
+        >>> jacobian = vmap(jacfwd(torch.sin))(x)
+        >>> assert jacobian.shape == (64, 5, 5)
+
+    If you would like to compute the output of the function as well as the
+    jacobian of the function, use the ``has_aux`` flag to return the output
+    as an auxiliary object:
+
+        >>> from torch.func import jacfwd
+        >>> x = torch.randn(5)
+        >>>
+        >>> def f(x):
+        >>>   return x.sin()
+        >>>
+        >>> def g(x):
+        >>>   result = f(x)
+        >>>   return result, result
+        >>>
+        >>> jacobian_f, f_x = jacfwd(g, has_aux=True)(x)
+        >>> assert torch.allclose(f_x, f(x))
+
+    Additionally, :func:`jacrev` can be composed with itself or :func:`jacrev`
+    to produce Hessians
+
+        >>> from torch.func import jacfwd, jacrev
+        >>> def f(x):
+        >>>   return x.sin().sum()
+        >>>
+        >>> x = torch.randn(5)
+        >>> hessian = jacfwd(jacrev(f))(x)
+        >>> assert torch.allclose(hessian, torch.diag(-x.sin()))
+
+    By default, :func:`jacfwd` computes the Jacobian with respect to the first
+    input. However, it can compute the Jacboian with respect to a different
+    argument by using ``argnums``:
+
+        >>> from torch.func import jacfwd
+        >>> def f(x, y):
+        >>>   return x + y ** 2
+        >>>
+        >>> x, y = torch.randn(5), torch.randn(5)
+        >>> jacobian = jacfwd(f, argnums=1)(x, y)
+        >>> expected = torch.diag(2 * y)
+        >>> assert torch.allclose(jacobian, expected)
+
+    Additionally, passing a tuple to ``argnums`` will compute the Jacobian
+    with respect to multiple arguments
+
+        >>> from torch.func import jacfwd
+        >>> def f(x, y):
+        >>>   return x + y ** 2
+        >>>
+        >>> x, y = torch.randn(5), torch.randn(5)
+        >>> jacobian = jacfwd(f, argnums=(0, 1))(x, y)
+        >>> expectedX = torch.diag(torch.ones_like(x))
+        >>> expectedY = torch.diag(2 * y)
+        >>> assert torch.allclose(jacobian[0], expectedX)
+        >>> assert torch.allclose(jacobian[1], expectedY)
+
+    """
+    from torch._functorch import eager_transforms
+
+    @functools.wraps(func)
+    def wrapper_fn(*args):
+        return eager_transforms.jacfwd_impl(func, argnums, has_aux, randomness, args)
+    return wrapper_fn
+
+
+@exposed_in("torch.func")
+def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False,
+           chunk_size: Optional[int] = None,
+           _preallocate_and_copy=False):
+    """
+    Computes the Jacobian of ``func`` with respect to the arg(s) at index
+    ``argnum`` using reverse mode autodiff
+
+    .. note::
+        Using :attr:`chunk_size=1` is equivalent to computing the jacobian
+        row-by-row with a for-loop i.e. the constraints of :func:`vmap` are
+        not applicable.
+
+    Args:
+        func (function): A Python function that takes one or more arguments,
+            one of which must be a Tensor, and returns one or more Tensors
+        argnums (int or Tuple[int]): Optional, integer or tuple of integers,
+            saying which arguments to get the Jacobian with respect to.
+            Default: 0.
+        has_aux (bool): Flag indicating that ``func`` returns a
+            ``(output, aux)`` tuple where the first element is the output of
+            the function to be differentiated and the second element is
+            auxiliary objects that will not be differentiated.
+            Default: False.
+        chunk_size (None or int): If None (default), use the maximum chunk size
+            (equivalent to doing a single vmap over vjp to compute the jacobian).
+            If 1, then compute the jacobian row-by-row with a for-loop.
+            If not None, then compute the jacobian :attr:`chunk_size` rows at a time
+            (equivalent to doing multiple vmap over vjp). If you run into memory issues computing
+            the jacobian, please try to specify a non-None chunk_size.
+
+    Returns:
+        Returns a function that takes in the same inputs as ``func`` and
+        returns the Jacobian of ``func`` with respect to the arg(s) at
+        ``argnums``. If ``has_aux is True``, then the returned function
+        instead returns a ``(jacobian, aux)`` tuple where ``jacobian``
+        is the Jacobian and ``aux`` is auxiliary objects returned by ``func``.
+
+    A basic usage with a pointwise, unary operation will give a diagonal array
+    as the Jacobian
+
+        >>> from torch.func import jacrev
+        >>> x = torch.randn(5)
+        >>> jacobian = jacrev(torch.sin)(x)
+        >>> expected = torch.diag(torch.cos(x))
+        >>> assert torch.allclose(jacobian, expected)
+
+    If you would like to compute the output of the function as well as the
+    jacobian of the function, use the ``has_aux`` flag to return the output
+    as an auxiliary object:
+
+        >>> from torch.func import jacrev
+        >>> x = torch.randn(5)
+        >>>
+        >>> def f(x):
+        >>>   return x.sin()
+        >>>
+        >>> def g(x):
+        >>>   result = f(x)
+        >>>   return result, result
+        >>>
+        >>> jacobian_f, f_x = jacrev(g, has_aux=True)(x)
+        >>> assert torch.allclose(f_x, f(x))
+
+    :func:`jacrev` can be composed with vmap to produce batched
+    Jacobians:
+
+        >>> from torch.func import jacrev, vmap
+        >>> x = torch.randn(64, 5)
+        >>> jacobian = vmap(jacrev(torch.sin))(x)
+        >>> assert jacobian.shape == (64, 5, 5)
+
+    Additionally, :func:`jacrev` can be composed with itself to produce
+    Hessians
+
+        >>> from torch.func import jacrev
+        >>> def f(x):
+        >>>   return x.sin().sum()
+        >>>
+        >>> x = torch.randn(5)
+        >>> hessian = jacrev(jacrev(f))(x)
+        >>> assert torch.allclose(hessian, torch.diag(-x.sin()))
+
+    By default, :func:`jacrev` computes the Jacobian with respect to the first
+    input. However, it can compute the Jacboian with respect to a different
+    argument by using ``argnums``:
+
+        >>> from torch.func import jacrev
+        >>> def f(x, y):
+        >>>   return x + y ** 2
+        >>>
+        >>> x, y = torch.randn(5), torch.randn(5)
+        >>> jacobian = jacrev(f, argnums=1)(x, y)
+        >>> expected = torch.diag(2 * y)
+        >>> assert torch.allclose(jacobian, expected)
+
+    Additionally, passing a tuple to ``argnums`` will compute the Jacobian
+    with respect to multiple arguments
+
+        >>> from torch.func import jacrev
+        >>> def f(x, y):
+        >>>   return x + y ** 2
+        >>>
+        >>> x, y = torch.randn(5), torch.randn(5)
+        >>> jacobian = jacrev(f, argnums=(0, 1))(x, y)
+        >>> expectedX = torch.diag(torch.ones_like(x))
+        >>> expectedY = torch.diag(2 * y)
+        >>> assert torch.allclose(jacobian[0], expectedX)
+        >>> assert torch.allclose(jacobian[1], expectedY)
+
+    .. note::
+        Using PyTorch ``torch.no_grad`` together with ``jacrev``.
+        Case 1: Using ``torch.no_grad`` inside a function:
+
+            >>> def f(x):
+            >>>     with torch.no_grad():
+            >>>         c = x ** 2
+            >>>     return x - c
+
+        In this case, ``jacrev(f)(x)`` will respect the inner ``torch.no_grad``.
+
+        Case 2: Using ``jacrev`` inside ``torch.no_grad`` context manager:
+
+            >>> with torch.no_grad():
+            >>>     jacrev(f)(x)
+
+        In this case, ``jacrev`` will respect the inner ``torch.no_grad``, but not the
+        outer one. This is because ``jacrev`` is a "function transform": its result
+        should not depend on the result of a context manager outside of ``f``.
+    """
+    from torch._functorch import eager_transforms
+
+    if not (chunk_size is None or chunk_size > 0):
+        raise ValueError("jacrev: `chunk_size` should be greater than 0.")
+
+    @functools.wraps(func)
+    def wrapper_fn(*args):
+        return eager_transforms.jacrev_impl(func, argnums, has_aux, chunk_size, _preallocate_and_copy, args)
+    return wrapper_fn
+
+
+@exposed_in("torch.func")
+def hessian(func, argnums=0):
+    """
+    Computes the Hessian of ``func`` with respect to the arg(s) at index
+    ``argnum`` via a forward-over-reverse strategy.
+
+    The forward-over-reverse strategy (composing ``jacfwd(jacrev(func))``) is
+    a good default for good performance. It is possible to compute Hessians
+    through other compositions of :func:`jacfwd` and :func:`jacrev` like
+    ``jacfwd(jacfwd(func))`` or ``jacrev(jacrev(func))``.
+
+    Args:
+        func (function): A Python function that takes one or more arguments,
+            one of which must be a Tensor, and returns one or more Tensors
+        argnums (int or Tuple[int]): Optional, integer or tuple of integers,
+            saying which arguments to get the Hessian with respect to.
+            Default: 0.
+
+    Returns:
+        Returns a function that takes in the same inputs as ``func`` and
+        returns the Hessian of ``func`` with respect to the arg(s) at
+        ``argnums``.
+
+    .. note::
+        You may see this API error out with "forward-mode AD not implemented
+        for operator X". If so, please file a bug report and we will prioritize it.
+        An alternative is to use ``jacrev(jacrev(func))``, which has better
+        operator coverage.
+
+    A basic usage with a R^N -> R^1 function gives a N x N Hessian:
+
+        >>> from torch.func import hessian
+        >>> def f(x):
+        >>>   return x.sin().sum()
+        >>>
+        >>> x = torch.randn(5)
+        >>> hess = hessian(f)(x)  # equivalent to jacfwd(jacrev(f))(x)
+        >>> assert torch.allclose(hess, torch.diag(-x.sin()))
+
+    """
+    from torch._functorch import eager_transforms
+
+    @functools.wraps(func)
+    def wrapper_fn(*args):
+        # hessian can be expressed as a composition of "jacfwd(jacrev(...))"
+        # but Dynamo cannot trace this code. Each higher order operation (jacfwd/jacrev)
+        # is treated internally as a NestedUserFunctionVariable due to "@functools.wraps(func)"
+        # decorator in each one of these functions. Because of that, dynamo cannot handle a double
+        # NestedUserFunctionVariable. To circumvent this issue, we call jacfwd_impl instead of jacfwd
+        return eager_transforms.jacfwd_impl(jacrev(func, argnums), argnums, False, 'error', args)
+    return wrapper_fn

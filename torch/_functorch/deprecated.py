@@ -81,16 +81,16 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
            chunk_size: Optional[int] = None,
            _preallocate_and_copy=False):
     warn_deprecated('jacrev')
-    return _impl.jacrev(func, argnums, has_aux=has_aux, chunk_size=chunk_size,
-                        _preallocate_and_copy=_preallocate_and_copy)
+    return apis.jacrev(func, argnums, has_aux=has_aux, chunk_size=chunk_size,
+                       _preallocate_and_copy=_preallocate_and_copy)
 
 def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, randomness: str = "error"):
     warn_deprecated('jacfwd')
-    return _impl.jacfwd(func, argnums, has_aux, randomness=randomness)
+    return apis.jacfwd(func, argnums, has_aux, randomness=randomness)
 
 def hessian(func, argnums=0):
     warn_deprecated('hessian')
-    return _impl.hessian(func, argnums=argnums)
+    return apis.hessian(func, argnums=argnums)
 
 def functionalize(func: Callable, *, remove: str = 'mutations') -> Callable:
     warn_deprecated('functionalize')
@@ -113,9 +113,9 @@ setup_docs(grad, apis.grad)
 setup_docs(grad_and_value, apis.grad_and_value)
 setup_docs(vjp)
 setup_docs(jvp)
-setup_docs(jacrev)
-setup_docs(jacfwd)
-setup_docs(hessian)
+setup_docs(jacrev, apis.jacrev)
+setup_docs(jacfwd, apis.jacfwd)
+setup_docs(hessian, apis.hessian)
 setup_docs(functionalize)
 setup_docs(make_functional, _nn_impl.make_functional,
            'torch.func.functional_call')

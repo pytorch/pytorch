@@ -195,7 +195,8 @@ manual_torch_name_rule_map = {
     "torch._functorch.eager_transforms._wrap_all_tensors": UserFunctionVariable,
     "torch._functorch.eager_transforms._wrap_tensor_for_grad": UserFunctionVariable,
     # functorch/jacrev
-    "torch._functorch.eager_transforms.jacrev": UserFunctionVariable,
+    "torch._functorch.apis.jacrev": UserFunctionVariable,
+    "torch._functorch.eager_transforms.jacrev_impl": UserFunctionVariable,
     "torch._functorch.eager_transforms.error_if_complex": UserFunctionVariable,
     "torch._functorch.eager_transforms._chunked_standard_basis_for_": UserFunctionVariable,
     "torch._functorch.eager_transforms._safe_zero_index": UserFunctionVariable,
@@ -215,9 +216,12 @@ manual_torch_name_rule_map = {
     "torch.autograd.forward_ad.make_dual": UserFunctionVariable,
     "torch.autograd.forward_ad.unpack_dual": UserFunctionVariable,
     # functorch/jacfwd
-    "torch._functorch.eager_transforms.jacfwd": UserFunctionVariable,
+    "torch._functorch.apis.jacfwd": UserFunctionVariable,
+    "torch._functorch.eager_transforms.jacfwd_impl": UserFunctionVariable,
     "torch._functorch.eager_transforms._construct_standard_basis_for": UserFunctionVariable,
     "torch._functorch.eager_transforms.safe_unflatten": UserFunctionVariable,
+    # functorch/hessian
+    "torch._functorch.apis.hessian": UserFunctionVariable,
     #
     "torch._constrain_as_size": UserFunctionVariable,
     "torch._constrain_as_value": UserFunctionVariable,
@@ -2187,7 +2191,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.eager_transforms._wrap_all_tensors_to_functional",
         "torch._functorch.eager_transforms.assert_flat_tuple_of_tensors",
         "torch._functorch.eager_transforms.functionalize",
-        "torch._functorch.eager_transforms.hessian",
         "torch._functorch.eager_transforms.lazy_dynamo_disable",
         "torch._functorch.eager_transforms.linearize",
         "torch._functorch.eager_transforms.noop",
