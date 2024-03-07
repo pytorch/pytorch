@@ -953,7 +953,7 @@ class VecISA:
     # In fbcode however, we are using the same compiler for pytorch and for inductor codegen,
     # making the runtime check unnecessary.
     _avx_code = """
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR)
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #endif
@@ -1027,19 +1027,6 @@ cdll.LoadLibrary("__lib_path__")
 
 
 @dataclasses.dataclass
-class VecNEON(VecISA):
-    _bit_width = 256  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec256/vec256_float_neon.h
-    _macro = "-DCPU_CAPABILITY_NEON"
-    _arch_flags = ""  # Unused
-    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16}
-
-    def __str__(self) -> str:
-        return "neon"  # Unused
-
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
-
-
-@dataclasses.dataclass
 class VecAVX512(VecISA):
     _bit_width = 512
     _macro = "-DCPU_CAPABILITY_AVX512"
@@ -1094,11 +1081,7 @@ class InvalidVecISA(VecISA):
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [
-    VecAVX512(),
-    VecAVX2(),
-    VecNEON(),
-]  # This order matters for test_cpu_repro
+supported_vec_isa_list = [VecAVX512(), VecAVX2()]
 
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
@@ -1116,12 +1099,7 @@ def valid_vec_isa_list() -> List[VecISA]:
     with open("/proc/cpuinfo") as _cpu_info:
         _cpu_info_content = _cpu_info.read()
         for isa in supported_vec_isa_list:
-            # cpuinfo does not reveal info about NEON support. All aarch64 processors do support NEON though.
-            if (
-                (str(isa) in _cpu_info_content)
-                or (isinstance(isa, VecNEON) and platform.processor() == "aarch64")
-                and isa
-            ):
+            if str(isa) in _cpu_info_content and isa:
                 isa_list.append(isa)
         return isa_list
 
