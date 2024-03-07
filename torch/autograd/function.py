@@ -311,7 +311,7 @@ class BackwardCFunction(_C._FunctionBase, FunctionCtx, _HookMixin):
         return self._forward_cls._compiled_autograd_key(self)  # type: ignore[attr-defined]
 
 
-def warn_traceable_deprecated():
+def _warn_traceable_deprecated():
     warnings.warn(
         "The is_traceable field on torch.autograd.Function is deprecated "
         "and will be removed in PyTorch 2.4.",
@@ -339,7 +339,7 @@ class FunctionMeta(type):
         cls._backward_cls = backward_fn
 
         if "is_traceable" in attrs and attrs["is_traceable"] is True:
-            warn_traceable_deprecated()
+            _warn_traceable_deprecated()
 
         super().__init__(name, bases, attrs)
 
