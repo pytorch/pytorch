@@ -2069,7 +2069,7 @@ def _get_num_workers(verbose: bool) -> Optional[int]:
 
 
 def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> None:
-    command = ['ninja', '-v']
+    command = ['ninja', '--version']
     num_workers = _get_num_workers(verbose)
     if num_workers is not None:
         command.extend(['-j', str(num_workers)])
