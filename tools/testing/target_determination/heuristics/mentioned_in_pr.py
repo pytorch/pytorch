@@ -1,21 +1,23 @@
-import json
 import os
 import re
-import subprocess
 from typing import Any, List
-from urllib.request import Request, urlopen
 
 from tools.testing.target_determination.heuristics.interface import (
     HeuristicInterface,
     TestPrioritizations,
 )
+from tools.testing.target_determination.heuristics.utils import (
+    get_git_commit_info,
+    get_issue_or_pr_body,
+)
 from tools.testing.test_run import TestRun
 
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 
-
-# This heuristic gives a test a rating of 1 if it is mentioned in the PR or a
-# commit title.
+# This heuristic searches the PR body and commit titles, as well as issues/PRs
+# mentioned in the PR body/commit title for test names (search depth of 1) and
+# gives the test a rating of 1.  For example, if I mention "test_foo" in the PR
+# body, test_foo will be rated 1.  If I mention #123 in the PR body, and #123
+# mentions "test_foo", test_foo will be rated 1.
 class MentionedInPR(HeuristicInterface):
     def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
@@ -62,41 +64,3 @@ class MentionedInPR(HeuristicInterface):
                 mentioned.append(test)
 
         return TestPrioritizations(tests, {TestRun(test): 1 for test in mentioned})
-
-
-def get_git_commit_info() -> str:
-    """Gets the commit info since the last commit on the default branch."""
-    default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'main')}"
-
-    merge_base = (
-        subprocess.check_output(["git", "merge-base", default_branch, "HEAD"])
-        .decode()
-        .strip()
-    )
-
-    head = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
-
-    base_commit = merge_base
-    if base_commit == head:
-        # We are on the default branch, so check for changes since the last commit
-        base_commit = "HEAD^"
-
-    return (
-        subprocess.check_output(
-            ["git", "log", f"{base_commit}..HEAD"],
-        )
-        .decode()
-        .strip()
-    )
-
-
-def get_issue_or_pr_body(number: int) -> str:
-    headers = {
-        "Accept": "application/vnd.github.v3+json",
-        "Authorization": f"token {GITHUB_TOKEN}",
-    }
-    # Despite the 'issues' in the link, this also works for PRs
-    url = f"https://api.github.com/repos/pytorch/pytorch/issues/{number}"
-    with urlopen(Request(url, headers=headers)) as conn:
-        body: str = json.loads(conn.read().decode())["body"]
-        return body
