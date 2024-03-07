@@ -775,7 +775,7 @@ class TestSparseSemiStructuredTraining(TestCase):
             # Create a 4x4 tile that can be 24 sparsified perfectly
             values = [
                 [1, 1, 0, 0],
-                [0, 1, 1, 0],
+                [0, 1, 1ht 0],
                 [0, 0, 1, 1],
                 [1, 0, 0, 1],
             ]
@@ -1271,63 +1271,3 @@ instantiate_device_type_tests(TestSparseSemiStructuredTraining, globals(), only_
 
 if __name__ == "__main__":
     run_tests()
-
-# class _TransformerFFN(nn.Module):
-#     def __init__(
-#         self,
-#         in_features: int,
-#         hidden_features=None,
-#         out_features=None,
-#         act_layer=nn.GELU,
-#         bias: bool = True,
-#         linear_cls=nn.Linear,
-#     ) -> None:
-#         super().__init__()
-#         out_features = out_features or in_features
-#         hidden_features = hidden_features or in_features
-#         self.fc1 = linear_cls(in_features, hidden_features, bias=bias)
-#         self.act = act_layer()
-#         self.fc2 = linear_cls(hidden_features, out_features, bias=bias)
-
-#     def forward(self, x: torch.Tensor) -> torch.Tensor:
-#         x = self.fc1(x)
-#         x = self.act(x)
-#         x = self.fc2(x)
-#         return x
-
-
-# @cuda_sm80_only
-# @torch_compile_tests
-# @pytest.mark.skipif(not sp24._has_cusparseLt(), reason="requires cusparselt")
-# def test_linearw24_block_compile() -> None:
-#     # TODO: Parametrize on `dtype` when torch.compile gets faster
-#     # currently takes ~5s per test
-#     dtype = torch.bfloat16
-#     B, FT_IN, FT_HIDDEN = 31, 512, 2048
-
-#     _workaround_cusparselt_internal_error()
-#     m = _TransformerFFN(FT_IN, FT_HIDDEN, linear_cls=LinearW24).to("cuda").to(dtype)
-#     m_c = _TransformerFFN(FT_IN, FT_HIDDEN, linear_cls=LinearW24).to("cuda").to(dtype)
-#     m_c.load_state_dict(m.state_dict())
-#     m_c = cast(_TransformerFFN, torch.compile(m_c))
-
-#     x, grad = [torch.randn([B, FT_IN], dtype=dtype, device="cuda") for _ in range(2)]
-#     x = x.requires_grad_()
-#     out = m(x)
-#     out.backward(grad)
-
-#     x_c = x.detach().requires_grad_()
-#     out_c = m_c(x_c)
-#     out_c.backward(grad)
-
-#     assert_allclose(out_c, out, "output", **atol_rtol_kw[dtype])
-#     assert x_c.grad is not None and x.grad is not None
-#     assert_allclose(x_c.grad, x.grad, "output", **atol_rtol_kw[dtype])
-#     for param_name, param_ref, param_c in [
-#         ["fc1.weight", m.fc1.weight, m_c.fc1.weight],
-#         ["fc1.bias", m.fc1.bias, m_c.fc1.bias],
-#         ["fc2.weight", m.fc2.weight, m_c.fc2.weight],
-#         ["fc2.bias", m.fc2.bias, m_c.fc2.bias],
-#     ]:
-#         assert param_ref.grad is not None and param_c.grad is not None, param_name
-#         assert_allclose(param_c.grad, param_ref.grad, param_name, **atol_rtol_kw[dtype])
