@@ -25,9 +25,9 @@ def get_device_type():
     )
 
 
-def run_torchrec_row_wise_sharding_example(rank, world_size):
-    # row-wise example:
-    #   one table is sharded by rows within the global ProcessGroup
+def run_torchrec_row_wise_even_sharding_example(rank, world_size):
+    # row-wise even sharding example:
+    #   One table is evenly sharded by rows within the global ProcessGroup.
     #   In our example, the table's num_embedding is 8, and the embedding dim is 16
     #   The global ProcessGroup has 4 ranks, so each rank will have one 2 by 16 local
     #   shard.
@@ -73,7 +73,7 @@ def run_torchrec_row_wise_sharding_example(rank, world_size):
     )
 
     # display the DTensor's sharding
-    visualize_sharding(dtensor, header="Row-wise sharding example in DTensor")
+    visualize_sharding(dtensor, header="Row-wise even sharding example in DTensor")
 
     # get the global tensor from the DTensor
     dtensor_full = dtensor.full_tensor()  # torch.Tensor
@@ -118,6 +118,65 @@ def run_torchrec_row_wise_sharding_example(rank, world_size):
     dtensor.copy_(src_dtensor)
     # these two DTensors should have the same global view after loading
     assert torch.equal(dtensor.full_tensor(), src_dtensor.full_tensor())
+
+
+def run_torchrec_row_wise_uneven_sharding_example(rank, world_size):
+    # row-wise uneven sharding example:
+    #   One table is unevenly sharded by rows within the global ProcessGroup.
+    #   In our example, the table's num_embedding is 8, and the embedding dim is 16
+    #   The global ProcessGroup has 4 ranks, and each rank will have the local shard
+    #   of shape:
+    #       rank 0: [1, 16]
+    #       rank 1: [3, 16]
+    #       rank 2: [1, 16]
+    #       rank 3: [3, 16]
+
+    # device mesh is a representation of the worker ranks
+    # create a 1-D device mesh that includes every rank
+    device_type = get_device_type()
+    device = torch.device(device_type)
+    device_mesh = init_device_mesh(device_type=device_type, mesh_shape=(world_size,))
+
+    # manually create the embedding table's local shards
+    num_embeddings = 8
+    embedding_dim = 16
+    emb_table_shape = torch.Size([num_embeddings, embedding_dim])
+    local_shard_shape_list = [
+        torch.Size([1, embedding_dim]),
+        torch.Size([3, embedding_dim]),
+    ]
+    local_shards = [
+        torch.randn(local_shard_shape_list[i % 2], device=device)
+        for i in range(world_size)
+    ]
+    # row-wise sharding: one shard per rank
+    local_shard = local_shards[rank]
+
+    ###########################################################################
+    # example 1: transform local_shards into DTensor
+    row_wise_sharding_placements = [Shard(0)]
+    # note: for uneven sharding, we need to specify the shape and stride because
+    # DTensor would assume even sharding and compute shape/stride based on the
+    # assumption. Torchrec needs to pass in this information explicitely.
+    dtensor = DTensor.from_local(
+        local_shard,
+        device_mesh,
+        row_wise_sharding_placements,
+        run_check=False,
+        shape=emb_table_shape,  # this is required for uneven sharding
+        stride=(embedding_dim, 1),
+    )
+    # TODO (xilunwu): so far visualize_sharding() cannot print correctly for uneven
+    # sharded DTensor because it relies on offset computation which assumes even sharding
+    visualize_sharding(dtensor, header="Row-wise uneven sharding example in DTensor")
+    # check the dtensor has the correct shape and stride on all ranks
+    assert dtensor.shape == emb_table_shape
+    assert dtensor.stride() == (embedding_dim, 1)
+    assert dtensor.to_local().shape == local_shard.shape
+
+    ###########################################################################
+    # example 2: transform DTensor into local_shards
+    assert torch.equal(dtensor.to_local(), local_shard)
 
 
 def run_torchrec_table_wise_sharding_example(rank, world_size):
@@ -195,7 +254,8 @@ def run_torchrec_table_wise_sharding_example(rank, world_size):
 def run_example(rank, world_size, example_name):
     # the dict that stores example code
     name_to_example_code = {
-        "row-wise": run_torchrec_row_wise_sharding_example,
+        "row-wise-even": run_torchrec_row_wise_even_sharding_example,
+        "row-wise-uneven": run_torchrec_row_wise_uneven_sharding_example,
         "table-wise": run_torchrec_table_wise_sharding_example,
     }
     if example_name not in name_to_example_code:
@@ -224,9 +284,10 @@ if __name__ == "__main__":
     )
     example_prompt = (
         "choose one sharding example from below:\n"
-        "\t1. row-wise;\n"
-        "\t2. table-wise\n"
-        "e.g. you want to try the row-wise sharding example, please input 'row-wise'\n"
+        "\t1. row-wise-even;\n"
+        "\t2. row-wise-uneven\n"
+        "\t3. table-wise\n"
+        "e.g. you want to try the row-wise even sharding example, please input 'row-wise-even'\n"
     )
     parser.add_argument("-e", "--example", help=example_prompt, required=True)
     args = parser.parse_args()
