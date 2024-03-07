@@ -66,6 +66,8 @@ class ForeachFuncWrapper:
             assert mta_called == (expect_fastpath and (not zero_size))
         else:
             actual = self.func(*inputs, **kwargs)
+        if self.is_inplace:
+            assert all(id(a) == id(b) for a, b in zip(inputs[0], actual))
         return actual
 
 
