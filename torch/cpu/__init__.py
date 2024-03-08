@@ -27,9 +27,14 @@ __all__ = [
 _device_t = Union[_device, str, int, None]
 
 
-def _is_cpu_support_vnni() -> bool:
+def _does_cpu_support_vnni() -> bool:
     r"""Returns a bool indicating if CPU supports VNNI."""
-    return torch._C._cpu._is_cpu_support_vnni()
+    return torch._C._cpu._does_cpu_support_vnni()
+
+
+def _does_cpu_support_avx512bf16() -> bool:
+    r"""Returns a bool indicating if CPU support AVX512 BF16 ISA."""
+    return torch._C._cpu._does_cpu_support_avx512bf16()
 
 
 def is_available() -> bool:
