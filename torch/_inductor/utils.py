@@ -1024,11 +1024,13 @@ def run_and_get_code(fn, *args, **kwargs):
             source_codes.append(f.read())
         return mod
 
-    with mock.patch.object(
-        GraphLowering, "compile_to_module", patched_compile_to_module
-    ):
-        torch._dynamo.reset()
-        result = fn(*args, **kwargs)
+    # If FX code caching is enabled, a hit prevents getting the code.
+    with config.patch({"fx_graph_cache": False}):
+        with mock.patch.object(
+            GraphLowering, "compile_to_module", patched_compile_to_module
+        ):
+            torch._dynamo.reset()
+            result = fn(*args, **kwargs)
     return result, source_codes
 
 
