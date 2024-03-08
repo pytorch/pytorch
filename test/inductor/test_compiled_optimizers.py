@@ -13,7 +13,6 @@ import torch
 import torch._inductor
 import torch._inductor.cudagraph_trees
 from torch._inductor import config
-from torch._inductor.test_case import TestCase
 
 from torch.optim import (
     Adadelta,
@@ -41,6 +40,7 @@ from torch.testing._internal.common_optimizers import (
     optims,
 )
 
+from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, has_triton
 from torch.testing._internal.triton_utils import requires_cuda
 
@@ -572,7 +572,7 @@ for optim_cls, name, kwargs in COMPILED_OPT_KWARG_DB:
 instantiate_device_type_tests(CompiledOptimizerParityTests, globals())
 
 if __name__ == "__main__":
-    from torch._inductor.test_case import run_tests
+    from torch._dynamo.test_case import run_tests
 
     if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")
