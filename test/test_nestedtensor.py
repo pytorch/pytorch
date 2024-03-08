@@ -4012,10 +4012,10 @@ class TestTensorUnionFind(TestCase):
         uf.merge(a, b)
         uf.merge(b, c)
         canonical = uf.find(a)
-        self.assertEqual(set(uf.get_equiv_tensors(a)), set(a, b, c))
+        self.assertEqual(set(uf.get_equiv_tensors(a)), {a, b, c})
         self.assertIs(canonical, a)
         del b
-        self.assertEqual(set(uf.get_equiv_tensors(a)), set(a, c))
+        self.assertEqual(set(uf.get_equiv_tensors(a)), {a, c})
 
     def test_metadata_merge(self):
         uf = self._get_test_union_find()
