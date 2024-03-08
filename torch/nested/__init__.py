@@ -11,6 +11,7 @@ __all__ = [
     "to_padded_tensor",
     "as_nested_tensor",
     "nested_tensor",
+    "nested_tensor_from_jagged",
     "narrow",
 ]
 
