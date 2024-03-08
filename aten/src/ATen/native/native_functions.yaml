@@ -5617,6 +5617,14 @@
     SparseCPU: _sspaddmm_out_cpu
     SparseCUDA: _sspaddmm_out_cuda
 
+- func: _chunk_cat(Tensor[] tensors, int dim, int num_chunks) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: _chunk_cat
+
+- func: _chunk_cat.out(Tensor[] tensors, int dim, int num_chunks, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: _chunk_cat_out
+
 - func: stack(Tensor[] tensors, int dim=0) -> Tensor
   dispatch:
     CompositeExplicitAutograd: stack
