@@ -6347,15 +6347,13 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    CPU, CUDA: where
-    MPS: where_mps
+    CPU, CUDA, MPS: where
   tags: [core, pointwise]
 
 - func: where.self_out(Tensor condition, Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: where_self_out
-    MPS: where_self_out_mps
+    CPU, CUDA, MPS: where_self_out
 
 - func: where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor
   variants: function
