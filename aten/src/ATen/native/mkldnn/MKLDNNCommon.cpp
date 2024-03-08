@@ -157,7 +157,6 @@ ideep::tensor itensor_view_from_dense(
 // longer than the ideep tensor.
 ideep::tensor itensor_from_tensor(const Tensor& tensor, bool from_const_data_ptr) {
   if (tensor.is_mkldnn()) {
-    TORCH_INTERNAL_ASSERT(from_const_data_ptr == false);
     return itensor_from_mkldnn(tensor);
   } else {
     return itensor_view_from_dense(tensor, from_const_data_ptr);

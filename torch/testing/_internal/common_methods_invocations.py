@@ -2298,6 +2298,115 @@ def sample_inputs_stack(op_info, device, dtype, requires_grad, **kwargs):
         for dim in range(-1, len(shape) - 1):
             yield SampleInput(tensors, args=(dim,))
 
+
+def sample_inputs_chunk_cat(op_info, device, dtype, requires_grad, **kwargs):
+    # 1. If input tensors have different ndims, dim should be non-negative and be less than the ndims of every input tensors.
+    #    If all input tensors have the same ndims, we support both negative and non-negative dim.
+    # 2. For wrapped_dim, all tensors should have the same size for 0,...,wrapped_dim-1 dimensions.
+    #        No requirements for (wrapped_dim, ...)-th dimension.
+    # 3. Expect positive num_chunks
+    # 4. Expect non-empty input tensor list and each input tensor should have at least 1 element
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    same_ndim_cases = (
+        (
+            [
+                torch.Size([1, 2, 3]),
+                torch.Size([1, 2, 3]),
+            ], -1, 5
+        ),
+        (
+            [
+                torch.Size([1, 2, 3]),
+                torch.Size([1, 2, 3]),
+            ], 1, 5
+        ),
+        (
+            [
+                torch.Size([3, 3, 2, 1]),
+                torch.Size([1, 4, 2, 2]),
+                torch.Size([2, 1, 3, 3]),
+            ], 0, 2
+        ),
+    )
+    for sizes, dim, num_chunks in same_ndim_cases:
+        tensors = []
+        for size in sizes:
+            tensors.append(make_arg(size))
+        yield SampleInput(tensors, args=(dim, num_chunks))
+
+    different_ndim_case = [
+        torch.Size([2, 3, 3]),
+        torch.Size([2, 3, 1, 2]),
+        torch.Size([2, 3]),
+        torch.Size([2, 3, 2]),
+    ]
+    max_dim, num_chunks = 2, 3
+    for dim in range(max_dim):
+        tensors = []
+        for size in different_ndim_case:
+            tensors.append(make_arg(size))
+        yield SampleInput(tensors, args=(dim, num_chunks))
+
+
+def error_inputs_chunk_cat(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+
+    # input tensors have different ndims but dim is negative
+    sizes, dim, num_chunks = [torch.Size([2, 3]), torch.Size([4,])], -1, 3
+    tensors = [make_arg(size) for size in sizes]
+    yield ErrorInput(
+        SampleInput(tensors, args=(dim, num_chunks)),
+        error_regex='_chunk_cat expects non-negative dim when input tensors have different ndims',
+    )
+
+    # input tensors have different ndims but dim >= ndim of some input tensors
+    sizes, dim, num_chunks = [torch.Size([2, 3]), torch.Size([4,])], 1, 3
+    tensors = [make_arg(size) for size in sizes]
+    yield ErrorInput(
+        SampleInput(tensors, args=(dim, num_chunks)),
+        error_regex='_chunk_cat expects dim < ndim for all input tensors',
+    )
+
+    # some tensors have different sizes for 0, ..., dim-1 dimensions.
+    sizes, dim, num_chunks = [torch.Size([2, 3, 4]), torch.Size([4, 3])], 1, 3
+    tensors = [make_arg(size) for size in sizes]
+    yield ErrorInput(
+        SampleInput(tensors, args=(dim, num_chunks)),
+        error_regex='_chunk_cat expects same sizes of 0,...,dim-1 dimensions for all tensors',
+    )
+
+    # negative num_chunks
+    sizes, dim, num_chunks = [torch.Size([2,]), torch.Size([3,])], 0, -1
+    tensors = [make_arg(size) for size in sizes]
+    yield ErrorInput(
+        SampleInput(tensors, args=(dim, num_chunks)),
+        error_regex='_chunk_cat expects positive num_chunks',
+    )
+
+    # zero as num_chunks
+    sizes, dim, num_chunks = [torch.Size([2,]), torch.Size([3,])], 0, 0
+    tensors = [make_arg(size) for size in sizes]
+    yield ErrorInput(
+        SampleInput(tensors, args=(dim, num_chunks)),
+        error_regex='_chunk_cat expects positive num_chunks',
+    )
+
+    # empty input tensor list
+    dim, num_chunks = 0, 1
+    yield ErrorInput(
+        SampleInput([], args=(dim, num_chunks)),
+        error_regex='_chunk_cat expects a non-empty input tensor list',
+    )
+
+    # empty input tensor with 0 elements
+    sizes, dim, num_chunks = [torch.Size([0,]), torch.Size([3,])], 0, 1
+    tensors = [make_arg(size) for size in sizes]
+    yield ErrorInput(
+        SampleInput(tensors, args=(dim, num_chunks)),
+        error_regex='_chunk_cat expects non-empty tensor',
+    )
+
+
 def sample_inputs_cat_concat(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -12953,8 +13062,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
-           # TODO: Avoid COW materialize
-           supports_cow_input_no_materialize=False,
+           allow_cow_input_materialize=[3, 4],
            sample_inputs_func=sample_inputs_native_batch_norm,
            skips=(
                # NotImplementedError: Could not run
@@ -12982,8 +13090,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
-           # TODO: Avoid COW materialize
-           supports_cow_input_no_materialize=False,
+           allow_cow_input_materialize=[3, 4],
            sample_inputs_func=sample_inputs__native_batch_norm_legit,
            skips=(
                # NotImplementedError: Could not run
@@ -13488,7 +13595,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           allow_cow_input_materialize=['weight', 'bias'],
            error_inputs_func=error_inputs_group_norm,
            decorators=[
                # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
@@ -17466,6 +17572,13 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
            ),
+           ),
+    OpInfo('_chunk_cat',
+           dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_chunk_cat,
+           error_inputs_func=error_inputs_chunk_cat,
+           supports_autograd=False,
+           supports_out=True,
            ),
     OpInfo('hstack',
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),

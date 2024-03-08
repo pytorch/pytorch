@@ -499,8 +499,8 @@ void GroupNorm1dForward(
                     .add_owned_const_input(X.view({N, G, D}))
                     .add_owned_input(mean.view({N, G, 1}))
                     .add_owned_input(rstd.view({N, G, 1}))
-                    .add_owned_input(gamma.view({1, G, D}))
-                    .add_owned_input(beta.view({1, G, D}))
+                    .add_owned_const_input(gamma.view({1, G, D}))
+                    .add_owned_const_input(beta.view({1, G, D}))
                     .build();
     gpu_kernel(iter, [] GPU_LAMBDA(T x, T mean, T rstd, T gamma, T beta) -> T {
       return (static_cast<T_ACC>(x) - static_cast<T_ACC>(mean)) *
@@ -514,7 +514,7 @@ void GroupNorm1dForward(
                     .add_owned_const_input(X.view({N, G, D}))
                     .add_owned_input(mean.view({N, G, 1}))
                     .add_owned_input(rstd.view({N, G, 1}))
-                    .add_owned_input(gamma.view({1, G, D}))
+                    .add_owned_const_input(gamma.view({1, G, D}))
                     .build();
     gpu_kernel(iter, [] GPU_LAMBDA(T x, T mean, T rstd, T gamma) -> T {
       return (static_cast<T_ACC>(x) - static_cast<T_ACC>(mean)) *
@@ -527,7 +527,7 @@ void GroupNorm1dForward(
                     .add_owned_const_input(X.view({N, G, D}))
                     .add_owned_input(mean.view({N, G, 1}))
                     .add_owned_input(rstd.view({N, G, 1}))
-                    .add_owned_input(beta.view({1, G, D}))
+                    .add_owned_const_input(beta.view({1, G, D}))
                     .build();
     gpu_kernel(iter, [] GPU_LAMBDA(T x, T mean, T rstd, T beta) -> T {
       return (static_cast<T_ACC>(x) - static_cast<T_ACC>(mean)) *
