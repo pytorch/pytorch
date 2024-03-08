@@ -939,7 +939,11 @@ def make_fast_binary_impl(slow_ref):
         # Do some extra safety checks to see if the output
         # stride is obvious
         for op in operands:
-            if isinstance(op, torch.Tensor) and op.shape == final_shape:
+            if (
+                isinstance(op, torch.Tensor)
+                and len(op.shape) == len(final_shape)
+                and op.shape == final_shape
+            ):
                 break
         else:
             return slow("both tensors nontrivially broadcast")

@@ -2329,6 +2329,25 @@ def forward(self, x):
             )
         )
 
+    def test_export_fast_binary_broadcast_check(self):
+        # This test looks at the case where we erroneously
+        # create a guard when checking the equality of the
+        # operands' shape and the output shape.
+
+        class MyModel(torch.nn.Module):
+            def forward(self, a, b):
+                # final shape is (dim0, 4, 8)
+                # order matters since a & the output have the same shape
+                return b + a
+
+        a = torch.randn(100, 4, 8)
+        b = torch.randn(4, 8)
+        model = MyModel().eval().cuda()
+        batchsize = torch.export.Dim("dim0", min=3, max=1024)
+        dynamic_shape_spec = {"a": [batchsize, None, None], "b": [None, None]}
+
+        torch.export.export(model, (a, b), dynamic_shapes=dynamic_shape_spec)
+
     def test_export_meta(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -3567,6 +3586,19 @@ G['macademia'], accessed at:
                     msg="test_capture_symbolic_tracing_within_fake_mode_aten_graph_"
                     + str(aten_graph),
                 )
+
+    # def test_colin(self):
+    #     class Model(torch.nn.Module):
+    #         def forward(self, a, b):
+    #             return a + b
+
+    #     a = torch.randn(100, 3, 4)
+    #     b = torch.randn(3, 4)
+
+    #     batchsize = torch.export.Dim("dim0", min=3, max=1024)
+    #     dynamic_shape_spec = {"a": [batchsize, None, None], "b": [None, None]}
+
+    #     gm, _ = torch._dynamo.export(Model(), dynamic_shapes=dynamic_shape_spec)(a, b)
 
     def test_cond_op_param_buffer_lifted(self):
         class A(torch.nn.Module):
