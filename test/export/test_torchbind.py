@@ -3,6 +3,7 @@
 import torch
 import torch.testing._internal.torchbind_impls  # noqa: F401
 import torch.utils._pytree as pytree
+from torch._functorch.aot_autograd import aot_export_module
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.export import export
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -246,6 +247,42 @@ def forward(self, arg0_1, arg1_1):
     """,
         )
         self._assert_equal_skip_script_object(mod(tq, x), gm(tq, x))
+
+    def test_tensor_queue_aot_export(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 2)
+
+            def forward(self, tq, x):
+                torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
+                torch.ops._TorchScriptTesting.queue_push(tq, x.sin())
+                x_sin = torch.ops._TorchScriptTesting.queue_pop(tq)
+                x_cos = torch.ops._TorchScriptTesting.queue_pop(tq)
+                return self.linear(x_sin), self.linear(x_cos), tq
+
+        mod = Model()
+        tq = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        x = torch.ones(2, 3)
+        with torch._higher_order_ops.torchbind.enable_torchbind_tracing():
+            gm, _ = aot_export_module(mod, (tq, x), trace_joint=False)
+        self.assertExpectedInline(
+            gm.code.strip("\n"),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    queue_pop = torch.ops._TorchScriptTesting.queue_pop.default(arg2_1)
+    queue_pop_1 = torch.ops._TorchScriptTesting.queue_pop.default(arg2_1)
+    t = torch.ops.aten.t.default(arg0_1)
+    addmm = torch.ops.aten.addmm.default(arg1_1, queue_pop, t);  queue_pop = t = None
+    t_1 = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
+    addmm_1 = torch.ops.aten.addmm.default(arg1_1, queue_pop_1, t_1);  arg1_1 = queue_pop_1 = t_1 = None
+    return (addmm, addmm_1, arg2_1)
+    """,
+        )
 
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
