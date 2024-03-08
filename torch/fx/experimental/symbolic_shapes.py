@@ -3443,39 +3443,33 @@ class ShapeEnv:
             # Unbacked symints only
             if s in self.var_to_val:
                 continue
-            expr_guards = (canonicalize_bool_expr(g.expr) for g in self.guards if isinstance(g.expr, sympy.Rel))
-            expr_deferred = (ra.expr for ra in self.deferred_runtime_asserts.get(s, ()))
+
             subst = {}
-            for e in itertools.chain(expr_guards, expr_deferred):
+
+            def add_expr(expr):
+                # Expr and negation
+                subst[canonicalize_bool_expr(expr)] = sympy.true
+                subst[canonicalize_bool_expr(sympy.Not(expr))] = sympy.false
+                if isinstance(expr, sympy.Rel):
+                    # multiyplying by -1 changes the direction of the inequality
+                    dual = type(expr)(-expr.rhs, -expr.lhs)
+                    subst[canonicalize_bool_expr(dual)] = sympy.true
+                    subst[canonicalize_bool_expr(sympy.Not(dual))] = sympy.false
+
+            for e in itertools.chain(self.guards, self.deferred_runtime_asserts.get(s, ())):
+                e = e.expr
                 if compute_hint:
                     e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
-                # e is already canonical
-                subst[e] = sympy.true
-                subst[canonicalize_bool_expr(sympy.Not(e))] = sympy.false
-                # Add tautologies in a canonical form
+                add_expr(e)
                 if isinstance(e, sympy.Eq):
-                    subst[sympy.Le(e.lhs, e.rhs)] = sympy.true
-                    subst[sympy.Le(-e.lhs, -e.rhs)] = sympy.true
-                    subst[sympy.Lt(e.lhs, e.rhs)] = sympy.false
-                    subst[sympy.Lt(-e.lhs, -e.rhs)] = sympy.false
-
-                    subst[sympy.Le(e.rhs, e.lhs)] = sympy.true
-                    subst[sympy.Le(-e.rhs, -e.lhs)] = sympy.true
-                    subst[sympy.Lt(e.rhs, e.lhs)] = sympy.false
-                    subst[sympy.Lt(-e.rhs, -e.lhs)] = sympy.false
+                    add_expr(e.lhs <= e.rhs)
+                    add_expr(e.lhs >= e.rhs)
+                elif isinstance(e, sympy.Ne):
+                    add_expr(e.lhs < e.rhs)
+                    add_expr(e.lhs > e.rhs)
                 elif isinstance(e, sympy.Lt):
-                    subst[sympy.Le(e.lhs, e.rhs)] = sympy.true
-                    subst[sympy.Lt(-e.rhs, -e.lhs)] = sympy.true
-                    subst[sympy.Ne(e.lhs, e.rhs)] = sympy.true
-
-                    subst[sympy.Lt(e.rhs, e.lhs)] = sympy.false
-                    subst[sympy.Le(e.rhs, e.lhs)] = sympy.false
-                    subst[sympy.Lt(-e.lhs, -e.rhs)] = sympy.false
-                    subst[sympy.Le(-e.lhs, -e.rhs)] = sympy.false
-                    subst[sympy.Eq(e.lhs, e.rhs)] = sympy.false
-                elif isinstance(e, sympy.Le):
-                    subst[sympy.Le(-e.rhs, -e.lhs)] = sympy.true
-                    subst[sympy.Lt(e.rhs, e.lhs)] = sympy.false
+                    add_expr(e.lhs <= e.rhs)
+                    add_expr(e.lhs != e.rhs)
 
             # NB: this helps us deal with And/Or connectives
             expr = expr.subs(subst)
