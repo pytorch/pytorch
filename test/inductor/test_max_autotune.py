@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
+import logging
 import os
+import unittest
 
 from typing import Callable, List, Optional
 
@@ -27,6 +29,7 @@ from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
+from torch.testing._internal.common_cuda import SM75OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -40,6 +43,8 @@ if HAS_CUDA:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
 _CUTLASS_DIR = os.path.join(os.path.dirname(__file__), "../../third_party/cutlass/")
+
+log = logging.getLogger(__name__)
 
 
 def _get_path_without_sccache() -> str:
@@ -66,6 +71,10 @@ class FailChoiceCaller(ChoiceCaller):
 
 @instantiate_parametrized_tests
 class TestMaxAutotune(TestCase):
+    def setUp(self):
+        super().setUp()
+        torch.random.manual_seed(1234)
+
     def _create_buffer(self, name, shape):
         return Buffer(name, FixedLayout(torch.device("cuda:0"), torch.float32, shape))
 
@@ -357,6 +366,33 @@ class TestMaxAutotune(TestCase):
                 ), "Expected all ChoiceCaller's precompile method to have been called on separate thread"
         finally:
             V.set_debug_handler(old_debug_handler)
+
+    # TODO: Enable dynamic test cases when dynamic support is added.
+    @unittest.skipIf(not SM75OrLater, "need sm_75")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_max_autotune_default_backends_regular_mm(
+        self, dynamic: bool = False, max_autotune_gemm_backends: str = "ATen,Triton"
+    ):
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn(100, 10).cuda().half()
+        b = torch.randn(10, 100).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": False,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+            }
+        ):
+            mm_compiled = torch.compile(mm, dynamic=dynamic)
+            Y_compiled = mm_compiled(a, b)
+            Y = mm(a, b)
+            torch.testing.assert_close(Y_compiled, Y)
 
     @parametrize("dynamic", (False, True))
     def test_max_autotune_addmm(self, dynamic=False):
