@@ -508,9 +508,11 @@ Device out_device(Args&... inps){
 
 
 Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor& other, Tensor& out) {
+  const auto result_type = at::native::result_type(self, other);
+  TORCH_CHECK(out.scalar_type() == result_type, "Expected out type to be ", result_type, " but got ", out.scalar_type());
+
   Tensor self_, other_, condition_;
   if (self.dtype() != other.dtype()) {
-    auto result_type = at::native::result_type(self, other);
     self_ = self.to(result_type);
     other_ = other.to(result_type);
   } else {
