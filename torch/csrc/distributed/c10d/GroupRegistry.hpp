@@ -4,7 +4,7 @@
 
 namespace c10d {
 
-void set_thread_isolation_mode(bool enable);
+C10_EXPORT void set_thread_isolation_mode(bool enable);
 
 bool get_thread_isolation_mode();
 

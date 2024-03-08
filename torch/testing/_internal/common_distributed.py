@@ -1029,6 +1029,7 @@ class MultiThreadedTestCase(TestCase):
         """
         Run the current test associated with `test_name` using the threaded process group.
         """
+        torch._C._distributed_c10d._set_thread_isolation_mode(True)
         c10d.init_process_group(
             backend="threaded", rank=rank, world_size=world_size, store=self.__class__.global_store
         )
@@ -1042,6 +1043,7 @@ class MultiThreadedTestCase(TestCase):
         finally:
             c10d.destroy_process_group()
             self.perThreadTearDown()
+            torch._C._distributed_c10d._set_thread_isolation_mode(False)
 
 
     @classmethod
