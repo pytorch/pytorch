@@ -87,7 +87,7 @@ Row 0-3  cuda:3
 tensor = torch.empty(0)
 mesh = DeviceMesh("cuda", list(range(world_size)))
 dtensor = distribute_tensor(tensor, mesh, [Replicate()])
-visualize_sharding(dtensor, header=f"Example 6:")
+visualize_sharding(dtensor, header="Example 6:")
 # No sharding info shall be printed for empty tensors
 """
 """
