@@ -50,6 +50,16 @@ def enable_torchbind_tracing():
         torch.ScriptMethod.__call__ = _orig_scriptmethod_call  # type: ignore[method-assign]
 
 
+@contextmanager
+def _restore_script_method_call():
+    prior_call = torch.ScriptMethod.__call__
+    try:
+        torch.ScriptMethod.__call__ = _orig_scriptmethod_call  # type: ignore[method-assign]
+        yield
+    finally:
+        torch.ScriptMethod.__call__ = prior_call  # type: ignore[method-assign]
+
+
 @call_torchbind.py_impl(DispatchKey.CompositeExplicitAutograd)
 def call_torchbind_impl(obj, method, *args, **kwargs):
     return _orig_scriptmethod_call(getattr(obj, method), *args, **kwargs)
@@ -78,16 +88,18 @@ def inner(mode, *args, **kwargs):
 def call_torchbind_fake(mode, *args, **kwargs):
     with mode:
         from torch._subclasses.fake_tensor import (
-            _fakify_script_object,
-            _maybe_fakify_script_object,
+            _cached_fakify_script_object,
+            _maybe_cached_fakify_script_object,
         )
 
         assert len(args) >= 2
         script_object, method_name, *pos_args = args
-        torch.ScriptMethod.__call__ = _orig_scriptmethod_call  # type: ignore[method-assign]
-        fake_script_obj = _fakify_script_object(script_object)
-        torch.ScriptMethod.__call__ = torchbind_method_redispatch  # type: ignore[method-assign]
-        pos_args, kwargs = _maybe_fakify_script_object(pos_args, kwargs)
+        # We need to restore original script method call to
+        # call the actual methods of real script object in order to
+        # create a fake script object with from_real.
+        with _restore_script_method_call():
+            fake_script_obj = _cached_fakify_script_object(script_object)
+        pos_args, kwargs = _maybe_cached_fakify_script_object(pos_args, kwargs)
         if not hasattr(fake_script_obj, method_name):
             raise RuntimeError(
                 f"Do you forget to fakify `{method_name}` method for fake object {type(fake_script_obj)}?"

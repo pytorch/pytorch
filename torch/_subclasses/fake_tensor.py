@@ -805,7 +805,7 @@ class DispatchCacheInfo:
 cached_fake_script_obj = {}
 
 
-def _fakify_script_object(x):
+def _cached_fakify_script_object(x):
     if hash(x) in cached_fake_script_obj:
         return cached_fake_script_obj[hash(x)]
 
@@ -835,9 +835,9 @@ def _fakify_script_object(x):
     return fake_x
 
 
-def _maybe_fakify_script_object(args, kwargs):
+def _maybe_cached_fakify_script_object(args, kwargs):
     return pytree.tree_map_only(
-        torch.ScriptObject, lambda x: _fakify_script_object(x), (args, kwargs)
+        torch.ScriptObject, lambda x: _cached_fakify_script_object(x), (args, kwargs)
     )
 
 
@@ -1277,7 +1277,7 @@ class FakeTensorMode(TorchDispatchMode):
             torch.ops.profiler._record_function_enter_new,
             torch.ops.profiler._record_function_exit._RecordFunction,
         }:
-            args, kwargs = _maybe_fakify_script_object(args, kwargs)
+            args, kwargs = _maybe_cached_fakify_script_object(args, kwargs)
 
         # Some attribute queries that can be serviced directly
         # See Note [is_coalesced is dispatched]
