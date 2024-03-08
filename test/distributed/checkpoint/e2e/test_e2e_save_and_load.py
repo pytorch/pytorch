@@ -171,7 +171,28 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
     def test_e2e_async(self):
         self._run_e2e_test(compile=False, model_type=ModelType.FSDP, async_op=True)
 
-    def _run_e2e_test(self, compile, model_type, async_op=False):
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @with_temp_dir
+    def test_fsspec(self):
+        self._run_e2e_test(
+            compile=False,
+            model_type=ModelType.FSDP,
+            storage_reader=DCP.FsspecReader(),
+            storage_writer=DCP.FsspecWriter(),
+        )
+
+    def _run_e2e_test(
+        self,
+        compile,
+        model_type,
+        async_op=False,
+        storage_reader=None,
+        storage_writer=None,
+    ):
+        storage_reader = storage_reader or DCP.FileSystemReader()
+        storage_writer = storage_writer or DCP.FileSystemWriter()
+
         model, optim = self._create_model(compile, ModelType.NONE)
         _train(model, optim, train_steps=2)
 
@@ -186,7 +207,9 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         }
 
         if async_op:
-            f = saver._async_save(sd, checkpoint_id=self.temp_dir)
+            f = saver._async_save(
+                sd, checkpoint_id=self.temp_dir, storage_writer=storage_writer
+            )
             t = time.monotonic()
             while not f.done():
                 time.sleep(1)
@@ -194,7 +217,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
 
             f.result()
         else:
-            DCP.save(sd, checkpoint_id=self.temp_dir)
+            DCP.save(sd, checkpoint_id=self.temp_dir, storage_writer=storage_writer)
 
         loaded_stateful_obj = TestStatefulObj()
         dist_model, dist_optim = self._create_model(compile, model_type)
@@ -209,6 +232,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
                 "s": loaded_stateful_obj,
             },
             checkpoint_id=self.temp_dir,
+            storage_reader=storage_reader,
         )
 
         self.assertEqual(original_stateful_obj, loaded_stateful_obj)

@@ -63,11 +63,22 @@ The following types define the planner interface used during checkpoint:
 
 We provide a filesystem based storage layer:
 
-.. autoclass:: torch.distributed.checkpoint.FileSystemReader
+.. autoclass:: torch.distributed.checkpoint.filesystem.FileSystemReader
   :members:
 
-.. autoclass:: torch.distributed.checkpoint.FileSystemWriter
+.. autoclass:: torch.distributed.checkpoint.filesystem.FileSystemWriter
   :members:
+
+Additionally, we provide the following abstractions for working with Fsspec storage.
+
+.. automodule:: torch.distributed.checkpoint.fsspec
+
+.. autoclass:: torch.distributed.checkpoint.fsspec.FsspecReader
+  :members:
+
+.. autoclass:: torch.distributed.checkpoint.fsspec.FsspecWriter
+  :members:
+
 
 We provide default implementations of `LoadPlanner` and `SavePlanner` that
 can handle all of torch.distributed constructs such as FSDP, DDP, ShardedTensor and DistributedTensor.
