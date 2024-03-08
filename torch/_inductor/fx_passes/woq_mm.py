@@ -36,6 +36,19 @@ def _woq_mm_params_check(match):
     )
 
 
+def _woq_mm_extra_check(disable_cuda=False):
+    def fn(match):
+        if (
+            disable_cuda
+            and "x" in match.kwargs
+            and "cuda" in str(match.kwargs["x"].meta["val"].device)
+        ):
+            return False
+        return _woq_mm_params_check(match)
+
+    return fn
+
+
 def _get_woq_mm_patterns():
     from .joint_graph import patterns
 
@@ -60,12 +73,13 @@ def _get_woq_mm_patterns():
     workaround: dict[str, float]
 
     for pattern, replacement, args, workaround, extra_check in [
+        # _weight_int8pack_mm kernel only supports cpu now
         (
             _woq_mm_pattern_1,
             _woq_mm_replacement_1,
             [x(), w(), s()],
             {},
-            _woq_mm_params_check,
+            _woq_mm_extra_check(disable_cuda=True),
         ),
     ]:
         assert isinstance(workaround, dict)  # mypy is unable to infer the type properly
