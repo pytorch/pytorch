@@ -1134,8 +1134,7 @@ class ExportedProgramSerializer:
                 major=SCHEMA_VERSION[0],
                 minor=SCHEMA_VERSION[1],
             ),
-            dialect=exported_program.dialect,
-            from_export=True
+            dialect=exported_program.dialect
         )
 
         # Test canonical form is well defined.
@@ -2437,6 +2436,5 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
         opset_version=opset_version,
         range_constraints=range_constraints,
         schema_version=ep.schema_version,
-        dialect=ep.dialect,
-        from_export=True
+        dialect=ep.dialect
     )
