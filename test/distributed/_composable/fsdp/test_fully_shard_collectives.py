@@ -206,8 +206,7 @@ class TestFullyShardCollectives(FSDPTestMultiThread):
             orig_dtype=orig_params[0].dtype,
             reduce_dtype=reduce_scatter_dtype,
             device=self.device,
-            predivide_factor=fsdp_param_group._grad_predivide_factor,
-            postdivide_factor=fsdp_param_group._grad_postdivide_factor,
+            divide_factors=None,
         )
         torch.cuda.current_stream().wait_event(view_out_event)
 
