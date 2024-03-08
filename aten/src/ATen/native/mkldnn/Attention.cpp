@@ -107,14 +107,14 @@ void create_partition(
     g.add_op(transpose_once_key_op);
   }
 
-  logical_tensor transpose_key_before_qk_desc(logical_tensor_id++, dtype);
+  logical_tensor transposed_key_before_qk_desc(logical_tensor_id++, dtype);
   if (key_requires_transpose_twice || key_requires_transpose_once) {
     op transpose_key_before_qk_op(
         op_idx++,
         op::kind::StaticTranspose,
-        {key_requires_transpose_once ? transpose_key_first_time_desc
-                                     : key_src_desc},
-        {transpose_key_before_qk_desc},
+        {key_requires_transpose_once ? key_src_desc,
+                                     : transpose_key_first_time_desc},
+        {transposed_key_before_qk_desc},
         "transpose_key");
     transpose_key_before_qk_op.set_attr<dims>(
         dnnl::graph::op::attr::order, key_transpose_dims);
@@ -141,7 +141,7 @@ void create_partition(
       op::kind::MatMul,
       {query_requires_transpose ? transposed_query_desc : query_src_desc,
        key_requires_transpose_twice || key_requires_transpose_once
-           ? transpose_key_before_qk_desc
+           ? transposed_key_before_qk_desc
            : key_src_desc},
       {matmul_qk_dst_desc},
       "matmul_qk");
