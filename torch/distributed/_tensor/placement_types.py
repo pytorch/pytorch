@@ -605,3 +605,16 @@ class DTensorSpec:
         return True if the current DTensorSpec replicates on all mesh dims (devices)
         """
         return all(placement.is_replicate() for placement in self.placements)
+
+    def shallow_copy_with_tensor_meta(
+        self, tensor_meta: Optional[TensorMeta]
+    ) -> "DTensorSpec":
+        """
+        Shallow copy the DTensorSpec with a new tensor_meta.
+        """
+        assert tensor_meta is not None, "shallow copy with no tensor_meta!"
+        return DTensorSpec(
+            self.mesh,
+            self.placements,
+            tensor_meta=tensor_meta,
+        )

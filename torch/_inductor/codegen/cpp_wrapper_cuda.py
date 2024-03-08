@@ -1,7 +1,7 @@
 import functools
 import os
 from itertools import chain, count
-from typing import Any, List, Optional
+from typing import Any, List, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -11,8 +11,11 @@ from .. import config
 from ..codecache import CudaKernelParamCache
 from ..triton_heuristics import grid as default_grid
 from ..virtualized import V
-from .cpp_wrapper_cpu import CppWrapperCodeGen
+from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import SymbolicCallArg
+
+if TYPE_CHECKING:
+    from ..graph import GraphLowering
 
 
 def is_int(s: str) -> bool:
@@ -37,12 +40,13 @@ def is_float(s: str) -> bool:
     return True
 
 
-class CudaWrapperCodeGen(CppWrapperCodeGen):
+class CppWrapperCuda(CppWrapperCpu):
     """
     Generates cpp wrapper for running on GPU and calls CUDA kernels
     """
 
     def __init__(self):
+        self.device = "cuda"
         super().__init__()
         self.grid_id = count()
         self.cuda = True
@@ -64,6 +68,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 """
                 #include <c10/cuda/CUDAGuard.h>
                 #include <c10/cuda/CUDAStream.h>
+                #include <ATen/cuda/EmptyTensor.h>
                 """
             )
 
@@ -138,10 +143,11 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             """
         )
 
-    def write_get_raw_stream(self, index):
+    def write_get_raw_stream(self, index, graph=None):
         name = f"stream{index}"
+        self.writeline(f"cudaStream_t {name};")
         self.writeline(
-            f"cudaStream_t {name} = at::cuda::getCurrentCUDAStream({index});"
+            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_current_cuda_stream({index}, (void**)&{name}));"
         )
         return name
 
@@ -155,7 +161,8 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         self.prefix.writeline("\n")
         if not V.graph.aot_mode:
             for kernel in chain(
-                self.src_to_kernel.values(), self.user_defined_kernel_cache.values()
+                self.src_to_kernel.values(),
+                [entry[0] for entry in self.user_defined_kernel_cache.values()],
             ):
                 self.prefix.writeline(f"static CUfunction {kernel} = nullptr;")
             self.prefix.writeline("\n")
@@ -163,7 +170,12 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
 
     @functools.lru_cache(None)
     def generate_load_kernel_once(
-        self, name: str, mangled_name: str, cubin_path: str, shared_mem: int
+        self,
+        name: str,
+        mangled_name: str,
+        cubin_path: str,
+        shared_mem: int,
+        graph: "GraphLowering",  # for per-graph caching
     ):
         if V.graph.aot_mode:
             self.writeline(f"if (kernels.{name} == nullptr) {{")
@@ -243,9 +255,10 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         triton=True,
         arg_types=None,
         grid_fn: str = "grid",
+        triton_meta=None,
     ):
         if not cuda:
-            # Even in CudaWrapperCodeGen, we may see cpp kernels
+            # Even in CppWrapperCuda, we may see cpp kernels
             return super().generate_kernel_call(
                 name, call_args, grid, device_index, cuda, triton, arg_types
             )
@@ -262,13 +275,28 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         ), f"cubin file should already exist at this moment: {cubin_path}"
         shared_mem = params.get("shared_mem", 0)
 
-        self.generate_load_kernel_once(name, mangled_name, cubin_path, shared_mem)
+        self.generate_load_kernel_once(
+            name, mangled_name, cubin_path, shared_mem, V.graph
+        )
+
+        # args with value 1 are added into equal_to_1 and constants
+        # in triton_meta (in the Python codegen) which makes them
+        # inlined in the PTX and compiled CUBIN
+        if (
+            triton_meta is not None
+            and "configs" in triton_meta
+            and triton_meta["configs"]
+        ):
+            equal_to_1 = triton_meta["configs"][0].equal_to_1
+            call_args = [arg for i, arg in enumerate(call_args) if i not in equal_to_1]
 
         call_args = self.generate_args_decl(call_args)
         kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
         self.writeline(f"void* {kernel_args_var}[] = {{{call_args}}};")
         stream = (
-            "stream" if V.graph.aot_mode else self.write_get_raw_stream(device_index)
+            "stream"
+            if V.graph.aot_mode
+            else self.write_get_raw_stream(device_index, V.graph)
         )
         grid_name = f"{name}_grid_{next(self.grid_id)}"
         assert isinstance(
