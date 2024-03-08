@@ -229,8 +229,9 @@ class TritonTemplateKernel(TritonKernel):
             code.splice(gen_common_triton_imports())
             code.writeline(self.jit_line())
             code.writeline(f"def {self.kernel_name}({', '.join(arg_defs)}):")
-            code.splice(self.defines)
-            code.splice(renames.getvalue())
+            with code.indent():
+                code.splice(self.defines)
+                code.splice(renames.getvalue())
             return code.getvalue()
 
         assert "<DEF_KERNEL>" not in self.render_hooks
