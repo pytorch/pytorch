@@ -71,7 +71,6 @@ ignored_c_binding_in_graph_function_names = {
     "torch._C._pickle_save",
     "torch._validate_sparse_compressed_tensor_args",
     "torch._validate_sparse_csr_tensor_args",
-    "torch._validate_sparse_compressed_tensor_args",
     "torch._validate_sparse_bsr_tensor_args",
     "torch._validate_sparse_csc_tensor_args",
     "torch._validate_sparse_coo_tensor_args",
