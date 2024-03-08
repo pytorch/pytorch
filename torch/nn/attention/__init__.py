@@ -28,8 +28,6 @@ __all__: List[str] = ["SDPBackend", "sdpa_kernel", "WARN_FOR_UNFUSED_KERNELS"]
 # torch.nn.attention.WARN_FOR_UNFUSED_KERNELS = True
 WARN_FOR_UNFUSED_KERNELS = False
 
-from torch._C import _SDPBackend as SDPBackend
-
 # Wrap in a normal python enum so that dynamo understands it
 SDPBackend = enum.Enum("SDPBackend", torch._C._SDPBackend.__members__.items())
 

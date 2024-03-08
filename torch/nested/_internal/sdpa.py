@@ -15,7 +15,7 @@ from torch.backends.cuda import (
 
 from torch.nn.attention import SDPBackend
 
-from .nested_tensor import buffer_from_jagged, jagged_from_buffer, NestedTensor, ViewNestedFromBuffer
+from .nested_tensor import buffer_from_jagged, NestedTensor, ViewNestedFromBuffer
 
 log = logging.getLogger(__name__)
 
@@ -615,6 +615,11 @@ def _post_process_flash_output(out: torch.Tensor, og_size):
     return out
 
 
+@torch._dynamo.allow_in_graph
+def _jagged_from_buffer(buffer, offsets):
+    return ViewNestedFromBuffer.apply(buffer, offsets)
+
+
 def jagged_scaled_dot_product_attention(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -696,7 +701,7 @@ def jagged_scaled_dot_product_attention(
             scale=og_scale,
         )
         # Reshape output to convert nnz to batch_size and seq_len
-        attention = jagged_from_buffer(
+        attention = _jagged_from_buffer(
             attention.squeeze(0), output_nt_info["offsets"]
         ).transpose(1, 2)
         return _post_process_flash_output(attention, og_size)
