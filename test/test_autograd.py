@@ -510,6 +510,47 @@ class TestAutograd(TestCase):
                 # if forward AD ends up being implemented for torch.igamma, choose a different op
                 torch.igamma(dual_x, dual_x)
 
+    def test_traceable_deprecated(self):
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, gO):
+                return gO * 2
+
+        with self.assertWarnsRegex(UserWarning, "is_traceable .*is deprecated"):
+            MyFunction.is_traceable
+
+        with self.assertWarnsRegex(UserWarning, "is_traceable .*is deprecated"):
+            MyFunction.is_traceable = True
+
+        with self.assertWarnsRegex(UserWarning, "is_traceable .*is deprecated"):
+            class MyFunction(Function):
+                is_traceable = True
+
+                @staticmethod
+                def forward(ctx, x):
+                    return x * 2
+
+                @staticmethod
+                def backward(ctx, gO):
+                    return gO * 2
+
+        with self.assertWarnsRegex(UserWarning, "traceable .*is deprecated"):
+            @torch.autograd.function.traceable
+            class MyFunction(Function):
+                is_traceable = True
+
+                @staticmethod
+                def forward(ctx, x):
+                    return x * 2
+
+                @staticmethod
+                def backward(ctx, gO):
+                    return gO * 2
+
     def test_will_engine_execute_node(self):
         counter = [0]
 
