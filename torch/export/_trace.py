@@ -721,7 +721,13 @@ def _export(
 
                     def forward(self, *args, **kwargs):
                         nonlocal out_spec
-                        tree_out = self._export_root(*args, **kwargs)
+                        if isinstance(self._export_root, torch.fx.GraphModule):
+                            with torch.fx.traceback.preserve_node_meta():
+                                tree_out = torch.fx.Interpreter(self._export_root).run(
+                                    *args, **kwargs
+                                )
+                        else:
+                            tree_out = self._export_root(*args, **kwargs)
                         flat_outs, out_spec = pytree.tree_flatten(tree_out)
                         return tuple(flat_outs)
 
@@ -772,15 +778,16 @@ def _export(
         fake_params_buffers = make_fake_params_buffers(
             fake_mode, _get_params_buffers(mod)
         )
-        ep_non_strict = _export_non_strict(
-            mod,
-            fake_args,
-            fake_kwargs,
-            fake_params_buffers,
-            constant_attrs,
-            pre_dispatch=pre_dispatch,
-            transform=_tuplify_outputs,
-        )
+        with fake_mode:
+            ep_non_strict = _export_non_strict(
+                mod,
+                fake_args,
+                fake_kwargs,
+                fake_params_buffers,
+                constant_attrs,
+                pre_dispatch=pre_dispatch,
+                transform=_tuplify_outputs,
+            )
         try:
             range_constraints = make_constraints(
                 fake_mode,

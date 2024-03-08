@@ -1665,6 +1665,7 @@ ALL_OPS_IN_DB = frozenset(op_info.name for op_info in OPS_DB)
 def _torch_size_flatten_spec(d: List[Any], spec: Any) -> List[Any]:
     return [d[i] for i in range(spec.num_children)]
 
+
 torch.fx._pytree.register_pytree_flatten_spec(
     torch.Size,
     _torch_size_flatten_spec,

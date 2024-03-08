@@ -24,7 +24,7 @@ from torch._export.utils import (
     register_dataclass_as_pytree_node,
 )
 from torch._subclasses import FakeTensorMode
-from torch.export import Dim, dynamic_dim, export, unflatten, WrapperModule
+from torch.export import Dim, dynamic_dim, export, unflatten
 from torch.export._trace import (
     _export,
     _export_to_torch_ir,
@@ -82,15 +82,17 @@ def returns_tensor_symint_impl(x):
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestDynamismExpression(TestCase):
     def test_export_inline_constraints(self):
-        def f(x):
-            b = x.item()
-            torch._constrain_as_size(b)
-            return torch.full((b, 1), 1)
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                b = x.item()
+                torch._constrain_as_size(b)
+                return torch.full((b, 1), 1)
 
+        f = Module()
         inp = (torch.tensor([3]),)
         ref = f(*inp)
 
-        gm = export(WrapperModule(f), inp)
+        gm = export(f, inp)
         res = gm.module()(*inp)
 
         self.assertTrue(torchdynamo.utils.same(ref, res))
@@ -129,23 +131,25 @@ class TestDynamismExpression(TestCase):
             ep.module()(torch.tensor([3]))
 
     def test_export_assume_static_by_default(self):
-        def branch_on_shape(x: torch.Tensor):
-            if x.shape[0] == 4:
-                return x + 1
-            else:
-                return x
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor):
+                if x.shape[0] == 4:
+                    return x + 1
+                else:
+                    return x
 
+        branch_on_shape = Module()
         inp = (torch.rand(4, 5),)
 
         # Being able to export means shape is preserved as static
-        export(WrapperModule(branch_on_shape), inp)
+        export(branch_on_shape, inp)
 
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestExport(TestCase):
     def _test_export_same_as_eager(self, f, args, kwargs=None):
         kwargs = kwargs or {}
-        exported_program = export(WrapperModule(f), args, kwargs)
+        exported_program = export(f, args, kwargs)
         self.assertEqual(exported_program.module()(*args, **kwargs), f(*args, **kwargs))
         # this is not supported by .module()
         # reversed_kwargs = {key: kwargs[key] for key in reversed(kwargs)}
@@ -154,11 +158,13 @@ class TestExport(TestCase):
         # )
 
     def test_basic(self):
-        def f(x, y):
-            return x[0] + y
+        class Module(torch.nn.Module):
+            def forward(self, x, y):
+                return x[0] + y
 
+        f = Module()
         inp = ([torch.ones(1, 3)], torch.ones(1, 3))
-        self._test_export_same_as_eager(WrapperModule(f), inp)
+        self._test_export_same_as_eager(f, inp)
 
     def test_external_call_non_strict_real_tensor(self):
         class ExternalMethod:
@@ -175,7 +181,7 @@ class TestExport(TestCase):
 
         f = Basic()
         args = (torch.randn(1, 3),)
-        ep = export(WrapperModule(f), args, strict=False)
+        ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
 
     @testing.expectedFailureRetraceability
@@ -219,7 +225,7 @@ class TestExport(TestCase):
 
         f = Basic()
         args = ([torch.randn(1, 3)], torch.randn(1, 3))
-        ep = export(WrapperModule(f), args, strict=False)
+        ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
 
     def test_basic_non_strict_fake_tensor(self):
@@ -235,7 +241,7 @@ class TestExport(TestCase):
         f = Basic()
         with fake_mode:
             args = ([torch.empty(3, 2)], torch.empty(3, 2))
-        ep = export(WrapperModule(f), args, strict=False)
+        ep = export(f, args, strict=False)
         inputs = ([torch.randn(3, 2)], torch.randn(3, 2))
         self.assertEqual(ep.module()(*inputs), f(*inputs))
 
@@ -728,13 +734,15 @@ class TestExport(TestCase):
             _ = export(M(), (torch.tensor([2, 3, 5]),))
 
     def test_if_functional(self):
-        def foo(x):
-            z = x + 4
-            z.add_(4)
-            y = z.view(x.shape)
-            return x.cos() + y.cos()
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                z = x + 4
+                z.add_(4)
+                y = z.view(x.shape)
+                return x.cos() + y.cos()
 
-        gm = export(WrapperModule(foo), (torch.tensor([2, 3, 5]),))
+        foo = Module()
+        gm = export(foo, (torch.tensor([2, 3, 5]),))
 
         view_count = 0
         for node in gm.graph.nodes:
@@ -808,27 +816,33 @@ class TestExport(TestCase):
 
     @testing.expectedFailureRetraceability
     def test_map(self):
-        def list_tensor_map(xs, y, z):
-            def body(x, y, z):
-                return x + y + z
+        class Module(torch.nn.Module):
+            def forward(self, xs, y, z):
+                def body(x, y, z):
+                    return x + y + z
 
-            return map(body, xs, y, z)
+                return map(body, xs, y, z)
 
+        list_tensor_map = Module()
         inps = (torch.ones(6, 4), torch.tensor(5), torch.tensor(4))
         self._test_export_same_as_eager(list_tensor_map, inps)
 
     def test_export_func_with_kwargs(self):
-        def kw_func(arg1, arg2, kw1, kw2):
-            return arg1 + arg2, kw1 + kw2
+        class Module(torch.nn.Module):
+            def forward(self, arg1, arg2, kw1, kw2):
+                return arg1 + arg2, kw1 + kw2
 
+        kw_func = Module()
         args = (torch.ones(6, 4), torch.ones(1, 1))
         kwargs = {"kw1": torch.ones(1, 1), "kw2": torch.ones(6, 4)}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
     def test_export_func_with_pytree_kwargs(self):
-        def kw_func(arg1, arg2, a, b):
-            return arg1 + a["kw1"] + b[0], arg2 + a["kw2"] + b[1]
+        class Module(torch.nn.Module):
+            def forward(self, arg1, arg2, a, b):
+                return arg1 + a["kw1"] + b[0], arg2 + a["kw2"] + b[1]
 
+        kw_func = Module()
         args = (torch.ones(2, 3), torch.ones(3, 4))
         kwargs = {
             "a": {"kw1": torch.ones(2, 3), "kw2": torch.ones(3, 4)},
@@ -837,11 +851,17 @@ class TestExport(TestCase):
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
     def test_export_func_with_default_kwargs(self):
-        def kw_func(arg1, arg2, a, b=1):
-            return arg1 + arg2, a["kw1"] + a["kw2"] + b
+        class Module(torch.nn.Module):
+            def forward(self, arg1, arg2, a, b=1):
+                return arg1 + arg2, a["kw1"] + a["kw2"] + b
 
-        def kw_func2(arg1, arg2, a=1, b=2):
-            return arg1 + a, arg2 + b
+        kw_func = Module()
+
+        class Module2(torch.nn.Module):
+            def forward(self, arg1, arg2, a=1, b=2):
+                return arg1 + a, arg2 + b
+
+        kw_func2 = Module2()
 
         args = (torch.ones(6, 4), torch.ones(1, 1))
         kwargs1 = {"a": {"kw1": torch.ones(1, 1), "kw2": torch.ones(6, 4)}}
@@ -852,27 +872,33 @@ class TestExport(TestCase):
         self._test_export_same_as_eager(kw_func2, args, kwargs3)
 
     def test_export_func_with_var_postional_args(self):
-        def kw_func(arg1, arg2, *args):
-            return arg1 + args[0], arg2 + args[1]
+        class Module(torch.nn.Module):
+            def forward(self, arg1, arg2, *args):
+                return arg1 + args[0], arg2 + args[1]
 
+        kw_func = Module()
         args = (torch.ones(2, 3), torch.ones(3, 4), torch.ones(2, 3), torch.ones(3, 4))
         self._test_export_same_as_eager(kw_func, args)
 
     def test_export_func_with_keyword_only_args(self):
-        def kw_func(arg1, arg2, *args, kw1, kw2):
-            return arg1 + args[0] + kw1, arg2 + args[1] + kw2
+        class Module(torch.nn.Module):
+            def forward(self, arg1, arg2, *args, kw1, kw2):
+                return arg1 + args[0] + kw1, arg2 + args[1] + kw2
 
+        kw_func = Module()
         args = (torch.ones(2, 3), torch.ones(3, 4), torch.ones(2, 3), torch.ones(3, 4))
         kwargs = {"kw1": torch.ones(2, 3), "kw2": torch.ones(3, 4)}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
     def test_export_func_with_var_keyword_args(self):
-        def kw_func(arg1, arg2, *args, kw1, kw2, **kwargs):
-            return (
-                arg1 + args[0] + kw1 + kwargs["kw3"],
-                arg2 + args[1] + kw2 + kwargs["kw4"],
-            )
+        class Module(torch.nn.Module):
+            def forward(self, arg1, arg2, *args, kw1, kw2, **kwargs):
+                return (
+                    arg1 + args[0] + kw1 + kwargs["kw3"],
+                    arg2 + args[1] + kw2 + kwargs["kw4"],
+                )
 
+        kw_func = Module()
         args = (torch.ones(2, 3), torch.ones(3, 4), torch.ones(2, 3), torch.ones(3, 4))
         kwargs = {
             "kw1": torch.ones(2, 3),
@@ -917,12 +943,14 @@ class TestExport(TestCase):
         self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
 
     def test_export_func_with_var_keyword_pytree_args(self):
-        def kw_func(arg1, arg2, *args, kw1, kw2, **kwargs):
-            return (
-                arg1 + arg2[0][0] + args[0] + kw1[0] + kwargs["kw3"][0],
-                arg2[1] + args[1] + kw2 + kwargs["kw4"],
-            )
+        class Module(torch.nn.Module):
+            def forward(self, arg1, arg2, *args, kw1, kw2, **kwargs):
+                return (
+                    arg1 + arg2[0][0] + args[0] + kw1[0] + kwargs["kw3"][0],
+                    arg2[1] + args[1] + kw2 + kwargs["kw4"],
+                )
 
+        kw_func = Module()
         args = (
             torch.ones(2, 3),
             [(torch.ones(2, 3),), torch.ones(3, 4)],
@@ -1275,18 +1303,20 @@ class TestExport(TestCase):
 
     @testing.expectedFailureNonStrict
     def test_error_does_not_reference_eager_fallback(self):
-        def fn_ddo(x):
-            y = x.nonzero()
-            z = y.shape[0]
-            if z > 2:
-                return x.cos()
-            else:
-                return x.sin()
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = x.nonzero()
+                z = y.shape[0]
+                if z > 2:
+                    return x.cos()
+                else:
+                    return x.sin()
 
+        fn_ddo = Module()
         with self.assertRaisesRegex(
             torchdynamo.exc.UserError, r"^(?!.*fall back to eager).*"
         ):
-            _ = export(WrapperModule(fn_ddo), (torch.tensor([2, 3, 5]),))
+            _ = export(fn_ddo, (torch.tensor([2, 3, 5]),))
 
     def test_pytree_register_data_class(self):
         @dataclass
@@ -1564,13 +1594,15 @@ class TestExport(TestCase):
             _ = export(M(), inp)
 
     def test_constrain_value_with_no_default(self):
-        def fn(x, y):
-            n = x.max().item()
-            torch._constrain_as_value(n)
-            return y + n
+        class Module(torch.nn.Module):
+            def forward(self, x, y):
+                n = x.max().item()
+                torch._constrain_as_value(n)
+                return y + n
 
+        fn = Module()
         ep = export(
-            WrapperModule(fn),
+            fn,
             (torch.randint(3, 5, (2, 2)), torch.randint(3, 5, (2, 3))),
         )
         test_inp = (torch.randint(3, 5, (2, 2)), torch.randint(3, 5, (2, 3)))
@@ -1638,25 +1670,29 @@ def forward(self, arg_0):
 
     @testing.expectedFailureNonStrict
     def test_constrain_value_with_symfloat(self):
-        def fn(x, y):
-            n = x.max().item()
-            torch._constrain_as_value(n)
-            return y + n
+        class Module(torch.nn.Module):
+            def forward(self, x, y):
+                n = x.max().item()
+                torch._constrain_as_value(n)
+                return y + n
 
+        fn = Module()
         with self.assertRaisesRegex(
             torch._dynamo.exc.TorchRuntimeError,
             "Constraining SymFloat or Symbool is nyi",
         ):
-            _ = export(WrapperModule(fn), (torch.rand(2, 2), torch.rand(2, 3)))
+            _ = export(fn, (torch.rand(2, 2), torch.rand(2, 3)))
 
     def test_constrain_size_in_eager(self):
-        def fn(x, y):
-            n = x.max().item()
-            torch._constrain_as_size(n)
-            return y + n
+        class Module(torch.nn.Module):
+            def forward(self, x, y):
+                n = x.max().item()
+                torch._constrain_as_size(n)
+                return y + n
 
+        fn = Module()
         ep = export(
-            WrapperModule(fn),
+            fn,
             (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3))),
         )
         test_inp = (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3)))
@@ -1664,19 +1700,21 @@ def forward(self, arg_0):
 
     @testing.expectedFailureNonStrict
     def test_constrain_size_with_constrain_value(self):
-        def fn(x, y):
-            n = x.max().item()
-            torch._constrain_as_value(n, 2, 10)
-            torch._constrain_as_size(n)
-            return y + n
+        class Module(torch.nn.Module):
+            def forward(self, x, y):
+                n = x.max().item()
+                torch._constrain_as_value(n, 2, 10)
+                torch._constrain_as_size(n)
+                return y + n
 
+        fn = Module()
         with self.assertRaisesRegex(
             RuntimeError, r"Invalid value range for 1 between \[2, 10\]."
         ):
             _ = fn(torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3)))
 
         ep = export(
-            WrapperModule(fn),
+            fn,
             (torch.randint(3, 4, (2, 2)), torch.randint(3, 5, (2, 3))),
         )
         with self.assertRaisesRegex(RuntimeError, "is outside of inline constraint"):
@@ -1684,57 +1722,72 @@ def forward(self, arg_0):
             _ = ep.module()(*test_inp)
 
     def test_constrain_size_with_various_cases(self):
-        def case_1(x, y):
-            n = x.item()
-            torch._constrain_as_size(n, min=0)
-            return y.sum() + torch.ones(n, 5).sum()
+        class Module1(torch.nn.Module):
+            def forward(self, x, y):
+                n = x.item()
+                torch._constrain_as_size(n, min=0)
+                return y.sum() + torch.ones(n, 5).sum()
 
-        def case_2(x, y):
-            n = x.item()
-            torch._constrain_as_size(n, min=0, max=6)
-            return y.sum() + torch.ones(n, 5).sum()
+        case1 = Module1()
 
-        def case_3(x, y):
-            n = x.item()
-            torch._constrain_as_size(n, min=0, max=1)
-            return y.sum() + torch.ones(n, 5).sum()
+        class Module2(torch.nn.Module):
+            def forward(self, x, y):
+                n = x.item()
+                torch._constrain_as_size(n, min=0, max=6)
+                return y.sum() + torch.ones(n, 5).sum()
 
-        def case_4(x, y):
-            n = x.item()
-            torch._constrain_as_size(n, min=2)
-            return y.sum() + torch.ones(n, 5).sum()
+        case2 = Module2()
 
-        def case_5(x, y):
-            n = x.item()
-            torch._constrain_as_size(n, min=1)
-            return y.sum() + torch.ones(n, 5).sum()
+        class Module3(torch.nn.Module):
+            def forward(self, x, y):
+                n = x.item()
+                torch._constrain_as_size(n, min=0, max=1)
+                return y.sum() + torch.ones(n, 5).sum()
 
-        ep = export(WrapperModule(case_1), (torch.tensor(1), torch.ones(4, 5)))
+        case3 = Module3()
+
+        class Module4(torch.nn.Module):
+            def forward(self, x, y):
+                n = x.item()
+                torch._constrain_as_size(n, min=2)
+                return y.sum() + torch.ones(n, 5).sum()
+
+        case4 = Module4()
+
+        class Module5(torch.nn.Module):
+            def forward(self, x, y):
+                n = x.item()
+                torch._constrain_as_size(n, min=1)
+                return y.sum() + torch.ones(n, 5).sum()
+
+        case5 = Module5()
+
+        ep = export(case1, (torch.tensor(1), torch.ones(4, 5)))
 
         with self.assertRaisesRegex(
             RuntimeError, r"Invalid value range for -1 between"
         ):
-            _ = case_1(torch.tensor(-1), torch.randn(4, 5))
+            _ = case1(torch.tensor(-1), torch.randn(4, 5))
 
         self.assertTrue(
             torch.allclose(
                 ep.module()(torch.tensor(1), torch.ones(4, 5)),
-                case_1(torch.tensor(1), torch.ones(4, 5)),
+                case1(torch.tensor(1), torch.ones(4, 5)),
             )
         )
 
-        ep = export(WrapperModule(case_2), (torch.tensor(5), torch.randn(4, 5)))
+        ep = export(case2, (torch.tensor(5), torch.randn(4, 5)))
 
         with self.assertRaisesRegex(RuntimeError, r"Invalid value range for 7 between"):
-            _ = case_2(torch.tensor(7), torch.randn(4, 5))
+            _ = case2(torch.tensor(7), torch.randn(4, 5))
 
         with self.assertRaisesRegex(RuntimeError, r"Invalid value range for 9 between"):
-            _ = case_2(torch.tensor(9), torch.randn(4, 5))
+            _ = case2(torch.tensor(9), torch.randn(4, 5))
 
         self.assertTrue(
             torch.allclose(
                 ep.module()(torch.tensor(5), torch.ones(4, 5)),
-                case_2(torch.tensor(5), torch.ones(4, 5)),
+                case2(torch.tensor(5), torch.ones(4, 5)),
             )
         )
 
@@ -1742,35 +1795,35 @@ def forward(self, arg_0):
             RuntimeError,
             "Max value to constrain_range_for_size must be greater than 2. got: 1",
         ):
-            _ = case_3(torch.tensor(1), torch.randn(4, 5))
+            _ = case3(torch.tensor(1), torch.randn(4, 5))
 
         with self.assertRaisesRegex(
             RuntimeError,
             r"Invalid value range for 1 between \[2, 9223372036854775807\].",
         ):
-            _ = case_4(torch.tensor(1), torch.randn(4, 5))
+            _ = case4(torch.tensor(1), torch.randn(4, 5))
 
-        ep = export(WrapperModule(case_4), (torch.tensor(5), torch.randn(4, 5)))
+        ep = export(case4, (torch.tensor(5), torch.randn(4, 5)))
 
         with self.assertRaisesRegex(RuntimeError, r"Invalid value range for 1"):
-            _ = case_4(torch.tensor(1), torch.randn(4, 5))
+            _ = case4(torch.tensor(1), torch.randn(4, 5))
 
         self.assertTrue(
             torch.allclose(
                 ep.module()(torch.tensor(5), torch.ones(4, 5)),
-                case_4(torch.tensor(5), torch.ones(4, 5)),
+                case4(torch.tensor(5), torch.ones(4, 5)),
             )
         )
 
-        ep = export(WrapperModule(case_5), (torch.tensor(5), torch.randn(4, 5)))
+        ep = export(case5, (torch.tensor(5), torch.randn(4, 5)))
 
         with self.assertRaisesRegex(RuntimeError, r"Invalid value range for 0"):
-            _ = case_5(torch.tensor(0), torch.randn(4, 5))
+            _ = case5(torch.tensor(0), torch.randn(4, 5))
 
         self.assertTrue(
             torch.allclose(
                 ep.module()(torch.tensor(5), torch.ones(4, 5)),
-                case_5(torch.tensor(5), torch.ones(4, 5)),
+                case5(torch.tensor(5), torch.ones(4, 5)),
             )
         )
 
@@ -1814,26 +1867,31 @@ def forward(self, arg_0):
         ).run(decompose_ep.graph_module.code)
 
     def test_mixed_input(self):
-        def func(a, b, alpha: int):
-            return torch.add(a, b, alpha=alpha)
+        class Module(torch.nn.Module):
+            def forward(self, a, b, alpha: int):
+                return torch.add(a, b, alpha=alpha)
+
+        func = Module()
 
         a = torch.rand(1, 2)
         b = torch.rand(1, 2)
         alpha = 10
 
-        exported = export(WrapperModule(func), (a, b, alpha))
+        exported = export(func, (a, b, alpha))
         for node in exported.graph_module.graph.nodes:
             if node.op == "placeholder":
                 self.assertTrue(isinstance(node.meta["val"], (Tensor, int)))
 
     @testing.expectedFailureNonStrict
     def test_export_with_inline_constraints(self):
-        def f(x):
-            a = x.item()
-            torch._constrain_as_value(a, 4, 7)
-            return torch.empty((a, 4))
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                a = x.item()
+                torch._constrain_as_value(a, 4, 7)
+                return torch.empty((a, 4))
 
-        ep = export(WrapperModule(f), (torch.tensor([5]),))
+        f = Module()
+        ep = export(f, (torch.tensor([5]),))
         self.assertEqual(ep.module()(torch.tensor([6])).shape, (6, 4))
 
         FileCheck().check_count(
@@ -1847,14 +1905,16 @@ def forward(self, arg_0):
             ep.module()(torch.tensor([30]))
 
     def test_export_with_inline_constraints_complex(self):
-        def f(x):
-            a = x.item()
-            torch._constrain_as_value(a, 4, 7)
-            empty = torch.empty((a, 4))
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                a = x.item()
+                torch._constrain_as_value(a, 4, 7)
+                empty = torch.empty((a, 4))
 
-            return torch.cat((empty.transpose(0, 1), torch.zeros(6, a)), 0)
+                return torch.cat((empty.transpose(0, 1), torch.zeros(6, a)), 0)
 
-        ep = export(WrapperModule(f), (torch.tensor([6]),))
+        f = Module()
+        ep = export(f, (torch.tensor([6]),))
         self.assertEqual(ep.module()(torch.tensor([5])).shape, (10, 5))
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
@@ -2221,17 +2281,19 @@ def forward(self, arg_0):
 
     @testing.expectedFailureNonStrict
     def test_constrain_as_size_error(self):
-        def f(x):
-            a = x.item()
-            # We cannot automatically infer a is a size here because view
-            # accepts -1
-            return torch.randn(24).view(a, 4)
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                a = x.item()
+                # We cannot automatically infer a is a size here because view
+                # accepts -1
+                return torch.randn(24).view(a, 4)
 
+        f = Module()
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             "Tried to use data-dependent value in the subsequent computation",
         ):
-            _ = export(WrapperModule(f), (torch.tensor(6),))
+            _ = export(f, (torch.tensor(6),))
 
     def test_train_eval_on_exported_preautograd_module(self):
         class Foo(torch.nn.Module):
@@ -2301,10 +2363,12 @@ def forward(self, arg_0):
 
     @testing.expectedFailureRetraceability
     def test_lifted_constants(self) -> None:
-        def f(x):
-            return x + torch.tensor(3)
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x + torch.tensor(3)
 
-        ep = export(WrapperModule(f), (torch.tensor(1),))
+        f = Module()
+        ep = export(f, (torch.tensor(1),))
 
         self.assertEqual(len(ep.graph_signature.input_specs), 2)
         self.assertEqual(len(ep.constants), 1)
@@ -2330,6 +2394,20 @@ def forward(self, arg_0):
         transform = ep.run_decompositions()
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
         self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
+
+    @testing.expectedFailureRetraceability
+    def test_tensor_attribute_zero_args(self):
+        class Foo(torch.nn.Module):
+            def __init__(self, value):
+                super().__init__()
+                self.x = torch.tensor(value)
+
+            def forward(self):
+                return self.x.clone()
+
+        m = Foo([1, 2])
+        ep = export(m, ())
+        self.assertEqual(ep.graph_signature.lifted_tensor_constants, ["x"])
 
     def test_preserve_shape_dynamism_for_unused_inputs(self):
         @dataclass
@@ -2455,10 +2533,12 @@ def forward(self, arg_0):
         self.assertTrue(torch.allclose(core_aten_ep.module()(*inp), m(*inp)))
 
     def test_nonzero_2(self):
-        def f(x):
-            return torch.nonzero(x)
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return torch.nonzero(x)
 
-        ep = export(WrapperModule(f), (torch.ones(2),))
+        f = Module()
+        ep = export(f, (torch.ones(2),))
         inp = torch.randn(2)
         self.assertTrue(torch.allclose(ep.module()(inp), torch.nonzero(inp)))
 
@@ -2802,10 +2882,12 @@ def forward(self, arg_0):
     def test_export_graph_with_no_inputs(self):
         # We saw this pattern when users want to export
         # a graph that initlizes the states of a model.
-        def f():
-            return torch.randn(3, 4), torch.randn(3, 4)
+        class Module(torch.nn.Module):
+            def forward(self):
+                return torch.randn(3, 4), torch.randn(3, 4)
 
-        ep = torch.export.export(WrapperModule(f), ())
+        f = Module()
+        ep = torch.export.export(f, ())
         a, b = ep.module()()
         self.assertEqual(a.size(), torch.Size([3, 4]))
         self.assertEqual(b.size(), torch.Size([3, 4]))
@@ -3702,6 +3784,45 @@ def forward(self, arg0_1):
         self.assertEqual(ep.constants["nested.constant"], m.nested.constant)
         self.assertEqual(ep.module()(torch.ones(2, 3)), m(torch.ones(2, 3)))
 
+    def test_nested_retrace(self):
+        class Nested(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(3))
+
+            def forward(self, x):
+                return x + self.param
+
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.nested = Nested()
+
+            def forward(self, x):
+                return x + self.nested(x)
+
+        # first export
+        foo = Foo().to("meta")
+        inputs = (torch.ones(3, device="meta"),)
+        foo(*inputs)
+        ep = torch.export.export(foo, inputs, strict=False)
+
+        # second export
+        foo_1 = ep.module()
+        ep_1 = torch.export.export(foo_1, inputs, strict=False)
+
+        for node1, node2 in zip(ep.graph.nodes, ep_1.graph.nodes):
+            nn_module_stack_1 = node1.meta.get("nn_module_stack", None)
+            nn_module_stack_2 = node2.meta.get("nn_module_stack", None)
+
+            if nn_module_stack_1 is None:
+                self.assertTrue(nn_module_stack_2 is None)
+            else:
+                for v1, v2 in zip(nn_module_stack_1.values(), nn_module_stack_2.values()):
+                    self.assertEqual(v1, v2)
+
+
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestExportCustomClass(TorchTestCase):
     def setUp(self):
@@ -3764,6 +3885,12 @@ class TestExportCustomClass(TorchTestCase):
                 arg = node.args[0]
                 self.assertTrue(arg.op == "placeholder")
 
+    def test_tolist_nonstrict_output(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x.tolist()
+
+        ep = torch.export.export(M(), (torch.ones(3),), strict=False)
 
 if __name__ == '__main__':
     run_tests()
