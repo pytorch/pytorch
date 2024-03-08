@@ -7475,6 +7475,15 @@ class TestMPS(TestCaseMPS):
         helper((2, 3), (5, 2, 3), (2, 3))
         helper((2, 3), (2, 3), (5, 2, 3))
         helper((2, 3), (5, 2, 3), (6, 5, 2, 3))
+        # Test that output is correctly resizes
+        # TODO: Remove me when out OpInfo testing is enabled on MPS
+        output = torch.tensor(0.0, device="mps")
+        cond = torch.randint(2, (3, 3), dtype=torch.bool, device="mps")
+        inp = torch.rand(3, 3, device="mps")
+        other = torch.rand(3, 3, device="mps")
+        out = torch.where(cond, inp, other, out=output)
+        self.assertEqual(id(out), id(output))
+        self.assertEqual(out.shape, (3, 3))
 
     # Test normal
     def test_normal(self):
