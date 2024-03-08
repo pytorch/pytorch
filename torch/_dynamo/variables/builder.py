@@ -27,6 +27,7 @@ from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
 from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
+from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
@@ -1058,6 +1059,11 @@ class VariableBuilder:
             and not isinstance(value, NestedTensor)
         ):
             unimplemented("torch.compile does not support strided NestedTensor")
+
+        if is_sparse_any(value):
+            unimplemented(
+                f"torch.compile does not support sparse Tensor with {value.layout} layout"
+            )
 
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
