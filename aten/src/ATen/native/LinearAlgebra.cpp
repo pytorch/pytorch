@@ -38,7 +38,6 @@
 #include <ATen/ops/_linalg_slogdet_native.h>
 #include <ATen/ops/_unsafe_view.h>
 #include <ATen/ops/_weight_int4pack_mm_native.h>
-#include <ATen/ops/_weight_int8pack_mm_native.h>
 #include <ATen/ops/addbmm_native.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addr.h>
@@ -1176,9 +1175,9 @@ static TensorIterator build_addr_iter(Tensor& result,
   auto iter = TensorIteratorConfig()
     .set_check_mem_overlap(true)
     .add_output(result)
-    .add_owned_input(*self_)
-    .add_owned_input(vec1.reshape({vec1_size0, 1}))
-    .add_input(vec2)
+    .add_owned_const_input(*self_)
+    .add_owned_const_input(vec1.reshape({vec1_size0, 1}))
+    .add_const_input(vec2)
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
     .cast_common_dtype_to_outputs(true)
@@ -3395,28 +3394,41 @@ Tensor kron(const Tensor& self, const Tensor& other) {
 // Weight Only Quantization Gemm
 DEFINE_DISPATCH(weight_to_int4pack_stub);
 DEFINE_DISPATCH(int4pack_mm_stub);
-DEFINE_DISPATCH(int8pack_mm_stub);
 
 Tensor _convert_weight_to_int4pack_cpu(
     const Tensor& in,
     int64_t innerKTiles) {
 
   TORCH_CHECK(in.dim() == 2,
-      "_convert_weight_to_int4pack: expect weight to be 2D tensor.");
+      __func__, " : expect weight to be 2D tensor.");
   TORCH_CHECK(in.dtype() == at::kInt,
-      "_convert_weight_to_int4pack: expect weight to be kInt.");
+      __func__, " : expect weight to be kInt.");
+  TORCH_CHECK(innerKTiles == 2 || innerKTiles == 4 || innerKTiles == 8,
+      __func__, " : innerKTiles need to be 2, 4, or 8, got ", innerKTiles);
 
   auto weight = in.contiguous();
   auto N = weight.size(0);
   auto K = weight.size(1);
 
-  TORCH_CHECK(N % 16 == 0,
-      "_convert_weight_to_int4pack: expect N to be dividable by 16");
-  TORCH_CHECK(K % 2 == 0,
-      "_convert_weight_to_int4pack: expect K to be dividable by 2");
+  // Create fake shapes for cpu. The meta registration in dynamo requires
+  // operator has the same output shape for each device. So creating a fake
+  // shape {N / 8, K / (16 * innerKTiles), 32, innerKTiles / 2}
+  constexpr int64_t kNTileSize = 8;
+  constexpr int64_t kKTileSize = 16;
+  auto nTiles = (N + kNTileSize - 1) / kNTileSize;
 
-  auto weight_packed = at::empty({N, K / 2}, weight.options().dtype(kByte));
-  weight_to_int4pack_stub(kCPU, weight_packed, weight);
+  TORCH_CHECK(N % 16 == 0,
+      __func__, " : expect N to be dividable by 16");
+  const int64_t kSuperKTileSize = kKTileSize * innerKTiles;
+  TORCH_CHECK( K % kSuperKTileSize == 0,
+      __func__, " : epxect K to be dividable by ", kSuperKTileSize);
+  auto kSuperTiles = (K + kSuperKTileSize - 1) / kSuperKTileSize;
+
+  auto weight_packed = at::empty(
+      {nTiles, kSuperTiles, 32, innerKTiles / 2},
+      at::TensorOptions().dtype(at::kInt));
+
+  weight_to_int4pack_stub(kCPU, weight_packed, weight, N, K);
   return weight_packed;
 }
 
@@ -3426,8 +3438,10 @@ Tensor _weight_int4pack_mm_cpu(
     int64_t qGroupSize,
     const Tensor& qScaleAndZeros) {
 
+  constexpr int64_t kNTileSize = 8;
+
   auto M = A.size(0);
-  auto N = B.size(0);
+  auto N = B.size(0) * kNTileSize;
   auto K = A.size(1);
 
   TORCH_CHECK(A.dtype() == kBFloat16,
@@ -3437,12 +3451,12 @@ Tensor _weight_int4pack_mm_cpu(
   TORCH_CHECK(A.dim() == 2,
       __func__, " : expect A to be 2D tensor.");
 
-  TORCH_CHECK(B.dtype() == kByte,
-      __func__, " : expect B to be uint8 tensor.");
+  TORCH_CHECK(B.dtype() == kInt,
+      __func__, " : expect B to be int32 tensor.");
   TORCH_CHECK(B.is_contiguous(),
       __func__, " : expect B to be contiguous.");
-  TORCH_CHECK(B.size(1) == K / 2,
-      __func__, " : expect B.size(1) to be K/2, got ", B.size(1));
+  TORCH_CHECK(B.dim() == 4,
+      __func__, " : expect B to 4d tensor.");
 
   TORCH_CHECK(qGroupSize == 32 || qGroupSize == 64 || qGroupSize == 128
       || qGroupSize == 256,
@@ -3453,39 +3467,7 @@ Tensor _weight_int4pack_mm_cpu(
       __func__, ": expect qScaleAndZeros to be 3d tensor with sizes [:, ", N, ", 2]");
 
   auto C = at::empty({M, N}, A.options());
-  int4pack_mm_stub(kCPU, C, A, B, qGroupSize, qScaleAndZeros);
-
-  return C;
-}
-
-Tensor _weight_int8pack_mm_cpu(
-    const Tensor& A,
-    const Tensor& B,
-    const Tensor& scales) {
-
-  auto M = A.size(0);
-  auto N = B.size(0);
-  auto K = A.size(1);
-
-  TORCH_CHECK(A.dtype() == kBFloat16,
-      __func__, " : expect A to be bfloat16 tensor.");
-  TORCH_CHECK(A.is_contiguous(),
-      __func__, " : expect A to be contiguous.");
-  TORCH_CHECK(A.dim() == 2,
-      __func__, " : expect A to be 2D tensor.");
-
-  TORCH_CHECK(B.dtype() == kChar,
-      __func__, " : expect B to be int8 tensor.");
-  TORCH_CHECK(B.is_contiguous(),
-      __func__, " : expect B to be contiguous.");
-  TORCH_CHECK(B.size(1) == K,
-      __func__, " : expect B.size(1) == ", K);
-
-  TORCH_CHECK(scales.dim() == 1 && scales.size(0) == N,
-      __func__, " : expect scales to be 1d tensor with size ", N);
-
-  auto C = at::empty({M, N}, A.options());
-  int8pack_mm_stub(kCPU, C, A, B, scales);
+  int4pack_mm_stub(kCPU, C, A, B, qGroupSize, qScaleAndZeros, N, K);
 
   return C;
 }
