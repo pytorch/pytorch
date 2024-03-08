@@ -28,9 +28,11 @@ class CustomOpTestCaseBase(TestCase):
     test_ns = "_test_custom_op"
 
     def setUp(self):
+        super().setUp()
         self.libraries = []
 
     def tearDown(self):
+        super().tearDown()
         import torch._custom_op
 
         keys = list(torch._custom_op.impl.global_registry.keys())

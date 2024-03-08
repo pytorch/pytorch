@@ -303,8 +303,8 @@ static std::tuple<Tensor, optional<int64_t>> log_sigmoid_backward_batch_rule(
   return std::make_tuple(at::log_sigmoid_backward(out_grad, out_self, out_buffer), 0);
 }
 
-static Tensor binomial_wrapper(const Tensor& count, const Tensor& prob, c10::optional<Generator> gen) {
-  return at::binomial(count, prob.contiguous(), std::move(gen)); // Bug in PyTorch, prob shouldn't need to be contiguous
+static Tensor binomial_wrapper(const Tensor& count, const Tensor& prob, const std::optional<Generator>& gen) {
+  return at::binomial(count, prob.contiguous(), gen); // Bug in PyTorch, prob shouldn't need to be contiguous
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
