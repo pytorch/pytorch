@@ -2,8 +2,10 @@
 
 import torch
 import torch.testing._internal.torchbind_impls  # noqa: F401
+import torch.utils._pytree as pytree
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.export import export
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
@@ -24,10 +26,56 @@ class TestExportTorchbind(TestCase):
             def add_tensor(self, z):
                 return (self.x + self.y) * z
 
+        @torch._library.impl_abstract_class("_TorchScriptTesting::_TensorQueue")
+        class FakeTensorQueue:
+            def __init__(self, q):
+                self.queue = q
+
+            @classmethod
+            def from_real(cls, real_tq):
+                return cls(real_tq.clone_queue())
+
+            def push(self, x):
+                self.queue.append(x)
+
+            def pop(self):
+                return self.queue.pop(0)
+
+            def size(self):
+                return len(self.queue)
+
     def tearDown(self):
         torch._library.abstract_impl_class.deregister_abstract_impl(
             "_TorchScriptTesting::_Foo"
         )
+        torch._library.abstract_impl_class.deregister_abstract_impl(
+            "_TorchScriptTesting::_TensorQueue"
+        )
+
+    def _assert_equal_skip_script_object(self, exp, actual):
+        flat_exp = pytree.tree_leaves(exp)
+        flat_actual = pytree.tree_leaves(actual)
+        self.assertEqual(len(flat_exp), len(flat_actual))
+        for a, b in zip(flat_exp, flat_actual):
+            if isinstance(a, torch.ScriptObject) and isinstance(b, torch.ScriptObject):
+                continue
+            self.assertEqual(a, b)
+
+    def _test_export_same_as_eager_skip_script_object(
+        self, f, args, kwargs=None, strict=False
+    ):
+        kwargs = kwargs or {}
+        with enable_torchbind_tracing():
+            exported_program = export(f, args, kwargs, strict=strict)
+        gm = exported_program.module()
+        reversed_kwargs = {key: kwargs[key] for key in reversed(kwargs)}
+
+        self._assert_equal_skip_script_object(gm(*args, **kwargs), f(*args, **kwargs))
+        self._assert_equal_skip_script_object(
+            gm(*args, **reversed_kwargs),
+            f(*args, **reversed_kwargs),
+        )
+        return exported_program
 
     def _test_export_same_as_eager(self, f, args, kwargs=None, strict=True):
         kwargs = kwargs or {}
@@ -241,6 +289,87 @@ def forward(self, attr, arg0_1):
     """,
         )
         self.assertEqual(m(input), unlifted(input))
+
+    def test_tensor_queue_non_strict(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, tq, x):
+                torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
+                torch.ops._TorchScriptTesting.queue_push(tq, x.sin())
+                x_sin = torch.ops._TorchScriptTesting.queue_pop(tq)
+                x_cos = torch.ops._TorchScriptTesting.queue_pop(tq)
+                return x_sin, x_cos, tq
+
+        mod = Model()
+
+        tq = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        x = torch.ones(2, 3)
+        from torch._higher_order_ops.effects import _EffectType, SIDE_EFFECTS
+
+        SIDE_EFFECTS[
+            torch.ops._TorchScriptTesting.queue_push.default
+        ] = _EffectType.ORDERED
+        SIDE_EFFECTS[
+            torch.ops._TorchScriptTesting.queue_pop.default
+        ] = _EffectType.ORDERED
+        # This is caused by newly created token not handled in export yet.
+        with self.assertRaisesRegex(IndexError, "list index out of range"):
+            ep = self._test_export_same_as_eager_skip_script_object(
+                mod, (tq, x), strict=False
+            )
+        del SIDE_EFFECTS[torch.ops._TorchScriptTesting.queue_push.default]
+        del SIDE_EFFECTS[torch.ops._TorchScriptTesting.queue_pop.default]
+
+    def test_tensor_queue_make_fx(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 2)
+
+            def forward(self, tq, x):
+                torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
+                torch.ops._TorchScriptTesting.queue_push(tq, x.sin())
+                x_sin = torch.ops._TorchScriptTesting.queue_pop(tq)
+                x_cos = torch.ops._TorchScriptTesting.queue_pop(tq)
+                return self.linear(x_sin), self.linear(x_cos), tq
+
+        mod = Model()
+        tq = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        x = torch.ones(2, 3)
+        gm = make_fx(mod)(tq, x)
+        self.assertExpectedInline(
+            gm.code.strip("\n"),
+            """\
+def forward(self, arg0_1, arg1_1):
+    cos = torch.ops.aten.cos.default(arg1_1)
+    queue_push = torch.ops._TorchScriptTesting.queue_push.default(arg0_1, cos);  cos = None
+    sin = torch.ops.aten.sin.default(arg1_1);  arg1_1 = None
+    queue_push_1 = torch.ops._TorchScriptTesting.queue_push.default(arg0_1, sin);  sin = None
+    queue_pop = torch.ops._TorchScriptTesting.queue_pop.default(arg0_1)
+    queue_pop_1 = torch.ops._TorchScriptTesting.queue_pop.default(arg0_1)
+    _param_constant0 = self._param_constant0
+    t = torch.ops.aten.t.default(_param_constant0);  _param_constant0 = None
+    _param_constant1 = self._param_constant1
+    addmm = torch.ops.aten.addmm.default(_param_constant1, queue_pop, t);  _param_constant1 = queue_pop = t = None
+    _param_constant0_1 = self._param_constant0
+    t_1 = torch.ops.aten.t.default(_param_constant0_1);  _param_constant0_1 = None
+    _param_constant1_1 = self._param_constant1
+    addmm_1 = torch.ops.aten.addmm.default(_param_constant1_1, queue_pop_1, t_1);  _param_constant1_1 = queue_pop_1 = t_1 = None
+    return (addmm, addmm_1, arg0_1)
+    """,
+        )
+        self._assert_equal_skip_script_object(mod(tq, x), gm(tq, x))
 
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")

@@ -85,7 +85,10 @@ class OutputSpec:
     target: Optional[str]
 
     def __post_init__(self):
-        assert isinstance(self.arg, (TensorArgument, SymIntArgument, ConstantArgument))
+        assert isinstance(
+            self.arg,
+            (TensorArgument, SymIntArgument, ConstantArgument, CustomObjArgument),
+        ), self.arg
 
 
 def _sig_to_specs(
@@ -333,7 +336,7 @@ class ExportGraphSignature:
             if s.kind != OutputKind.USER_OUTPUT:
                 continue
 
-            if isinstance(s.arg, (TensorArgument, SymIntArgument)):
+            if isinstance(s.arg, (TensorArgument, SymIntArgument, CustomObjArgument)):
                 user_outputs.append(s.arg.name)
             elif isinstance(s.arg, ConstantArgument):
                 user_outputs.append(s.arg.value)

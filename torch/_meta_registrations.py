@@ -788,6 +788,32 @@ def meta__linalg_eigh(
     return vals, vecs
 
 
+@register_meta([aten._linalg_eigvals.default, aten.linalg_eigvals.out])
+@out_wrapper()
+def meta__linalg_eigvals(input: Tensor) -> Tensor:
+    squareCheckInputs(input, "linalg.eigvals")
+    complex_dtype = (
+        input.dtype
+        if utils.is_complex_dtype(input.dtype)
+        else utils.corresponding_complex_dtype(input.dtype)
+    )
+    return input.new_empty(input.shape[:-1], dtype=complex_dtype)
+
+
+@register_meta([aten.linalg_eig])
+@out_wrapper("eigenvalues", "eigenvectors")
+def meta_linalg_eig(input: Tensor):
+    squareCheckInputs(input, "linalg.eig")
+    complex_dtype = (
+        input.dtype
+        if utils.is_complex_dtype(input.dtype)
+        else utils.corresponding_complex_dtype(input.dtype)
+    )
+    values = input.new_empty(input.shape[:-1], dtype=complex_dtype)
+    vectors = input.new_empty(input.shape, dtype=complex_dtype)
+    return values, vectors
+
+
 def cloneBatchedColumnMajor(src: Tensor) -> Tensor:
     return src.mT.clone(memory_format=torch.contiguous_format).transpose(-2, -1)
 
@@ -3403,12 +3429,6 @@ def meta__convert_weight_to_int4pack(w, inner_k_tiles):
     )
     n = w.size(0)
     k = w.size(1)
-    if device_hint(w) == "cpu":
-        return w.new_empty(
-            (n, k // 2),
-            dtype=torch.uint8,
-        )
-    # cuda path
     return w.new_empty(
         (
             n // 8,
@@ -3423,23 +3443,16 @@ def meta__convert_weight_to_int4pack(w, inner_k_tiles):
 @register_meta([aten._weight_int4pack_mm])
 def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
     torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
+    torch._check(w.dim() == 4, lambda: "w must be a 4D tensor")
     torch._check(
         x.dtype is torch.bfloat16,
         lambda: f"expected x to be bf16, got {x.dtype}",
     )
-    if device_hint(w) == "cpu":
-        torch._check(w.dim() == 2, lambda: "w must be a 2D tensor")
-        torch._check(
-            w.dtype is torch.uint8,
-            lambda: f"expected w to be uint8, got {w.dtype}",
-        )
-    else:
-        torch._check(w.dim() == 4, lambda: "w must be a 4D tensor")
-        torch._check(
-            w.dtype is torch.int32,
-            lambda: f"expected w to be int32, got {w.dtype}",
-        )
-    return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
+    torch._check(
+        w.dtype is torch.int32,
+        lambda: f"expected w to be int32, got {w.dtype}",
+    )
+    return x.new_empty(x.size(0), w.size(0) * 8, dtype=x.dtype)
 
 
 @register_meta([aten._weight_int8pack_mm])

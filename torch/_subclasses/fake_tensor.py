@@ -802,6 +802,45 @@ class DispatchCacheInfo:
     size: int
 
 
+cached_fake_script_obj = {}
+
+
+def _fakify_script_object(x):
+    if hash(x) in cached_fake_script_obj:
+        return cached_fake_script_obj[hash(x)]
+
+    full_qualname = x._type().qualified_name()
+    splits = full_qualname.split(".")
+    assert len(splits) == 5
+    _torch, torch_ns, classes, ns, class_name = splits
+
+    fake_class = torch._library.abstract_impl_class.find_fake_impl(full_qualname)
+    if fake_class is None:
+        raise RuntimeError(
+            f" ScriptObject's {full_qualname} haven't registered a fake class."
+            f" Please use impl_abstract_class({ns}::{class_name}) to annotate a fake class for the script obj."
+            f" Specifically, create a python class that implements a fake version for all the methods"
+            f" that're used in the program and put annotated class in the program e.g. after loading the library."
+            f" The fake methods can be written in the same way as a meta kernel for an operator but need to also"
+            f" simulate the object's states when necessary. Be sure to add a from_real classmethod to enable creating"
+            f" a fake obj from a real one."
+        )
+    if not hasattr(fake_class, "from_real"):
+        raise RuntimeError(
+            f"ScriptObject {full_qualname}'s corresponding fake_class {fake_class}"
+            f" doesn't implement a from_real classmethod. Please add it to the fake class."
+        )
+    fake_x = fake_class.from_real(x)
+    cached_fake_script_obj[hash(x)] = fake_x
+    return fake_x
+
+
+def _maybe_fakify_script_object(args, kwargs):
+    return pytree.tree_map_only(
+        torch.ScriptObject, lambda x: _fakify_script_object(x), (args, kwargs)
+    )
+
+
 # We keep one instantiation of `fake_tensor_converter` active
 # for the duration of `with FakeTensorMode()`.
 # This allows accurate storage aliasing across invocation of
@@ -1219,7 +1258,8 @@ class FakeTensorMode(TorchDispatchMode):
 
     def dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
-        log.debug("%s %s %s", func, args, kwargs)
+        with no_dispatch():
+            log.debug("%s %s %s", func, args, kwargs)
 
         if func in _DISPATCH_META_HANDLERS:
             return _DISPATCH_META_HANDLERS[func](args)
@@ -1231,36 +1271,13 @@ class FakeTensorMode(TorchDispatchMode):
             # NOTE: incr is intentionally unused for a RAII pattern
             incr = IncrementRecursionCount()
 
-        def _fakify_script_object(x):
-            # NOTE: Skip fakifying inputs to torch.ops.profiler because they only have c++ implementation
-            # and are performance critical. The suggested workaround will cause non-eligible overhead.
-            if func in {
-                torch.ops.profiler._record_function_enter_new,
-                torch.ops.profiler._record_function_exit._RecordFunction,
-            }:
-                return x
-
-            full_qualname = x._type().qualified_name()
-            fake_class = torch._library.abstract_impl_class.find_fake_impl(
-                full_qualname
-            )
-            if fake_class is None:
-                raise RuntimeError(
-                    f" ScriptObject's {full_qualname} haven't registered a fake class. If {func} is supposed "
-                    f" to be exported as a node in graph and preserve the script obj as input to the node, "
-                    f" please use impl_abstract_class to register a fake class for the script obj. Otherwise,"
-                    f" consider disabling fake modes for the operator by callig it with ctx manager maybe_disable_fake_tensor_mode."
-                )
-            if not hasattr(fake_class, "from_real"):
-                raise RuntimeError(
-                    f"ScriptObject {full_qualname}'s corresponding fake_class {fake_class}"
-                    f" doesn't implement a from_real classmethod. Please add it to the fake class."
-                )
-            return fake_class.from_real(x)
-
-        args, kwargs = pytree.tree_map_only(
-            torch.ScriptObject, lambda x: _fakify_script_object(x), (args, kwargs)
-        )
+        # NOTE: Skip fakifying inputs to torch.ops.profiler because they only have c++ implementation
+        # and are performance critical. The suggested workaround will cause non-eligible overhead.
+        if func not in {
+            torch.ops.profiler._record_function_enter_new,
+            torch.ops.profiler._record_function_exit._RecordFunction,
+        }:
+            args, kwargs = _maybe_fakify_script_object(args, kwargs)
 
         # Some attribute queries that can be serviced directly
         # See Note [is_coalesced is dispatched]
