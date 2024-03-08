@@ -330,7 +330,7 @@ def nonzero(fake_mode, func, arg):
     return arg.new_empty((arg.nonzero_memo, arg.dim()), dtype=torch.int64)
 
 @register_op_impl(torch.ops.aten._unique2.default)
-def unique(fake_mode, func, arg, **kwargs):
+def unique(fake_mode, func, *arg, **kwargs):
     if (
         fake_mode.shape_env is None
         or not fake_mode.shape_env.allow_dynamic_output_shape_ops
@@ -343,8 +343,8 @@ def unique(fake_mode, func, arg, **kwargs):
     from torch.fx.experimental.symbolic_shapes import (
         _constrain_range_for_size
     )
-    _constrain_range_for_size(uni_cnt, min=1, max=arg.numel())
-    return arg.new_empty(uni_cnt), arg.new_empty(arg.size(), dtype=torch.int64), arg.new_empty(uni_cnt, dtype=torch.int64)
+    _constrain_range_for_size(uni_cnt, min=1, max=arg[0].numel())
+    return arg[0].new_empty(uni_cnt), arg[0].new_empty(arg[0].size(), dtype=torch.int64), arg[0].new_empty(uni_cnt, dtype=torch.int64)
 
 
 
