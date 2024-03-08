@@ -3610,6 +3610,52 @@ class TestNestedTensorSubclass(TestCase):
 
             _check_grad(base if values_is_view else values)
 
+    @dtypes(torch.float)
+    def test_nested_tensor_from_jagged(self, device, dtype):
+        # construct from (values, offsets)
+        values = torch.randn(10, 5, device=device, dtype=dtype)
+        offsets = torch.tensor([0, 2, 4, 6, 10], device=device, dtype=torch.int64)
+        nt = torch.nested.nested_tensor_from_jagged(values, offsets=offsets)
+        self.assertTrue(isinstance(nt, NestedTensor))
+        self.assertTrue(nt._is_view() and nt._base is values)
+        self.assertEqual(nt.dim(), 3)
+        self.assertEqual(nt.size(0), offsets.size(0) - 1)
+        self.assertEqual(nt.size(-1), values.size(-1))
+        self.assertIsNone(nt._lengths)
+        self.assertTrue(nt.is_contiguous())
+
+        # construct from (values, offsets, lengths)
+        lengths = torch.tensor([2, 1, 1, 2])
+        nt = torch.nested.nested_tensor_from_jagged(values, offsets=offsets, lengths=lengths)
+        self.assertTrue(isinstance(nt, NestedTensor))
+        self.assertTrue(nt._is_view() and nt._base is values)
+        self.assertEqual(nt.dim(), 3)
+        self.assertEqual(nt.size(0), offsets.size(0) - 1)
+        self.assertEqual(nt.size(-1), values.size(-1))
+        self.assertEqual(nt._lengths, lengths)
+        # when both offsets / lengths are specified, expect non-contiguous
+        self.assertFalse(nt.is_contiguous())
+
+        # construct from (values, lengths)
+        values = torch.randn(14, 5, device=device, dtype=dtype)
+        lengths = torch.tensor([2, 3, 4, 5])
+        nt = torch.nested.nested_tensor_from_jagged(values, lengths=lengths)
+        self.assertTrue(isinstance(nt, NestedTensor))
+        self.assertTrue(nt._is_view() and nt._base is values)
+        self.assertEqual(nt.dim(), 3)
+        self.assertEqual(nt.size(0), lengths.size(0))
+        self.assertEqual(nt.size(-1), values.size(-1))
+        # for now, if only lengths is specified, convert to offsets to integrate best with the
+        # existing kernels
+        expected_offsets = torch.tensor([0, 2, 5, 9, 14])
+        expected_nt = torch.nested.nested_tensor_from_jagged(values, offsets=expected_offsets)
+        for n1, n2 in zip(nt.unbind(), expected_nt.unbind()):
+            self.assertEqual(n1, n2)
+
+        # error case: no offsets or lengths
+        with self.assertRaisesRegex(RuntimeError, "At least one of offsets or lengths is required"):
+            torch.nested.nested_tensor_from_jagged(values, offsets=None, lengths=None)
+
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("dim", range(5))
     @parametrize("layout", [torch.strided, torch.jagged],
