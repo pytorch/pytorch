@@ -1,3 +1,4 @@
+import dataclasses
 from typing import Dict, Iterable, Optional
 
 import torch
@@ -93,3 +94,12 @@ def check_lowering_disable_cudagraph(
     device_node_mapping: Dict[torch.device, torch.fx.Node]
 ):
     return check_multiple_devices_or_any_cpu_nodes(device_node_mapping)
+
+
+@dataclasses.dataclass
+class BoxedDeviceIndex:
+    value: Optional[int]
+
+    def set(self, device_idx: Optional[int]):
+        assert device_idx is None or isinstance(device_idx, int)
+        self.value = device_idx
