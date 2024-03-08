@@ -399,25 +399,51 @@ class CachingAutotuner(KernelInterface):
         )
         scope["shared"] = binary_shared
 
-        exec(
-            f"""
-            def launcher({', '.join(def_args)}, grid, stream):
-                if callable(grid):
-                    grid_0, grid_1, grid_2 = grid(grid_meta)
-                else:
-                    grid_0, grid_1, grid_2 = grid
+        # only for testing, will remove
+        if os.environ.get("USE_NEW_LAUNCHER", "1") == "1":
+            exec(
+                f"""
+                def launcher(*args, grid, stream):
+                    if callable(grid):
+                        grid_0, grid_1, grid_2 = grid(grid_meta)
+                    else:
+                        grid_0, grid_1, grid_2 = grid
+    
+                    args = tuple(
+                        x.data_ptr() if isinstance(x, torch.Tensor) else x for x in args
+                    )
+                    runner(grid_0, grid_1, grid_2, num_warps,
+                                *cta_args, shared,
+                                stream, function,
+                                launch_enter_hook,
+                                launch_exit_hook,
+                                metadata,
+                                args)
+                    return bin
+                """.lstrip(),
+                scope,
+            )
+        else:
+            exec(
+                f"""
+                def launcher({', '.join(def_args)}, grid, stream):
+                    if callable(grid):
+                        grid_0, grid_1, grid_2 = grid(grid_meta)
+                    else:
+                        grid_0, grid_1, grid_2 = grid
+    
+                    runner(grid_0, grid_1, grid_2, num_warps,
+                                *cta_args, shared,
+                                stream, function,
+                                launch_enter_hook,
+                                launch_exit_hook,
+                                metadata,
+                                {', '.join(call_args)})
+                    return bin
+                """.lstrip(),
+                scope,
+            )
 
-                runner(grid_0, grid_1, grid_2, num_warps,
-                            *cta_args, shared,
-                            stream, function,
-                            launch_enter_hook,
-                            launch_exit_hook,
-                            metadata,
-                            {', '.join(call_args)})
-                return bin
-            """.lstrip(),
-            scope,
-        )
 
         launcher = scope["launcher"]
         launcher.config = cfg
