@@ -126,6 +126,169 @@ if __name__ == "__main__":
         torch.xpu.set_rng_state(g_state0)
         self.assertEqual(2024, torch.xpu.initial_seed())
 
+    # Simple cases for operators
+    # TODO: Reusing PyTorch test_ops.py to improve coverage
+    # Binary
+    def test_add(self, dtype=torch.float):
+        a_cpu = torch.randn(2, 3)
+        b_cpu = torch.randn(2, 3)
+        a_xpu = a_cpu.to(xpu_device)
+        b_xpu = b_cpu.to(xpu_device)
+        c_xpu = a_xpu + b_xpu
+        c_cpu = a_cpu + b_cpu
+        self.assertEqual(c_cpu, c_xpu.to(cpu_device))
+
+    def test_sub(self, dtype=torch.float):
+        a_cpu = torch.randn(2, 3)
+        b_cpu = torch.randn(2, 3)
+        a_xpu = a_cpu.to(xpu_device)
+        b_xpu = b_cpu.to(xpu_device)
+        c_xpu = a_xpu - b_xpu
+        c_cpu = a_cpu - b_cpu
+        self.assertEqual(c_cpu, c_xpu.to(cpu_device))
+
+    def test_mul(self, dtype=torch.float):
+        a_cpu = torch.randn(2, 3)
+        b_cpu = torch.randn(2, 3)
+        a_xpu = a_cpu.to(xpu_device)
+        b_xpu = b_cpu.to(xpu_device)
+        c_xpu = a_xpu * b_xpu
+        c_cpu = a_cpu * b_cpu
+        self.assertEqual(c_cpu, c_xpu.to(cpu_device))
+
+    def test_div(self, dtype=torch.float):
+        a_cpu = torch.randn(2, 3)
+        b_cpu = torch.randn(2, 3)
+        a_xpu = a_cpu.to(xpu_device)
+        b_xpu = b_cpu.to(xpu_device)
+        c_xpu = a_xpu / b_xpu
+        c_cpu = a_cpu / b_cpu
+        self.assertEqual(c_cpu, c_xpu.to(cpu_device))
+
+    # Resize/View
+    def test_resize(self, dtype=torch.float):
+        x = torch.ones([2, 2, 4, 3], device=xpu_device, dtype=dtype)
+        x.resize_(1, 2, 3, 4)
+        y = torch.ones([2, 2, 4, 3], device=cpu_device, dtype=dtype)
+        y.resize_(1, 2, 3, 4)
+        self.assertEqual(y, x.cpu())
+
+    def test_view_as_real(self, dtype=torch.cfloat):
+        a_cpu = torch.randn(2, 3, 4, dtype=dtype)
+        a_xpu = a_cpu.to(xpu_device)
+        b_cpu = torch.view_as_real(a_cpu)
+        b_xpu = torch.view_as_real(a_xpu)
+        self.assertEqual(b_cpu, b_xpu.to(cpu_device))
+
+    def test_view_as_complex(self, dtype=torch.float):
+        a_cpu = torch.randn(109, 2, dtype=dtype)
+        a_xpu = a_cpu.to(xpu_device)
+        b_cpu = torch.view_as_complex(a_cpu)
+        b_xpu = torch.view_as_complex(a_xpu)
+        self.assertEqual(b_cpu, b_xpu.to(cpu_device))
+
+    def test_view(self, dtype=torch.float):
+        a_cpu = torch.randn(2, 3, 4, dtype=dtype)
+        a_xpu = a_cpu.to(xpu_device)
+        a_xpu = a_xpu.view(4, 3, 2)
+        b_xpu = torch.full_like(a_xpu, 1)
+        c_cpu = torch.ones([4, 3, 2])
+        assert b_xpu.shape[0] == 4
+        assert b_xpu.shape[1] == 3
+        self.assertEqual(c_cpu, b_xpu.to(cpu_device))
+
+    # Unary
+    def test_abs(self, dtype=torch.float):
+        data = [
+            [
+                -0.2911,
+                -1.3204,
+                -2.6425,
+                -2.4644,
+                -0.6018,
+                -0.0839,
+                -0.1322,
+                -0.4713,
+                -0.3586,
+                -0.8882,
+                0.0000,
+                0.0000,
+                1.1111,
+                2.2222,
+                3.3333,
+            ]
+        ]
+        excepted = [
+            [
+                0.2911,
+                1.3204,
+                2.6425,
+                2.4644,
+                0.6018,
+                0.0839,
+                0.1322,
+                0.4713,
+                0.3586,
+                0.8882,
+                0.0000,
+                0.0000,
+                1.1111,
+                2.2222,
+                3.3333,
+            ]
+        ]
+        x_dpcpp = torch.tensor(data, device=xpu_device)
+        y = torch.tensor(excepted, device=xpu_device)
+        y_dpcpp = torch.abs(x_dpcpp)
+        self.assertEqual(y.to(cpu_device), y_dpcpp.to(cpu_device))
+
+    # Copy/Clone
+    def test_copy_and_clone(self, dtype=torch.float):
+        a_cpu = torch.randn(16, 64, 28, 28)
+        b_cpu = torch.randn(16, 64, 28, 28)
+        a_xpu = a_cpu.to(xpu_device)
+        b_xpu = b_cpu.to(xpu_device)
+        # naive
+        b_cpu.copy_(a_cpu)
+        b_xpu.copy_(a_xpu)
+        self.assertEqual(b_cpu, b_xpu.to(cpu_device))
+        # clone + permutation
+        b_cpu = a_cpu.clone(memory_format=torch.channels_last)
+        b_xpu = a_xpu.clone(memory_format=torch.channels_last)
+        self.assertEqual(b_cpu, b_xpu.to(cpu_device))
+
+    # Loops kernel
+    test_shapes = [
+        [[23, 72, 72], [5184, 72, 1], [23, 72, 72], [5184, 72, 1]],
+        [[23, 16, 16], [23, 1, 16]],
+        [[23, 16, 17], [23, 1, 17]],
+        [[1, 72, 72], [23, 72, 72]],
+        [[23, 72, 1], [23, 72, 72]],
+        [[23000, 72, 72], [5184, 72, 1], [23000, 72, 72], [5184, 72, 1]],
+        [[16, 16, 256, 256], [16, 16, 256, 256]],
+        [[16, 16, 512, 512], [16, 1, 1, 512]],
+        [[4, 15000, 3], [105000, 1, 15000], [4, 1, 3], [3, 3, 1]],
+        [[16, 16, 512, 513], [16, 1, 1, 513]],
+        [[28, 4096, 9], [36864, 9, 1], [28, 4096, 1], [4096, 1, 1]],
+    ]
+
+    def test_loops(self, dtype=torch.float):
+        for shape in test_shapes:
+            if len(shape) == 2:
+                a = torch.randn(shape[0], dtype=dtype)
+                b = torch.randn(shape[1], dtype=dtype)
+            elif len(shape) == 4:
+                a = torch.as_strided(
+                    torch.randn(shape[0][0] * shape[1][0]), shape[0], shape[1]
+                )
+                b = torch.as_strided(
+                    torch.randn(shape[2][0] * shape[3][0]), shape[2], shape[3]
+                )
+            a_xpu = a.xpu()
+            b_xpu = b.xpu()
+            c = a + b
+            c_xpu = a_xpu + b_xpu
+            self.assertEqual(c, c_xpu.cpu())
 
 if __name__ == "__main__":
     run_tests()
