@@ -1287,12 +1287,8 @@ def with_native_funcol(use_native_funcol: bool, remove_arg: bool):
         def inner(*args, **kwargs):
             if remove_arg:
                 del kwargs["use_native_funcol"]
-            prev = funcol_impl._use_native_funcol
-            funcol_impl._use_native_funcol = use_native_funcol
-            try:
+            with patch.object(funcol_impl, '_use_native_funcol', new=use_native_funcol):
                 return fn(*args, **kwargs)
-            finally:
-                funcol_impl._use_native_funcol = prev
 
         return inner
 
