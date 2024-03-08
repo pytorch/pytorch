@@ -5,14 +5,12 @@ import math
 
 import torch
 from ..._dynamo.utils import counters
-from .. import config
 from ..pattern_matcher import (
     filter_nodes,
     fwd_only,
     joint_fwd_bwd,
     register_replacement,
 )
-from ..utils import is_avx512_bf16_supported, is_avx512_vnni_supported
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -455,6 +453,11 @@ def _sfdp_replacement_17(query, key, value, attn_mask, inv_scale, dropout_p):
     )
 
 
+# Currently, this pattern and its batch size 1 counterpart (_sfdp_pattern_18) are
+# only supported by oneDNN Graph, so their replacement are not present in this file.
+# If you'd like to support these patterns, please add their replacements in this file
+# and remove references to _get_onednn_graph_sfdp_patterns in
+# torchgen/fuse_attention_patterns/gen_attention_patterns.py
 def _sfdp_pattern_18(query, key, value, inv_scale, causal_mask_value, causal_mask):
     # for hf_GPT2 with dropout
     query = query.permute([0, 2, 1, 3])
@@ -475,35 +478,6 @@ def _sfdp_pattern_18(query, key, value, inv_scale, causal_mask_value, causal_mas
     )
 
 
-def _sfdp_replacement_18(query, key, value, inv_scale, causal_mask_value, causal_mask):
-    counters["inductor"]["fuse_attention"] += 1
-    query_permuted = query.permute([0, 2, 1, 3])
-    key_permuted = key.permute([0, 2, 1, 3])
-    value_permuted = value.permute([0, 2, 1, 3])
-    attn_bias = torch.zeros(1, 1, query.size(1), query.size(1))
-    return (
-        torch.ops.mkldnn._graph_sdpa_fusion(
-            query_permuted,
-            key_permuted.transpose(-1, -2),
-            value_permuted,
-            None,
-            inv_scale,
-            attn_bias,  # oneDNN v3.5 will not require this workaround
-            causal_mask,
-            causal_mask_value,
-            transpose_query=False,
-            transpose_key_twice=False,
-            transpose_key_once=False,
-            transpose_value=False,
-            apply_mask_before_scale=True,
-            choose_causal_mask_over_attn_score=False,
-            output_requires_transpose_and_reorder=True,
-        ),
-        key_permuted,
-        value_permuted,
-    )
-
-
 def _sfdp_pattern_19(query, key, value, inv_scale, causal_mask_value, causal_mask):
     # for hf_GPT2 with dropout (batch size 1)
     attn_weights = torch.matmul(query, key.permute(0, 1, 3, 2))
@@ -514,28 +488,6 @@ def _sfdp_pattern_19(query, key, value, inv_scale, causal_mask_value, causal_mas
         .matmul(value)
         .permute([0, 2, 1, 3])
         .contiguous()
-    )
-
-
-def _sfdp_replacement_19(query, key, value, inv_scale, causal_mask_value, causal_mask):
-    counters["inductor"]["fuse_attention"] += 1
-    attn_bias = torch.zeros(1, 1, query.size(2), query.size(2))
-    return torch.ops.mkldnn._graph_sdpa_fusion(
-        query,
-        key.transpose(-1, -2),
-        value,
-        None,
-        inv_scale,
-        attn_bias,  # oneDNN v3.5 will not require this workaround
-        causal_mask,
-        causal_mask_value,
-        transpose_query=False,
-        transpose_key_twice=False,
-        transpose_key_once=False,
-        transpose_value=False,
-        apply_mask_before_scale=True,
-        choose_causal_mask_over_attn_score=False,
-        output_requires_transpose_and_reorder=True,
     )
 
 
@@ -569,23 +521,6 @@ def _sfdp_params_check(match):
         ):
             return False
     return True
-
-
-def _onednn_graph_extra_check(match):
-    if not (
-        config.onednn_graph
-        and torch._C._has_onednn_graph
-        and is_avx512_vnni_supported()
-    ):
-        return False
-    query = match.kwargs["query"].meta["val"]
-    if query.dtype not in [torch.float32, torch.bfloat16]:
-        return False
-    if str(query.device) != "cpu":
-        return False
-    if (query.dtype == torch.bfloat16) and not is_avx512_bf16_supported():
-        return False
-    return _sfdp_params_check(match)
 
 
 def _sfdp_extra_check(scale_factor_op, disable_cuda=False):
@@ -666,12 +601,6 @@ def _get_sfdp_patterns():
     )
     m_bs1_inp = functools.partial(torch.empty, (1, 1, 1, 4), device=device)
 
-    # causal_mask
-    cmask_inp = functools.partial(torch.empty, (1, 1, 4, 4), device=device)
-    cmask_q_post_permute_inp = functools.partial(
-        torch.empty, (1, 1, 8, 8), device=device
-    )
-
     # softmax will generate a dtype conversion on inputs if they are in half,
     # but will not in float, so we generate a pattern for both
     for dtype in [torch.float, torch.half]:
@@ -684,10 +613,6 @@ def _get_sfdp_patterns():
         g_bs1 = functools.partial(g_bs1_inp, dtype=dtype)
         m_bs1 = functools.partial(m_bs1_inp, dtype=dtype)
         m_bs1_float = functools.partial(m_bs1_inp, dtype=torch.float)
-        cmask = functools.partial(cmask_inp, dtype=torch.bool)
-        cmask_q_post_permute = functools.partial(
-            cmask_q_post_permute_inp, dtype=torch.bool
-        )
 
         candidates = [
             (
@@ -696,7 +621,6 @@ def _get_sfdp_patterns():
                 [g(), g(), g(), c()],
                 {},
                 _sfdp_extra_check(aten.div.Tensor),
-                True,
             ),
             (
                 _sfdp_pattern_2,
@@ -704,7 +628,6 @@ def _get_sfdp_patterns():
                 [g(), g(), g(), c()],
                 {},
                 _sfdp_extra_check(aten.mul.Tensor),
-                True,
             ),
             (
                 _sfdp_pattern_3,
@@ -712,7 +635,6 @@ def _get_sfdp_patterns():
                 [g(), g(), g(), c()],
                 d,
                 _sfdp_extra_check(aten.div.Tensor),
-                True,
             ),
             (
                 _sfdp_pattern_4,
@@ -720,7 +642,6 @@ def _get_sfdp_patterns():
                 [g(), g(), g(), c()],
                 d,
                 _sfdp_extra_check(aten.mul.Tensor),
-                True,
             ),
             (
                 _sfdp_pattern_5,
@@ -728,7 +649,6 @@ def _get_sfdp_patterns():
                 [g(), g(), g(), b()],
                 {},
                 _sfdp_params_check,
-                True,
             ),
             (
                 _sfdp_pattern_6,
@@ -736,7 +656,6 @@ def _get_sfdp_patterns():
                 [g(), g(), g(), b()],
                 d,
                 _sfdp_params_check,
-                True,
             ),
             (
                 _sfdp_pattern_7,
@@ -744,7 +663,6 @@ def _get_sfdp_patterns():
                 [g(), g(), g()],
                 d,
                 _sfdp_params_check,
-                True,
             ),
             (
                 _sfdp_pattern_8,
@@ -752,7 +670,6 @@ def _get_sfdp_patterns():
                 [g(), g(), g()],
                 {},
                 _sfdp_params_check,
-                True,
             ),
             (
                 _sfdp_pattern_9,
@@ -760,7 +677,6 @@ def _get_sfdp_patterns():
                 [g(), g(), g()],
                 d,
                 _sfdp_params_check,
-                True,
             ),
             (
                 _sfdp_pattern_10,
@@ -768,7 +684,6 @@ def _get_sfdp_patterns():
                 [g(), g(), g()],
                 {},
                 _sfdp_params_check,
-                True,
             ),
             (
                 _sfdp_pattern_11,
@@ -776,7 +691,6 @@ def _get_sfdp_patterns():
                 [g(), g(), g(), c()],
                 {},
                 _sfdp_extra_check(aten.div.Tensor),
-                True,
             ),
             (
                 _sfdp_pattern_12,
@@ -784,7 +698,6 @@ def _get_sfdp_patterns():
                 [g(), g(), g(), c()],
                 d,
                 _sfdp_extra_check(aten.div.Tensor),
-                True,
             ),
             (
                 _sfdp_pattern_13,
@@ -792,7 +705,6 @@ def _get_sfdp_patterns():
                 [g_3d(), g_3d(), g_3d()],
                 d,
                 _sfdp_params_check,
-                True,
             ),
             (
                 _sfdp_pattern_14,
@@ -800,7 +712,6 @@ def _get_sfdp_patterns():
                 [g(), g(), g(), m(), c()],
                 {},
                 _sfdp_extra_check(aten.div.Tensor),
-                True,
             ),
             (
                 _sfdp_pattern_15,
@@ -808,7 +719,6 @@ def _get_sfdp_patterns():
                 [g(), g(), g(), m(), c()],
                 {},
                 _sfdp_extra_check(aten.div.Tensor),
-                True,
             ),
             # TODO: Enable CUDA after solving Bert accuracy issue of calling efficient attention
             (
@@ -817,7 +727,6 @@ def _get_sfdp_patterns():
                 [g(), g(), g(), m(), c()],
                 d,
                 _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
-                True,
             ),
             (
                 _sfdp_pattern_16,
@@ -825,7 +734,6 @@ def _get_sfdp_patterns():
                 [g_bs1(), g_bs1(), g_bs1(), m_bs1(), c()],
                 d,
                 _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
-                True,
             ),
             (
                 _sfdp_pattern_17,
@@ -833,23 +741,6 @@ def _get_sfdp_patterns():
                 [g(), g(), g(), m(), c()],
                 d,
                 _sfdp_extra_check(aten.div.Tensor),
-                True,
-            ),
-            (
-                _sfdp_pattern_18,
-                _sfdp_replacement_18,
-                [g(), g(), g(), c(), c(), cmask()],
-                {},
-                _onednn_graph_extra_check,
-                False,
-            ),
-            (
-                _sfdp_pattern_19,
-                _sfdp_replacement_19,
-                [g(), g(), g(), c(), c(), cmask_q_post_permute()],
-                {},
-                _onednn_graph_extra_check,
-                False,
             ),
         ]
         mask_fp32_patterns = ["pattern_16"]
@@ -862,7 +753,6 @@ def _get_sfdp_patterns():
                     [g(), g(), g(), m_float(), c()],
                     d,
                     _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
-                    True,
                 )
             )
             candidates.append(
@@ -872,7 +762,6 @@ def _get_sfdp_patterns():
                     [g_bs1(), g_bs1(), g_bs1(), m_bs1_float(), c()],
                     d,
                     _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
-                    True,
                 )
             )
 
@@ -882,7 +771,6 @@ def _get_sfdp_patterns():
             args,
             workaround,
             extra_check,
-            register_training_pattern,
         ) in candidates:
             # XXX: when adding a new pattern, re-run `gen_attention_patterns` so the pattern
             # gets serialized to a python file and does not require tracing at runtime.
@@ -899,26 +787,25 @@ def _get_sfdp_patterns():
             if args[0].size(0) == 1:
                 name += "_bs1"
 
-            if register_training_pattern:
-                training_name = name + "_training"
-                yield training_name, {
-                    "search_fn": pattern,
-                    "replace_fn": replacement,
-                    "example_inputs": args,
-                    "trace_fn": joint_fwd_bwd,
-                    "pass_dicts": patterns,
-                    "extra_check": extra_check,
-                    "scalar_workaround": workaround,
-                }
+            training_name = name + "_training"
+            yield training_name, {
+                "search_fn": pattern,
+                "replace_fn": replacement,
+                "example_inputs": args,
+                "trace_fn": joint_fwd_bwd,
+                "pass_dicts": patterns,
+                "extra_check": extra_check,
+                "scalar_workaround": workaround,
+            }
 
-                if workaround:
-                    assert len(workaround) == 1 and "dropout_p" in workaround
-                    # functools.partial insufficient because we look at signature downstream
-                    pattern = partialize_and_update_signature(pattern, dropout_p=0.0)
-                    replacement = partialize_and_update_signature(
-                        replacement, dropout_p=0.0
-                    )
-                    workaround = {}
+            if workaround:
+                assert len(workaround) == 1 and "dropout_p" in workaround
+                # functools.partial insufficient because we look at signature downstream
+                pattern = partialize_and_update_signature(pattern, dropout_p=0.0)
+                replacement = partialize_and_update_signature(
+                    replacement, dropout_p=0.0
+                )
+                workaround = {}
 
             inference_name = name + "_inference"
             yield inference_name, {
@@ -926,7 +813,7 @@ def _get_sfdp_patterns():
                 "replace_fn": replacement,
                 "example_inputs": args,
                 "trace_fn": fwd_only,
-                "pass_dicts": patterns,
+                "pass_dicts": patterns[1],
                 "extra_check": extra_check,
                 "scalar_workaround": workaround,
             }

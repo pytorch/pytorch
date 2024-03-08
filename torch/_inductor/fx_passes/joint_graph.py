@@ -21,18 +21,28 @@ from ..pattern_matcher import (
 from .replace_random import replace_random_passes
 
 log = logging.getLogger(__name__)
-patterns = PatternMatcherPass()
+# We need two sets of PatternMatcherPasses here
+# One of them is for oneDNN Graph
+patterns = [PatternMatcherPass(), PatternMatcherPass()]
+
+
+@init_once_fakemode
+def lazily_init_onednn_graph():
+    from .misc_patterns import _misc_patterns_init
+    from .onednn_graph_fusions import _onednn_graph_sfdp_init
+    from .pad_mm import _pad_mm_init
+
+    _pad_mm_init()
+    # This one's a no-op if oneDNN Graph is not enabled
+    _onednn_graph_sfdp_init()
+    _misc_patterns_init()
 
 
 @init_once_fakemode
 def lazy_init():
     from .fuse_attention import _sfdp_init
-    from .misc_patterns import _misc_patterns_init
-    from .pad_mm import _pad_mm_init
 
-    _pad_mm_init()
     _sfdp_init()
-    _misc_patterns_init()
 
 
 @torch.utils._python_dispatch._disable_current_modes()
@@ -282,14 +292,21 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     """
     Run FX transformations on the joint forwards+backwards graph.
     """
-    lazy_init()
+
+    lazily_init_onednn_graph()
     count = 0
 
     if config.joint_graph_constant_folding:
         constant_fold_uniform_value(graph)
 
     if config.pattern_matcher:
-        count += patterns.apply(graph.graph)  # type: ignore[arg-type]
+        count += patterns[0].apply(graph.graph)  # type: ignore[arg-type]
+
+    lazy_init()
+
+    # patterns[1] is used for _sfdp_init patterns
+    if config.pattern_matcher:
+        count += patterns[1].apply(graph.graph)  # type: ignore[arg-type]
 
     if not config.fallback_random:
         count += replace_random_passes(graph)

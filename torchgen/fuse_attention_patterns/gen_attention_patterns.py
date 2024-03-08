@@ -7,6 +7,9 @@ from pathlib import Path
 import torch._inductor
 
 from torch._inductor.fx_passes.fuse_attention import _get_sfdp_patterns
+from torch._inductor.fx_passes.onednn_graph_fusions import (
+    _get_onednn_graph_sfdp_patterns,
+)
 from torch._inductor.pattern_matcher import (
     _TargetExpr,
     gen_pattern,
@@ -87,43 +90,54 @@ def serialize_functions() -> None:
     seen_patterns = set()
 
     file_template = get_file_template()
-    for (
-        key,
-        kwargs,
-    ) in _get_sfdp_patterns():  # type: ignore[no-untyped-call]
-        pattern_name = kwargs["search_fn"].__name__
-        gen_kwargs = {
-            key: kwargs[key]
-            for key in ("search_fn", "example_inputs", "trace_fn", "scalar_workaround")
-        }
+    # This logic is currently necessary because CUDA & CPU ATen SDPA ops
+    # currently do not support implementing GPT2 SDPA algorithm
+    # Once either would start supporting it, only _get_sfdp_patterns would suffice
+    # and _get_onednn_graph_sfdp_patterns must be removed from here
+    sfdp_pattern_fns = [_get_sfdp_patterns, _get_onednn_graph_sfdp_patterns]
+    for sfdp_pattern_fn in sfdp_pattern_fns:
+        for (
+            key,
+            kwargs,
+        ) in sfdp_pattern_fn():  # type: ignore[no-untyped-call]
+            pattern_name = kwargs["search_fn"].__name__
+            gen_kwargs = {
+                key: kwargs[key]
+                for key in (
+                    "search_fn",
+                    "example_inputs",
+                    "trace_fn",
+                    "scalar_workaround",
+                )
+            }
 
-        from torch._functorch import config as functorch_config
+            from torch._functorch import config as functorch_config
 
-        with functorch_config.patch(functionalize_rng_ops=False):
-            pattern = gen_pattern(**gen_kwargs)
+            with functorch_config.patch(functionalize_rng_ops=False):
+                pattern = gen_pattern(**gen_kwargs)
 
-        serialized_pattern = PatternPrettyPrinter.run(pattern, output_name=key)
-        # serialized pattern file should have "operator.getitem" instead of just "getitem"
-        serialized_pattern = serialized_pattern.replace(
-            "CallFunction(getitem", "CallFunction(operator.getitem"
-        )
-        if pattern_name not in seen_patterns:
-            write_mode = "w"
-            seen_patterns.add(pattern_name)
-        else:
-            write_mode = "a"
-
-        with open(file_path / f"{pattern_name}.py", write_mode) as f:
-            if write_mode == "w":
-                f.write(file_template)
+            serialized_pattern = PatternPrettyPrinter.run(pattern, output_name=key)
+            # serialized pattern file should have "operator.getitem" instead of just "getitem"
+            serialized_pattern = serialized_pattern.replace(
+                "CallFunction(getitem", "CallFunction(operator.getitem"
+            )
+            if pattern_name not in seen_patterns:
+                write_mode = "w"
+                seen_patterns.add(pattern_name)
             else:
-                f.write("\n\n")
-            f.write(serialized_pattern)
-            f.write("\n")
+                write_mode = "a"
 
-        central_index[f"{key}"] = f"{pattern_name}.py"
+            with open(file_path / f"{pattern_name}.py", write_mode) as f:
+                if write_mode == "w":
+                    f.write(file_template)
+                else:
+                    f.write("\n\n")
+                f.write(serialized_pattern)
+                f.write("\n")
 
-        file_to_keys[pattern_name].append(f"{key}")
+            central_index[f"{key}"] = f"{pattern_name}.py"
+
+            file_to_keys[pattern_name].append(f"{key}")
 
     with open(file_path / "central_index.py", "w") as f:
         f.write(auto_generated_msg)

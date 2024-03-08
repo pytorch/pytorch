@@ -59,8 +59,6 @@ central_index = {
     '_sfdp_pattern_16_bs1_inference': _sfdp_pattern_16_bs1_inference,
     '_sfdp_pattern_17_training': _sfdp_pattern_17_training,
     '_sfdp_pattern_17_inference': _sfdp_pattern_17_inference,
-    '_sfdp_pattern_18_inference': _sfdp_pattern_18_inference,
-    '_sfdp_pattern_19_inference': _sfdp_pattern_19_inference,
     '_sfdp_pattern_1_half_training': _sfdp_pattern_1_half_training,
     '_sfdp_pattern_1_half_inference': _sfdp_pattern_1_half_inference,
     '_sfdp_pattern_2_half_training': _sfdp_pattern_2_half_training,
@@ -97,12 +95,14 @@ central_index = {
     '_sfdp_pattern_16_half_bs1_inference': _sfdp_pattern_16_half_bs1_inference,
     '_sfdp_pattern_17_half_training': _sfdp_pattern_17_half_training,
     '_sfdp_pattern_17_half_inference': _sfdp_pattern_17_half_inference,
-    '_sfdp_pattern_18_half_inference': _sfdp_pattern_18_half_inference,
-    '_sfdp_pattern_19_half_inference': _sfdp_pattern_19_half_inference,
     '_sfdp_pattern_16_half_mask_fp32_training': _sfdp_pattern_16_half_mask_fp32_training,
     '_sfdp_pattern_16_half_mask_fp32_inference': _sfdp_pattern_16_half_mask_fp32_inference,
     '_sfdp_pattern_16_half_mask_fp32_bs1_training': _sfdp_pattern_16_half_mask_fp32_bs1_training,
     '_sfdp_pattern_16_half_mask_fp32_bs1_inference': _sfdp_pattern_16_half_mask_fp32_bs1_inference,
+    '_sfdp_pattern_18_inference': _sfdp_pattern_18_inference,
+    '_sfdp_pattern_19_inference': _sfdp_pattern_19_inference,
+    '_sfdp_pattern_18_half_inference': _sfdp_pattern_18_half_inference,
+    '_sfdp_pattern_19_half_inference': _sfdp_pattern_19_half_inference,
 }
 
 
