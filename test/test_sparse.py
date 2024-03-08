@@ -4379,6 +4379,56 @@ class TestSparseMeta(TestCase):
             self.maxDiff = orig_maxDiff
             raise
 
+    @all_sparse_layouts('layout', include_strided=False)
+    @parametrize("dtype", [torch.float64])
+    def test_fake(self, dtype, layout):
+        from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
+        fake_mode = FakeTensorMode()
+        index_dtype = torch.int64
+        device = 'cpu'
+        for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
+            f = FakeTensor.from_tensor(t, fake_mode)
+            self.assertIsInstance(f, FakeTensor)
+            self.assertEqual(f.layout, layout)
+            self.assertEqual(f.shape, t.shape)
+            self.assertEqual(f.device, t.device)
+            if layout is torch.sparse_coo:
+                nnz = 0
+                indices = f._indices()
+                self.assertEqual(indices.dtype, index_dtype)
+                self.assertEqual(indices.device, t.device)
+                self.assertEqual(indices.shape, (*t._indices().shape[:-1], nnz))
+                values = f._values()
+                self.assertEqual(values.dtype, dtype)
+                self.assertEqual(values.device, t.device)
+                self.assertEqual(values.shape, (nnz, *t._values().shape[1:]))
+            else:
+                nnz = 0
+                if layout in {torch.sparse_csr, torch.sparse_bsr}:
+                    f_compressed_indices, f_plain_indices = f.crow_indices(), f.col_indices()
+                    compressed_indices, plain_indices = t.crow_indices(), t.col_indices()
+                else:
+                    f_compressed_indices, f_plain_indices = f.ccol_indices(), f.row_indices()
+                    compressed_indices, plain_indices = t.ccol_indices(), t.row_indices()
+                f_values = f.values()
+                values = t.values()
+                batch_dims = len(compressed_indices.shape) - 1
+                self.assertEqual(f_compressed_indices.layout, compressed_indices.layout)
+                self.assertEqual(f_compressed_indices.shape, compressed_indices.shape)
+                self.assertEqual(f_compressed_indices.dtype, compressed_indices.dtype)
+                self.assertEqual(f_compressed_indices.device, compressed_indices.device)
+
+                self.assertEqual(f_plain_indices.layout, plain_indices.layout)
+                self.assertEqual(f_plain_indices.shape, (*plain_indices.shape[:-1], nnz))
+                self.assertEqual(f_plain_indices.dtype, plain_indices.dtype)
+                self.assertEqual(f_plain_indices.device, plain_indices.device)
+
+                batch_dim = plain_indices.ndim - 1
+                self.assertEqual(f_values.layout, values.layout)
+                self.assertEqual(f_values.shape, (*values.shape[:batch_dim], nnz, *values.shape[batch_dim + 1:]))
+                self.assertEqual(f_values.dtype, values.dtype)
+                self.assertEqual(f_values.device, values.device)
+
 
 class _SparseDataset(torch.utils.data.Dataset):
     # An utility class used in TestSparseAny.test_dataloader method.

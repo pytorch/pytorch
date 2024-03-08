@@ -280,6 +280,8 @@ def _iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Basic]:
         yield val
     elif isinstance(val, (int, float, bool)):
         pass
+    elif is_sparse_any(val):
+        yield from _iterate_exprs(val.size())
     elif isinstance(val, torch.Tensor):
         yield from _iterate_exprs(val.size())
         yield from _iterate_exprs(val.stride())
@@ -2686,7 +2688,12 @@ class ShapeEnv:
             self.log.debug("create_symbol %s duck sized %s", r, source.name())
 
         if isinstance(r, sympy.Symbol):
-            self.var_to_sources[r].append(source)
+            r_sources = self.var_to_sources[r]
+            r_sources.append(source)
+            if not source.is_ephemeral() and r_sources[0].is_ephemeral():
+                # prefer non-ephemeral source first since it may be guarded on later
+                r_sources[0], r_sources[-1] = r_sources[-1], r_sources[0]
+
             # This ensures we get zeros in symbol_guard_counts, which makes
             # some queries simpler (since we will accumulate mass on 0 this
             # way)
@@ -3602,7 +3609,7 @@ class ShapeEnv:
         result_expr = safe_expand(expr).xreplace(self.var_to_val)
         return result_expr.is_number or self._maybe_evaluate_static(result_expr) is not None
 
-    def _make_data_dependent_error(self, expr, unhinted_expr):
+    def _make_data_dependent_error(self, expr, unhinted_expr, *, size_oblivious_result: Optional[bool] = None):
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
         size_like_symbols = []
@@ -3611,10 +3618,17 @@ class ShapeEnv:
             self.log.debug("Data dependent variable '%s' allocated at:\n%s", s, stacktrace)
             if s in self.size_like:
                 size_like_symbols.append(s)
+        size_oblivious_result_msg = ""
+        if size_oblivious_result is not None:
+            size_oblivious_result_msg = (
+                f"ATTENTION: guard_size_oblivious would fix the error, evaluating expression to {size_oblivious_result}.\n"
+                "Maybe you need to add guard_size_oblivious to framework code, see doc below for more guidance.\n\n"
+            )
         fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(True)
         return GuardOnDataDependentSymNode(
             f"Could not guard on data-dependent expression {expr} (unhinted: {unhinted_expr}).  "
             f"(Size-like symbols: {', '.join(map(str, size_like_symbols)) or 'none'})\n\n"
+            f"{size_oblivious_result_msg}"
             "Potential framework code culprit (scroll up for full backtrace):\n"
             f"{''.join(traceback.StackSummary.from_list([fsummary]).format())}\n"
             "For more information, run with TORCH_LOGS=\"dynamic\"\n"
@@ -3787,8 +3801,21 @@ class ShapeEnv:
         # In case of really gnarly expression, we don't blow up
         if len(free) > 5:
             return
-        # NB: prioritize unbacked symints for solving by ordering them last
-        free = sorted(free, key=lambda x: (self.size_hint(x, allow_none=True) or sys.maxsize, x.name), reverse=True)  # type: ignore[attr-defined]
+
+        # Prioritize unbacked symints for solving by ordering them last.
+        # Prefer to simplify out lexicographically higher symbols (i.e. simplify out s4 over s3).
+        #   (NB: this unfortunately isn't strictly equivalent to simplifying out newer symbols)
+        # Prefer to simplify out symbols with ephemeral sources.
+        def _smart_symbol_sort(x):
+            has_only_ephemeral_sources = (
+                x in self.var_to_sources and all(s.is_ephemeral() for s in self.var_to_sources[x])
+            )
+            size = self.size_hint(x, allow_none=True) or sys.maxsize
+            name = x.name
+            # 1 puts ephemeral sourced symbols first when sorting in reverse
+            return (1 if has_only_ephemeral_sources else 0, size, name)
+
+        free = sorted(free, key=_smart_symbol_sort, reverse=True)  # type: ignore[attr-defined]
         lhs = expr.lhs
         rhs = expr.rhs
 
@@ -4046,7 +4073,19 @@ class ShapeEnv:
                 # Attempt to eliminate the unbacked SymInt
                 new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
                 if not (new_expr.free_symbols <= self.var_to_val.keys()):
-                    raise self._make_data_dependent_error(expr.xreplace(self.var_to_val), expr)
+                    size_oblivious_result = None
+                    if not size_oblivious:
+                        size_oblivious_result = self._maybe_evaluate_static(
+                            expr,
+                            expect_rational=expect_rational,
+                            size_oblivious=True
+                        )
+
+                    raise self._make_data_dependent_error(
+                        expr.xreplace(self.var_to_val),
+                        expr,
+                        size_oblivious_result=size_oblivious_result
+                    )
                 expr = new_expr
 
             concrete_val = compute_concrete_val()
