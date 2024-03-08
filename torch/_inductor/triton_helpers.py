@@ -1,6 +1,15 @@
 import triton
 import triton.language as tl
 
+# In the latest triton, math functions were shuffled around into different modules:
+# https://github.com/openai/triton/pull/3172
+if hasattr(tl.extra.cuda, "libdevice"):
+    libdevice = tl.extra.cuda.libdevice
+    math = tl.math
+else:
+    libdevice = tl.math
+    math = tl
+
 
 @triton.jit
 def promote_to_tensor(x):
@@ -329,7 +338,7 @@ def exclusive_scan_decoupled_lookback_64(
 @triton.jit
 def frexp(x):
     # TODO(isuruf): use inline_asm_elementwise here
-    y = tl.math.ilogb(x) + 1
+    y = libdevice.ilogb(x) + 1
     exponent = tl.where(x == 0, 0, y)
-    mantissa = tl.where(x == 0, 0, tl.math.ldexp(x, -y))
+    mantissa = tl.where(x == 0, 0, libdevice.ldexp(x, -y))
     return mantissa, exponent
