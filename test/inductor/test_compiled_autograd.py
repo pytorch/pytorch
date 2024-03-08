@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 from torch import _inductor as inductor
 from torch._dynamo import compiled_autograd
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._inductor.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 

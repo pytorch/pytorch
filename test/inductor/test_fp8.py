@@ -5,7 +5,7 @@ import unittest
 
 import torch
 from torch import Tensor
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor import utils
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (

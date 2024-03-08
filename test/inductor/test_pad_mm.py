@@ -5,7 +5,7 @@ import torch
 
 import torch._inductor.config as inductor_config
 
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._inductor.test_case import run_tests, TestCase
 from torch._dynamo.testing import rand_strided
 from torch._inductor.fx_passes.pad_mm import get_alignment_size, get_padded_length
 from torch._inductor.utils import run_and_get_code

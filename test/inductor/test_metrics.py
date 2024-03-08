@@ -1,6 +1,6 @@
 # Owner(s): ["module: inductor"]
 import torch
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor import config, metrics
 from torch._inductor.utils import collect_defined_kernels
 from torch._inductor.wrapper_benchmark import get_kernel_category_by_source_code
