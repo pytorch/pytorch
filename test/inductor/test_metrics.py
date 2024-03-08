@@ -4,9 +4,9 @@ from torch._dynamo.test_case import run_tests, TestCase
 from torch._inductor import config, metrics
 from torch._inductor.utils import collect_defined_kernels
 from torch._inductor.wrapper_benchmark import get_kernel_category_by_source_code
+from torch.testing._internal.common_device_type import largeTensorTest
 
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.testing._internal.common_device_type import largeTensorTest
 
 example_kernel = """
 @triton_heuristics.reduction(
