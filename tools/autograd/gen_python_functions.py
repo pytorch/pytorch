@@ -1373,7 +1373,7 @@ return self_tensorlist;
             return f"""\
 {schema_comment}
 {inits}
-auto dispatch_{name} = []({lambda_formals}) -> void {{
+auto dispatch_{name} = []({lambda_formals}) -> {lambda_return} {{
   pybind11::gil_scoped_release no_gil;
   {dispatch_callee}({dispatch_args});
 }};
