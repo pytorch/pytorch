@@ -1989,21 +1989,35 @@ class GraphModule(torch.nn.Module):
 
         self.assertTrue(same(program(input1, input2), input1 + input1))
 
+    comparison_ops = (
+        operator.lt,
+        operator.le,
+        operator.gt,
+        operator.ge,
+        operator.ne,
+        operator.eq,
+        operator.is_,
+        operator.is_not,
+    )
+
     def test_compare_constant_and_tensor(self):
-        for op in [
-            operator.lt,
-            operator.le,
-            operator.gt,
-            operator.ge,
-            operator.ne,
-            operator.eq,
-            operator.is_,
-            operator.is_not,
-        ]:
+        for op in comparison_ops:
             with self.subTest(op=op):
 
                 def fn(x):
                     return op(-10, x)
+
+                opt_fn = torch.compile(fullgraph=True)(fn)
+
+                x = torch.randn(10)
+                self.assertEqual(opt_fn(x), fn(x))
+
+    def test_compare_tensor_and_constant(self):
+        for op in comparison_ops:
+            with self.subTest(op=op):
+
+                def fn(x):
+                    return op(x, -10)
 
                 opt_fn = torch.compile(fullgraph=True)(fn)
 
