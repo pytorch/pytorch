@@ -802,11 +802,12 @@ class DispatchCacheInfo:
     size: int
 
 
-# cached_fake_script_obj = {}
+cached_fake_script_obj = {}
+
 
 def _fakify_script_object(x):
-    # if hash(x) in cached_fake_script_obj:
-    #     return cached_fake_script_obj[hash(x)]
+    if hash(x) in cached_fake_script_obj:
+        return cached_fake_script_obj[hash(x)]
 
     full_qualname = x._type().qualified_name()
     splits = full_qualname.split(".")
@@ -830,7 +831,7 @@ def _fakify_script_object(x):
             f" doesn't implement a from_real classmethod. Please add it to the fake class."
         )
     fake_x = fake_class.from_real(x)
-    # cached_fake_script_obj[hash(x)] = fake_x
+    cached_fake_script_obj[hash(x)] = fake_x
     return fake_x
 
 
@@ -847,6 +848,7 @@ def _maybe_fakify_script_object(args, kwargs):
 # tensors alive during `FakeTensorMode`, there will no be no
 # new allocations of Tensors which have non-meta storage so
 # memory should not significantly increase.
+
 
 class FakeTensorMode(TorchDispatchMode):
     cache: Dict[_DispatchCacheKey, _DispatchCacheEntry] = {}
@@ -1256,7 +1258,8 @@ class FakeTensorMode(TorchDispatchMode):
 
     def dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
-        log.debug("%s %s %s", func, args, kwargs)
+        with no_dispatch():
+            log.debug("%s %s %s", func, args, kwargs)
 
         if func in _DISPATCH_META_HANDLERS:
             return _DISPATCH_META_HANDLERS[func](args)

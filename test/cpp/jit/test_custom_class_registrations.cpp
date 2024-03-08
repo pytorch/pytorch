@@ -117,7 +117,7 @@ struct NoInit : torch::CustomClassHolder {
   int64_t x;
 };
 
-  // Thread-safe Tensor Queue
+// Thread-safe Tensor Queue
 struct TensorQueue : torch::CustomClassHolder {
   explicit TensorQueue(at::Tensor t) : init_tensor_(t) {}
 
@@ -548,24 +548,24 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
             return c10::make_intrusive<ContainsTensor>(std::move(data));
           });
 
-    m.class_<TensorQueue>("_TensorQueue")
-        .def(torch::init<at::Tensor>())
-        .def("push", &TensorQueue::push)
-        .def("pop", &TensorQueue::pop)
-        .def("top", &TensorQueue::top)
-        .def("size", &TensorQueue::size)
-        .def("clone_queue", &TensorQueue::clone_queue)
-        .def_pickle(
-            // __getstate__
-            [](const c10::intrusive_ptr<TensorQueue>& self)
-                -> c10::Dict<std::string, at::Tensor> {
-              return self->serialize();
-            },
-            // __setstate__
-            [](c10::Dict<std::string, at::Tensor> data)
-                -> c10::intrusive_ptr<TensorQueue> {
-              return c10::make_intrusive<TensorQueue>(std::move(data));
-            });
+  m.class_<TensorQueue>("_TensorQueue")
+      .def(torch::init<at::Tensor>())
+      .def("push", &TensorQueue::push)
+      .def("pop", &TensorQueue::pop)
+      .def("top", &TensorQueue::top)
+      .def("size", &TensorQueue::size)
+      .def("clone_queue", &TensorQueue::clone_queue)
+      .def_pickle(
+          // __getstate__
+          [](const c10::intrusive_ptr<TensorQueue>& self)
+              -> c10::Dict<std::string, at::Tensor> {
+            return self->serialize();
+          },
+          // __setstate__
+          [](c10::Dict<std::string, at::Tensor> data)
+              -> c10::intrusive_ptr<TensorQueue> {
+            return c10::make_intrusive<TensorQueue>(std::move(data));
+          });
 }
 
 TORCH_LIBRARY_FRAGMENT(_TorchScriptTesting, m) {
@@ -590,10 +590,21 @@ at::Tensor queue_pop(c10::intrusive_ptr<TensorQueue> tq) {
   return tq->pop();
 }
 
+int64_t queue_size(c10::intrusive_ptr<TensorQueue> tq) {
+  return tq->size();
+}
+
 TORCH_LIBRARY_IMPL(_TorchScriptTesting, CPU, m) {
   m.impl("takes_foo", takes_foo);
   m.impl("queue_push", queue_push);
   m.impl("queue_pop", queue_pop);
+  m.impl("queue_size", queue_size);
+}
+
+// Implementation of these two ops don't depend on the device.
+TORCH_LIBRARY_IMPL(_TorchScriptTesting, BackendSelect, m) {
+  m.impl("queue_pop", queue_pop);
+  m.impl("queue_size", queue_size);
 }
 
 } // namespace

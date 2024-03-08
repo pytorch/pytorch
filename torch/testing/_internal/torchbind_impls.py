@@ -13,9 +13,11 @@ else:
 def fake_takes_foo(foo, z):
     return foo.add_tensor(z)
 
+
 @torch.library.impl_abstract("_TorchScriptTesting::queue_pop")
 def fake_queue_pop(tq):
     return tq.pop()
+
 
 @torch.library.impl_abstract("_TorchScriptTesting::queue_push")
 def fake_queue_push(tq, x):
