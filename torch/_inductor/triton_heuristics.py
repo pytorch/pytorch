@@ -1442,11 +1442,11 @@ def grid(*numels):
         x_grid = get_grid_dim(xnumel, meta.get("XBLOCK", 1))
         y_grid = get_grid_dim(ynumel, meta.get("YBLOCK", None))
 
+        MAX_Y_GRID = 65536
         if znumel is None and max_grid_dims:
-            z_grid = 1
-            while y_grid > 65535:
-                y_grid = ceildiv(y_grid, 2)
-                z_grid *= 2
+            div = ceildiv(y_grid, MAX_Y_GRID)
+            y_grid = y_grid // div
+            z_grid = div
         else:
             z_grid = get_grid_dim(znumel, meta.get("ZBLOCK", None))
             torch._check(
