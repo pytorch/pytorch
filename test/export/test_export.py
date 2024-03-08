@@ -770,21 +770,27 @@ class TestExport(TestCase):
         m = BasicDynamiShapeModel()
         a = torch.randn(3, 4)
         dim0_x = torch.export.Dim("dim0_x", min=3)
-        dim1_x = torch.export.Dim("dim1_x")
+        dim1_x = torch.export.Dim("dim1_x", max=8000)
         dynamic_shapes = {"x": (dim0_x, dim1_x)}
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             (
                 "Specializations unexpectedly required"
-                ".*\n.*\\[0\\] must be specialized to 3.*guards.*too complex"
-                ".*\n.*\\[1\\] must be specialized to 4.*guards.*too complex"
+                ".*\n.*\\[0\\] must be specialized to 3.*guards.*too complex(.*\n)*.*"
+                "Suggested fixes:(.*\n)*.*"
+                "dim0_x = None  # 3(.*\n)*.*"
+                "dim1_x = 2\\*_dim1_x"
             ),
         ):
             torch.export.export(m, (a,), dynamic_shapes=dynamic_shapes)
-        em = torch.export.export(m, (a,))
+        dim0_x = None
+        dim1_x = 2 * torch.export.Dim("_dim1_x", max=4000)
+        dynamic_shapes = {"x": (dim0_x, dim1_x)}
+        em = torch.export.export(m, (a,), dynamic_shapes=dynamic_shapes)
         x = torch.randn(3, 5)
         with self.assertRaisesRegex(
-            RuntimeError, "shape\[1\] to be equal to 4, but got 5"
+            RuntimeError,
+            "Expected.*shape\\[1\\] = 5 to be of the form 2\\*s1, where s1 is an integer",
         ):
             em.module()(x)
 
@@ -1255,13 +1261,12 @@ class TestExport(TestCase):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             (
-                "Constraints violated \\(batch\\)!(.*\n)*.*"
+                "Constraints violated.*!(.*\n)*.*"
+                "Not all values of K.*satisfy the generated guard(.*\n)*.*"
                 "Not all values of batch.*satisfy the generated guard(.*\n)*.*"
-                "Specializations unexpectedly required \\(K\\)!(.*\n)*.*"
-                "K.*specialized.*because the guards generated for it are too complex(.*\n)*.*"
                 "Suggested fixes:(.*\n)*.*"
                 "batch = Dim\\('batch', max=15\\)(.*\n)*.*"
-                "K = None  # 3"
+                "K = 3\\*_K"
             ),
         ):
             export(
