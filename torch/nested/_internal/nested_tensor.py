@@ -239,6 +239,7 @@ class NestedTensor(torch.Tensor):
 
 torch._dynamo.config.traceable_tensor_subclasses.add(NestedTensor)
 
+
 # Not actually a view!
 class ViewBufferFromNested(torch.autograd.Function):
     @staticmethod

@@ -312,7 +312,6 @@ def jagged_torch_function(func, *args, **kwargs):
     return NotImplemented
 
 
-
 @register_jagged_func(
     [
         torch.ops.aten.is_non_overlapping_and_dense.default,

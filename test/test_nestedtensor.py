@@ -40,6 +40,7 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
     subtest,
     TEST_WITH_ROCM,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
 
@@ -3500,7 +3501,7 @@ class TestNestedTensorSubclass(TestCase):
                 t = t if isinstance(t, torch.Tensor) else torch.as_tensor(t)
                 self.assertTrue(t.grad is None)
 
-    @xfailIfTorchDynamo
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "unexpectedly succeeding in ci")
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("components_require_grad", [False, True])
     def test_jagged_layout_construction_as_nested_tensor(
