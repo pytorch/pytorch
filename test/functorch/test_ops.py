@@ -28,7 +28,6 @@ from common_utils import (
     generate_vmap_inputs,
     decorate,
     xfail,
-    xfailIf,
     skip,
     skipOps,
     tol1,
@@ -404,7 +403,11 @@ class TestOperators(TestCase):
 
         # RuntimeError: Expected contiguous tensor, but got
         # non-contiguous tensor for argument #2 'grad_output'
-        xfailIf('_batch_norm_with_update', cond=TEST_WITH_ROCM, device_type='cuda')
+        decorate(
+            '_batch_norm_with_update',
+            decorator=expectedFailureIf(TEST_WITH_ROCM),
+            device_type='cuda',
+        )
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
@@ -1837,7 +1840,11 @@ class TestOperators(TestCase):
 
         # RuntimeError: Expected contiguous tensor, but got
         # non-contiguous tensor for argument #2 'grad_output'
-        xfailIf('_batch_norm_with_update', cond=TEST_WITH_ROCM, device_type='cuda')
+        decorate(
+            '_batch_norm_with_update',
+            decorator=expectedFailureIf(TEST_WITH_ROCM),
+            device_type='cuda',
+        )
     })
     @opsToleranceOverride('TestOperators', 'test_vmap_autograd_grad', (
         tol1('linalg.householder_product',

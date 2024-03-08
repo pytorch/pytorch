@@ -325,13 +325,6 @@ DecorateMeta = namedtuple("DecorateMeta", [
     "dtypes",
 ])
 
-def expectedFailureIf(cond):
-    def wrapper(func):
-        if cond:
-            return unittest.expectedFailure(func)
-        else:
-            return func
-    return wrapper
 
 def decorate(op_name, variant_name='', *, decorator=None, device_type=None, dtypes=None):
     assert decorator is not None
@@ -349,12 +342,6 @@ def xfail(op_name, variant_name='', *, device_type=None, dtypes=None):
                     device_type=device_type,
                     dtypes=dtypes)
 
-def xfailIf(op_name, variant_name='', *, cond=False, device_type=None, dtypes=None):
-    return decorate(op_name=op_name,
-                    variant_name=variant_name,
-                    decorator=expectedFailureIf(cond),
-                    device_type=device_type,
-                    dtypes=dtypes)
 
 def skip(op_name, variant_name='', *, device_type=None, dtypes=None):
     return decorate(op_name=op_name,
