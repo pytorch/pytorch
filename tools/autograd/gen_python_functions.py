@@ -1354,6 +1354,7 @@ def emit_single_dispatch(
             # Make in-place foreach return `self` at python-binding level.
             # ref: https://github.com/pytorch/pytorch/pull/118622#pullrequestreview-1904804954
             self_arg = f.func.arguments.self_arg
+            return_stmt: str
             if (
                 str(f.func.name).startswith("_foreach_")
                 and f.func.kind() == SchemaKind.inplace
@@ -1363,7 +1364,13 @@ def emit_single_dispatch(
                 assert self_arg is not None and is_tensor_list_type(
                     self_arg.argument.type
                 )
-                return f"""\
+                return_stmt = """PyObject* self_tensorlist = _r.args[0];
+Py_INCREF(self_tensorlist);
+return self_tensorlist;
+"""
+            else:
+                return_stmt = "Py_RETURN_NONE;"
+            return f"""\
 {schema_comment}
 {inits}
 auto dispatch_{name} = []({lambda_formals}) -> void {{
@@ -1371,20 +1378,7 @@ auto dispatch_{name} = []({lambda_formals}) -> void {{
   {dispatch_callee}({dispatch_args});
 }};
 dispatch_{name}({lambda_args}){set_requires_grad};
-PyObject* self_tensorlist = _r.args[0];
-Py_INCREF(self_tensorlist);
-return self_tensorlist;
-"""
-            else:
-                return f"""\
-{schema_comment}
-{inits}
-auto dispatch_{name} = []({lambda_formals}) -> {lambda_return} {{
-  pybind11::gil_scoped_release no_gil;
-  {dispatch_callee}({dispatch_args});
-}};
-dispatch_{name}({lambda_args}){set_requires_grad};
-Py_RETURN_NONE;
+{return_stmt}
 """
         else:
             typename = structseq_typenames.get(gen_structseq_typename_key(f))
