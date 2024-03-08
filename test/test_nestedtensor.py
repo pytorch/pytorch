@@ -4004,6 +4004,7 @@ class TestTensorUnionFind(TestCase):
         uf.merge(a, b)
         self.assertIs(uf.find(a), uf.find(b))
 
+    @xfailIfTorchDynamo
     def test_equiv_tensors(self):
         uf = self._get_test_union_find()
         a = torch.tensor([1, 2, 3])
@@ -4029,6 +4030,7 @@ class TestTensorUnionFind(TestCase):
         # See Note [TensorUnionFind: Metadata merging asymmetry]
         self.assertEqual(uf.get_metadata(a)["foo"], "baz")
 
+    @xfailIfTorchDynamo
     def test_lifetime(self):
         # Tests the invariant that the canonical tensor is kept alive by the
         # the tensors in its equiv set.
