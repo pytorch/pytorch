@@ -1069,8 +1069,7 @@ class WrapperCodeGen(CodeGen):
 
         from .triton import gen_common_triton_imports
 
-        compile_wrapper.splice(gen_common_triton_imports(), strip=True)
-        compile_wrapper.newline()
+        compile_wrapper.splice(gen_common_triton_imports())
 
         inductor_meta = {
             "kernel_name": name,
