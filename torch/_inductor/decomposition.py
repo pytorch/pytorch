@@ -57,6 +57,7 @@ inductor_decompositions = get_decompositions(
         aten.native_batch_norm,
         aten.native_group_norm,
         aten.native_layer_norm,
+        aten.nll_loss2d_backward,
         aten._softmax,
         aten.sin_,
         aten.sqrt_,
@@ -660,3 +661,18 @@ def choose_qparams_tensor(
     zero_point = quant_min - torch.round(min_val / scale).to(torch.int)
     zero_point = torch.clamp(zero_point, quant_min, quant_max)
     return scale.to(torch.float64), zero_point.to(torch.int64)
+
+
+@register_decomposition(aten.put)
+def put(self, index, source, accumulate=False):
+    flattened = self.flatten()
+    flattened = torch.index_put(
+        flattened, [index], source.reshape(index.shape), accumulate
+    )
+    return flattened.reshape(self.shape)
+
+
+@register_decomposition(aten.put_)
+def put_(self, index, source, accumulate=False):
+    out = aten.put(self, index, source, accumulate=accumulate)
+    return self.copy_(out)

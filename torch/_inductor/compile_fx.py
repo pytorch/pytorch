@@ -735,6 +735,7 @@ def fx_codegen_and_compile(
                     else:
                         output_strides.append(None)
 
+            metrics_helper = metrics.CachedMetricsHelper()
             compiled_fn = graph.compile_to_fn()
 
             if V.aot_compilation is True:
@@ -750,7 +751,11 @@ def fx_codegen_and_compile(
                 )
 
             compiled_graph = CompiledFxGraph(
-                compiled_fn, graph, output_strides, V.graph.disable_cudagraphs_reason
+                compiled_fn,
+                graph,
+                output_strides,
+                V.graph.disable_cudagraphs_reason,
+                metrics_helper.get_deltas(),
             )
 
     return compiled_graph

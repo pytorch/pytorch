@@ -10,7 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 
-from typing import Any, Callable, Dict, List, Optional, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 from unittest.mock import patch
 
 import sympy
@@ -157,6 +157,7 @@ class TritonTemplateKernel(TritonKernel):
 
         inductor_meta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
+            "backend_hash": torch.utils._triton.triton_hash_with_backend(),
         }
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
@@ -609,6 +610,7 @@ class ExternKernelChoice:
         name=None,
         has_out_variant=True,
         op_overload=None,
+        use_fallback_kernel=False,
     ):
         super().__init__()
         name = name or kernel.__name__
@@ -619,6 +621,7 @@ class ExternKernelChoice:
         self.has_out_variant = has_out_variant
         setattr(extern_kernels, name, kernel)
         self.op_overload = op_overload
+        self.use_fallback_kernel = use_fallback_kernel
 
     def to_callable(self):
         return getattr(extern_kernels, self.name)
@@ -764,13 +767,16 @@ class ExternKernelCaller(ChoiceCaller):
         )
 
     def output_node(self):
-        cls: Union[Type[ir.ExternKernelOut], Type[ir.ExternKernelAlloc]]
-        if self.has_out_variant:
-            cls = ir.ExternKernelOut
+        if config.abi_compatible and self.choice.use_fallback_kernel:
+            assert (
+                self.choice.op_overload is not None
+            ), "Please provide an op_overload to use ir.FallbackKernel"
+            inner = ir.FallbackKernel.create(
+                self.choice.op_overload, *self.input_nodes, **self.kwargs
+            )
         else:
-            cls = ir.ExternKernelAlloc
-        return ir.TensorBox.create(
-            cls(
+            cls = ir.ExternKernelOut if self.has_out_variant else ir.ExternKernelAlloc
+            inner = cls(
                 layout=self.layout,
                 inputs=self.input_nodes,
                 python_kernel_name=self.choice.call_name(),
@@ -779,7 +785,8 @@ class ExternKernelCaller(ChoiceCaller):
                 op_overload=self.choice.op_overload,
                 kwargs=self.kwargs,
             )
-        )
+
+        return ir.TensorBox.create(inner)
 
     def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
