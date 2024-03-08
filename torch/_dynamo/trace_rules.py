@@ -793,6 +793,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._last_executed_optimized_graph",
         "torch._C._len_torch_dispatch_stack",
         "torch._C._len_torch_function_stack",
+        "torch._C._linalg._linalg_eigvals",
         "torch._C._linalg.linalg_cholesky_ex",
         "torch._C._linalg.linalg_cholesky",
         "torch._C._linalg.linalg_cond",
