@@ -1366,12 +1366,14 @@ def emit_single_dispatch(
                 return f"""\
 {schema_comment}
 {inits}
-auto dispatch_{name} = []({lambda_formals}) -> at::TensorList {{
+auto dispatch_{name} = []({lambda_formals}) -> void {{
   pybind11::gil_scoped_release no_gil;
   {dispatch_callee}({dispatch_args});
-  return self;
 }};
-return wrap(dispatch_{name}({lambda_args}){set_requires_grad});
+dispatch_{name}({lambda_args}){set_requires_grad};
+PyObject* self_tensorlist = _r.args[0];
+Py_INCREF(self_tensorlist);
+return self_tensorlist;
 """
             else:
                 return f"""\

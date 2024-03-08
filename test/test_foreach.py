@@ -67,7 +67,7 @@ class ForeachFuncWrapper:
         else:
             actual = self.func(*inputs, **kwargs)
         if self.is_inplace:
-            assert all(id(a) == id(b) for a, b in zip(inputs[0], actual))
+            assert id(inputs[0]) == id(actual)
         return actual
 
 
