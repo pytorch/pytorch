@@ -8,6 +8,7 @@ from torch import nn
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import same
 from torch._inductor import config
+from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 USE_DDP_WRAPPER = os.environ.get("USE_DDP_WRAPPER", "1") == "1"
@@ -227,6 +228,7 @@ class TestLayoutOptim(TestCase):
         y = f(x)
         self.assertTrue(torch.equal(y, torch.ones(3, 2).cuda() * 2))
 
+    @tf32_off()
     def test_mutate_base_for_conv_output(self):
         class Model(nn.Module):
             def __init__(self, manual_graph_break=False):
@@ -244,6 +246,7 @@ class TestLayoutOptim(TestCase):
 
         self.verify_accuracy_for_infer(Model)
 
+    @tf32_off()
     def test_mutate_view_for_conv_output(self):
         class Model(nn.Module):
             def __init__(self, manual_graph_break=False):
