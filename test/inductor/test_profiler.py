@@ -148,6 +148,6 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     run_tests()

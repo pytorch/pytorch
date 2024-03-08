@@ -1700,6 +1700,6 @@ globals()[no_opt_test_class.__name__] = no_opt_test_class
 no_opt_test_class.__module__ = __name__
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     run_tests()
