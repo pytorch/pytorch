@@ -29,7 +29,7 @@ namespace {
 using namespace onednn_graph;
 
 void create_partition(
-    std::bitset<12>& patternID,
+    std::bitset<32>& patternID,
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
@@ -296,7 +296,7 @@ void update_output_shapes(
 void compile_and_cache_sdpa_fusion(
     std::vector<Tensor>& input_tensors,
     cp_entry& cp,
-    std::bitset<12>& patternID) {
+    std::bitset<32>& patternID) {
   // assuming all inputs have the same dtype. Might revisit this assumption
   // later
   int i = 0;
@@ -366,8 +366,20 @@ void _handle_sdpa_fusions(
     bool output_requires_transpose_and_reorder = false,
     bool execute = true) {
   // patternID is determined on the basis of the arguments provided
-  std::bitset<12> patternID;
-  int pos = 0;
+  std::bitset<32> patternID;
+  if (query.scalar_type() == c10::ScalarType::Float) {
+    // bit 3 corresponds to float dtype
+    patternID.set(3, 1);
+  } else {
+    // bit 2 corresponds to bfloat16 dtype
+    // the dtype can be either float or bfloat16.
+    // This logic is checked in torch/_inductor/fx_passes/fuse_attention.py
+    patternID.set(2, 1);
+  }
+  // MHA pattern
+  patternID.set(4, 1);
+  // Refer to comments in Graph.cpp. The first 8 bits are reserved
+  int pos = 8;
   patternID.set(pos++, scale.has_value());
   patternID.set(pos++, inverse_scale.has_value());
   patternID.set(pos++, attn_mask.has_value());

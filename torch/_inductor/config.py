@@ -334,7 +334,10 @@ developer_warnings = is_fbcode() or is_nightly_or_source
 worker_start_method = "fork"
 
 # Use oneDNN Graph fusions for inference on machines with processors that
-# support AVX512 ISAs
+# support at least AVX512_VNNI. While FP32 doesn't require AVX512_VNNI,
+# if we had enabled support of this feature for Intel Xeon SP gen 1 (SkyLake SP),
+# then some consumer-grade machines may also inadvertently have this feature enabled,
+# although we haven't validated it on consumer-grade machines yet.
 onednn_graph = os.environ.get("TORCHINDUCTOR_ONEDNN_GRAPH", "0") == "1"
 
 

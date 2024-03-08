@@ -8,7 +8,7 @@ namespace onednn_graph {
 
 // Thread local data-structures are required if multiple thread-pools
 // of a PyTorch process would be used for inference.
-thread_local std::unordered_map<std::bitset<12>, dnnl::graph::partition>
+thread_local std::unordered_map<std::bitset<32>, dnnl::graph::partition>
     partition_map_;
 // Compiled partition (fused kernel) cache
 // Adopted from
@@ -46,17 +46,29 @@ std::unordered_map<std::vector<int64_t>, list_iterator_t>::iterator cache_end() 
   return fused_kernel_cache_map_.end();
 }
 
-std::unordered_map<std::bitset<12>, dnnl::graph::partition>::iterator
-partition_map_lookup(std::bitset<12>& patternID) {
+std::unordered_map<std::bitset<32>, dnnl::graph::partition>::iterator
+partition_map_lookup(std::bitset<32>& patternID) {
   return partition_map_.find(patternID);
 }
 
-std::unordered_map<std::bitset<12>, dnnl::graph::partition>::iterator
+std::unordered_map<std::bitset<32>, dnnl::graph::partition>::iterator
 partition_map_end() {
   return partition_map_.end();
 }
 
-void insert_in_partition_cache(std::bitset<12>& patternID, partition& p) {
+// The first 8 bits are reserved
+// bit 0: is int8
+// bit 1: is uint8
+// bit 2: is bf16
+// bit 3: is fp32
+// bit 4: is MHA pattern
+// bit 5: is MLP pattern
+// bit 6: has conv. may or may not have linear as well
+// bit 7: has linear, but is not an MLP
+// The rest of the bits depend upon the arguments provided
+// However, down the line, we might have different bitsets for different
+// patterns
+void insert_in_partition_cache(std::bitset<32>& patternID, partition& p) {
   partition_map_[patternID] = std::move(p);
 }
 
