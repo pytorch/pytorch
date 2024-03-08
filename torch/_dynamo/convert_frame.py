@@ -471,11 +471,8 @@ def _compile(
     tracer: Optional[InstructionTranslator] = None
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
-    fail_type: Optional[str] = None
-    fail_reason: Optional[str] = None
-    fail_user_frame_filename: Optional[str] = None
-    fail_user_frame_lineno: Optional[int] = None
     speculation_log = SpeculationLog()
+    torch._dynamo.callback_handler.run_start_callbacks()
 
     @preserve_global_state
     def transform(instructions, code_options):
@@ -671,6 +668,10 @@ def _compile(
             },
         )
         start_time = time.time()
+        fail_type: Optional[str] = None
+        fail_reason: Optional[str] = None
+        fail_user_frame_filename: Optional[str] = None
+        fail_user_frame_lineno: Optional[int] = None
         try:
             guarded_code = compile_inner(code, one_graph, hooks, transform)
             return guarded_code
@@ -770,6 +771,7 @@ def _compile(
                 compliant_custom_ops,
             )
             record_compilation_metrics(metrics)
+            torch._dynamo.callback_handler.run_end_callbacks()
 
 
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
