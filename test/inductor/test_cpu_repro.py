@@ -3464,8 +3464,12 @@ class CPUReproTests(TestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.weight1 = torch.nn.Parameter(torch.randn(10, 10, dtype=torch.float64))
-                self.weight2 = torch.nn.Parameter(torch.randn(10, 10, dtype=torch.float64))
+                self.weight1 = torch.nn.Parameter(
+                    torch.randn(10, 10, dtype=torch.float64)
+                )
+                self.weight2 = torch.nn.Parameter(
+                    torch.randn(10, 10, dtype=torch.float64)
+                )
                 self.bias = torch.nn.Parameter(torch.randn(10, dtype=torch.float64))
 
             def forward(self, x1):
@@ -3480,6 +3484,7 @@ class CPUReproTests(TestCase):
                 mod,
                 (v,),
             )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
