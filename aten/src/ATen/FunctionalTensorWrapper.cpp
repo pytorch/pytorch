@@ -366,7 +366,7 @@ bool FunctionalTensorWrapper::is_functional_alias_of(const Tensor& base) {
   auto size = impl->view_metas_size();
 
   // Make sure they alias the same storage.
-  if (storage_ != impl->storage_) {
+  if (functional_storage_impl() != impl->functional_storage_impl()) {
     return false;
   }
 
