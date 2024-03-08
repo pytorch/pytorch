@@ -923,9 +923,13 @@ def spawn_threads_and_init_comms(
     @wraps(func)
     def wrapper(self, *args, **kwargs):
         # TODO: get test name from kwargs
-        threads = _run_test_method_with_multi_threads(world_size, lambda: func(self, *args, **kwargs))
-        # join and error handling
-        MultiThreadedTestCase._join_threads(threads, func)
+        torch._C._distributed_c10d._set_thread_isolation_mode(True)
+        try:
+            threads = _run_test_method_with_multi_threads(world_size, lambda: func(self, *args, **kwargs))
+            # join and error handling
+            MultiThreadedTestCase._join_threads(threads, func)
+        finally:
+            torch._C._distributed_c10d._set_thread_isolation_mode(False)
 
     return wrapper
 
@@ -993,6 +997,7 @@ class MultiThreadedTestCase(TestCase):
         """
         class method to spawn threads and run test, use this method in the SetUp of your TestCase
         """
+        torch._C._distributed_c10d._set_thread_isolation_mode(True)
         test_name = self._current_test_name
         # for each test case, we need to create thread local world, and a global store
         world = _install_threaded_pg()
@@ -1029,7 +1034,6 @@ class MultiThreadedTestCase(TestCase):
         """
         Run the current test associated with `test_name` using the threaded process group.
         """
-        torch._C._distributed_c10d._set_thread_isolation_mode(True)
         c10d.init_process_group(
             backend="threaded", rank=rank, world_size=world_size, store=self.__class__.global_store
         )
@@ -1043,7 +1047,6 @@ class MultiThreadedTestCase(TestCase):
         finally:
             c10d.destroy_process_group()
             self.perThreadTearDown()
-            torch._C._distributed_c10d._set_thread_isolation_mode(False)
 
 
     @classmethod
@@ -1072,6 +1075,7 @@ class MultiThreadedTestCase(TestCase):
                 failed_ranks.append(failure)
         finally:
             _uninstall_threaded_pg()
+            torch._C._distributed_c10d._set_thread_isolation_mode(False)
 
         cls._check_return_codes(failed_ranks, timeout, fn)
 
