@@ -1883,7 +1883,9 @@ class ShapeEnv:
         self.var_to_stack: Dict[sympy.Symbol, CapturedTraceback] = {}
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
-        self.replacements: Dict[sympy.Symbol, sympy.Expr] = {}  #
+        self.replacements: Dict[sympy.Symbol, sympy.Expr] = {}
+        # Maps boolean expressions to their constant value
+        self.boolean_constants: Dict[sympy.Rel, bool] = {}
         # Set holds a % b expressions that evaluate to 0.
         self.divisible: Set[sympy.Expr] = set()
         # Set that holds "size-like" symbols.  When we perform
@@ -3444,19 +3446,36 @@ class ShapeEnv:
             if s in self.var_to_val:
                 continue
             subst = {}
-            for ra in self.deferred_runtime_asserts.get(s, ()):
+            for e in itertools.chain(map(lambda ra: ra.expr, self.deferred_runtime_asserts.get(s, ())), self.boolean_constants):
                 if compute_hint:
-                    e = canonicalize_bool_expr(ra.expr.xreplace(self.var_to_val))
-                else:
-                    e = ra.expr
+                    e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
                 # e is already canonical
                 subst[e] = sympy.true
                 subst[canonicalize_bool_expr(sympy.Not(e))] = sympy.false
+                # Add tautologies in a canonical form
                 if isinstance(e, sympy.Eq):
                     subst[sympy.Le(e.lhs, e.rhs)] = sympy.true
                     subst[sympy.Le(-e.lhs, -e.rhs)] = sympy.true
                     subst[sympy.Lt(e.lhs, e.rhs)] = sympy.false
                     subst[sympy.Lt(-e.lhs, -e.rhs)] = sympy.false
+
+                    subst[sympy.Le(e.rhs, e.lhs)] = sympy.true
+                    subst[sympy.Le(-e.rhs, -e.lhs)] = sympy.true
+                    subst[sympy.Lt(e.rhs, e.lhs)] = sympy.false
+                    subst[sympy.Lt(-e.rhs, -e.lhs)] = sympy.false
+                elif isinstance(e, sympy.Lt):
+                    subst[sympy.Le(e.lhs, e.rhs)] = sympy.true
+                    subst[sympy.Lt(-e.rhs, -e.lhs)] = sympy.true
+                    subst[sympy.Ne(e.lhs, e.rhs)] = sympy.true
+
+                    subst[sympy.Lt(e.rhs, e.lhs)] = sympy.false
+                    subst[sympy.Le(e.rhs, e.lhs)] = sympy.false
+                    subst[sympy.Lt(-e.lhs, -e.rhs)] = sympy.false
+                    subst[sympy.Le(-e.lhs, -e.rhs)] = sympy.false
+                    subst[sympy.Eq(e.lhs, e.rhs)] = sympy.false
+                elif isinstance(e, sympy.Le):
+                    subst[sympy.Le(-e.rhs, -e.lhs)] = sympy.true
+                    subst[sympy.Lt(e.rhs, e.lhs)] = sympy.false
 
             # NB: this helps us deal with And/Or connectives
             expr = expr.subs(subst)
@@ -3788,6 +3807,8 @@ class ShapeEnv:
         simplify shapes (i.e. a == b or a % 5 == 0)
         """
         assert isinstance(expr, sympy.Rel)
+
+        self.boolean_constants[canonicalize_bool_expr(expr)] = True
 
         # A good example of what goes wrong if you don't do this is
         # python test/functorch/test_aotdispatch.py -k
