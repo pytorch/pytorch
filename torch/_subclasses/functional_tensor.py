@@ -1,6 +1,6 @@
 import contextlib
 from abc import ABC, abstractmethod
-from typing import Any, Callable, ContextManager, Optional, Tuple
+from typing import Any, Callable, ContextManager, Dict, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -213,9 +213,17 @@ class FunctionalTensor(torch.Tensor):
     def mark_mutation_hidden_from_autograd(self) -> None:
         torch._functionalize_mark_mutation_hidden_from_autograd(self.elem)
 
+    def tolist(self) -> Any:
+        if self.elem.dim() == 0:
+            return self.elem.item()
+        elif self.elem.dim() == 1:
+            return [elem.item() for elem in self.elem]
+        else:
+            return [elem.tolist() for elem in self.elem]
+
 
 class FunctionalTensorMode(TorchDispatchMode):
-    def __init__(self, pre_dispatch=False, export=False):
+    def __init__(self, pre_dispatch=False, export=False, _allow_token_discovery=False):
         self.export = export
         self.is_on_stack = False
         self.enter_stack = []
@@ -225,6 +233,18 @@ class FunctionalTensorMode(TorchDispatchMode):
         self.pre_dispatch = pre_dispatch
         # This will be turned off later for pre-dispatch functionalization
         self._dispatch_key = torch._C.DispatchKey.PreDispatch if pre_dispatch else None  # type: ignore[attr-defined]
+        # Map of effect type (ex. _EffectType.ORDERED) to a token. The tokens help keep
+        # track of the ordering between side effectful operations.
+        self._tokens: Dict[Any, torch.Tensor] = {}
+
+        # Functionalization runs twice in AOTAutograd, once in
+        # `run_functionalized_fw_and_collect_metadata` to collect metadata to
+        # see which tensors need to be functionalized and discover how many
+        # tokens we need, and another time in `make_fx` which does the actual
+        # tracing to replace ops with their functional variants and handling
+        # side-effectful ops. In the second stage there should be no token
+        # discovery. This flag distinguishes between the two stages.
+        self._allow_token_discovery = _allow_token_discovery
 
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):
@@ -337,6 +357,16 @@ class FunctionalTensorMode(TorchDispatchMode):
                     "Auto functionalization is not supported on pre-dispatch tracing"
                 )
             return do_auto_functionalize(func, args, kwargs)
+
+        from torch._higher_order_ops.effects import handle_effects, has_effects
+
+        if has_effects(func, args, kwargs):
+            assert not torch._C._dispatch_has_kernel_for_dispatch_key(
+                func.name(), torch._C.DispatchKey.Functionalize
+            )
+            return handle_effects(
+                self._allow_token_discovery, self._tokens, func, args, kwargs
+            )
 
         args_unwrapped, kwargs_unwrapped = pytree.tree_map_only(
             FunctionalTensor, unwrap, (args, kwargs)
