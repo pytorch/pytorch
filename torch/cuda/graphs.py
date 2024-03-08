@@ -187,7 +187,7 @@ class graph:
 
 
 def make_graphed_callables(
-    callables, sample_args, num_warmup_iters=3, allow_unused_input=False, pool=None,
+    callables, sample_args, num_warmup_iters=3, allow_unused_input=False, pool=None
 ):
     r"""Accept callables (functions or :class:`nn.Module<torch.nn.Module>`\ s) and returns graphed versions.
 
