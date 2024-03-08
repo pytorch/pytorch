@@ -1069,6 +1069,31 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(f(torch.randn(1)), (Multistreamable,))
 
+    @parametrize("dynamic", [False, True])
+    def test_subclass_views(self, dynamic):
+        def _get_views(t):
+            # Note that any closed-over SymInts will be symbolicized during fake-ification.
+            yield t.narrow(dim=-1, start=3, length=8)
+            yield t.split(5, -1)
+            yield t.split_with_sizes([9, 6], -1)
+            yield t.unsqueeze(-1).expand(4, 15, 10)
+            yield t.select(-1, 6)
+            yield t[2:3, 5:9]
+
+        def f(x):
+            return x * 2
+
+        compiled_f = torch.compile(
+            f, backend="aot_eager", fullgraph=True, dynamic=dynamic
+        )
+
+        # Take a view of a subclass to pass as input.
+        t = TwoTensor(torch.randn(4, 15), torch.randn(4, 15))
+        for view in _get_views(t):
+            out_ref = f(view)
+            out_test = compiled_f(view)
+            self.assertEqual(out_ref, out_test)
+
 
 instantiate_parametrized_tests(SubclassTests)
 
@@ -1297,7 +1322,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 s0: [2, 9223372036854775805]
 s2: [2, 9223372036854775806]
 s3: [3, 9223372036854775806]
-s4: [2, 9223372036854775806]""",
+s5: [2, 9223372036854775806]""",
                 )
                 return gm
 
