@@ -257,14 +257,15 @@ def define(qualname, schema, *, lib=None, tags=()):
         >>> torch.library.define("mylib::sin", "(Tensor x) -> Tensor")
         >>>
         >>> # Add implementations for the operator
-        >>> @torch.library.impl("mylibrary::sin", "cpu")
+        >>> @torch.library.impl("mylib::sin", "cpu")
         >>> def f(x):
         >>>     return torch.from_numpy(np.sin(x.numpy()))
         >>>
         >>> # Call the new operator from torch.ops.
         >>> x = torch.randn(3)
-        >>> y = torch.ops.mylib.sin(x)
-        >>> assert torch.allclose(y, x)
+        >>> y1 = torch.ops.mylib.sin(x)
+        >>> y2 = np.sin(x)
+        >>> assert torch.allclose(y1, y2)
 
     """
     if not isinstance(qualname, str):
@@ -304,6 +305,11 @@ def impl(qualname, types, func=None, *, lib=None):
     Please only use this if the implementation truly supports all device types;
     for example, this is true if it is a composition of built-in PyTorch operators.
 
+    This API may be used as a decorator (see examples). You can use additional
+    decorators with this API provided they return a function and are placed
+    inside this API. Decorators placed outside this API will not be applied
+    because this API does not return a function.
+
     Some valid types are: "cpu", "cuda", "xla", "mps", "ipu", "xpu".
 
     Args:
@@ -316,17 +322,43 @@ def impl(qualname, types, func=None, *, lib=None):
         >>> import torch
         >>> import numpy as np
         >>>
+        >>> # Example 1: Register function.
         >>> # Define the operator
-        >>> torch.library.define("mylibrary::sin", "(Tensor x) -> Tensor")
+        >>> torch.library.define("mylib::sin", "(Tensor x) -> Tensor")
         >>>
-        >>> # Add implementations for the cpu device
-        >>> @torch.library.impl("mylibrary::sin", "cpu")
+        >>> # Add implementations for the operator
+        >>> @torch.library.impl("mylib::sin", "cpu")
         >>> def f(x):
         >>>     return torch.from_numpy(np.sin(x.numpy()))
         >>>
+        >>> # Call the new operator from torch.ops.
         >>> x = torch.randn(3)
-        >>> y = torch.ops.mylibrary.sin(x)
-        >>> assert torch.allclose(y, x.sin())
+        >>> y1 = torch.ops.mylib.sin(x)
+        >>> y2 = np.sin(x)
+        >>> assert torch.allclose(y1, y2)
+        >>>
+        >>> # Example 2: Register function with decorator.
+        >>> def my_decorator(func):
+        >>>     def wrapper(*args, **kwargs):
+        >>>         print("my_decorator called.")
+        >>>         return func(*args, **kwargs)
+        >>>     return wrapper
+        >>>
+        >>> # Define the operator
+        >>> torch.library.define("mylib::decorated_sin", "(Tensor x) -> Tensor")
+        >>>
+        >>> # Add implementations for the operator
+        >>> @torch.library.impl("mylib::decorated_sin", "cpu")
+        >>> @my_decorator
+        >>> def f(x):
+        >>>     return torch.from_numpy(np.sin(x.numpy()))
+        >>>
+        >>> # Call the new operator from torch.ops.
+        >>> x = torch.randn(3)
+        >>> # This function call will print "my_decorator called."
+        >>> y1 = torch.ops.mylib.sin(x)
+        >>> y2 = np.sin(x)
+        >>> assert torch.allclose(y1, y2)
     """
     if isinstance(types, str):
         types = (types,)
@@ -397,7 +429,10 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
     (and may not directly access the storage or data of any input or
     intermediate Tensors).
 
-    This API may be used as a decorator (see examples).
+    This API may be used as a decorator (see examples). You can use additional
+    decorators with this API provided they return a function and are placed
+    inside this API. Decorators placed outside this API will not be applied
+    because this API does not return a function.
 
     For a detailed guide on custom ops, please see
     https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ/edit
@@ -443,6 +478,30 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
         >>>     x_np = x.numpy()
         >>>     res = np.stack(np.nonzero(x_np), axis=1)
         >>>     return torch.tensor(res, device=x.device)
+        >>>
+        >>> # Example 3: Double decorating
+        >>> def my_decorator(func):
+        >>>     def wrapper(*args, **kwargs):
+        >>>         print("my_decorator called.")
+        >>>         return func(*args, **kwargs)
+        >>>     return wrapper
+        >>>
+        >>> torch.library.define(
+        >>>     "mylib::custom_linear",
+        >>>     "(Tensor x, Tensor weight, Tensor bias) -> Tensor")
+        >>>
+        >>> # When called, the function below will print "my_decorator called."
+        >>> @torch.library.impl_abstract("mylib::custom_linear")
+        >>> @my_decorator
+        >>> def custom_linear_abstract(x, weight):
+        >>>     assert x.dim() == 2
+        >>>     assert weight.dim() == 2
+        >>>     assert bias.dim() == 1
+        >>>     assert x.shape[1] == weight.shape[1]
+        >>>     assert weight.shape[0] == bias.shape[0]
+        >>>     assert x.device == weight.device
+        >>>
+        >>>     return (x @ weight.t()) + bias
 
     """
     source = torch._library.utils.get_source(_stacklevel + 1)
