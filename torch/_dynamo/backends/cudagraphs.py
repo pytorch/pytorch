@@ -1,11 +1,15 @@
 # mypy: ignore-errors
 
+import functools
 import operator
 from collections import defaultdict
-from typing import Dict, Optional, Set
+from typing import Dict, List, Optional
 
 import torch
+from torch._dynamo.backends.debugging import boxed_nop
+from torch._inductor.cudagraph_trees import cudagraphify_impl
 from torch._inductor.cudagraph_utils import (
+    BoxedDeviceIndex,
     check_multiple_devices_or_any_cpu_nodes,
     get_mutation_stack_trace,
 )
@@ -14,83 +18,13 @@ from torch._inductor.utils import (
     count_tangents,
     has_incompatible_cudagraph_ops,
     num_fw_fixed_arguments,
+    output_node,
 )
-from torch.fx import GraphModule
-from torch.fx.passes.backends.cudagraphs import partition_cudagraphs
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.nn import Module
-from torch.utils._pytree import tree_map
 from .common import aot_autograd
 from .registry import register_backend
 
 perf_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
-
-
-def cloner(t):
-    if isinstance(t, torch.Tensor):
-        return t.clone()
-    else:
-        return t
-
-
-class CudaGraphModule(Module):
-    gm: GraphModule
-    mutated_inputs: Set[int]
-
-    def __init__(self, gm, mutated_inputs):
-        super().__init__()
-        self.gm = gm
-        self.mutated_inputs = mutated_inputs
-
-    warmed_up = False
-
-    # these are all None or all filled
-    graph = None
-    static_inputs = None
-    static_outputs = None
-
-    # NB: we override __call__ as we don't need any nn.Module machinery
-    # and to reduce overhead
-    def __call__(self, *args):
-        # TODO: once we've recorded here, we'd like to replace the __call__
-        # implementation with compiled bytecode that copies into static, replays
-        # the cuda graph, then copies out.  First condition is the hotpath,
-        # needs optimizing
-        if self.graph is not None:
-            assert len(args) == len(self.static_inputs)
-            for dst, src in zip(self.static_inputs, args):
-                dst.copy_(src)
-            self.graph.replay()
-            for i in self.mutated_inputs:
-                args[i].copy_(self.static_inputs[i])
-            return tree_map(cloner, self.static_outputs)
-
-        elif self.warmed_up:
-            # record
-            self.static_inputs = [x.clone() for x in args]
-            self.graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(self.graph):
-                self.static_outputs = self.gm(*self.static_inputs)
-            # NB: recording doesn't actually run the operations, so
-            # now we immediately replay the graph to serve up the result
-            self.graph.replay()
-            for i in self.mutated_inputs:
-                args[i].copy_(self.static_inputs[i])
-            return tree_map(cloner, self.static_outputs)
-
-        else:
-            # warmup
-            stream = torch.cuda.Stream()
-            stream.wait_stream(torch.cuda.current_stream())
-            with torch.cuda.stream(stream):
-                r = self.gm(*args)
-            torch.cuda.current_stream().wait_stream(stream)
-            self.warmed_up = True
-            return r
-
-
-# Interpreter versions of these passes can be found at
-# https://gist.github.com/ezyang/df2d746cac3b2c7d55c181e37c57ef23
 
 
 def find_input_mutations(g):
@@ -131,18 +65,6 @@ def find_input_mutations(g):
     return mutated_inputs
 
 
-# Mutates input graph
-def apply_cuda_graphs(gm):
-    for n in gm.graph.nodes:
-        if n.op == "call_module":
-            assert not n.kwargs
-            submod = gm.get_submodule(n.target)
-            gm.delete_submodule(n.target)
-            mutated_inputs = find_input_mutations(submod.graph)
-            gm.add_submodule(n.target, CudaGraphModule(submod, mutated_inputs))
-    # NB: we didn't actually change the graph, no need for recompile
-
-
 def get_device_node_mapping(gm: torch.fx.GraphModule):
     device_node_mapping: Dict[torch.device, torch.fx.Node] = {}
     for n in gm.graph.nodes:
@@ -175,47 +97,107 @@ def check_for_skip(aot_model: torch.fx.GraphModule, num_fixed) -> Optional[str]:
     return None
 
 
+def get_device_index(gm) -> int:
+    device = next(iter(get_device_node_mapping(gm)))
+    assert device.type == "cuda"
+    return device.index
+
+
+def get_stack_traces(gm) -> List[Optional[str]]:
+    output = output_node(gm)
+    assert len(output.args) == 1
+    return [
+        (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
+        for arg in output.args[0]
+    ]
+
+
 def cudagraphs(dynamo_model, dynamo_inputs):
     do_cudagraphs = BoxedBool(True)
+    boxed_device_index = BoxedDeviceIndex(None)
 
-    def forward_cudagraphs(aot_model, aot_inputs):
+    def forward_cudagraphs(aot_model, aot_inputs, is_inference=False):
+        interp = boxed_nop(aot_model, aot_inputs)
         fixed = num_fw_fixed_arguments(len(dynamo_inputs), len(aot_inputs))
         if skip_msg := check_for_skip(aot_model, fixed):
-            BoxedBool.disable(cudagraphs)
+            BoxedBool.disable(do_cudagraphs)
             perf_log.warning("skipping cudagraphs due to %s", skip_msg)
-            return aot_model
+            return interp
 
-        model = partition_cudagraphs(aot_model, aot_inputs)
-        apply_cuda_graphs(model)
-        return model
+        boxed_device_index.set(get_device_index(aot_model))
+
+        out = cudagraphify_impl(
+            interp,
+            aot_inputs,
+            range(fixed),
+            device_index=boxed_device_index.value,
+            is_backward=False,
+            is_inference=False,
+            stack_traces=get_stack_traces(aot_model),
+        )
+        out._boxed_call = True
+        return out
 
     def backward_cudagraphs(aot_model, aot_inputs):
+        interp = boxed_nop(aot_model, aot_inputs)
         if not do_cudagraphs:
             return aot_model
 
         fixed = count_tangents(aot_model)
         if skip_msg := check_for_skip(aot_model, fixed):
             perf_log.warning("skipping cudagraphs due to %s", skip_msg)
-            return aot_model
 
-        model = partition_cudagraphs(aot_model, aot_inputs)
-        apply_cuda_graphs(model)
-        return model
+            # See [Backward Generation Handling]
+            manager = torch._inductor.cudagraph_trees.get_manager(
+                boxed_device_index.value, create_if_none_exists=False
+            )
+            assert manager is not None
+
+            def fn(inputs):
+                manager.set_to_running_backward()
+                return aot_model(inputs)
+
+            fn._boxed_call = True
+            return fn
+
+        out = cudagraphify_impl(
+            interp,
+            aot_inputs,
+            range(fixed),
+            device_index=get_device_index(aot_model),
+            is_backward=True,
+            is_inference=False,
+            stack_traces=get_stack_traces(aot_model),
+        )
+        out._boxed_call = True
+        return out
 
     aot_cudagraphs = aot_autograd(
         fw_compiler=forward_cudagraphs,
         bw_compiler=backward_cudagraphs,
+        inference_compiler=functools.partial(forward_cudagraphs, is_inference=True),
         keep_inference_input_mutations=torch._dynamo.config.cudagraph_backend_keep_input_mutation,
     )
     return aot_cudagraphs(dynamo_model, dynamo_inputs)
 
 
-aot_cudagraphs = aot_autograd(fw_compiler=cudagraphs, bw_compiler=cudagraphs)
+class CudagraphsBackend:
+    compiler_name = "cudagraphs"
+
+    @staticmethod
+    def reset():
+        from torch._inductor.cudagraph_trees import reset_cudagraph_trees
+
+        reset_cudagraph_trees()
+
+    @staticmethod
+    def __call__(model, inputs):
+        return cudagraphs(model, inputs)
+
 
 # aot_cudagraphs only applies CUDA graphs to the graph.  It is also helpful
 # for debugging and can serve as a perf baseline.
-# TODO(jansel): rename to just "cudagraphs"?
-register_backend(name="cudagraphs", compiler_fn=cudagraphs)
+register_backend(name="cudagraphs", compiler_fn=CudagraphsBackend())
 
 
 def cudagraphs_inner(model, inputs, copy_outputs=True, copy_inputs=True):

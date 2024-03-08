@@ -444,13 +444,15 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
 
-        def test_forward_backward_not_called(self):
-            @torch.compile(mode="reduce-overhead")
+        @parametrize("backend", ("inductor", "cudagraphs"))
+        def test_forward_backward_not_called(self, backend):
             def foo(x, y):
                 x_out = x * x * x
                 torch._dynamo.graph_break()
                 y_out = y * y * y
                 return x_out, y_out
+
+            foo = get_compile_fn(backend)(foo)
 
             for _ in range(3):
                 inps = [
