@@ -315,7 +315,7 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             )
 
     @unittest.skip(
-        "This test keeps getting broken and our disable infra is not handling well"
+        "This test keeps getting broken and our disable infra is not handling well. see #120627"
     )
     def test_torch_name_rule_map_updated(self):
         # Generate the allowed objects based on heuristic defined in `allowed_functions.py`,
