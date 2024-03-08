@@ -12,6 +12,8 @@ if not TEST_XPU:
 
 TEST_MULTIXPU = torch.xpu.device_count() > 1
 
+cpu_device = torch.device("cpu")
+xpu_device = torch.device("xpu")
 
 class TestXpu(TestCase):
     def test_device_behavior(self):
@@ -128,6 +130,7 @@ if __name__ == "__main__":
 
     # Simple cases for operators
     # TODO: Reusing PyTorch test_ops.py to improve coverage
+
     # Binary
     def test_add(self, dtype=torch.float):
         a_cpu = torch.randn(2, 3)
@@ -258,21 +261,20 @@ if __name__ == "__main__":
         self.assertEqual(b_cpu, b_xpu.to(cpu_device))
 
     # Loops kernel
-    test_shapes = [
-        [[23, 72, 72], [5184, 72, 1], [23, 72, 72], [5184, 72, 1]],
-        [[23, 16, 16], [23, 1, 16]],
-        [[23, 16, 17], [23, 1, 17]],
-        [[1, 72, 72], [23, 72, 72]],
-        [[23, 72, 1], [23, 72, 72]],
-        [[23000, 72, 72], [5184, 72, 1], [23000, 72, 72], [5184, 72, 1]],
-        [[16, 16, 256, 256], [16, 16, 256, 256]],
-        [[16, 16, 512, 512], [16, 1, 1, 512]],
-        [[4, 15000, 3], [105000, 1, 15000], [4, 1, 3], [3, 3, 1]],
-        [[16, 16, 512, 513], [16, 1, 1, 513]],
-        [[28, 4096, 9], [36864, 9, 1], [28, 4096, 1], [4096, 1, 1]],
-    ]
-
     def test_loops(self, dtype=torch.float):
+        test_shapes = [
+            [[23, 72, 72], [5184, 72, 1], [23, 72, 72], [5184, 72, 1]],
+            [[23, 16, 16], [23, 1, 16]],
+            [[23, 16, 17], [23, 1, 17]],
+            [[1, 72, 72], [23, 72, 72]],
+            [[23, 72, 1], [23, 72, 72]],
+            [[23000, 72, 72], [5184, 72, 1], [23000, 72, 72], [5184, 72, 1]],
+            [[16, 16, 256, 256], [16, 16, 256, 256]],
+            [[16, 16, 512, 512], [16, 1, 1, 512]],
+            [[4, 15000, 3], [105000, 1, 15000], [4, 1, 3], [3, 3, 1]],
+            [[16, 16, 512, 513], [16, 1, 1, 513]],
+            [[28, 4096, 9], [36864, 9, 1], [28, 4096, 1], [4096, 1, 1]],
+        ]
         for shape in test_shapes:
             if len(shape) == 2:
                 a = torch.randn(shape[0], dtype=dtype)
