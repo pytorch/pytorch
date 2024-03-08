@@ -11,6 +11,7 @@ from torch.distributed._tensor import DeviceMesh, DTensor, Placement, Replicate,
 __all__ = [
     "ParallelStyle",
     "RowwiseParallel",
+    "SequenceParallel",
     "ColwiseParallel",
     "PrepareModuleInput",
     "PrepareModuleOutput",
@@ -258,7 +259,7 @@ class SequenceParallel(ParallelStyle):
     Keyword Args:
         sequence_dim (int, optional):
             The sequence dimension of the input tensor for the ``nn.Module``, this is used to annotate the input tensor to
-            become a DTensor that is sharded on the sequence dimension.
+            become a DTensor that is sharded on the sequence dimension, default: 1.
         use_local_output (bool, optional):
             Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module output, default: False.
     Returns:
@@ -421,7 +422,7 @@ class PrepareModuleOutput(ParallelStyle):
             The desired DTensor layouts of output tensors for the nn.Module, this is used to ensure the outputs of the nn.Module
             have the desired DTensor layouts.
         use_local_output (bool, optional):
-            Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module outputs, default: False.
+            Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module outputs, default: True.
     Returns:
         A ParallelStyle object that prepares the sharding layouts of the nn.Module's outputs.
 

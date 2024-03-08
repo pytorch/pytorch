@@ -932,6 +932,10 @@ class StatelessSymbolicContext(SymbolicContext):
     """
     dynamic_sizes: DimList[DimDynamic]
     constraint_sizes: DimList[DimConstraint] = None
+    # If the tensor is a view, this should be populated for the base. It contains
+    # information on how to allocate symbols when recursively fakeifying the base
+    # during view fake-ification.
+    view_base_context: Optional[SymbolicContext] = None
     # TODO: add storage offset and stride symbolic_context
 
     def __post_init__(self):
@@ -1004,6 +1008,7 @@ class SubclassSymbolicContext(StatefulSymbolicContext):
     inner_contexts: Dict[str, SymbolicContext] = None
 
     def __post_init__(self):
+        super().__post_init__()
         if self.inner_contexts is None:
             self.inner_contexts = {}
 
@@ -1353,6 +1358,9 @@ class DimConstraints:
         # a fix for this issue, we delay raising such failures. See solve().
         if orig_reduced == sympy.false:
             self._inconsistencies.append(f"{orig_expr} is inconsistent!")
+        if isinstance(expr, sympy.Ne):
+            # we're not going to do anything useful with these, so drop them
+            return False
         free_symbols = expr.free_symbols
         assert free_symbols, f"Did not expect constraint with no free variables: {expr}"
         if len(free_symbols) > 1:
@@ -1362,9 +1370,11 @@ class DimConstraints:
             # univariate: can solve these immediately
             s = next(iter(free_symbols))
             # eliminate // and % (see documentation of `rewrite_with_congruences` above)
+            old_n_congruences = len(self._congruences[s])
             expr = self.rewrite_with_congruences(s, expr)
+            new_n_congruences = len(self._congruences[s])
             if expr == sympy.true:
-                return True
+                return old_n_congruences == new_n_congruences
             reduced = expr.subs(self._var_to_val)
             if reduced == sympy.false:
                 self._inconsistencies.append(
@@ -1497,17 +1507,25 @@ class DimConstraints:
             for congruence in congruences:
                 # any congruence that cannot be checked becomes a dynamic constraint as well
                 if s not in self._substitutions or not sympy.checksol(congruence, {s: self._substitutions[s]}):
-                    if disable_congruences:
+                    if self._is_supported_congruence(congruence):
+                        base, divisor = congruence.args
+                        tmp_name = f"_{self._dcp.source_name_to_debug_name[self._dcp.symbol_to_source[s][0].name()]}"
+                        tmp = sympy.Symbol(tmp_name, integer=True)
+                        from torch._dynamo.source import ConstantSource
+                        self._dcp.symbol_to_source[tmp] = [ConstantSource(tmp_name)]
+                        r = try_solve(sympy.Eq(base, divisor * tmp), s)
+                        self._dynamic_results.add(self._dcp.doprint(sympy.Eq(s, r[1])))
+                    elif disable_congruences:
                         self._force_specialization(s)
                         self._univariate_inequalities.pop(s, None)
-                    else:
-                        self._dynamic_results.add(self._dcp.doprint(sympy.Eq(congruence, 0)))
 
         # remaining symbols have only pure inequalities (no equalities)
         for s, exprs in self._univariate_inequalities.items():
             try:
                 solution = sympy.solvers.inequalities.reduce_inequalities(exprs, s)
                 # because this is univariate, the solution is a dynamic (range) constraint
+                if isinstance(solution, sympy.Or):
+                    solution = next(iter(arg for arg in solution.args if arg.subs(self._var_to_val)))
                 if isinstance(solution, sympy.And):
                     for arg in solution.args:
                         self._dynamic_results.add(self._dcp.doprint(arg))
@@ -1545,6 +1563,24 @@ class DimConstraints:
                 (isinstance(lhs, sympy.Integer) and cls._is_supported_equivalence(rhs))
             )
         return isinstance(expr, sympy.Symbol)
+
+    @classmethod
+    def _is_supported_congruence(cls, congruence):
+        base, divisor = congruence.args
+        # Congruences that can be currently expressed with supported Dim ops are
+        # of the form (x + a) % b == 0, where x is a Dim and a and b are constants.
+        # This allows us to derive x as b*y - a for some Dim y.
+        # (See also documentation of dynamic_shapes._DerivedDim.)
+        if isinstance(base, sympy.Add):
+            lhs, rhs = base.args
+            cond = (
+                (isinstance(lhs, sympy.Symbol) and isinstance(rhs, sympy.Integer)) or
+                (isinstance(lhs, sympy.Integer) and isinstance(rhs, sympy.Symbol))
+            )
+        else:
+            cond = isinstance(base, sympy.Symbol)
+        cond = cond and isinstance(divisor, sympy.Integer)
+        return cond
 
     def forced_specializations(self):
         """Returns a dictionary of the names of symbols to their specialized value
@@ -1662,14 +1698,22 @@ class DimConstraints:
             if match is not None:
                 debug_names.update(match.expand(r'\1').split(', '))
 
-            for k, c in results.items():
-                if k not in debug_names:
-                    continue
+            for k, c in sorted(results.items()):
+                # if k not in debug_names:
+                #     continue
                 if "eq" in c:
                     other = c["eq"]
                     if isinstance(other, int):
                         others.append(f"{k} = None  # {other}")
-                    else:
+                    elif self._is_supported_equivalence(other):
+                        s = next(iter(other.free_symbols))
+                        if s not in results:
+                            modulus, remainder = sympy.polys.polytools.div(other, s)
+                            c_min = c.get("min", 2)
+                            min_ = math.ceil((c_min - remainder) / modulus)
+                            c_max = c.get("max", sys.maxsize - 1)
+                            max_ = math.floor((c_max - remainder) / modulus)
+                            dims.append(f"{s} = Dim('{s}', min={min_}, max={max_})  # {c_min} <= {other} <= {c_max}")
                         others.append(f"{k} = {other}")
                 else:
                     min_ = c.get("min", None)
@@ -2359,15 +2403,18 @@ class ShapeEnv:
                 for i in range(len(size))
                 if stride[i] is not None and ex_stride[i] >= 0
             }
+
             # iterate over unbound strides in sorted order
-            val_list = sorted(
-                [(ex_stride[i], i) for i in range(len(stride)) if stride[i] is None],
-                key=lambda tup: (
-                    # Order nested int by their coefficients.
-                    # 1 here to order nested int after non-nested int.
+            def _nested_int_aware_sort(tup):
+                return (
+                    # Order nested ints by their coefficients.
+                    # 1 here to order nested ints after non-nested-ints.
                     (1, tup[0].node.nested_int_coeff(), tup[1]) if is_nested_int(tup[0])
                     else (0, *tup)
                 )
+            val_list = sorted(
+                [(ex_stride[i], i) for i in range(len(stride)) if stride[i] is None],
+                key=_nested_int_aware_sort,
             )
             for _, i in val_list:
                 if stride[i] is None and ex_stride[i] in candidates:
@@ -2381,7 +2428,7 @@ class ShapeEnv:
                         (ex_stride[i], i)
                         for i in range(len(stride))
                         if stride[i] is None
-                    ]
+                    ], key=_nested_int_aware_sort
                 )
                 stride[i] = self.create_symbol(
                     val,
@@ -3389,13 +3436,6 @@ class ShapeEnv:
             return f"\n   Guarded at:\n{''.join('   ' + l for l in tb.format())}"
 
         return '\n'.join(f" - {guard.expr}{format_tb(guard.stack)}" for guard in self.guards)
-
-    def get_shape_groups(self):
-        """Returns lists of symbols grouped by the expression they are equivalent to"""
-        shape_groups = collections.defaultdict(list)
-        for k, v in self.replacements.items():
-            shape_groups[v].append(k)
-        return shape_groups
 
     def bound_sympy(self, expr: sympy.Expr, size_oblivious: bool = False) -> ValueRanges:
         """Given a sympy expression, computes a ValueRanges bound for what values it can be"""
