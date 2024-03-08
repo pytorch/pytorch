@@ -478,6 +478,23 @@ class AOTInductorTestsTemplate:
             options={"debug_check_inf_and_nan": True},
         )
 
+    def test_assert_async(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                u0 = x.item()
+                torch._check(u0 > 3)
+                return torch.ones(u0)[0]
+
+        x = torch.tensor(23, device=self.device)
+        example_inputs = (x,)
+        self.check_model(Model(), example_inputs)
+
     def test_simple_dynamic(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1306,6 +1323,25 @@ class AOTInductorTestsTemplate:
 
         self.check_model(Model(), example_inputs)
 
+    @skipIfRocm
+    def test_triton_kernel_equal_to_1_arg(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.empty_like(x)
+                n_elements = x.numel()
+                add_kernel[(n_elements,)](x, y, out, n_elements, BLOCK_SIZE=16)
+                return out
+
+        example_inputs = (
+            torch.randn(1, device=self.device),
+            torch.randn(1, device=self.device),
+        )
+
+        self.check_model(Model(), example_inputs)
+
     def test_shifted_constraint_ranges(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1322,13 +1358,12 @@ class AOTInductorTestsTemplate:
         a = torch.randn((4, 5), device=self.device)
         b = torch.randn((5, 5), device=self.device)
         dim0_x = Dim("dim0_x", min=2, max=1024)
-        dim0_y = Dim("dim0_y", min=3, max=1025)
+        dim0_y = dim0_x + 1
         dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_y}}
         self.check_model(
             Model(),
             (a, b),
             dynamic_shapes=dynamic_shapes,
-            disable_constraint_solver=True,
         )
 
     def test_scatter_fallback(self):
