@@ -793,7 +793,7 @@ def _get_sfdp_patterns():
                 "replace_fn": replacement,
                 "example_inputs": args,
                 "trace_fn": joint_fwd_bwd,
-                "pass_dicts": patterns,
+                "pass_dicts": patterns[1],
                 "extra_check": extra_check,
                 "scalar_workaround": workaround,
             }
