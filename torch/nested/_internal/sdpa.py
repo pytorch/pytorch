@@ -15,7 +15,7 @@ from torch.backends.cuda import (
 
 from torch.nn.attention import SDPBackend
 
-from .nested_tensor import buffer_from_jagged, NestedTensor, ViewNestedFromBuffer
+from .nested_tensor import buffer_from_jagged, jagged_from_buffer, NestedTensor, ViewNestedFromBuffer
 
 log = logging.getLogger(__name__)
 
@@ -261,11 +261,12 @@ def _can_use_math_sdpa_jagged(params: SDPAParams, debug=False) -> bool:
     return True
 
 
-def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal):
+@torch._dynamo.allow_in_graph
+def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal, flash_enabled, mem_efficient_enabled, math_enabled):
     if (
-        not flash_sdp_enabled()
-        and not mem_efficient_sdp_enabled()
-        and not math_sdp_enabled()
+        not flash_enabled
+        and not mem_efficient_enabled
+        and not math_enabled
     ):
         return SDPBackend.ERROR
 
@@ -280,15 +281,15 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal):
     for backend in ordering:
         if backend == SDPBackend.FLASH_ATTENTION:
             if can_use_flash_attention(params) and _can_use_flash_sdpa_jagged(params):
-                return SDPBackend.FLASH_ATTENTION
+                return 1
         if backend == SDPBackend.EFFICIENT_ATTENTION:
             if can_use_efficient_attention(params) and _can_use_efficient_sdpa_jagged(
                 params
             ):
-                return SDPBackend.EFFICIENT_ATTENTION
+                return 2
         if backend == SDPBackend.MATH:
-            if math_sdp_enabled() and _can_use_math_sdpa_jagged(params):
-                return SDPBackend.MATH
+            if math_enabled and _can_use_math_sdpa_jagged(params):
+                return 3
 
     log.warning("Memory efficient kernel not used because:")
     can_use_efficient_attention(params, debug=True)
@@ -298,7 +299,7 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal):
     _can_use_flash_sdpa_jagged(params, debug=True)
     log.warning("Math attention kernel not used because:")
     _can_use_math_sdpa_jagged(params, debug=True)
-    return SDPBackend.ERROR
+    return 4
 
 
 def _cumulative_and_max_seq_len_nnz(qkv: torch.Tensor) -> Tuple[torch.Tensor, int, int]:
@@ -654,10 +655,10 @@ def jagged_scaled_dot_product_attention(
     compute_logsumexp = query.requires_grad or key.requires_grad or value.requires_grad
 
     backend_choice = _select_sdp_backend(
-        query, key, value, attn_mask, dropout_p, is_causal
+        query, key, value, attn_mask, dropout_p, is_causal, flash_sdp_enabled(), mem_efficient_sdp_enabled(), math_sdp_enabled()
     )
 
-    if backend_choice == SDPBackend.FLASH_ATTENTION:
+    if backend_choice == 1:
         og_size = query.size(-1)
         query_padded = _pad_last_dim(query, 8, False)
         key_padded = _pad_last_dim(key, 8, False)
@@ -695,11 +696,11 @@ def jagged_scaled_dot_product_attention(
             scale=og_scale,
         )
         # Reshape output to convert nnz to batch_size and seq_len
-        attention = ViewNestedFromBuffer.apply(
+        attention = jagged_from_buffer(
             attention.squeeze(0), output_nt_info["offsets"]
         ).transpose(1, 2)
         return _post_process_flash_output(attention, og_size)
-    elif backend_choice == SDPBackend.EFFICIENT_ATTENTION:
+    elif backend_choice == 2:
         (
             query_reshaped,
             key_reshaped,
@@ -736,7 +737,7 @@ def jagged_scaled_dot_product_attention(
         return ViewNestedFromBuffer.apply(
             attention.squeeze(0), output_nt_info["offsets"]
         ).transpose(1, 2)
-    elif backend_choice == SDPBackend.MATH:
+    elif backend_choice == 3:
         # save the offsets and shape of the inputs, so we can reshape the final output
         # query @ key = attn: [B, D1, j0, D'] @ [B, D1, D' j1] = [B, D1, j0, j1]
         # attn @ value = out: [B, D1, j0, j1] @ [B, D1, j1, D2] = [B, D1, j0, D2]

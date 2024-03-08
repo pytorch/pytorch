@@ -1540,6 +1540,7 @@ def wrap_fx_proxy_cls(
         # results in a constant int
         torch._constrain_as_value,
         torch._constrain_as_size,
+        torch.nested._internal.sdpa._select_sdp_backend,
     ]:
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable.create(example_value, **options)
@@ -1547,10 +1548,13 @@ def wrap_fx_proxy_cls(
         from .sdpa import SDPAParamsVariable
 
         proxy.node.meta["example_value"] = example_value
-        return SDPAParamsVariable(proxy, **options)
+        return SDPAParamsVariable.create(tx, example_value, options.get("source", None))
     elif isinstance(example_value, bool) and proxy.node.target in [
         torch.backends.cuda.can_use_flash_attention,
         torch.backends.cuda.can_use_efficient_attention,
+        torch.backends.cuda.flash_sdp_enabled,
+        torch.backends.cuda.mem_efficient_sdp_enabled,
+        torch.backends.cuda.math_sdp_enabled,
     ]:
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable.create(example_value, **options)

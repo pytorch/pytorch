@@ -424,3 +424,7 @@ def jagged_from_tensor_and_lengths(
 
 def buffer_from_jagged(jagged):
     return ViewBufferFromNested.apply(jagged)
+
+@torch._dynamo.allow_in_graph
+def jagged_from_buffer(buffer, offsets):
+    return ViewNestedFromBuffer.apply(buffer, offsets)

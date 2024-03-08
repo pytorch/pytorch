@@ -3880,7 +3880,7 @@ class TestNestedTensorSubclass(TestCase):
         attn_d1 = torch.nn.functional.scaled_dot_product_attention(q_d1, k_d1, v_d1).transpose(1, 2)
         attn_d2 = torch.nn.functional.scaled_dot_product_attention(q_d2, k_d2, v_d2).transpose(1, 2)
 
-        compiled_sdpa = torch.compile(torch.nn.functional.scaled_dot_product_attention)
+        compiled_sdpa = torch.compile(torch.nn.functional.scaled_dot_product_attention, fullgraph=True)
         attn_nt = compiled_sdpa(q_nt, k_nt, v_nt).transpose(1, 2)
 
         attn_nts = attn_nt.unbind()
