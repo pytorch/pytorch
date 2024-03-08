@@ -1,12 +1,9 @@
 # Owner(s): ["module: inductor"]
 import functools
 import pickle
-import tempfile
 import unittest
-from unittest.mock import patch
 
 import torch
-from torch._inductor.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
 from torch._inductor.codecache import (
@@ -16,6 +13,7 @@ from torch._inductor.codecache import (
     TensorMetadata,
     TensorMetadataAndValues,
 )
+from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
