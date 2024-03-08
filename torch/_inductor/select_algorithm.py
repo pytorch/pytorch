@@ -145,7 +145,7 @@ class TritonTemplateKernel(TritonKernel):
             num_bytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
         return sum(num_bytes)
 
-    def jit_line(self):
+    def jit_lines(self):
         if self.use_jit:
             return "@triton.jit"
 
@@ -168,8 +168,7 @@ class TritonTemplateKernel(TritonKernel):
         if config.profile_bandwidth or config.benchmark_kernel:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
             inductor_meta["kernel_num_gb"] = num_gb
-        return textwrap.dedent(
-            f"""
+        return f"""
             @triton_heuristics.template(
                 num_stages={self.num_stages},
                 num_warps={self.num_warps},
@@ -177,8 +176,7 @@ class TritonTemplateKernel(TritonKernel):
                 inductor_meta={inductor_meta!r},
             )
             @triton.jit
-            """
-        )
+        """
 
     def def_kernel(self, *argnames):
         """
@@ -227,7 +225,7 @@ class TritonTemplateKernel(TritonKernel):
             arg_defs, *_ = self.args.python_argdefs()
             code = IndentedBuffer()
             code.splice(gen_common_triton_imports())
-            code.writeline(self.jit_line())
+            code.splice(self.jit_lines())
             code.writeline(f"def {self.kernel_name}({', '.join(arg_defs)}):")
             with code.indent():
                 code.splice(self.defines)
