@@ -27,6 +27,15 @@ fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
+# codegen cpp wrapper code in an ABI compatible mode
+abi_compatible = (
+    os.environ.get("TORCHINDUCTOR_ABI_COMPATIBLE", "1" if is_fbcode() else "0") == "1"
+)
+
+c_shim_version = os.environ.get(
+    "TORCHINDUCTOR_C_SHIM_VERSION", "1" if is_fbcode() else "2"
+)
+
 # dead code elimination
 dce = False
 
@@ -184,6 +193,14 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
+# enable autotune local cache
+use_autotune_local_cache = True
+
+# enable autotune remote cache
+use_autotune_remote_cache = (
+    os.environ.get("TORCH_INDUCTOR_AUTOTUNE_REMOTE_CACHE") == "1"
+)
+
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
 # for any combinations of m, n, k, regardless of their alignment. setting this flag will ensure
@@ -271,7 +288,7 @@ enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", ""
 max_fusion_size = 64
 
 # max number of inputs to generate cat as a pointwise op with masked laods
-max_pointwise_cat_inputs = 4
+max_pointwise_cat_inputs = 8
 
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
@@ -401,7 +418,9 @@ freezing_discard_parameters: bool = False
 
 # Kill switch for allowing temporary tensors to be allocated as stack arrays. Tests
 # should be run with this flag both on and off to make sure we have coverage.
-allow_stack_allocation: bool = True
+allow_stack_allocation: bool = (
+    os.environ.get("TORCHINDUCTOR_STACK_ALLOCATION", "1") == "1"
+)
 
 # Enables an alternate DSO interface (the "minimal ArrayRef interface") intended
 # to maximize performance for use cases that it can accommodate at the expense of
@@ -413,6 +432,9 @@ allow_stack_allocation: bool = True
 # When the DSO is generated in this mode, the usual interface will also be supported,
 # but performance for that interface may be degraded.
 use_minimal_arrayref_interface: bool = False
+
+# decompose some memory bound matmul/bmm to mul
+decompose_mem_bound_mm: bool = False
 
 
 # config specific to codegen/cpp.py
@@ -535,8 +557,8 @@ class triton:
         os.environ.get("TORCHINDUCTOR_PERSISTENT_REDUCTIONS", "1") == "1"
     )
 
-    # 0: disable
-    # 1: enable, use tuning to pick between different subkernels
+    # 0/False: disable
+    # 1/True: enable, use tuning to pick between different subkernels
     # 2: enable, force using persistent reduction (for debugging)
     # 3: enable, force using non-persistent reduction (for debugging)
     multi_kernel = int(os.environ.get("TORCHINDUCTOR_MULTI_KERNEL", "0"))
@@ -555,6 +577,10 @@ class triton:
         "Z": 1024,
         "R": 4096 * (16 if multi_kernel else 1),
     }
+
+    # Minimum RBLOCK to be used for a TritonSplitScanKernel
+    # NOTE: This also indirectly controls the size of workspace buffer required
+    min_split_scan_rblock = 256
 
     # Store the generated cubin files for cpp wrapper code to load
     store_cubin = False
@@ -591,9 +617,6 @@ class aot_inductor:
     output_path = ""
 
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
-
-    # Wether to codegen abi compatible model.so
-    abi_compatible = is_fbcode()
 
     # Serialized tree spec for flattening inputs
     serialized_in_spec = ""
@@ -711,6 +734,8 @@ class trace:
     # Upload the .tar.gz file
     # Needs to be overriden based on specific environment needs
     upload_tar: Optional[Callable[[str], None]] = None
+
+    log_autotuning_results: bool = False
 
 
 _save_config_ignore = {

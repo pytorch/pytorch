@@ -107,9 +107,7 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
         /*a=*/std::sqrt(5)); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
 
     if (bias.defined()) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int64_t fan_in, fan_out;
-      std::tie(fan_in, fan_out) = init::_calculate_fan_in_and_fan_out(weight);
+      auto [fan_in, fan_out] = init::_calculate_fan_in_and_fan_out(weight);
       auto bound = 1 / std::sqrt(fan_in);
       init::uniform_(bias, -bound, bound);
     }

@@ -184,10 +184,9 @@ class ElementwiseTypePromotionRule(TypePromotionRule):
         since there is no way to differentiate between inserted upcasts and model code
         casts. Hence we consolidate the input dtype to the result dtype to avoid this.
         """
-        if (
-            not self._USE_OPMATH
-            and self.promotion_kind
-            == _prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+        if not self._USE_OPMATH and self.promotion_kind in (
+            _prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+            _prims_common.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         ):
             return result_dtype
         return computed_dtype

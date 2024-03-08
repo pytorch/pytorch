@@ -42,7 +42,9 @@ def hook3(gI, gO):
 
 
 class TestCompiledAutograd(TestCase):
-    def check_output_and_recompiles(self, fn, count=1, compiler_fn=compiler_fn):
+    def check_output_and_recompiles(
+        self, fn, count=1, compiler_fn=compiler_fn, compile_fn=False
+    ):
         with torch.autograd.set_multithreading_enabled(False):
             torch._dynamo.reset()
             counters["compiled_autograd"].clear()
@@ -50,7 +52,8 @@ class TestCompiledAutograd(TestCase):
             expected = list(fn())
             torch.manual_seed(123)
             with compiled_autograd.enable(compiler_fn):
-                actual = list(fn())
+                opt_fn = torch.compile(fn) if compile_fn else fn
+                actual = list(opt_fn())
             self.assertEqual(expected, actual)
             self.assertEqual(counters["compiled_autograd"]["captures"], count)
             self.assertEqual(counters["compiled_autograd"]["compiles"], count)
@@ -633,6 +636,52 @@ class TestCompiledAutograd(TestCase):
 
         self.check_output_and_recompiles(fn, 3)
 
+    def test_mismatch_fake_tensor_mode(self, dynamic_shape=False):
+        """
+        Repro the failure of training nanogpt with both compiled-autograd
+        and _LazyGraphModule. Check https://github.com/pytorch/pytorch/pull/118981
+        for more context.
+        """
+        B = 8
+        x = torch.rand(B, 16)
+        y = torch.rand(B, 16, requires_grad=True)
+
+        if dynamic_shape:
+            torch._dynamo.mark_dynamic(x, 0)
+            torch._dynamo.mark_dynamic(y, 0)
+
+        def f():
+            y.grad = None
+            out = x + y
+
+            # make sure the backward call does not trigger any error when
+            # compiling the backward graph
+            out.sum().backward()
+            return out, y.grad
+
+        self.check_output_and_recompiles(f, compile_fn=True)
+
+    def test_mismatch_fake_tensor_mode_dynamic_shape(self):
+        self.test_mismatch_fake_tensor_mode(dynamic_shape=True)
+
+    def test_accumulate_grad_accuracy(self):
+        def fn():
+            model = torch.nn.Sequential(
+                torch.nn.Linear(2, 1, bias=False),
+                torch.nn.Linear(1, 2, bias=False),
+            )
+            x = torch.randn(2, 2)
+
+            out = model(x)
+            loss = out.sum()
+            torch.manual_seed(0)
+            loss.backward()
+
+            yield model[0].weight.grad
+            yield model[1].weight.grad
+
+        self.check_output_and_recompiles(fn, 1)
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
@@ -642,26 +691,32 @@ def load_test_module(name):
         ).load_module()
 
 
-test_autograd = load_test_module("test_autograd")
+def make_wrapped(fn):
+    @functools.wraps(fn)
+    def wrapped(self):
+        torch._dynamo.reset()
+        with compiled_autograd.enable(compiler_fn):
+            return fn(self)
+
+    return wrapped
 
 
-class EagerAutogradTests(TestCase):
-    @classmethod
-    def add_test(cls, name, fn):
-        @functools.wraps(fn)
-        def wrapped(self: EagerAutogradTests):
-            torch._dynamo.reset()
-            with compiled_autograd.enable(compiler_fn):
-                return fn(self)
-
+def wrap_test_class(orig_cls):
+    dct = orig_cls.__dict__.copy()
+    for name in list(dct.keys()):
+        fn = dct[name]
         if not callable(fn):
-            return
+            continue
         elif known_failures_re.match(name) or name in known_failing_tests:
-            setattr(cls, name, unittest.expectedFailure)
-        elif name.startswith("test"):
-            setattr(cls, name, wrapped)
-        else:
-            setattr(cls, name, fn)
+            dct[name] = unittest.expectedFailure
+        elif name.startswith("test_"):
+            dct[name] = make_wrapped(fn)
+
+    return type(
+        orig_cls.__name__ + "WithCompiledAutograd",
+        orig_cls.__bases__,
+        dct,
+    )
 
 
 # These groups of tests aren't supported yet
@@ -768,7 +823,7 @@ known_failing_tests = {
     "test_mark_non_differentiable_mixed",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertTrue
     "test_materialize_grads",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
     "test_naughty_autograd_function_stashing_ctx",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function
-    "test_no_grad_copy",  # torch._dynamo.exc.Unsupported: call_function args: TensorVariable() SkipFilesVariable()
+    "test_no_grad_copy",  # torch._dynamo.exc.Unsupported: call_function args: TensorVariable() SkipFunctionVariable()
     "test_no_grad_copy_sparse",  # torch._dynamo.exc.Unsupported: Tensor.data_ptr
     "test_reentrant_priority",  # torch._dynamo.exc.InternalTorchDynamoError: '<' not supported between instances of
     "test_reentrant_with_callbacks_both_depths",  # torch._dynamo.exc.Unsupported: call_method UserDefinedObjectVariable
@@ -779,21 +834,35 @@ known_failing_tests = {
     "test_return_leaf",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
     "test_save_none_for_backward",  # AssertionError:
     "test_save_output_nr",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
-    "test_saved_variables_deprecated",  # torch._dynamo.exc.Unsupported: UNPACK_SEQUENCE SkipFilesVariable()
+    "test_saved_variables_deprecated",  # torch._dynamo.exc.Unsupported: UNPACK_SEQUENCE SkipFunctionVariable()
     "test_set_materialize_non_diff_grads",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsNone
     "test_setup_context_when_forward_has_default_args",  # torch._dynamo.exc.Unsupported: call_function args
-    "test_simple_reentrant",  # torch._dynamo.exc.Unsupported: call_method SkipFilesVariable() sum [] {}
+    "test_simple_reentrant",  # torch._dynamo.exc.Unsupported: call_method SkipFunctionVariable() sum [] {}
     "test_tensor_hooks_inplace_multiple_outputs",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
     "test_lobpcg",  # torch._dynamo.exc.Unsupported: 'call_function LOBPCGAutogradFunction.backward in skip_files
+    "test_backward_dict_grad_for_nontensor",  # AssertionError: "non-Tensor-like types" does not match "'skip function
+    "test_backward_dict_invalid_keys",  # AssertionError: "to have keys {'x'}" does not match "'skip function
+    "test_backward_dict_requires_keys_for_input_optional_tensors",  # AssertionError: "to have keys {.*'y'.*}"
+    "test_backward_dict_requires_keys_for_input_tensors",  # AssertionError: "to have keys {.*'y'.*}" does not
+    "test_backward_grads_are_tensor_or_none",  # AssertionError: "either None or a Tensor" does not match "'
+    "test_backward_impl_on_existing_op",  # torch._dynamo.exc.Unsupported: 'skip function
+    "test_backward_returns_dict",  # AssertionError: "to be a dict" does not match "'skip function
+    "test_backward_tensorlist_input_requires_list_grads",  # AssertionError: "list of gradients" does not
+    "test_backward_tensorlist_input_requires_list_grads_none_or_Tensor",  # AssertionError: "None or Tensor"
+    "test_backward_tensorlist_input_requires_list_grads_with_same_numel",  # AssertionError: "3 gradients
+    "test_save_for_backward_inputs_are_namedtuple",  # torch._dynamo.exc.Unsupported: 'skip function
+    "test_autograd_function_backed_op",  # RuntimeError: compiled_args not implemented
 }
 
 if not HAS_CUDA:
     # Found Tesla M60 which is too old to be supported by the triton GPU compiler
     known_failing_tests.add("test_type_conversions")
 
-for name, fn in test_autograd.TestAutograd.__dict__.items():
-    EagerAutogradTests.add_test(name, fn)
+test_autograd = load_test_module("test_autograd")
+test_custom_ops = load_test_module("test_custom_ops")
 
+TestAutogradWithCompiledAutograd = wrap_test_class(test_autograd.TestAutograd)
+TestCustomOpWithCompiledAutograd = wrap_test_class(test_custom_ops.TestCustomOp)
 
 if __name__ == "__main__":
     if HAS_CPU:

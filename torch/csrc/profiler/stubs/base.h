@@ -3,6 +3,7 @@
 #include <functional>
 #include <memory>
 
+#include <c10/core/Device.h>
 #include <c10/util/strong_type.h>
 #include <torch/csrc/Export.h>
 
@@ -20,7 +21,7 @@ using ProfilerVoidEventStub = std::shared_ptr<void>;
 
 struct TORCH_API ProfilerStubs {
   virtual void record(
-      int* device,
+      c10::DeviceIndex* device,
       ProfilerVoidEventStub* event,
       int64_t* cpu_ns) const = 0;
   virtual float elapsed(
