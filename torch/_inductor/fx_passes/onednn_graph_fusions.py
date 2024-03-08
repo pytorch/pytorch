@@ -68,6 +68,12 @@ def _sfdp_replacement_19(query, key, value, inv_scale, causal_mask_value, causal
 
 
 def _onednn_graph_extra_check(match):
+    if not (
+        config.onednn_graph
+        and torch._C._has_onednn_graph
+        and is_avx512_vnni_supported()
+    ):
+        return False
     query = match.kwargs["query"].meta["val"]
     if query.dtype not in [torch.float32, torch.bfloat16]:
         return False
@@ -169,7 +175,7 @@ def _get_onednn_graph_sfdp_patterns():
                 "replace_fn": replacement,
                 "example_inputs": args,
                 "trace_fn": fwd_only,
-                "pass_dicts": patterns,
+                "pass_dicts": patterns[0],
                 "extra_check": extra_check,
                 "scalar_workaround": workaround,
             }
@@ -177,15 +183,10 @@ def _get_onednn_graph_sfdp_patterns():
 
 @functools.lru_cache(None)
 def _onednn_graph_sfdp_init():
-    if (
-        config.onednn_graph
-        and torch._C._has_onednn_graph
-        and is_avx512_vnni_supported()
-    ):
-        from .serialized_patterns.central_index import get_serialized_pattern
+    from .serialized_patterns.central_index import get_serialized_pattern
 
-        for key, register_replacement_kwargs in _get_onednn_graph_sfdp_patterns():
-            search_fn_pattern = get_serialized_pattern(key)
-            register_replacement(
-                **register_replacement_kwargs, search_fn_pattern=search_fn_pattern
-            )
+    for key, register_replacement_kwargs in _get_onednn_graph_sfdp_patterns():
+        search_fn_pattern = get_serialized_pattern(key)
+        register_replacement(
+            **register_replacement_kwargs, search_fn_pattern=search_fn_pattern
+        )
