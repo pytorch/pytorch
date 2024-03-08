@@ -3461,15 +3461,13 @@ class ShapeEnv:
                 if compute_hint:
                     e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
                 add_expr(e)
+                # Other relational expressions this expression implies
                 if isinstance(e, sympy.Eq):
-                    add_expr(e.lhs <= e.rhs)
-                    add_expr(e.lhs >= e.rhs)
-                elif isinstance(e, sympy.Ne):
-                    add_expr(e.lhs < e.rhs)
-                    add_expr(e.lhs > e.rhs)
+                    add_expr(sympy.Le(e.lhs, e.rhs))
+                    add_expr(sympy.Ge(e.lhs, e.rhs))
                 elif isinstance(e, sympy.Lt):
-                    add_expr(e.lhs <= e.rhs)
-                    add_expr(e.lhs != e.rhs)
+                    add_expr(sympy.Le(e.lhs, e.rhs))
+                    add_expr(sympy.Ne(e.lhs, e.rhs))
 
             # NB: this helps us deal with And/Or connectives
             expr = expr.subs(subst)
