@@ -26,8 +26,8 @@ The entrypoints to load and save a checkpoint are the following:
 
 .. currentmodule:: torch.distributed.checkpoint.state_dict_loader
 
-.. autofunction::  load_state_dict
 .. autofunction::  load
+.. autofunction::  load_state_dict
 
 
 In addition to the above entrypoints, `Stateful` objects, as described below, provide additional customization during saving/loading
