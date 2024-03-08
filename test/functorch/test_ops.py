@@ -11,7 +11,7 @@ import unittest
 
 from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
-    IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like
+    IS_X86, parametrize, TEST_WITH_ASAN, TEST_WITH_ROCM, noncontiguous_like
 from torch.testing._internal.common_utils import skipIfRocm, runOnRocm
 import torch
 from torch import Tensor
@@ -28,6 +28,7 @@ from common_utils import (
     generate_vmap_inputs,
     decorate,
     xfail,
+    xfailIf,
     skip,
     skipOps,
     tol1,
@@ -400,6 +401,10 @@ class TestOperators(TestCase):
         xfail('nn.functional.scaled_dot_product_attention'),
         xfail("torch.ops.aten._flash_attention_forward"),
         xfail("torch.ops.aten._efficient_attention_forward"),
+
+        # RuntimeError: Expected contiguous tensor, but got
+        # non-contiguous tensor for argument #2 'grad_output'
+        xfailIf('_batch_norm_with_update', cond=TEST_WITH_ROCM, device_type='cuda')
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
@@ -1829,6 +1834,10 @@ class TestOperators(TestCase):
         skip('sparse.sampled_addmm', ''),
         skip('sparse.mm', 'reduce'),
         skip('native_layer_norm', '', device_type='cpu'),
+
+        # RuntimeError: Expected contiguous tensor, but got
+        # non-contiguous tensor for argument #2 'grad_output'
+        xfailIf('_batch_norm_with_update', cond=TEST_WITH_ROCM, device_type='cuda')
     })
     @opsToleranceOverride('TestOperators', 'test_vmap_autograd_grad', (
         tol1('linalg.householder_product',
