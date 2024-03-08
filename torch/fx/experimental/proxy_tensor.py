@@ -1,4 +1,4 @@
-# a# ypy: ignore-errors
+# mypy: ignore-errors
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
