@@ -2219,7 +2219,7 @@ class TritonKernel(Kernel):
                     self.compute.splice(
                         f"""\
                     {accumulator}_next, {accumulator_m2}_next, {accumulator_weight}_next = triton_helpers.welford_reduce(
-                        {value}, {accumulator}, {accumulator_m2}, {accumulator_weight},
+                        {value}, {accumulator}, {accumulator_m2}, {accumulator_weight}, roffset == 0
                     )
                     """
                     )
