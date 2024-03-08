@@ -56,6 +56,7 @@ from .schema import (  # type: ignore[attr-defined]
     InputToCustomObjSpec,
     InputToParameterSpec,
     InputToTensorConstantSpec,
+    InputTokenSpec,
     Layout,
     LossOutputSpec,
     MemoryFormat,
@@ -65,6 +66,7 @@ from .schema import (  # type: ignore[attr-defined]
     Node,
     OptionalTensorArgument,
     OutputSpec,
+    OutputTokenSpec,
     RangeConstraint,
     ScalarType,
     SCHEMA_VERSION,
@@ -332,6 +334,14 @@ def _is_single_tensor_list_return(target: torch._ops.OpOverload) -> bool:
     return isinstance(return_type, torch.ListType) and isinstance(
         return_type.getElementType(), torch.TensorType
     )
+
+def _output_node_at_index(node, index):
+    for user in node.users:
+        assert user.target is operator.getitem, f"{user} is not a getitem node"
+        if index == user.args[1]:
+            return user
+    return None
+
 
 
 @dataclass
@@ -783,6 +793,13 @@ class GraphModuleSerializer:
                     custom_obj_name=spec.target,
                 )
             )
+        elif spec.kind == ep.InputKind.TOKEN:
+            assert isinstance(spec.arg, ep.TensorArgument)
+            return InputSpec.create(
+                token=InputTokenSpec(
+                    arg=TensorArgument(name=spec.arg.name),
+                )
+            )
         else:
             raise AssertionError(f"Unknown argument kind: {spec}")
 
@@ -834,6 +851,13 @@ class GraphModuleSerializer:
                 user_input_mutation=UserInputMutationSpec(
                     arg=TensorArgument(name=spec.arg.name),
                     user_input_name=spec.target,
+                )
+            )
+        elif spec.kind == ep.OutputKind.TOKEN:
+            assert isinstance(spec.arg, ep.TensorArgument)
+            return OutputSpec.create(
+                token=OutputTokenSpec(
+                    arg=TensorArgument(name=spec.arg.name),
                 )
             )
         else:
@@ -902,19 +926,12 @@ class GraphModuleSerializer:
 
         meta_val = node.meta["val"]
 
-        def output_node_at_index(node, index):
-            for user in node.users:
-                assert user.target is operator.getitem, f"{user} is not a getitem node"
-                if index == user.args[1]:
-                    return user
-            return None
-
         # Check single value return
         if _is_single_tensor_list_return(node.target):
             # e.g "-> Tensor[]"
             tensor_args = []
             for idx, meta in enumerate(meta_val):
-                user_node = output_node_at_index(node, idx)
+                user_node = _output_node_at_index(node, idx)
                 name = (
                     user_node.name
                     if user_node is not None
@@ -942,7 +959,7 @@ class GraphModuleSerializer:
                 output_arguments.append(Argument.create(as_none=()))
             elif isinstance(meta, FakeTensor):
                 assert isinstance(return_schema.real_type, torch.TensorType)
-                user_node = output_node_at_index(node, idx)
+                user_node = _output_node_at_index(node, idx)
                 name = (
                     user_node.name
                     if user_node is not None
@@ -956,20 +973,20 @@ class GraphModuleSerializer:
                 ) and isinstance(
                     return_schema.real_type.getElementType(), torch.TensorType
                 )
-                user_node = output_node_at_index(node, idx)
+                user_node = _output_node_at_index(node, idx)
                 assert user_node is not None
 
                 args = []
                 for i, m in enumerate(meta):
                     if m is None:
                         continue
-                    sub_user_node = output_node_at_index(user_node, i)
+                    sub_user_node = _output_node_at_index(user_node, i)
                     assert sub_user_node is not None, f"No user found at index {i}"
 
                     args.append(self.serialize_tensor_output(sub_user_node.name, m))
                 output_arguments.append(Argument.create(as_tensors=args))
             elif isinstance(meta, (int, SymInt)):
-                user_node = output_node_at_index(node, idx)
+                user_node = _output_node_at_index(node, idx)
                 name = (
                     user_node.name
                     if user_node is not None
@@ -995,32 +1012,50 @@ class GraphModuleSerializer:
             # a singleton tensor, we will serialize this to be a singleton
             # tensor list so that the deserializer knows to insert getitem nodes.
 
-            idx_to_name = {}
-            for user in node.users:
-                if user.target is not operator.getitem:
-                    continue
-                idx_to_name[user.args[1]] = user.name
-
-            for idx in range(len(meta_val)):
-                # FX does not emit a getitem node for any outputs that are unused.
-                # However, we need a name for them so that the number of outputs will
-                # correctly match the schema. Just assign a dummy name.
-                if idx not in idx_to_name:
-                    idx_to_name[idx] = f"{node.name}_unused_{idx}"
-
             if len(meta_val) == 1:
                 tensors = []
                 for i, v in enumerate(meta_val):
                     assert isinstance(v, torch.Tensor)
-                    tensors.append(self.serialize_tensor_output(idx_to_name[i], v))
+                    user_node = _output_node_at_index(node, i)
+                    name = (
+                        user_node.name
+                        if user_node is not None
+                        else f"{node.name}_unused_{i}"
+                    )
+                    tensors.append(self.serialize_tensor_output(name, v))
                 return [Argument.create(as_tensors=tensors)]
 
-            else:
-                return [
-                    self.serialize_output(idx_to_name[i], element_meta_val)
-                    for i, element_meta_val in enumerate(meta_val)
-                ]
+            outputs = []
+            for i, element_meta_val in enumerate(meta_val):
+                user_node = _output_node_at_index(node, i)
+                if isinstance(element_meta_val, list):
+                    # e.g "-> Tensor[]"
+                    assert user_node is not None
 
+                    tensors = []
+                    for j, m in enumerate(element_meta_val):
+                        if not isinstance(m, torch.Tensor):
+                            raise SerializeError(f"Serialize list output with type {type(m)} nyi")
+
+                        sub_user_node = _output_node_at_index(user_node, j)
+                        name = (
+                            sub_user_node.name
+                            if sub_user_node is not None
+                            else f"{user_node.name}_unused_{j}"
+                        )
+                        tensors.append(self.serialize_tensor_output(name, m))
+                    outputs.append(Argument.create(as_tensors=tensors))
+
+                else:
+                    name = (
+                        user_node.name
+                        if user_node is not None
+                        else f"{node.name}_unused_{i}"
+                    )
+
+                    outputs.append(self.serialize_output(name, element_meta_val))
+
+            return outputs
         else:
             return [self.serialize_output(node.name, meta_val)]
 
@@ -1429,6 +1464,12 @@ class GraphModuleDeserializer:
                 arg=ep.CustomObjArgument(name=i.custom_obj.arg.name, class_fqn=i.custom_obj.arg.class_fqn),
                 target=i.custom_obj.custom_obj_name,
             )
+        if i.type == "token":
+            return ep.InputSpec(
+                kind=ep.InputKind.TOKEN,
+                arg=ep.TensorArgument(name=i.token.arg.name),
+                target=None
+            )
         else:
             raise AssertionError(f"Unknown input spec {i}")
 
@@ -1468,6 +1509,12 @@ class GraphModuleDeserializer:
                 kind=ep.OutputKind.USER_INPUT_MUTATION,
                 arg=ep.TensorArgument(name=o.user_input_mutation.arg.name),
                 target=o.user_input_mutation.user_input_name
+            )
+        elif o.type == "token":
+            return ep.OutputSpec(
+                kind=ep.OutputKind.TOKEN,
+                arg=ep.TensorArgument(name=o.token.arg.name),
+                target=None
             )
         else:
             raise AssertionError(f"Unknown output spec {o}")
@@ -2311,6 +2358,8 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
             return 3, spec.tensor_constant.tensor_constant_name, idx
         elif spec.type == "custom_obj":
             return 4, spec.custom_obj.custom_obj_name, idx
+        elif spec.type == "token":
+            return 0, None, idx
         else:
             raise AssertionError(f"Unknown input type: {spec}")
 
@@ -2329,6 +2378,8 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
             return 5, None, idx
         elif spec.type == "user_input_mutation":
             return 2, None, idx
+        elif spec.type == "token":
+            return 0, None, idx
         else:
             raise AssertionError(f"Unknown output type: {spec}")
 
@@ -2370,6 +2421,9 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
             t.name = replace_table[t.name]
         elif spec.type == "custom_obj":
             return
+        elif spec.type == "token":
+            t = spec.token.arg
+            t.name = replace_table[t.name]
         else:
             raise AssertionError(f"Unknown input type: {spec}")
 
@@ -2409,6 +2463,9 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
             u = spec.user_input_mutation
             u.arg.name = replace_table[u.arg.name]
             u.user_input_name = replace_table[u.user_input_name]
+        elif spec.type == "token":
+            t = spec.token.arg
+            t.name = replace_table[t.name]
         else:
             raise AssertionError(f"Unknown output type: {spec}")
 
