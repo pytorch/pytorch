@@ -7,14 +7,6 @@ import math
 import re
 from typing import Dict, List
 
-from torch._streambase import _StreamBase
-from ..guards import install_guard
-
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    np = None
-
 import torch._C
 import torch._refs
 import torch.fx
@@ -22,10 +14,11 @@ import torch.nn
 import torch.onnx.operators
 from torch._logging import warning_once
 
+from torch._streambase import _StreamBase
 from .. import config, polyfill, variables
 from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented
-from ..guards import GuardBuilder
+from ..guards import GuardBuilder, install_guard
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
@@ -45,6 +38,11 @@ from .ctx_manager import (
 from .distributed import is_constant_pg_functions, is_from_local, ProcessGroupVariable
 from .lists import ListVariable, TupleVariable
 from .torch_function import can_dispatch_torch_function, dispatch_torch_function
+
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
 
 log = logging.getLogger(__name__)
 

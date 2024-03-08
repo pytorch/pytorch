@@ -140,20 +140,13 @@ def _convert_input_to_fake(gm, args, kwargs):
     return fake_args, fake_kwargs, fake_params_buffers, fake_mode
 
 
-def _replace_param_buffer_names(param_buffer_table, sig, constants):
+def _replace_param_buffer_names(param_buffer_table, sig):
     for spec in sig.input_specs:
         if spec.kind in (
             InputKind.PARAMETER,
             InputKind.BUFFER,
         ):
             spec.target = param_buffer_table[spec.target]
-
-            if spec.persistent is False:
-                # we store non-persistent buffers in the constant table, so rewrite
-                # there as well
-                non_persistent_buffer = constants[spec.target]
-                del constants[spec.target]
-                constants[param_buffer_table[spec.target]] = non_persistent_buffer
     for spec in sig.output_specs:
         if spec.kind in (
             OutputKind.BUFFER_MUTATION,
@@ -345,11 +338,6 @@ def _export_to_torch_ir(
             f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}",
         )
 
-    # We convert to nn.Module because __call__ of ExportedProgram
-    # is untracable right now.
-    if isinstance(f, ExportedProgram):
-        f = f.module()
-
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
         try:
             module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
@@ -416,7 +404,7 @@ def _gather_constant_attrs(m: torch.nn.Module) -> ConstantAttrMap:
 
 
 def _export_non_strict(
-    mod,
+    mod: torch.nn.Module,
     fake_args,
     fake_kwargs,
     fake_params_buffers,
@@ -555,7 +543,7 @@ def _get_params_buffers(mod: torch.nn.Module) -> Dict[str, torch.Tensor]:
     return params_buffers
 
 
-def rewrite_dynamo_tensor_constants(
+def _rewrite_dynamo_tensor_constants(
     orig_mod_buffers: Set[torch.Tensor],
     traced_mod_buffers: Dict[str, torch.Tensor],
     graph_signature: ExportGraphSignature,
@@ -577,7 +565,7 @@ def rewrite_dynamo_tensor_constants(
                 constants[spec.target] = value
 
 
-def rewrite_non_persistent_buffers(
+def _rewrite_non_persistent_buffers(
     orig_mod: torch.nn.Module,
     graph_signature: ExportGraphSignature,
     constants: Dict[str, Union[torch.Tensor, torch.ScriptObject]],
@@ -596,6 +584,22 @@ def rewrite_non_persistent_buffers(
                 constants[spec.target] = orig_mod.get_buffer(spec.target)
 
 
+def get_ep_stats(ep: ExportedProgram) -> Dict[str, Any]:
+    op_count = 0
+    op_set = set()
+    for m in ep.graph_module.modules():
+        if not isinstance(m, torch.fx.GraphModule):
+            continue
+        for node in m.graph.nodes:
+            if node.op != "call_function":
+                continue
+            op_count += 1
+            assert hasattr(node.target, "__module__")
+            assert hasattr(node.target, "__name__")
+            op_set.add(f"{node.target.__module__}.{node.target.__name__}")
+    return {"op_count": op_count, "op_set": op_set}
+
+
 _EXPORT_FLAGS: Optional[Set[str]] = None
 
 
@@ -608,7 +612,10 @@ def _log_export_wrapper(fn):
             ep = fn(*args, **kwargs)
             end = time.time()
             log_export_usage(
-                event="export.time", metrics=end - start, flags=_EXPORT_FLAGS
+                event="export.time",
+                metrics=end - start,
+                flags=_EXPORT_FLAGS,
+                **get_ep_stats(ep),
             )
         except Exception as e:
             t = type(e)
@@ -631,7 +638,7 @@ def _log_export_wrapper(fn):
 @_log_export_wrapper
 @_disable_prexisiting_fake_mode
 def _export(
-    f: torch.nn.Module,
+    mod: torch.nn.Module,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
@@ -681,16 +688,15 @@ def _export(
     log_export_usage(event="export.enter", flags=flags)
     _EXPORT_FLAGS = flags
 
-    constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes) or []
+    constraints = _process_dynamic_shapes(mod, args, kwargs, dynamic_shapes) or []
 
     kwargs = kwargs or {}
 
-    constant_attrs = _gather_constant_attrs(f)
+    constant_attrs = _gather_constant_attrs(mod)
 
     flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
 
     if not strict:
-        assert isinstance(f, torch.nn.Module)
         out_spec = None
 
         module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
@@ -715,13 +721,7 @@ def _export(
 
                     def forward(self, *args, **kwargs):
                         nonlocal out_spec
-                        if isinstance(self._export_root, torch.fx.GraphModule):
-                            with torch.fx.traceback.preserve_node_meta():
-                                tree_out = torch.fx.Interpreter(self._export_root).run(
-                                    *args, **kwargs
-                                )
-                        else:
-                            tree_out = self._export_root(*args, **kwargs)
+                        tree_out = self._export_root(*args, **kwargs)
                         flat_outs, out_spec = pytree.tree_flatten(tree_out)
                         return tuple(flat_outs)
 
@@ -767,20 +767,21 @@ def _export(
             fake_kwargs,
             equalities_inputs,
             original_signature,
-        ) = make_fake_inputs(f, args, kwargs, constraints)
+        ) = make_fake_inputs(mod, args, kwargs, constraints)
 
         fake_params_buffers = make_fake_params_buffers(
-            fake_mode, _get_params_buffers(f)
+            fake_mode, _get_params_buffers(mod)
         )
-        ep_non_strict = _export_non_strict(
-            f,
-            fake_args,
-            fake_kwargs,
-            fake_params_buffers,
-            constant_attrs,
-            pre_dispatch=pre_dispatch,
-            transform=_tuplify_outputs,
-        )
+        with fake_mode:
+            ep_non_strict = _export_non_strict(
+                mod,
+                fake_args,
+                fake_kwargs,
+                fake_params_buffers,
+                constant_attrs,
+                pre_dispatch=pre_dispatch,
+                transform=_tuplify_outputs,
+            )
         try:
             range_constraints = make_constraints(
                 fake_mode,
@@ -822,13 +823,13 @@ def _export(
             assert res is not None
             gm = res.graph_module
 
-        rewrite_non_persistent_buffers(f, ep_non_strict.sig, ep_non_strict.constants)
+        _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
 
         return ExportedProgram(
             root=gm,
             graph=gm.graph,
             graph_signature=ep_non_strict.sig,
-            state_dict=f.state_dict(keep_vars=True),
+            state_dict=mod.state_dict(keep_vars=True),
             range_constraints=range_constraints,
             module_call_graph=[
                 ModuleCallEntry(
@@ -846,7 +847,7 @@ def _export(
         )
 
     gm_torch_level = _export_to_torch_ir(
-        f,
+        mod,
         args,
         kwargs,
         constraints,
@@ -934,8 +935,7 @@ def _export(
     )
     gm_torch_level.recompile()
 
-    if isinstance(f, torch.nn.Module):
-        _normalize_nn_module_stack(gm_torch_level, type(f))
+    _normalize_nn_module_stack(gm_torch_level, type(mod))
 
     # NOTE: graph module expects only positional args
     ep_non_strict = _export_non_strict(
@@ -994,18 +994,18 @@ def _export(
     # Do some cleanups on the graph module to restore the state dict to the
     # expected form. Each of these steps should probably get fixed upstream.
     # 1. Remove tensor constants that were added as buffers.
-    rewrite_dynamo_tensor_constants(
-        orig_mod_buffers=set(f.buffers()),
+    _rewrite_dynamo_tensor_constants(
+        orig_mod_buffers=set(mod.buffers()),
         traced_mod_buffers=dict(gm_torch_level.named_buffers()),
         graph_signature=ep_non_strict.sig,
         constants=ep_non_strict.constants,
     )
     # 2. Restore FQN of param/buffers
-    param_buffer_table: Dict[str, str] = _get_param_buffer_mapping(f, gm_torch_level)
-    _replace_param_buffer_names(param_buffer_table, export_graph_signature, constants)
+    param_buffer_table: Dict[str, str] = _get_param_buffer_mapping(mod, gm_torch_level)
+    _replace_param_buffer_names(param_buffer_table, export_graph_signature)
 
     # 3. Remove non-persistent buffers from the graph signature
-    rewrite_non_persistent_buffers(f, ep_non_strict.sig, ep_non_strict.constants)
+    _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
 
     # 4. Rewrite constants to have the same FQN as the original module.
     _remap_constants(constant_attrs, export_graph_signature, constants)
@@ -1025,7 +1025,7 @@ def _export(
         root=gm,
         graph=gm.graph,
         graph_signature=export_graph_signature,
-        state_dict=f.state_dict(keep_vars=True),
+        state_dict=mod.state_dict(keep_vars=True),
         range_constraints=range_constraints,
         module_call_graph=[
             ModuleCallEntry(
