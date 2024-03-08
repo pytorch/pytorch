@@ -35,8 +35,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
     IS_PPC, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION, \
-    PLATFORM_SUPPORTS_FLASH_ATTENTION
+from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
@@ -4147,7 +4146,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         dtype = torch.double
         self._test_RNN_cpu_vs_cudnn(0, dtype)
 
-    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_cpu_vs_cudnn_with_dropout(self):
         # Because of dropout randomness, can only compare dropout=0 and dropout=1
         self._test_RNN_cpu_vs_cudnn(1)
@@ -4206,8 +4205,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         warnings.simplefilter("always")
         self.assertEqual(m(inp)[0].cpu(), out_expected[0])
 
-
-    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @set_default_dtype(torch.double)
     def test_RNN_dropout(self):
         # checking the assumption that cuDNN sticks dropout in between
@@ -4251,6 +4249,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                     self.assertEqual(hy.data[0][0][0], 10)
                     self.assertEqual(hy.data[1][0][0], output_val)
 
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @set_default_dtype(torch.double)
     def test_error_RNN_seq_len_zero(self):
         # checking error message when RNN has seq_len = 0
@@ -4279,7 +4278,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 # Check that backward does not cause a hard error
                 outs[0].sum().backward()
 
-    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_RNN_dropout_state(self):
         for p in (0, 0.1234):
             for train in (True, False):
@@ -4319,7 +4318,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         self.assertNotEqual(hy1, hy2)
                         self.assertNotEqual(hy1, hy3)
 
-    @unittest.skipIf(not (TEST_CUDNN and (TEST_CUDNN_VERSION if TEST_CUDNN_VERSION else 0) >= 5103), "needs cudnn >= 5.1")
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @set_default_dtype(torch.double)
     def test_RNN_change_dropout(self):
         for train, cuda in product((True, False), repeat=2):
@@ -5017,6 +5016,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertTrue(meta_bn.num_batches_tracked.device == torch.device('meta'))
         meta_bn.load_state_dict(empty_dict, assign=True, strict=False)
         self.assertEqual(meta_bn.state_dict()["num_batches_tracked"], torch.tensor(0))
+
+    def test_batch_norm_update_stats(self):
+        input = torch.rand(0, 1)
+        running_mean = torch.rand(1)
+        running_var = torch.rand(1)
+        with self.assertRaisesRegex(RuntimeError,
+                                    re.escape("input tensor must have at least one element, but got input_sizes = [0, 1]")):
+            torch.batch_norm_update_stats(input=input, momentum=0.0, running_mean=running_mean, running_var=running_var)
 
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
@@ -6225,6 +6232,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         groups = 3
         input_tensor = torch.rand([0, 9, 4, 4])
         output = torch.nn.ChannelShuffle(groups)(input_tensor)
+        torch.testing.assert_close(output, input_tensor)
+
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
+    def test_native_channel_shuffle_return_alias_of_self(self):
+        groups = 3
+        input_tensor = torch.rand([0, 9, 4, 4])
+        output = torch.native_channel_shuffle(input_tensor, groups)
         torch.testing.assert_close(output, input_tensor)
 
     @set_default_dtype(torch.double)
@@ -8465,6 +8479,15 @@ class TestNNDeviceType(NNTestCase):
             mod = torch.nn.ReplicationPad3d((2, 2, 2, 2, 2, 2))
             inp = torch.randn(3, 0, 10, 10, 10, device=device, dtype=dtype)
             mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 2'):
+            torch._C._nn.replication_pad1d(torch.randn([2]), padding=[])
+
+        with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 4'):
+            torch._C._nn.replication_pad2d(torch.randn([2]), padding=[])
+
+        with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6'):
+            torch._C._nn.replication_pad3d(torch.randn([2]), padding=[])
 
     def test_ReplicationPad1d_large(self, device):
         shapes = ([2, 65736, 4], [65736, 2, 4])
@@ -12726,6 +12749,49 @@ class TestFusionUtils(TestCase):
                                        bn.running_mean, bn.running_var, bn.eps, bn.weight, bn.bias)
             self.assertEqual(weight.requires_grad, w_rg)
             self.assertEqual(bias.requires_grad, b_rg)
+
+class TestUtils(TestCase):
+    def test_consume_prefix_in_state_dict_if_present(self):
+        class Block(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = nn.Conv2d(3, 3, 3, bias=True)
+                self.conv2 = nn.Conv2d(3, 3, 3, bias=False)
+
+        class Net(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = nn.Linear(5, 5)
+                self.linear2 = nn.Linear(5, 5)
+                net.bn = nn.BatchNorm2d(2)
+                self.block = Block()
+
+        # 0. Case non-DDP model empty state_dict
+        net = nn.Module()
+        state_dict = net.state_dict()
+        nn.modules.utils.consume_prefix_in_state_dict_if_present(state_dict, 'module.')
+        # check they are the same preserving order
+        self.assertEqual(list(state_dict.keys()), list(net.state_dict().keys()))
+        self.assertEqual(list(state_dict._metadata.keys()), list(net.state_dict()._metadata.keys()))
+
+        # 1. Case non-DDP model test example state_dict
+        net = Net()
+        state_dict = net.state_dict()
+        nn.modules.utils.consume_prefix_in_state_dict_if_present(state_dict, 'module.')
+        # Check they are the same preserving order
+        self.assertEqual(list(state_dict.keys()), list(net.state_dict().keys()))
+        self.assertEqual(list(state_dict._metadata.keys()), list(net.state_dict()._metadata.keys()))
+
+        # 2. Case DDP model test example state_dict
+        state_dict = net.state_dict()
+        metadata = state_dict._metadata
+        ddp_state_dict = OrderedDict((f'module.{k}', v) for k, v in state_dict.items())
+        ddp_state_dict._metadata = OrderedDict({'': metadata['']})
+        ddp_state_dict._metadata.update(('module' if k == '' else f'module.{k}', v) for k, v in metadata.items())
+        nn.modules.utils.consume_prefix_in_state_dict_if_present(ddp_state_dict, 'module.')
+        # Check they are the same preserving order
+        self.assertEqual(list(state_dict.keys()), list(ddp_state_dict.keys()))
+        self.assertEqual(list(state_dict._metadata.keys()), list(ddp_state_dict._metadata.keys()))
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 instantiate_parametrized_tests(TestNN)

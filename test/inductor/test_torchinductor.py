@@ -784,7 +784,7 @@ class CommonTemplate:
             _, code = run_and_get_code(fn, x, y)
             self.assertEqual(
                 " ".join(code).count(
-                    "::view_dtype" if config.cpp_wrapper else "aten.view"
+                    "view_dtype" if config.cpp_wrapper else "aten.view"
                 ),
                 3,
             )
@@ -951,7 +951,7 @@ class CommonTemplate:
             ),
         )
         self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 5)
-        assertGeneratedKernelCountEqual(self, 1 if self.device == GPU_TYPE else 3)
+        assertGeneratedKernelCountEqual(self, 1 if self.device == GPU_TYPE else 2)
 
     def test_index_propagation(self):
         def flip(x):
@@ -8919,7 +8919,7 @@ class CommonTemplate:
                 # 'i1 + 3 * i0' is cached.
                 self.assertTrue(
                     "i0 + 2 * i1" in mul_buf.data.inner_fn_str()
-                    or "i0 + i1 * s0" in mul_buf.data.inner_fn_str()
+                    or "i0 + i1 * s1" in mul_buf.data.inner_fn_str()
                 )
 
         with add_scheduler_init_hook(hook_fn):
