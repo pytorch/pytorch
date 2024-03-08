@@ -29,9 +29,7 @@ if torch._running_with_deploy():
 
 else:
     try:
-        from torch._dynamo.external_utils import (
-            is_compiling as is_torchdynamo_compiling,
-        )
+        from torch.compiler import is_dynamo_compiling as is_torchdynamo_compiling
     except Exception:
         warnings.warn(
             "Unable to import torchdynamo util `is_torchdynamo_compiling`, so won't support torchdynamo correctly"
@@ -1035,10 +1033,20 @@ def all_gather_inplace(
     assert (
         not async_op
     ), "Can't remap async version of inplace op to functional collective"
+    assert all(
+        t.size(0) == tensor.size(0) for t in tensor_list
+    ), "Remapping variable size all_gather is not yet supported"
+
     output = all_gather_tensor(tensor, 0, group, tag)
-    for dst, src in zip(
-        tensor_list, output.split([t.size(0) for t in tensor_list], dim=0)
-    ):
+
+    # Use aten.slice instead of aten.split because the latter causes
+    # tensor.shape(0) to be unnecessarily baked in when it's a SymInt.
+    output_splits = []
+    offset = 0
+    for t in tensor_list:
+        output_splits.append(output[offset : offset + t.size(0)])
+        offset += t.size(0)
+    for dst, src in zip(tensor_list, output_splits):
         dst.copy_(src)
     return tensor_list
 
