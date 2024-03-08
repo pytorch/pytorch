@@ -191,10 +191,22 @@ class PaddingTest(TestCase):
         self.common_numeric_check(f, x)
 
     def test_pad_strides(self):
+        sizes = [2, 16, 511]
+        in_strides = [8176, 511, 1]
+        out_strides = list(ir.Layout._pad_strides(in_strides, sizes))
+        expected_strides = [8192, 512, 1]
+        self.assertEqual(
+            expected_strides, out_strides, f"{expected_strides} v.s. {out_strides}"
+        )
+
+    def test_pad_strides_skip(self):
+        """
+        The padding is skipped to avoid too much memory overhead.
+        """
         sizes = [2, 16, 127]
         in_strides = [2032, 127, 1]
         out_strides = list(ir.Layout._pad_strides(in_strides, sizes))
-        expected_strides = [2048, 128, 1]
+        expected_strides = [2032, 127, 1]
         self.assertEqual(
             expected_strides, out_strides, f"{expected_strides} v.s. {out_strides}"
         )
