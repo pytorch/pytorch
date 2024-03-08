@@ -382,18 +382,19 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             assert not (args or kwargs)
             install_guard(TorchFunctionDisableVariable._guards_singleton)
             return ConstantVariable.create(tx.output.torch_function_enabled)
-        elif self.value is torch.overrides.has_torch_function:
-            assert not (kwargs or len(args) != 1)
-            return ConstantVariable.create(
-                any(has_torch_function(a) for a in args[0].unpack_var_sequence(tx)),
-            )
         elif self.value in (
+            torch.overrides.has_torch_function,
             torch.overrides.has_torch_function_variadic,
             torch.overrides.has_torch_function_unary,
         ):
             assert not kwargs
+            elems = (
+                args[0].unpack_var_sequence(tx)
+                if len(args) == 1 and isinstance(args[0], TupleVariable)
+                else args
+            )
             return ConstantVariable.create(
-                any(has_torch_function(a) for a in args),
+                any(has_torch_function(x) for x in elems),
             )
         elif any(
             self.value is method
