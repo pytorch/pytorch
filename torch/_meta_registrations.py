@@ -788,6 +788,32 @@ def meta__linalg_eigh(
     return vals, vecs
 
 
+@register_meta([aten._linalg_eigvals.default, aten.linalg_eigvals.out])
+@out_wrapper()
+def meta__linalg_eigvals(input: Tensor) -> Tensor:
+    squareCheckInputs(input, "linalg.eigvals")
+    complex_dtype = (
+        input.dtype
+        if utils.is_complex_dtype(input.dtype)
+        else utils.corresponding_complex_dtype(input.dtype)
+    )
+    return input.new_empty(input.shape[:-1], dtype=complex_dtype)
+
+
+@register_meta([aten.linalg_eig])
+@out_wrapper("eigenvalues", "eigenvectors")
+def meta_linalg_eig(input: Tensor):
+    squareCheckInputs(input, "linalg.eig")
+    complex_dtype = (
+        input.dtype
+        if utils.is_complex_dtype(input.dtype)
+        else utils.corresponding_complex_dtype(input.dtype)
+    )
+    values = input.new_empty(input.shape[:-1], dtype=complex_dtype)
+    vectors = input.new_empty(input.shape, dtype=complex_dtype)
+    return values, vectors
+
+
 def cloneBatchedColumnMajor(src: Tensor) -> Tensor:
     return src.mT.clone(memory_format=torch.contiguous_format).transpose(-2, -1)
 
@@ -2249,6 +2275,7 @@ if torch._C._has_mkldnn:
         return out
 
     @register_meta(torch.ops.onednn.qlinear_pointwise.default)
+    @register_meta(torch.ops.onednn.qlinear_pointwise.tensor)
     def meta_qlinear_pointwise(
         x,
         x_scale,
@@ -4317,6 +4344,91 @@ def meta_max_pool2d_with_indices(
             dtype=torch.int64,
             device=input.device,
             memory_format=memory_format,
+        ),
+    )
+
+
+@register_meta(aten.fractional_max_pool2d.default)
+def meta_fractional_max_pool2d(self_, kernel_size, output_size, random_samples):
+    torch._check(
+        self_.ndim in (3, 4),
+        lambda: f"fractional_max_pool2d: Expected 3D or 4D tensor, but got: {self_.ndim}",
+    )
+    ndim = self_.ndim
+
+    for d in range(ndim - 3, ndim):
+        torch._check(
+            self_.size(d) > 0,
+            f"fractional_max_pool2d: Expected input to have non-zero "
+            f" size for non-batch dimenions, but got {self_.size()} with dimension {d} empty",
+        )
+
+    # the check and message are out of sync, but this matches the structured meta
+    torch._check(
+        len(kernel_size) == 2,
+        lambda: "fractional_max_pool2d: kernel_size must"
+        "either be a single int or tuple of Ints",
+    )
+    torch._check(
+        len(output_size) == 2,
+        lambda: "fractional_max_pool2d: output_size must "
+        "either be a single int or tuple of Ints",
+    )
+
+    input_channels = self_.size(-3)
+    input_height = self_.size(-2)
+    input_width = self_.size(-1)
+    if ndim == 4:
+        input_batch = self_.size(0)
+    else:
+        input_batch = 1
+
+    torch._check(
+        self_.dtype == random_samples.dtype,
+        lambda: "Expect _random_samples to have the same dtype as input",
+    )
+    torch._check(
+        random_samples.ndim == 3,
+        lambda: f"Expect _random samples to have 3 dimensions got, {random_samples.ndim}",
+    )
+
+    n = random_samples.size(0)
+    c = random_samples.size(1)
+    d = random_samples.size(2)
+    torch._check(
+        n >= input_batch,
+        "Expect _random_samples.size(0) no less then input batch size.",
+    )
+    torch._check(
+        c == input_channels,
+        lambda: "Expect _random_samples.size(1) equals to input channel size.",
+    )
+    torch._check(d == 2, lambda: f"Expect _random_samples.size(2) equals to 2 got {d}.")
+
+    torch._check(
+        output_size[0] + kernel_size[0] - 1 <= input_height,
+        lambda: f"fractional_max_pool2d: kernel height {kernel_size[0]} is too large relative to input height {input_height}",
+    )
+    torch._check(
+        output_size[1] + kernel_size[1] - 1 <= input_width,
+        lambda: f"fractional_max_pool2d: kernel width {kernel_size[1]} is too large relative to input width {input_width}",
+    )
+
+    if self_.dim() == 4:
+        size = [input_batch, input_channels, output_size[0], output_size[1]]
+    else:
+        size = [input_channels, output_size[0], output_size[1]]
+
+    return (
+        torch.empty(
+            size,
+            dtype=self_.dtype,
+            device=self_.device,
+        ),
+        torch.empty(
+            size,
+            dtype=torch.int64,
+            device=self_.device,
         ),
     )
 
