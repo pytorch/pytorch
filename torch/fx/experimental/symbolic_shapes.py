@@ -3446,7 +3446,7 @@ class ShapeEnv:
             if s in self.var_to_val:
                 continue
             subst = {}
-            for e in itertools.chain(map(lambda ra: ra.expr, self.deferred_runtime_asserts.get(s, ())), self.boolean_constants):
+            for e in itertools.chain((ra.expr for ra in self.deferred_runtime_asserts.get(s, ())), self.boolean_constants):
                 if compute_hint:
                     e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
                 # e is already canonical
