@@ -1395,12 +1395,11 @@ class TestNNParametrization(NNTestCase):
         for dtype in (torch.float, torch.cfloat):
             m = nn.Linear(2, 2, dtype=dtype)
             with torch.no_grad():
-                # set weight to diagonal matrix with values 2., 1.
-                # so spectral norm is 2
+                # set weight to be diagonal
                 x = torch.diagonal(m.weight)
                 m.weight = nn.Parameter(torch.diag(x))
                 torch.nn.utils.parametrizations.spectral_norm(m)
-                # weights should be rescaled by spectral norm, (i.e., largest eigenvalue in norm)
+                # weights should be rescaled by spectral norm, (i.e., largest diagonal element in norm)
                 expected = torch.diag(x / x.abs().max())
                 self.assertEqual(m.weight.data, expected)
 
