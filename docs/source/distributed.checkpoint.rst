@@ -71,6 +71,8 @@ We provide a filesystem based storage layer:
 
 Additionally, we provide the following abstractions for working with Fsspec storage.
 
+.. automodule:: torch.distributed.checkpoint.fsspec
+
 .. autoclass:: torch.distributed.checkpoint.fsspec.FsspecReader
   :members:
 
