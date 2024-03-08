@@ -319,7 +319,7 @@ void CUDAGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
  * the generator.
  */
 void CUDAGeneratorImpl::graphsafe_set_state(
-    c10::intrusive_ptr<GeneratorImpl> gen) {
+    const c10::intrusive_ptr<GeneratorImpl>& gen) {
   c10::intrusive_ptr<CUDAGeneratorImpl> cuda_gen =
       dynamic_intrusive_pointer_cast<CUDAGeneratorImpl>(gen);
   TORCH_CHECK(cuda_gen, "Expected a CUDA Generator");

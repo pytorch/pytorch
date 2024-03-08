@@ -13727,7 +13727,7 @@ add_docstr(
     r"""
 Generator.graphsafe_set_state(state) -> None
 
-Sets the state of the generator to the specified state in a manner that is safe for use in graph capture. 
+Sets the state of the generator to the specified state in a manner that is safe for use in graph capture.
 This method is crucial for ensuring that the generator's state can be captured in the CUDA graph.
 
 Arguments:
@@ -13746,7 +13746,7 @@ add_docstr(
     r"""
 Generator.graphsafe_get_state() -> torch.Generator
 
-Retrieves the current state of the generator in a manner that is safe for graph capture. 
+Retrieves the current state of the generator in a manner that is safe for graph capture.
 This method is crucial for ensuring that the generator's state can be captured in the CUDA graph.
 
 Returns:
@@ -13763,7 +13763,7 @@ add_docstr(
     r"""
 Generator.clone_state() -> torch.Generator
 
-Clones the current state of the generator and returns a new generator pointing to this cloned state. 
+Clones the current state of the generator and returns a new generator pointing to this cloned state.
 This method is beneficial for preserving a particular state of a generator to restore at a later point.
 
 Returns:
