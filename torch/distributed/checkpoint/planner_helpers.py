@@ -241,21 +241,34 @@ def _create_chunk_from_dtensor(tensor: DTensor) -> ChunkStorageMetadata:
     )
 
 
+def _create_chunk_list(tensor: torch.Tensor) -> List[ChunkStorageMetadata]:
+    if isinstance(tensor, DTensor):
+        local_chunks = [_create_chunk_from_dtensor(tensor)]
+    elif isinstance(tensor, ShardedTensor):
+        local_chunks = [
+            _chunk_for_shard(shard.metadata) for shard in tensor.local_shards()
+        ]
+    elif isinstance(tensor, torch.Tensor):
+        local_chunks = [_create_chunk_from_tensor(tensor)]
+    else:
+        raise ValueError(
+            "Unsupported Type, expecting one of [Tensor, DTensor, ShardedTensor] "
+            f",but got {type(tensor)}"
+        )
+
+    return local_chunks
+
+
 def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
     if not isinstance(md, BytesStorageMetadata):
-        if isinstance(obj, DTensor):
-            local_chunks = [_create_chunk_from_dtensor(obj)]
-        elif isinstance(obj, ShardedTensor):
-            local_chunks = [
-                _chunk_for_shard(shard.metadata) for shard in obj.local_shards()
-            ]
-        elif isinstance(obj, torch.Tensor):
-            local_chunks = [_create_chunk_from_tensor(obj)]
-        else:
+        try:
+            local_chunks = _create_chunk_list(obj)
+        except ValueError as ex:
             raise ValueError(
                 f"Invalid checkpoint metadata for {fqn}, "
-                + f"expected BytesStorageMetadata but found {type(md)}"
-            )
+                + f"expected BytesStorageMetadata but found {type(md)}",
+            ) from ex
+
         return create_read_items_for_chunk_list(fqn, md, local_chunks)
     else:
         return [
