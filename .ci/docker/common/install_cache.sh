@@ -50,7 +50,11 @@ chmod a+x /opt/cache/bin/sccache
 function write_sccache_stub() {
   # Unset LD_PRELOAD for ps because of asan + ps issues
   # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=90589
-  printf "#!/bin/sh\nif [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then\n  exec sccache $(which $1) \"\$@\"\nelse\n  exec $(which $1) \"\$@\"\nfi" > "/opt/cache/bin/$1"
+  if [ $1 == "gcc"]; then
+    printf "#!/bin/sh\nif [ \"$1\" = \"-E\" ]; then\n  exec $(which $1)  \"\$@\"\nelif [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then\n  exec sccache $(which $1) \"\$@\"\nelse\n  exec $(which $1) \"\$@\"\nfi" > "/opt/cache/bin/$1"
+  else
+    printf "#!/bin/sh\nif [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then\n  exec sccache $(which $1) \"\$@\"\nelse\n  exec $(which $1) \"\$@\"\nfi" > "/opt/cache/bin/$1"
+  fi
   chmod a+x "/opt/cache/bin/$1"
 }
 
