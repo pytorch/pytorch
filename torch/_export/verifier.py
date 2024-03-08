@@ -165,11 +165,11 @@ class Verifier(metaclass=_VerifierMeta):
 
     @final
     def check(self, ep: ExportedProgram) -> None:
-        self._check_graph_module(ep.graph_module, from_export_trace=ep.from_export_trace)
+        self._check_graph_module(ep.graph_module, from_export=ep.from_export)
         _verify_exported_program_signature(ep)
 
     @final
-    def _check_graph_module(self, gm: torch.fx.GraphModule, from_export_trace: bool = False) -> None:
+    def _check_graph_module(self, gm: torch.fx.GraphModule, from_export: bool = False) -> None:
         def _allowed_getattr_types() -> Tuple[Type[Any], ...]:
             ret = self.allowed_getattr_types()
             assert not any(t is object for t in ret)
@@ -276,7 +276,7 @@ class Verifier(metaclass=_VerifierMeta):
                 # elif node.op == "output":
                 #     _check_flattened_outputs()
 
-        if from_export_trace:
+        if from_export:
             check_nn_module_stack(gm)
         self.check_additional(gm)
 

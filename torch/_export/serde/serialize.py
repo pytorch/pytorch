@@ -1135,6 +1135,7 @@ class ExportedProgramSerializer:
                 minor=SCHEMA_VERSION[1],
             ),
             dialect=exported_program.dialect,
+            from_export=True
         )
 
         # Test canonical form is well defined.
@@ -1859,6 +1860,7 @@ class ExportedProgramDeserializer:
             example_inputs=None,
             verifier=load_verifier(serialized_artifact.exported_program.dialect),
             constants=res.constants,
+            from_export=True
         )
         return upgrader.upgrade(exported_program)
 
@@ -2436,4 +2438,5 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
         range_constraints=range_constraints,
         schema_version=ep.schema_version,
         dialect=ep.dialect,
+        from_export=True
     )
