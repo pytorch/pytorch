@@ -142,6 +142,7 @@ class ExportedProgram:
         constants: Optional[
             Dict[str, Union[torch.Tensor, torch._C.ScriptObject]]
         ] = None,
+        from_export_trace: bool = False,
     ):
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
@@ -165,6 +166,14 @@ class ExportedProgram:
             verifier = Verifier
         assert issubclass(verifier, Verifier)
         self._verifier = verifier
+
+        # from_export_trace is True if the ExportedProgram is created from export/_trace.py
+        # With this we have stronger guarantees on graph metadata, and perform more checks with the verifier.
+        # External users may have their own workflows of constructing ExportedPrograms
+        # (e.g. dynamo trace -> make_fx() -> ExportedProgram() without going through export/_trace.py)
+        # and for this we cannot provide complete guarantees on graph metadata.
+        self.from_export_trace = from_export_trace
+
         # Validate should be always the last step of the constructor.
         self.verifier().check(self)
 

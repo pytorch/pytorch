@@ -850,6 +850,7 @@ def _export(
             ],
             example_inputs=(args, kwargs),
             constants=ep_non_strict.constants,
+            from_export_trace=True,
         )
 
     gm_torch_level = _export_to_torch_ir(
@@ -1048,6 +1049,7 @@ def _export(
         + [ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()],
         example_inputs=(args, kwargs),
         constants=constants,
+        from_export_trace=True,
     )
     log.debug("Exported program from AOTAutograd:\n%s", exported_program)
 
