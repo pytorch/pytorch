@@ -3451,7 +3451,7 @@ class ShapeEnv:
                 subst[canonicalize_bool_expr(expr)] = sympy.true
                 subst[canonicalize_bool_expr(sympy.Not(expr))] = sympy.false
                 if isinstance(expr, sympy.Rel):
-                    # multiyplying by -1 changes the direction of the inequality
+                    # multiplying by -1 changes the direction of the inequality
                     dual = type(expr)(-expr.rhs, -expr.lhs)
                     subst[canonicalize_bool_expr(dual)] = sympy.true
                     subst[canonicalize_bool_expr(sympy.Not(dual))] = sympy.false
