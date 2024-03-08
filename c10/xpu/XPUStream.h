@@ -30,7 +30,7 @@ static constexpr int max_compile_time_stream_priorities = 2;
 
 /*
  * This serves as a wrapper around c10::Stream and acts as a representation for
- * a SYCL queue, which allows to asynchronously execute tasks on XPU.
+ * a SYCL queue, which allows asynchronous execution of XPU tasks.
  */
 class C10_XPU_API XPUStream {
  public:
