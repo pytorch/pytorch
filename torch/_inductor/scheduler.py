@@ -2111,6 +2111,9 @@ class Scheduler:
         )
         return (
             node1.is_template() == config.epilogue_fusion_first and memory_score > 0,
+            # give reduction followed by pointwise less priority since the saving is small
+            # while the data access pattern for pointwise may be worse
+            not (node1.is_reduction() and node2.is_pointwise()) and memory_score > 0,
             node1.is_reduction() == node2.is_reduction() and memory_score > 0,
             memory_score,
             proximity_score,
