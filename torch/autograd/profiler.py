@@ -449,8 +449,8 @@ class profile:
 
         # Create and return FunctionEvent list
         function_events = []
+        function_events_no_link = []
         device_corr_map: Dict[int, List[FunctionEvent]] = {}
-        device_corr_map_values: List[FunctionEvent] = []
         max_evt_id = 0
         for kineto_event in result.events():
             if _filter_name(kineto_event.name()):
@@ -520,26 +520,21 @@ class profile:
                     if cuda_time > 0:
                         fe.append_kernel(fe.name, fe.device_index, cuda_time)
                         fe.is_legacy = True
-            function_events.append(fe)
             corr_id = kineto_event.linked_correlation_id()
             if corr_id > 0:
                 if corr_id not in device_corr_map:
                     device_corr_map[corr_id] = []
                 device_corr_map[corr_id].append(fe)
-        # prepare the values list for corr map to avoid duplicately appending kernel
-        # while some CPU Kineto events (e.g. CUDA/XPU Runtime Activity) have a same
-        # correlation ID as CPU events
-        device_corr_map_values = [
-            fe for fe_list in device_corr_map.values() for fe in fe_list
-        ]
+                function_events.append(fe)
+            else:
+                function_events_no_link.append(fe)
 
         # associate CUDA/XPU kernels and CUDA/XPU runtime (CPU) with CPU events
-        for fe in function_events:
+        for fe in function_events_no_link:
             if (
                 fe.device_type == DeviceType.CPU
                 and not fe.is_async
                 and fe.id in device_corr_map
-                and fe not in device_corr_map_values
             ):
                 for f_evt in device_corr_map[fe.id]:
                     if f_evt.device_type == DeviceType.CUDA:
@@ -565,6 +560,9 @@ class profile:
                         # with the 'thread' of the corresponding linked PyTorch event to properly track
                         # parents and children
                         f_evt.thread = fe.thread
+
+        # Merge function_events list
+        function_events.extend(function_events_no_link)
 
         def createFunctionEventForMemoryEvents(evt):
             rel_start_us = evt.start_us() - trace_start_us
