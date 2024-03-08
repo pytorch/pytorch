@@ -288,7 +288,7 @@ class TORCH_API Context {
   // Throws an error if `Context::deterministicAlgorithms()` is true, CUDA
   // >= 10.2, and CUBLAS_WORKSPACE_CONFIG is not set to either ":16:8" or
   // ":4096:8". For more details:
-  // https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
+  // https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility
   void alertCuBLASConfigNotDeterministic() const;
 
   void setFloat32MatmulPrecision(const std::string& s);

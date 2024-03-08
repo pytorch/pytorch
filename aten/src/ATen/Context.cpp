@@ -174,7 +174,7 @@ void Context::alertCuBLASConfigNotDeterministic() const {
     "case, you must set an environment variable before running your PyTorch application: ",
     cublas_config_var_name, "=", cublas_deterministic_configs[0], " or ",
     cublas_config_var_name, "=", cublas_deterministic_configs[1], ". For more information, go to ",
-    "https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility"
+    "https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility"
   );
 
   if (deterministicAlgorithmsWarnOnly()) {
