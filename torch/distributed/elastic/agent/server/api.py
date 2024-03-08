@@ -29,7 +29,6 @@ from torch.distributed.elastic.metrics import prof, put_metric
 from torch.distributed.elastic.multiprocessing import (
     ProcessFailure,
     SignalException,
-    Std,
 )
 from torch.distributed.elastic.utils.logging import get_logger
 
@@ -90,8 +89,6 @@ class WorkerSpec:
     master_port: Optional[int] = None
     master_addr: Optional[str] = None
     local_addr: Optional[str] = None
-    redirects: Union[Std, Dict[int, Std]] = Std.NONE
-    tee: Union[Std, Dict[int, Std]] = Std.NONE
 
     def __post_init__(self):
         assert self.local_world_size > 0

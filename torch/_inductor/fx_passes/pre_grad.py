@@ -80,7 +80,7 @@ def lazy_init():
         from . import fb  # type: ignore[attr-defined]  # noqa: F401
 
 
-def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
+def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
     """
     Apply passes on the input FX graph using Torch IR.
 
@@ -131,7 +131,8 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
         else:
             # We only log the graph with changes to avoid the excessive compilation time
             # https://fb.workplace.com/groups/257735836456307/permalink/633533465543207/
-            gm = fuse_fx(gm, example_inputs)
+            if example_inputs is not None:
+                gm = fuse_fx(gm, example_inputs)
             numpy_compat_normalization(gm.graph)
             inductor_before_change = copy.deepcopy(counters["inductor"])
             group_batch_fusion_passes(gm.graph, pre_grad=True)
@@ -157,6 +158,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
         config.pattern_matcher
         and hasattr(config, "fx_passes_numeric_check")
         and config.fx_passes_numeric_check.get("pre_grad", False)
+        and example_inputs is not None
     ):
         from .numeric_utils import numeric_check_if_enabled
 

@@ -15,7 +15,7 @@
 #include <torch/library.h>
 
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 namespace {
 static bool any_has_value(ArrayRef<optional<int64_t>> bdims) {
@@ -1245,4 +1245,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("as_strided_scatter", torch::CppFunction::makeFromBoxedFunction<&vmapErrorFallback>());
 }
 
-}}
+} // namespace at::functorch
