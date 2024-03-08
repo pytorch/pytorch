@@ -1,4 +1,4 @@
-from typing import List, Optional, Union, Sequence
+from typing import List, Optional, Tuple, Union
 
 import torch
 from torch import SymInt, Tensor
@@ -17,13 +17,14 @@ __all__ = [
 
 
 def as_nested_tensor(
-    ts: Union[Tensor, Sequence[Tensor]],
+    ts: Union[Tensor, List[Tensor], Tuple[Tensor, ...]],
     dtype: Optional[DType] = None,
     device: Optional[Device] = None,
     layout=None
 ) -> Tensor:
     r"""
-    Constructs a nested tensor preserving autograd history from a tensor or a list of tensors.
+    Constructs a nested tensor preserving autograd history from a tensor or a list / tuple of
+    tensors.
 
     If a nested tensor is passed, it will be returned directly unless the device / dtype / layout
     differ. Note that converting device / dtype will result in a copy, while converting layout
@@ -37,8 +38,8 @@ def as_nested_tensor(
     the nested tensor.
 
     Args:
-        ts (Tensor or List[Tensor]): a tensor to treat as a nested tensor OR a list of tensors
-            with the same ndim
+        ts (Tensor or List[Tensor] or Tuple[Tensor]): a tensor to treat as a nested tensor OR a
+            list / tuple of tensors with the same ndim
 
     Keyword arguments:
         dtype (:class:`torch.dtype`, optional): the desired type of returned nested tensor.
@@ -64,11 +65,14 @@ def as_nested_tensor(
         >>> c = torch.randn(3, 5, requires_grad=True)
         >>> nt2 = torch.nested.as_nested_tensor(c)
     """
-    is_tensor_list = isinstance(ts, list) and all(isinstance(t, Tensor) for t in ts)
+    is_tensor_list = isinstance(ts, (list, tuple)) and all(isinstance(t, Tensor) for t in ts)
     if not isinstance(ts, Tensor) and not is_tensor_list:
         raise TypeError(
-            "as_nested_tensor(): Expected first argument to be a tensor or a list of tensors "
+            "as_nested_tensor(): Expected first argument to be a tensor or a list / tuple of tensors "
         )
+    # convert tuple -> list if needed
+    if is_tensor_list and not isinstance(ts, list):
+        ts = list(ts)
 
     if isinstance(ts, Tensor) and ts.dim() < 2:
         raise RuntimeError("as_nested_tensor(): Expected tensor argument to have dim() > 1")
@@ -95,6 +99,7 @@ def as_nested_tensor(
                 nested_sizes,
                 *torch._nested_compute_contiguous_strides_offsets(nested_sizes))
         else:
+            assert isinstance(ts, list)
             return torch._nested_tensor_from_tensor_list(ts, dtype, None, device, None)
     elif layout == torch.jagged:
         if isinstance(ts, Tensor):
@@ -112,6 +117,7 @@ def as_nested_tensor(
         else:
             from torch.nested._internal.nested_tensor import jagged_from_list
 
+            assert isinstance(ts, list)
             nt, _ = jagged_from_list(ts, offsets=None, device=device, dtype=dtype)
             return nt
     else:
