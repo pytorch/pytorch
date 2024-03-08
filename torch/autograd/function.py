@@ -345,7 +345,7 @@ class FunctionMeta(type):
 
     def __getattribute__(cls, name):
         if name == "is_traceable":
-            warn_traceable_deprecated()
+            _warn_traceable_deprecated()
         return super().__getattribute__(name)
 
     def __setattr__(cls, name, value):
