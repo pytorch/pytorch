@@ -21,6 +21,7 @@ from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     skipIfRocm,
+    skipIfTorchDynamo,
     TEST_FAIRSEQ,
     run_tests,
     parametrize,
@@ -1328,13 +1329,17 @@ class TestSDPAFailureModes(NNTestCase):
     _do_cuda_non_default_stream = True
 
     @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION or not isSM8XDevice,
-                     "Does not support fused SDPA or not SM86+ hardware")
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION or not isSM8XDevice,
+        "Does not support fused SDPA or not SM86+ hardware",
+    )
     @parametrize("head_dim", [193, 204, 256])
-    def test_flash_backward_failure_sm86plus(self, device, head_dim: int):
+    @parametrize("dropout_p", [0.0, 0.2])
+    def test_flash_backward_failure_sm86plus(self, device, head_dim: int, dropout_p: float):
         dtype = torch.float16
         make_tensor = partial(torch.rand, device=device, dtype=dtype)
-        # See check_requires_grad_and_head_dim_gt64_and_sm_ge86 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
+        # See check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89 in
+        # pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
         size = (2, 2, 4, head_dim)
         q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
 
@@ -1351,8 +1356,15 @@ class TestSDPAFailureModes(NNTestCase):
             q = make_tensor(size, requires_grad=True)
             k = make_tensor(size, requires_grad=True)
             v = make_tensor(size, requires_grad=True)
-            self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, None, 0.0, False))
+            if 192 < head_dim <= 224 or (head_dim > 224 and dropout_p != 0.0):
+                self.assertRaises(
+                    RuntimeError,
+                    lambda: torch.nn.functional.scaled_dot_product_attention(
+                        q, k, v, None, dropout_p, False
+                    ),
+                )
+            else:
+                flash_ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, None, dropout_p, False)
 
     @onlyCUDA
     def test_dispatch_fails_no_backend(self, device):
@@ -1589,7 +1601,6 @@ class TestSDPAFailureModes(NNTestCase):
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
 
-
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION or not isLessThanSM80Device,
                      "Current platform does not support fused SDPA or is an SM80+ device.")
@@ -1670,37 +1681,35 @@ class TestSDPAFailureModes(NNTestCase):
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, is_causal=True))
 
-def _get_block_size(device, head_dim, is_causal):
+def _get_block_size_n(device, head_dim, is_dropout, is_causal):
     # This should match the block sizes in the CUDA kernel
-    # Mask is only interesting when we are setting dropout
-    is_dropout = True
     assert head_dim <= 256
     major, minor = torch.cuda.get_device_capability(device)
     is_sm8x = major == 8 and minor > 0  # Only include sm86 and sm89, exclude sm80 (A100)
     is_sm80 = major == 8 and minor == 0
     is_sm90 = major == 9 and minor == 0
     if head_dim <= 32:
-        return 128, 128
+        return 128
     if head_dim <= 64:
-        return (128, 128) if not is_dropout else (128, 64)
+        return 128 if not is_dropout else 64
     elif head_dim <= 96:
-        return (64, 64) if (is_sm8x and is_causal) else (128, 64)
+        return 64
     elif head_dim <= 128:
         if is_sm8x:
-            return (64, 64) if (not is_dropout and is_causal) else (128, 32)
+            return 64 if (not is_dropout and is_causal) else 32
         else:
-            return 128, (64 if not is_dropout else 32)
+            return 64 if not is_dropout else 32
     elif head_dim <= 160:
         if is_sm8x:
-            return (128, 64) if not is_causal else (64, 64)
+            return 64
         else:
-            return 128, 32
+            return 32
     elif head_dim <= 192:
-        return (128, 64) if not is_dropout else (64, 64)
+        return 64
     elif head_dim <= 224:
-        return (128, 64) if (is_sm80 or is_sm90) else (64, 64)
+        return 64
     elif head_dim <= 256:
-        return (128, 64) if is_sm80 else (64, 64)
+        return 64
 
 
 def pad_last_dim(input_tensor, alignment_size, slice: bool = False):
@@ -1963,7 +1972,114 @@ class TestSDPACudaOnly(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
-    def convert_flash_attn_S_to_softmax(self, S, query_padding_mask, key_padding_mask, head_dim, causal=False):
+    # TODO USED FOR TESTING THE SCORES, e.g. testing ALIBI we don't need this now
+    def normalize_flash_attn_S(
+        self,
+        attn_unnorm,
+        q,
+        k,
+        v,
+        query_padding_mask=None,
+        key_padding_mask=None,
+        attn_bias=None,
+        is_dropout=False,
+        causal=False,
+        window_size=(-1, -1),  # -1 means infinite window size
+        scale=None,
+    ):
+        """
+        Arguments:
+            q: (batch_size, seqlen_q, nheads, head_dim)
+            k, v: (batch_size, seqlen_k, nheads, head_dim)
+            key_padding_mask: (batch_size, seqlen_q)
+            attn_bias: broadcastable to (batch_size, nheads, seqlen_q, seqlen_k)
+        Output:
+            softmax_lse: (batch_size, nheads, seqlen_q)
+            softmax_max: (batch_size, nheads, seqlen_q)
+        """
+        q = q.transpose(1, 2)
+        k = k.transpose(1, 2)
+        v = v.transpose(1, 2)
+        if causal:
+            window_size = (window_size[0], 0)
+        q, k, v = q.float(), k.float(), v.float()
+        _, seqlen_q, _, head_dim = q.shape
+        seqlen_k = k.shape[1]
+        b = q.shape[0]
+        from torch.nn.attention.bias import _calculate_scale
+        scale = _calculate_scale(head_dim, scale)
+        scores = torch.matmul(q.transpose(1, 2) * scale, k.permute(0, 2, 3, 1))
+        if key_padding_mask is not None:
+            scores.masked_fill_(~key_padding_mask.view(b, 1, 1, -1), float("-inf"))
+        if window_size[0] >= 0 or window_size[1] >= 0:
+            local_mask = self.construct_local_mask(
+                seqlen_q,
+                seqlen_k,
+                window_size,
+                query_padding_mask,
+                key_padding_mask,
+                q.device,
+            )
+            scores.masked_fill_(local_mask, float("-inf"))
+        if attn_bias is not None:
+            scores = scores + attn_bias.to(dtype=scores.dtype)
+        block_size_n = _get_block_size_n(scores.device, head_dim, is_dropout, causal)
+        scores_block = scores.split(block_size_n, dim=-1)
+        lse_block = torch.stack([torch.logsumexp(s, dim=-1) for s in scores_block], dim=-1)
+        lse = torch.logsumexp(lse_block, dim=-1)
+        # lse could be -inf (i.e. all values in scores are -inf), and we want to set those to inf
+        # so that when we do torch.exp(m - lse), we get 0.0 instead of NaN.
+        lse[lse == float("-inf")] = float("inf")
+        scores_max_block = torch.stack([torch.amax(s, dim=-1) for s in scores_block], dim=-1)
+        cummax_block = torch.cummax(scores_max_block.flip(-1), dim=-1).values.flip(-1).unbind(dim=-1)
+        attn_unnorm_block = attn_unnorm.split(block_size_n, dim=-1)
+        attn_norm = torch.cat(
+            [
+                a * (torch.exp(m - lse)).unsqueeze(-1)
+                for a, m in zip(attn_unnorm_block, cummax_block)
+            ],
+            dim=-1,
+        )
+        if query_padding_mask is not None:
+            attn_norm.masked_fill_(~query_padding_mask.view(b, 1, -1, 1), 0.0)
+            # attn_norm.masked_fill_(rearrange(~query_padding_mask, "b s -> b 1 s 1"), 0.0)
+        return attn_norm.to(dtype=attn_unnorm.dtype)
+
+    def construct_local_mask(self, seqlen_q, seqlen_k, window_size, query_padding_mask, key_padding_mask, device):
+        # row_idx = rearrange(torch.arange(seqlen_q, device=device, dtype=torch.long), "s -> s 1")
+        row_idx = torch.arange(seqlen_q, device=device, dtype=torch.long).view(-1, 1)
+        col_idx = torch.arange(seqlen_k, device=device, dtype=torch.long)
+        sk = (
+            seqlen_k
+            if key_padding_mask is None
+            else key_padding_mask.sum(-1).view(-1, 1, 1, 1)
+            # else rearrange(key_padding_mask.sum(-1), "b -> b 1 1 1")
+        )
+        sq = (
+            seqlen_q
+            if query_padding_mask is None
+            else query_padding_mask.sum(-1).view(-1, 1, 1, 1)
+            # else rearrange(query_padding_mask.sum(-1), "b -> b 1 1 1")
+        )
+        if window_size[0] < 0:
+            return col_idx > row_idx + sk - sq + window_size[1]
+        else:
+            sk = torch.full_like(col_idx, seqlen_k) if key_padding_mask is None else sk
+            return torch.logical_or(
+                col_idx > torch.minimum(row_idx + sk - sq + window_size[1], sk),
+                col_idx < row_idx + sk - sq - window_size[0],
+            )
+
+    def convert_flash_attn_S_to_softmax(
+        self,
+        S,
+        seqlen_q,
+        seqlen_k,
+        query_padding_mask,
+        key_padding_mask,
+        causal=False,
+        window_size=(-1, -1),  # -1 means infinite window size
+    ):
         """FlashAttention stores the S matrix in a different way.
         Arguments:
             S: (batch_size, nheads, seqlen_q, seqlen_k)
@@ -1972,53 +2088,45 @@ class TestSDPACudaOnly(NNTestCase):
         """
         if TEST_WITH_ROCM:
             return S
-
-        b, h, seqlen_q, seqlen_k = S.shape
-        warps_n = 4
-        blocksize_m, blocksize_n = _get_block_size(S.device, head_dim, causal)
-        nblocks_m = (seqlen_q + blocksize_m - 1) // blocksize_m
-        nblocks_n = (seqlen_k + blocksize_n - 1) // blocksize_n
-        mmas_n = (blocksize_n + 16 - 1) // 16
-
-        # Reshape S using PyTorch native functions
-        S_flat = S.view(b, h, nblocks_m, blocksize_m, nblocks_n, blocksize_n)
-        S_flat = S_flat.permute(0, 1, 2, 4, 3, 5)
-        S_flat = S_flat.reshape(b, h, nblocks_m, nblocks_n, (blocksize_m * blocksize_n))
-        S_converted = S_flat.view(b, h, nblocks_m, nblocks_n, mmas_n, -1, warps_n, 8, 4, 2, 2, 2)
-        S_converted = S_converted.permute(0, 1, 2, 5, 6, 10, 7, 3, 4, 9, 8, 11)
-        S_converted = S_converted.reshape(b, h, (nblocks_m * S_converted.size(3) *
-                                          warps_n * 2 * 8), (nblocks_n * mmas_n * 2 * 4 * 2))
+        b = S.shape[0]
 
         if causal:
-            causal_mask = torch.triu(torch.ones(seqlen_q, seqlen_k, dtype=torch.bool, device=S.device), 1)
-            S_converted.masked_fill_(causal_mask, 0.0)
+            window_size = (window_size[0], 0)
+        seqlen_q_rounded, seqlen_k_rounded = S.shape[-2:]
+        S_converted = S
+        if window_size[0] >= 0 or window_size[1] >= 0:
+            local_mask = self.construct_local_mask(
+                seqlen_q,
+                seqlen_k,
+                window_size,
+                query_padding_mask,
+                key_padding_mask,
+                S.device,
+            )
+            local_mask = F.pad(
+                local_mask,
+                (0, seqlen_k_rounded - seqlen_k, 0, seqlen_q_rounded - seqlen_q),
+                value=True,
+            )
+            S_converted = S_converted.masked_fill(local_mask, 0.0)
+
         # Need to zero out things not in attention_mask in case S was initialized with random values
         # and some of those values aren't overwritten.
-        seqlen_q_og = query_padding_mask.shape[-1] if query_padding_mask is not None else seqlen_q
+        seqlen_q_og = (
+            query_padding_mask.shape[-1] if query_padding_mask is not None else seqlen_q_rounded
+        )
         if query_padding_mask is not None:
-            if seqlen_q_og < seqlen_q:
-                query_padding_mask = F.pad(query_padding_mask, (0, seqlen_q - seqlen_q_og))
-            else:
-                query_padding_mask = query_padding_mask[:, :seqlen_q]
-            q_mask_fill = ~query_padding_mask.view(query_padding_mask.shape[0], 1, query_padding_mask.shape[1], 1)
-            S_converted = S_converted.masked_fill(q_mask_fill, 0.0)
+            query_padding_mask = F.pad(query_padding_mask, (0, seqlen_q_rounded - seqlen_q_og))
+            # S_converted = S_converted.masked_fill(rearrange(~query_padding_mask, "b s -> b 1 s 1"), 0.0)
+            S_converted = S_converted.masked_fill(~query_padding_mask.view(b, 1, -1, 1), 0.0)
         seqlen_k_og = key_padding_mask.shape[-1] if key_padding_mask is not None else seqlen_k
         if key_padding_mask is not None:
-            if seqlen_k_og < seqlen_k:
-                key_padding_mask = F.pad(key_padding_mask, (0, seqlen_k - seqlen_k_og))
-            else:
-                key_padding_mask = key_padding_mask[:, :seqlen_k]
-            k_mask_fill = ~key_padding_mask.view(key_padding_mask.shape[0], 1, 1, key_padding_mask.shape[1])
-            S_converted = S_converted.masked_fill(k_mask_fill, 0.0)
-        if seqlen_q_og < seqlen_q:
-            S_converted = S_converted[:, :, :seqlen_q_og, :]
-        else:
-            S_converted = F.pad(S_converted, (0, 0, 0, seqlen_q_og - seqlen_q))
-        if seqlen_k_og < seqlen_k:
-            S_converted = S_converted[:, :, :, :seqlen_k_og]
-        else:
-            S_converted = F.pad(S_converted, (0, seqlen_k_og - seqlen_k))
-        return S_converted
+            key_padding_mask = F.pad(key_padding_mask, (0, seqlen_k_rounded - seqlen_k_og))
+            S_converted = S_converted.masked_fill(~key_padding_mask.view(b, 1, 1, -1), 0.0)
+            # S_converted = S_converted.masked_fill(rearrange(~key_padding_mask, "b s -> b 1 1 s"), 0.0)
+        S_converted = F.pad(S_converted, (0, 0, 0, seqlen_q_og - seqlen_q_rounded))
+        S_converted = F.pad(S_converted, (0, seqlen_k_og - seqlen_k_rounded))
+        return S_converted[:, :, :seqlen_q, :seqlen_k]
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
@@ -2370,28 +2478,29 @@ class TestSDPACudaOnly(NNTestCase):
         query, key, value = make_tensor(shape), make_tensor(shape), make_tensor(shape)
 
         with use_deterministic_algorithims(True, warn_only=warn_only):
-            # Note that this should swith to a testing version with we remove old context manager
             with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]):
                 assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION.value
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
+    @parametrize("fused_kernel", PLATFORM_SPECIFIC_SDPA)
     @parametrize("warn_only", [True, False])
-    def test_mem_eff_backwards_throws_determinism_warning(self, device, warn_only):
+    def test_fused_backwards_throws_determinism_warning(self, device, warn_only, fused_kernel):
         batch_size, seq_len, num_heads, head_dim = 1, 64, 8, 64
         shape = SdpaShape(batch_size, num_heads, seq_len, head_dim)
-        make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=torch.float32, packed=False, requires_grad=True)
+        make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=torch.float16, packed=False, requires_grad=True)
         query, key, value = make_tensor(shape), make_tensor(shape), make_tensor(shape)
 
+        kernel_name = "Memory Efficient attention" if fused_kernel == SDPBackend.EFFICIENT_ATTENTION else "Flash Attention"
         warning_context = (
             self.assertWarnsRegex(
                 UserWarning,
-                "Memory Efficient attention defaults to a non-deterministic algorithm.",
+                f"{kernel_name} defaults to a non-deterministic algorithm.",
             )
             if warn_only
             else contextlib.nullcontext()
         )
         with use_deterministic_algorithims(True, warn_only=warn_only):
-            with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+            with sdpa_kernel(backends=[fused_kernel]):
                 with warning_context:
                     torch.nn.functional.scaled_dot_product_attention(query, key, value).sum().backward()
 
@@ -2710,8 +2819,6 @@ class TestSDPACudaOnly(NNTestCase):
         is_dropout = dropout_p > 0.0
 
         if not is_dropout:
-            # Problem: We pad sizes in the composite region of the top level SDPA. But we need the
-            # Debug mask when have dropout. So I am going to manualy pad up here when testing dropout
             with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
                 out = F.scaled_dot_product_attention(query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale)
             with sdpa_kernel(backends=[SDPBackend.MATH]):
@@ -2722,6 +2829,8 @@ class TestSDPACudaOnly(NNTestCase):
                 out_lp_ref = F.scaled_dot_product_attention(
                     query_ref_lp, key_ref_lp, value_ref_lp, is_causal=is_causal, scale=scale)
         else:
+            # Problem: We pad sizes in the composite region of the top level SDPA. But we need the
+            # Debug mask when have dropout. So I am going to manualy pad up here when testing dropout
             q_padded, q_og_size = pad_last_dim(query, 8)
             k_padded, k_og_size = pad_last_dim(key, 8)
             v_padded, v_og_size = pad_last_dim(value, 8)
@@ -2740,9 +2849,14 @@ class TestSDPACudaOnly(NNTestCase):
                 batch_size, seq_len_k, device=device, dtype=torch.bool)
 
             softmax_mask = self.convert_flash_attn_S_to_softmax(
-                dbug_mask, query_padding_mask, key_padding_mask, head_dim=head_dim,
+                dbug_mask, seq_len_q, seq_len_k, query_padding_mask, key_padding_mask,
                 causal=is_causal)[:, :, :seq_len_q, :seq_len_k]
             dropout_mask = softmax_mask >= 0
+            # attn_unnorm = softmax_mask.abs()
+            # attn = self.normalize_flash_attn_S(attn_unnorm, q_padded,
+            #                                    k_padded, v_padded, query_padding_mask,
+            #                                    key_padding_mask, None, True, is_causal, scale=scale)
+
             # High Precision Math Reference
             out_ref = torch.ops.aten._scaled_dot_product_attention_math(
                 query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal, scale=scale, dropout_mask=dropout_mask)[0]
@@ -2823,7 +2937,8 @@ class TestSDPACudaOnly(NNTestCase):
                     batch_size, seq_len_k, device=device, dtype=torch.bool)
 
                 softmax_mask = self.convert_flash_attn_S_to_softmax(
-                    dbug_mask, query_padding_mask, key_padding_mask, head_dim=head_dim, causal=is_causal)
+                    dbug_mask, seq_len_q, seq_len_k, query_padding_mask, key_padding_mask,
+                    causal=is_causal)[:, :, :seq_len_q, :seq_len_k]
                 dropout_mask = softmax_mask >= 0
                 return dropout_mask
 
@@ -3178,7 +3293,7 @@ class TestSDPACudaOnly(NNTestCase):
             key_padding_mask = key_padding_mask.to("cuda")
 
             softmax_mask = self.convert_flash_attn_S_to_softmax(
-                dbug_mask, query_padding_mask, key_padding_mask, head_dim=head_dim, causal=is_causal)
+                dbug_mask, max_seq_len_q, max_seq_len_kv, query_padding_mask, key_padding_mask, causal=is_causal)
             dropout_mask = softmax_mask >= 0
             nt_stack = []
             for tensor_component in range(batch_size):
@@ -3310,6 +3425,7 @@ class TestAttnBias(NNTestCase):
     @unittest.skipIf(
         sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
     )
+    @skipIfTorchDynamo("This function already calls torch.compile.")
     def test_causal_variants_compile(self, device, causal_variant: CausalVariant, shape: List[Tuple[int]]):
         cnts = CompileCounterWithBackend("aot_eager")
         make_tensor = partial(
