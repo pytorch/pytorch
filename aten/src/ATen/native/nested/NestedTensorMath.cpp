@@ -680,7 +680,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
     std::vector<int64_t> size_reshaped_vector(proposed_shape.begin() + 1, proposed_shape.end());
     // only allow one pre-existing dimension to have proposed shape == -1
     int64_t infer_index_old = -1;
-    // some negative sizes remain to be infered
+    // some negative sizes remain to be inferred
     if (ndims_underlying < ndims_underlying_reshaped) {
       int64_t numel = 1, numel_reshaped = 1;
       // replace negative sizes for old dimensions with old sizes
@@ -770,7 +770,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
 } // namespace
 
 // Note [Special size rule for nested tensor]
-// Instead of infering size, -1 means "inherit the old size", so:
+// Instead of inferring size, -1 means "inherit the old size", so:
 // * negative size is legal for a ragged dimension
 // * however, we only allow one -1
 // In principle we could still infer a dimension,
@@ -931,7 +931,7 @@ Tensor reshape_as_nested(const Tensor& self, const Tensor& other) {
   return self.reshape(sizes);
 }
 
-Tensor& normal_nested_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+Tensor& normal_nested_(Tensor& self, double mean, double std, const std::optional<Generator>& gen) {
   const auto& self_buf = get_nested_tensor_impl(self)->get_buffer();
   self_buf.normal_(mean, std, gen);
   return self;

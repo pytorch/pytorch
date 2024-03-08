@@ -15,9 +15,10 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TestCase,
+    IS_WINDOWS
 )
 
-
+@unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class ExampleTests(TestCase):
     # TODO Maybe we should make this tests actually show up in a file?

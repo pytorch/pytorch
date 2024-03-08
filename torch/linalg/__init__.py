@@ -2332,9 +2332,9 @@ Examples::
     >>> A = torch.randn(2, 3, 3)
     >>> B1 = torch.randn(2, 3, 4)
     >>> B2 = torch.randn(2, 3, 7)
-    >>> A_factor = torch.linalg.lu_factor(A)
-    >>> X1 = torch.linalg.lu_solve(A_factor, B1)
-    >>> X2 = torch.linalg.lu_solve(A_factor, B2)
+    >>> LU, pivots = torch.linalg.lu_factor(A)
+    >>> X1 = torch.linalg.lu_solve(LU, pivots, B1)
+    >>> X2 = torch.linalg.lu_solve(LU, pivots, B2)
     >>> torch.allclose(A @ X1, B1)
     True
     >>> torch.allclose(A @ X2, B2)
@@ -2392,7 +2392,7 @@ If :attr:`left`\ `= False`, this function returns the matrix :math:`X \in \mathb
 
     XA = B\mathrlap{\qquad A \in \mathbb{K}^{k \times k}, B \in \mathbb{K}^{n \times k}.}
 
-If  :attr:`adjoint`\ `= True` (and :attr:`left`\ `= True), given an LU factorization of :math:`A`
+If  :attr:`adjoint`\ `= True` (and :attr:`left`\ `= True`), given an LU factorization of :math:`A`
 this function function returns the :math:`X \in \mathbb{K}^{n \times k}` that solves the system
 
 .. math::

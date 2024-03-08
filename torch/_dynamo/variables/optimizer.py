@@ -4,6 +4,7 @@ import weakref
 from typing import Dict, List
 
 import torch
+
 from ..decorators import mark_static_address
 
 from ..guards import GuardBuilder, install_guard
@@ -109,23 +110,33 @@ class OptimizerVariable(UserDefinedObjectVariable):
         return new_args, new_kwargs
 
     def map_sources_and_install_guards(self, tx):
-        from .builder import VariableBuilder
-
         self.grad_to_source = {}
         self.tensor_to_source = {}
 
-        for g_ind, group in enumerate(self.value.param_groups):
-            group_source = GetItemSource(AttrSource(self.source, "param_groups"), g_ind)
-            for p_ind, p in enumerate(group["params"]):
-                param_source = GetItemSource(
-                    GetItemSource(group_source, "params"), p_ind
-                )
+        from .builder import VariableBuilder
+
+        param_groups_vt = VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
+            self.value.param_groups
+        ).recursive_realize()
+
+        for g_ind, (group, group_vt) in enumerate(
+            zip(self.value.param_groups, param_groups_vt.items)
+        ):
+            group_source = group_vt.source
+            params_vt = group_vt.getitem_const(ConstantVariable.create("params"))
+            for p_ind, (p, p_vt) in enumerate(
+                zip(group["params"], params_vt.unpack_var_sequence(tx))
+            ):
+                param_source = p_vt.source
                 self.tensor_to_source[p] = param_source
+                grad_source = AttrSource(
+                    param_source,
+                    "grad",
+                )
                 if p.grad is not None:
-                    self.grad_to_source[p.grad] = AttrSource(
-                        param_source,
-                        "grad",
-                    )
+                    self.grad_to_source[p.grad] = grad_source
+                else:
+                    install_guard(grad_source.make_guard(GuardBuilder.CONSTANT_MATCH))
 
         # state guards take a long time to generate
         # so we manually generate them here
@@ -152,11 +163,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
                     )
                 else:
                     raise GuardInstallException()
-
-        # this next line has the side effect of installing guards
-        VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
-            self.value.param_groups
-        ).recursive_realize()
 
     def wrap_tensor(self, tx, tensor_value):
         """Wrap state tensor in a TensorVariable"""

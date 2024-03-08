@@ -1350,7 +1350,13 @@ def check_compiler_is_gcc(compiler):
 
     env = os.environ.copy()
     env['LC_ALL'] = 'C'  # Don't localize output
-    version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
+    try:
+        version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
+    except Exception as e:
+        try:
+            version_string = subprocess.check_output([compiler, '--version'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
+        except Exception as e:
+            return False
     # Check for 'gcc' or 'g++' for sccache wrapper
     pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
     results = re.findall(pattern, version_string)
@@ -1847,8 +1853,7 @@ def verify_ninja_availability():
 
 def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
     if IS_WINDOWS:
-        python_path = os.path.dirname(sys.executable)
-        python_lib_path = os.path.join(python_path, 'libs')
+        python_lib_path = os.path.join(sys.base_exec_prefix, 'libs')
 
         extra_ldflags.append('c10.lib')
         if with_cuda:
@@ -1959,9 +1964,9 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
 
     # If not given, determine what's best for the GPU / CUDA version that can be found
     if not _arch_list:
-        print(
+        warnings.warn(
             "TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. \n"
-            "If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'].", file=sys.stderr)
+            "If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'].")
         arch_list = []
         # the assumption is that the extension should run on any of the currently visible cards,
         # which could be of different types - therefore all archs for visible cards should be included
@@ -2342,7 +2347,8 @@ def _write_ninja_file(path,
         cuda_compile_rule = ['rule cuda_compile']
         nvcc_gendeps = ''
         # --generate-dependencies-with-compile is not supported by ROCm
-        if torch.version.cuda is not None:
+        # Nvcc flag `--generate-dependencies-with-compile` is not supported by sccache, which may increase build time.
+        if torch.version.cuda is not None and os.getenv('TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES', '0') != '1':
             cuda_compile_rule.append('  depfile = $out.d')
             cuda_compile_rule.append('  deps = gcc')
             # Note: non-system deps with nvcc are only supported

@@ -351,6 +351,7 @@ configure_file("${TORCH_SRC_DIR}/csrc/api/include/torch/version.h.in"
 
 set(GENERATED_CXX_TORCH
   "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/ViewFuncs.cpp"
   )
 
 if(NOT INTERN_DISABLE_AUTOGRAD AND NOT BUILD_LITE_INTERPRETER)
@@ -367,6 +368,7 @@ if(NOT INTERN_DISABLE_AUTOGRAD AND NOT BUILD_LITE_INTERPRETER)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_4.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_0.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_1.cpp"
+    "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp"
   )
   if(BUILD_LAZY_TS_BACKEND)
     list(APPEND GENERATED_CXX_TORCH
@@ -380,6 +382,7 @@ endif()
 set(GENERATED_H_TORCH
   "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.h"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/variable_factories.h"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/ViewFuncs.h"
   )
 
 if(NOT INTERN_DISABLE_AUTOGRAD)
@@ -420,12 +423,17 @@ set(GENERATED_TESTING_PYTHON
   "${TORCH_SRC_DIR}/testing/_internal/generated/annotated_fn_args.py"
   )
 
+set(GENERATED_CXX_TORCH_CUDA
+  "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_cuda.cpp"
+  )
+
 set(TORCH_GENERATED_CODE
   ${GENERATED_CXX_TORCH}
   ${GENERATED_H_TORCH}
   ${GENERATED_CXX_PYTHON}
   ${GENERATED_H_PYTHON}
   ${GENERATED_TESTING_PYTHON}
+  ${GENERATED_CXX_TORCH_CUDA}
   )
 
 set(GEN_PER_OPERATOR_FLAG)
@@ -968,6 +976,7 @@ endif()
 # Compile exposed libraries.
 if(USE_ROCM)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
+  list(APPEND Caffe2_HIP_SRCS ${GENERATED_CXX_TORCH_CUDA})
   hip_add_library(torch_hip ${Caffe2_HIP_SRCS})
   if(USE_FLASH_ATTENTION)
     target_link_libraries(torch_hip PRIVATE __caffe2_oort)
@@ -986,6 +995,7 @@ if(USE_ROCM)
   endif()
 elseif(USE_CUDA)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
+  list(APPEND Caffe2_GPU_SRCS ${GENERATED_CXX_TORCH_CUDA})
   if(CUDA_SEPARABLE_COMPILATION)
     # Separate compilation fails when kernels using `thrust::sort_by_key`
     # are linked with the rest of CUDA code. Workaround by linking them separately.
@@ -1323,11 +1333,19 @@ if(USE_ROCM)
     USE_ROCM
     __HIP_PLATFORM_AMD__
     )
+
+  if(NOT ROCM_SOURCE_DIR)
+    set(ROCM_SOURCE_DIR "$ENV{ROCM_SOURCE_DIR}")
+  endif()
+  if($ROCM_SOURCE_DIR STREQUAL "")
+    set(ROCM_SOURCE_DIR "/opt/rocm")
+  endif()
+  message(INFO "caffe2 ROCM_SOURCE_DIR = ${ROCM_SOURCE_DIR}")
   target_include_directories(torch_hip PRIVATE
-    /opt/rocm/include
-    /opt/rocm/hcc/include
-    /opt/rocm/rocblas/include
-    /opt/rocm/hipsparse/include
+    ${ROCM_SOURCE_DIR}/include
+    ${ROCM_SOURCE_DIR}/hcc/include
+    ${ROCM_SOURCE_DIR}/rocblas/include
+    ${ROCM_SOURCE_DIR}/hipsparse/include
     )
   if(USE_FLASH_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE USE_FLASH_ATTENTION)
@@ -1586,7 +1604,7 @@ if(USE_CUDA)
   # FIXME: If kineto is linked with CUPTI it pollutes torch_cpu with CUDA dependencies
   # Even worse, it never declares that it depends on cudart, but calls the API, see
   # https://github.com/pytorch/kineto/blob/aef2f5c0f15e3be52406ac0b885e8689de6bc9f6/libkineto/src/CudaDeviceProperties.cpp#L24
-  if(USE_KINETO AND NOT MSVC)
+  if(USE_KINETO AND NOT MSVC AND NOT LIBKINETO_NOCUPTI)
     target_link_libraries(torch_cpu PRIVATE torch::cudart)
   endif()
   target_link_libraries(torch_cuda INTERFACE torch::cudart)
