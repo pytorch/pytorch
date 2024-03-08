@@ -282,6 +282,20 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         DCP.load({}, checkpoint_id=self.temp_dir, no_dist=True)
 
 
+class TestNoCPU(DTensorTestBase):
+    @property
+    def backend(self):
+        return "nccl"
+
+    @with_comms
+    def test_no_cpu(self):
+        with self.assertRaisesRegex(
+            AssertionError, r"A CPU backend must be enabled for async save;.*?"
+        ):
+            f = saver._async_save({})
+            f.result()
+
+
 instantiate_parametrized_tests(TestE2ESaveAndLoad)
 if __name__ == "__main__":
     run_tests()

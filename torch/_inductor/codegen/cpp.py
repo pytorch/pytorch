@@ -7,6 +7,7 @@ import math
 import re
 import sys
 from copy import copy, deepcopy
+from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
@@ -23,7 +24,12 @@ from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
 from ..optimize_indexing import range_expressable_in_32_bits
-from ..scheduler import BaseScheduling, SchedulerNode
+from ..scheduler import (
+    BaseScheduling,
+    ForeachKernelSchedulerNode,
+    FusedSchedulerNode,
+    SchedulerNode,
+)
 from ..utils import (
     cache_on_self,
     get_fused_kernel_name,
@@ -1644,6 +1650,9 @@ class CppKernel(Kernel):
             if not config.cpp.dynamic_threads and self.num_threads == 1:
                 line = f"{var}[{cexpr_index(index)}] += {value};"
             else:
+                dtype = V.graph.get_dtype(name)
+                # mirroring static_cast<float>(...) in load:
+                value = f"static_cast<{DTYPE_TO_CPP[dtype]}>({value})"
                 line = f"atomic_add(&{var}[{cexpr_index(index)}], {value});"
         else:
             raise NotImplementedError(f"store mode={mode}")
@@ -2963,6 +2972,7 @@ class CppVecKernelChecker(CppVecKernel):
                                 torch.float16,
                                 torch.bfloat16,
                                 torch.float,
+                                torch.float64,
                                 torch.uint8,
                                 torch.int8,
                                 torch.int32,
@@ -3448,6 +3458,12 @@ class CppKernelProxy(CppKernel):
         self.codegen_loops_impl(self.loop_nest, code, worksharing)
 
 
+class ReasonFusedNodes(Enum):
+    SAME_VARS_REDUCE = "same_vars_reduce"
+    COMPATIBLE_REDUCTION = "compatible_reduction"
+    COMPATIBLE_RANGES_NO_REDUCTION = "compatible_ranges_no_reduction"
+
+
 class CppScheduling(BaseScheduling):
     # ctypes limits the number of args to 1024, refer to:
     # https://github.com/python/cpython/commit/a285af7e626d1b81cf09f8b2bf7656f100bc1237
@@ -3474,15 +3490,114 @@ class CppScheduling(BaseScheduling):
         else:
             self.kernel_group = KernelGroup()
 
-    def _can_fuse_horizontal_impl(self, node1, node2):
+    def fuse(self, node1, node2):
+        if node1.is_foreach() or node2.is_foreach():
+            return ForeachKernelSchedulerNode.fuse(node1, node2)
+        else:
+            if (
+                self._why_fuse_nodes(node1, node2)
+                == ReasonFusedNodes.COMPATIBLE_RANGES_NO_REDUCTION
+            ):
+                assert isinstance(node1, (SchedulerNode, FusedSchedulerNode))
+                assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
+
+                _, (vars1, reduce1) = node1.group
+                _, (vars2, reduce2) = node2.group
+                assert reduce1 == () and reduce2 == (), (reduce1, reduce2)
+
+                def get_indexing_ranges_exprs(node):
+                    if isinstance(node, FusedSchedulerNode):
+                        assert len(node.snodes) > 0
+                        return get_indexing_ranges_exprs(node.snodes[0])
+                    else:
+                        assert isinstance(node, SchedulerNode)
+                        comp_buffer = node.node
+                        assert isinstance(comp_buffer, ir.ComputedBuffer)
+                        _, body, _ = comp_buffer.get_default_sizes_body()
+                        return body.var_ranges, list(body.indexing_exprs.values())
+
+                node_to_recomp = node1 if len(vars1) < len(vars2) else node2
+                assert isinstance(node_to_recomp, SchedulerNode)
+
+                ref_node = node2 if len(vars1) < len(vars2) else node1
+
+                extra_indexing_constraints = get_indexing_ranges_exprs(ref_node)
+
+                node_to_recomp.recompute_size_and_body(
+                    extra_indexing_constraints=extra_indexing_constraints
+                )
+
+                _, (vars1, _) = node1.group
+                _, (vars2, _) = node2.group
+                assert vars1 == vars2, (vars1, vars2)
+
+            return FusedSchedulerNode.fuse(node1, node2)
+
+    def _why_fuse_nodes(self, node1, node2) -> Optional[ReasonFusedNodes]:
         _, (vars1, reduce1) = node1.group
         _, (vars2, reduce2) = node2.group
+
         if vars1 == vars2 and reduce1 == reduce2:
-            return True
+            return ReasonFusedNodes.SAME_VARS_REDUCE
         if reduce1 == () and vars1 == vars2 + reduce2:
-            return True
+            return ReasonFusedNodes.COMPATIBLE_REDUCTION
+        if self._can_fuse_nodes_with_compatible_ranges(node1, node2):
+            return ReasonFusedNodes.COMPATIBLE_RANGES_NO_REDUCTION
         # TODO(jansel): allow fusion pointwise (vars1, ()) suffix?
-        return False
+        return None
+
+    def _can_fuse_nodes_with_compatible_ranges(self, node1, node2):
+        # Here we try to fuse SchedulerNode/FusedSchedulerNode with compatible ranges
+        # e.g. (s0, s1, s2) and (s0 * s1 * s2)
+        _, (vars1, reduce1) = node1.group
+        _, (vars2, reduce2) = node2.group
+
+        c1 = reduce1 == () and reduce2 == ()
+        c2 = math.prod(vars1) == math.prod(vars2)
+        c3 = len(vars1) == 1 or len(vars2) == 1
+        if not (c1 and c2 and c3):
+            return False
+
+        node_to_recomp = node1 if len(vars1) < len(vars2) else node2
+        ref_node = node2 if len(vars1) < len(vars2) else node1
+
+        # We can not recompute sizes and body for nodes other than SchedulerNode
+        # TODO: we can extend fusion support with compatible ranges for FusedSchedulerNode
+        if isinstance(node_to_recomp, FusedSchedulerNode):
+            return False
+
+        def get_buffer(node):
+            if isinstance(node, FusedSchedulerNode):
+                assert len(node.snodes) > 0
+                # use the last scheduler node from the list as it has the most
+                # relevant indexing expressions
+                return get_buffer(node.snodes[-1])
+            else:
+                assert isinstance(node, SchedulerNode)
+                return node.node
+
+        ref_node_buffer = get_buffer(ref_node)
+        if isinstance(ref_node_buffer, ir.TemplateBuffer):
+            return False
+
+        assert isinstance(ref_node_buffer, ir.ComputedBuffer)
+
+        # It may happen that node1 and node2 compatible number of elements
+        # but different original ranges, for example:
+        # {d0: s0, d1: s1, d2: s2} vs {d0: s0*s1*s2}
+        # See https://github.com/pytorch/pytorch/pull/120077/files#r1500427848 for more details
+        # TODO: we can fix if it allows us to CSE at least one of the variables
+        var_ranges1 = ref_node_buffer.get_read_writes().var_ranges
+        var_ranges2 = node_to_recomp.node.get_read_writes().var_ranges
+        if var_ranges1 != var_ranges2:
+            return False
+
+        return True
+
+    def _can_fuse_horizontal_impl(self, node1, node2):
+        assert isinstance(node1, (FusedSchedulerNode, SchedulerNode))
+        assert isinstance(node2, (FusedSchedulerNode, SchedulerNode))
+        return self._why_fuse_nodes(node1, node2) is not None
 
     def can_fuse_horizontal(self, node1, node2):
         if (
