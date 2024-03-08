@@ -1350,6 +1350,8 @@ def wrap_fx_proxy_cls(
     target_cls, tx, proxy, example_value=None, subclass_type=None, **options
 ):
     from ..symbolic_convert import InstructionTranslatorBase
+    # Avoid a circular import
+    from torch.nested._internal import sdpa
 
     assert isinstance(tx, InstructionTranslatorBase)
     if "guards" in options and options["guards"] is not None:

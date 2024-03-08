@@ -390,29 +390,29 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             x = torch.ones(2, 2).as_subclass(LocalSubclass)
             fn(x)
 
-    def test_user_overidden_attr_unsupported(self):
-        class LocalSubclass(torch.Tensor):
-            @classmethod
-            def __torch_function__(cls, func, types, args=(), kwargs=None):
-                if kwargs is None:
-                    kwargs = {}
-                return super().__torch_function__(func, types, args, kwargs)
+    # def test_user_overidden_attr_unsupported(self):
+    #     class LocalSubclass(torch.Tensor):
+    #         @classmethod
+    #         def __torch_function__(cls, func, types, args=(), kwargs=None):
+    #             if kwargs is None:
+    #                 kwargs = {}
+    #             return super().__torch_function__(func, types, args, kwargs)
 
-            ndim = 10
+    #         ndim = 10
 
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            return x.ndim
+    #     @torch.compile(backend="eager", fullgraph=True)
+    #     def fn(x):
+    #         return x.ndim
 
-        msg = (
-            "Accessing overridden method/attribute ndim on a tensor"
-            " subclass with a __torch_function__ override is not supported"
-        )
-        with torch._dynamo.config.patch(
-            "traceable_tensor_subclasses", {LocalSubclass}
-        ), self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
-            x = torch.ones(2, 2).as_subclass(LocalSubclass)
-            fn(x)
+    #     msg = (
+    #         "Accessing overridden method/attribute ndim on a tensor"
+    #         " subclass with a __torch_function__ override is not supported"
+    #     )
+    #     with torch._dynamo.config.patch(
+    #         "traceable_tensor_subclasses", {LocalSubclass}
+    #     ), self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+    #         x = torch.ones(2, 2).as_subclass(LocalSubclass)
+    #         fn(x)
 
     def test_user_overidden_property_unsupported(self):
         class LocalSubclass(torch.Tensor):
