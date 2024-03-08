@@ -1096,6 +1096,10 @@ class IterationRangesRoot(IterationRanges):
     def get_pid(self):
         assert self.grid_dim is not None
         key = f"tl.program_id({self.grid_dim})"
+        # y_grid can only be up to 2^16, so express it in terms of y and z
+        # in case of overflow. z grid is only exercised when max_tiles == 3 (off by default).
+        if self.grid_dim == 1 and config.triton.max_tiles <= 2:
+            key = f'{key} * {f"tl.program_id({self.grid_dim + 1})"}'
         pid = self.pid_cache.get(key, key)
         if self.kernel.index_dtype != "tl.int32":
             return f"{pid}.to({self.kernel.index_dtype})"
