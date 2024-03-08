@@ -2,9 +2,7 @@
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 
-#include <cmath>
 #include <deque>
-#include <mutex>
 #include <vector>
 
 namespace at::xpu {
@@ -46,7 +44,7 @@ void initDeviceGlobalIdx(DeviceIndex device) {
   };
   auto it = std::find_if(devices.begin(), devices.end(), match_device);
   TORCH_CHECK(
-      it != devices.end(), "Cant't find the global index of XPU device.");
+      it != devices.end(), "Can't find the global index of XPU device.");
   device_global_idxs[device] =
       static_cast<int32_t>(std::distance(devices.begin(), it));
 }

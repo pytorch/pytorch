@@ -1200,6 +1200,28 @@ class TestTracer(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, r"Only tensors.+can be output from traced functions"):
             traced_f = torch.jit.trace(f, [])
 
+    def test_trace_with_nested_strided_tensor_output(self):
+        @torch.jit.script
+        def nt_construct(values, kv_lengths):
+            kv_lengths_list: List[int] = kv_lengths.tolist()
+            return torch._nested_tensor_from_tensor_list(
+                list(values.split(kv_lengths_list, dim=0)), None, None, None, None
+            )
+
+        def f(x, offsets):
+            kv_lengths = offsets[1:] - offsets[:-1]
+            return nt_construct(x, kv_lengths).cos()
+
+        x = torch.rand(5, 4)
+        offsets = torch.tensor([0, 2, 5])
+        ref = f(x, offsets)
+        f_t = torch.jit.trace(f, (x, offsets))
+        res = f_t(x, offsets)
+        self.assertEqual(ref, res)
+        x2 = torch.rand((8, 4))
+        offsets2 = torch.tensor([0, 2, 4, 8])
+        self.assertEqual(f(x2, offsets2), f_t(x2, offsets2))
+
     def test_trace_variable_instantiation(self):
         def random_foo(x):
             return Variable(Variable(x) + 1.0)

@@ -238,6 +238,8 @@ aten::fmod.Tensor
 aten::fmod.Tensor_out
 aten::fmod_.Scalar
 aten::fmod_.Tensor
+aten::frexp.Tensor
+aten::frexp.Tensor_out
 aten::full
 aten::full.out
 aten::gcd
@@ -388,8 +390,6 @@ aten::normal.float_float_out
 aten::normal.out
 aten::normal_
 aten::permute
-aten::pixel_shuffle
-aten::pixel_shuffle.out
 aten::polar
 aten::polar.out
 aten::pow.Scalar

@@ -59,6 +59,7 @@ pass_patterns = [
 ]
 # patterns applied only in inference
 inference_patterns = PatternMatcherPass()
+decompose_mm_pass = PatternMatcherPass()
 
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
@@ -91,6 +92,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             patterns.apply(gm.graph)  # type: ignore[arg-type]
         if is_inference:
             inference_patterns.apply(gm.graph)  # type: ignore[arg-type]
+        decompose_mm_pass.apply(gm.graph)  # type: ignore[arg-type]
 
     if config.post_grad_custom_post_pass is not None:
         config.post_grad_custom_post_pass(gm.graph)
@@ -113,6 +115,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 @init_once_fakemode
 def lazy_init():
     if torch._C._has_mkldnn:
+        from . import decompose_mem_bound_mm  # noqa: F401
         from .mkldnn_fusion import _mkldnn_fusion_init
 
         _mkldnn_fusion_init()
@@ -660,6 +663,10 @@ def decompose_auto_functionalized(graph):
     def replacement(match: Match, *args, **kwargs):
         from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
 
+        only_clone_these_tensors = tuple(
+            match.nodes[0].meta.get("only_clone_these_tensors", [])
+        )
+
         flat_args, spec = pytree.tree_flatten((args, kwargs))
 
         # NB: we combine (args, kwargs) into flat args for replacing.
@@ -667,7 +674,7 @@ def decompose_auto_functionalized(graph):
         # tracing a function with kwargs.
         def decomp(*flat_args):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
-            return auto_functionalized_dense(*args, **kwargs)
+            return auto_functionalized_dense(*args, only_clone_these_tensors, **kwargs)
 
         with V.fake_mode:
             match.replace_by_example(decomp, flat_args, run_dce=False)

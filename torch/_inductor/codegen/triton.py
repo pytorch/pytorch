@@ -40,7 +40,7 @@ from torch.utils._triton import has_triton_package
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash, get_path, PyCodeCache
-from ..dependencies import Dep, MemoryDep, StarDep
+from ..dependencies import Dep, MemoryDep, StarDep, WeakDep
 from ..ir import IRNode, ReductionHint, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
@@ -905,6 +905,20 @@ class TritonKernelOverrides(TritonOverrides):
             f"tl.load({var} + {V.kernel.args.seed_offset('load_seed_offset', offset)})"
         )
 
+    @staticmethod
+    def frexp(x):
+        cache_key = f"frexp({x})"
+        if cache_key in V.kernel.cse.cache:
+            return V.kernel.cse.cache[cache_key]
+
+        mantissa = V.kernel.cse.newvar()
+        exponent = V.kernel.cse.newvar()
+        V.kernel.compute.writeline(
+            f"{mantissa}, {exponent} = triton_helpers.frexp({x})"
+        )
+        V.kernel.cse.cache[cache_key] = (mantissa, exponent)
+        return (mantissa, exponent)
+
 
 # Use mypy to check protocol implemented correctly
 def _typecheck_TritonKernelOverrides(h: TritonKernelOverrides) -> OpsHandler[str]:
@@ -1277,6 +1291,7 @@ class TritonKernel(Kernel):
 
         self.simplify_indexing = simplify_indexing
         self.code_hash = None
+        self.triton_meta: Optional[Dict[str, object]] = None
 
     def need_numel_args(self):
         r"""
@@ -2567,6 +2582,9 @@ class TritonKernel(Kernel):
         import AttrsDescriptor if the triton version is new enough to have this
         class defined.
         """
+        if not has_triton_package():
+            return ""
+
         import triton.compiler.compiler
 
         if hasattr(triton.compiler.compiler, "AttrsDescriptor"):
@@ -2620,9 +2638,14 @@ class TritonKernel(Kernel):
                 # This arg points to a buf that has been sliced.
                 # We need to count each individual slice to have
                 # a better estimation.
-                indices = set()
+                indices: Set[Any] = set()
+                no_index_dep_count = 0
                 for dep in self.buf_accesses[arg]:
-                    indices.add(dep.index)
+                    if isinstance(dep, (StarDep, WeakDep)):
+                        indices.add(f"no_index_dep_{no_index_dep_count}")
+                        no_index_dep_count += 1
+                    else:
+                        indices.add(dep.index)
                 numel = len(indices) * out_numel
             else:
                 numel = buf_size
@@ -2640,8 +2663,6 @@ class TritonKernel(Kernel):
         return "pointwise"
 
     def codegen_kernel(self, name=None):
-        from triton import next_power_of_2
-
         code = IndentedBuffer()
 
         size_hints = []
@@ -2728,6 +2749,7 @@ class TritonKernel(Kernel):
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
             "no_x_dim": self.no_x_dim,
+            "backend_hash": torch.utils._triton.triton_hash_with_backend(),
         }
         num_gb = None
         if config.benchmark_kernel or config.profile_bandwidth:
@@ -2748,6 +2770,16 @@ class TritonKernel(Kernel):
             # )
             # argdefs.append(f"{tree.prefix}numel: tl.constexpr")
         triton_meta["configs"] = [config_of(signature)]
+
+        # Triton compiler includes equal_to_1 args into constants even
+        # when they are not constexpr. otherwise there may be a segfault
+        # during launching the Inductor-compiled Triton kernel.
+        # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
+        # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
+        for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
+            triton_meta["constants"][arg_num] = 1  # type: ignore[index]
+
+        self.triton_meta = triton_meta
 
         for tree in self.range_trees:
             if tree.prefix == "r" and self.persistent_reduction:
@@ -2911,6 +2943,7 @@ class TritonKernel(Kernel):
             cuda=True,
             triton=True,
             grid_fn=self._get_grid_fn(),
+            triton_meta=self.triton_meta,
         )
 
         if self.args.workspace_arg is not None:
@@ -3505,7 +3538,9 @@ class TritonScheduling(BaseScheduling):
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
             compile_wrapper.splice(src_code, strip=True)
-            compile_wrapper.writeline("''')")
+            compile_wrapper.writeline(
+                f"''', device_str='{V.graph.scheduler.current_device.type}')"
+            )
 
             metadata_comment = f"# kernel path: {kernel_path}"
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
