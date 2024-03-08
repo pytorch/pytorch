@@ -21,13 +21,10 @@ class DataPtr;
  * PYTORCH_DEFAULT and BACKEND_DEFAULT are valid for all backends. The
  * BACKEND_DEFAULT is what a particular backend would select if no
  * flags were given. PYTORCH_DEFAULT is the PyTorch's framework default
- * choice for events on that backend, which may not be the same. For example,
- * when PyTorch creates a CUDA event it sets the flag
- * CUDA_EVENT_DISABLING_TIMING by default to improve performance.
+ * choice for events on that backend, which may not be the same.
  *
  * The mapping of PYTORCH_DEFAULT and BACKEND_DEFAULT is done by each
- * backend implementation. Backend-specific flags, like CUDA_EVENT_DEFAULT,
- * should map one-to-one with actual event flags for those backends.
+ * backend implementation. 
  */
 enum class EventFlag {
   // Disable timing
