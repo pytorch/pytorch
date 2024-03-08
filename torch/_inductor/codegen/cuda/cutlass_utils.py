@@ -196,6 +196,10 @@ def dtype_match(
         return cutlass_dtype == cutlass_library.library.DataType.f16
     elif torch_dtype == torch.bfloat16:
         return cutlass_dtype == cutlass_library.library.DataType.bf16
+    elif torch_dtype == torch.int8:
+        return cutlass_dtype == cutlass_library.library.DataType.s8
+    elif torch_dtype == torch.int32:
+        return cutlass_dtype == cutlass_library.library.DataType.s32
     else:
         return False
 
@@ -220,6 +224,8 @@ def get_accumulator_dtype(
             return torch.float
     if torch_dtype in {torch.bfloat16, torch.float}:
         return torch.float
+    if torch_dtype == torch.int8:
+        return torch.int32
     raise NotImplementedError(f"Unsupported data type: {input_torch_dtypes=}")
 
 
@@ -232,6 +238,10 @@ def get_alignments(torch_dtype: torch.dtype) -> List[int]:
     if torch_dtype in (torch.half, torch.bfloat16):
         return [8, 4, 2, 1]
     elif torch_dtype == torch.float:
+        return [4, 2, 1]
+    elif torch_dtype in (torch.uint8, torch.int8):
+        return [16, 8, 4, 2]
+    elif torch_dtype == torch.int32:
         return [4, 2, 1]
     else:
         raise NotImplementedError(f"unsupported {torch_dtype=} for alignments")
