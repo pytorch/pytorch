@@ -264,7 +264,7 @@ def define(qualname, schema, *, lib=None, tags=()):
         >>> # Call the new operator from torch.ops.
         >>> x = torch.randn(3)
         >>> y1 = torch.ops.mylib.sin(x)
-        >>> y2 = np.sin(x)
+        >>> y2 = torch.sin(x)
         >>> assert torch.allclose(y1, y2)
 
     """
@@ -334,7 +334,7 @@ def impl(qualname, types, func=None, *, lib=None):
         >>> # Call the new operator from torch.ops.
         >>> x = torch.randn(3)
         >>> y1 = torch.ops.mylib.sin(x)
-        >>> y2 = np.sin(x)
+        >>> y2 = torch.sin(x)
         >>> assert torch.allclose(y1, y2)
         >>>
         >>> # Example 2: Register function with decorator.
@@ -357,7 +357,7 @@ def impl(qualname, types, func=None, *, lib=None):
         >>> x = torch.randn(3)
         >>> # This function call will print "my_decorator called."
         >>> y1 = torch.ops.mylib.sin(x)
-        >>> y2 = np.sin(x)
+        >>> y2 = torch.sin(x)
         >>> assert torch.allclose(y1, y2)
     """
     if isinstance(types, str):
