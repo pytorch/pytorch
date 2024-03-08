@@ -1,3 +1,5 @@
+#include <ATen/ops/add.h>
+#include <ATen/ops/ones_like.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorOperators.h>
@@ -720,8 +722,6 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
 
     const auto query = query_ * (is_negative_scaling ? c10::SymFloat(0.0) - scaling_factor: scaling_factor);
     if (is_causal) {
-        TORCH_CHECK(!attn_mask.has_value(),
-                "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
         TORCH_CHECK(!query.is_nested() && !key.is_nested(),
                 "_scaled_dot_product_attention: Nested tensors for query / key are not supported when is_causal=True");
 
@@ -729,6 +729,9 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         const auto L = query.sym_size(-2), S = key.sym_size(-2);
         attn_mask = at::ones_symint({L, S}, query.options().dtype(at::kBool)).tril();
         attn_mask = convert_boolean_attn_mask(attn_mask, query.dtype());
+        if (attn_mask_.has_value()) {
+          attn_mask = at::add(attn_mask_.value(), attn_mask.value());
+        }
     }
     auto attn = at::matmul(query, key.transpose(-2, -1) * scaling_factor);
     if (attn_mask.has_value()) {
