@@ -105,7 +105,7 @@ jobs:
           echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
 
       - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@jeanschmidt/calc-dock-img-ecr-login
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
