@@ -674,7 +674,7 @@ class cuda:
     # 4) default system search PATH.
     cuda_cxx: Optional[str] = None
 
-    # Minimum of M*N*N to consider the CUTLASS backend for GEMM ops.
+    # Minimum value of M*N*K to consider the CUTLASS backend for GEMM ops.
     cutlass_backend_min_gemm_size: int = 1
 
     # If set to True, it will ensure that only GEMM ops capable of
