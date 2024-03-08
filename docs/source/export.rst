@@ -280,8 +280,8 @@ know the python code is not exactly needed for computation. For example:
             with ContextManager():
                 return x.sin() + x.cos()
 
-    torch.export.export(M(), (torch.ones(3, 3),), strict=False)  # Non-strict traces successfully
-    torch.export.export(M(), (torch.ones(3, 3),))  # Strict mode fails with torch._dynamo.exc.Unsupported: ContextManager
+    export(M(), (torch.ones(3, 3),), strict=False)  # Non-strict traces successfully
+    export(M(), (torch.ones(3, 3),))  # Strict mode fails with torch._dynamo.exc.Unsupported: ContextManager
 
 In this example, the first call using non-strict mode (through the
 ``strict=False`` flag) traces successfully whereas the second call using strict
@@ -394,6 +394,60 @@ Some additional things to note:
   that the exported program will not work for dimensions 0 or 1. See
   `The 0/1 Specialization Problem <https://docs.google.com/document/d/16VPOa3d-Liikf48teAOmxLc92rgvJdfosIy-yoT38Io/edit?fbclid=IwAR3HNwmmexcitV0pbZm_x1a4ykdXZ9th_eJWK-3hBtVgKnrkmemz6Pm5jRQ#heading=h.ez923tomjvyk>`_
   for an in-depth discussion of this topic.
+
+
+We can also specify more expressive relationships between input shapes, such as
+where a pair of shapes might differ by one, a shape might be double of
+another, or a shape is even. An example:
+
+::
+
+    class M(torch.nn.Module):
+        def forward(self, x, y):
+            return x + y[1:]
+
+    x, y = torch.randn(5), torch.randn(6)
+    dimx = torch.export.Dim("dimx", min=3, max=6)
+    dimy = dimx + 1
+
+    exported_program = torch.export.export(
+        M(), (x, y), dynamic_shapes=({0: dimx}, {0: dimy}),
+    )
+    print(exported_program)
+
+.. code-block::
+
+    ExportedProgram:
+    class GraphModule(torch.nn.Module):
+        def forward(self, arg0_1: "f32[s0]", arg1_1: "f32[s0 + 1]"):
+            # code: return x + y[1:]
+            slice_1: "f32[s0]" = torch.ops.aten.slice.Tensor(arg1_1, 0, 1, 9223372036854775807);  arg1_1 = None
+            add: "f32[s0]" = torch.ops.aten.add.Tensor(arg0_1, slice_1);  arg0_1 = slice_1 = None
+            return (add,)
+
+    Graph signature: ExportGraphSignature(
+        input_specs=[
+            InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='arg0_1'), target=None, persistent=None),
+            InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='arg1_1'), target=None, persistent=None)
+        ],
+        output_specs=[
+            OutputSpec(kind=<OutputKind.USER_OUTPUT: 1>, arg=TensorArgument(name='add'), target=None)]
+    )
+    Range constraints: {s0: ValueRanges(lower=3, upper=6, is_bool=False), s0 + 1: ValueRanges(lower=4, upper=7, is_bool=False)}
+
+Some things to note:
+
+* By specifying ``{0: dimx}`` for the first input, we see that the resulting
+  shape of the first input is now dynamic, being ``[s0]``. And now by specifying
+  ``{0: dimy}`` for the second input, we see that the resulting shape of the
+  second input is also dynamic. However, because we expressed ``dimy = dimx + 1``,
+  instead of ``arg1_1``'s shape containing a new symbol, we see that it is
+  now being represented with the same symbol used in ``arg0_1``, ``s0``. We can
+  see that relationship of ``dimy = dimx + 1`` is being shown through ``s0 + 1``.
+
+* Looking at the range constraints, we see that ``s0`` has the range [3, 6],
+  which is specified initially, and we can see that ``s0 + 1`` has the solved
+  range of [4, 7].
 
 
 Serialization
