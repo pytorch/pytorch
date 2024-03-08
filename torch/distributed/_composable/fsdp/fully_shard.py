@@ -252,7 +252,8 @@ class FSDP:
                 if fsdp_param.offload_to_cpu and not local_tensor.is_pinned():
                     local_tensor = local_tensor.cpu().pin_memory()
                 fsdp_param._sharded_param_data = local_tensor.view(-1)
-                cast(DTensor, fsdp_param.sharded_param)._local_tensor = local_tensor[
+                assert isinstance(fsdp_param.sharded_param, DTensor)  # mypy
+                fsdp_param.sharded_param._local_tensor = local_tensor[
                     : fsdp_param.sharded_size[0]
                 ]
         return ret
