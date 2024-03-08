@@ -1290,18 +1290,6 @@ class TestNNParametrization(NNTestCase):
 
                         gradcheck(fn, (m.parametrizations.weight.original,))
 
-    @skipIfTorchDynamo
-    def test_new_spectral_norm_cdouble(self):
-        dtype = torch.cfloat
-        net = nn.Linear(2, 2).to(dtype)
-        # top singular value is 2 = spectral norm
-        t = torch.diag(torch.tensor([2., 1.], dtype=dtype))
-        net.weight = nn.Parameter(t)
-        # weights should be rescaled by spectral norm
-        torch.nn.utils.parametrizations.spectral_norm(net, n_power_iterations=400)
-        # weights should now be diag(1., 0.5)
-        self.assertEqual(net.weight, torch.diag(torch.tensor([1., 0.5], dtype=dtype)))
-
     def test_new_spectral_norm_load_state_dict(self):
         for activate_times in (0, 3):
             inp = torch.randn(2, 3)
@@ -1404,16 +1392,17 @@ class TestNNParametrization(NNTestCase):
     def test_new_spectral_norm_value(self):
         # a test that the spectral norm (= top singular value)
         # is in fact properly calculated, using example of a simple diagonal matrix.
-        m = nn.Linear(2, 2)
-        with torch.no_grad():
-            # set weight to diagonal matrix with values 2., 1.
-            # so spectral norm is 2
-            m.weight = nn.Parameter(torch.diag(torch.tensor([2.0, 1.0])))
-            torch.nn.utils.parametrizations.spectral_norm(m)
-            # weights should be rescaled by spectral norm, so should now be
-            # diag(1., 0.5)
-            expected = torch.diag(torch.tensor([1.0, 0.5]))
-            self.assertEqual(m.weight.data, expected)
+        for dtype in (torch.float, torch.cfloat):
+            m = nn.Linear(2, 2, dtype=dtype)
+            with torch.no_grad():
+                # set weight to diagonal matrix with values 2., 1.
+                # so spectral norm is 2
+                m.weight = nn.Parameter(torch.diag(torch.tensor([2.0, 1.0], dtype=dtype)))
+                torch.nn.utils.parametrizations.spectral_norm(m)
+                # weights should be rescaled by spectral norm, so should now be
+                # diag(1., 0.5)
+                expected = torch.diag(torch.tensor([1.0, 0.5], dtype=dtype))
+                self.assertEqual(m.weight.data, expected)
 
     @skipIfNoLapack
     def test_orthogonal_parametrization(self):
