@@ -990,6 +990,18 @@ def reduce_scatter_tensor_inplace(
     return output.copy_(reduce_scatter_tensor(input, op, scatter_dim, group, tag))
 
 
+REDUCE_OP_TO_STR = {
+    dist.ReduceOp.SUM: "sum",
+    dist.ReduceOp.AVG: "avg",
+    dist.ReduceOp.PRODUCT: "product",
+    dist.ReduceOp.MIN: "min",
+    dist.ReduceOp.MAX: "max",
+    dist.ReduceOp.BAND: "band",
+    dist.ReduceOp.BOR: "bor",
+    dist.ReduceOp.BXOR: "bxor",
+}
+
+
 def all_reduce_inplace(
     tensor: torch.Tensor,
     op: str = "sum",
