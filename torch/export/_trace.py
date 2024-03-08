@@ -721,7 +721,13 @@ def _export(
 
                     def forward(self, *args, **kwargs):
                         nonlocal out_spec
-                        tree_out = self._export_root(*args, **kwargs)
+                        if isinstance(self._export_root, torch.fx.GraphModule):
+                            with torch.fx.traceback.preserve_node_meta():
+                                tree_out = torch.fx.Interpreter(self._export_root).run(
+                                    *args, **kwargs
+                                )
+                        else:
+                            tree_out = self._export_root(*args, **kwargs)
                         flat_outs, out_spec = pytree.tree_flatten(tree_out)
                         return tuple(flat_outs)
 
