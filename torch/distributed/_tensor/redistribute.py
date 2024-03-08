@@ -3,6 +3,7 @@ from functools import lru_cache
 from typing import cast, Dict, List, NamedTuple, Tuple
 
 import torch
+import torch.distributed._functional_collectives as funcol
 import torch.distributed._tensor.api as dtensor
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import (
@@ -139,6 +140,8 @@ def redistribute_local_tensor(
     local_tensor: torch.Tensor,
     current_spec: DTensorSpec,
     target_spec: DTensorSpec,
+    *,
+    async_op: bool = False,
     is_backward: bool = False,
 ) -> torch.Tensor:
     """
@@ -226,6 +229,12 @@ def redistribute_local_tensor(
             if current.is_replicate():
                 partial_spec = cast(_Partial, target)
                 # skip the replicate to partial transformation when we are in backward pass
+                # In this case we keep the grad as replicate, this is because we don't
+                # want to convert the replicated gradients back to partial, although
+                # that's logically conform with the same layout, converting the gradients
+                # back to partial is actually useless as you would have to do reduce later
+                # which would be more expensive than keeping it replicate! For this reason,
+                # we keep the replicate grad here.
                 new_local_tensor = (
                     partial_spec._partition_value(local_tensor, device_mesh, i)
                     if not is_backward
@@ -241,6 +250,9 @@ def redistribute_local_tensor(
 
     assert new_local_tensor is not None, "redistribute failed!"
 
+    if not async_op and isinstance(new_local_tensor, funcol.AsyncCollectiveTensor):
+        new_local_tensor = new_local_tensor.wait()
+
     return new_local_tensor
 
 
@@ -252,15 +264,19 @@ class Redistribute(torch.autograd.Function):
         input: "dtensor.DTensor",
         device_mesh: DeviceMesh,
         placements: Tuple[Placement, ...],
+        async_op: bool = False,
     ):
         current_spec = input._spec
         ctx.current_spec = current_spec
+        ctx.async_op = async_op
         target_spec = DTensorSpec(
             device_mesh, placements, tensor_meta=input._spec.tensor_meta
         )
 
         local_tensor = input._local_tensor
-        output = redistribute_local_tensor(local_tensor, current_spec, target_spec)
+        output = redistribute_local_tensor(
+            local_tensor, current_spec, target_spec, async_op=async_op
+        )
 
         return dtensor.DTensor(
             output,
@@ -275,38 +291,21 @@ class Redistribute(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output: "dtensor.DTensor"):  # type: ignore[override]
         previous_spec = ctx.current_spec
-        # When we run backward pass of redistribute (i.e. manual redistribute from
-        # user code instead of torch_dispatch), we scan first and see if we need
-        # to change the target placement for one special case:
-        #   replicate -> partial.
-        # In this case we keep the grad as replicate, this is because we don't
-        # want to convert the replicated gradients back to partial, although
-        # that's logically conform with the same layout, converting the gradients
-        # back to partial is actually useless as you would have to do reduce later
-        # which would be more expensive than keeping it replicate! For this reason,
-        # we keep the replicate grad here.
-        # TODO: see if this make sense for all cases.
         current_spec = grad_output._spec
-
-        target_placements: List[Placement] = []
-        for current, target in zip(current_spec.placements, previous_spec.placements):
-            if not current.is_partial() and target.is_partial():
-                # keep target placement to replicate instead of partial in this case
-                target_placements.append(Replicate())
-            else:
-                target_placements.append(target)
-        target_spec = DTensorSpec(
-            previous_spec.mesh,
-            tuple(target_placements),
-            tensor_meta=previous_spec.tensor_meta,
-        )
+        async_op = ctx.async_op
 
         local_tensor = grad_output._local_tensor
-        output = redistribute_local_tensor(local_tensor, current_spec, target_spec)
+        output = redistribute_local_tensor(
+            local_tensor,
+            current_spec,
+            previous_spec,
+            async_op=async_op,
+            is_backward=True,
+        )
         output_dtensor = dtensor.DTensor(
             output,
-            target_spec.mesh,
-            target_spec.placements,
+            previous_spec.mesh,
+            previous_spec.placements,
             shape=grad_output.shape,
             dtype=grad_output.dtype,
             requires_grad=grad_output.requires_grad,
@@ -315,6 +314,7 @@ class Redistribute(torch.autograd.Function):
 
         return (
             output_dtensor,
+            None,
             None,
             None,
         )
