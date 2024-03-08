@@ -86,6 +86,46 @@ schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 
 
+@lru_cache(None)
+def gen_attr_descriptor_import():
+    """
+    import AttrsDescriptor if the triton version is new enough to have this
+    class defined.
+    """
+    if not has_triton_package():
+        return ""
+
+    import triton.compiler.compiler
+
+    if hasattr(triton.compiler.compiler, "AttrsDescriptor"):
+        return "from triton.compiler.compiler import AttrsDescriptor"
+    else:
+        return ""
+
+
+@lru_cache(None)
+def gen_common_triton_imports():
+    imports = IndentedBuffer()
+    imports.splice(
+        """
+        import triton
+        import triton.language as tl
+        """
+    )
+    if attr_desc := gen_attr_descriptor_import():
+        imports.writeline(attr_desc)
+
+    imports.splice(
+        """
+        from torch._inductor import triton_helpers, triton_heuristics
+        from torch._inductor.ir import ReductionHint, TileHint
+        from torch._inductor.triton_heuristics import AutotuneHint
+        from torch._inductor.utils import instance_descriptor
+        """
+    )
+    return imports.getvalue()
+
+
 @dataclasses.dataclass
 class IndexingOptions:
     index_str: str
@@ -2575,23 +2615,6 @@ class TritonKernel(Kernel):
             )
         )
 
-    @staticmethod
-    @lru_cache(None)
-    def gen_attr_descriptor_import():
-        """
-        import AttrsDescriptor if the triton version is new enough to have this
-        class defined.
-        """
-        if not has_triton_package():
-            return ""
-
-        import triton.compiler.compiler
-
-        if hasattr(triton.compiler.compiler, "AttrsDescriptor"):
-            return "from triton.compiler.compiler import AttrsDescriptor"
-        else:
-            return ""
-
     def estimate_kernel_num_bytes(self):
         """
         Try the best to estimate the total size (in bytes) of the
@@ -2691,19 +2714,7 @@ class TritonKernel(Kernel):
         heuristics = self._get_heuristic()
 
         if name is None:
-            code.splice(
-                f"""
-                    import triton
-                    import triton.language as tl
-                    from torch._inductor.ir import ReductionHint
-                    from torch._inductor.ir import TileHint
-                    from torch._inductor.triton_heuristics import AutotuneHint, {heuristics}
-                    from torch._inductor.utils import instance_descriptor
-                    from torch._inductor import triton_helpers
-                """
-            )
-            if self.gen_attr_descriptor_import():
-                code.splice(self.gen_attr_descriptor_import())
+            code.splice(gen_common_triton_imports())
 
             if config.benchmark_kernel:
                 code.splice(self.imports_for_benchmark_kernel())
@@ -2798,7 +2809,7 @@ class TritonKernel(Kernel):
         if self.inside_reduction:
             reduction_hint = self.reduction_hint
             heuristics_line = f"""
-                @{heuristics}(
+                @triton_heuristics.{heuristics}(
                     size_hints={size_hints!r},
                     reduction_hint={reduction_hint},
                     filename=__file__,
@@ -2815,7 +2826,7 @@ class TritonKernel(Kernel):
                 else:
                     tile_hint = "tile_hint=TileHint.DEFAULT,"
             heuristics_line = f"""
-                @{heuristics}(
+                @triton_heuristics.{heuristics}(
                     size_hints={size_hints!r}, {tile_hint}
                     filename=__file__,
                     triton_meta={triton_meta!r},
