@@ -1095,9 +1095,8 @@ def main():
         "networkx",
         "jinja2",
         "fsspec",
+        'mkl>=2021.1.1,<=2021.4.0; platform_system == "Windows"',
     ]
-    if IS_WINDOWS:
-        install_requires.append("mkl>=2021.1.1,<=2021.4.0")
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
@@ -1251,6 +1250,7 @@ def main():
         "include/torch/csrc/inductor/aoti_runtime/*.h",
         "include/torch/csrc/inductor/aoti_torch/*.h",
         "include/torch/csrc/inductor/aoti_torch/c/*.h",
+        "include/torch/csrc/inductor/aoti_torch/generated/*.h",
         "include/torch/csrc/jit/*.h",
         "include/torch/csrc/jit/backends/*.h",
         "include/torch/csrc/jit/generated/*.h",

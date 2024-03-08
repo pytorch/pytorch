@@ -2393,6 +2393,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::call_guard<py::gil_scoped_release>())
           .def_property_readonly(
               "options", &::c10d::ProcessGroupNCCL::getOptions)
+          .def_property_readonly("uid", &::c10d::ProcessGroupNCCL::getUid)
           .def_property(
               "bound_device_id",
               &::c10d::ProcessGroupNCCL::getBoundDeviceId,
