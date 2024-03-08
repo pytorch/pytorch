@@ -22,7 +22,12 @@ static PyObject* THXPEvent_pynew(
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   constexpr const char* kwlist[] = {"enable_timing", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
-          args, kwargs, "|b", const_cast<char**>(kwlist), &enable_timing)) {
+          args,
+          kwargs,
+          "|b",
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+          const_cast<char**>(kwlist),
+          &enable_timing)) {
     return nullptr;
   }
 
@@ -106,15 +111,13 @@ static PyObject* THXPEvent_synchronize(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,
-// cppcoreguidelines-avoid-non-const-global-variables, modernize-avoid-c-arrays)
+// NOLINTNEXTLINE(*c-arrays*, *global-variables)
 static struct PyGetSetDef THXPEvent_properties[] = {
     {"device", (getter)THXPEvent_get_device, nullptr, nullptr, nullptr},
     {"sycl_event", (getter)THXPEvent_get_sycl_event, nullptr, nullptr, nullptr},
     {nullptr}};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,
-// cppcoreguidelines-avoid-non-const-global-variables, modernize-avoid-c-arrays)
+// NOLINTNEXTLINE(*c-arrays*, *global-variables)
 static PyMethodDef THXPEvent_methods[] = {
     {(char*)"record", THXPEvent_record, METH_O, nullptr},
     {(char*)"wait", THXPEvent_wait, METH_O, nullptr},

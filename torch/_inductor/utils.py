@@ -20,6 +20,7 @@ import tempfile
 import textwrap
 import time
 import unittest
+from dataclasses import fields
 from datetime import datetime
 from io import StringIO
 from typing import (
@@ -224,15 +225,50 @@ def ceildiv(
 
 def next_power_of_2(n: int) -> int:
     """Return the smallest power of 2 greater than or equal to n"""
-    assert n <= 2**32, "32-bit only"
     n -= 1
     n |= n >> 1
     n |= n >> 2
     n |= n >> 4
     n |= n >> 8
     n |= n >> 16
+    n |= n >> 32
     n += 1
     return n
+
+
+def _type_of(key):
+    # Use the function here to get rid of dependencies on the Triton during the codegen.
+    # Refer to Triton implementation here:
+    # https://github.com/openai/triton/blob/98b5945d2aef679e00ebca8e07c35c3658ec76de/python/triton/runtime/jit.py#L238
+    # `None` is nullptr.  Implicitly convert to *i8.
+    if key is None:
+        return "*i8"
+    dtype_str = str(key).split(".")[-1]
+    tys = {
+        "bool": "i1",
+        "float8e4nv": "fp8e4nv",
+        "float8e5": "fp8e5",
+        "float8e4b15": "fp8e4b15",
+        "float8e4b15x4": "fp8e4b15x4",
+        "float8_e4m3fn": "fp8e4nv",
+        "float8_e5m2": "fp8e5",
+        "float16": "fp16",
+        "bfloat16": "bf16",
+        "float32": "fp32",
+        "float64": "fp64",
+        "int8": "i8",
+        "int16": "i16",
+        "int32": "i32",
+        "int64": "i64",
+        "uint8": "u8",
+        "uint16": "u16",
+        "uint32": "u32",
+        "uint64": "u64",
+    }
+    # reinterpret can create triton type
+    for v in list(tys.values()):
+        tys[v] = v
+    return key if isinstance(key, str) else f"*{tys[dtype_str]}"
 
 
 def convert_shape_to_inductor(
@@ -602,6 +638,8 @@ def any_is_symbolic(*args: Any) -> bool:
 
 
 def has_incompatible_cudagraph_ops(gm):
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
     forbidden_set = {
         "aten._fused_moving_avg_obs_fq_helper.default",
         "aten._fused_moving_avg_obs_fq_helper_functional.default",
@@ -611,6 +649,11 @@ def has_incompatible_cudagraph_ops(gm):
         "run_and_save_rng_state",
         "run_with_rng_state",
         "aten._local_scalar_dense",
+        # Technically, it's not necessary to ban this, because an
+        # assert_scalar with constant arguments can be validly run
+        # with CUDA graphs, but the operator is also pointless with
+        # constant arguments, so might as well ban
+        "aten._assert_scalar",
     }
     if torch.are_deterministic_algorithms_enabled():
         forbidden_set.update(
@@ -631,14 +674,48 @@ def has_incompatible_cudagraph_ops(gm):
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
             return True
+        if (val := node.meta.get("val")) is not None and free_unbacked_symbols(val):
+            return True
     return False
 
 
+# Attempt to import AttrsDescriptor from Triton
 try:
-    from triton.compiler.compiler import AttrsDescriptor as instance_descriptor
+    from triton.compiler.compiler import AttrsDescriptor
+
+    attrs_descriptor_available = True
+    # Determine if 'ids_of_folded_args' is a valid field for AttrsDescriptor
+    ids_of_folded_args_available = "ids_of_folded_args" in [
+        f.name for f in fields(AttrsDescriptor)
+    ]
 except ImportError:
-    # To support older version of triton which does not have AttrsDescriptor
-    # class
+    attrs_descriptor_available = False
+
+# Define `instance_descriptor` function with clear conditional handling
+if attrs_descriptor_available:
+
+    def instance_descriptor(
+        divisible_by_16=None,
+        equal_to_1=None,
+        ids_of_folded_args=None,
+        divisible_by_8=None,
+    ):
+        # Prepare the arguments for AttrsDescriptor
+        kwargs = {
+            "divisible_by_16": divisible_by_16,
+            "equal_to_1": equal_to_1,
+            "divisible_by_8": divisible_by_8,
+        }
+
+        # Conditionally add 'ids_of_folded_args' if it's available in AttrsDescriptor
+        if ids_of_folded_args_available:
+            kwargs["ids_of_folded_args"] = ids_of_folded_args
+
+        # Instantiate AttrsDescriptor with the prepared arguments
+        return AttrsDescriptor(**kwargs)
+
+else:
+    # Define a namedtuple as a fallback when AttrsDescriptor is not available
     instance_descriptor = collections.namedtuple(  # type: ignore[no-redef]
         "instance_descriptor",
         ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
@@ -954,11 +1031,13 @@ def run_and_get_code(fn, *args, **kwargs):
             source_codes.append(f.read())
         return mod
 
-    with mock.patch.object(
-        GraphLowering, "compile_to_module", patched_compile_to_module
-    ):
-        torch._dynamo.reset()
-        result = fn(*args, **kwargs)
+    # If FX code caching is enabled, a hit prevents getting the code.
+    with config.patch({"fx_graph_cache": False}):
+        with mock.patch.object(
+            GraphLowering, "compile_to_module", patched_compile_to_module
+        ):
+            torch._dynamo.reset()
+            result = fn(*args, **kwargs)
     return result, source_codes
 
 
@@ -1034,17 +1113,10 @@ def get_num_bytes(*args: torch.Tensor, num_in_out_args: int = 0) -> int:
     )
 
 
-def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix=""):
+def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix="", color=True):
     info_str = f"{prefix}{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:7.2f}GB/s{suffix}"
-    try:
-        import colorama
-
-        if ms > 0.012 and gb_per_s < 650:
-            info_str = colorama.Fore.RED + info_str + colorama.Fore.RESET
-    except ImportError:
-        log.warning("Colorama is not installed. Install it if you want colored output")
-
-    return info_str
+    slow = ms > 0.012 and gb_per_s < 650
+    return red_text(info_str) if color and slow else info_str
 
 
 def get_benchmark_name():
@@ -1286,3 +1358,18 @@ def is_wait(node):
     from . import ir
 
     return isinstance(node, ir.Wait) or type(node) == ir._WaitKernel
+
+
+@contextlib.contextmanager
+def collect_defined_kernels(kernel_list):
+    from .codegen.wrapper import WrapperCodeGen
+
+    orig_define_kernel = WrapperCodeGen.define_kernel
+
+    def new_define_kernel(wrapper, name, kernel_code, metadata, *args, **kwargs):
+        nonlocal kernel_list
+        kernel_list.append(kernel_code)
+        return orig_define_kernel(wrapper, name, kernel_code, metadata, *args, **kwargs)
+
+    with unittest.mock.patch.object(WrapperCodeGen, "define_kernel", new_define_kernel):
+        yield

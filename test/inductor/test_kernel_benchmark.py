@@ -344,6 +344,25 @@ class TestKernelBenchmark(TestCase):
         #        = 0.022
         self.check_bandwidth(compiled_module, "0.022")
 
+    def test_star_dep(self):
+        """
+        Test the bandwidth estimation for StarDep
+        """
+
+        @torch.compile
+        def f(a, b):
+            a[b] = 3.0
+
+        a = torch.rand(10000, 5000, device=GPU_TYPE)
+        b = torch.randint(
+            0, 10000, [20000], device=GPU_TYPE, dtype=torch.int32
+        ).unsqueeze(1)
+        f(a, b)
+        compiled_module = self.get_compiled_module()
+        # 20000 * 4 = 80KB for b
+        # 20000 * 5000 * 4 = 200MB for a
+        self.check_bandwidth(compiled_module, "0.200")
+
 
 if __name__ == "__main__":
     if HAS_GPU:

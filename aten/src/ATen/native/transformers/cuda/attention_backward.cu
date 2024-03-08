@@ -1,3 +1,4 @@
+#include <string_view>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <cstdint>
 #include <type_traits>
@@ -41,9 +42,8 @@
 #include <ATen/native/transformers/cuda/mem_eff_attention/gemm_kernel_utils.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h>
 #endif
-namespace at {
 
-namespace native {
+namespace at::native {
 
 std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     const Tensor& grad_out,
@@ -74,6 +74,21 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   //  The kernel computes irregardless we will drop for this functions return
   Tensor grad_softmax;
 
+  // Currently unused args:
+  c10::optional<at::Tensor> alibi_slopes{c10::nullopt};
+
+  bool determinisitic{false};
+  auto& ctx = at::globalContext();
+  if (ctx.deterministicAlgorithms()) {
+    if (ctx.deterministicAlgorithmsWarnOnly()) {
+      TORCH_WARN_ONCE(
+          "Flash Attention defaults to a non-deterministic algorithm. ",
+          "To explicitly enable determinism call torch.use_deterministic_algorithms(True, warn_only=False).");
+    } else {
+      determinisitic = true;
+    }
+  }
+
   // We check the whether the cumulative_sequence_length_q is defined
   // in order to determine whether we are using varlen or dense forward
   if (cumulative_sequence_length_q.defined()) {
@@ -90,6 +105,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         dv,
         cumulative_sequence_length_q,
         cumulative_sequence_length_k,
+        alibi_slopes,
         max_seqlen_batch_q,
         max_seqlen_batch_k,
         dropout_p,
@@ -98,6 +114,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         is_causal,
         -1, /*window_size_left*/
         -1, /*window_size_right*/
+        determinisitic,
         philox_seed,
         philox_offset);
     return std::make_tuple(dQuery, dKey, dValue);
@@ -113,11 +130,13 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         dq,
         dk,
         dv,
+        alibi_slopes,
         dropout_p,
         softmax_scale,
         is_causal,
         -1, /*window_size_left*/
         -1, /*window_size_right*/
+        determinisitic,
         philox_seed,
         philox_offset);
     return std::make_tuple(std::move(dQuery), std::move(dKey), std::move(dValue));
@@ -540,8 +559,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
   Tensor grad_out_t = grad_out_.transpose(1,2);
   Tensor out_t = out.transpose(1,2);
 
-  Tensor grad_q, grad_k, grad_v;
-  std::tie(grad_q, grad_k, grad_v) = at::_flash_attention_backward(
+  auto [grad_q, grad_k, grad_v] = at::_flash_attention_backward(
     grad_out_t,
     q_t,
     k_t,
@@ -592,14 +610,14 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
 
   Tensor grad_q, grad_k, grad_v, grad_bias;
 
-  // This is needed because SaveVarible automatically converts
+  // This is needed because SaveVariable automatically converts
   // c10::optional to undefined tensor
   c10::optional<Tensor> kernel_bias;
   if (attn_bias.defined()) {
     kernel_bias = attn_bias;
   }
   // Will add with signauter changes for dropout and bias
-  // We are only handiling Dense inputs, but this should be passed
+  // We are only handling Dense inputs, but this should be passed
   // from forward to backward
   int64_t max_seqlen_q = q_t.size(1);
   int64_t max_seqlen_k = k_t.size(1);
@@ -631,5 +649,4 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
       grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2), grad_bias);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
