@@ -112,7 +112,7 @@ void create_partition(
     op transpose_key_before_qk_op(
         op_idx++,
         op::kind::StaticTranspose,
-        {key_requires_transpose_once ? key_src_desc,
+        {key_requires_transpose_once ? key_src_desc
                                      : transpose_key_first_time_desc},
         {transposed_key_before_qk_desc},
         "transpose_key");
