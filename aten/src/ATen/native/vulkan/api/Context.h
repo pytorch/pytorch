@@ -168,19 +168,14 @@ class Context final {
     }
   }
 
- private:
-  DescriptorSet submit_compute_prologue(
-      CommandBuffer&,
+  DescriptorSet get_descriptor_set(const ShaderInfo&, const utils::uvec3&);
+
+  void register_shader_dispatch(
+      const DescriptorSet&,
+      PipelineBarrier&,
       const ShaderInfo&,
       const utils::uvec3&);
 
-  void submit_compute_epilogue(
-      CommandBuffer&,
-      const DescriptorSet&,
-      PipelineBarrier&,
-      const utils::uvec3&);
-
- public:
   template <class S, class D>
   bool submit_copy(
       PipelineBarrier&,
@@ -502,23 +497,16 @@ inline bool Context::submit_compute_job(
 
   // Factor out template parameter independent code to minimize code bloat.
   DescriptorSet descriptor_set =
-      submit_compute_prologue(cmd_, shader, local_work_group_size);
+      get_descriptor_set(shader, local_work_group_size);
 
   detail::bind(
       descriptor_set,
       std::index_sequence_for<Arguments...>{},
       std::forward<Arguments>(arguments)...);
 
-  // Adjust the global workgroup size based on the output tile size
-  const utils::uvec3 effective_global_wg = {
-      utils::div_up(global_work_group.data[0u], shader.out_tile_size.data[0u]),
-      utils::div_up(global_work_group.data[1u], shader.out_tile_size.data[1u]),
-      utils::div_up(global_work_group.data[2u], shader.out_tile_size.data[2u]),
-  };
-
   // Factor out template parameter independent code to minimize code bloat.
-  submit_compute_epilogue(
-      cmd_, descriptor_set, pipeline_barrier, effective_global_wg);
+  register_shader_dispatch(
+      descriptor_set, pipeline_barrier, shader, global_work_group);
 
 #ifdef USE_VULKAN_GPU_DIAGNOSTICS
   if (enable_op_profiling_) {
