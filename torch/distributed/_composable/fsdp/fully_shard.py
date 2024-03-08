@@ -239,7 +239,8 @@ class FSDP:
                     padded_local_tensor[: local_tensor.size(0)].copy_(local_tensor)
                     local_tensor = padded_local_tensor
                 fsdp_param._sharded_param_data = local_tensor.view(-1)
-                cast(DTensor, fsdp_param.sharded_param)._local_tensor = local_tensor[
+                assert isinstance(fsdp_param.sharded_param, DTensor)  # mypy
+                fsdp_param.sharded_param._local_tensor = local_tensor[
                     : fsdp_param.sharded_size[0]
                 ]
         return ret
