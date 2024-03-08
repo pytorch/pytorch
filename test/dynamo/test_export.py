@@ -2720,7 +2720,7 @@ def forward(self, x):
     def test_trivial_constraint(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
-                # non-trivial divisibility condition
+                # complex divisibility condition
                 if (2 * x.shape[0] + 3) % (x.shape[0] - 3) == 0:
                     return x + 1
                 else:
@@ -2738,6 +2738,16 @@ def forward(self, x):
 
         bar = Bar()
 
+        class Qux(torch.nn.Module):
+            def forward(self, x):
+                # simple divisibility condition (not trivially true)
+                if (3 * x.shape[0]) % 2 == 0:
+                    return x + 1
+                else:
+                    return x - 1
+
+        qux = Qux()
+
         x = torch.randn(12)
         dim0 = torch.export.Dim("dim0", max=100)
         dynamic_shapes = {"x": (dim0,)}
@@ -2748,6 +2758,12 @@ def forward(self, x):
             torch.export.export(foo, (x,), dynamic_shapes=dynamic_shapes)
 
         torch.export.export(bar, (x,), dynamic_shapes=dynamic_shapes)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Not all values.*satisfy the generated guard",
+        ):
+            torch.export.export(qux, (x,), dynamic_shapes=dynamic_shapes)
 
     def test_list_contains(self):
         def func(x):

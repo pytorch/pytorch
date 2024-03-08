@@ -13,7 +13,7 @@ from .graph_signature import (
 )
 
 
-def remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
+def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
     """
     Removes the existance of tokens from the exported program, including:
     - Removes the input and output tokens
