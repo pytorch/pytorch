@@ -24,6 +24,11 @@ class AbstractClassRegistry:
         self._registered_class[full_qualname] = fake_class
 
     def deregister(self, full_qualname: str) -> Any:
+        if not self.has_impl(full_qualname):
+            raise RuntimeError(
+                f"Cannot deregister {full_qualname}. Please use impl_abstract_class to register it first."
+                f" Or do you dereigster it twice?"
+            )
         self._check_registered(full_qualname)
         return self._registered_class.pop(full_qualname)
 

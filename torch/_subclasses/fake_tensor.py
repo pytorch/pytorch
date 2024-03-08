@@ -802,19 +802,16 @@ class DispatchCacheInfo:
     size: int
 
 
-# We keep one instantiation of `fake_tensor_converter` active
-# for the duration of `with FakeTensorMode()`.
-# This allows accurate storage aliasing across invocation of
-# different operators. While this will keep all freshly allocated
-# tensors alive during `FakeTensorMode`, there will no be no
-# new allocations of Tensors which have non-meta storage so
-# memory should not significantly increase.
+cached_fake_script_obj = {}
 
 
 def _fakify_script_object(x):
+    if hash(x) in cached_fake_script_obj:
+        return cached_fake_script_obj[hash(x)]
+
     full_qualname = x._type().qualified_name()
     splits = full_qualname.split(".")
-    assert len(splits) == 5, breakpoint()
+    assert len(splits) == 5
     _torch, torch_ns, classes, ns, class_name = splits
 
     fake_class = torch._library.abstract_impl_class.find_fake_impl(full_qualname)
@@ -833,13 +830,24 @@ def _fakify_script_object(x):
             f"ScriptObject {full_qualname}'s corresponding fake_class {fake_class}"
             f" doesn't implement a from_real classmethod. Please add it to the fake class."
         )
-    return fake_class.from_real(x)
+    fake_x = fake_class.from_real(x)
+    cached_fake_script_obj[hash(x)] = fake_x
+    return fake_x
 
 
 def _maybe_fakify_script_object(args, kwargs):
     return pytree.tree_map_only(
         torch.ScriptObject, lambda x: _fakify_script_object(x), (args, kwargs)
     )
+
+
+# We keep one instantiation of `fake_tensor_converter` active
+# for the duration of `with FakeTensorMode()`.
+# This allows accurate storage aliasing across invocation of
+# different operators. While this will keep all freshly allocated
+# tensors alive during `FakeTensorMode`, there will no be no
+# new allocations of Tensors which have non-meta storage so
+# memory should not significantly increase.
 
 
 class FakeTensorMode(TorchDispatchMode):
@@ -1250,7 +1258,8 @@ class FakeTensorMode(TorchDispatchMode):
 
     def dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
-        log.debug("%s %s %s", func, args, kwargs)
+        with no_dispatch():
+            log.debug("%s %s %s", func, args, kwargs)
 
         if func in _DISPATCH_META_HANDLERS:
             return _DISPATCH_META_HANDLERS[func](args)

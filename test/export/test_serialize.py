@@ -25,7 +25,7 @@ from torch._export.serde.serialize import (
 )
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch.export import Dim, export, load, save, WrapperModule
+from torch.export import Dim, export, load, save
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 from torch.testing._internal.common_utils import (
     find_library_location,
@@ -451,11 +451,13 @@ class TestDeserialize(TestCase):
         self.check_graph(DynamicShapeSimpleModel(), inputs, dynamic_shapes)
 
     def test_sym_bool(self):
-        def f(x, y):
-            assert x.size(0) in y
-            return x + y
+        class Module(torch.nn.Module):
+            def forward(self, x, y):
+                assert x.size(0) in y
+                return x + y
 
-        self.check_graph(WrapperModule(f), (torch.ones(1), torch.ones(3)))
+        f = Module()
+        self.check_graph(f, (torch.ones(1), torch.ones(3)))
 
     def test_shape(self):
         class Foo(torch.nn.Module):
@@ -522,11 +524,13 @@ class TestDeserialize(TestCase):
         def f(x, y):
             return x + y
 
-        def g(xs, y):
-            return control_flow.map(f, xs, y)
+        class Module(torch.nn.Module):
+            def forward(self, xs, y):
+                return control_flow.map(f, xs, y)
 
+        g = Module()
         inputs = (torch.ones(3, 2, 2), torch.ones(2))
-        self.check_graph(WrapperModule(g), inputs, _check_meta=False)
+        self.check_graph(g, inputs, _check_meta=False)
 
     def test_tensor_tensor_list(self):
         try:
@@ -588,24 +592,30 @@ class TestDeserialize(TestCase):
         self.check_graph(model, inputs.args, _check_meta=_check_meta)
 
     def test_constraints(self):
-        def f(x, y):
-            n = x.item()
-            torch._constrain_as_size(n, min=2)
-            return y.sum() + torch.ones(n, 5).sum()
+        class Module(torch.nn.Module):
+            def forward(self, x, y):
+                n = x.item()
+                torch._constrain_as_size(n, min=2)
+                return y.sum() + torch.ones(n, 5).sum()
 
-        self.check_graph(WrapperModule(f), (torch.tensor(3), torch.randn(4, 5)))
+        f = Module()
+        self.check_graph(f, (torch.tensor(3), torch.randn(4, 5)))
 
     def test_get_attr(self) -> None:
-        def f(x):
-            return x + torch.tensor(3)
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x + torch.tensor(3)
 
-        self.check_graph(WrapperModule(f), (torch.tensor(3),))
+        f = Module()
+        self.check_graph(f, (torch.tensor(3),))
 
     def test_get_attr_list(self) -> None:
-        def f(x):
-            return torch.cat([x, torch.tensor([1, 1])])
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return torch.cat([x, torch.tensor([1, 1])])
 
-        self.check_graph(WrapperModule(f), (torch.tensor([1, 1]),))
+        f = Module()
+        self.check_graph(f, (torch.tensor([1, 1]),))
 
     @unittest.skipIf(not torch.cuda.is_available(), "Requires cuda")
     def test_device(self) -> None:
@@ -631,10 +641,12 @@ instantiate_parametrized_tests(TestDeserialize)
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSchemaVersioning(TestCase):
     def test_error(self):
-        def f(x):
-            return x + x
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x + x
 
-        ep = export(WrapperModule(f), (torch.randn(1, 3),))
+        f = Module()
+        ep = export(f, (torch.randn(1, 3),))
 
         serialized_artifact = ExportedProgramSerializer().serialize(ep)
         serialized_artifact.exported_program.schema_version.major = -1
