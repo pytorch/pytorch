@@ -1486,7 +1486,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                         missing = fvs - symbol_to_proxy.keys()
                         if missing:
                             i1 = sorted(missing)[0]
-                            assert self.shape_env.is_unbacked_symint(i1), i1
+                            # TODO: Remove relaxing assert on unbacked_symint https://github.com/pytorch/pytorch/issues/119689
+                            # assert self.shape_env.is_unbacked_symint(i1), i1
                             ras_by_symbol.setdefault(i1, []).append(ra)
                         else:
                             # Convert the sympy expression into a sequence of FX

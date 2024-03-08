@@ -259,7 +259,7 @@ class SequenceParallel(ParallelStyle):
     Keyword Args:
         sequence_dim (int, optional):
             The sequence dimension of the input tensor for the ``nn.Module``, this is used to annotate the input tensor to
-            become a DTensor that is sharded on the sequence dimension.
+            become a DTensor that is sharded on the sequence dimension, default: 1.
         use_local_output (bool, optional):
             Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module output, default: False.
     Returns:
