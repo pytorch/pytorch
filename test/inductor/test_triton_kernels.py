@@ -4,9 +4,9 @@
 from unittest.mock import patch
 
 import torch
+import torch._dynamo.testing
 
 import torch._inductor.test_case
-import torch._dynamo.testing
 from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
 

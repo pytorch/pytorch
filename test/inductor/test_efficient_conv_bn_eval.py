@@ -13,9 +13,9 @@ from torch import nn
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
-from torch._inductor.test_case import TestCase
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
+from torch._inductor.test_case import TestCase
 
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, TEST_WITH_ASAN
 
