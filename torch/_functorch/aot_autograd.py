@@ -1019,6 +1019,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
     full_args.extend(args)
 
     with ctx():
+        pytree.tree_map_only(torch.ScriptObject, lambda x: print(type(x), id(x)), full_args)
         fx_g, metadata, in_spec, out_spec = _aot_export_function(
             fn_to_trace,
             full_args,

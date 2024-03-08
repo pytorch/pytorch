@@ -483,7 +483,7 @@ def _export_non_strict(
 
         assert (
             "val" in node.meta
-        ), f"{node} is not a constant or a node with a 'val' metadata field"
+        ), breakpoint()
         val = node.meta["val"]
         if isinstance(val, FakeTensor):
             return TensorArgument(name=node.name)

@@ -118,6 +118,45 @@ class TestExportTorchbind(TestCase):
         unlifted = ep.module()
         self.assertEqual(m(input), unlifted(input))
 
+    def test_tensor_queue(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, tq, x):
+                torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
+                torch.ops._TorchScriptTesting.queue_push(tq, x.sin())
+                x_sin = torch.ops._TorchScriptTesting.queue_pop(tq)
+                x_cos = torch.ops._TorchScriptTesting.queue_pop(tq)
+                return x_sin, x_cos, tq
+
+        @torch._library.impl_abstract_class("_TorchScriptTesting::_TensorQueue")
+        class TensorQueue:
+            def __init__(self, q):
+                self.queue = q
+
+            @classmethod
+            def from_real(cls, real_tq):
+                return cls(real_tq.clone_queue())
+
+            def push(self, x):
+                self.queue.append(x)
+
+            def pop(self):
+                self.queue.pop(0)
+
+            def size(self):
+                return len(self.queue)
+
+        mod = Model()
+
+        tq = torch.classes._TorchScriptTesting._TensorQueue(torch.empty(0,).fill_(-1))
+        x = torch.ones(2, 3)
+        # mod(tq, x)
+        ep = self._test_export_same_as_eager(Model(), (tq, x), strict=False)
+        pass
+
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestImplAbstractClass(TestCase):
