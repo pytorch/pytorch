@@ -61,6 +61,7 @@ def remove_dupe_metadata(
                 dynamic_dims=o.dynamic_dims,
                 base_idx=None if o.base_idx is None else add_dupe_map[o.base_idx],
                 requires_grad=o.requires_grad,
+                functional_tensor=o.functional_tensor,
             )
             for o in m.output_info
         ],
@@ -219,6 +220,7 @@ def create_synthetic_base_metadata(
                 # Map the input idx pre-synthetic-bases to the new idx post-synthetic-bases
                 base_idx=new_base_idx,  # type: ignore[arg-type]
                 requires_grad=o.requires_grad,
+                functional_tensor=o.functional_tensor,
             )
         )
 

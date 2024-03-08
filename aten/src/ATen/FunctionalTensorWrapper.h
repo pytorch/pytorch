@@ -95,6 +95,31 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
         mutation_counter_;
   }
 
+  // Runs the forward_fn of every ViewMeta collected in the current instance
+  // to some other base.
+  Tensor apply_view_metas(
+      const Tensor& base,
+      int64_t start,
+      c10::optional<int64_t> end = c10::nullopt);
+
+  // Return the number of ViewMeta instances added to this tensor.
+  int64_t view_metas_size() {
+    return view_metas_.size();
+  }
+
+  // Return whether this instance is really an alias of 'base'.
+  //
+  // If this is the case, then this instance should have all ViewMeta of base
+  // inside its 'view_meta_'.
+  //
+  // Here, we compare each ViewMeta pair by comparing all their attributes. We
+  // can do this, even though they have lambdas inside, since when a view is
+  // created, all of its ViewMeta is copied from the base to the view tensor.
+  bool is_functional_alias_of(const Tensor& base);
+
+  // Get the base tensor inside the storage.
+  Tensor base();
+
   // Sync's the underlying tensor with its alias, if it's out of date. This
   // involves two steps: 1) Apply any pending updates/mutations to the alias 2)
   // Replay the views (if any) to regenerate the current tensor off of the

@@ -236,7 +236,7 @@ def create_runtime_wrapper(
                 if info.output_type == OutputType.alias_of_input:
                     aliased_base_tensor = args[info.base_idx]  # type: ignore[index]
                     regenerated_out = gen_alias_from_base(
-                        aliased_base_tensor, o_, o_grad
+                        aliased_base_tensor, o_, o_grad, info.functional_tensor
                     )
                     fw_outs_including_aliases.append(regenerated_out)
                     continue
@@ -261,7 +261,9 @@ def create_runtime_wrapper(
                 # TODO: handle the custom autograd function case here.
                 # We need a way to check whether a tensor came from a custom autograd fn from python,
                 # AND a way to replay that custom view fn.
-                regenerated_out = gen_alias_from_base(aliased_base_tensor, o_, o_grad)
+                regenerated_out = gen_alias_from_base(
+                    aliased_base_tensor, o_, o_grad, info.functional_tensor
+                )
                 fw_outs_including_aliases.append(regenerated_out)
             ret_outs = fw_outs_including_aliases
         else:

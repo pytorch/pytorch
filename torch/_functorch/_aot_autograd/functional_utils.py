@@ -191,7 +191,79 @@ def has_metadata_mutation(f_arg, arg, *, check_only_storage_mutation: bool):
         return has_metadata_mutation_
 
 
-def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires_grad):
+def gen_alias_from_base(
+    aliased_base_tensor,
+    target_meta_tensor,
+    target_requires_grad,
+    target_functional_tensor=None,
+):
+    # Patch the correct requires_grad field of the output tensor, depending on whether:
+    # (i) the reconstructed output (out) was came from a tensor that requires grad or not;
+    # and (ii) the concrete returned output does require grad or not.
+    def patch_requires_grad(out):
+        if aliased_base_tensor.requires_grad and not target_requires_grad:
+            out = out.detach()
+        elif not aliased_base_tensor.requires_grad and target_requires_grad:
+            out.requires_grad_(True)
+        return out
+
+    # If provided, use the target functional tensor for replaying the views.
+    #
+    # In summary, we use the fact that FunctionalTensorWrapper saves the view
+    # functions applied to itself (collected during functionalization) so as
+    # to replay them (view functions) on the aliased_base_tensor.
+    if target_functional_tensor is not None:
+        functional_tensor = target_functional_tensor.tensor
+
+        # First, retrieve the actual base tensor.
+        base = torch._functionalize_base(functional_tensor)
+
+        # Then, apply the necessary ViewMeta so that we reach the offset.
+        # These are ViewMeta that should already be applied to aliased_base_tensor.
+        if target_functional_tensor.offset > 0:
+            base = torch._functionalize_apply_view_metas(
+                target_functional_tensor.tensor,
+                base=base,
+                start=0,
+                end=target_functional_tensor.offset,
+            )
+
+        if base.shape == aliased_base_tensor.shape:
+            # Only apply these functions if the new base (aliased_base_tensor) has the
+            # same shape as the old base. The idea is:
+            #
+            #   1. target_functional_tensor represents the functional tensor that corresponds
+            #      to target_meta_tensor output
+            #
+            #   2. In order to make the new base have the same shape as target_functional_tensor,
+            #      the base of the latter (old base) should have the same shape as the new base
+            #      (that's what FunctionalTensorWrapper guarantees with its regenerate_from_base)
+            #
+            #   3. Otherwise, we have no guarantees the output will have the same shape as
+            #      target_meta_tensor
+            try:
+                out = torch._functionalize_apply_view_metas(
+                    target_functional_tensor.tensor,
+                    base=aliased_base_tensor,
+                    start=target_functional_tensor.offset,
+                )
+
+                assert out.shape == target_meta_tensor.shape, (
+                    "incorrect out shape after application of ViewMeta sequence: "
+                    f"{tuple(out.shape)} (actual) vs {tuple(target_meta_tensor.shape)} (expected)"
+                )
+
+                return patch_requires_grad(out)
+            except RuntimeError:
+                # NYI for dynamic shapes.
+                #
+                # On functionalization, the ViewMeta lambdas will have symbolic shapes.
+                # When trying to apply those lambdas on concrete tensors, it will fail.
+                #
+                # In order for this to work, we should have a way to replace those
+                # symbolic shapes with concrete numbers.
+                pass
+
     # Try to do view-replay if possible.
     # fall back to .as_strided() if we can't.
     if target_meta_tensor._base is not None:
@@ -218,11 +290,8 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
         #
         # As a stopgap, we'll fall back to as_strided.
         if out is not None and out.shape == target_meta_tensor.shape:
-            if aliased_base_tensor.requires_grad and not target_requires_grad:
-                out = out.detach()
-            elif not aliased_base_tensor.requires_grad and target_requires_grad:
-                out.requires_grad_(True)
-            return out
+            return patch_requires_grad(out)
+
     size = target_meta_tensor.size()
     stride = target_meta_tensor.stride()
     storage_offset = target_meta_tensor.storage_offset()
@@ -237,10 +306,7 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
     else:
         aliased_out = aliased_base_tensor.as_strided(size, stride, storage_offset)
     # For outputs aliasing inputs, we need to check if the requires-gradness has changed.
-    if aliased_base_tensor.requires_grad and not target_requires_grad:
-        aliased_out = aliased_out.detach()
-    elif not aliased_base_tensor.requires_grad and target_requires_grad:
-        aliased_out.requires_grad_(True)
+    aliased_out = patch_requires_grad(aliased_out)
     # For outputs aliasing inputs, we need to check if the dtype has changed.
     # as_strided() is the "most generic" view, but it does not cover cross-dtype views
     if aliased_out.dtype != target_meta_tensor.dtype:

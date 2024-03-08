@@ -33,6 +33,7 @@ from .functional_utils import (
     to_fun,
 )
 from .schemas import (
+    FunctionalTensorMetadataEq,
     InputAliasInfo,
     MutationType,
     OutputAliasInfo,
@@ -359,6 +360,19 @@ def run_functionalized_fw_and_collect_metadata(
                 ]
             )
 
+            # Compute the offset of the ViewMeta sequence of the output.
+            # Consider that the output 'O' aliases one of the inputs 'I':
+            #
+            #   - 'O' will have all ViewMeta instances (in the same order) that 'I' has,
+            #     since creating a view from a functional tensor will ensure that
+            #
+            #   - 'O' might have more ViewMeta instances than just those in the beggining
+            #
+            # That's why we need to find out where this specific offset that divides the
+            # ViewMeta sequence into (i) input ViewMeta sequence and (ii) output ViewMeta
+            # sequence lies.
+            base_functional_offset = 0
+
             # See Note [Accessing .grad_fn on FunctionalTensor]
             # In-place operations on views will trigger a lazy rebase of the autograd graph;
             # this runs during access to the .grad_fn. The rebase logic will invoke view ops
@@ -423,6 +437,20 @@ alias each other from a multi-output view call"
                     output_type = OutputType.is_input
                 else:
                     output_type = OutputType.alias_of_input
+
+                    # If the tensors are instances of FunctionalTensor, then record how many ViewMeta
+                    # instances the input has. That will be the base offset.
+                    f_arg = flat_f_args[base_idx]
+                    if isinstance(o, FunctionalTensor) and isinstance(
+                        f_arg, FunctionalTensor
+                    ):
+                        base_functional_offset = torch._functionalize_view_metas_size(
+                            f_arg.elem
+                        )
+                        assert torch._functionalize_is_alias_of(o.elem, f_arg.elem), (
+                            "Output not a real alias of input, even though they do alias the "
+                            "same tensor."
+                        )
 
             # We only need to handle the intermediate base case when both
             # the intermediate base and the output require gradients.
@@ -525,6 +553,11 @@ from a multi-output view call"
                 base_idx=base_idx,
                 dynamic_dims=dynamic_dims,
                 requires_grad=isinstance(o, torch.Tensor) and o.requires_grad,
+                functional_tensor=(
+                    FunctionalTensorMetadataEq(o.elem, offset=base_functional_offset)
+                    if isinstance(o, FunctionalTensor)
+                    else None
+                ),
             )
             output_info.append(out_info)
 

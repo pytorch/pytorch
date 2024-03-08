@@ -328,17 +328,77 @@ void FunctionalTensorWrapper::sync_() {
   regenerate_from_base();
 }
 
+Tensor FunctionalTensorWrapper::base() {
+  auto storage_impl = functional_storage_impl();
+  return storage_impl->base();
+}
+
+Tensor FunctionalTensorWrapper::apply_view_metas(const Tensor& base, int64_t start, c10::optional<int64_t> end) {
+  auto t = base;
+
+  std::size_t i = start;
+  std::size_t e = end.value_or(view_metas_.size());
+
+  // Reapply views to get the viewed tensor from the base in alias_
+  for (; i < e; i++) {
+    t = view_metas_[i].forward_fn(t, view_metas_[i].out_index);
+  }
+
+  return t;
+}
+
+
+static bool view_meta_equal(const functionalization::ViewMeta& lhs, const functionalization::ViewMeta& rhs) {
+  using at::functionalization::ViewMetaForwardFunctionType;
+  using at::functionalization::ViewMetaReverseFunctionType;
+
+  // Compare forward_fn and reverse_fn function pointers.
+  return lhs.forward_fn.target<ViewMetaForwardFunctionType>() ==
+      rhs.forward_fn.target<ViewMetaForwardFunctionType>() &&
+      lhs.reverse_fn.target<ViewMetaReverseFunctionType>() ==
+      rhs.reverse_fn.target<ViewMetaReverseFunctionType>() &&
+      lhs.out_index == rhs.out_index &&
+      lhs.is_multi_output == rhs.is_multi_output;
+}
+
+bool FunctionalTensorWrapper::is_functional_alias_of(const Tensor& base) {
+  auto impl = at::functionalization::impl::unsafeGetFunctionalWrapper(base);
+  auto size = impl->view_metas_size();
+
+  // Make sure they alias the same storage.
+  if (functional_storage_impl() != impl->functional_storage_impl()) {
+    return false;
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      size <= view_metas_size(),
+      "Base tensor cannot have more ViewMeta than the alias tensor.");
+
+  // Compare each pair of ViewMeta.
+  //
+  // If we find a single one that isn't the same, then it means that either
+  // the ViewMeta instance was modified (doesn't happen) or that they aren't
+  // really alias of each other.
+  for (auto i = 0; i < impl->view_metas_size(); i++) {
+    if (!view_meta_equal(impl->view_metas_[i], view_metas_[i])) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 void FunctionalTensorWrapper::regenerate_from_base() {
   at::AutoDispatchSkipFunctionalize guard;
-  auto storage_impl = functional_storage_impl();
-  auto t = storage_impl->base();
+  auto t = base();
+
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
-  // Reapply views to get the viewed tensor from the base in alias_
-  for (auto& view_meta: view_metas_) {
-    t = view_meta.forward_fn(t, view_meta.out_index);
-  }
+  t = apply_view_metas(t, 0);
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
+
   replace_(t);
+
+  auto storage_impl = functional_storage_impl();
   generation_ = storage_impl->generation();
 }
 
