@@ -157,6 +157,7 @@ class CachingAutotuner(KernelInterface):
         self.configs = configs
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
+        self.cuda_kernel_saved = False
 
         # Align the default design that default as cuda
         self.device_type = (
@@ -563,6 +564,8 @@ class CachingAutotuner(KernelInterface):
                 launcher.bin.asm["hsaco_path"]
             ).read_bytes()
             CudaKernelParamCache.set(key, params, launcher.bin.asm["hsaco"])
+
+        self.cuda_kernel_saved = True
 
     def coordinate_descent_tuning(self, launcher, *args, **kwargs):
         """
