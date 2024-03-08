@@ -17,7 +17,7 @@ from .storage import StorageWriter
 from .utils import _api_bc_check, _DistWrapper, _profile
 
 
-__all__ = ["save_state_dict", "save"]
+__all__ = ["save_state_dict", "save", "async_save"]
 
 
 def save_state_dict(
@@ -113,11 +113,11 @@ def save(
         >>> # xdoctest: +SKIP
         >>> my_model = MyModule()
 
-        >>> model_state_dict = my_model.state_dict()
+        >>> state_dict = {"model": my_model}
 
         >>> fs_storage_writer = torch.distributed.checkpoint.FileSystemWriter("/checkpoint/1")
-        >>> torch.distributed.checkpoint.save_state_dict(
-        >>>     state_dict=model_state_dict,
+        >>> torch.distributed.checkpoint.save(
+        >>>     state_dict=state_dict,
         >>>     storage_writer=fs_storage_writer,
         >>> )
 
@@ -151,7 +151,7 @@ def save(
         )
 
 
-def _async_save(
+def async_save(
     state_dict: STATE_DICT_TYPE,
     *,
     checkpoint_id: Union[str, os.PathLike, None] = None,
@@ -163,7 +163,7 @@ def _async_save(
     `save` in a separate thread.
 
     .. warning::
-        This feature is experimental and subject to removal/change.
+        This feature is experimental and subject to change.
 
     Args:
         state_dict (Dict[str, Any]): The state_dict to save.
@@ -187,8 +187,24 @@ def _async_save(
     Returns:
         Future: A future holding the resultant Metadata object from `save`.
 
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> my_model = MyModule()
+
+        >>> state_dict = {"model": my_model}
+
+        >>> fs_storage_writer = torch.distributed.checkpoint.FileSystemWriter("/checkpoint/1")
+        >>> checkpoint_future = torch.distributed.checkpoint.async_save(
+        >>>     state_dict=state_dict,
+        >>>     storage_writer=fs_storage_writer,
+        >>> )
+        >>>
+        >>> # ... do some work ...
+        >>>
+        >>> checkpoint_future.result()
+
     """
-    torch._C._log_api_usage_once("torch.distributed.checkpoint._async_save")
+    torch._C._log_api_usage_once("torch.distributed.checkpoint.async_save")
 
     pg = process_group or _get_default_group()
     assert (

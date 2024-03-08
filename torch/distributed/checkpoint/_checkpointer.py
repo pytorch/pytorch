@@ -83,7 +83,7 @@ class _Checkpointer:
         Returns:
             Future: A future holding the resultant Metadata object from `save`.
         """
-        return saver._async_save(
+        return saver.async_save(
             state_dict,
             storage_writer=self.storage_writer,
             process_group=self.process_group,
