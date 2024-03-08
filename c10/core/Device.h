@@ -34,12 +34,7 @@ struct C10_API Device final {
   /// our DeviceIndex is a int16_t. Note that this does not include the default
   /// device index -1, but instead defines the range from 0 to MAX_NUM_DEVICES-1
   /// inclusively.
-#ifdef FBCODE_CAFFE2
-  // fbcode depends on this value being 16
-  static constexpr DeviceIndex MAX_NUM_DEVICES = 16;
-#else
   static constexpr DeviceIndex MAX_NUM_DEVICES = 512;
-#endif
 
   using Type = DeviceType;
 
