@@ -4092,7 +4092,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         ver = t['version']
-        self.assertEqual(ver, "1.3")
+        self.assertEqual(ver, "1.4")
         pg_config = t['pg_config']
         self.assertEqual(len(pg_config), 1)
         self.assertEqual(len(pg_config[0]), self.world_size)
@@ -4330,11 +4330,13 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         self.assertEqual(len(t['entries']), num_coalesced_ops * (ops_per_coalesce + 1))
+
         expected_record_id = 0
+        expected_seq = 1
+        expected_op_id = 1
         for seq in range(num_coalesced_ops):
             first_op = seq * (ops_per_coalesce + 1)
             coalesced_op = first_op + ops_per_coalesce
-            expected_seq = seq + 1
             for p2p_op_idx, input_sizes in zip(range(first_op, coalesced_op, 1), op_sizes_per_coalesce):
                 # the indivudal ops inside the coalescing group the individual op metadata,
                 # but not the timing info coming from the actual coalesced kernel
@@ -4343,6 +4345,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 expected_record_id += 1
                 self.assertEqual(t['entries'][p2p_op_idx]['profiling_name'], profiling_name)
                 self.assertEqual(t['entries'][p2p_op_idx]['seq_id'], expected_seq)
+                self.assertEqual(t['entries'][p2p_op_idx]['op_id'], expected_op_id)
+                expected_op_id += 1
                 self.assertEqual(t['entries'][p2p_op_idx]['input_sizes'], [input_sizes])
                 self.assertEqual(t['entries'][p2p_op_idx]['output_sizes'], [input_sizes])
                 # duration doesn't get tagged onto individual ops yet, nor is their state updated
@@ -4355,16 +4359,18 @@ class NCCLTraceTest(NCCLTraceTestBase):
             expected_record_id += 1
             self.assertEqual(t['entries'][coalesced_op]['profiling_name'], 'nccl:coalesced')
             self.assertEqual(t['entries'][coalesced_op]['seq_id'], expected_seq)
+            expected_seq += 1
             self.assertEqual(t['entries'][coalesced_op]['state'], 'completed')
             self.assertEqual(t['entries'][coalesced_op]['input_sizes'], [])
             self.assertEqual(t['entries'][coalesced_op]['output_sizes'], [])
-
             if timing_enabled:
                 duration = t['entries'][coalesced_op]['duration_ms']
                 self.assertTrue(0.001 < duration < 10000, duration)
             else:
                 self.assertTrue('duration_ms' not in t['entries'][coalesced_op])
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("op_sizes", [
         [(2, 3)],
         [(2, 3), (5, 5), (1,)],
@@ -4399,12 +4405,16 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         self.assertEqual(len(t['entries']), num_repeats * (ops_per_repeat))
+        expected_seq = 1
+        expected_op_id = 1
         for seq in range(num_repeats * ops_per_repeat):
             input_sizes = op_sizes[seq % ops_per_repeat]
             profiling_name = 'nccl:recv 0<-1' if self.rank == 0 else 'nccl:send 1->0'
-            expected_seq = seq + 1
             self.assertEqual(t['entries'][seq]['profiling_name'], profiling_name)
             self.assertEqual(t['entries'][seq]['seq_id'], expected_seq)
+            expected_seq += 1
+            self.assertEqual(t['entries'][seq]['op_id'], expected_op_id)
+            expected_op_id += 1
             self.assertEqual(t['entries'][seq]['input_sizes'], [input_sizes])
             self.assertEqual(t['entries'][seq]['output_sizes'], [input_sizes])
             self.assertEqual(t['entries'][seq]['state'], 'completed')
@@ -4447,9 +4457,8 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("timing_enabled", [True, False])
     def test_timeout_dumps(self, timing_enabled):
-        # We need to completely disable the coordinated timeout dump to avoid rank 0
-        # also timeout so that we set the check frequency to be very large (25 min).
-        os.environ['TORCH_NCCL_COORD_CHECK_MILSEC'] = '1500000'
+        # dump on heartbeatmonitor thread
+        os.environ['TORCH_NCCL_COORD_CHECK_MILSEC'] = '1000'
         # need rank0 to crash before looking for its output file
         os.environ['TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC'] = '1'
 
