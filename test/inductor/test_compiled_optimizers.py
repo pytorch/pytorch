@@ -80,12 +80,8 @@ KERNEL_COUNTS = {
     Adagrad: KernelCounts(multitensor=5, singletensor=8),
     ASGD: KernelCounts(multitensor=2, singletensor=12),
     SGD: KernelCounts(multitensor=2, singletensor=8),
-    RAdam: KernelCounts(
-        multitensor=2, singletensor=None
-    ),  # Single tensor eager needs to be refactored to enable tracing (#118230)
-    Adamax: KernelCounts(
-        multitensor=2, singletensor=None
-    ),  # Single tensor eager needs to be refactored to enable tracing (#117836)
+    RAdam: KernelCounts(multitensor=2, singletensor=8),
+    Adamax: KernelCounts(multitensor=2, singletensor=8),
 }
 
 
@@ -109,15 +105,6 @@ def build_opt_kwarg_db():
                         name += "_" + key
 
                 name += f"_{device}"
-
-                # Eager for-loop impl doesn't support capturable ASGD
-                if name in [
-                    "test_asgd_capturable_cuda",
-                    "test_asgd_maximize_capturable_cuda",
-                    "test_asgd_weight_decay_capturable_cuda",
-                    "test_asgd_weight_decay_maximize_capturable_cuda",
-                ]:
-                    continue
 
                 kwargs["device"] = device
                 if name in KERNEL_COUNT_OVERRIDES:
@@ -343,13 +330,6 @@ class CompiledOptimizerParityTests(TestCase):
         )
         for optim_input in all_optim_inputs:
             kwargs = optim_input.kwargs
-
-            # RAdam #117836 and Adamax #118230 and ASGD #116052
-            # Single tensor eager needs to be refactored to enable tracing
-            if optim_info.only_supports_capturable_on_foreach and not kwargs.get(
-                "foreach", False
-            ):
-                kwargs["foreach"] = True
 
             torch._dynamo.reset()
             torch._inductor.metrics.reset()

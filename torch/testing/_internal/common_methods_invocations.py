@@ -509,6 +509,19 @@ def sample_inputs__native_batch_norm_legit(op_info, device, dtype, requires_grad
         else:
             yield SampleInput(sample.input, args=(args[2], args[3], training, momentum, eps))
 
+def sample_inputs__batch_norm_with_update(op_info, device, dtype, requires_grad, **kwargs):
+    samples = sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs)
+    for sample in samples:
+        # torch.native_batch_norm does not support 0 numel tensors
+        # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got 1)
+        if sample.input.numel() == 0:
+            continue
+        args = sample.args
+        momentum = sample.kwargs.get('momentum', 0.5)
+        eps = sample.kwargs.get('eps', 1e-5)
+        if any(args[i] is None for i in range(4)):
+            continue
+        yield SampleInput(sample.input, args=(args[2], args[3], args[0], args[1], momentum, eps))
 
 def sample_inputs_nn_activation_relu(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -13098,6 +13111,42 @@ op_db: List[OpInfo] = [
                             "TestCompositeCompliance", "test_forward_ad"),
            )
            ),
+    OpInfo('_batch_norm_with_update',
+           op=torch.ops.aten._batch_norm_with_update,
+           aten_name='_batch_norm_with_update',
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
+           # TODO: Avoid COW materialize
+           supports_cow_input_no_materialize=False,
+           sample_inputs_func=sample_inputs__batch_norm_with_update,
+           skips=(
+               # NotImplementedError: Could not run
+               # 'aten::native_batch_norm.out' with arguments from the 'CPU' backend.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type="cpu"),
+               # RuntimeError: out_invstd.dim() == 1 && out_invstd.is_contiguous() && out_invstd.sizes()[0]
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type="cuda"),
+               # Problem with _get_numerical_jacobian
+               # IndexError: tuple index out of range
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
+               # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # https://github.com/pytorch/pytorch/issues/85960
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-5)}),
+                            "TestCompositeCompliance", "test_forward_ad"),
+               # _batch_norm_with_update expects contiguous inputs for cudnn and miopen
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type="cuda"),
+               DecorateInfo(unittest.expectedFailure,
+                            'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides', device_type="cuda"),
+               # _batch_norm_with_update does not have python bindings
+               DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # aten out variants do not accept out= kwarg, only python out variants
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+           )
+           ),
     OpInfo('nn.functional.cosine_similarity',
            aten_name="cosine_similarity",
            dtypes=floating_types_and(torch.half, torch.bfloat16),
@@ -14565,11 +14614,9 @@ op_db: List[OpInfo] = [
         check_batched_forward_grad=False,
         decorators=[skipCUDAIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "This platform doesn't support Flash Attention")],
         skips=(
-            # ROCM fails stride order
-            DecorateInfo(unittest.expectedFailure, "TestFakeTensor", "test_fake_autocast", device_type="cuda",
-                         dtypes=[torch.float16, torch.bfloat16], active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
-            DecorateInfo(unittest.expectedFailure, "TestFakeTensor", "test_fake", device_type="cuda",
-                         dtypes=[torch.float16, torch.bfloat16], active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
+            # Device mismatch due to philox seed and offset
+            DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast', device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake', device_type='cuda'),
             # meta implementation is in fake_impls.py instead of being a meta registration
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
@@ -14606,6 +14653,9 @@ op_db: List[OpInfo] = [
         supports_cow_input_no_materialize=False,
         decorators=[skipCUDAIf(TEST_WITH_ROCM, "ROCm doesn't support efficient attention")],
         skips=(
+            # Device mismatch due to philox seed and offset
+            DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast', device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake', device_type='cuda'),
             # meta implementation is in fake_impls.py instead of being a meta registration
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
@@ -18340,12 +18390,11 @@ op_db: List[OpInfo] = [
            # Currently only the `input` is tested in gradcheck.
            # If we pass `condition` first, none of the input which supports
            # autograd will be tested. Hence the following lambda.
-           op=lambda self, condition, other: torch.where(condition, self, other),
+           op=lambda self, condition, other, **kwargs: torch.where(condition, self, other, **kwargs),
            ref=lambda self, condition, other: np.where(condition, self, other),
            sample_inputs_func=sample_inputs_where,
            reference_inputs_func=reference_inputs_where,
            error_inputs_func=error_inputs_where,
-           supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            decorators=(
@@ -22582,6 +22631,7 @@ python_ref_db = [
         "_refs.where",
         torch_opinfo_name="where",
         op=lambda self, condition, other: refs.where(condition, self, other),
+        supports_out=False,
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors', device_type='cuda'),
         ),
