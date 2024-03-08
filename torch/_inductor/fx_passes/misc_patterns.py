@@ -47,7 +47,7 @@ def _misc_patterns_init():
         randperm_index_add_replacement,
         [torch.empty(4, 8, device=device), torch.empty(2, 8, device=device)],
         fwd_only,
-        [post_grad_patterns, joint_graph_patterns],
+        [post_grad_patterns, joint_graph_patterns[0]],
     )
 
     def randperm_index_pattern(x, slice_shape):
@@ -63,7 +63,7 @@ def _misc_patterns_init():
         randperm_index_replacement,
         [torch.empty(4, 8, device=device)],
         fwd_only,
-        [post_grad_patterns, joint_graph_patterns],
+        [post_grad_patterns, joint_graph_patterns[0]],
         scalar_workaround={"slice_shape": 42},
     )
 

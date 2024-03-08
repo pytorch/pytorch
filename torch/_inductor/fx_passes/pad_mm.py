@@ -552,7 +552,7 @@ def _pad_mm_init():
             replacement,
             args,
             joint_fwd_bwd,
-            patterns,
+            patterns[0],
             extra_check=extra_check,
             scalar_workaround=workaround,
         )
@@ -561,7 +561,7 @@ def _pad_mm_init():
             replacement,
             args,
             fwd_only,
-            patterns,
+            patterns[0],
             extra_check=extra_check,
             scalar_workaround=workaround,
         )

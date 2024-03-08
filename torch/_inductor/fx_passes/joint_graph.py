@@ -328,7 +328,7 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         ),
         KeywordArg("dtype2"),
     ),
-    pass_dict=patterns,
+    pass_dict=patterns[0],
 )
 def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtype):
     """Remove chain of dtype conversions often created by AMP"""
@@ -346,7 +346,7 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
 
 @register_graph_pattern(
     CallFunction(torch.ops.aten.view.default, KeywordArg("arg"), KeywordArg("size")),
-    pass_dict=patterns,
+    pass_dict=patterns[0],
 )
 def pointless_view(match: Match, arg, size):
     """Remove no-op view"""
