@@ -647,8 +647,9 @@ def remove_noop_ops(graph: torch.fx.Graph):
             # necessary.
             node_storage = get_node_storage(node)
             src_storage = get_node_storage(src)
+            node_is_view = node_storage == src_storage
             if (
-                node_storage != src_storage
+                not node_is_view
                 and node_storage in output_storages
                 and (src_storage in input_storages or src_storage in output_storages)
             ):
@@ -657,7 +658,7 @@ def remove_noop_ops(graph: torch.fx.Graph):
             # Even if input and outputs are expected to alias,
             # don't make "node is src" True
             if (
-                node_storage == src_storage
+                node_is_view
                 and node in output_node.args
                 and (src in inputs or src in output_node.args)
             ):
@@ -681,6 +682,10 @@ def decompose_auto_functionalized(graph):
     def replacement(match: Match, *args, **kwargs):
         from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
 
+        only_clone_these_tensors = tuple(
+            match.nodes[0].meta.get("only_clone_these_tensors", [])
+        )
+
         flat_args, spec = pytree.tree_flatten((args, kwargs))
 
         # NB: we combine (args, kwargs) into flat args for replacing.
@@ -688,7 +693,7 @@ def decompose_auto_functionalized(graph):
         # tracing a function with kwargs.
         def decomp(*flat_args):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
-            return auto_functionalized_dense(*args, **kwargs)
+            return auto_functionalized_dense(*args, only_clone_these_tensors, **kwargs)
 
         with V.fake_mode:
             match.replace_by_example(decomp, flat_args, run_dce=False)

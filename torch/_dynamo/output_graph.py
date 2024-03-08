@@ -30,6 +30,7 @@ from torch._guards import (
 )
 from torch._utils_internal import signpost_event
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
+from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -60,6 +61,7 @@ from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import (
     AttrSource,
+    BackwardStateSource,
     ConstantSource,
     GlobalStateSource,
     is_constant_source,
@@ -87,7 +89,13 @@ from .utils import (
     same,
 )
 from .variables.base import VariableTracker
-from .variables.builder import GraphArg, TrackedFake, VariableBuilder, wrap_fx_proxy
+from .variables.builder import (
+    BackwardStateGraphArg,
+    GraphArg,
+    TrackedFake,
+    VariableBuilder,
+    wrap_fx_proxy,
+)
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -379,6 +387,29 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
         ] = []
         self.random_values_var = None
+
+        # Use to pass values to backward hooks when using compiled autograd
+        self.backward_state: Dict[str, VariableTracker] = {}
+        self.backward_state_proxy: Optional[torch.fx.Proxy] = None
+        self.backward_state_var: Optional[str] = None
+
+    def add_backward_state_hook(self, hook: VariableTracker):
+        name = f"hook{len(self.backward_state)}"
+        assert name not in self.backward_state
+        self.backward_state[name] = hook
+        return name, self.get_backward_state_proxy()
+
+    def get_backward_state_proxy(self):
+        if self.backward_state_proxy is None:
+            if self.export:
+                unimplemented("backward_state does not support export")
+            self.backward_state_proxy = self.root_tracer.create_graph_input(
+                "dynamo_backward_state", BackwardState, source=BackwardStateSource()
+            )
+            self.backward_state_proxy.node.meta["grapharg"] = BackwardStateGraphArg()
+            self.backward_state_proxy.node.meta["example_value"] = BackwardState()
+            self.backward_state_var = self.new_var()
+        return self.backward_state_proxy
 
     # This gets its own helper function so guards DEBUG logs are more informative
     def init_ambient_guards(self):
@@ -924,6 +955,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             and all(isinstance(x, TensorVariable) for x in stack_values)
             and len(set(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
+            and not len(tx.debug_locals) != 0
+            and not self.backward_state
         ):
             append_prefix_insts()
             # optimization to generate better code in a common case
@@ -934,10 +967,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         else:
             graph_output_var = self.new_var("graph_out")
             pass1 = PyCodegen(tx, root, graph_output_var)
-            self.side_effects.codegen_hooks(pass1)
-            self.side_effects.codegen_save_tempvars(pass1)
-            pass1.restore_stack(stack_values, value_from_source=not tx.export)
-            self.side_effects.codegen_update_mutated(pass1)
+            self.codegen_suffix(tx, stack_values, pass1)
 
             # one more time now that we have established tempvars
             pass2 = PyCodegen(
@@ -946,10 +976,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 graph_output_var,
                 tempvars={val: None for val, count in pass1.uses.items() if count > 1},
             )
-            self.side_effects.codegen_hooks(pass2)
-            self.side_effects.codegen_save_tempvars(pass2)
-            pass2.restore_stack(stack_values, value_from_source=not tx.export)
-            self.side_effects.codegen_update_mutated(pass2)
+            self.codegen_suffix(tx, stack_values, pass2)
 
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
@@ -968,6 +995,26 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.add_output_instructions(
             [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
         )
+
+    def codegen_suffix(self, tx, stack_values, cg):
+        if self.backward_state:
+            assert not self.export
+            for name, val in self.backward_state.items():
+                cg(val)
+                cg.append_output(cg.create_load(self.backward_state_var))
+                cg.store_attr(name)
+        self.side_effects.codegen_hooks(cg)
+        self.side_effects.codegen_save_tempvars(cg)
+
+        # Return variables used for logging at the end
+        for debug_var, args in tx.debug_locals:
+            cg(debug_var)
+            for arg in args:
+                cg(arg)
+            cg.extend_output(create_call_function(len(args), True))
+
+        cg.restore_stack(stack_values, value_from_source=not tx.export)
+        self.side_effects.codegen_update_mutated(cg)
 
     def cleanup_graph(self):
         """
@@ -999,7 +1046,16 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     self.graph.erase_node(node1)
                     self.graph.erase_node(node2)
 
-    def get_graph_sizes_log_str(self, name):
+    def get_graph_sizes_structured(self):
+        ret = {}
+        for node in self.graph.nodes:
+            example_value = node.meta.get("example_value", None)
+            if isinstance(example_value, torch._subclasses.FakeTensor):
+                size = example_value.size()
+                ret[node.name] = [s if isinstance(s, int) else repr(s) for s in size]
+        return ret
+
+    def get_graph_sizes(self, name: str):
         graph_sizes_str = "TRACED GRAPH TENSOR SIZES\n"
         graph_sizes_str += f"===== {name} =====\n"
         for node in self.graph.nodes:
@@ -1082,10 +1138,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         ] = self.dynamo_flat_name_to_original_fqn.copy()
 
         graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
-        graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
-        graph_sizes_log.debug(
-            "%s", LazyString(lambda: self.get_graph_sizes_log_str(name))
+        torch._logging.trace_structured(
+            "dynamo_output_graph",
+            lambda: {"sizes": self.get_graph_sizes_structured()},
+            payload_fn=lambda: gm.print_readable(print_output=False),
         )
+        graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
+        graph_sizes_log.debug("%s", LazyString(lambda: self.get_graph_sizes(name)))
         self.call_cleanup_hooks()
         old_fake_mode = self.tracing_context.fake_mode
         if not self.export:
@@ -1231,11 +1290,15 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 if not node.users:
                     recheck_placeholders.append(node)
             else:
-                if not node.users:
+                if not node.users and not isinstance(
+                    node.meta["grapharg"], BackwardStateGraphArg
+                ):
                     remove_unused(node)
                 else:
                     # Register the free symbols as uses
                     arg = node.meta["grapharg"]
+                    if isinstance(arg, BackwardStateGraphArg):
+                        continue
                     fake = (
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example
                     )
@@ -1431,15 +1494,12 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                             res = sympy_interp(
                                 PythonReferenceAnalysis, symbol_to_proxy, ra.expr
                             ).node
-                            res2 = self.graph.call_function(
-                                torch.ops.aten.scalar_tensor.default, (res,)
-                            )
                             self.graph.call_function(
-                                torch.ops.aten._assert_async.msg,
+                                torch.ops.aten._assert_scalar.default,
                                 # TODO: use ra.msg here, but it's pretty
                                 # useless right now
                                 (
-                                    res2,
+                                    res,
                                     f"Deferred runtime assertion failed {ra.expr}",
                                 ),
                             )

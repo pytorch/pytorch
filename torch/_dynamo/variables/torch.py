@@ -7,14 +7,6 @@ import math
 import re
 from typing import Dict, List
 
-from torch._streambase import _StreamBase
-from ..guards import install_guard
-
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    np = None
-
 import torch._C
 import torch._refs
 import torch.fx
@@ -22,10 +14,11 @@ import torch.nn
 import torch.onnx.operators
 from torch._logging import warning_once
 
+from torch._streambase import _StreamBase
 from .. import config, polyfill, variables
 from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented
-from ..guards import GuardBuilder
+from ..guards import GuardBuilder, install_guard
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
@@ -43,9 +36,13 @@ from .ctx_manager import (
     TorchFunctionDisableVariable,
 )
 from .distributed import is_constant_pg_functions, is_from_local, ProcessGroupVariable
-from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import ListVariable, TupleVariable
 from .torch_function import can_dispatch_torch_function, dispatch_torch_function
+
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +52,8 @@ supported_ctx_manager_classes = {
     torch.autograd.profiler.record_function,
     torch._C.DisableTorchFunctionSubclass,
     torch._functorch.vmap.vmap_increment_nesting,
+    torch._functorch.eager_transforms.grad_increment_nesting,
+    torch._functorch.eager_transforms.enable_inplace_requires_grad,
     torch.amp.autocast_mode.autocast,
     torch.autograd.grad_mode.enable_grad,
     torch.autograd.grad_mode.inference_mode,
@@ -109,6 +108,8 @@ tracing_state_functions = {
     torch.onnx.is_in_onnx_export: False,
     torch._dynamo.external_utils.is_compiling: True,
     torch._utils.is_compiling: True,
+    torch.compiler.is_compiling: True,
+    torch.compiler.is_dynamo_compiling: True,
 }
 
 
@@ -176,6 +177,8 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
     ) -> "VariableTracker":
         from . import (
             DisabledSavedTensorsHooksVariable,
+            GradIncrementNestingCtxManagerVariable,
+            GradInplaceRequiresGradCtxManagerVariable,
             GradModeVariable,
             InferenceModeVariable,
             StreamVariable,
@@ -241,6 +244,17 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 tx,
                 [guard_if_dyn(x) for x in args],
             )
+        elif self.value is torch._functorch.eager_transforms.grad_increment_nesting:
+            assert len(args) == 0
+            return GradIncrementNestingCtxManagerVariable.create(tx)
+        elif (
+            self.value is torch._functorch.eager_transforms.enable_inplace_requires_grad
+        ):
+            assert len(args) == 1
+            return GradInplaceRequiresGradCtxManagerVariable.create(
+                tx,
+                [guard_if_dyn(x) for x in args],
+            )
         elif self.value is torch.autograd.graph.disable_saved_tensors_hooks:
             assert len(args) == 1
             return DisabledSavedTensorsHooksVariable.create(
@@ -290,14 +304,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if self.value in (
                 torch._utils.is_compiling,
                 torch._dynamo.external_utils.is_compiling,
+                torch.compiler.is_compiling,
+                torch.compiler.is_dynamo_compiling,
             ):
                 tx.mark_inconsistent_side_effects()
             return ConstantVariable.create(tracing_state_functions[self.value])
-        elif self.value in (torch._functorch.eager_transforms.grad_impl,):
-            return TorchHigherOrderOperatorVariable.make(
-                self.value,
-                source=self.source,
-            ).call_function(tx, args, kwargs)
         elif self.value is torch.overrides.get_default_nowrap_functions.__wrapped__:
             # [Note: __torch_function__] we return empty here because we restrict
             # the set of functions that we trace __torch_function__ on to
@@ -307,6 +318,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             return SourcelessBuilder()(
                 tx, torch.overrides.get_default_nowrap_functions()
+            )
+        elif self.value == torch.ops.inductor.accumulate_grad_.default:
+            from .builder import SourcelessBuilder
+
+            return tx.inline_user_function_return(
+                SourcelessBuilder()(tx, polyfill.accumulate_grad), args, kwargs
             )
         elif self.value == math.radians and not (constant_args or unspec_python_args):
             # Use polyfill to convert math.radians(x) into math.pi * x / 180.0
@@ -433,6 +450,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return ConstantVariable.create(
                 torch.backends.cudnn.is_acceptable(tensor_inp)
             )
+        elif self.value is torch.utils.hooks.BackwardHook:
+            return variables.BackwardHookVariable.create(tx, *args, **kwargs)
         elif (
             self.value == torch.numel
             and len(args) == 1
