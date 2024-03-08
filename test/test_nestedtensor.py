@@ -6,6 +6,7 @@ import sys
 from typing import Optional, Tuple
 import unittest
 from functools import partial
+import weakref
 
 import numpy as np
 import torch
@@ -47,6 +48,8 @@ from torch.nested._internal.nested_tensor import (
     buffer_from_jagged,
     jagged_from_list,
     NestedTensor,
+    TensorIntMap,
+    TensorUnionFind,
 )
 
 # Tests are ported from pytorch/nestedtensor.
@@ -3949,6 +3952,100 @@ class TestNestedTensorSubclass(TestCase):
             output_ref_atol, output_ref_rtol = get_tolerances(out, out_lp_ref)
 
             self.assertEqual(out, out_component, atol=output_ref_atol, rtol=output_ref_rtol)
+
+
+class TestTensorUnionFind(TestCase):
+    def _get_test_union_find(self):
+        class TestUnionFind(TensorUnionFind):
+            def merge(self, a, b):
+                super().merge(a, b)
+                super().validate_invariants()
+
+        return TestUnionFind()
+
+    def test_basic(self):
+        uf = self._get_test_union_find()
+        a = torch.tensor([1, 2, 3])
+        b = a.clone()
+        self.assertIsNot(uf.find(a), uf.find(b))
+        uf.merge(a, b)
+        self.assertIs(uf.find(a), uf.find(b))
+
+    def test_equiv_tensors(self):
+        uf = self._get_test_union_find()
+        a = torch.tensor([1, 2, 3])
+        b = a.clone()
+        c = a.clone()
+        uf.merge(a, b)
+        uf.merge(b, c)
+        canonical = uf.find(a)
+        self.assertEqual(set(uf.get_equiv_tensors(a)), set([a, b, c]))
+        self.assertIs(canonical, a)
+        del b
+        self.assertEqual(set(uf.get_equiv_tensors(a)), set([a, c]))
+
+    def test_metadata_merge(self):
+        uf = self._get_test_union_find()
+        a = torch.tensor([1, 2, 3])
+        b = a.clone()
+        uf.get_metadata(a)["foo"] = "bar"
+        uf.get_metadata(b)["foo"] = "baz"
+        uf.merge(a, b)
+        canonical = uf.find(a)
+        self.assertIs(canonical, a)
+        # See Note [TensorUnionFind: Metadata merging asymmetry]
+        self.assertEqual(uf.get_metadata(a)["foo"], "baz")
+
+    def test_lifetime(self):
+        # Tests the invariant that the canonical tensor is kept alive by the
+        # the tensors in its equiv set.
+        uf = self._get_test_union_find()
+        a = torch.tensor([1, 2, 3])
+        b = a.clone()
+        canonical = uf.find(a)
+        weak_canonical = weakref.ref(canonical)
+        uf.merge(a, b)
+        del canonical
+        self.assertIsNotNone(weak_canonical())
+        del a, b
+        self.assertIsNone(weak_canonical())
+
+    def test_tensor_int_map_version_counting(self):
+        m = TensorIntMap()
+        a = torch.tensor([1, 2, 3])
+        a_id_0 = m.get_int(a)
+        self.assertIs(m.get_tensor(a_id_0), a)
+        a.add_(1)
+        self.assertIsNone(m.get_tensor(a_id_0))
+        a_id_1 = m.get_int(a)
+        self.assertEqual(a_id_0 + 1, a_id_1)
+        self.assertIs(m.get_tensor(a_id_1), a)
+        del a
+        self.assertIsNone(m.get_tensor(a_id_1))
+
+    def test_union_find_mutate_canonical(self):
+        # See Note [TensorUnionFind: Union find over "versions of tensors"]
+        uf = self._get_test_union_find()
+        a = torch.tensor([1, 2, 3])
+        b = a.clone()
+        uf.merge(a, b)
+        self.assertIs(uf.find(a), uf.find(b))
+        # a is canonical
+        self.assertIs(uf.find(a), a)
+        # mutate the canonical
+        a.add_(1)
+
+        # When another tensor in the set tries to query for the canonical
+        with self.assertRaisesRegex(RuntimeError, "has been mutated"):
+            uf.find(b)
+
+        # What happens if we merge this new one with the old one? You can't!
+        with self.assertRaisesRegex(RuntimeError, "has been mutated"):
+            uf.merge(a, b)
+
+        # To the perspective of the mutated tensor, it will just belong
+        # to a new set where it is still canonical.
+        self.assertIs(uf.find(a), a)
 
 
 instantiate_parametrized_tests(TestNestedTensor)

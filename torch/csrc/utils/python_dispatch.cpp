@@ -663,6 +663,11 @@ void initDispatchBindings(PyObject* module) {
       .def("has", &c10::DispatchKeySet::has)
       .def("__repr__", [](c10::DispatchKeySet d) { return c10::toString(d); });
 
+  py::class_<c10::UnionFind>(m, "_UnionFind")
+      .def(py::init<>())
+      .def("merge", &c10::UnionFind::merge)
+      .def("find", &c10::UnionFind::find);
+
   m.attr("_dispatch_autogradother_backends") =
       py::cast(c10::autogradother_backends);
 
