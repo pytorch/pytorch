@@ -418,7 +418,9 @@ freezing_discard_parameters: bool = False
 
 # Kill switch for allowing temporary tensors to be allocated as stack arrays. Tests
 # should be run with this flag both on and off to make sure we have coverage.
-allow_stack_allocation: bool = True
+allow_stack_allocation: bool = (
+    os.environ.get("TORCHINDUCTOR_STACK_ALLOCATION", "1") == "1"
+)
 
 # Enables an alternate DSO interface (the "minimal ArrayRef interface") intended
 # to maximize performance for use cases that it can accommodate at the expense of

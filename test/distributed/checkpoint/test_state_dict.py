@@ -106,9 +106,6 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         # Then finally we can call set_state_dict().
         if not isinstance(dist_optim, list):
             dist_optim = [dist_optim]
-        curr_dist_msd, curr_dist_osd = get_state_dict(
-            dist_model, optimizers=dist_optim, options=options
-        )
         if test_frozen:
             # We won't be able to load the partial state_dict back.
             return
