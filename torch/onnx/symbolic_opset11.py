@@ -111,7 +111,7 @@ def hardtanh(g: jit_utils.GraphContext, self: _C.Value, min_val: float, max_val:
         "Constant",
         value_t=torch.tensor(max_val, dtype=scalar_type.dtype()),
     )
-    return opset9._op_with_optional_float_cast(
+    return symbolic_helper._op_with_optional_float_cast(
         g, "Clip", self, min_val, max_val, opset_before=12
     )
 
@@ -146,7 +146,7 @@ def clamp(g: jit_utils.GraphContext, self, min, max):
             symbolic_helper._get_tensor_rank(min) == 0
             and symbolic_helper._get_tensor_rank(max) == 0
         ):
-            return opset9._op_with_optional_float_cast(
+            return symbolic_helper._op_with_optional_float_cast(
                 g, "Clip", self, min, max, opset_before=12
             )
         else:
@@ -160,11 +160,11 @@ def clamp_min(g: jit_utils.GraphContext, self, min):
     min = g.op("Cast", min, to_i=_type_utils.JitScalarType.from_value(self).onnx_type())
     if symbolic_helper._get_tensor_rank(min) == 0:
         max = opset9.unused(g)
-        return opset9._op_with_optional_float_cast(
+        return symbolic_helper._op_with_optional_float_cast(
             g, "Clip", self, min, max, opset_before=12
         )
     else:
-        return opset9._op_with_optional_float_cast(g, "Max", self, min, opset_before=12)
+        return symbolic_helper._op_with_optional_float_cast(g, "Max", self, min, opset_before=12)
 
 
 @_onnx_symbolic("aten::clamp_max")
@@ -174,11 +174,11 @@ def clamp_max(g: jit_utils.GraphContext, self, max):
     max = g.op("Cast", max, to_i=_type_utils.JitScalarType.from_value(self).onnx_type())
     if symbolic_helper._get_tensor_rank(max) == 0:
         min = opset9.unused(g)
-        return opset9._op_with_optional_float_cast(
+        return symbolic_helper._op_with_optional_float_cast(
             g, "Clip", self, min, max, opset_before=12
         )
     else:
-        return opset9._op_with_optional_float_cast(g, "Min", self, max, opset_before=12)
+        return symbolic_helper._op_with_optional_float_cast(g, "Min", self, max, opset_before=12)
 
 
 @_onnx_symbolic("aten::relu6")

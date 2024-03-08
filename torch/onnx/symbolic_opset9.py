@@ -802,12 +802,20 @@ def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True):
             return symbolic_helper._handle_reduce_dim_none(g, self, onnx_op_name)
         else:
             # dim-reduce path
-            desc = "is" if allow_multi_dim_support else "i"
-            dim, keepdim = symbolic_helper._get_const(
-                dim, desc, "dim"
-            ), symbolic_helper._get_const(keepdim, "i", "keepdim")
-            dim_list = dim if allow_multi_dim_support else [dim]
-            return g.op(onnx_op_name, self, axes_i=dim_list, keepdims_i=keepdim)
+            keepdim = symbolic_helper._get_const(keepdim, "i", "keepdim")
+            if g.opset < 18:
+                desc = "is" if allow_multi_dim_support else "i"
+                dim = symbolic_helper._get_const(dim, desc, "dim")
+                dim_list = dim if allow_multi_dim_support else [dim]
+                return g.op(
+                    onnx_op_name, self, axes_i=dim_list, keepdims_i=keepdim
+                )
+            else:
+                if allow_multi_dim_support:
+                    axes = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.long))
+                else:
+                    axes = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
+                return g.op(onnx_op_name, self, axes, keepdims_i=keepdim)
 
     return symbolic
 
@@ -1356,65 +1364,11 @@ def mish(g: jit_utils.GraphContext, input):
     return g.op("Mul", input, g.op("Tanh", g.op("Softplus", input)))
 
 
-@_beartype.beartype
-def _op_with_optional_float_cast(g: jit_utils.GraphContext, op_name, *args, **kwargs):
-    """Some PyTorch operators (e.g., Clip/Min/ReLU/Pad) are super set of ONNX in terms of data types.
-    This function maximizes the exportability of PyTorch-ONNX by allowing ONNX-unsupported PyTorch
-    operator data type. For example, `Cast<int>(Clip<float>(Cast<float>(INPUT)))` can be used to mimic
-    `Clip<int>(INPUT)` (opset version < 12).
-
-    Args:
-        g (torch._C.Graph): graph to write the ONNX representation into.
-        op_name (str): operator name in ONNX.
-        *args (tuple): operands to the operator.
-        **kwargs (dict): attributes to the operator along with "opset_before" (optional, None by default)
-            indicating the smallest opset version to trigger such casting behavior and "target_float_t"
-            (optional, torch.onnx.JitScalarType.FLOAT by default) indicating the data type of internal operator.
-
-    Returns:
-        Optional[torch._C.Value, Tuple[torch._C.Value, ...]]: output(s) of the operator.
-    """
-    opset_before = kwargs.pop("opset_before", None)
-    target_float_t = kwargs.pop("target_float_t", _type_utils.JitScalarType.FLOAT)
-
-    inputs = list(args)
-    dtype_0 = _type_utils.JitScalarType.from_value(inputs[0])
-
-    require_cast = not symbolic_helper._is_fp(inputs[0]) and (
-        opset_before is None or GLOBALS.export_onnx_opset_version < opset_before
-    )
-
-    if require_cast:
-        for input in inputs:
-            if input.isCompleteTensor():
-                input_scalar_type = _type_utils.JitScalarType.from_value(input)
-                if input_scalar_type != dtype_0:
-                    raise errors.SymbolicValueError(
-                        f"Inputs of {op_name} must have same dtype."
-                        f"Got {dtype_0.scalar_name()} and {input_scalar_type.scalar_name()}",
-                        input,
-                    )
-        for i, input in enumerate(inputs):
-            if input.isCompleteTensor() and not symbolic_helper._is_fp(input):
-                inputs[i] = g.op(
-                    "Cast",
-                    input,
-                    to_i=target_float_t.onnx_type(),
-                )
-
-    self = g.op(op_name, *inputs, **kwargs)
-
-    if require_cast:
-        self = g.op("Cast", self, to_i=dtype_0.onnx_type())
-
-    return self
-
-
 @_onnx_symbolic("aten::relu")
 @symbolic_helper.quantized_args(True)
 @_beartype.beartype
 def relu(g: jit_utils.GraphContext, input):
-    return _op_with_optional_float_cast(g, "Relu", input, opset_before=14)
+    return symbolic_helper._op_with_optional_float_cast(g, "Relu", input, opset_before=14)
 
 
 @_onnx_symbolic("aten::relu6")
@@ -1762,7 +1716,7 @@ def _avg_pool(name, tuple_fn):
         # this accommodation.
         # More detail on https://github.com/pytorch/pytorch/issues/57178
         if count_include_pad:
-            input = _op_with_optional_float_cast(
+            input = symbolic_helper._op_with_optional_float_cast(
                 g,
                 "Pad",
                 input,
@@ -1961,7 +1915,7 @@ def constant_pad_nd(g: jit_utils.GraphContext, input, padding, value):
 
     padding = _convert_padding_node(padding)
     paddings = _prepare_onnx_paddings(symbolic_helper._get_tensor_rank(input), padding)
-    return _op_with_optional_float_cast(
+    return symbolic_helper._op_with_optional_float_cast(
         g, "Pad", input, pads_i=paddings, mode_s=mode, value_f=value, opset_before=11
     )
 
@@ -2016,7 +1970,7 @@ def reflection_pad(g: jit_utils.GraphContext, input, padding):
     mode = "reflect"
     padding = _convert_padding_node(padding)
     paddings = _prepare_onnx_paddings(symbolic_helper._get_tensor_rank(input), padding)
-    return _op_with_optional_float_cast(
+    return symbolic_helper._op_with_optional_float_cast(
         g, "Pad", input, pads_i=paddings, mode_s=mode, opset_before=11
     )
 
@@ -2029,7 +1983,7 @@ def replication_pad(g: jit_utils.GraphContext, input, padding):
     mode = "edge"
     padding = _convert_padding_node(padding)
     paddings = _prepare_onnx_paddings(symbolic_helper._get_tensor_rank(input), padding)
-    return _op_with_optional_float_cast(
+    return symbolic_helper._op_with_optional_float_cast(
         g, "Pad", input, pads_i=paddings, mode_s=mode, opset_before=11
     )
 
@@ -2942,7 +2896,14 @@ def native_layer_norm(
     two_cst = symbolic_helper._generate_wrapped_number(g, 2.0)
     eps_cst = symbolic_helper._generate_wrapped_number(g, eps)
 
-    mean = g.op("ReduceMean", input, axes_i=axes)
+    if g.opset < 18:
+        mean = g.op("ReduceMean", input, axes_i=axes)
+    else:
+        mean = g.op(
+            "ReduceMean",
+            input,
+            g.op("Constant", value_t=torch.tensor(axes, dtype=torch.long)))
+
     numerator = sub(g, input, mean)
 
     # Cast it to eps dtype to avoid precision loss
@@ -2957,7 +2918,14 @@ def native_layer_norm(
         )
 
     # variance = e((x - e(x))^2), and (x - e(x)) is the numerator in the layer_norm formula
-    variance = g.op("ReduceMean", pow(g, numerator, two_cst), axes_i=axes)
+    if g.opset < 18:
+        variance = g.op("ReduceMean", pow(g, numerator, two_cst), axes_i=axes)
+    else:
+        variance = g.op(
+            "ReduceMean",
+            pow(g, numerator, two_cst),
+            g.op("Constant", value_t=torch.tensor(axes, dtype=torch.long)))
+
     denominator = sqrt(g, g.op("Add", variance, eps_cst))
     normalized = g.op("Div", numerator, denominator)
 
@@ -3405,7 +3373,7 @@ def clamp(g: jit_utils.GraphContext, self, min, max):
         return clamp_min(g, self, min)
     else:
         if symbolic_helper._is_constant(min) and symbolic_helper._is_constant(max):
-            return _op_with_optional_float_cast(
+            return symbolic_helper._op_with_optional_float_cast(
                 g,
                 "Clip",
                 self,
@@ -3422,13 +3390,13 @@ def clamp(g: jit_utils.GraphContext, self, min, max):
 @_beartype.beartype
 def clamp_min(g: jit_utils.GraphContext, self, min):
     if symbolic_helper._is_constant(min):
-        return _op_with_optional_float_cast(
+        return symbolic_helper._op_with_optional_float_cast(
             g, "Clip", self, min_f=symbolic_helper._parse_arg(min, "f"), opset_before=12
         )
     else:
         dtype = _type_utils.JitScalarType.from_value(self)
         min = g.op("Cast", min, to_i=dtype.onnx_type())
-        return _op_with_optional_float_cast(g, "Max", self, min, opset_before=12)
+        return symbolic_helper._op_with_optional_float_cast(g, "Max", self, min, opset_before=12)
 
 
 @_onnx_symbolic("aten::clamp_max")
@@ -3436,13 +3404,13 @@ def clamp_min(g: jit_utils.GraphContext, self, min):
 @_beartype.beartype
 def clamp_max(g: jit_utils.GraphContext, self, max):
     if symbolic_helper._is_constant(max):
-        return _op_with_optional_float_cast(
+        return symbolic_helper._op_with_optional_float_cast(
             g, "Clip", self, max_f=symbolic_helper._parse_arg(max, "f"), opset_before=12
         )
     else:
         dtype = _type_utils.JitScalarType.from_value(self)
         max = g.op("Cast", max, to_i=dtype.onnx_type())
-        return _op_with_optional_float_cast(g, "Min", self, max, opset_before=12)
+        return symbolic_helper._op_with_optional_float_cast(g, "Min", self, max, opset_before=12)
 
 
 @_onnx_symbolic("aten::max")
@@ -3456,12 +3424,16 @@ def max(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
         return g.op("ReduceMax", self, keepdims_i=0)
     # torch.max(input, other)
     if keepdim is None:
-        return _op_with_optional_float_cast(g, "Max", self, dim_or_y, opset_before=12)
+        return symbolic_helper._op_with_optional_float_cast(g, "Max", self, dim_or_y, opset_before=12)
     # torch.max(input, dim, keepdim)
     else:
-        dim = symbolic_helper._get_const(dim_or_y, "i", "dim")
         keepdim = symbolic_helper._get_const(keepdim, "i", "keepdim")
-        max = g.op("ReduceMax", self, axes_i=[dim], keepdims_i=keepdim)
+        dim = symbolic_helper._get_const(dim_or_y, "i", "dim")
+        if g.opset < 18:
+            max = g.op("ReduceMax", self, axes_i=[dim], keepdims_i=keepdim)
+        else:
+            axes = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
+            max = g.op("ReduceMax", self, axes, keepdims_i=keepdim)
         indices = g.op("ArgMax", self, axis_i=dim, keepdims_i=keepdim)
         return max, indices
 
@@ -3482,12 +3454,16 @@ def min(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
         return g.op("ReduceMin", self, keepdims_i=0)
     # torch.min(input, other)
     if keepdim is None:
-        return _op_with_optional_float_cast(g, "Min", self, dim_or_y, opset_before=12)
+        return symbolic_helper._op_with_optional_float_cast(g, "Min", self, dim_or_y, opset_before=12)
     # torch.min(input, dim, keepdim)
     else:
-        dim = symbolic_helper._get_const(dim_or_y, "i", "dim")
         keepdim = symbolic_helper._get_const(keepdim, "i", "keepdim")
-        min = g.op("ReduceMin", self, axes_i=[dim], keepdims_i=keepdim)
+        dim = symbolic_helper._get_const(dim_or_y, "i", "dim")
+        if g.opset < 18:
+            min = g.op("ReduceMin", self, axes_i=[dim], keepdims_i=keepdim)
+        else:
+            axes = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
+            min = g.op("ReduceMin", self, axes, keepdims_i=keepdim)
         indices = g.op("ArgMin", self, axis_i=dim, keepdims_i=keepdim)
         return min, indices
 
@@ -4135,7 +4111,7 @@ def slice(g: jit_utils.GraphContext, self, *args):
 @symbolic_helper.parse_args("v", "f", "f")
 @_beartype.beartype
 def hardtanh(g: jit_utils.GraphContext, self: _C.Value, min_val: float, max_val: float):
-    return _op_with_optional_float_cast(
+    return symbolic_helper._op_with_optional_float_cast(
         g, "Clip", self, min_f=min_val, max_f=max_val, opset_before=12
     )
 
@@ -6842,7 +6818,7 @@ def prim_shape(g: jit_utils.GraphContext, self):
 @_onnx_symbolic("prim::max")
 @_beartype.beartype
 def prim_max(g: jit_utils.GraphContext, self, other):
-    return _op_with_optional_float_cast(g, "Max", self, other, opset_before=12)
+    return symbolic_helper._op_with_optional_float_cast(g, "Max", self, other, opset_before=12)
 
 
 @_onnx_symbolic("prim::min")

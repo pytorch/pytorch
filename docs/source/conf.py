@@ -1467,8 +1467,6 @@ coverage_ignore_functions = [
     "stft",
     # torch.onnx.symbolic_opset18
     "col2im",
-    # torch.onnx.symbolic_opset20
-    "affine_grid_generator",
     # torch.onnx.symbolic_opset7
     "max",
     "min",

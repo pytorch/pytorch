@@ -3454,7 +3454,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = StandardDeviationUnbiased()
         self.run_test(model, x)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_std_along_dims(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
@@ -3472,7 +3471,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = StandardDeviationUnbiased()
         self.run_test(model, x)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_std_keepdim(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
@@ -3490,7 +3488,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = StandardDeviationUnbiased()
         self.run_test(model, x)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_std_correction(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
@@ -3500,7 +3497,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = StandardDeviation()
         self.run_test(model, x)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_var(self):
         class Variance(torch.nn.Module):
             def forward(self, input):
@@ -3526,7 +3522,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = VarianceSqrt()
         self.run_test(model, x)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_var_along_dims(self):
         class Variance(torch.nn.Module):
             def forward(self, input):
@@ -3544,7 +3539,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = VarianceUnbiased()
         self.run_test(model, x)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_var_keepdim(self):
         class Variance(torch.nn.Module):
             def forward(self, input):
@@ -3562,7 +3556,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = VarianceUnbiased()
         self.run_test(model, x)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_var_correction(self):
         class Variance(torch.nn.Module):
             def forward(self, input):
@@ -3588,7 +3581,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = VarianceUnbiased()
         self.run_test(model, x)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_var_mean_along_dims(self):
         class Variance(torch.nn.Module):
             def forward(self, input):
@@ -3606,7 +3598,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = VarianceUnbiased()
         self.run_test(model, x)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_var_mean_mixed_dims(self):
         class ReverseDims(torch.nn.Module):
             def forward(self, input):
@@ -3632,7 +3623,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = NonZeroDims()
         self.run_test(model, x)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_var_mean_keepdim(self):
         class Variance(torch.nn.Module):
             def forward(self, input):
@@ -3650,7 +3640,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = VarianceUnbiased()
         self.run_test(model, x)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_var_mean_correction(self):
         class Variance(torch.nn.Module):
             def forward(self, input):
@@ -3676,7 +3665,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = StandardDeviationUnbiased()
         self.run_test(model, x)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_std_mean_along_dims(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
@@ -3694,7 +3682,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = VarianceUnbiased()
         self.run_test(model, x)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_std_mean_keepdim(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
@@ -3712,7 +3699,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = StandardDeviationUnbiased()
         self.run_test(model, x)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_std_mean_correction(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
@@ -4531,11 +4517,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_reduced_sum(self):
         return self._test_reduced_ops(op=torch.sum)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_reduced_mean(self):
         return self._test_reduced_ops(op=torch.mean)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_reduced_prod(self):
         return self._test_reduced_ops(op=torch.prod)
 
@@ -4552,7 +4536,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(NoDimModel(), input)
         self.run_test(DimModel(), input)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_reduced_min_max(self):
         class ReducedMinMaxModule(torch.nn.Module):
             def forward(self, input):
@@ -4567,7 +4550,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 5, dtype=torch.float)
         self.run_test(ReducedMinMaxModule(), x)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_reduce_log_sum_exp(self):
         class ReduceLogSumExpModel(torch.nn.Module):
             def forward(self, input):
@@ -5007,7 +4989,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(4, 1, requires_grad=True)
         self.run_test(model, (x, y))
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_amax_amin(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -5019,7 +5000,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 4)
         self.run_test(model, x)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_aminmax(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -7202,7 +7182,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.tensor(2)
         self.run_test(FullLikeModel(), (x, y))
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_l1_norm(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -7211,7 +7190,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_l2_norm(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -7220,7 +7198,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_frobenius_norm(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -7229,7 +7206,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_frobenius_norm_keepdim(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -7501,7 +7477,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(FModModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_glu(self):
         class GluModel(torch.nn.Module):
             def forward(self, x):
@@ -7609,7 +7584,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     @skipScriptTest()  # error in propagate as assign input shape
     @skipIfUnsupportedMinOpsetVersion(10)
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_embedding_bag(self):
         model = torch.nn.EmbeddingBag(10, 5, mode="sum", scale_grad_by_freq=True)
         input = torch.randint(10, (7,))
@@ -7626,7 +7600,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, (input))
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_embedding_bag_1d_per_sample_weights(self):
         class EmbeddingModel(torch.nn.Module):
             def forward(self, embedding_matrix, input, offset, weights):
@@ -7648,7 +7621,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, (embedding_matrix, x, offset, w))
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @skipIfUnsupportedMaxOpsetVersion(17)
     @unittest.skip(
         "This test is broken with ONNXRuntime(17): "
         "when running with onnxruntime 1.17.0 this test fails with the following error:"
@@ -8590,7 +8562,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 5, 5)
         self.run_test(Det(), x)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_linalg_norm(self):
         class LinalgSingleDimModel(torch.nn.Module):
             def __init__(self, ord_val):
@@ -8678,7 +8649,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 5, 5)
         self.run_test(LinalgVectorNormModel(0), x)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_linalg_vector_norm(self):
         class LinalgVectorNormModel(torch.nn.Module):
             def __init__(self, ord_val, dim_info):
@@ -8698,7 +8668,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             for dim_info in dim_options:
                 self.run_test(LinalgVectorNormModel(ord_val, dim_info), x)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_linalg_matrix_norm(self):
         class LinalgMatrixNormModel(torch.nn.Module):
             def __init__(self, ord_val, dim_val=(-2, -1), keepdim_val=False):
@@ -12940,7 +12909,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     )
     @skipScriptTest()
     @skipIfUnsupportedMinOpsetVersion(10)
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_quantized_unary_ops(self, function_or_module):
         input = torch.randn(1, 4, 2, 3)
         q_input = torch.quantize_per_tensor(input, 0.26, 128, torch.quint8)

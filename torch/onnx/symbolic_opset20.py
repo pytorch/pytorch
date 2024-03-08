@@ -46,7 +46,7 @@ _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=20)
 @_onnx_symbolic("aten::grid_sampler")
 @symbolic_helper.parse_args("v", "v", "i", "i", "b")
 @_beartype.beartype
-def grid_sampler(
+def _grid_sampler(
     g: jit_utils.GraphContext,
     input: _C.Value,
     grid: _C.Value,
@@ -71,7 +71,7 @@ def grid_sampler(
 @_onnx_symbolic("aten::affine_grid_generator")
 @symbolic_helper.parse_args("v", "v", "b")
 @_beartype.beartype
-def affine_grid_generator(
+def _affine_grid_generator(
     g: jit_utils.GraphContext,
     theta: _C.Value,
     size: _C.Value,
