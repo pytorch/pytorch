@@ -339,7 +339,7 @@ Tensor _to_copy(
   }
   // See Note [Explicit nullopt MemoryFormat argument]
   // TODO: empty_quantized does not work here. It raises an exception in CheckMemoryFormat.h prior to
-  // empty_affine_quantizd/_empty_per_channel_affine_quantized calls
+  // empty_affine_quantized/_empty_per_channel_affine_quantized calls
   // at::empty also does not work here because there is no proper at::empty support for quantized tensors
   // as it would return a quantized tensor with an UnknownQuantizer
   auto r = self.is_quantized() ? at::empty_like(self, memory_format)
@@ -653,7 +653,7 @@ Tensor sparse_compressed_to_dense(
   dense = dense.reshape(dense_reshaped_sizes);
 
   // Calculate batch, row and column indices for non-zeros in the
-  // sparse matrix, and use these to calculate correspoding indices
+  // sparse matrix, and use these to calculate corresponding indices
   // into the dense matrix reshaped as above.  Then, update dense
   // matrix by adding sparse matrix values into elements with indices
   // calculated this way.

@@ -25,7 +25,7 @@ from typing import (
 
 import torch
 from torch import Tensor
-from torch._utils import _get_device_module
+from torch._utils import _get_available_device_type, _get_device_module
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.futures import Future
 
@@ -114,7 +114,9 @@ class _OverlappingCpuLoader(_TensorLoader):
         self.current_items: collections.deque = collections.deque()
         self.idx = 0
         self.started = False
-        self.device_type = stream.device_type if stream else torch.device("cuda").type
+        self.device_type = (
+            stream.device_type if stream else _get_available_device_type()
+        )
         self.device_module = _get_device_module(self.device_type)
         self.stream = cast(
             torch.cuda.Stream, stream or self.device_module.current_stream()
@@ -258,12 +260,18 @@ def _write_files_from_queue(
             file_name, storage_key, write_items = file_queue.get_nowait()
             loader: _TensorLoader
 
+            custom_backend_name = torch._C._get_privateuse1_backend_name()
+            custom_device_mod = getattr(torch, custom_backend_name, None)
+
             # TODO: Using the OverlappingCpuLoader with multiple threads creates significant
             # performance degredation, observed as being related to cuda stream syncs. We
             # should try to fix this and use _OverlappingCpuLoader for all threaded cases
             if (
                 thread_count == 1
-                and torch.cuda.is_available()
+                and (
+                    torch.cuda.is_available()
+                    or (custom_device_mod and custom_device_mod.is_available())
+                )
                 and inflight_threshhold > 0
             ):
                 loader = _OverlappingCpuLoader(

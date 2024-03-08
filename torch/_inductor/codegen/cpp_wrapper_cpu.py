@@ -18,14 +18,15 @@ from .common import IndentedBuffer
 from .wrapper import pexpr, WrapperCodeGen
 
 
-class CppWrapperCodeGen(WrapperCodeGen):
+class CppWrapperCpu(WrapperCodeGen):
     """
     Generates cpp wrapper for running on CPU and calls cpp kernels
     """
 
     def __init__(self):
+        if not hasattr(self, "device"):
+            self.device = "cpu"
         super().__init__()
-
         self.declare = "auto "
         self.declare_maybe_reference = "decltype(auto) "
         self.ending = ";"
@@ -78,6 +79,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         triton=True,
         arg_types=None,
         grid_fn: str = "grid",
+        triton_meta=None,
     ):
         """
         Generates kernel call code.
@@ -148,7 +150,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
             )
 
         if config.abi_compatible:
-            self.header.splice("#include <torch/csrc/inductor/aoti_torch/c/shim.h>")
+            if config.c_shim_version == "1":
+                self.header.splice("#include <torch/csrc/inductor/aoti_torch/c/shim.h>")
+            else:
+                self.header.splice(
+                    f"#include <torch/csrc/inductor/aoti_torch/generated/c_shim_{self.device}.h>"
+                )
         else:
             if not V.graph.aot_mode:
                 self.header.splice("#include <pybind11/pybind11.h>")
@@ -238,7 +245,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 from .cpp import DTYPE_TO_CPP
 
                 input_cpp_types = ", ".join(
-                    f"{CppWrapperCodeGen.get_input_cpp_type(x)}"
+                    f"{CppWrapperCpu.get_input_cpp_type(x)}"
                     for x in V.graph.graph_inputs.values()
                 )
 
@@ -486,7 +493,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
         )
         self.prefix.writeline("  public:")
         declare_kernel = set(self.src_to_kernel.values())
-        declare_kernel.update(self.user_defined_kernel_cache.values())
+        declare_kernel.update(
+            entry[0] for entry in self.user_defined_kernel_cache.values()
+        )
         if V.graph.const_module:
             declare_kernel.update(
                 V.graph.const_module.wrapper_code.src_to_kernel.values()
@@ -561,10 +570,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     f"constants_info_[{idx}].stride = {{{stride_str}}};"
                 )
                 if name in V.graph.dynamo_flat_name_to_original_fqn:
-                    self.prefix.writeline(
-                        f"""constants_info_[{idx}].original_fqn = "{V.graph.dynamo_flat_name_to_original_fqn[name]}";"""
+                    original_fqn = V.graph.dynamo_flat_name_to_original_fqn.get(
+                        name, name
                     )
-
+                elif name in V.graph.allocated_constant_name:
+                    original_fqn = V.graph.allocated_constant_name[name]
+                else:
+                    raise AssertionError("original_fqn must be set for constant")
+                self.prefix.writeline(
+                    f"""constants_info_[{idx}].original_fqn = "{original_fqn}";"""
+                )
             self.prefix.writeline("update_constants_map(std::move(constants_map));")
             self.prefix.writeline("update_constants_array(std::move(constants_array));")
 
@@ -915,7 +930,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
         kernel_suffix = kernel_tokens[-1]
         if kernel_suffix == "call":
             kernel_suffix = kernel_tokens[-2]
-        shim_fn = f"aoti_torch_{kernel_suffix}"
+        if config.c_shim_version == "1":
+            shim_fn = f"aoti_torch_{kernel_suffix}"
+        else:
+            shim_fn = f"aoti_torch_{self.device}_{kernel_suffix}"
+
         # HACK: val_to_arg_str jams multiple arguments together using a comma. If that
         # ever breaks, it needs to be reworked to be able to return multiple arguments,
         # and the split-on-comma code here needs to be removed.
@@ -1007,7 +1026,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
         else:
             self.writeline(self.wrap_kernel_call(kernel, args))
 
-    def generate_user_defined_triton_kernel(self, kernel_name, grid, configs, args):
+    def generate_user_defined_triton_kernel(
+        self, kernel_name, grid, configs, args, triton_meta
+    ):
         assert len(grid) != 0
         if len(grid) == 1:
             grid_decision = grid[0]
@@ -1028,6 +1049,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             device_index=V.graph.scheduler.current_device.index,
             cuda=True,
             triton=True,
+            triton_meta=triton_meta,
         )
 
     def generate_scatter_fallback(
@@ -1419,6 +1441,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if not config.abi_compatible:
             super().codegen_multi_output(name, value)
 
+    def codegen_subgraph(self, subgraph, outer_inputs, outer_outputs):
+        raise NotImplementedError("Control flow NYI in C++ wrapper codegen.")
+
+    def codegen_conditional(self, conditional):
+        raise NotImplementedError("Control flow NYI in C++ wrapper codegen.")
+
     def generate_extern_kernel_args_decl_if_needed(
         self, op_overload, raw_args, output_args
     ):
@@ -1658,12 +1686,24 @@ class CppWrapperCodeGen(WrapperCodeGen):
         ):
             if val is None:
                 return "0"  # nullptr is not available in C
-            if isinstance(val, (bool, int, str, float)):
+            if not isinstance(type_.getElementType(), torch.TensorType):
                 var_name = f"var_{next(self.arg_var_id)}"
                 self.writeline(f"auto {var_name} = {self.val_to_arg_str(val)};")
                 return f"&{var_name}"
-            if not isinstance(type_.getElementType(), torch.TensorType):
-                return f"&{self.val_to_arg_str(val)}"
+            elif config.c_shim_version == "2":
+                # Similar to other data type, use pointer to denote optional tensor arg in v2 C shim
+                base_handle = self.val_to_arg_str(val)
+                if "wrap_with_raii_handle_if_needed" in base_handle:
+                    # wrap_with_raii_handle_if_needed creates a temp RAIIAtenTensorHandle, so we need to
+                    # explicitly store it. Otherwise, it will be destroyed before the fallback kernel call.
+                    tmp_var_name = f"var_{next(self.arg_var_id)}"
+                    self.writeline(
+                        f"RAIIAtenTensorHandle {tmp_var_name} = {base_handle};"
+                    )
+                    base_handle = tmp_var_name
+                var_name = f"var_{next(self.arg_var_id)}"
+                self.writeline(f"AtenTensorHandle {var_name} = {base_handle}.get();")
+                return f"&{var_name}"
 
         return self.val_to_arg_str(val)
 
@@ -1683,7 +1723,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return f"{val}LL" if sys.platform == "darwin" else f"{val}L"
         elif isinstance(val, str):
             return f'"{val}"'
-        elif isinstance(val, (ir.Buffer, ir.ReinterpretView)):
+        elif isinstance(
+            val, (ir.Buffer, ir.ReinterpretView, ir.StorageBox, ir.TensorBox)
+        ):
             return val.codegen_reference()
         elif isinstance(val, torch.device):
             return self.codegen_device(val)

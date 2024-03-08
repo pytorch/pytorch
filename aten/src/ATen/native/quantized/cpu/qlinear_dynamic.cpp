@@ -423,6 +423,8 @@ at::Tensor& PackedLinearWeightFp16::apply_dynamic_impl(
   // Resize output Tensor
   output.resize_(output_sizes);
 
+  auto output_data = output.data_ptr<float>();
+
   int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
     for (const auto task_id : c10::irange(begin, end)) {
@@ -433,7 +435,7 @@ at::Tensor& PackedLinearWeightFp16::apply_dynamic_impl(
           /*A=*/input_ptr,
           /*Bp=*/packed_weight_fp16,
           /*beta=*/0.0f,
-          /*C=*/output.data_ptr<float>(),
+          /*C=*/output_data,
           /*thread_id=*/static_cast<int>(task_id),
           /*num_threads=*/num_tasks);
     }
@@ -520,8 +522,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
       /*len=*/input.numel());
 #else
   if (input_contig.numel() > 0) {
-    Tensor t_min, t_max;
-    std::tie(t_min, t_max) = at::aminmax(input_contig);
+    auto [t_min, t_max] = at::aminmax(input_contig);
     x_max = t_max.item<float>();
     x_min = t_min.item<float>();
   }

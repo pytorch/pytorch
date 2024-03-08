@@ -173,6 +173,14 @@ class SymNode:
     def is_bool(self):
         return self.pytype is bool
 
+    def is_nested_int(self):
+        # Unbacked SymInts cannot be nested int today
+        return (
+            self._hint is not None
+            and isinstance(self._hint, SymInt)
+            and self._hint.node.is_nested_int()
+        )
+
     def wrap_int(self, num):
         assert type(num) is int
         import sympy

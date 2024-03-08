@@ -16,8 +16,9 @@ import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
-from torch._logging import LazyString
+from torch._logging import LazyString, trace_structured
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import has_free_symbols, ShapeEnv, SymTypes
 from torch.utils._mode_utils import no_dispatch
@@ -30,8 +31,8 @@ from .codegen.common import (
     get_wrapper_codegen_for_device,
     register_backend_for_device,
 )
-from .codegen.cpp_wrapper_cpu import CppWrapperCodeGen
-from .codegen.cpp_wrapper_cuda import CudaWrapperCodeGen
+from .codegen.cpp_wrapper_cpu import CppWrapperCpu
+from .codegen.cpp_wrapper_cuda import CppWrapperCuda
 from .codegen.wrapper import WrapperCodeGen
 from .exc import (
     CppWrapperCodeGenError,
@@ -211,6 +212,7 @@ class GraphLowering(torch.fx.Interpreter):
         const_output_index=None,
         const_code=None,
         const_module=None,
+        name=None,
     ):
         super().__init__(gm)
 
@@ -235,6 +237,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.reuse_shape_env = True
         self._shape_env = shape_env
         self.sizevars = SizeVarAllocator(shape_env)
+        self.graph_input_names: List[str] = []
         self.graph_inputs: Dict[str, TensorBox] = {}
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
         self.device_types: Set[str] = (
@@ -273,7 +276,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.name_to_buffer: Dict[str, ir.Buffer] = {}
         self.name_to_users: DefaultDict[str, List[ir.IRNode]] = defaultdict(list)
         self.creation_time = time.time()
-        self.name = "GraphLowering"
+        self.name = name
         self.cpp_wrapper = cpp_wrapper
 
         # record multi_kernel choice for cpp_wrapper so the second pass knows
@@ -305,6 +308,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.orig_gm: torch.fx.GraphModule = gm.__copy__()
         self.dynamo_flat_name_to_original_fqn = self.module.meta.get(
             "dynamo_flat_name_to_original_fqn", {}
+        )
+        self.allocated_constant_name = (
+            const_module.allocated_constant_name if const_module is not None else {}
         )
         self.init_backend_registration()
 
@@ -470,6 +476,37 @@ class GraphLowering(torch.fx.Interpreter):
 
         return True
 
+    def qualify_name(self, name: str) -> str:
+        """Prepend the given name with the graph name if any."""
+        if self.name is not None:
+            return f"{self.name}_{name}"
+        return name
+
+    def make_subgraph(
+        self,
+        gm: torch.fx.GraphModule,
+        example_inputs: List[torch.Tensor],
+        subgraph_name: str,
+    ) -> "GraphLowering":
+        """
+        Make a subgraph of the current graph with all inherited
+        parts, except the graph module (`gm`) and `example_inputs`.
+        The subgraphs are lowered separately, but intended to be
+        inlined in the parent graph's codegening. Hence the need
+        for maintaining the same `shape_env` and other properties.
+        The subgraph name is qualified by the parent graph's name.
+        """
+        return GraphLowering(
+            gm=gm,
+            example_inputs=example_inputs,
+            shape_env=self._shape_env,
+            cpp_wrapper=self.cpp_wrapper,
+            aot_mode=self.aot_mode,
+            extern_node_serializer=self.extern_node_serializer,
+            is_inference=self.is_inference,
+            name=self.qualify_name(subgraph_name),
+        )
+
     def find_nodes_prefer_channels_last(self):
         """
         The rule to decide if an node prefer channels last is simple.
@@ -575,7 +612,7 @@ class GraphLowering(torch.fx.Interpreter):
         return super().run(*args)
 
     def register_buffer(self, buffer: ir.Buffer):
-        name = f"buf{len(self.buffers)}"
+        name = self.qualify_name(f"buf{len(self.buffers)}")
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
         # Skip empty CPU tensor so that CUDA graphs can succeed, see https://github.com/pytorch/pytorch/pull/114144
@@ -584,7 +621,7 @@ class GraphLowering(torch.fx.Interpreter):
         return name
 
     def register_list(self, buffer_names: List[str]):
-        name = "list_" + "_".join(buffer_names)
+        name = self.qualify_name("list_" + "_".join(buffer_names))
         self.lists[name] = buffer_names
         return name
 
@@ -641,6 +678,7 @@ class GraphLowering(torch.fx.Interpreter):
                 name = f"constant{len(self.constants)}"
             if name[0].isdigit():
                 name = f"constant_{name}"
+            name = self.qualify_name(name)
             # We may generate a var name for each constant in the codegen.
             # Let's only keep sane characters.
             prefix = re.sub(r"[^a-zA-Z0-9_]", "_", name)
@@ -657,11 +695,12 @@ class GraphLowering(torch.fx.Interpreter):
             )
             return name
 
-        name = allocate(name)
+        new_name = allocate(name)
+        self.allocated_constant_name[new_name] = name
 
         return TensorBox.create(
             ir.ConstantBuffer(
-                name,
+                new_name,
                 FixedLayout(data.device, data.dtype, *self.static_sizes_strides(data)),
             )
         )
@@ -681,6 +720,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def placeholder(self, target: str, args, kwargs):
         example = super().placeholder(target, args, kwargs)
+        self.graph_input_names.append(target)
         if isinstance(example, SymTypes):
             expr = example.node.expr
             self.graph_inputs[target] = expr
@@ -689,6 +729,10 @@ class GraphLowering(torch.fx.Interpreter):
             expr = sympy.sympify(example)
             self.graph_inputs[target] = expr
             return expr
+        if isinstance(example, BackwardState):
+            # Ignored arg, must be unused
+            # Alternately we could filter this out in AotAutograd
+            return None
         assert isinstance(example, torch.Tensor), example
         # todo(chilli): We can remove the last check once we turn buffers into
         # static shape tensors. That's a hack to workaround Inductor believing
@@ -700,6 +744,7 @@ class GraphLowering(torch.fx.Interpreter):
         else:
             sizes, strides = self.symbolic_sizes_strides(example)
         # TODO(jansel): handle input aliasing
+        target = self.qualify_name(target)
         tensor = TensorBox.create(
             InputBuffer(
                 target,
@@ -785,6 +830,9 @@ class GraphLowering(torch.fx.Interpreter):
     def get_attr(self, target, args, kwargs):
         # this is a constant
         value = getattr_recursive(self.module, target)
+
+        if isinstance(value, torch.fx.GraphModule):
+            return ir.Subgraph(name=target, graph_module=value)
 
         if (
             config.aot_inductor.use_runtime_constant_folding
@@ -986,6 +1034,7 @@ class GraphLowering(torch.fx.Interpreter):
                                 torch.ops.onednn.qconv2d_pointwise.default,
                                 torch.ops.onednn.qconv2d_pointwise.binary,
                                 torch.ops.onednn.qlinear_pointwise.default,
+                                torch.ops.onednn.qlinear_pointwise.tensor,
                             ]
                             if torch._C.has_mkl:
                                 need_fixed_layout += [torch.ops.mkl._mkl_linear.default]
@@ -1068,9 +1117,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.cuda = "cuda" in self.device_types
         if self.cpp_wrapper:
             self.validate_can_generate_cpp_wrapper()
-            self.wrapper_code = (
-                CudaWrapperCodeGen() if self.cuda else CppWrapperCodeGen()
-            )
+            self.wrapper_code = CppWrapperCuda() if self.cuda else CppWrapperCpu()
             return
 
         device_types = self.device_types.copy()
@@ -1151,6 +1198,24 @@ class GraphLowering(torch.fx.Interpreter):
         self.scheduler.codegen()
         return self.wrapper_code.generate(self.is_inference)
 
+    def codegen_subgraph(self, parent_graph):
+        """
+        This is a more compact version of the `codegen()` above
+        where we codegen this graph as a subgraph of some parent
+        graph. The parent graph is passed as an argument: the
+        intention is to inline codegening of the subgraph in
+        the parent graph's wrapper code (including the generated
+        kerenls). The wrapper code is not finalized (via `.generate()`
+        call), as this will be done in the parent graph's `codegen()`.
+        """
+        from .scheduler import Scheduler
+
+        self.wrapper_code = parent_graph.wrapper_code
+        self.device_ops = parent_graph.device_ops
+
+        self.scheduler = Scheduler(self.buffers)
+        self.scheduler.codegen()
+
     def count_bytes(self):
         from .scheduler import Scheduler
 
@@ -1189,6 +1254,11 @@ class GraphLowering(torch.fx.Interpreter):
         log_module_code(mod.__file__)
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.debug("Output code: \n%s", code)
+        trace_structured(
+            "inductor_output_code",
+            lambda: {"filename": mod.__file__},
+            payload_fn=lambda: code,
+        )
         output_code_log.info("Output code written to: %s", mod.__file__)
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)

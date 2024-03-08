@@ -19,7 +19,7 @@
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
 
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON)
 #define INDUCTOR_USE_VECTOR_TYPES() 1
 #else
 #define INDUCTOR_USE_VECTOR_TYPES() 0
@@ -444,9 +444,12 @@ inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<float> src) 
 }
 
 inline at::vec::Vectorized<float> to_float_mask(int src) {
-  float mask;
-  *(uint32_t*)&mask = src ? 0xFFFFFFFF : 0;
-  return at::vec::Vectorized<float>(mask);
+  union {
+      float fmask;
+      uint32_t imask;
+  } mask;
+  mask.imask = src ? 0xFFFFFFFF : 0;
+  return at::vec::Vectorized<float>(mask.fmask);
 }
 
 inline bool all_zero(at::vec::Vectorized<float> src) {

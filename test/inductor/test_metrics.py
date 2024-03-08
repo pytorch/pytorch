@@ -1,7 +1,11 @@
 # Owner(s): ["module: inductor"]
+import torch
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._inductor import metrics
+from torch._inductor import config, metrics
+from torch._inductor.utils import collect_defined_kernels
 from torch._inductor.wrapper_benchmark import get_kernel_category_by_source_code
+
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 example_kernel = """
 @reduction(
@@ -70,6 +74,41 @@ class TestMetrics(TestCase):
             "INNER", metrics._parse_reduction_hint(kernel_category, example_kernel)
         )
 
+    def test_atomic_add(self):
+        @torch.compile
+        def f(lhs, index, rhs):
+            return lhs.index_put_([index], rhs, accumulate=True)
+
+        lhs = torch.randn(1024, device=GPU_TYPE)
+        index = torch.randint(0, 1024, [32], device=GPU_TYPE, dtype=torch.int32)
+        rhs = torch.randn(32, device=GPU_TYPE)
+
+        kernel_list = []
+        with collect_defined_kernels(kernel_list):
+            f(lhs, index, rhs)
+
+        self.assertEqual(len(kernel_list), 1)
+        kernel_code = kernel_list[0]
+        self.assertEqual(metrics._count_pattern(kernel_code, "tl.atomic_add"), 1)
+
+    @config.patch("benchmark_kernel", True)
+    def test_kernel_args_num_gb(self):
+        @torch.compile
+        def f(x):
+            return x + 1
+
+        x = torch.randn(int(25e7), device=GPU_TYPE)
+        kernel_list = []
+        with collect_defined_kernels(kernel_list):
+            f(x)
+
+        self.assertEqual(len(kernel_list), 1)
+        kernel_code = kernel_list[0]
+        self.assertEqual(
+            metrics._parse_kernel_args_num_gb(kernel_code, "pointwise"), 2.0
+        )
+
 
 if __name__ == "__main__":
-    run_tests()
+    if HAS_GPU:
+        run_tests()
