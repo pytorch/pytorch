@@ -3,6 +3,8 @@ import functools
 import pickle
 import tempfile
 import unittest
+from typing import List
+from unittest import mock
 from unittest.mock import patch
 
 import torch
@@ -11,6 +13,8 @@ from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.codecache import (
     AsyncCompile,
+    cuda_compile_command,
+    CUDACodeCache,
     FxGraphCachePickler,
     FxGraphHashDetails,
     TensorMetadata,
@@ -476,6 +480,31 @@ class TestFxGraphCacheHashing(TestCase):
             FxGraphCachePickler.dumps(details1),
             FxGraphCachePickler.dumps(details3),
         )
+
+    def test_cuda_compile_command(self):
+        cmd_no_extra_args: str = cuda_compile_command(
+            ["abc.cu", "def.cu"], "output", "so"
+        )
+        assert "nvcc " in cmd_no_extra_args, cmd_no_extra_args
+        assert "abc.cu" in cmd_no_extra_args, cmd_no_extra_args
+        assert "def.cu" in cmd_no_extra_args, cmd_no_extra_args
+        assert "output" in cmd_no_extra_args, cmd_no_extra_args
+        cmd_extra_args: str = cuda_compile_command(
+            ["abc.cu", "def.cu"], "output", "so", ["-Wwhatever", "-nothing"]
+        )
+        assert "nvcc " in cmd_extra_args, cmd_extra_args
+        assert " -Wwhatever" in cmd_extra_args, cmd_extra_args
+        assert " -nothing" in cmd_extra_args, cmd_extra_args
+        assert "abc.cu" in cmd_extra_args, cmd_extra_args
+        assert "def.cu" in cmd_extra_args, cmd_extra_args
+        assert "output " in cmd_extra_args, cmd_extra_args
+        with mock.patch("subprocess.check_output") as check_output_mock:
+            CUDACodeCache.compile("test123.cu", "so", ["-Wsomething"])
+            check_output_mock.assert_called()
+            cmd_parts: List[str] = check_output_mock.call_args[0][0]
+            assert cmd_parts[0] == "nvcc", cmd_parts
+            assert "-Wsomething" in cmd_parts, cmd_parts
+            assert "-DNDEBUG" in cmd_parts, cmd_parts
 
 
 if __name__ == "__main__":
