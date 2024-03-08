@@ -918,6 +918,8 @@ if torch._C._has_mkldnn:
         if input_meta_value is None or weight_meta_value is None:
             return False
         batch_size = input_meta_value.shape[0]
+        if weight_meta_value.dtype == torch.float64:
+            return False
         is_lp_weight = weight_meta_value.dtype in (
             torch.bfloat16,
             torch.float16,
