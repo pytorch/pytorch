@@ -5018,6 +5018,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         meta_bn.load_state_dict(empty_dict, assign=True, strict=False)
         self.assertEqual(meta_bn.state_dict()["num_batches_tracked"], torch.tensor(0))
 
+    def test_batch_norm_update_stats(self):
+        input = torch.rand(0, 1)
+        running_mean = torch.rand(1)
+        running_var = torch.rand(1)
+        with self.assertRaisesRegex(RuntimeError,
+                                    re.escape("input tensor must have at least one element, but got input_sizes = [0, 1]")):
+            torch.batch_norm_update_stats(input=input, momentum=0.0, running_mean=running_mean, running_var=running_var)
+
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
         input2 = torch.randn(4, 4, requires_grad=True, dtype=torch.double)
@@ -6225,6 +6233,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         groups = 3
         input_tensor = torch.rand([0, 9, 4, 4])
         output = torch.nn.ChannelShuffle(groups)(input_tensor)
+        torch.testing.assert_close(output, input_tensor)
+
+    @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
+    def test_native_channel_shuffle_return_alias_of_self(self):
+        groups = 3
+        input_tensor = torch.rand([0, 9, 4, 4])
+        output = torch.native_channel_shuffle(input_tensor, groups)
         torch.testing.assert_close(output, input_tensor)
 
     @set_default_dtype(torch.double)
@@ -8465,6 +8480,15 @@ class TestNNDeviceType(NNTestCase):
             mod = torch.nn.ReplicationPad3d((2, 2, 2, 2, 2, 2))
             inp = torch.randn(3, 0, 10, 10, 10, device=device, dtype=dtype)
             mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 2'):
+            torch._C._nn.replication_pad1d(torch.randn([2]), padding=[])
+
+        with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 4'):
+            torch._C._nn.replication_pad2d(torch.randn([2]), padding=[])
+
+        with self.assertRaisesRegex(RuntimeError, 'padding size is expected to be 6'):
+            torch._C._nn.replication_pad3d(torch.randn([2]), padding=[])
 
     def test_ReplicationPad1d_large(self, device):
         shapes = ([2, 65736, 4], [65736, 2, 4])
