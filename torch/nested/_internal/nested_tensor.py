@@ -1,5 +1,5 @@
-from typing import Tuple
 import weakref
+from typing import Tuple
 
 import torch
 from torch._C import DispatchKey, DispatchKeySet
@@ -37,6 +37,7 @@ class DefaultWeakTensorKeyDictionary(WeakTensorKeyDictionary):
             super().__setitem__(key, self._default_cls())
         return super().__getitem__(key)
 
+
 class TensorIntMap:
     # Assigns Tensor objects to unique ints in an incrementing fashion.
     # The int given corresponds to a particular version of a Tensor.
@@ -45,7 +46,7 @@ class TensorIntMap:
     # We try to be careful to NOT hold any owning references.
     _incrementing_id = 0
     _tensor_to_int_and_version = WeakTensorKeyDictionary()
-    _int_to_tensor = dict()
+    _int_to_tensor: Dict[int, weakref.ReferenceType] = dict()
 
     def get_int(self, t):
         mb_data = self._tensor_to_int_and_version.get(t)
@@ -63,12 +64,14 @@ class TensorIntMap:
         if mb_weak_t is None:
             return None
         mb_t = mb_weak_t()
-        if (mb_t is None or
-                (self._tensor_to_int_and_version[mb_t][1] != mb_t._version or
-                 self._tensor_to_int_and_version[mb_t][0] != i)):
+        if mb_t is None or (
+            self._tensor_to_int_and_version[mb_t][1] != mb_t._version
+            or self._tensor_to_int_and_version[mb_t][0] != i
+        ):
             del self._int_to_tensor[i]
             return None
         return mb_t
+
 
 class TensorUnionFind:
     # Union-find over tensors with some extra functionality:
@@ -123,8 +126,7 @@ class TensorUnionFind:
         if x_root is y_root:
             return
         self._union_find_int.merge(
-            self._tensor_int_map.get_int(x),
-            self._tensor_int_map.get_int(y)
+            self._tensor_int_map.get_int(x), self._tensor_int_map.get_int(y)
         )
         # src and tgt depend on which direction we merged in the actual impl
         tgt, src = (x_root, y_root) if self.find(x_root) is x_root else (y_root, x_root)
@@ -152,9 +154,7 @@ class TensorUnionFind:
         self._refs[src] = tgt
 
     def find(self, tensor):
-        canonical_id = self._union_find_int.find(
-            self._tensor_int_map.get_int(tensor)
-        )
+        canonical_id = self._union_find_int.find(self._tensor_int_map.get_int(tensor))
         ret = self._tensor_int_map.get_tensor(canonical_id)
         if ret is None:
             raise RuntimeError("The canonical tensor of this set has been mutated.")
@@ -499,6 +499,8 @@ def jagged_from_list(
     # Calculate jagged offsets if not provided.
     if offsets is None:
         # Jagged layout specifies that offsets are stored as int64 on the same device as values.
+        # TODO: An alternative way to construct offsets is to use F.pad. This avoids creating
+        # an extra leaf tensor during the forward, potentially resolving compatibility issues.
         offsets = torch.cat(
             [
                 torch.zeros(1, dtype=torch.int64, device=values.device),

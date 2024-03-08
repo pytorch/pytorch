@@ -13,6 +13,7 @@ torch.xpu
     device
     device_count
     device_of
+    empty_cache
     get_device_capability
     get_device_name
     get_device_properties
@@ -24,15 +25,33 @@ torch.xpu
     stream
     synchronize
 
-Streams
+Random Number Generator
+-------------------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    get_rng_state
+    get_rng_state_all
+    initial_seed
+    manual_seed
+    manual_seed_all
+    seed
+    seed_all
+    set_rng_state
+    set_rng_state_all
+
+Streams and events
 ------------------
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
+    Event
     Stream
 
 
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
+.. py:module:: torch.xpu.random
 .. py:module:: torch.xpu.streams
