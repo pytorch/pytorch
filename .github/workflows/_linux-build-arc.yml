@@ -99,6 +99,9 @@ jobs:
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@jeanschmidt/calc-dock-img-ecr-login
+        permissions:
+          id-token: write
+          contents: read
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
 
@@ -113,6 +116,9 @@ jobs:
 
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        permissions:
+          id-token: write
+          contents: read
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
