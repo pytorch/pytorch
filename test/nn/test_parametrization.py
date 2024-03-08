@@ -1290,6 +1290,7 @@ class TestNNParametrization(NNTestCase):
 
                         gradcheck(fn, (m.parametrizations.weight.original,))
 
+    @skipIfTorchDynamo
     def test_new_spectral_norm_cdouble(self):
         dtype = torch.cfloat
         net = nn.Linear(2, 2).to(dtype)
