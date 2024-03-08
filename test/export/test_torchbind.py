@@ -4,6 +4,7 @@ import torch
 import torch.testing._internal.torchbind_impls  # noqa: F401
 import torch.utils._pytree as pytree
 from torch._functorch.aot_autograd import aot_export_module
+from torch._higher_order_ops.effects import _EffectType, SIDE_EFFECTS
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.export import export
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -312,7 +313,6 @@ def forward(self, attr, arg0_1):
             ).fill_(-1)
         )
         x = torch.ones(2, 3)
-        from torch._higher_order_ops.effects import _EffectType, SIDE_EFFECTS
 
         SIDE_EFFECTS[
             torch.ops._TorchScriptTesting.queue_push.default
@@ -393,19 +393,37 @@ def forward(self, arg0_1, arg1_1):
         )
         x = torch.ones(2, 3)
         with torch._higher_order_ops.torchbind.enable_torchbind_tracing():
+            SIDE_EFFECTS[
+                torch.ops._TorchScriptTesting.queue_push.default
+            ] = _EffectType.ORDERED
+            SIDE_EFFECTS[
+                torch.ops._TorchScriptTesting.queue_pop.default
+            ] = _EffectType.ORDERED
             gm, _ = aot_export_module(mod, (tq, x), trace_joint=False)
+            del SIDE_EFFECTS[torch.ops._TorchScriptTesting.queue_push.default]
+            del SIDE_EFFECTS[torch.ops._TorchScriptTesting.queue_pop.default]
         self.assertExpectedInline(
             gm.code.strip("\n"),
             """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    queue_pop = torch.ops._TorchScriptTesting.queue_pop.default(arg2_1)
-    queue_pop_1 = torch.ops._TorchScriptTesting.queue_pop.default(arg2_1)
-    t = torch.ops.aten.t.default(arg0_1)
-    addmm = torch.ops.aten.addmm.default(arg1_1, queue_pop, t);  queue_pop = t = None
-    t_1 = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
-    addmm_1 = torch.ops.aten.addmm.default(arg1_1, queue_pop_1, t_1);  arg1_1 = queue_pop_1 = t_1 = None
-    return (addmm, addmm_1, arg2_1)
-    """,
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
+    cos = torch.ops.aten.cos.default(arg4_1)
+    with_effects = torch._higher_order_ops.effects.with_effects(arg0_1, torch.ops._TorchScriptTesting.queue_push.default, arg3_1, cos);  arg0_1 = cos = None
+    getitem = with_effects[0];  with_effects = None
+    sin = torch.ops.aten.sin.default(arg4_1);  arg4_1 = None
+    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops._TorchScriptTesting.queue_push.default, arg3_1, sin);  getitem = sin = None
+    getitem_2 = with_effects_1[0];  with_effects_1 = None
+    with_effects_2 = torch._higher_order_ops.effects.with_effects(getitem_2, torch.ops._TorchScriptTesting.queue_pop.default, arg3_1);  getitem_2 = None
+    getitem_4 = with_effects_2[0]
+    getitem_5 = with_effects_2[1];  with_effects_2 = None
+    with_effects_3 = torch._higher_order_ops.effects.with_effects(getitem_4, torch.ops._TorchScriptTesting.queue_pop.default, arg3_1);  getitem_4 = None
+    getitem_6 = with_effects_3[0]
+    getitem_7 = with_effects_3[1];  with_effects_3 = None
+    t = torch.ops.aten.t.default(arg1_1)
+    addmm = torch.ops.aten.addmm.default(arg2_1, getitem_5, t);  getitem_5 = t = None
+    t_1 = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+    addmm_1 = torch.ops.aten.addmm.default(arg2_1, getitem_7, t_1);  arg2_1 = getitem_7 = t_1 = None
+    return (getitem_6, addmm, addmm_1, arg3_1)
+    """,  # noqa: B950
         )
 
 
