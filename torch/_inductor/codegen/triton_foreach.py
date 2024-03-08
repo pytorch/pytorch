@@ -153,7 +153,7 @@ class ForeachKernel(Kernel):
         self.sub_kernels.append(sub_kernel)
         return sub_kernel
 
-    def jit_line(self):
+    def jit_lines(self):
         can_use_32bit = all(k.index_dtype == "tl.int32" for k in self.sub_kernels)
         size_dtype = "tl.int32" if can_use_32bit else "tl.int64"
         _, _, signature = self.args.python_argdefs()
@@ -191,7 +191,7 @@ class ForeachKernel(Kernel):
 
         code.splice(gen_common_triton_imports())
         argdefs, _, _ = self.args.python_argdefs()
-        code.writeline(self.jit_line())
+        code.splice(self.jit_lines())
         code.writeline(
             f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(argdefs)}):"
         )
