@@ -175,6 +175,9 @@ Tensor& cat_out_quantized_cpu(const ITensorListRef& qxs, int64_t dim, Tensor& ou
   auto materialized = qxs.materialize();
   TORCH_CHECK(is_valid_quantization_scheme(materialized[0]),
               "Only per-tensor quantization is supported in 'cat'!")
+  TORCH_CHECK(
+      all_inputs_sharing_qparams(materialized),
+      "All inputs should share the same quantization parameters.");
   TORCH_CHECK(is_valid_quantization_scheme(out),
               "Only per-tensor quantization is supported in 'cat'!")
   check_cat_no_zero_dim(materialized);
