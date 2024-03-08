@@ -113,7 +113,7 @@ def _get_onednn_graph_sfdp_patterns():
             cmask_q_post_permute_inp, dtype=torch.bool
         )
 
-        candidates = [
+        candidates = [  # type: ignore[var-annotated]
             (
                 _sfdp_pattern_18,
                 _sfdp_replacement_18,
