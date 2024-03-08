@@ -2194,7 +2194,7 @@ class ShapeEnv:
         Defines the current "state" of the guards we've accumulated in this ShapeEnv.
         Determines when we need to invalidate our cache
         """
-        return (len(self.replacements), len(self.divisible), self.num_deferred_runtime_asserts)
+        return (len(self.replacements), len(self.divisible), self.num_deferred_runtime_asserts, len(self.boolean_constants)
 
     def _update_version_counter(self):
         # The shape environment is queried orders of magnitude more often than
