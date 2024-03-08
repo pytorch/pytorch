@@ -463,6 +463,10 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_view_dtype(
     AtenTensorHandle* ret // returns new reference
 );
 
+AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
+    AtenTensorHandle self,
+    const char* msg);
+
 #ifdef USE_CUDA
 
 struct CUDAStreamGuardOpaque;
