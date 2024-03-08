@@ -1558,6 +1558,9 @@ def wrap_fx_proxy_cls(
     ]:
         proxy.node.meta["example_value"] = example_value
         return ConstantVariable.create(example_value, **options)
+    elif isinstance(example_value, torch.nn.attention.SDPBackend):
+        proxy.node.meta["example_value"] = example_value
+        return EnumVariable(example_value, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "

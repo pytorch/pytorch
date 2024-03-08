@@ -281,15 +281,15 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal, flash_
     for backend in ordering:
         if backend == SDPBackend.FLASH_ATTENTION:
             if can_use_flash_attention(params) and _can_use_flash_sdpa_jagged(params):
-                return 1
+                return SDPBackend.FLASH_ATTENTION
         if backend == SDPBackend.EFFICIENT_ATTENTION:
             if can_use_efficient_attention(params) and _can_use_efficient_sdpa_jagged(
                 params
             ):
-                return 2
+                return SDPBackend.EFFICIENT_ATTENTION
         if backend == SDPBackend.MATH:
             if math_enabled and _can_use_math_sdpa_jagged(params):
-                return 3
+                return SDPBackend.MATH
 
     log.warning("Memory efficient kernel not used because:")
     can_use_efficient_attention(params, debug=True)
@@ -299,7 +299,7 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal, flash_
     _can_use_flash_sdpa_jagged(params, debug=True)
     log.warning("Math attention kernel not used because:")
     _can_use_math_sdpa_jagged(params, debug=True)
-    return 4
+    return SDPBackend.ERROR
 
 
 def _cumulative_and_max_seq_len_nnz(qkv: torch.Tensor) -> Tuple[torch.Tensor, int, int]:
@@ -658,7 +658,7 @@ def jagged_scaled_dot_product_attention(
         query, key, value, attn_mask, dropout_p, is_causal, flash_sdp_enabled(), mem_efficient_sdp_enabled(), math_sdp_enabled()
     )
 
-    if backend_choice == 1:
+    if backend_choice == SDPBackend.FLASH_ATTENTION:
         og_size = query.size(-1)
         query_padded = _pad_last_dim(query, 8, False)
         key_padded = _pad_last_dim(key, 8, False)
@@ -700,7 +700,7 @@ def jagged_scaled_dot_product_attention(
             attention.squeeze(0), output_nt_info["offsets"]
         ).transpose(1, 2)
         return _post_process_flash_output(attention, og_size)
-    elif backend_choice == 2:
+    elif backend_choice == SDPBackend.EFFICIENT_ATTENTION:
         (
             query_reshaped,
             key_reshaped,
@@ -737,7 +737,7 @@ def jagged_scaled_dot_product_attention(
         return ViewNestedFromBuffer.apply(
             attention.squeeze(0), output_nt_info["offsets"]
         ).transpose(1, 2)
-    elif backend_choice == 3:
+    elif backend_choice == SDPBackend.MATH:
         # save the offsets and shape of the inputs, so we can reshape the final output
         # query @ key = attn: [B, D1, j0, D'] @ [B, D1, D' j1] = [B, D1, j0, j1]
         # attn @ value = out: [B, D1, j0, j1] @ [B, D1, j1, D2] = [B, D1, j0, D2]

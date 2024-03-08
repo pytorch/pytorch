@@ -2,7 +2,9 @@
 import contextlib
 from typing import List, Union
 from warnings import warn
+import enum
 
+import torch
 from torch.backends.cuda import (
     can_use_efficient_attention,
     can_use_flash_attention,
@@ -26,8 +28,10 @@ __all__: List[str] = ["SDPBackend", "sdpa_kernel", "WARN_FOR_UNFUSED_KERNELS"]
 # torch.nn.attention.WARN_FOR_UNFUSED_KERNELS = True
 WARN_FOR_UNFUSED_KERNELS = False
 
-
 from torch._C import _SDPBackend as SDPBackend
+
+# Wrap in a normal python enum so that dynamo understands it
+SDPBackend = enum.Enum("SDPBackend", torch._C._SDPBackend.__members__.items())
 
 # Hacks for Sphinx documentation:
 # https://stackoverflow.com/questions/38765577/overriding-sphinx-autodoc-alias-of-for-import-of-private-class
@@ -38,8 +42,6 @@ r"""An enum-like class that contains the different backends for scaled dot produ
 
     ... warning:: This class is in beta and subject to change.
 """
-SDPBackend.__module__ = __name__
-SDPBackend.__name__ = "SDPBackend"
 
 
 def _raise_kernel_warnings(params: SDPAParams) -> None:
