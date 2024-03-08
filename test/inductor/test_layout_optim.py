@@ -246,6 +246,7 @@ class TestLayoutOptim(TestCase):
 
         self.verify_accuracy_for_infer(Model)
 
+    @tf32_off()
     def test_mutate_view_for_conv_output(self):
         class Model(nn.Module):
             def __init__(self, manual_graph_break=False):
