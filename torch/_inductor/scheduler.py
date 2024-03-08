@@ -1763,9 +1763,12 @@ class Scheduler:
         if not config.benchmark_fusion:
             return True
 
-        if node1.is_template() and not isinstance(
-            node1.get_template_node(), ir.TritonTemplateBuffer
-        ) or node1.is_foreach() or node2.is_foreach():
+        if (
+            node1.is_template()
+            and not isinstance(node1.get_template_node(), ir.TritonTemplateBuffer)
+            or node1.is_foreach()
+            or node2.is_foreach()
+        ):
             # TODO support benchmarking epilogue fusion
             return True
 

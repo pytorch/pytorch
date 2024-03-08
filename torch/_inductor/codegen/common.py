@@ -1663,45 +1663,6 @@ def jinja2_env():
         return None
 
 
-PrimitiveInfoType = Union[int, float, bool, str, List[Union[int, str, float, bool]]]
-
-
-class ChoiceCaller:
-    """
-    Represents a possible choice used in autotune_process.py.
-    During autotuning, self.benchmark() is first called to get benchmark result,
-    and if this choice is selected, self.output_node() is called to get the output_node.
-
-    Children classes: TritonTemplateCaller, CUDATemplateCaller.
-    """
-
-    def __init__(self, name, input_nodes, layout):
-        super().__init__()
-        self.name = name
-        self.layout = layout
-        self.input_nodes = input_nodes
-
-    def benchmark(self, *args, out) -> float:
-        algo = self.to_callable()
-        return do_bench(lambda: algo(*args, out=out))
-
-    def call_name(self) -> str:
-        raise NotImplementedError()
-
-    def to_callable(self):
-        raise NotImplementedError()
-
-    def hash_key(self) -> str:
-        raise NotImplementedError()
-
-    def output_node(self) -> "TensorBox":
-        raise NotImplementedError()
-
-    def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
-        """Information returned here is logged to the autotune log file when that is enabled."""
-        return {}
-
-
 class KernelTemplate:
     """
     Base class for defining kernel templates.

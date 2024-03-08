@@ -22,16 +22,11 @@ from torch._dynamo.utils import counters, identity, preserve_rng_state
 from . import config, ir
 from .autotune_process import TensorMeta, TritonBenchmarkRequest
 from .codecache import code_hash, PersistentCache, PyCodeCache
-from .codegen.common import (
-    ChoiceCaller,
-    IndentedBuffer,
-    KernelTemplate,
-    PrimitiveInfoType,
-)
 from .codegen.common import IndentedBuffer, KernelTemplate
 from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
+from .ir import ChoiceCaller, PrimitiveInfoType
 from .utils import (
     do_bench,
     get_dtype_size,
@@ -719,7 +714,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         return self.make_kernel_render
 
 
-class ExternKernelCaller(ir.ChoiceCaller):
+class ExternKernelCaller(ChoiceCaller):
     def __init__(
         self,
         choice: ExternKernelChoice,
@@ -795,7 +790,7 @@ class ExternKernelCaller(ir.ChoiceCaller):
 
 
 class ErrorFromChoice(RuntimeError):
-    def __init__(self, msg, choice: ir.ChoiceCaller, inputs_str):
+    def __init__(self, msg, choice: ChoiceCaller, inputs_str):
         msg += f"\nFrom choice {choice}\n{inputs_str}"
         super().__init__(msg)
         self.choice = choice
@@ -805,7 +800,7 @@ class AlgorithmSelectorCache(PersistentCache):
     def __call__(
         self,
         name,
-        choices: List[ir.ChoiceCaller],
+        choices: List[ChoiceCaller],
         input_nodes,
         layout,
         # optional dict mapping arg indices to the functions

@@ -3446,6 +3446,9 @@ class TritonTemplateBuffer(TemplateBuffer):
     pass
 
 
+PrimitiveInfoType = Union[int, float, bool, str, List[Union[int, str, float, bool]]]
+
+
 class ChoiceCaller:
     """
     Represents a possible choice used in autotune_process.py.
@@ -3476,6 +3479,10 @@ class ChoiceCaller:
 
     def output_node(self) -> "TensorBox":
         raise NotImplementedError()
+
+    def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
+        """Information returned here is logged to the autotune log file when that is enabled."""
+        return {}
 
 
 class TritonTemplateCallerBase(ChoiceCaller):
