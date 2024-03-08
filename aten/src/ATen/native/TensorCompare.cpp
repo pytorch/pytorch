@@ -511,16 +511,10 @@ Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor
   const auto result_type = at::native::result_type(self, other);
   TORCH_CHECK(out.scalar_type() == result_type, "Expected out type to be ", result_type, " but got ", out.scalar_type());
 
-  Tensor self_, other_, condition_;
-  if (self.dtype() != other.dtype()) {
-    self_ = self.to(result_type);
-    other_ = other.to(result_type);
-  } else {
-    self_ = self;
-    other_ = other;
-  }
+  auto self_ = self.scalar_type() != result_type ? self.to(result_type): self;
+  auto other_ = other.scalar_type() != result_type ? other.to(result_type): other;
+  auto condition_ = condition;
   auto device = out_device(condition, self_, other_);
-  condition_ = condition;
   if (device != at::kCPU) { // allow CPU scalars on non-cpu device
     if (condition.device() != device && condition.ndimension() == 0) {
       condition_ = condition.to(device);
@@ -532,12 +526,11 @@ Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor
         other_ = other_.to(device);
     }
   }
-  if (condition.scalar_type() == ScalarType::Byte) {
-  TORCH_WARN_ONCE("where received a uint8 condition tensor. This behavior is deprecated and will be removed in a future version of PyTorch. Use a boolean condition instead.");
-  } else {
-  TORCH_CHECK(condition.scalar_type() == ScalarType::Bool, "where expected condition to be a boolean tensor, but got a tensor with dtype ", condition.scalar_type());
+  if (condition_.scalar_type() == ScalarType::Byte) {
+    TORCH_WARN_ONCE("where received a uint8 condition tensor. This behavior is deprecated and will be removed in a future version of PyTorch. Use a boolean condition instead.");
+    condition_ = condition_.to(kBool);
   }
-  condition_ = condition_.scalar_type() == ScalarType::Byte ? condition_.to(ScalarType::Bool) : condition_;
+  TORCH_CHECK(condition_.scalar_type() == kBool, "where expected condition to be a boolean tensor, but got a tensor with dtype ", condition_.scalar_type());
   // if there's still a device mismatch, let tensoriterator error out with it
   auto iter = at::TensorIteratorConfig()
     .check_all_same_dtype(false)
