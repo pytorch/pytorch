@@ -4,6 +4,10 @@
 
 namespace c10d {
 
+void set_thread_isolation_mode(bool enable);
+
+bool get_thread_isolation_mode();
+
 C10_EXPORT void register_process_group(
     const std::string& group_name,
     c10::intrusive_ptr<c10d::ProcessGroup> group);

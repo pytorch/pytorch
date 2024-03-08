@@ -19,6 +19,7 @@ from torch.distributed._functional_collectives import (
 )
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
+    DynamoDistributedMultiProcTestCase,
     requires_nccl,
     run_with_native_funcol,
     skip_if_lt_x_gpu,
@@ -378,6 +379,46 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             "avg",
             "default",
         )
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    @run_with_native_funcol
+    def test_threading(self):
+        self._init_process_group()
+
+        def func(arg: torch.Tensor) -> torch.Tensor:
+            buf0 = arg + 42
+            ar0 = funcol.all_reduce(buf0, "avg", "0")
+            ar0 = funcol.wait_tensor(ar0)
+            return ar0 + 1
+
+        arg = torch.rand(4, 4, device=self.device)
+        func(arg)
+
+        compiled = torch.compile(func, fullgraph=True)
+        code = run_and_get_triton_code(compiled, arg)
+        print(code)
+        return
+
+
+        def run_in_thread():
+            arg = torch.rand(4, 4, device=self.device)
+            compiled(arg)
+
+        import threading
+
+        t = threading.Thread(target=compile_and_run)
+        t.start()
+        t.join()
+
+        # arg = torch.rand(4, 4, device="cuda")
+        # print(func(arg))
+        # return
+        # compiled = torch.compile(func, fullgraph=True)
+
+        # code = run_and_get_triton_code(compiled, arg)
+        # (FileCheck().check("all_reduce_.default(buf0, 'avg', '0')").run(code))
 
 
 class C10DFunctionalNativeCompileTest(TestCase):
