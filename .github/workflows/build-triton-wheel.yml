@@ -125,8 +125,7 @@ jobs:
         run: |
             set -x
             unzip ~/triton-deps.zip -q
-            ls ~/.triton
-        working-directory: "~"
+            ls .triton
 
       - name: Build Triton wheel
         env:
@@ -259,7 +258,6 @@ jobs:
     name: "Build Triton Conda"
     runs-on: [self-hosted, linux.2xlarge]
     needs: download-triton-deps
-    if: ${{ needs.download-triton-deps.output.device == 'cuda' }}
     strategy:
       fail-fast: false
       matrix:
@@ -290,7 +288,7 @@ jobs:
       - name: Download Dependency Artifacts
         uses: actions/download-artifact@v3
         with:
-          name: triton-packages-${{ needs.download-triton-deps.outputs.device }}
+          name: triton-packages-cuda
 
       - name: Uncompress Triton Dependencies
         run: |
