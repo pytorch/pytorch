@@ -58,7 +58,7 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
-      - name: Download packages
+      - name: Download Packages
         run: |
             set -x
 
@@ -69,11 +69,14 @@ jobs:
 
             python3 "${GITHUB_WORKSPACE}/.github/scripts/download_triton_packages.py" ${BUILD_ROCM}
 
+      - name: Compress Packages
+        run: zip triton-deps.zip ~/.triton -r
+
       - name: Upload Dependency Artifacts
         uses: actions/upload-artifact@v3
         with:
           name: Triton Dependency Packages
-          path: ~/.triton
+          path: triton-deps.zip
 
   build-wheel:
     name: "Build Triton Wheel"
@@ -113,7 +116,12 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: Triton Dependency Packages
-          path: ~/.triton
+
+      - name: Uncompress Triton Dependencies
+        run: |
+            set -x
+            unzip triton-deps.zip
+            ls ~/.triton
 
       - name: Build Triton wheel
         env:
@@ -278,7 +286,12 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: Triton Dependency Packages
-          path: ~/.triton
+
+      - name: Uncompress Triton Dependencies
+        run: |
+            set -x
+            unzip triton-deps.zip
+            ls ~/.triton
 
       - name: Build Triton conda package
         env:

@@ -37,8 +37,7 @@ def get_pybind11_package_info() -> Package:
 # llvm
 
 
-def get_llvm_package_info() -> Package:
-    # added statement for Apple Silicon
+def get_llvm_package_info_cuda() -> Package:
     system = platform.system()
     arch = platform.machine()
     if arch == "aarch64":
@@ -66,23 +65,48 @@ def get_llvm_package_info() -> Package:
         )
     # use_assert_enabled_llvm = check_env_flag("TRITON_USE_ASSERT_ENABLED_LLVM", "False")
     # release_suffix = "assert" if use_assert_enabled_llvm else "release"
-    triton_root = Path.cwd().parent
-    for path in [
-        triton_root / "cmake" / "llvm-hash.txt",
-        triton_root / "llvm-hash.txt",
-    ]:
-        if path.exists():
-            llvm_hash_file = path.open()
-            break
-    else:
-        raise RuntimeError("llvm-hash.txt file not found")
-
+    llvm_hash_file = open("../cmake/llvm-hash.txt")
     rev = llvm_hash_file.read(8)
+
     name = f"llvm-{rev}-{system_suffix}"
     url = f"https://tritonlang.blob.core.windows.net/llvm-builds/{name}.tar.gz"
     return Package(
         "llvm", name, url, "LLVM_INCLUDE_DIRS", "LLVM_LIBRARY_DIR", "LLVM_SYSPATH"
     )
+
+
+def get_llvm_package_info_rocm():
+    # added statement for Apple Silicon
+    system = platform.system()
+    arch = platform.machine()
+    if arch == 'aarch64':
+        arch = 'arm64'
+    if system == "Darwin":
+        system_suffix = "apple-darwin"
+        arch = platform.machine()
+    elif system == "Linux":
+        vglibc = tuple(map(int, platform.libc_ver()[1].split('.')))
+        vglibc = vglibc[0] * 100 + vglibc[1]
+        linux_suffix = 'ubuntu-18.04' if vglibc > 217 else 'centos-7'
+        system_suffix = f"linux-gnu-{linux_suffix}"
+    else:
+        return Package("llvm", "LLVM-C.lib", "", "LLVM_INCLUDE_DIRS", "LLVM_LIBRARY_DIR", "LLVM_SYSPATH")
+    use_assert_enabled_llvm = False
+    release_suffix = "assert" if use_assert_enabled_llvm else "release"
+    name = f'llvm+mlir-17.0.0-{arch}-{system_suffix}-{release_suffix}'
+    version = "llvm-17.0.0-c5dede880d17"
+    url = f"https://github.com/ptillet/triton-llvm-releases/releases/download/{version}/{name}.tar.xz"
+    # FIXME: remove the following once github.com/ptillet/triton-llvm-releases has arm64 llvm releases
+    if arch == 'arm64' and 'linux' in system_suffix:
+        url = f"https://github.com/acollins3/triton-llvm-releases/releases/download/{version}/{name}.tar.xz"
+    return Package("llvm", name, url, "LLVM_INCLUDE_DIRS", "LLVM_LIBRARY_DIR", "LLVM_SYSPATH")
+
+
+def get_llvm_package_info(build_rocm):
+    if build_rocm:
+        return get_llvm_package_info_rocm()
+    else:
+        return get_llvm_package_info_cuda()
 
 
 def open_url(url: str) -> Any:
@@ -108,9 +132,9 @@ def get_triton_cache_path() -> str:
     return os.path.join(user_home, ".triton")
 
 
-def get_thirdparty_packages() -> List[str]:
+def get_thirdparty_packages(build_rocm: bool) -> List[str]:
     triton_cache_path = get_triton_cache_path()
-    packages = [get_pybind11_package_info(), get_llvm_package_info()]
+    packages = [get_pybind11_package_info(), get_llvm_package_info(build_rocm)]
     thirdparty_cmake_args = []
     for p in packages:
         package_root_dir = os.path.join(triton_cache_path, p.package)
@@ -165,11 +189,11 @@ def main() -> None:
         else:
             triton_repo = "https://github.com/openai/triton"
             triton_pkg_name = "pytorch-triton"
-        check_call(["git", "clone", triton_repo], cwd=tmpdir)
+        # check_call(["git", "clone", triton_repo], cwd=tmpdir)
         check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
 
         os.chdir(triton_basedir / "python")
-        get_thirdparty_packages()
+        get_thirdparty_packages(build_rocm)
 
 if __name__ == "__main__":
     main()
