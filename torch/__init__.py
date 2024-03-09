@@ -5,7 +5,8 @@ tensors and defines mathematical operations over these tensors.
 Additionally, it provides many utilities for efficient serialization of
 Tensors and arbitrary types, and other useful utilities.
 
-It has a CUDA counterpart, that enables you to run your tensor computations
+It has a CUDA(CUDA is a software development platform used to accelerate parallel computing) 
+counterpart, that enables you to run your tensor computations
 on an NVIDIA GPU with compute capability >= 3.0.
 """
 
