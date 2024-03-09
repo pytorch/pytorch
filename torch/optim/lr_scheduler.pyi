@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, Iterable, List, Optional, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Union, Sequence
 
 from .optimizer import Optimizer
 
@@ -109,7 +109,7 @@ class ExponentialLR(LRScheduler):
     ) -> None: ...
 
 class ChainedScheduler(LRScheduler):
-    def __init__(self, schedulers: List[LRScheduler]) -> None: ...
+    def __init__(self, schedulers: Sequence[LRScheduler]) -> None: ...
 
 class SequentialLR(LRScheduler):
     def __init__(

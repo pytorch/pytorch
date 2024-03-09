@@ -881,12 +881,12 @@ class CosineAnnealingLR(LRScheduler):
 
 
 class ChainedScheduler(LRScheduler):
-    """Chains list of learning rate schedulers. It takes a list of chainable learning
+    """Chains list of learning rate schedulers. It takes a sequence of chainable learning
     rate schedulers and performs consecutive step() functions belonging to them by just
     one call.
 
     Args:
-        schedulers (list): List of chained schedulers.
+        schedulers (sequence): sequence of chained schedulers.
 
     Example:
         >>> # xdoctest: +SKIP
