@@ -955,7 +955,7 @@ class TestSymbolicTracing(TestCase):
         import torch.library
         from torch.library import Library
 
-        foo = Library("foo", "DEF")
+        foo = Library("foo", "DEF")  # noqa: TOR901
         foo.define("foo(Tensor self) -> Tensor")
 
         # Operator where meta and cpu disagree on strides
@@ -1068,7 +1068,7 @@ def forward(self, x_1, y_1):
         self.assertTrue(eval_guards(gm, torch.randn(4, 5)))
         self.assertEqual(repr(bind_symbols(gm, torch.randn(4, 5))), "{s0: 4, s1: 5}")
         self.assertFalse(eval_guards(gm, torch.randn(25, 5)))
-        self.assertExpectedInline(show_guards(gm), """L['x'].size()[0] < 20""")
+        self.assertExpectedInline(show_guards(gm), """L['x'].size()[0] <= 19""")
 
     def test_repeat_interleave(self):
         def f(src_tokens, beam_size_src):
@@ -1714,14 +1714,14 @@ def forward(self, x_1):
             assert a.shape[0] > 5 and a.shape[0] > 12
             return a.cos()
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(15))
-        self.assertExpectedInline(show_guards(tensor), """L['a'].size()[0] > 12""")
+        self.assertExpectedInline(show_guards(tensor), """13 <= L['a'].size()[0]""")
 
     def test_guard_lowerbound_range_refinement(self):
         def f(a):
             assert a.shape[0] < 20 and a.shape[0] < 30
             return a.cos()
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(15))
-        self.assertExpectedInline(show_guards(tensor), """L['a'].size()[0] < 20""")
+        self.assertExpectedInline(show_guards(tensor), """L['a'].size()[0] <= 19""")
 
     def test_guard_upperbound_range_refinement_multivariate(self):
         def f(a):
@@ -1731,7 +1731,8 @@ def forward(self, x_1):
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn((15, 20)))
         self.assertExpectedInline(show_guards(tensor), """\
 L['a'].size()[1] > L['a'].size()[0]
-L['a'].size()[0] > 12""")
+13 <= L['a'].size()[0]
+14 <= L['a'].size()[1]""")
 
     def test_guard_lowerbound_range_refinement_multivariate(self):
         def f(a):
@@ -1743,7 +1744,8 @@ L['a'].size()[0] > 12""")
             show_guards(tensor),
             """\
 L['a'].size()[1] < L['a'].size()[0]
-L['a'].size()[0] < 20""")
+L['a'].size()[0] <= 19
+L['a'].size()[1] <= 18""")
 
     def test_sym_storage_offset(self):
         def f(x, y):
@@ -1873,15 +1875,11 @@ fake_tensor_failures = {
 }
 
 symbolic_tensor_failures = {
-    xfail('linalg.eig'),
-    xfail('linalg.eigvals'),
     xfail('combinations', ''),
-    xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('histc', ''),  # Could not run 'aten::histc' with arguments from the 'Meta' backend. This could be because...
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
-    xfail('isin', ''),  # aten.isin.Tensor_Tensor - couldn't find symbolic meta function/decomposition
     xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -1890,19 +1888,10 @@ symbolic_tensor_failures = {
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.fractional_max_pool2d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('nn.functional.fractional_max_pool3d', ''),  # argument 'size' must be tuple of ints, but found element of t...
-    xfail('nn.functional.interpolate', 'linear'),  # aten.upsample_linear1d.vec - couldn't find symbolic meta function/dec...
-    xfail('nn.functional.interpolate', 'trilinear'),  # aten.upsample_trilinear3d.vec - couldn't find symbolic meta functi...
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
     xfail('unique', ''),  # aten._unique2.default - couldn't find symbolic meta function/decomposition
-
-    # AssertionError: False != True - https://github.com/pytorch/pytorch/issues/113905
-    xfail('dist', ''),
-    xfail('norm', ''),
-    xfail('linalg.vector_norm', ''),
-    xfail('linalg.norm', 'subgradients_at_zero'),
-    xfail('renorm', ''),
 
     xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
 
@@ -1930,12 +1919,6 @@ symbolic_tensor_segfaults = {
 
 symbolic_tensor_failures.update(symbolic_tensor_segfaults)
 
-outplace_symbolic_tensor_failures = {
-    xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
-
-    xfail('linalg.norm', ''),
-}
-
 inplace_symbolic_tensor_failures = {
     # bugs
     xfail('float_power', ''),  # base given to float_power_ has dtype Float but the operation's result requires dtype Double
@@ -1944,51 +1927,41 @@ inplace_symbolic_tensor_failures = {
 }
 
 out_symbolic_tensor_failures = {
+    # Cast error details: Unable to cast (...) to Tensor
+    #
+    # This happens because the test is set up to call the out variant using the `out` kwarg:
+    #   torch._some_op(arg1, arg2, out=(out1, out2, out3))
+    #
+    # However, this only works on torch ops, not aten ops. For `_batch_norm_with_update`,
+    # this fails because the op has no python bindings, so it doesn't support the `out` kwarg
+    # way of calling its out variant.
+    xfail('_batch_norm_with_update', ''),
     xfail('_native_batch_norm_legit', ''),
-    xfail('aminmax', ''),
     xfail('angle', ''),
     xfail('argmax', ''),
     xfail('argmin', ''),
     xfail('bmm', ''),
-    xfail('cummax', ''),
-    xfail('cummin', ''),
     xfail('fft.fft2', ''),
     xfail('fft.fftn', ''),
     xfail('fft.ifft2', ''),
     xfail('fft.ifftn', ''),
     xfail('gather', ''),
-    xfail('i0', ''),
     xfail('linalg.cholesky', ''),
     xfail('linalg.cholesky_ex', ''),
     xfail('linalg.det', ''),
     xfail('linalg.det', 'singular'),
-    xfail('linalg.eigh', ''),
     xfail('linalg.inv', ''),
     xfail('linalg.inv_ex', ''),
-    xfail('linalg.ldl_factor', ''),
-    xfail('linalg.ldl_factor_ex', ''),
-    xfail('linalg.lu', ''),
-    xfail('linalg.lu_factor', ''),
-    xfail('linalg.lu_factor_ex', ''),
     xfail('linalg.pinv', ''),
     xfail('linalg.pinv', 'hermitian'),
-    xfail('linalg.qr', ''),
-    xfail('linalg.slogdet', ''),
-    xfail('linalg.solve_ex', ''),
-    xfail('linalg.svd', ''),
     xfail('linalg.svdvals', ''),
     xfail('lu', ''),
-    xfail('lu_unpack', ''),
     xfail('max', 'reduction_with_dim'),
     xfail('min', 'reduction_with_dim'),
-    xfail('mode', ''),
     xfail('nn.functional.avg_pool2d', ''),
     xfail('nn.functional.linear', ''),
-    xfail('qr', ''),
     xfail('scatter_add', ''),
     xfail('scatter', ''),
-    xfail('sort', ''),
-    xfail('svd', ''),
     xfail('take_along_dim', ''),
     xfail('topk', ''),
     xfail('triangular_solve', ''),
@@ -2052,7 +2025,7 @@ class TestProxyTensorOpInfo(TestCase):
 
     @ops(op_db + custom_op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive',
-             make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | outplace_symbolic_tensor_failures)
+             make_fx_failures | fake_tensor_failures | symbolic_tensor_failures)
     def test_make_fx_symbolic_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "symbolic")
 

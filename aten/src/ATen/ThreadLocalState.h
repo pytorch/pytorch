@@ -1,7 +1,5 @@
 #pragma once
 
-#include <stack>
-
 #include <c10/core/InferenceMode.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Exception.h>
@@ -98,6 +96,7 @@ class TORCH_API ThreadLocalStateGuard {
   }
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const ThreadLocalState prev_state_;
 };
 

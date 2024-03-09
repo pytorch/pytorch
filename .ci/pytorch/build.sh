@@ -82,6 +82,19 @@ if ! which conda; then
   fi
 else
   export CMAKE_PREFIX_PATH=/opt/conda
+
+  # Workaround required for MKL library linkage
+  # https://github.com/pytorch/pytorch/issues/119557
+  if [ "$ANACONDA_PYTHON_VERSION" = "3.12" ]; then
+    export CMAKE_LIBRARY_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib/"
+    export CMAKE_INCLUDE_PATH="/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/include/"
+  fi
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
+  export USE_MKLDNN=1
+  export USE_MKLDNN_ACL=1
+  export ACL_ROOT_DIR=/ComputeLibrary
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then

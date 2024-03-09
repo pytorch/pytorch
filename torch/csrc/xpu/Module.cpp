@@ -1,6 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/xpu/XPUContext.h>
+#include <ATen/xpu/XPUGeneratorImpl.h>
 #include <c10/util/CallOnce.h>
+#include <c10/xpu/XPUCachingAllocator.h>
 #include <c10/xpu/XPUFunctions.h>
 #include <torch/csrc/Module.h>
 #include <torch/csrc/THP.h>
@@ -41,8 +43,8 @@ PyObject* THXPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to set_device");
 
-  int device = THPUtils_unpackInt(arg);
-  c10::xpu::set_device(static_cast<c10::DeviceIndex>(device));
+  auto device_index = THPUtils_unpackDeviceIndex(arg);
+  c10::xpu::set_device(device_index);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -52,15 +54,15 @@ PyObject* THXPModule_exchangeDevice_wrap(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to exchange_device");
 
-  int device = THPUtils_unpackInt(arg);
-  if (device < 0) {
+  auto device_index = THPUtils_unpackDeviceIndex(arg);
+  if (device_index < 0) {
     return THPUtils_packInt32(-1);
   }
 
   torch::utils::device_lazy_init(at::kXPU);
-  int current_device = c10::xpu::exchange_device(device);
+  auto current_device = c10::xpu::exchange_device(device_index);
 
-  return THPUtils_packInt32(current_device);
+  return THPUtils_packDeviceIndex(current_device);
   END_HANDLE_TH_ERRORS
 }
 
@@ -69,25 +71,24 @@ PyObject* THXPModule_maybeExchangeDevice_wrap(PyObject* self, PyObject* arg) {
   TORCH_CHECK(
       THPUtils_checkLong(arg), "invalid argument to maybe_exchange_device");
 
-  int device = THPUtils_unpackInt(arg);
-  if (device < 0) {
+  auto device_index = THPUtils_unpackDeviceIndex(arg);
+  if (device_index < 0) {
     return THPUtils_packInt32(-1);
   }
 
   torch::utils::device_lazy_init(at::kXPU);
-  int current_device = c10::xpu::maybe_exchange_device(device);
+  auto current_device = c10::xpu::maybe_exchange_device(device_index);
 
-  return THPUtils_packInt32(current_device);
+  return THPUtils_packDeviceIndex(current_device);
   END_HANDLE_TH_ERRORS
 }
 
 PyObject* THXPModule_getDevice_wrap(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
 
-  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-  auto device = static_cast<int32_t>(c10::xpu::current_device());
+  auto device_index = c10::xpu::current_device();
 
-  return THPUtils_packInt32(device);
+  return THPUtils_packDeviceIndex(device_index);
   END_HANDLE_TH_ERRORS
 }
 
@@ -104,15 +105,13 @@ PyObject* THXPModule_getCurrentStream_wrap(
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPUtils_checkLong(device_index), "invalid argument to current_stream");
-  int64_t device = THPUtils_unpackLong(device_index);
-  auto stream = at::xpu::getCurrentXPUStream(device);
+  auto c10_device_index = THPUtils_unpackDeviceIndex(device_index);
+  auto stream = at::xpu::getCurrentXPUStream(c10_device_index);
   PyObject* output_tuple = PyTuple_New(3);
   PyTuple_SetItem(
       output_tuple, 0, THPUtils_packInt64(static_cast<int64_t>(stream.id())));
   PyTuple_SetItem(
-      output_tuple,
-      1,
-      THPUtils_packInt64(static_cast<int64_t>(stream.device_index())));
+      output_tuple, 1, THPUtils_packDeviceIndex(stream.device_index()));
   PyTuple_SetItem(
       output_tuple,
       2,
@@ -128,8 +127,9 @@ PyObject* THXPModule_getCurrentStream_raw(
   TORCH_CHECK(
       THPUtils_checkLong(device_index),
       "invalid argument to getCurrentRawStream");
-  int64_t device = THPUtils_unpackLong(device_index);
-  return PyLong_FromVoidPtr(&at::xpu::getCurrentXPUStream(device).queue());
+  auto c10_device_index = THPUtils_unpackDeviceIndex(device_index);
+  return PyLong_FromVoidPtr(
+      &at::xpu::getCurrentXPUStream(c10_device_index).queue());
   END_HANDLE_TH_ERRORS
 }
 
@@ -149,6 +149,7 @@ PyObject* THXPModule_setStream_wrap(
           args,
           kwargs,
           "|LLL",
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
           &stream_id,
           &device_index,
@@ -156,7 +157,9 @@ PyObject* THXPModule_setStream_wrap(
   }
 
   auto stream = at::xpu::XPUStream::unpack3(
-      stream_id, device_index, static_cast<c10::DeviceType>(device_type));
+      stream_id,
+      static_cast<c10::DeviceIndex>(device_index),
+      static_cast<c10::DeviceType>(device_type));
 
   auto device = c10::xpu::current_device();
   if (device != stream.device_index()) {
@@ -170,15 +173,22 @@ PyObject* THXPModule_setStream_wrap(
 PyObject* THXPModule_xpuSynchronize(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to synchronize");
-  int device = THPUtils_unpackInt(arg);
+  auto device_index = THPUtils_unpackDeviceIndex(arg);
   {
     pybind11::gil_scoped_release no_gil;
     // Only the SYCL queues we have reserved will be synchronized, see Note
     // [Synchronize Streams on Device].
-    c10::xpu::syncStreamsOnDevice(static_cast<c10::DeviceIndex>(device));
+    c10::xpu::syncStreamsOnDevice(device_index);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
+}
+
+PyObject* THXPModule_emptyCache(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  c10::xpu::XPUCachingAllocator::emptyCache();
+  END_HANDLE_TH_ERRORS
+  Py_RETURN_NONE;
 }
 
 // XPU module initialization
@@ -231,8 +241,8 @@ static void registerXpuDeviceProperties(PyObject* module) {
             std::ostringstream stream;
             stream << "_XpuDeviceProperties(name='" << prop.name
                    << "', platform_name='" << prop.platform_name << "', type='"
-                   << get_device_type(prop)
-                   << ", total_memory=" << prop.global_mem_size / (1024 * 1024)
+                   << get_device_type(prop) << ", total_memory="
+                   << prop.global_mem_size / (1024ull * 1024)
                    << "MB, max_compute_units=" << prop.max_compute_units
                    << ", gpu_eu_count=" << prop.gpu_eu_count
                    << ", gpu_subslice_count=" << gpu_subslice_count(prop)
@@ -248,7 +258,7 @@ static void bindGetDeviceProperties(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   m.def(
       "_get_device_properties",
-      [](int device) -> c10::xpu::DeviceProp* {
+      [](c10::DeviceIndex device) -> c10::xpu::DeviceProp* {
         return at::xpu::getDeviceProperties(device);
       },
       py::return_value_policy::reference);
@@ -260,20 +270,34 @@ static PyObject* THXPModule_initExtension(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   TORCH_INTERNAL_ASSERT(!in_bad_fork); // Handled at python level
   poison_fork();
+  at::globalContext().lazyInitXPU();
 
   auto m = THPObjectPtr(PyImport_ImportModule("torch.xpu"));
   if (!m)
     throw python_error();
 
+  auto set_module_attr = [&](const char* name, PyObject* v) {
+    if (PyObject_SetAttrString(m, name, v) < 0) {
+      throw python_error();
+    }
+  };
+
+  auto num_gpus = c10::xpu::device_count();
+  THPObjectPtr default_xpu_generators(
+      PyTuple_New(static_cast<Py_ssize_t>(num_gpus)));
+  for (const auto i : c10::irange(num_gpus)) {
+    const auto& gen = at::xpu::detail::getDefaultXPUGenerator(i);
+    auto* cast_gen = THPGenerator_initDefaultGenerator(gen);
+    PyTuple_SetItem(default_xpu_generators.get(), i, cast_gen);
+  }
+  set_module_attr("default_generators", default_xpu_generators.get());
   bindGetDeviceProperties(m);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,
-// cppcoreguidelines-avoid-non-const-global-variables,
-// cppcoreguidelines-avoid-c-arrays)
+// NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
 static struct PyMethodDef _THXPModule_methods[] = {
     {"_xpu_init", THXPModule_initExtension, METH_NOARGS, nullptr},
     {"_xpu_setDevice", THXPModule_setDevice_wrap, METH_O, nullptr},
@@ -301,6 +325,7 @@ static struct PyMethodDef _THXPModule_methods[] = {
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_xpu_synchronize", THXPModule_xpuSynchronize, METH_O, nullptr},
+    {"_xpu_emptyCache", THXPModule_emptyCache, METH_NOARGS, nullptr},
     {nullptr}};
 
 PyMethodDef* THXPModule_methods() {
