@@ -30,7 +30,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfRocmVersionLessThan,
     TEST_WITH_ROCM,
-    skipIfRocm,
     TestCase,
 )
 
