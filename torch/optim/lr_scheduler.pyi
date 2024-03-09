@@ -109,7 +109,11 @@ class ExponentialLR(LRScheduler):
     ) -> None: ...
 
 class ChainedScheduler(LRScheduler):
-    def __init__(self, schedulers: Sequence[LRScheduler]) -> None: ...
+    def __init__(
+        self,
+        schedulers: Sequence[LRScheduler],
+        optimizer: Optional[Optimizer] = ...,
+    ) -> None: ...
 
 class SequentialLR(LRScheduler):
     def __init__(

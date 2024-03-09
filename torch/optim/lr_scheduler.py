@@ -890,6 +890,7 @@ class ChainedScheduler(LRScheduler):
 
     Args:
         schedulers (sequence): sequence of chained schedulers.
+        optimizer (Optimizer, optional): Wrapped optimizer. Default: None.
 
     Example:
         >>> # xdoctest: +SKIP
@@ -901,7 +902,7 @@ class ChainedScheduler(LRScheduler):
         >>> # lr = 0.59049  if epoch >= 4
         >>> scheduler1 = ConstantLR(optimizer, factor=0.1, total_iters=2)
         >>> scheduler2 = ExponentialLR(optimizer, gamma=0.9)
-        >>> scheduler = ChainedScheduler([scheduler1, scheduler2])
+        >>> scheduler = ChainedScheduler([scheduler1, scheduler2], optimizer=optimizer)
         >>> for epoch in range(100):
         >>>     train(...)
         >>>     validate(...)
