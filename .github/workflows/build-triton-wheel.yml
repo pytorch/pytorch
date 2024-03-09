@@ -11,6 +11,7 @@ on:
     paths:
       - .github/workflows/build-triton-wheel.yml
       - .github/scripts/build_triton_wheel.py
+      - .github/scripts/download_triton_packages.py
       - .github/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton-rocm.txt
@@ -18,6 +19,7 @@ on:
     paths:
       - .github/workflows/build-triton-wheel.yml
       - .github/scripts/build_triton_wheel.py
+      - .github/scripts/download_triton_packages.py
       - .github/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton.txt
       - .ci/docker/ci_commit_pins/triton-rocm.txt
@@ -27,19 +29,55 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-wheel:
-    name: "Build Triton Wheel"
-    runs-on: [self-hosted, linux.2xlarge]
+  download-triton-deps:
+    name: "Download Triton Dependencies"
+    runs-on: [self-hosted, linux.large]
+    # Triton's LLVM download is SLOW.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.8", "3.9", "3.10", "3.11", "3.12" ]
-        device: ["cuda", "rocm"]
         include:
           - device: "rocm"
             rocm_version: "6.0"
           - device: "cuda"
             rocm_version: ""
+    steps:
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Download packages
+        run: python3 "${GITHUB_WORKSPACE}/.github/scripts/download_triton_packages.py"
+
+      - name: Upload Dependency Artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: Triton Dependency Packages
+          path: ~/.triton
+
+  build-wheel:
+    name: "Build Triton Wheel"
+    runs-on: [self-hosted, linux.2xlarge]
+    needs: download-triton-deps
+    strategy:
+      fail-fast: false
+      matrix:
+        py_vers: [ "3.8", "3.9", "3.10", "3.11", "3.12" ]
+        device: ["cuda", "rocm"]
+    with:
+      device: ${{ needs.download-triton-deps.device }}
+      rocm_version: ${{ needs.download-triton-deps.rocm_version }}
+
     timeout-minutes: 40
     env:
       DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux-rocm:{0}', matrix.rocm_version) || 'pytorch/manylinux-builder:cpu' }}
@@ -64,6 +102,12 @@ jobs:
         with:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
+      - name: Download Dependency Artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: Triton Dependency Packages
+          path: ~/.triton
+
       - name: Build Triton wheel
         env:
           IS_RELEASE_TAG: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
@@ -73,6 +117,7 @@ jobs:
           container_name=$(docker run \
             --tty \
             --detach \
+            -v "~/.triton:/home/root/.triton" \
             -v "${GITHUB_WORKSPACE}:/pytorch" \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w /artifacts/ \
@@ -193,6 +238,8 @@ jobs:
   build-conda:
     name: "Build Triton Conda"
     runs-on: [self-hosted, linux.2xlarge]
+    needs: download-triton-deps
+    if: ${{ needs.download-triton-deps.device == "cuda" }}
     strategy:
       fail-fast: false
       matrix:
@@ -220,6 +267,12 @@ jobs:
         with:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
+      - name: Download Dependency Artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: Triton Dependency Packages
+          path: ~/.triton
+
       - name: Build Triton conda package
         env:
           IS_RELEASE_TAG: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
@@ -229,6 +282,7 @@ jobs:
           container_name=$(docker run \
             --tty \
             --detach \
+            -v "~/.triton:/home/root/.triton" \
             -v "${GITHUB_WORKSPACE}:/pytorch" \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w /artifacts/ \
