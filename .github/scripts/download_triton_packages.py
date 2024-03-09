@@ -66,7 +66,16 @@ def get_llvm_package_info() -> Package:
         )
     # use_assert_enabled_llvm = check_env_flag("TRITON_USE_ASSERT_ENABLED_LLVM", "False")
     # release_suffix = "assert" if use_assert_enabled_llvm else "release"
-    llvm_hash_file = open("../cmake/llvm-hash.txt")
+    triton_root = Path.cwd()
+    for path in [
+        triton_root / "cmake" / "llvm-hash.txt",
+        triton_root / "llvm-hash.txt",
+    ]:
+        if path.exists():
+            llvm_hash_file = path.open()
+    else:
+        raise RuntimeError("llvm-hash.txt file not found")
+
     rev = llvm_hash_file.read(8)
     name = f"llvm-{rev}-{system_suffix}"
     url = f"https://tritonlang.blob.core.windows.net/llvm-builds/{name}.tar.gz"
