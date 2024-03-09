@@ -294,8 +294,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
     @staticmethod
     def set_alignment(torch_layout, op_element) -> bool:
         alignment = cutlass_utils.get_max_alignment(torch_layout)
-        cuda_arch = cutlass_utils.get_cuda_arch()
-        if cuda_arch and int(cuda_arch) >= 90 and alignment < op_element.alignment:
+        if alignment < op_element.alignment:
             return False
         else:
             op_element.alignment = alignment
