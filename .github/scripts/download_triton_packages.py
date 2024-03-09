@@ -189,7 +189,7 @@ def main() -> None:
         else:
             triton_repo = "https://github.com/openai/triton"
             triton_pkg_name = "pytorch-triton"
-        # check_call(["git", "clone", triton_repo], cwd=tmpdir)
+        check_call(["git", "clone", triton_repo], cwd=tmpdir)
         check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
 
         os.chdir(triton_basedir / "python")
