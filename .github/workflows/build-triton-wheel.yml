@@ -33,8 +33,7 @@ jobs:
     name: "Download Triton Dependencies"
     runs-on: [self-hosted, linux.large]
     container:
-      image: ubuntu:22.04
-    # Triton's LLVM download is SLOW.
+      image: amazonlinux:2023
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -81,7 +80,7 @@ jobs:
     name: "Build Triton Wheel"
     runs-on: [self-hosted, linux.2xlarge]
     container:
-      image: ubuntu:22.04
+      image: amazonlinux:2023
     needs: download-triton-deps
     strategy:
       fail-fast: false
