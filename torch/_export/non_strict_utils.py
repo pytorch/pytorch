@@ -15,13 +15,15 @@ from torch._export.passes.add_runtime_assertions_for_constraints_pass import Inp
 from torch._guards import Source
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
-from torch.export.graph_signature import CustomObjArgument
+from torch.export.exported_program import InputKind
+from torch.export.graph_signature import CustomObjArgument, TensorArgument
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
     EqualityConstraint,
     ShapeEnv,
     StatelessSymbolicContext,
+    ValueRanges
 )
 from torch.utils._pytree import (
     GetAttrKey,
@@ -169,6 +171,9 @@ def make_fake_inputs(nn_module, args, kwargs, constraints):
 def make_constraints(
     fake_mode,
     equalities_inputs,
+    flat_args,
+    input_specs,
+    constraints,
     original_signature,
     gm,
 ):
@@ -226,16 +231,25 @@ def make_constraints(
     if constraint_violation_error:
         raise constraint_violation_error
 
+    # create mapping from tensor id -> dim -> user-specified constraint spec for user tensor inputs
+    user_tensor_input_names = set([spec.arg.name for spec in input_specs if spec.kind == InputKind.USER_INPUT and isinstance(spec.arg, TensorArgument)])
+    tensor_id_to_dim_constraint = defaultdict(defaultdict)
+    for constraint in constraints:
+        spec = constraint.serializable_spec
+        tensor_id_to_dim_constraint[spec['t_id']][spec['dim']] = {"lower": spec['min'], "upper": spec['max']}
+
     range_constraints = {}
     input_dims = defaultdict(list)
     free_symbols = set()
+    input_index = 0
     for node in gm.graph.nodes:
-        if node.op != "placeholder":
+        if node.name not in user_tensor_input_names:
             continue
         if _is_constant_argument(node.meta["val"]) or isinstance(
             node.meta["val"], CustomObjArgument
         ):
             continue
+        tensor_constraints = tensor_id_to_dim_constraint[id(flat_args[input_index])]
         for i, d in enumerate(node.meta["val"].shape):
             if isinstance(d, torch.SymInt):
                 # Look up the range constraint for the symbol corresponding to this shape dimension
@@ -243,9 +257,14 @@ def make_constraints(
                 # NOTE(avik): Use node._expr instead of node.expr for the lookup here because
                 # we want the symbol, not its replacement, which could be an expression. Maybe
                 # there's a better way to do this, e.g., by (re)computing value ranges for expressions?
-                range_constraints[d.node.expr] = shape_env.var_to_range[d.node._expr]
+                constraint = tensor_constraints[i] if tensor_constraints else None
+                if constraint:  # user-specified
+                    range_constraints[d.node.expr] = ValueRanges(lower=constraint["lower"], upper=constraint["upper"])
+                else:  # from analysis
+                    range_constraints[d.node.expr] = shape_env.var_to_range[d.node._expr]
                 input_dims[d.node.expr].append(InputDim(input_name=node.name, dim=i))
                 free_symbols.update(d.node.expr.free_symbols)
+        input_index += 1
 
     for symbol in free_symbols:
         if symbol not in range_constraints:

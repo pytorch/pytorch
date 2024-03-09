@@ -714,7 +714,6 @@ class TestExport(TestCase):
             6,
         )
 
-    @testing.expectedFailureNonStrict
     def test_dim_1_2(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -737,7 +736,6 @@ class TestExport(TestCase):
         self.assertEquals(vr.lower, 1)
         self.assertEquals(vr.upper, 2)
 
-    @testing.expectedFailureNonStrict
     def test_derived_dim_1_2(self):
         class Bar(torch.nn.Module):
             def forward(self, x, y):
