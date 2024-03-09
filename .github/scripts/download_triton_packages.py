@@ -159,8 +159,6 @@ def main() -> None:
         check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
 
         os.chdir(triton_basedir / "python")
-        check_call(["pwd"])
-        check_call(["ls"])
         get_thirdparty_packages()
 
 if __name__ == "__main__":
