@@ -124,7 +124,7 @@ jobs:
       - name: Uncompress Triton Dependencies
         run: |
             set -x
-            unzip ~/triton-deps.zip -q
+            unzip triton-deps.zip -q
             ls .triton
 
       - name: Build Triton wheel
@@ -293,8 +293,8 @@ jobs:
       - name: Uncompress Triton Dependencies
         run: |
             set -x
-            unzip ~/triton-deps.zip -q
-            ls ~/.triton
+            unzip triton-deps.zip -q
+            ls .triton
 
       - name: Build Triton conda package
         env:
