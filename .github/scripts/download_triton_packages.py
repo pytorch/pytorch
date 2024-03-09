@@ -5,9 +5,14 @@ import platform
 import shutil
 import tarfile
 import urllib.request
+
 from pathlib import Path
+from subprocess import check_call
+from tempfile import TemporaryDirectory
 from typing import Any, List, NamedTuple
 
+SCRIPT_DIR = Path(__file__).parent
+REPO_DIR = SCRIPT_DIR.parent.parent
 
 class Package(NamedTuple):
     package: str
@@ -125,5 +130,38 @@ def get_thirdparty_packages() -> List[str]:
     return thirdparty_cmake_args
 
 
+def read_triton_pin(rocm_hash: bool = False) -> str:
+    triton_file = "triton.txt" if not rocm_hash else "triton-rocm.txt"
+    with open(REPO_DIR / ".ci" / "docker" / "ci_commit_pins" / triton_file) as f:
+        return f.read().strip()
+
+
+def main() -> None:
+    from argparse import ArgumentParser
+
+    parser = ArgumentParser("Download Triton Dependencies")
+    parser.add_argument("--build-rocm", action="store_true")
+    parser.add_argument("--commit-hash", type=str)
+    args = parser.parse_args()
+    build_rocm = args.build_rocm
+    commit_hash = args.commit_hash if args.commit_hash else read_triton_pin(build_rocm)
+
+    with TemporaryDirectory() as tmpdir:
+        triton_basedir = Path(tmpdir) / "triton"
+        triton_pythondir = triton_basedir / "python"
+        if build_rocm:
+            triton_repo = "https://github.com/ROCmSoftwarePlatform/triton"
+            triton_pkg_name = "pytorch-triton-rocm"
+        else:
+            triton_repo = "https://github.com/openai/triton"
+            triton_pkg_name = "pytorch-triton"
+        check_call(["git", "clone", triton_repo], cwd=tmpdir)
+        check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
+
+        os.chdir(triton_basedir / "python")
+        check_call(["pwd"])
+        check_call(["ls"])
+        get_thirdparty_packages()
+
 if __name__ == "__main__":
-    get_thirdparty_packages()
+    main()
