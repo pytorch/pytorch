@@ -60,7 +60,7 @@ jobs:
         run: python3 "${GITHUB_WORKSPACE}/.github/scripts/download_triton_packages.py"
 
       - name: Upload Dependency Artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v3
         with:
           name: Triton Dependency Packages
           path: ~/.triton
@@ -100,7 +100,7 @@ jobs:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
       - name: Download Dependency Artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v3
         with:
           name: Triton Dependency Packages
           path: ~/.triton
@@ -265,7 +265,7 @@ jobs:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
       - name: Download Dependency Artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v3
         with:
           name: Triton Dependency Packages
           path: ~/.triton
