@@ -329,8 +329,8 @@ class FSDPParamGroup:
                 self._reduce_dtype,
                 self.device,
                 self._grad_divide_factors,
-                self._all_reduce_process_group if self._should_all_reduce_grads else None,
-                self.comm_ctx.all_reduce_stream if self._should_all_reduce_grads else None,
+                self._all_reduce_process_group if self._should_all_reduce_grads() else None,
+                self.comm_ctx.all_reduce_stream if self._should_all_reduce_grads() else None,
             )
 
     def finalize_backward(self):
@@ -481,7 +481,6 @@ class FSDPParamGroup:
         assert isinstance(mesh_info, HSDPMeshInfo)
         return mesh_info.replicate_process_group
 
-    @property
     def _should_all_reduce_grads(self) -> bool:
         return isinstance(self.mesh_info, HSDPMeshInfo) and self.all_reduce_grads
 

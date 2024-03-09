@@ -144,24 +144,26 @@ def foreach_reduce_scatter_and_all_reduce(
         post_reduce_output = reduce_scatter_input.new_empty(
             (reduce_scatter_output_numel,)
         )
+        # TODO
+        # _reduce_scatter(
+        #     post_reduce_output, reduce_scatter_input, reduce_scatter_group, divide_factors
+        # )
         _reduce_scatter(
-            post_reduce_output, reduce_scatter_input, reduce_scatter_group, divide_factors
+            post_reduce_output, reduce_scatter_input, reduce_scatter_group
         )
-        if all_reduce_stream is None:
-            _, postdivide_factor = divide_factors
-            _div_if_needed(post_reduce_output, postdivide_factor)
-            post_reduce_output = _to_dtype_if_needed(post_reduce_output, orig_dtype)
     if all_reduce_stream is not None:
         all_reduce_stream.wait_stream(reduce_scatter_stream)
         with torch.cuda.stream(all_reduce_stream):
+            # TODO
+            # _all_reduce(
+            #     post_reduce_output, all_reduce_group, divide_factors
+            # )
             _all_reduce(
-                post_reduce_output, all_reduce_group, divide_factors
+                post_reduce_output, all_reduce_group
             )
-            _, postdivide_factor = divide_factors
-            _div_if_needed(post_reduce_output, postdivide_factor)
-            post_reduce_output = _to_dtype_if_needed(post_reduce_output, orig_dtype)
     view_out_stream = reduce_scatter_stream if all_reduce_stream is None else all_reduce_stream
     with torch.cuda.stream(view_out_stream):
+        post_reduce_output = _to_dtype_if_needed(post_reduce_output, orig_dtype)
         # - View out and accumulate
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
         for padded_unsharded_size, fsdp_param in zip(
@@ -215,12 +217,13 @@ def _reduce_scatter(
     output: torch.Tensor,
     input: torch.Tensor,
     group: dist.ProcessGroup,
-    divide_factors: Optional[Tuple[float, float]],
+    divide_factors: Optional[Tuple[float, float]] = None,
 ) -> None:
     if divide_factors:
-        predivide_factor, _ = divide_factors
+        predivide_factor, postdivide_factor = divide_factors
         _div_if_needed(input, predivide_factor)
         dist.reduce_scatter_tensor(output, input, group=group)
+        _div_if_needed(output, postdivide_factor)
     else:
         # Using NCCL's reduce-scatter to do the division by world size saves
         # extra memory read/write from a separate division kernel
@@ -229,12 +232,13 @@ def _reduce_scatter(
 def _all_reduce(
     tensor: torch.Tensor,
     group: dist.ProcessGroup,
-    divide_factors: Optional[Tuple[float, float]],
+    divide_factors: Optional[Tuple[float, float]] = None,
 ) -> None:
     if divide_factors:
-        predivide_factor, _ = divide_factors
+        predivide_factor, postdivide_factor = divide_factors
         _div_if_needed(tensor, predivide_factor)
         dist.all_reduce(tensor, group=group)
+        _div_if_needed(tensor, postdivide_factor)
     else:
         # Using NCCL's reduce-scatter to do the division by world size saves
         # extra memory read/write from a separate division kernel
