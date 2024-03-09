@@ -120,6 +120,4 @@ def config_of(
     # and None args by the Triton compiler
     ids_of_folded_args = tuple(equal_to_1)
 
-    return instance_descriptor(
-        divisible_by_16, equal_to_1, ids_of_folded_args
-    )
+    return instance_descriptor(divisible_by_16, equal_to_1, ids_of_folded_args)
