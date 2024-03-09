@@ -64,15 +64,15 @@ def _pretty_print_spec(spec: object) -> str:
 @dataclass
 class PlacementStrategy:
     """
-    A placement strategy describes an acceptable sharding placements of the output
+    A placement strategy describes acceptable sharding placements of the output
     and the tensor arguments of an operation.
 
-    note: when the op return value is a single DTensor object, output_spec is
-    DTensorSpec; when the return value is a sequence of Optional[DTensor],
-    output_spec is a sequence of Optional[DTensorSpec].
+    note: when the op return value is a single DTensor object, output_specs is
+    DTensorSpec; when the return value is a tuple of Optional[DTensor],
+    output_specs is a tuple of Optional[DTensorSpec].
     """
 
-    output_spec: Union[DTensorSpec, Tuple[Optional[DTensorSpec], ...]]
+    output_specs: Union[DTensorSpec, Tuple[Optional[DTensorSpec], ...]]
     input_specs: Optional[Sequence[DTensorSpec]] = None
 
     # redistribute costs for this op placement strategy
@@ -82,21 +82,29 @@ class PlacementStrategy:
     redistribute_cost: Optional[List[List[float]]] = None
 
     @cached_property
-    def out_spec(self) -> DTensorSpec:
-        if isinstance(self.output_spec, DTensorSpec):
-            return self.output_spec
+    def output_spec(self) -> DTensorSpec:
+        """
+        This function requires that the strategy have exactly one DTensorSpec as the
+        output spec. If the output_specs is a tuple, we throw an exception.
+        """
+        if isinstance(self.output_specs, DTensorSpec):
+            return self.output_specs
         else:
-            assert len(self.output_spec) > 0, "empty output_spec!"
-            spec = self.output_spec[0]
-            assert isinstance(
-                spec, DTensorSpec
-            ), "If the operator returns a tuple, PlacementStrategy requires the first"
-            f"element in tuple be not None but got: {spec}."
-            return spec
+            raise ValueError(
+                f"function output_spec expects a single DTensorSpec but got: {self.output_specs}"
+            )
+
+    def input_spec(self, index: int = 0) -> DTensorSpec:
+        assert self.input_specs is not None, "input_specs of PlacementStrategy is None!"
+        assert len(self.input_specs) > index, (
+            f"Invalid index {index} for input_specs of length "
+            f"{len(self.input_specs)}: {self.input_specs}"
+        )
+        return self.input_specs[index]
 
     def __str__(self) -> str:
         input_specs_str = _pretty_print_spec(self.input_specs)
-        output_spec_str = _pretty_print_spec(self.output_spec)
+        output_spec_str = _pretty_print_spec(self.output_specs)
         return f"{input_specs_str} -> {output_spec_str}"
 
 
@@ -121,25 +129,33 @@ class OpStrategy(StrategyType):
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
         mesh_shape = self.output_mesh_shape
-        return f"OpStrategy:[{strategy_list_str}] @mesh: {mesh_shape}"
+        return f"OpStrategy:[{strategy_list_str}] @ mesh: {mesh_shape}"
 
     def max_num_shards(self) -> int:
         """
         Returns the max number of shards across all placement strategies
         """
-        return max([strategy.out_spec.num_shards for strategy in self.strategies])
+        return max([strategy.output_spec.num_shards for strategy in self.strategies])
 
     @property
     def output_mesh_shape(self):
-        return self.strategies[0].out_spec.mesh.shape
+        output_spec = self.strategies[0].output_specs
+        if isinstance(output_spec, DTensorSpec):
+            return output_spec.mesh.shape
+        else:
+            assert isinstance(
+                output_spec, tuple
+            ), "found no DTensorSpec in the OpStrategy!"
+            assert output_spec[0] is not None
+            return output_spec[0].mesh.shape
 
     @property
     def output_ndim(self):
-        return self.strategies[0].out_spec.ndim
+        return self.strategies[0].output_spec.ndim
 
     @property
     def output_shape(self):
-        return self.strategies[0].out_spec.shape
+        return self.strategies[0].output_spec.shape
 
 
 class TupleStrategy(StrategyType):
@@ -147,7 +163,8 @@ class TupleStrategy(StrategyType):
     TupleStrategy represents the output strategy of this op is a tuple
     of strategy, i.e. If the output of this op is a tuple of tensors or list of tensors
     with possibly different placement strategies, we should return a TupleStrategy that
-    contains a tuple of OpStrategy.
+    contains a tuple of OpStrategy, where each child represents the sharding strategy
+    of "each element" of the tuple/list of tensors the op returns.
 
     NOTE: if the output of the op is a List[Tensor] and they share the same placement
     strategy, then we should return a single OpStrategy instead of a TupleStrategy
@@ -173,8 +190,8 @@ class RuntimeSchemaInfo:
     """
 
     # This static_argnum records static arg "starting index" for ops that have non-tensor
-    # args/kwargs which would affect sharding propagation results. All args after this
-    # index would be hashed to our sharding cache.
+    # args/kwargs which would affect sharding propagation results. All args starting from
+    # this index would be hashed to our sharding cache.
     # Note that only a few ops need this information, e.g. view, transpose, var.dim, etc.
     static_argnum: int = 100
     # This static_kwargkey records static kwarg names which would affect sharding prop
@@ -237,7 +254,7 @@ class OpSchema:
                 mesh_shape = arg.mesh.shape
             elif isinstance(arg, OpStrategy):
                 assert len(arg.strategies) == 1
-                args_sharding.append(_pretty_print_spec(arg.strategies[0].output_spec))
+                args_sharding.append(_pretty_print_spec(arg.strategies[0].output_specs))
                 mesh_shape = arg.output_mesh_shape
             elif isinstance(arg, TupleStrategy):
                 first_op_strtgy = arg.childs[0]
@@ -246,7 +263,7 @@ class OpSchema:
                 args_sharding.append(str(arg))
             else:
                 args_sharding.append(str(arg))
-        return f"Op(op={self.op}, args_sharding={', '.join(args_sharding)}@ mesh: {mesh_shape})"
+        return f"Op(op={self.op}, args_sharding={', '.join(args_sharding)} @ mesh: {mesh_shape})"
 
     def __post_init__(self) -> None:
         has_symints = False
@@ -268,9 +285,10 @@ class OpSchema:
 
         return all(isinstance(e, DTensorSpec) or e is None for e in arg)
 
-    def return_type_tuple_tensors(self) -> bool:
+    def return_type_tuple_tensor_like(self) -> bool:
+        # all dispatch ops could only return Tuple[Tensor] or have None/ints/floats
+        # in the tuple, but the first element must be a Tensor, so this check is enough
         return_types = self.op._schema.returns
-        # all dispatch ops only return Tensor or Tuple[Tensor], so this check if enough
         return len(return_types) > 1 and isinstance(
             return_types[0].type, torch.TensorType
         )

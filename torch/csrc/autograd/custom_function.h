@@ -6,6 +6,8 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/autograd/variable_info.h>
+#include <torch/csrc/dynamo/compiled_autograd.h>
 #include <vector>
 
 namespace torch::autograd {
@@ -57,11 +59,16 @@ using forward_t = decltype(X::forward(nullptr, std::declval<Args>()...));
 /// `ctx->get_saved_variables` (see
 /// `torch::autograd::AutogradContext::get_saved_variables`) and other saved
 /// data can be accessed from `ctx->saved_data`.
+/// To enable compiled autograd support (torch.compile for backward) for your
+/// custom autograd operation, you can set MyFunction::is_traceable
+/// (see Function::istraceable notes below).
 ///
 /// For example:
 /// ```
 /// class MyFunction : public Function<MyFunction> {
 ///   public:
+///   static constexpr bool is_traceable = true;
+///
 ///   static variable_list forward(AutogradContext *ctx, int n, Variable var) {
 ///      // Save data for backward in context
 ///      ctx->saved_data["n"] = n;
@@ -97,6 +104,15 @@ struct TORCH_API Function {
   template <typename X = T, typename... Args>
   static auto apply(Args&&... args)
       -> std::enable_if_t<std::is_same_v<X, T>, forward_t<X, Args...>>;
+
+  // This flag is for an experimental feature: compiled autograd. Not all
+  // built-in APIs are supported at the moment e.g. mark_dirty and
+  // mark_non_differentiable. Before setting this flag to enable tracing for
+  // your custom function <T>, you need to ensure that the backward function is
+  // traceable i.e. any variables accessed in the backward other than the input
+  // arguments must be handled in a similar manner to built-ins in
+  // CppNode::compiled_args and CppNode::apply_with_saved.
+  static constexpr bool is_traceable = false;
 };
 
 /// Context to save information during `forward` that can be accessed in
@@ -157,20 +173,6 @@ struct TORCH_API AutogradContext {
   friend struct CppNode;
 };
 
-struct TORCH_API VariableInfo {
-  explicit VariableInfo();
-  explicit VariableInfo(const Variable& var);
-
-  Variable zeros(at::OptionalDeviceGuard& device_guard) const;
-
-  at::Layout layout = at::Layout::Strided;
-  at::Device device = at::kCPU;
-  at::ScalarType scalar_type = at::kFloat;
-  std::vector<c10::SymInt> size;
-  bool requires_grad;
-  bool is_empty;
-};
-
 // CppNode<T> is the Node in the autograd graph that represents the user defined
 // backward function for Function<T>. Calls to CppNode::apply are forward to
 // T::backward().
@@ -186,10 +188,62 @@ struct CppNode : public Node {
 
   void set_ctx_grad_fn(const std::shared_ptr<Node>& node);
   void save_variables_to_ctx();
+
+  void compiled_args(CompiledNodeArgs& args) override {
+    if (!T::is_traceable) {
+      throw std::runtime_error(
+          std::string(
+              "compiled_args not implemented for non-traceable node: ") +
+          name());
+    }
+
+    // although neither of the 2 methods below have uniqueness guarantees
+    // it is unlikely for them to collide at the same time
+    args.collect(static_cast<uint64_t>(typeid(T).hash_code()));
+    args.collect(std::string(typeid(T).name()));
+
+    args.collect(ctx_.saved_data);
+    TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
+    TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
+    args.collect(ctx_.saved_variables_);
+    TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
+    args.collect(ctx_.materialize_grads_);
+    args.collect(ctx_.has_freed_buffers_);
+    args.collect(is_variable_input_);
+    args.collect(input_info_);
+    args.collect(output_info_);
+  }
+
+  variable_list apply_with_saved(
+      const variable_list& inputs,
+      SwapSavedVariables& saved) override {
+    saved.before(ctx_.saved_data);
+    TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
+    TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
+    saved.before(ctx_.saved_variables_);
+    TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
+    saved.before(ctx_.materialize_grads_);
+    saved.before(ctx_.has_freed_buffers_);
+    saved.before(input_info_);
+    saved.before(output_info_);
+    auto results = apply(variable_list(inputs));
+    saved.after(ctx_.saved_data);
+    TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
+    TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
+    saved.after(ctx_.saved_variables_);
+    TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
+    saved.after(ctx_.materialize_grads_);
+    saved.after(ctx_.has_freed_buffers_);
+    saved.after(input_info_);
+    saved.after(output_info_);
+    return results;
+  }
 };
 
 struct ExtractVariables : IterArgs<ExtractVariables> {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   std::vector<bool>& is_var_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   variable_list& list_;
   ExtractVariables(std::vector<bool>& is_var, variable_list& list)
       : is_var_(is_var), list_(list) {}
@@ -347,17 +401,17 @@ auto Function<T>::apply(Args&&... args)
 // The logic here is the same as PyNode::apply, so changes to it should be done
 // in both the places
 template <class T>
+// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
 variable_list CppNode<T>::apply(variable_list&& inputs) {
   at::OptionalDeviceGuard _device_guard;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int num_inputs = inputs.size();
+  auto num_inputs = inputs.size();
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   variable_list backward_inputs;
   backward_inputs.reserve(num_inputs);
   for (const auto i : c10::irange(num_inputs)) {
     if (inputs[i].defined() || !ctx_.materialize_grads_) {
-      backward_inputs.emplace_back(inputs[i]);
+      backward_inputs.emplace_back(std::move(inputs[i]));
     } else {
       backward_inputs.emplace_back(output_info_[i].zeros(_device_guard));
     }

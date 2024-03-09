@@ -365,7 +365,7 @@ def get_submodule_folders():
     with open(git_modules_path) as f:
         return [
             os.path.join(cwd, line.split("=", 1)[1].strip())
-            for line in f.readlines()
+            for line in f
             if line.strip().startswith("path")
         ]
 
@@ -521,8 +521,8 @@ def check_pydep(importname, module):
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
-    # Copy libiomp5.dylib inside the wheel package on OS X
-    def _embed_libiomp(self):
+    def _embed_libomp(self):
+        # Copy libiomp5.dylib/libomp.dylib inside the wheel package on MacOS
         lib_dir = os.path.join(self.build_lib, "torch", "lib")
         libtorch_cpu_path = os.path.join(lib_dir, "libtorch_cpu.dylib")
         if not os.path.exists(libtorch_cpu_path):
@@ -545,17 +545,31 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 assert rpath.startswith("path ")
                 rpaths.append(rpath.split(" ", 1)[1].rsplit("(", 1)[0][:-1])
 
-        omp_lib_name = "libiomp5.dylib"
+        omp_lib_name = (
+            "libomp.dylib" if os.uname().machine == "arm64" else "libiomp5.dylib"
+        )
         if os.path.join("@rpath", omp_lib_name) not in libs:
             return
 
-        # Copy libiomp5 from rpath locations
+        # Copy libomp/libiomp5 from rpath locations
         for rpath in rpaths:
             source_lib = os.path.join(rpath, omp_lib_name)
             if not os.path.exists(source_lib):
                 continue
             target_lib = os.path.join(self.build_lib, "torch", "lib", omp_lib_name)
             self.copy_file(source_lib, target_lib)
+            break
+
+        # Copy omp.h from OpenMP_C_FLAGS and copy it into include folder
+        omp_cflags = get_cmake_cache_vars()["OpenMP_C_FLAGS"]
+        if not omp_cflags:
+            return
+        for include_dir in [f[2:] for f in omp_cflags.split(" ") if f.startswith("-I")]:
+            omp_h = os.path.join(include_dir, "omp.h")
+            if not os.path.exists(omp_h):
+                continue
+            target_omp_h = os.path.join(self.build_lib, "torch", "include", "omp.h")
+            self.copy_file(omp_h, target_omp_h)
             break
 
     def run(self):
@@ -650,7 +664,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         setuptools.command.build_ext.build_ext.run(self)
 
         if IS_DARWIN and package_type != "conda":
-            self._embed_libiomp()
+            self._embed_libomp()
 
         # Copy the essential export library to compile C++ extensions.
         if IS_WINDOWS:
@@ -1041,7 +1055,10 @@ def configure_extension_build():
             "convert-caffe2-to-onnx = caffe2.python.onnx.bin.conversion:caffe2_to_onnx",
             "convert-onnx-to-caffe2 = caffe2.python.onnx.bin.conversion:onnx_to_caffe2",
             "torchrun = torch.distributed.run:main",
-        ]
+        ],
+        "torchrun.logs_specs": [
+            "default = torch.distributed.elastic.multiprocessing:DefaultLogsSpecs",
+        ],
     }
 
     return extensions, cmdclass, packages, entry_points, extra_install_requires
@@ -1078,6 +1095,7 @@ def main():
         "networkx",
         "jinja2",
         "fsspec",
+        'mkl>=2021.1.1,<=2021.4.0; platform_system == "Windows"',
     ]
 
     # Parse the command line and check the arguments before we proceed with
@@ -1114,7 +1132,7 @@ def main():
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
         long_description = f.read()
 
-    version_range_max = max(sys.version_info[1], 10) + 1
+    version_range_max = max(sys.version_info[1], 12) + 1
     torch_package_data = [
         "py.typed",
         "bin/*",
@@ -1150,6 +1168,7 @@ def main():
         "include/ATen/cuda/*.h",
         "include/ATen/cuda/detail/*.cuh",
         "include/ATen/cuda/detail/*.h",
+        "include/ATen/cuda/tunable/*.h",
         "include/ATen/cudnn/*.h",
         "include/ATen/functorch/*.h",
         "include/ATen/ops/*.h",
@@ -1158,6 +1177,7 @@ def main():
         "include/ATen/hip/detail/*.cuh",
         "include/ATen/hip/detail/*.h",
         "include/ATen/hip/impl/*.h",
+        "include/ATen/hip/tunable/*.h",
         "include/ATen/mps/*.h",
         "include/ATen/miopen/*.h",
         "include/ATen/detail/*.h",
@@ -1168,10 +1188,14 @@ def main():
         "include/ATen/native/hip/*.h",
         "include/ATen/native/hip/*.cuh",
         "include/ATen/native/mps/*.h",
+        "include/ATen/native/nested/*.h",
         "include/ATen/native/quantized/*.h",
         "include/ATen/native/quantized/cpu/*.h",
+        "include/ATen/native/sparse/*.h",
         "include/ATen/native/utils/*.h",
         "include/ATen/quantized/*.h",
+        "include/ATen/xpu/*.h",
+        "include/ATen/xpu/detail/*.h",
         "include/caffe2/serialize/*.h",
         "include/c10/*.h",
         "include/c10/macros/*.h",
@@ -1187,6 +1211,7 @@ def main():
         "include/c10/hip/*.h",
         "include/c10/hip/impl/*.h",
         "include/c10/xpu/*.h",
+        "include/c10/xpu/impl/*.h",
         "include/torch/*.h",
         "include/torch/csrc/*.h",
         "include/torch/csrc/api/include/torch/*.h",
@@ -1225,6 +1250,7 @@ def main():
         "include/torch/csrc/inductor/aoti_runtime/*.h",
         "include/torch/csrc/inductor/aoti_torch/*.h",
         "include/torch/csrc/inductor/aoti_torch/c/*.h",
+        "include/torch/csrc/inductor/aoti_torch/generated/*.h",
         "include/torch/csrc/jit/*.h",
         "include/torch/csrc/jit/backends/*.h",
         "include/torch/csrc/jit/generated/*.h",
@@ -1255,6 +1281,7 @@ def main():
         "include/torch/csrc/lazy/core/ops/*.h",
         "include/torch/csrc/lazy/python/python_util.h",
         "include/torch/csrc/lazy/ts_backend/*.h",
+        "include/torch/csrc/xpu/*.h",
         "include/pybind11/*.h",
         "include/pybind11/detail/*.h",
         "include/pybind11/eigen/*.h",
@@ -1269,6 +1296,7 @@ def main():
         "include/sleef.h",
         "_inductor/codegen/*.h",
         "_inductor/codegen/aoti_runtime/*.cpp",
+        "_export/serde/*.yaml",
         "share/cmake/ATen/*.cmake",
         "share/cmake/Caffe2/*.cmake",
         "share/cmake/Caffe2/public/*.cmake",

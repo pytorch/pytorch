@@ -57,6 +57,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     find_library_location,
     run_tests,
+    skipIfTorchDynamo,
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -4188,6 +4189,10 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         self.assertTrue(hasattr(reload_gm, "dummy_buffer"))
         self.assertTrue(hasattr(reload_gm, "dummy_parameter"))
 
+# This is failing on Python 3.12 : https://github.com/pytorch/pytorch/issues/119454
+@unittest.skipIf(
+    sys.version_info >= (3, 12), "Failing on python 3.12+"
+)
 class TestFunctionalTracing(JitTestCase):
     def setUp(self):
         super().setUp()
@@ -4454,6 +4459,7 @@ TestFunctionalTracing.generate_tests()
 
 instantiate_device_type_tests(TestOperatorSignatures, globals())
 
+@skipIfTorchDynamo("too slow")
 @skipIfNoTorchVision
 class TestVisionTracing(JitTestCase):
     def setUp(self):

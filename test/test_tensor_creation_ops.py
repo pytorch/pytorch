@@ -1056,8 +1056,6 @@ class TestTensorCreation(TestCase):
 
         self._float_to_int_conversion_helper(vals, device, dtype)
 
-    # TODO: re-enable this test
-    @unittest.skipIf(True, "real and imag not implemented for complex")
     @onlyNativeDeviceTypes
     def test_complex_type_conversions(self, device):
         dtypes = [torch.float, torch.complex64, torch.complex128]
@@ -1625,7 +1623,9 @@ class TestTensorCreation(TestCase):
                         lambda: t.random_(from_, to_)
                     )
 
-    @dtypes(*all_types_and(torch.bfloat16, torch.half))
+    # NB: uint64 is broken because its max value is not representable in
+    # int64_t, but this is what random expects
+    @dtypes(*all_types_and(torch.bfloat16, torch.half, torch.uint16, torch.uint32))
     def test_random_full_range(self, device, dtype):
         size = 2000
         alpha = 0.1
@@ -1659,7 +1659,9 @@ class TestTensorCreation(TestCase):
         self.assertTrue(from_ <= t.to(torch.double).min() < (from_ + delta))
         self.assertTrue((to_inc_ - delta) < t.to(torch.double).max() <= to_inc_)
 
-    @dtypes(*all_types_and(torch.bfloat16, torch.half))
+    # NB: uint64 is broken because its max value is not representable in
+    # int64_t, but this is what random expects
+    @dtypes(*all_types_and(torch.bfloat16, torch.half, torch.uint16, torch.uint32))
     def test_random_from_to(self, device, dtype):
         size = 2000
         alpha = 0.1
@@ -1748,7 +1750,7 @@ class TestTensorCreation(TestCase):
                         lambda: t.random_(from_, to_)
                     )
 
-    @dtypes(*all_types_and(torch.bfloat16, torch.half))
+    @dtypes(*all_types_and(torch.bfloat16, torch.half, torch.uint16, torch.uint32))
     def test_random_to(self, device, dtype):
         size = 2000
         alpha = 0.1
@@ -2733,10 +2735,22 @@ class TestTensorCreation(TestCase):
             return
         for size in [0, 1, 2, 5, 10, 50, 100, 1024, 2048]:
             for periodic in [True, False]:
-                res = torch_method(size, periodic=periodic, **kwargs, device=device, dtype=dtype)
+                res = torch_method(
+                    size,
+                    periodic=periodic,
+                    layout=torch.strided,
+                    requires_grad=False,
+                    **kwargs,
+                    device=device,
+                    dtype=dtype,
+                )
                 # NB: scipy always returns a float64 result
-                ref = torch.from_numpy(signal.get_window((name, *(kwargs.values())), size, fftbins=periodic))
-                self.assertEqual(res, ref, exact_dtype=False)
+                ref = torch.from_numpy(
+                    signal.get_window(
+                        (name, *(kwargs.values())), size, fftbins=periodic
+                    )
+                )
+                self.assertEqual(res, ref.to(dtype))
         with self.assertRaisesRegex(RuntimeError, r'not implemented for sparse types'):
             torch_method(3, layout=torch.sparse_coo)
         self.assertTrue(torch_method(3, requires_grad=True).requires_grad)
@@ -2757,7 +2771,7 @@ class TestTensorCreation(TestCase):
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
-    @dtypes(torch.float, torch.double, torch.long)
+    @dtypes(torch.float, torch.double, torch.long, torch.bfloat16, torch.float16)
     def test_kaiser_window(self, device, dtype):
         for num_test in range(50):
             self._test_signal_window_functions('kaiser', dtype, device, beta=random.random() * 30)

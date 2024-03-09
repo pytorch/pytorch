@@ -43,10 +43,14 @@ set(CMAKE_C_STANDARD   11 CACHE STRING "The C standard whose features are reques
 # ---[ Utils
 include(cmake/public/utils.cmake)
 
-# --- [ Check that minimal gcc version is 9.4+
-if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.4)
-  message(FATAL "GCC-9.4 or newer is required to compile PyTorch, but found ${CMAKE_CXX_COMPILER_VERSION}")
+# --- [ Check that minimal gcc version is 9.3+
+if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.3)
+  message(FATAL_ERROR "GCC-9.3 or newer is required to compile PyTorch, but found ${CMAKE_CXX_COMPILER_VERSION}")
 endif()
+
+# This define is needed to preserve behavior given anticpated changes to cccl/thrust
+# https://nvidia.github.io/libcudacxx/standard_api/numerics_library/complex.html
+string(APPEND CMAKE_CUDA_FLAGS "-DLIBCUDACXX_ENABLE_SIMPLIFIED_COMPLEX_OPERATIONS")
 
 if(LINUX)
   include(cmake/CheckAbi.cmake)
@@ -347,6 +351,8 @@ cmake_dependent_option(
     "NOT INTERN_BUILD_MOBILE" OFF)
 cmake_dependent_option(
     BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
+cmake_dependent_option(
+    BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin fodler" OFF "USE_CUDA" OFF)
 
 option(USE_MIMALLOC "Use mimalloc" OFF)
 # Enable third party mimalloc library to improve memory allocation performance on Windows.
@@ -737,6 +743,12 @@ cmake_dependent_option(
   "Whether to build the flash_attention kernel for scaled dot product attention.\
   Will be disabled if not supported by the platform" ON
   "USE_CUDA AND NOT MSVC" OFF)
+
+# We are currenlty not using alibi attention for Flash
+# So we disable this feature by default
+# We dont currently document this feature because we don't
+# Suspect users building from source will need this
+add_definitions(-DFLASHATTENTION_DISABLE_ALIBI)
 
 # CAVEAT: Again, do not check USE_ROCM here
 # Flash Attention2 will error while building for sm52 while Mem Eff Attention won't
@@ -1171,6 +1183,10 @@ if(BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUSPARSELT.cmake
       DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
+  install(FILES
+      ${PROJECT_SOURCE_DIR}/cmake/Modules/FindSYCLToolkit.cmake
+      DESTINATION share/cmake/Caffe2/
+      COMPONENT dev)
 
   install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2
       FILE Caffe2Targets.cmake
@@ -1232,4 +1248,13 @@ if(DEFINED USE_CUSTOM_DEBINFO)
     # Link everything with debug info when any file is in debug mode
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -g")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -g")
+endif()
+
+# Bundle PTXAS if needed
+if(BUILD_BUNDLE_PTXAS AND USE_CUDA)
+   if(NOT EXISTS "${PROJECT_SOURCE_DIR}/build/bin/ptxas")
+     message(STATUS "Copying PTXAS into the bin folder")
+     file(COPY "${CUDAToolkit_BIN_DIR}/ptxas" DESTINATION "${PROJECT_BINARY_DIR}")
+   endif()
+   install(PROGRAMS "${PROJECT_BINARY_DIR}/ptxas" DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()

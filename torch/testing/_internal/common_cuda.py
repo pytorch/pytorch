@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 r"""This file is allowed to initialize CUDA context when imported."""
 
 import functools
@@ -47,6 +49,9 @@ def evaluate_platform_supports_flash_attention():
 
 PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_flash_attention())
 PLATFORM_SUPPORTS_MEM_EFF_ATTENTION: bool = LazyVal(lambda: TEST_CUDA and not TEST_WITH_ROCM)
+# TODO(eqy): gate this against a cuDNN version
+PLATFORM_SUPPORTS_CUDNN_ATTENTION: bool = LazyVal(lambda: TEST_CUDA and not TEST_WITH_ROCM and
+                                                  torch.backends.cuda.cudnn_sdp_enabled())
 # This condition always evaluates to PLATFORM_SUPPORTS_MEM_EFF_ATTENTION but for logical clarity we keep it separate
 PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION or PLATFORM_SUPPORTS_MEM_EFF_ATTENTION)
 
@@ -225,7 +230,7 @@ def _check_hipsparse_generic_available():
 TEST_CUSPARSE_GENERIC = _check_cusparse_generic_available()
 TEST_HIPSPARSE_GENERIC = _check_hipsparse_generic_available()
 
-# Shared by test_cuda.py and test_multigpu.py
+# Shared by test_torch.py and test_multigpu.py
 def _create_scaling_models_optimizers(device="cuda", optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
     # Create a module+optimizer that will use scaling, and a control module+optimizer
     # that will not use scaling, against which the scaling-enabled module+optimizer can be compared.
@@ -243,14 +248,14 @@ def _create_scaling_models_optimizers(device="cuda", optimizer_ctor=torch.optim.
 
     return mod_control, mod_scaling, opt_control, opt_scaling
 
-
+# Shared by test_torch.py, test_cuda.py and test_multigpu.py
 def _create_scaling_case(device="cuda", dtype=torch.float, optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
     data = [(torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
             (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
             (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
             (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device))]
 
-    loss_fn = torch.nn.MSELoss().cuda()
+    loss_fn = torch.nn.MSELoss().to(device)
 
     skip_iter = 2
 

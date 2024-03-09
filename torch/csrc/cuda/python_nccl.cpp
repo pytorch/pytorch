@@ -21,7 +21,7 @@ using namespace torch::cuda::nccl::detail;
 static const char* COMM_CAPSULE_NAME = "torch.cuda.nccl.Communicator";
 
 PyObject* THCPModule_nccl_version(PyObject* self, PyObject* args) {
-  return PyInt_FromLong(version());
+  return PyLong_FromUnsignedLongLong(version());
 }
 
 PyObject* THCPModule_nccl_version_suffix(PyObject* self, PyObject* args) {
@@ -99,10 +99,10 @@ static std::vector<ncclComm_t> unpack_comms(PyObject* obj, size_t size) {
 
 PyObject* THCPModule_nccl_init_rank(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  int nranks;
-  const char* id;
-  Py_ssize_t id_len;
-  int rank;
+  int nranks = 0;
+  const char* id = nullptr;
+  Py_ssize_t id_len = 0;
+  int rank = 0;
 
   if (!PyArg_ParseTuple(
           args, "is#i:nccl_init_rank", &nranks, &id, &id_len, &rank)) {
@@ -118,7 +118,7 @@ PyObject* THCPModule_nccl_init_rank(PyObject* self, PyObject* args) {
 
   ncclUniqueId commId;
   memcpy(&commId, id, NCCL_UNIQUE_ID_BYTES);
-  ncclComm_t comm;
+  ncclComm_t comm = nullptr;
   {
     pybind11::gil_scoped_release no_gil;
     comm = comm_init_rank(nranks, commId, rank);
@@ -129,8 +129,9 @@ PyObject* THCPModule_nccl_init_rank(PyObject* self, PyObject* args) {
 
 PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  PyObject *_inputs, *_output, *_streams, *_comms;
-  int root, op;
+  PyObject *_inputs = nullptr, *_output = nullptr, *_streams = nullptr,
+           *_comms = nullptr;
+  int root = 0, op = 0;
 
   if (!PyArg_ParseTuple(
           args, "OOiiOO", &_inputs, &_output, &root, &op, &_streams, &_comms)) {
@@ -161,8 +162,9 @@ PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
 
 PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  PyObject *_inputs, *_outputs, *_streams, *_comms;
-  int op;
+  PyObject *_inputs = nullptr, *_outputs = nullptr, *_streams = nullptr,
+           *_comms = nullptr;
+  int op = 0;
 
   if (!PyArg_ParseTuple(
           args, "OOiOO", &_inputs, &_outputs, &op, &_streams, &_comms)) {
@@ -193,8 +195,8 @@ PyObject* THCPModule_nccl_all_reduce(PyObject* self, PyObject* args) {
 
 PyObject* THCPModule_nccl_broadcast(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  PyObject *_inputs, *_streams, *_comms;
-  int root;
+  PyObject *_inputs = nullptr, *_streams = nullptr, *_comms = nullptr;
+  int root = 0;
 
   if (!PyArg_ParseTuple(args, "OiOO", &_inputs, &root, &_streams, &_comms)) {
     THPUtils_invalidArguments(
@@ -224,7 +226,8 @@ PyObject* THCPModule_nccl_broadcast(PyObject* self, PyObject* args) {
 
 PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  PyObject *_inputs, *_outputs, *_streams, *_comms;
+  PyObject *_inputs = nullptr, *_outputs = nullptr, *_streams = nullptr,
+           *_comms = nullptr;
 
   if (!PyArg_ParseTuple(
           args, "OOOO", &_inputs, &_outputs, &_streams, &_comms)) {
@@ -255,8 +258,9 @@ PyObject* THCPModule_nccl_all_gather(PyObject* self, PyObject* args) {
 
 PyObject* THCPModule_nccl_reduce_scatter(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  PyObject *_inputs, *_outputs, *_streams, *_comms;
-  int op;
+  PyObject *_inputs = nullptr, *_outputs = nullptr, *_streams = nullptr,
+           *_comms = nullptr;
+  int op = 0;
 
   if (!PyArg_ParseTuple(
           args, "OOiOO", &_inputs, &_outputs, &op, &_streams, &_comms)) {

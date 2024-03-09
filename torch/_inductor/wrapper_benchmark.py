@@ -7,11 +7,12 @@ from torch.autograd import DeviceType
 from .utils import create_bandwidth_info_str, do_bench, get_num_bytes
 
 _kernel_category_choices = [
+    "foreach",
+    "persistent_reduction",
     "pointwise",
     "reduction",
-    "persistent_reduction",
+    "split_scan",
     "template",
-    "foreach",
 ]
 
 
@@ -45,6 +46,18 @@ def get_kernel_category(kernel_mod):
         return "unknown"
 
 
+def get_triton_kernel(mod):
+    from torch._inductor.triton_heuristics import CachingAutotuner
+
+    cand_list = [
+        v
+        for k, v in mod.__dict__.items()
+        if k.startswith("triton_") and isinstance(v, CachingAutotuner)
+    ]
+    assert len(cand_list) == 1
+    return cand_list[0]
+
+
 def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
     """
     An experimental API used only when config.benchmark_kernel is true.
@@ -56,17 +69,6 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
     does not change based on different graph modules being compiled.
     """
     from torch._inductor.codecache import PyCodeCache
-
-    def get_triton_kernel(mod):
-        from torch._inductor.triton_heuristics import CachingAutotuner
-
-        cand_list = [
-            v
-            for k, v in mod.__dict__.items()
-            if k.startswith("triton_") and isinstance(v, CachingAutotuner)
-        ]
-        assert len(cand_list) == 1
-        return cand_list[0]
 
     nfound = 0
     for kernel_key, kernel_mod in PyCodeCache.cache.items():
@@ -83,7 +85,9 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
                 if arg_name.startswith("in_out_ptr")
             ]
         )
-        num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
+        num_gb = triton_kernel.inductor_meta.get("kernel_num_gb", None)
+        if num_gb is None:
+            num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
 
         def get_info_str(ms, n_regs, n_spills, shared, prefix=""):
             if not any(x is None for x in [n_regs, n_spills, shared]):
@@ -274,9 +278,7 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
     else:
         times = 10
         repeat = 10
-        wall_time_ms = (
-            benchmark_compiled_module_fn(times=times, repeat=repeat) / times * 1000
-        )
+        wall_time_ms = benchmark_compiled_module_fn(times=times, repeat=repeat) * 1000
 
         if not args.profile:
             return

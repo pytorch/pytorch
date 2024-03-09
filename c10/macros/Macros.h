@@ -183,6 +183,10 @@ namespace at::cuda {
 using namespace c10::hip;
 } // namespace at::cuda
 
+namespace at::xpu {
+using namespace c10::xpu;
+} // namespace at::xpu
+
 // C10_LIKELY/C10_UNLIKELY
 //
 // These macros provide parentheses, so you can use these macros as:
@@ -230,13 +234,6 @@ using namespace c10::hip;
 #endif
 
 #define C10_ERASE C10_ALWAYS_INLINE C10_ATTR_VISIBILITY_HIDDEN
-
-// C10_FALLTHROUGH - Annotate fallthrough to the next case in a switch.
-#if C10_HAS_CPP_ATTRIBUTE(fallthrough)
-#define C10_FALLTHROUGH [[fallthrough]]
-#else
-#define C10_FALLTHROUGH
-#endif
 
 #include <cstdint>
 
@@ -431,16 +428,6 @@ __host__ __device__
 #define C10_ALWAYS_INLINE_UNLESS_MOBILE inline
 #else
 #define C10_ALWAYS_INLINE_UNLESS_MOBILE C10_ALWAYS_INLINE
-#endif
-
-// Portable determination of whether type T is trivially copyable.
-// Warning: __has_trivial_copy for GCC may not always detect the non-POD
-// correctly. For example, T = std::unique_ptr may evaluate to true and be
-// treated as POD. This can cause unexpected behavior.
-#if defined(__GNUG__) && __GNUC__ < 5 && !defined(__clang__)
-#define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
-#else
-#define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
 #endif
 
 #if defined(__CUDA_ARCH__)

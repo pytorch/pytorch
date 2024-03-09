@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import itertools
@@ -29,6 +31,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 
+
 from torch.distributed._tensor import (
     DeviceMesh,
     Shard,
@@ -49,6 +52,20 @@ if torch.cuda.is_available() and torch.cuda.device_count() > 1:
 
 T = TypeVar("T")
 
+
+# simple RMSNorm layer for testing
+class RMSNormPython(torch.nn.Module):
+    def __init__(self, dim: int, eps: float = 1e-6):
+        super().__init__()
+        self.eps = eps
+        self.weight = torch.nn.Parameter(torch.ones(dim))
+
+    def _norm(self, x):
+        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+
+    def forward(self, x):
+        output = self._norm(x)
+        return output * self.weight
 
 class MLPModule(nn.Module):
     def __init__(self, device):
@@ -76,6 +93,7 @@ class ModelArgs:
     dropout_p: float = 0.1
     use_attn_mask: bool = True
     weight_tying: bool = True
+    checkpoint_activations: bool = False
 
 class Attention(nn.Module):
     def __init__(self, args: ModelArgs):
@@ -103,11 +121,11 @@ class Attention(nn.Module):
         keys = keys.transpose(1, 2)  # (bsz, n_heads, seq_len, head_dim)
         values = values.transpose(1, 2)  # (bsz, n_heads, seq_len, head_dim)
 
-        mask = None
-        if self.use_attn_mask and seq_len > 1:
-            mask = torch.full((seq_len, seq_len), float("-inf"), device=x.device)
-            mask = torch.triu(mask, diagonal=1)
-        output = F.scaled_dot_product_attention(queries, keys, values, mask, self.dropout_p if self.training else 0)
+        output = F.scaled_dot_product_attention(
+            queries, keys, values, None,
+            self.dropout_p if self.training else 0,
+            self.use_attn_mask,
+        )
         output = output.transpose(1, 2).contiguous().view(bsz, seq_len, -1)
         return self.resid_dropout(self.wo(output))
 
@@ -153,6 +171,7 @@ class Transformer(nn.Module):
         self.output = nn.Linear(args.dim, args.vocab_size, bias=False)
         if args.weight_tying:
             self.output.weight = self.tok_embeddings.weight
+        self.checkpoint_activations = args.checkpoint_activations
 
     def forward(self, tokens):
         _bsz, seq_len = tokens.size()
@@ -163,7 +182,10 @@ class Transformer(nn.Module):
         h = h + p
         h = self.dropout(h)
         for layer in self.layers:
-            h = layer(h)
+            if self.checkpoint_activations:
+                h = torch.utils.checkpoint.checkpoint(layer, h, use_reentrant=False)
+            else:
+                h = layer(h)
         h = self.norm(h)
         output = self.output(h).float()
         return output
