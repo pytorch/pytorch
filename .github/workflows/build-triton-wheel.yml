@@ -75,8 +75,9 @@ jobs:
       - name: Upload Dependency Artifacts
         uses: actions/upload-artifact@v3
         with:
-          name: Triton Dependency Packages
+          name: triton-packages-${{ matrix.device }}
           path: triton-deps.zip
+          compression-level: 0  # no need to compress a zip file
 
   build-wheel:
     name: "Build Triton Wheel"
@@ -115,7 +116,7 @@ jobs:
       - name: Download Dependency Artifacts
         uses: actions/download-artifact@v3
         with:
-          name: Triton Dependency Packages
+          name: triton-packages-${{ needs.download-triton-deps.outputs.device }}
 
       - name: Uncompress Triton Dependencies
         run: |
@@ -285,7 +286,7 @@ jobs:
       - name: Download Dependency Artifacts
         uses: actions/download-artifact@v3
         with:
-          name: Triton Dependency Packages
+          name: triton-packages-${{ needs.download-triton-deps.outputs.device }}
 
       - name: Uncompress Triton Dependencies
         run: |
