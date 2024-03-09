@@ -258,6 +258,63 @@ def dyn_shape(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
 
 
+@register_op_impl(aten._unique2.default)
+def unique2(
+    fake_mode, func, arg, sorted=True, return_inverse=False, return_counts=False
+):
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        # Without symints/symfloats, cannot handle this
+        raise DynamicOutputShapeException(func)
+
+    if arg.unique_memo is None:
+        num_unique = fake_mode.shape_env.create_unbacked_symint()
+
+        # This is unsound, but it works well in practice
+        # See https://docs.google.com/document/d/1lFRYAJo5nrfxRhwIzGnfi2pbLpU6T4ytSRSuLJ5qebI/edit#
+        # TODO: Add a config knob to turn off this unsound behavior
+        #
+        # NB: If numel < 2, the bounds here might be COMPLETELY
+        # disjoint with what can actually occur.  But this is fine:
+        # remember, the hypothesis is that if your later code works
+        # with N >= 2, it will work with N = 1 and N = 0.
+        maxval = sys.maxsize - 1
+
+        # Avoid importing sympy at a module level
+        from torch.fx.experimental.symbolic_shapes import (
+            _constrain_range_for_size,
+            has_free_symbols,
+        )
+
+        if not has_free_symbols(arg.numel()):
+            # Don't upgrade the range if numel is less than two, since we then
+            # have an empty range which makes things go explodey.  We also
+            # don't allow for 2 because that would specialize the unbacked
+            # SymInt to 2, which is also likely to be buggy.
+            if arg.numel() > 2:
+                maxval = int(arg.numel())
+
+        _constrain_range_for_size(num_unique, max=maxval)
+
+        arg.unique_memo = num_unique
+
+    ret = [arg.new_empty((arg.unique_memo,))]
+
+    if return_inverse:
+        ret.append(torch.empty_like(arg))
+    else:
+        ret.append(arg.new_empty(0))
+
+    if return_counts:
+        ret.append(torch.empty_like(arg))
+    else:
+        ret.append(arg.new_empty(0))
+
+    return tuple(ret)
+
+
 @register_op_impl(aten.repeat_interleave.Tensor)
 def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
     if output_size is None:
