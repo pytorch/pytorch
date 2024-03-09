@@ -74,15 +74,15 @@ jobs:
       matrix:
         py_vers: [ "3.8", "3.9", "3.10", "3.11", "3.12" ]
         device: ["cuda", "rocm"]
-    with:
-      device: ${{ needs.download-triton-deps.outputs.device }}
-      rocm_version: ${{ needs.download-triton-deps.outputs.rocm_version }}
 
     timeout-minutes: 40
     env:
-      DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux-rocm:{0}', matrix.rocm_version) || 'pytorch/manylinux-builder:cpu' }}
+      DOCKER_IMAGE: |
+          ${{ needs.download-triton-deps.outputs.device == 'rocm' \
+              && format('pytorch/manylinux-rocm:{0}', needs.download-triton-deps.outputs.rocm_version) \
+              || 'pytorch/manylinux-builder:cpu' }}
       PY_VERS: ${{ matrix.py_vers }}
-      BUILD_DEVICE: ${{ matrix.device }}
+      BUILD_DEVICE: ${{ needs.download-triton-deps.outputs.device }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
