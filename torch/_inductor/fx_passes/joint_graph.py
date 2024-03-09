@@ -82,36 +82,36 @@ def remove_no_ops(
         if node.op != "call_function":
             continue
 
-        # TODO handle Tensor-Scalar adds, it's a different schema
-        if node.target == aten.add.Tensor and len(node.args) == 2:
-            if (
-                not any(e in zeros for e in node.args)
-                or node.kwargs.get("alpha", 1) != 1
-            ):
-                continue
+        for node in graph.find_nodes(op="call_function", target=aten.add.Tensor):
+            # TODO handle Tensor-Scalar adds, it's a different schema
+            if len(node.args) == 2:
+                if (
+                    not any(e in zeros for e in node.args)
+                    or node.kwargs.get("alpha", 1) != 1
+                ):
+                    continue
 
-            replace_index = 1 if node.args[0] in zeros else 0
-            replace_no_op(node, replace_index)
+                replace_index = 1 if node.args[0] in zeros else 0
+                replace_no_op(node, replace_index)
 
-        elif node.target == aten.sub.Tensor and len(node.args) == 2:
-            if node.args[1] not in zeros or node.kwargs.get("alpha", 1) != 1:
-                continue
+        for node in graph.find_nodes(op="call_function", target=aten.sub.Tensor):
+            if len(node.args) == 2:
+                if node.args[1] not in zeros or node.kwargs.get("alpha", 1) != 1:
+                    continue
 
-            replace_no_op(node, 0)
+                replace_no_op(node, 0)
 
-        elif node.target == aten.mul.Tensor and len(node.args) == 2:
-            if not any(e in ones for e in node.args):
-                continue
+        for node in graph.find_nodes(op="call_function", target=aten.mul.Tensor):
+            if len(node.args) == 2:
+                if not any(e in ones for e in node.args):
+                    continue
 
-            replace_input_index = 1 if node.args[0] in ones else 0
-            replace_no_op(node, replace_input_index)
+                replace_input_index = 1 if node.args[0] in ones else 0
+                replace_no_op(node, replace_input_index)
 
-        elif (
-            node.target == aten.div.Tensor
-            and len(node.args) == 2
-            and node.args[1] in ones
-        ):
-            replace_no_op(node, 0)
+        for node in graph.find_nodes(op="call_function", target=aten.div.Tensor):
+            if len(node.args) == 2 and node.args[1] in ones:
+                replace_no_op(node, 0)
 
 
 @torch.utils._python_dispatch._disable_current_modes()

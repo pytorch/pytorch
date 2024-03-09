@@ -693,8 +693,13 @@ class Node:
                 assert isinstance(value, str)
                 for user in self.users:
                     m._replace_hook(old=self, new=value, user=user)
+        update_target = False
+        if name == 'target' and hasattr(self, 'target'):
+            update_target = True
+            self.graph.side_table.remove(self)
         object.__setattr__(self, name, value)
-
+        if update_target:
+            self.graph.side_table.insert(self)
 
 @compatibility(is_backward_compatible=True)
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
