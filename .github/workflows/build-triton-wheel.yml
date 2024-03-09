@@ -72,14 +72,14 @@ jobs:
 
             python3 "${GITHUB_WORKSPACE}/.github/scripts/download_triton_packages.py" ${BUILD_ROCM}
 
-      - name: Compress Packages
-        run: (cd ~ && zip "${GITHUB_WORKSPACE}/triton-deps.zip" ./.triton -rq)
+      - name: Tar Triton Dependencies
+        run: tar -C ~ -cf triton-deps.tar .triton
 
       - name: Upload Dependency Artifacts
         uses: actions/upload-artifact@v3
         with:
           name: triton-packages-${{ matrix.device }}
-          path: triton-deps.zip
+          path: triton-deps.tar
           retention-days: 1  # Minimum retention period
 
   build-wheel:
@@ -121,10 +121,10 @@ jobs:
         with:
           name: triton-packages-${{ needs.download-triton-deps.outputs.device }}
 
-      - name: Uncompress Triton Dependencies
+      - name: Untar Triton Dependencies
         run: |
             set -x
-            unzip triton-deps.zip -q
+            tar -xf triton-deps.tar -q
             ls .triton
 
       - name: Build Triton wheel
@@ -290,10 +290,10 @@ jobs:
         with:
           name: triton-packages-cuda
 
-      - name: Uncompress Triton Dependencies
+      - name: Untar Triton Dependencies
         run: |
             set -x
-            unzip triton-deps.zip -q
+            tar -xf triton-deps.tar
             ls .triton
 
       - name: Build Triton conda package
