@@ -3478,7 +3478,7 @@ class TestNestedTensorSubclass(TestCase):
         self.assertTrue(isinstance(nt.shape[1], torch.SymInt))
         self.assertEqual(nt.shape[2:], first_t.shape[1:])
 
-    @xfailIfTorchDynamo
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "unexpectedly succeeding in ci")
     @dtypes(torch.float, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
