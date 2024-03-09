@@ -108,11 +108,6 @@ def config_of(
         )
     else:
         divisible_by_16 = ()
-    divisible_by_8 = tuple(
-        i
-        for i, arg in zip(indices, args)
-        if is_aligned(arg, alignment=8, include_tensor=False)
-    )
 
     equal_to_1 = tuple(
         i
@@ -126,5 +121,5 @@ def config_of(
     ids_of_folded_args = tuple(equal_to_1)
 
     return instance_descriptor(
-        divisible_by_16, equal_to_1, ids_of_folded_args, divisible_by_8
+        divisible_by_16, equal_to_1, ids_of_folded_args
     )

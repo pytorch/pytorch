@@ -706,13 +706,11 @@ if attrs_descriptor_available:
         divisible_by_16=None,
         equal_to_1=None,
         ids_of_folded_args=None,
-        divisible_by_8=None,
     ):
         # Prepare the arguments for AttrsDescriptor
         kwargs = {
             "divisible_by_16": divisible_by_16,
             "equal_to_1": equal_to_1,
-            "divisible_by_8": divisible_by_8,
         }
 
         # Conditionally add 'ids_of_folded_args' if it's available in AttrsDescriptor
@@ -726,8 +724,8 @@ else:
     # Define a namedtuple as a fallback when AttrsDescriptor is not available
     instance_descriptor = collections.namedtuple(  # type: ignore[no-redef]
         "instance_descriptor",
-        ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
-        defaults=[tuple(), tuple(), tuple(), tuple()],
+        ["divisible_by_16", "equal_to_1", "ids_of_folded_args"],
+        defaults=[tuple(), tuple(), tuple()],
     )
 
 
