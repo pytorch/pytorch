@@ -619,6 +619,9 @@ class VariableBuilder:
         elif isinstance(value, (torch._C._SDPAParams)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return SDPAParamsVariable.create(self.tx, value, self.source)
+        elif isinstance(value, torch.nn.attention.SDPBackend):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return EnumVariable(value, source=self.source)
         elif isinstance(value, _EventBase):
             self.install_guards(GuardBuilder.ID_MATCH)
             return EventVariable(
@@ -1550,7 +1553,7 @@ def wrap_fx_proxy_cls(
         from .sdpa import SDPAParamsVariable
 
         proxy.node.meta["example_value"] = example_value
-        return SDPAParamsVariable.create(tx, example_value, options.get("source", None))
+        return SDPAParamsVariable(proxy, **options)
     elif isinstance(example_value, bool) and proxy.node.target in [
         torch.backends.cuda.can_use_flash_attention,
         torch.backends.cuda.can_use_efficient_attention,

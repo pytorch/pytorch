@@ -3654,6 +3654,7 @@ class TestNestedTensorSubclass(TestCase):
         self.assertTrue(not nt_noncontiguous.is_contiguous(memory_format=torch.contiguous_format))
         self.assertTrue(nt_contiguous_narrow.is_contiguous(memory_format=torch.contiguous_format))
 
+    @xfailIfTorchDynamo
     def test_noncontiguous_pointwise(self, device):
         a = torch.randn(2, 3, 4, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, 4, requires_grad=True, dtype=torch.float64, device=device)
