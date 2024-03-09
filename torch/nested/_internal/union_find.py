@@ -9,32 +9,34 @@ from typing import *  # noqa: F403
 # -----------------------------------
 # TensorUnionFind implements union-find over "versions of tensors". What this
 # means is that if TensorUnionFind holds a set of two tensors {`a`, `b`} with
-# `a` being canonical, we should really think of it as holding {(`a`, 0),
-# (`b`, 0)} with (`a`, 0) being canonical, where the 0 is the version of the
-# tensor.
+# `a` as the canonical entry, we should really think of it as holding {(`a`, 0),
+# (`b`, 0)} with (`a`, 0) as the canonical entry, where the 0s are the versions
+# of the tensors.
 #
-# If the Tensor `a` is mutated, the version of `a` is increments to 1, the
-# the set continues continues to be {(`a`, 0), (`b`, 0)}, and the canonical
-# entry of that set continues to be (`a`, 0).
+# If the tensor `a` is mutated, incrementing its version e.g. to 1, that would
+# mean that if someone does uf.find(a), they are really querying for
+# uf.find((`a`, 1)). That would return (`a`, 1) because (`a`, 1) is in a new set
+# of its own and hence is the canonical entry of that set.
 #
-# If someone does uf.find(a) now, they are really querying for uf.find((`a`, 1))
-# and that would return (`a`, 1) because (`a`, 1) is in a new set of its own
-# and is the canonical entry of that set.
+# After all of this, we expect the union-find to now hold two sets:
+# {(`a`, 1)} and {(`a`, 0), (`b`, 0)}
 #
-# A more problematic case if someone does uf.find(b), i.e., uf.find((`b`, 0)).
-# Since the canonical entry of the set continues to be point to (`a`, 0), which
-# has now become outdated, we raise an error.
+# This situation can be problematic if someone does uf.find(b), i.e.,
+# uf.find((`b`, 0)). Since the canonical entry of the original set continues to
+# point to an older version of `a` i.e. (`a`, 0), there is no tensor for
+# find to retrn, and we raise an error in this case.
 
 # Storing metadata on canonical entries
 # -------------------------------------
-# Each set has a metadata dict associated with it. This dict is stored on the
-# canonical entry of the set.
+# We associate each set with exactly one metadata dict object. We maintain
+# this invariant by storing a map from canonical tenosors to metadata dict
+# objects. Extra logic is done on-merge in order to maintain this mapping.
 #
-# When two sets are merged, one of the two canonical entries is chosen to be
-# the canonical entry of the union. The other entry is no longer the canonical
-# entry of any set. When a merge happens, we also merge their metadata dicts
-# and store the result on the new canonical entry. The metadata of the
-# no-longer-canonical entry is invalidated.
+# When two sets A, B are merged, one of the two canonical entries is chosen to
+# be the canonical entry of the union. The other is no longer the canonical
+# entry of any set. To maintain the canonical entry -> metadata dict mapping, we
+# merge A and B's metadata dict objects and store the merged dict on the new
+# canonical entry. The metadata of the no-longer-canonical entry is invalidated.
 #
 # In the case where the two dicts have different entries for
 # the same key, we have a choice of which metadata to favor. In this class, we
@@ -42,7 +44,7 @@ from typing import *  # noqa: F403
 # This might be the opposite of what one would expect, but that shouldn't matter
 # because which tensor between a and b union-find chooses to be canonical is an
 # implementation detail anyway. The the user should careful to make sure that no
-# such conflict can exist.
+# such conflict can exist. We could raise an error in this case.
 
 
 class DefaultWeakTensorKeyDictionary(WeakTensorKeyDictionary):
@@ -92,35 +94,30 @@ class TensorIntMap:
 
 
 class TensorUnionFind:
-    # Union-find over tensors with some extra functionality:
-    #
-    # - Maintains a metadata dict object for each set. See
-    #   "Storing metadata on canonical entries".
-    # - Keeps track of all alive tensors in each set (see _equiv_sets).
-    # - Maintains a tree of owning references such the canonical tensor is
-    #   always alive as long as any tensor in its set is alive (see _refs).
-    #
+    # Union-find over tensors with some extra functionality
     def __init__(self, union_find_int=None, tensor_int_map=None):
-        # Allow user to pass in an existing union-find datastructure to use as
-        # a shared source of truth. This is useful for the NestedInt case where
-        # the source of truth must exist in cpp.
+        # Allow user to pass in an existing union-find data structure to use as
+        # a shared source of truth. This is useful for the NestedInt equality.
         self._union_find_int = (
             union_find_int if union_find_int is not None else torch._C._UnionFind()
         )
         self._tensor_int_map = (
             tensor_int_map if tensor_int_map is not None else TensorIntMap()
         )
-        # See note "Storing metadata on canonical entries"
+        # 1) Maintains a metadata dict object for each set (see note
+        #   "Storing metadata on canonical entries")
         self._metadata = DefaultWeakTensorKeyDictionary(dict)
+        # 2) Keeps track of all alive tensors in each set.
         self._equiv_sets = DefaultWeakTensorKeyDictionary(set)
-        # Used to manage lifetime of tensors in sets
+        # 3) Maintains a tree of owning references such the canonical tensor and
+        #   by extension, the metadata dict object is always alive as long as any
+        #   tensor in its set is alive.
         self._refs = WeakTensorKeyDictionary()
         # Sentinel value to indicate that an entry has been invalidated
         self._INVALID_ENTRY = object()
 
     def merge(self, x, y):
-        x_root = self.find(x)
-        y_root = self.find(y)
+        x_root, y_root = self.find(x), self.find(y)
         if x_root is y_root:
             return
         self._union_find_int.merge(
@@ -128,15 +125,13 @@ class TensorUnionFind:
         )
         # src and tgt depend on which direction we merged in the actual impl
         tgt, src = (x_root, y_root) if self.find(x_root) is x_root else (y_root, x_root)
-
-        # See note "Storing metadata on canonical entries"
+        # Store merged metadata onto new canonical entry and invalidate non-canonical
         self._metadata[tgt].update(self._metadata[src])
         self._metadata[src] = self._INVALID_ENTRY
+        # Maintain set of weakrefs to all tensors in set
         self._get_equiv_set(tgt).update(self._get_equiv_set(src))
         self._equiv_sets[src] = self._INVALID_ENTRY
-
-        # Maintains that the the canonical tensor and by extension the metadata
-        # and equiv sets are kept alive by any tensors alive in the set.
+        # Build tree of owning references, see (3)
         self._refs[src] = tgt
 
     def find(self, tensor):
@@ -148,6 +143,7 @@ class TensorUnionFind:
         return mb_tensor
 
     def _get_equiv_set(self, canonical_tensor):
+        # Wrapper around raw dict access to ensure set is initialized
         self._equiv_sets[canonical_tensor].add(weakref.ref(canonical_tensor))
         return self._equiv_sets[canonical_tensor]
 
