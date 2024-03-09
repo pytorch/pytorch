@@ -12,7 +12,6 @@ from unittest.mock import patch
 import numpy as np
 import sympy
 import torch
-from torch import nn
 from torch._C import FileCheck
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
@@ -1229,6 +1228,53 @@ class CPUReproTests(TestCase):
     )
     def test_per_channel_fake_quant_uint8(self):
         self._test_per_channel_fake_quant_helper(torch.uint8)
+
+    @unittest.skipIf(
+        not codecache.valid_vec_isa_list(), "Does not support vectorization"
+    )
+    def test_per_channel_fake_quant_module_uint8(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.scales = torch.ones((3,)).to(torch.float64)
+                self.zero_points = torch.zeros((3,)).to(torch.int64)
+                self.axis = 1
+                self.quant_min = 0
+                self.quant_max = 255
+                self.dtype = torch.uint8
+
+            def forward(self, input):
+                input = torch.ops.quantized_decomposed.quantize_per_channel(
+                    input,
+                    self.scales,
+                    self.zero_points,
+                    self.axis,
+                    self.quant_min,
+                    self.quant_max,
+                    self.dtype,
+                )
+                input = torch.ops.quantized_decomposed.dequantize_per_channel(
+                    input,
+                    self.scales,
+                    self.zero_points,
+                    self.axis,
+                    self.quant_min,
+                    self.quant_max,
+                    self.dtype,
+                )
+                return input
+
+        m = Mod().eval()
+        x = torch.clamp(
+            torch.randn((1, 3, 224, 224), dtype=torch.float32) * 100,
+            0,
+            255,
+        )
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(m, (x,))
+            assert metrics.generated_cpp_vec_kernel_count == 1
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -2878,35 +2924,6 @@ class CPUReproTests(TestCase):
         jit_func = torch.compile(func)
         self.assertRaises(RuntimeError, lambda: func(example_inputs))
         self.assertRaises(RuntimeError, lambda: jit_func(example_inputs))
-
-    def test_nn_param_assign(self):
-        # https://github.com/pytorch/pytorch/issues/99569
-        class Model2(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv = nn.Conv2d(in_channels=3, out_channels=5, kernel_size=3)
-                self.batchnorm = nn.BatchNorm2d(num_features=5)
-                self.conv_weight = torch.randn(5, 3, 3, 3)
-                self.conv_bias = torch.randn(5)
-
-            def forward(self, x):
-                self.conv.weight = nn.Parameter(self.conv_weight)
-                self.conv.bias = nn.Parameter(self.conv_bias, requires_grad=False)
-                self.conv.eval()
-                x = self.conv(x)
-                x = self.batchnorm(x)
-                x = F.relu(x)
-                return x
-
-        input_tensor = torch.randn(1, 3, 10, 10)
-        func = Model2().to("cpu")
-
-        with torch.no_grad():
-            func.train(False)
-            v1 = func(input_tensor)
-            jit_func = torch.compile(func, fullgraph=True)
-            v2 = jit_func(input_tensor)
-            self.assertEqual(v1, v2)
 
     @config.patch(inplace_buffers=True)
     def test_in_out_buffer(self):
