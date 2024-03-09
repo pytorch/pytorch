@@ -33,7 +33,6 @@ class TestTritonHeuristics(TestCase):
             self.assertTrue(cfg.kwargs[key] <= config.triton.max_block[label])
 
     def _test_artificial_zgrid(self):
-
         torch._inductor.config.cpp_wrapper = True
 
         def forward(primals_1, primals_2, primals_5):
