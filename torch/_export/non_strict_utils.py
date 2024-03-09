@@ -15,15 +15,16 @@ from torch._export.passes.add_runtime_assertions_for_constraints_pass import Inp
 from torch._guards import Source
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
+from torch.export._dynamic_shapes import _Constraint
 from torch.export.exported_program import InputKind
-from torch.export.graph_signature import CustomObjArgument, TensorArgument
+from torch.export.graph_signature import CustomObjArgument, InputSpec, TensorArgument
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
     EqualityConstraint,
     ShapeEnv,
     StatelessSymbolicContext,
-    ValueRanges
+    ValueRanges,
 )
 from torch.utils._pytree import (
     GetAttrKey,
@@ -169,13 +170,13 @@ def make_fake_inputs(nn_module, args, kwargs, constraints):
 
 
 def make_constraints(
-    fake_mode,
-    equalities_inputs,
-    flat_args,
-    input_specs,
-    constraints,
-    original_signature,
-    gm,
+    fake_mode: FakeTensorMode,
+    equalities_inputs: EqualityConstraint,
+    flat_args: List[Any],
+    input_specs: List[InputSpec],
+    constraints: List[_Constraint],
+    original_signature: inspect.Signature,
+    gm: torch.fx.GraphModule,
 ):
     """
     Given a fake mode, sources pairs corresponding to equal dynamic shape dimensions,
@@ -231,12 +232,22 @@ def make_constraints(
     if constraint_violation_error:
         raise constraint_violation_error
 
-    # create mapping from tensor id -> dim -> user-specified constraint spec for user tensor inputs
-    user_tensor_input_names = set([spec.arg.name for spec in input_specs if spec.kind == InputKind.USER_INPUT and isinstance(spec.arg, TensorArgument)])
-    tensor_id_to_dim_constraint = defaultdict(defaultdict)
+    # create mapping from tensor id -> (dim -> user-specified constraint spec) for user tensor inputs
+    user_tensor_input_names = set(
+        [
+            spec.arg.name
+            for spec in input_specs
+            if spec.kind == InputKind.USER_INPUT
+            and isinstance(spec.arg, TensorArgument)
+        ]
+    )
+    tensor_id_to_dim_constraint: Dict[int, Dict[str, int]] = defaultdict(defaultdict)
     for constraint in constraints:
         spec = constraint.serializable_spec
-        tensor_id_to_dim_constraint[spec['t_id']][spec['dim']] = {"lower": spec['min'], "upper": spec['max']}
+        tensor_id_to_dim_constraint[spec["t_id"]][spec["dim"]] = {
+            "lower": spec["min"],
+            "upper": spec["max"],
+        }
 
     range_constraints = {}
     input_dims = defaultdict(list)
@@ -259,9 +270,13 @@ def make_constraints(
                 # there's a better way to do this, e.g., by (re)computing value ranges for expressions?
                 constraint = tensor_constraints[i] if tensor_constraints else None
                 if constraint:  # user-specified
-                    range_constraints[d.node.expr] = ValueRanges(lower=constraint["lower"], upper=constraint["upper"])
+                    range_constraints[d.node.expr] = ValueRanges(
+                        lower=constraint["lower"], upper=constraint["upper"]
+                    )
                 else:  # from analysis
-                    range_constraints[d.node.expr] = shape_env.var_to_range[d.node._expr]
+                    range_constraints[d.node.expr] = shape_env.var_to_range[
+                        d.node._expr
+                    ]
                 input_dims[d.node.expr].append(InputDim(input_name=node.name, dim=i))
                 free_symbols.update(d.node.expr.free_symbols)
         input_index += 1
