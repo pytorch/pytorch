@@ -68,32 +68,12 @@ def patch_init_py(
         f.write(orig)
 
 
-
-class Package(NamedTuple):
-    package: str
-    name: str
-    url: str
-    include_flag: str
-    lib_flag: str
-    syspath_var_name: str
-
-
-# pybind11
-
-
-def get_pybind11_package_info():
-    name = "pybind11-2.11.1"
-    url = "https://github.com/pybind/pybind11/archive/refs/tags/v2.11.1.tar.gz"
-    return Package("pybind11", name, url, "PYBIND11_INCLUDE_DIR", "", "PYBIND11_SYSPATH")
-
-
 def build_triton(
     *,
     version: str,
     commit_hash: str,
     build_conda: bool = False,
     build_rocm: bool = False,
-    download_deps_only: bool = False,
     py_version: Optional[str] = None,
     release: bool = False,
 ) -> Path:
@@ -120,15 +100,6 @@ def build_triton(
             triton_pkg_name = "pytorch-triton"
         check_call(["git", "clone", triton_repo], cwd=tmpdir)
         check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
-
-        if download_deps_only:
-            import
-
-            check_call(
-                [sys.executable, "setup.py", "bdist_wheel"], cwd=triton_pythondir, env=env
-            )
-
-
         if build_conda:
             with open(triton_basedir / "meta.yaml", "w") as meta:
                 print(
@@ -218,7 +189,6 @@ def main() -> None:
     parser.add_argument("--release", action="store_true")
     parser.add_argument("--build-conda", action="store_true")
     parser.add_argument("--build-rocm", action="store_true")
-    parser.add_argument("--download-deps-only", action="store_true")
     parser.add_argument("--py-version", type=str)
     parser.add_argument("--commit-hash", type=str)
     parser.add_argument("--triton-version", type=str, default=read_triton_version())
