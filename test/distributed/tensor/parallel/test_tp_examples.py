@@ -103,7 +103,11 @@ class DistTensorParallelExampleTest(DTensorTestBase):
             output_tp.sum().backward()
 
         self.assertEqual(output, output_tp)
-        self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_reduce], 1)
+        if is_seq_parallel:
+            self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 2)
+            self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.reduce_scatter_tensor], 1)
+        else:
+            self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_reduce], 1)
 
         if is_seq_parallel:
             # Sum gradients from different ranks, since input
