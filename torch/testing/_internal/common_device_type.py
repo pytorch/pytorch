@@ -700,6 +700,10 @@ def get_desired_device_type_test_bases(except_for=None, only_for=None, include_l
     env_only_for = split_if_not_empty(os.getenv(PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, ''))
     env_except_for = split_if_not_empty(os.getenv(PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, ''))
 
+    if env_only_for:
+        desired_device_type_test_bases += filter(lambda x: x.device_type in env_only_for, test_bases)
+        desired_device_type_test_bases = list(set(desired_device_type_test_bases))
+
     return filter_desired_device_types(desired_device_type_test_bases, env_except_for, env_only_for)
 
 
