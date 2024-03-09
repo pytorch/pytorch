@@ -150,7 +150,8 @@ class TestMatmulCuda(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(IS_JETSON, "Too large for Jetson")
-    @toleranceOverride({torch.float32: xtol(atol=1e-5, rtol=1.1e-5)})
+    @toleranceOverride({torch.float32: xtol(atol=1e-5, rtol=1.1e-5),
+                        torch.float16: xtol(atol=1e-4, rtol=1e-3) if TEST_WITH_ROCM else []})
     @dtypes(*([torch.float32, torch.float16] +
               [torch.bfloat16] if TEST_WITH_ROCM or SM53OrLater else []))
     @parametrize(
@@ -161,7 +162,6 @@ class TestMatmulCuda(TestCase):
          (1, 10000, 10000, 10000)],
         name_fn=lambda batch_size, N, M, P: f"{batch_size}_{N}_{M}_{P}",
     )
-    @skipIfRocm
     def test_cublas_baddbmm_large_input(self, device, batch_size, N, M, P, dtype):
         cpu_dtype = dtype
         if dtype == torch.float16 or dtype == torch.bfloat16:
