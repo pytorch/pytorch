@@ -69,7 +69,6 @@ from .source import (
     LocalSource,
     ParamBufferSource,
     ShapeEnvSource,
-    SyntheticLocalSource,
     TensorProperty,
     TensorPropertySource,
 )
@@ -389,9 +388,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         ] = []
         self.random_values_var = None
 
-        # Bytecode to insert right before we call the graph
-        self.pregraph_bytecode: List[Instruction] = []
-
         # Use to pass values to backward hooks when using compiled autograd
         self.backward_state: Dict[str, VariableTracker] = {}
         self.backward_state_proxy: Optional[torch.fx.Proxy] = None
@@ -434,28 +430,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         )
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.BACKEND_MATCH))
-
-    def synthetic_graph_input(self, fn, args):
-        """
-        call fn(*args) before the graph runs and turn the result into a fake input.
-        """
-        example_value = fn(*args)
-        varname = self.new_var()
-        cg = PyCodegen(self.root_tx)
-        cg.load_import_from(
-            fn.__module__,
-            fn.__name__,
-        )
-        cg.foreach(map(variables.ConstantVariable.create, args))
-        cg.call_function(len(args), True)
-        cg.store(varname)
-        self.pregraph_bytecode.extend(cg.get_instructions())
-        source = SyntheticLocalSource(varname)
-        result = VariableBuilder(self.root_tx, source)(example_value)
-        TracingContext.get().guards_context.dynamo_guards.remove_guards_with_source(
-            source
-        )
-        return result
 
     def add_cleanup_hook(self, fn: Callable[[], Any]):
         self.cleanup_hooks.append(fn)
@@ -911,10 +885,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     )
                 else:
                     prefix_insts.append(copy.copy(inst))
-        assert not (
-            self.pregraph_bytecode and self.export
-        ), "export does not support pregraph_bytecode"
-        prefix_insts.extend(self.pregraph_bytecode)
 
         def append_prefix_insts():
             self.add_output_instructions(prefix_insts)
@@ -1604,13 +1574,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self, register_finalizer: Callable[[fx.GraphModule], None]
     ) -> None:
         self.register_finalizer_fns.append(register_finalizer)
-
-    def example_value_from_input_node(self, node: torch.fx.Node):
-        """Extract the non-fake example tensor"""
-        if node.op == "placeholder":
-            return node.meta["grapharg"].example
-        assert node.op == "get_attr"
-        return self.nn_modules[node.target]  # type: ignore[index]
 
 
 err_epilogue = (
