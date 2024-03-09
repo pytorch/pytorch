@@ -4049,14 +4049,14 @@ class TestTensorUnionFind(TestCase):
         m = TensorIntMap()
         a = torch.tensor([1, 2, 3])
         a_id_0 = m.get_int(a)
-        self.assertIs(m.get_tensor(a_id_0), a)
+        self.assertIs(m.get_opt_tensor(a_id_0), a)
         a.add_(1)
-        self.assertIsNone(m.get_tensor(a_id_0))
+        self.assertIsNone(m.get_opt_tensor(a_id_0))
         a_id_1 = m.get_int(a)
         self.assertEqual(a_id_0 + 1, a_id_1)
-        self.assertIs(m.get_tensor(a_id_1), a)
+        self.assertIs(m.get_opt_tensor(a_id_1), a)
         del a
-        self.assertIsNone(m.get_tensor(a_id_1))
+        self.assertIsNone(m.get_opt_tensor(a_id_1))
 
     def test_union_find_mutate_canonical(self):
         # See Note [TensorUnionFind: Union find over "versions of tensors"]
