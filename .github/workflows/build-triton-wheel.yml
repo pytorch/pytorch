@@ -73,14 +73,13 @@ jobs:
             python3 "${GITHUB_WORKSPACE}/.github/scripts/download_triton_packages.py" ${BUILD_ROCM}
 
       - name: Compress Packages
-        run: zip triton-deps.zip ./.triton -rq
-        working-directory: "~"
+        run: (cd ~ && zip "${GITHUB_WORKSPACE}/triton-deps.zip" ./.triton -rq)
 
       - name: Upload Dependency Artifacts
         uses: actions/upload-artifact@v3
         with:
           name: triton-packages-${{ matrix.device }}
-          path: ~/triton-deps.zip
+          path: triton-deps.zip
           retention-days: 1  # Minimum retention period
 
   build-wheel:
@@ -127,6 +126,7 @@ jobs:
             set -x
             unzip ~/triton-deps.zip -q
             ls ~/.triton
+        working-directory: "~"
 
       - name: Build Triton wheel
         env:
@@ -137,7 +137,7 @@ jobs:
           container_name=$(docker run \
             --tty \
             --detach \
-            -v "~/.triton:/home/root/.triton" \
+            -v "${GITHUB_WORKSPACE}/.triton:/home/root/.triton" \
             -v "${GITHUB_WORKSPACE}:/pytorch" \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w /artifacts/ \
@@ -307,7 +307,7 @@ jobs:
           container_name=$(docker run \
             --tty \
             --detach \
-            -v "~/.triton:/home/root/.triton" \
+            -v "${GITHUB_WORKSPACE}/.triton:/home/root/.triton" \
             -v "${GITHUB_WORKSPACE}:/pytorch" \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w /artifacts/ \
