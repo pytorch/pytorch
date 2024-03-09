@@ -607,7 +607,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return variables.ConstantVariable.create(
                 torch.fx.experimental.symbolic_shapes.guard_size_oblivious(cond.sym_num)
             )
+        elif self.value is torch._C._autograd._unsafe_set_version_counter:
+            from ..tensor_version_op import _unsafe_set_version_counter
 
+            return TorchInGraphFunctionVariable(
+                _unsafe_set_version_counter
+            ).call_function(tx, args, kwargs)
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
             all_ints_or_floats = all(
