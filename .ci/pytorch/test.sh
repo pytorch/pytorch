@@ -163,6 +163,8 @@ if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   export PATH="$HOME/.local/bin:$PATH"
 fi
 
+install_tlparse
+
 # DANGER WILL ROBINSON.  The LD_PRELOAD here could cause you problems
 # if you're not careful.  Check this if you made some changes and the
 # ASAN test is not working
@@ -319,6 +321,14 @@ test_inductor() {
       BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
       CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aot_inductor
   fi
+}
+
+test_inductor_cpp_wrapper_abi_compatible() {
+  export TORCHINDUCTOR_ABI_COMPATIBLE=1
+  echo "Testing Inductor cpp wrapper mode with TORCHINDUCTOR_ABI_COMPATIBLE=1"
+  # cpu stack allocation causes segfault and needs more investigation
+  TORCHINDUCTOR_STACK_ALLOCATION=0 python test/run_test.py --include inductor/test_cpu_cpp_wrapper
+  python test/run_test.py --include inductor/test_cuda_cpp_wrapper
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
@@ -982,7 +992,8 @@ test_bazel() {
 
     tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
   else
-    tools/bazel test --test_output=errors \
+    # Increase the test timeout to 480 like CPU tests because modules_test frequently timeout
+    tools/bazel test --test_timeout=480 --test_output=errors \
       //:any_test \
       //:autograd_test \
       //:dataloader_test \
@@ -1170,6 +1181,9 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     fi
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
+elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper_abi_compatible* ]]; then
+  install_torchvision
+  test_inductor_cpp_wrapper_abi_compatible
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
   install_torchvision
   test_inductor

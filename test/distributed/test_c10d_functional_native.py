@@ -759,6 +759,26 @@ class C10DFunctionalNativeCompileTest(TestCase):
         out = AOTIRunnerUtil.run("cuda", func, (arg,))
         torch.cuda.synchronize()
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @fresh_inductor_cache()
+    @run_with_native_funcol
+    def test_ranks_and_tag(self):
+        def func(arg: torch.Tensor) -> torch.Tensor:
+            buf0 = arg + 42
+            # Expect in-place with inductor allocated buf
+            ar0 = funcol.all_reduce(buf0, "avg", [0, 1], "")
+            ar0 = funcol.wait_tensor(ar0)
+            # Expect no in-place with graph input
+            ar1 = funcol.all_reduce(arg, "avg", [0, 1], "")
+            ar1 = funcol.wait_tensor(ar1)
+            return ar0, ar1
+
+        arg = torch.rand(4, 4, device="cuda")
+        compiled = torch.compile(func, fullgraph=True)
+
+        code = run_and_get_triton_code(compiled, arg)
+        (FileCheck().check("all_reduce_.default(buf0, 'avg', '0')").run(code))
+
 
 if __name__ == "__main__":
     run_tests()

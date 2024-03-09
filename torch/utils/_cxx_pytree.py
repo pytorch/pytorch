@@ -13,6 +13,8 @@ collection support for PyTorch APIs.
 """
 
 import functools
+import sys
+import types
 import warnings
 from typing import (
     Any,
@@ -478,7 +480,10 @@ def tree_map_(
 
 Type2 = Tuple[Type[T], Type[S]]
 Type3 = Tuple[Type[T], Type[S], Type[U]]
-TypeAny = Union[Type[Any], Tuple[Type[Any], ...]]
+if sys.version_info >= (3, 10):
+    TypeAny = Union[Type[Any], Tuple[Type[Any], ...], types.UnionType]
+else:
+    TypeAny = Union[Type[Any], Tuple[Type[Any], ...]]
 
 Fn2 = Callable[[Union[T, S]], R]
 Fn3 = Callable[[Union[T, S, U]], R]
@@ -537,15 +542,23 @@ def map_only(
 
     You can also directly use 'tree_map_only'
     """
-    if not isinstance(__type_or_types_or_pred, (tuple, type)):
-        raise ValueError(
-            "cxx_pytree map_only currently only accepts type or tuple of types"
-        )
+    if isinstance(__type_or_types_or_pred, (type, tuple)) or (
+        sys.version_info >= (3, 10)
+        and isinstance(__type_or_types_or_pred, types.UnionType)
+    ):
+
+        def pred(x: Any) -> bool:
+            return isinstance(x, __type_or_types_or_pred)  # type: ignore[arg-type]
+
+    elif callable(__type_or_types_or_pred):
+        pred = __type_or_types_or_pred  # type: ignore[assignment]
+    else:
+        raise TypeError("Argument must be a type, a tuple of types, or a callable.")
 
     def wrapper(func: Callable[[T], Any]) -> Callable[[Any], Any]:
         @functools.wraps(func)
         def wrapped(x: T) -> Any:
-            if isinstance(x, __type_or_types_or_pred):
+            if pred(x):
                 return func(x)
             return x
 
@@ -587,7 +600,7 @@ def tree_map_only(
 @overload
 def tree_map_only(
     __type_or_types_or_pred: Callable[[Any], bool],
-    func: Fn3[T, S, U, Any],
+    func: FnAny[Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
@@ -636,7 +649,7 @@ def tree_map_only_(
 @overload
 def tree_map_only_(
     __type_or_types_or_pred: Callable[[Any], bool],
-    func: Fn3[T, S, U, Any],
+    func: FnAny[Any],
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
