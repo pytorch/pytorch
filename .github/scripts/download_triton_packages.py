@@ -66,13 +66,14 @@ def get_llvm_package_info() -> Package:
         )
     # use_assert_enabled_llvm = check_env_flag("TRITON_USE_ASSERT_ENABLED_LLVM", "False")
     # release_suffix = "assert" if use_assert_enabled_llvm else "release"
-    triton_root = Path.cwd()
+    triton_root = Path.cwd().parent
     for path in [
         triton_root / "cmake" / "llvm-hash.txt",
         triton_root / "llvm-hash.txt",
     ]:
         if path.exists():
             llvm_hash_file = path.open()
+            break
     else:
         raise RuntimeError("llvm-hash.txt file not found")
 
