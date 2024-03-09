@@ -29,9 +29,7 @@ if torch._running_with_deploy():
 
 else:
     try:
-        from torch._dynamo.external_utils import (
-            is_compiling as is_torchdynamo_compiling,
-        )
+        from torch.compiler import is_dynamo_compiling as is_torchdynamo_compiling
     except Exception:
         warnings.warn(
             "Unable to import torchdynamo util `is_torchdynamo_compiling`, so won't support torchdynamo correctly"
@@ -728,9 +726,6 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
     """
     # `tag` will be deprecated. See details in:
     # https://github.com/pytorch/pytorch/issues/93173#issuecomment-1907095208
-    if tag != "":
-        warnings.warn(f"tag ({tag}) is ignored for process group resolution.")
-
     if isinstance(group, dist.ProcessGroup):
         return group.group_name
     elif isinstance(group, str):
@@ -751,6 +746,14 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
             return dmesh._dim_group_infos[dim][2]
         else:
             raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
+    elif isinstance(group, list):
+        if not is_torchdynamo_compiling():
+            warnings.warn(
+                "The combination of ranks + tag as process group "
+                "identifier has been deprecated. Please switch to "
+                "using ProcessGroup, DeviceMesh, or group name instead."
+            )
+        return c10d._resolve_group_name_by_ranks_and_tag(cast(List[int], group), tag)
     else:
         raise ValueError(f"Unsupported group type: {type(group)}, {group}")
 
@@ -1030,10 +1033,20 @@ def all_gather_inplace(
     assert (
         not async_op
     ), "Can't remap async version of inplace op to functional collective"
+    assert all(
+        t.size(0) == tensor.size(0) for t in tensor_list
+    ), "Remapping variable size all_gather is not yet supported"
+
     output = all_gather_tensor(tensor, 0, group, tag)
-    for dst, src in zip(
-        tensor_list, output.split([t.size(0) for t in tensor_list], dim=0)
-    ):
+
+    # Use aten.slice instead of aten.split because the latter causes
+    # tensor.shape(0) to be unnecessarily baked in when it's a SymInt.
+    output_splits = []
+    offset = 0
+    for t in tensor_list:
+        output_splits.append(output[offset : offset + t.size(0)])
+        offset += t.size(0)
+    for dst, src in zip(tensor_list, output_splits):
         dst.copy_(src)
     return tensor_list
 

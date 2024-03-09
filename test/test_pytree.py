@@ -633,7 +633,7 @@ class TestGenericPytree(TestCase):
         "pytree_impl",
         [
             subtest(py_pytree, name="py"),
-            # cxx tree_map_only does not support passing predicate fn as filter
+            subtest(cxx_pytree, name="cxx"),
         ],
     )
     def test_tree_map_only_predicate_fn(self, pytree_impl):
@@ -925,7 +925,6 @@ TreeSpec(tuple, None, [*,
         # the namedtuple type.
         self.assertEqual(spec.context._fields, roundtrip_spec.context._fields)
 
-    @unittest.expectedFailure
     def test_pytree_custom_type_serialize_bad(self):
         class DummyType:
             def __init__(self, x, y):

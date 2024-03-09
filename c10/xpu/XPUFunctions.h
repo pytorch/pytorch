@@ -30,6 +30,6 @@ C10_XPU_API void get_device_properties(
     DeviceProp* device_prop,
     DeviceIndex device);
 
-C10_XPU_API int get_device_idx_from_pointer(void* ptr);
+C10_XPU_API DeviceIndex get_device_idx_from_pointer(void* ptr);
 
 } // namespace c10::xpu

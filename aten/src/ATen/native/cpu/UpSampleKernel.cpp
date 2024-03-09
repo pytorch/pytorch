@@ -1242,10 +1242,8 @@ struct HelperInterpLinear : public HelperInterpBase {
             input_size, output_size, align_corners, opt_scale);
 
         auto interp_size = HelperInterpLinear::interp_size;
-        int unused;
-        scalar_t unused_2;
 
-        std::tie(indices_weights, unused, unused_2) = HelperInterpLinear::_compute_index_ranges_weights<scalar_t>(
+        indices_weights = std::get<0>(HelperInterpLinear::_compute_index_ranges_weights<scalar_t>(
             input_size,
             output_size,
             stride,
@@ -1255,7 +1253,7 @@ struct HelperInterpLinear : public HelperInterpBase {
             interp_size,
             &HelperInterpLinear::aa_filter<scalar_t>,
             /*antialias=*/antialias,
-            /*align_corners=*/align_corners);
+            /*align_corners=*/align_corners));
       }
     );
     return indices_weights;
@@ -1378,10 +1376,8 @@ struct HelperInterpCubic : public HelperInterpBase {
             input_size, output_size, align_corners, opt_scale);
 
         auto interp_size = HelperInterpCubic::interp_size;
-        int unused;
-        scalar_t unused_2;
 
-        std::tie(indices_weights, unused, unused_2) = HelperInterpCubic::_compute_index_ranges_weights<scalar_t>(
+        indices_weights = std::get<0>(HelperInterpCubic::_compute_index_ranges_weights<scalar_t>(
             input_size,
             output_size,
             stride,
@@ -1391,7 +1387,7 @@ struct HelperInterpCubic : public HelperInterpBase {
             interp_size,
             &HelperInterpCubic::aa_filter<scalar_t>,
             /*antialias=*/antialias,
-            /*align_corners=*/align_corners);
+            /*align_corners=*/align_corners));
       }
     );
     return indices_weights;

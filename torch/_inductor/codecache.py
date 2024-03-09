@@ -965,7 +965,7 @@ extern "C" void __avx_chk_kernel() {
     auto tmp1 = tmp0.exp();
     tmp1.store(in_out_ptr0);
 }
-"""
+"""  # noqa: B950
 
     _avx_py_load = """
 import torch
@@ -1313,7 +1313,7 @@ def get_include_and_linking_paths(
                     ]
                 )
 
-        if aot_mode and cuda:
+        if cuda:
             if macros is None:
                 macros = ""
             macros += " -D USE_ROCM" if torch.version.hip else " -D USE_CUDA"
@@ -2014,8 +2014,7 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
         }
 
         std::vector<at::Tensor> inductor_entry_cpp(std::vector<at::Tensor>&& inputs) {
-            auto input_handles =
-                torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
+            auto input_handles = unsafe_alloc_new_handles_from_tensors(inputs);
             // For outputs, we only allocate a vector to hold returned tensor handles,
             // not allocating the actual output tensor storage here
             std::vector<AtenTensorHandle> output_handles(%s);
@@ -2030,8 +2029,7 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
                 return {};
             }
 
-            return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
-                output_handles.data(), output_handles.size());
+            return alloc_tensors_by_stealing_from_handles(output_handles.data(), output_handles.size());
         }
         """
     )
@@ -2486,7 +2484,7 @@ def shutdown_compile_workers() -> None:
     global _pool_set
     for pool in _pool_set:
         pool.shutdown()
-    _pool_set = set()
+    _pool_set.clear()
 
 
 class AsyncCompile:
@@ -2639,4 +2637,10 @@ class AsyncCompile:
         _compile_end()
 
 
-AsyncCompile.warm_pool()
+if os.environ.get("TORCH_TNT_IN_USE", "0") == "1":
+    # When TorchTNT is used, calling warm_pool() here will cause the
+    # compile workers created not being able to be shut down inside
+    # shutdown_compile_workers(). This may cause significant QPS drop.
+    log.info("Do not call AsyncCompile.warm_pool() because TorchTNT is in use.")
+else:
+    AsyncCompile.warm_pool()
