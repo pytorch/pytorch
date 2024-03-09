@@ -14,6 +14,7 @@ from typing import Any, List, NamedTuple
 SCRIPT_DIR = Path(__file__).parent
 REPO_DIR = SCRIPT_DIR.parent.parent
 
+
 class Package(NamedTuple):
     package: str
     name: str
@@ -75,34 +76,42 @@ def get_llvm_package_info_cuda() -> Package:
     )
 
 
-def get_llvm_package_info_rocm():
-    # added statement for Apple Silicon
+def get_llvm_package_info_rocm() -> Package:
     system = platform.system()
     arch = platform.machine()
-    if arch == 'aarch64':
-        arch = 'arm64'
+    if arch == "aarch64":
+        arch = "arm64"
     if system == "Darwin":
         system_suffix = "apple-darwin"
         arch = platform.machine()
     elif system == "Linux":
-        vglibc = tuple(map(int, platform.libc_ver()[1].split('.')))
+        vglibc = tuple(map(int, platform.libc_ver()[1].split(".")))
         vglibc = vglibc[0] * 100 + vglibc[1]
-        linux_suffix = 'ubuntu-18.04' if vglibc > 217 else 'centos-7'
+        linux_suffix = "ubuntu-18.04" if vglibc > 217 else "centos-7"
         system_suffix = f"linux-gnu-{linux_suffix}"
     else:
-        return Package("llvm", "LLVM-C.lib", "", "LLVM_INCLUDE_DIRS", "LLVM_LIBRARY_DIR", "LLVM_SYSPATH")
+        return Package(
+            "llvm",
+            "LLVM-C.lib",
+            "",
+            "LLVM_INCLUDE_DIRS",
+            "LLVM_LIBRARY_DIR",
+            "LLVM_SYSPATH",
+        )
     use_assert_enabled_llvm = False
     release_suffix = "assert" if use_assert_enabled_llvm else "release"
-    name = f'llvm+mlir-17.0.0-{arch}-{system_suffix}-{release_suffix}'
+    name = f"llvm+mlir-17.0.0-{arch}-{system_suffix}-{release_suffix}"
     version = "llvm-17.0.0-c5dede880d17"
     url = f"https://github.com/ptillet/triton-llvm-releases/releases/download/{version}/{name}.tar.xz"
     # FIXME: remove the following once github.com/ptillet/triton-llvm-releases has arm64 llvm releases
-    if arch == 'arm64' and 'linux' in system_suffix:
+    if arch == "arm64" and "linux" in system_suffix:
         url = f"https://github.com/acollins3/triton-llvm-releases/releases/download/{version}/{name}.tar.xz"
-    return Package("llvm", name, url, "LLVM_INCLUDE_DIRS", "LLVM_LIBRARY_DIR", "LLVM_SYSPATH")
+    return Package(
+        "llvm", name, url, "LLVM_INCLUDE_DIRS", "LLVM_LIBRARY_DIR", "LLVM_SYSPATH"
+    )
 
 
-def get_llvm_package_info(build_rocm):
+def get_llvm_package_info(build_rocm: bool) -> Package:
     if build_rocm:
         return get_llvm_package_info_rocm()
     else:
@@ -194,6 +203,7 @@ def main() -> None:
 
         os.chdir(triton_basedir / "python")
         get_thirdparty_packages(build_rocm)
+
 
 if __name__ == "__main__":
     main()
