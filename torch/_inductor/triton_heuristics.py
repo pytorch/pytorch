@@ -13,6 +13,7 @@ import re
 import threading
 from enum import auto, Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from filelock import FileLock
 
 import torch
 
@@ -527,21 +528,27 @@ class CachingAutotuner(KernelInterface):
         key = self.inductor_meta.get("kernel_name", None)  # unique kernel name
         assert key is not None, "kernel_name can not be None"
         params = {
-            "mangled_name": launcher.bin.metadata.name
-            if hasattr(launcher.bin.metadata, "name")
-            else launcher.bin.metadata["name"],
+            "mangled_name": (
+                launcher.bin.metadata.name
+                if hasattr(launcher.bin.metadata, "name")
+                else launcher.bin.metadata["name"]
+            ),
             "grid_x": grid_x,
             "grid_y": grid_y,
             "grid_z": grid_z,
             "x_block": launcher.config.kwargs.get("XBLOCK", 1),
             "y_block": launcher.config.kwargs.get("YBLOCK", None),
             "z_block": launcher.config.kwargs.get("ZBLOCK", None),
-            "num_warps": launcher.bin.num_warps
-            if hasattr(launcher.bin, "num_warps")
-            else launcher.bin.metadata.num_warps,
-            "shared_mem": launcher.bin.shared
-            if hasattr(launcher.bin, "shared")
-            else launcher.bin.metadata.shared,
+            "num_warps": (
+                launcher.bin.num_warps
+                if hasattr(launcher.bin, "num_warps")
+                else launcher.bin.metadata.num_warps
+            ),
+            "shared_mem": (
+                launcher.bin.shared
+                if hasattr(launcher.bin, "shared")
+                else launcher.bin.metadata.shared
+            ),
             "stream": stream,
             # User defined triton kernels will have arbitrary kwarg names
             "meta": launcher.config.kwargs,
@@ -778,7 +785,8 @@ def load_cached_autotuning(
     if not os.path.exists(cache_filename):
         return None
 
-    with open(cache_filename) as fd:
+    lock = FileLock(cache_filename + ".lock", mode=0o777)
+    with lock, open(cache_filename) as fd:
         best_config = json.loads(fd.read())
     if best_config.pop("configs_hash", None) != configs_hash:
         return None
@@ -830,7 +838,8 @@ def cached_autotune(
             configs = [best_config]
 
         def save_cache_hook(cfg, found_by_coordesc=False):
-            with open(cache_filename, "w") as fd:
+            lock = FileLock(cache_filename + ".lock", mode=0o777)
+            with lock, open(cache_filename, "w") as fd:
                 fd.write(
                     json.dumps(
                         {
