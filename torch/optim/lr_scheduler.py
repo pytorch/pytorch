@@ -1,6 +1,6 @@
 import types
 import math
-from typing import Sequence
+from typing import Sequence, Optional
 from torch import inf
 from functools import wraps, partial
 import warnings
@@ -669,18 +669,21 @@ class SequentialLR(LRScheduler):
     """
 
     def __init__(self, optimizer, schedulers, milestones, last_epoch=-1, verbose="deprecated"):
-        for scheduler_idx in range(len(schedulers)):
-            if schedulers[scheduler_idx].optimizer != optimizer:
+        if len(schedulers) < 1:
+            raise ValueError("Sequential Schedulers expects at least one scheduler, but got no scheduler.")
+
+        for scheduler_idx, scheduler in enumerate(schedulers):
+            if not isinstance(scheduler, LRScheduler):
+                raise TypeError(
+                    f"{self.__class__.__name__} expects all schedulers to be of type LRScheduler, "
+                    f"but got {type(scheduler)}"
+                )
+            if scheduler.optimizer != optimizer:
                 raise ValueError(
                     "Sequential Schedulers expects all schedulers to belong to the same optimizer, but "
                     f"got schedulers at index {scheduler_idx} to be different than the optimizer passed in."
                 )
 
-            if (schedulers[scheduler_idx].optimizer != schedulers[0].optimizer):
-                raise ValueError(
-                    "Sequential Schedulers expects all schedulers to belong to the same optimizer, but "
-                    f"got schedulers at index {0} and {scheduler_idx} to be different."
-                )
         if (len(milestones) != len(schedulers) - 1):
             raise ValueError(
                 "Sequential Schedulers expects number of schedulers provided to be one more "
@@ -905,28 +908,29 @@ class ChainedScheduler(LRScheduler):
         >>>     scheduler.step()
     """
 
-    def __init__(self, schedulers: Sequence[LRScheduler]):
+    def __init__(self, schedulers: Sequence[LRScheduler], optimizer: Optional[Optimizer] = None):
         if len(schedulers) < 1:
-            raise ValueError("ChainedScheduler expects at least one schedulers to be chained, but got no schedulers.")
+            raise ValueError("ChainedScheduler expects at least one schedulers to be chained, but got no scheduler.")
 
-        first_scheduler: LRScheduler = None
-        for scheduler in schedulers:
+        optimizer = optimizer or schedulers[0].optimizer
+        for sch_idx, scheduler in enumerate(schedulers):
             if not isinstance(scheduler, LRScheduler):
                 raise TypeError(
-                    f"ChainedScheduler expects all schedulers to be of type LRScheduler, "
+                    f"{self.__class__.__name__} expects all schedulers to be of type LRScheduler, "
                     f"but got {type(scheduler)}"
                 )
-            if first_scheduler is None:
-                first_scheduler = scheduler
 
-            else:
-                if first_scheduler.optimizer != scheduler.optimizer:
-                    raise ValueError(
-                        "ChainedScheduler expects all schedulers to belong to the same optimizer, but "
-                        f"got schedulers at index {0} and {scheduler} to be different"
-                    )
+            if not sch_idx and optimizer is None:
+                optimizer = scheduler.optimizer
+
+            if optimizer != scheduler.optimizer:
+                raise ValueError(
+                    "ChainedScheduler expects all schedulers to belong to the same optimizer, but "
+                    f"got scheduler {scheduler.__class__.__name__} at index {sch_idx} has {scheduler.optimizer}, "
+                    f"which is different from {optimizer.__class__.__name__}."
+                )
         self._schedulers = schedulers
-        self.optimizer = first_scheduler.optimizer
+        self.optimizer = optimizer
         self._last_lr = [group['lr'] for group in self._schedulers[-1].optimizer.param_groups]
 
     def step(self):
