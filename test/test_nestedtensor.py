@@ -50,9 +50,8 @@ from torch.nested._internal.nested_tensor import (
     buffer_from_jagged,
     jagged_from_list,
     NestedTensor,
-    TensorIntMap,
-    TensorUnionFind,
 )
+from torch.nested._internal.union_find import TensorIntMap, TensorUnionFind
 
 # Tests are ported from pytorch/nestedtensor.
 # This makes porting as_nested_tensor easier in the future.
@@ -4008,6 +4007,7 @@ class TestTensorUnionFind(TestCase):
     def test_equiv_tensors(self):
         uf = self._get_test_union_find()
         a = torch.tensor([1, 2, 3])
+        self.assertEqual(set(uf.get_equiv_tensors(a)), {a})
         b = a.clone()
         c = a.clone()
         uf.merge(a, b)
