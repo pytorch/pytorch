@@ -77,10 +77,7 @@ jobs:
 
     timeout-minutes: 40
     env:
-      DOCKER_IMAGE: |
-          ${{ needs.download-triton-deps.outputs.device == 'rocm' \
-              && format('pytorch/manylinux-rocm:{0}', needs.download-triton-deps.outputs.rocm_version) \
-              || 'pytorch/manylinux-builder:cpu' }}
+      DOCKER_IMAGE: ${{ needs.download-triton-deps.outputs.device == 'rocm' && format('pytorch/manylinux-rocm:{0}', needs.download-triton-deps.outputs.rocm_version) || 'pytorch/manylinux-builder:cpu' }}
       PY_VERS: ${{ matrix.py_vers }}
       BUILD_DEVICE: ${{ needs.download-triton-deps.outputs.device }}
     steps:
