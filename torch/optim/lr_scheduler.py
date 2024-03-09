@@ -1,5 +1,6 @@
 import types
 import math
+from typing import Sequence
 from torch import inf
 from functools import wraps, partial
 import warnings
@@ -22,6 +23,7 @@ EPOCH_DEPRECATION_WARNING = (
     "https://github.com/pytorch/pytorch/issues/new/choose."
 )
 
+
 def _check_verbose_deprecated_warning(verbose):
     """Raises a warning when verbose is not the default value."""
     if verbose != "deprecated":
@@ -29,6 +31,7 @@ def _check_verbose_deprecated_warning(verbose):
                       "to access the learning rate.", UserWarning)
         return verbose
     return False
+
 
 class LRScheduler:
 
@@ -126,7 +129,6 @@ class LRScheduler:
                 epoch_str = ("%.2f" if isinstance(epoch, float) else
                              "%.5d") % epoch
                 print(f'Epoch {epoch_str}: adjusting learning rate of group {group} to {lr:.4e}.')
-
 
     def step(self, epoch=None):
         # Raise a warning if old pattern is detected
@@ -903,15 +905,28 @@ class ChainedScheduler(LRScheduler):
         >>>     scheduler.step()
     """
 
-    def __init__(self, schedulers):
-        for scheduler_idx in range(1, len(schedulers)):
-            if (schedulers[scheduler_idx].optimizer != schedulers[0].optimizer):
-                raise ValueError(
-                    "ChainedScheduler expects all schedulers to belong to the same optimizer, but "
-                    f"got schedulers at index {0} and {scheduler_idx} to be different"
+    def __init__(self, schedulers: Sequence[LRScheduler]):
+        if len(schedulers) < 1:
+            raise ValueError("ChainedScheduler expects at least one schedulers to be chained, but got no schedulers.")
+
+        first_scheduler: LRScheduler = None
+        for scheduler in schedulers:
+            if not isinstance(scheduler, LRScheduler):
+                raise TypeError(
+                    f"ChainedScheduler expects all schedulers to be of type LRScheduler, "
+                    f"but got {type(scheduler)}"
                 )
-        self._schedulers = list(schedulers)
-        self.optimizer = schedulers[0].optimizer
+            if first_scheduler is None:
+                first_scheduler = scheduler
+
+            else:
+                if first_scheduler.optimizer != scheduler.optimizer:
+                    raise ValueError(
+                        "ChainedScheduler expects all schedulers to belong to the same optimizer, but "
+                        f"got schedulers at index {0} and {scheduler} to be different"
+                    )
+        self._schedulers = schedulers
+        self.optimizer = first_scheduler.optimizer
         self._last_lr = [group['lr'] for group in self._schedulers[-1].optimizer.param_groups]
 
     def step(self):
