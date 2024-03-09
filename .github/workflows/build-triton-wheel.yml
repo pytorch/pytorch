@@ -75,8 +75,8 @@ jobs:
         py_vers: [ "3.8", "3.9", "3.10", "3.11", "3.12" ]
         device: ["cuda", "rocm"]
     with:
-      device: ${{ needs.download-triton-deps.device }}
-      rocm_version: ${{ needs.download-triton-deps.rocm_version }}
+      device: ${{ needs.download-triton-deps.outputs.device }}
+      rocm_version: ${{ needs.download-triton-deps.outputs.rocm_version }}
 
     timeout-minutes: 40
     env:
@@ -239,7 +239,7 @@ jobs:
     name: "Build Triton Conda"
     runs-on: [self-hosted, linux.2xlarge]
     needs: download-triton-deps
-    if: ${{ needs.download-triton-deps.device == "cuda" }}
+    if: ${{ needs.download-triton-deps.output.device == 'cuda' }}
     strategy:
       fail-fast: false
       matrix:
