@@ -32,6 +32,8 @@ jobs:
   download-triton-deps:
     name: "Download Triton Dependencies"
     runs-on: [self-hosted, linux.large]
+    container:
+      image: ubuntu:22.04
     # Triton's LLVM download is SLOW.
     timeout-minutes: 60
     strategy:
@@ -78,6 +80,8 @@ jobs:
   build-wheel:
     name: "Build Triton Wheel"
     runs-on: [self-hosted, linux.2xlarge]
+    container:
+      image: ubuntu:22.04
     needs: download-triton-deps
     strategy:
       fail-fast: false
