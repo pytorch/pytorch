@@ -240,10 +240,19 @@ def redistribute_local_tensor(
                     if not is_backward
                     else local_tensor
                 )
-            else:
-                raise RuntimeError(
-                    f"redistribute from {current} to {target} not supported yet"
+            elif current.is_shard():
+                if not is_backward:
+                    raise RuntimeError(
+                        f"redistribute from {current} to {target} not supported yet"
+                    )
+                # for backward shard -> partial, we just need to convert the shard to replicate
+                current_placement = cast(Shard, current)
+                new_local_tensor = current_placement._to_replicate_tensor(
+                    local_tensor, device_mesh, i, transform_info.logical_shape
                 )
+            else:
+                # partial -> partial no op, should never hit
+                new_local_tensor = local_tensor
 
         assert new_local_tensor is not None
         local_tensor = new_local_tensor
@@ -302,10 +311,18 @@ class Redistribute(torch.autograd.Function):
             async_op=async_op,
             is_backward=True,
         )
+        # normalize the target placement to replicate if it is partial
+        normalized_placements: List[Placement] = []
+        for previous_placement in previous_spec.placements:
+            if previous_placement.is_partial():
+                # keep target placement to replicate instead of partial in this case
+                normalized_placements.append(Replicate())
+            else:
+                normalized_placements.append(previous_placement)
         output_dtensor = dtensor.DTensor(
             output,
             previous_spec.mesh,
-            previous_spec.placements,
+            tuple(normalized_placements),
             shape=grad_output.shape,
             dtype=grad_output.dtype,
             requires_grad=grad_output.requires_grad,
