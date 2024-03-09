@@ -128,6 +128,8 @@ class _KinetoProfile:
         privateuse1_backend = _get_privateuse1_backend_name()
         if privateuse1_backend != "privateuseone":
             self.use_device = privateuse1_backend
+        # user-defined metadata to be amended to the trace
+        self.preset_metadata: Dict[str, str] = dict()
 
     def start(self):
         self.prepare_trace()
@@ -185,6 +187,10 @@ class _KinetoProfile:
                     #   2) crashes on 2nd non-lazy CUPTI re-init after teardown (CUDA 12)
                     # Workaround: turn off CUPTI teardown when using CUDA Graphs.
                     os.environ["TEARDOWN_CUPTI"] = "0"
+
+            # Insert the preset user metadata to the trace
+            for k, v in self.preset_metadata.items():
+                self.add_metadata_json(k, v)
 
     def stop_trace(self):
         if self.execution_trace_observer:
@@ -262,19 +268,32 @@ class _KinetoProfile:
         """
         torch.autograd._add_metadata_json(key, value)
 
+    def preset_metadata_json(self, key: str, value: str):
+        """
+        Preset a user defined metadata when the profiler is not started
+        and added into the trace file later.
+        Metadata is in the format of a string key and a valid json value
+        """
+        self.preset_metadata[key] = value
+
     def _get_distributed_info(self):
         import torch.distributed as dist
 
         if not dist.is_available() or not dist.is_initialized():
             return None
 
-        return {
-            "backend": dist.get_backend(),
+        backend = dist.get_backend()
+        dist_info = {
+            "backend": backend,
             "rank": dist.get_rank(),
             "world_size": dist.get_world_size(),
             "pg_count": dist.get_pg_count(),
             "pg_config": dist.distributed_c10d._get_all_pg_configs(),
         }
+        if backend == "nccl":
+            nccl_version = torch.cuda.nccl.version()
+            dist_info["nccl_version"] = ".".join(str(v) for v in nccl_version)
+        return dist_info
 
     def _memory_profile(self) -> MemoryProfile:
         required = ("record_shapes", "profile_memory", "with_stack")
