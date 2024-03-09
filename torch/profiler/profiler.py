@@ -721,7 +721,6 @@ class profile(_KinetoProfile):
         if self.record_steps and self.step_rec_fn:
             self.step_rec_fn.__exit__(None, None, None)
         prev_action = self.current_action
-        cur_step = self.step_num
         self.step_num += 1
         self.current_action = self.schedule(self.step_num)
 
@@ -729,7 +728,9 @@ class profile(_KinetoProfile):
         prof.KinetoStepTracker.increment_step(PROFILER_STEP_NAME)
 
         if self.record_steps:
-            self.step_rec_fn = prof.record_function("ProfilerStep#" + str(cur_step))
+            self.step_rec_fn = prof.record_function(
+                "ProfilerStep#" + str(self.step_num)
+            )
             self.step_rec_fn.__enter__()
 
     def _trace_ready(self):
