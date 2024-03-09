@@ -32,8 +32,6 @@ jobs:
   download-triton-deps:
     name: "Download Triton Dependencies"
     runs-on: [self-hosted, linux.large]
-    container:
-      image: amazonlinux:2023
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -70,7 +68,7 @@ jobs:
         run: tar -C ~ -cf triton-deps.tar .triton
 
       - name: Upload Dependency Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: triton-packages-${{ matrix.device }}
           path: triton-deps.tar
@@ -79,8 +77,6 @@ jobs:
   build-wheel:
     name: "Build Triton Wheel"
     runs-on: [self-hosted, linux.2xlarge]
-    container:
-      image: amazonlinux:2023
     needs: download-triton-deps
     strategy:
       fail-fast: false
@@ -118,7 +114,7 @@ jobs:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
       - name: Download Dependency Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v3
         with:
           name: triton-packages-${{ matrix.device }}
 
@@ -179,7 +175,7 @@ jobs:
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" /pytorch/.github/scripts/build_triton_wheel.py $BUILD_ROCM $RELEASE
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v3
         with:
           name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}
           if-no-files-found: error
@@ -216,12 +212,17 @@ jobs:
           aws-region: us-east-1
 
       - name: Download Build Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v3
         with:
-          # Download every version of the artifact
-          pattern: pytorch-triton-wheel-*
-          merge-multiple: true
-          path: ${{ runner.temp }}/artifacts/
+          # Download every available artifact
+          path: ${{runner.temp}}/artifacts-all/
+
+      - name: Select Wheel Artifacts
+        shell: bash
+        run: |
+          set -x
+          mkdir -p ${{runner.temp}}/artifacts/
+          mv ${{runner.temp}}/artifacts-all/pytorch-triton-wheel-*/* ${{runner.temp}}/artifacts/
 
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) }}
@@ -285,7 +286,7 @@ jobs:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
       - name: Download Dependency Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v3
         with:
           name: triton-packages-cuda
 
@@ -317,7 +318,7 @@ jobs:
           docker exec -t "${container_name}" python /pytorch/.github/scripts/build_triton_wheel.py --build-conda --py-version="${PY_VERS}" $RELEASE
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v3
         with:
           name: pytorch-triton-conda-${{ matrix.py_vers }}
           if-no-files-found: error
@@ -337,12 +338,17 @@ jobs:
       - uses: actions/checkout@v3
 
       - name: Download Build Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v3
         with:
-          # Download all python versions
-          name: pytorch-triton-conda-*
-          merge-multiple: true
-          path: ${{ runner.temp }}/artifacts/
+          # Download all available artifacts
+          path: ${{ runner.temp }}/artifacts-all/
+
+      - name: Select Conda Artifacts
+        shell: bash
+        run: |
+          set -x
+          mkdir -p ${{runner.temp}}/artifacts/
+          mv ${{runner.temp}}/artifacts-all/pytorch-triton-conda-*/* ${{runner.temp}}/artifacts/
 
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) }}
