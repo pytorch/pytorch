@@ -43,7 +43,7 @@ jobs:
           - device: "cuda"
             rocm_version: ""
     env:
-      BUILD_DEVICE: ${{ needs.download-triton-deps.outputs.device }}
+      BUILD_DEVICE: ${{ matrix.device }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
