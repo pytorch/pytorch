@@ -122,10 +122,7 @@ jobs:
           name: triton-packages-${{ needs.download-triton-deps.outputs.device }}
 
       - name: Untar Triton Dependencies
-        run: |
-            set -x
-            tar -xf triton-deps.tar -q
-            ls .triton
+        run: tar -xf triton-deps.tar
 
       - name: Build Triton wheel
         env:
@@ -291,10 +288,7 @@ jobs:
           name: triton-packages-cuda
 
       - name: Untar Triton Dependencies
-        run: |
-            set -x
-            tar -xf triton-deps.tar
-            ls .triton
+        run: tar -xf triton-deps.tar
 
       - name: Build Triton conda package
         env:
