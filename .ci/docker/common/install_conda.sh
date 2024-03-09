@@ -58,10 +58,14 @@ fi
   # as_jenkins conda update -y -n base conda
 
   # Install correct Python version
-  # Also ensure sysroot is using a modern GLIBC and GLIBCXX to match system compilers
+  # Also ensure sysroot is using a modern GLIBC to match system compilers
   as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y\
              python="$ANACONDA_PYTHON_VERSION" \
              sysroot_linux-64=2.17
+
+  # libstdcxx from conda default channels are too old, we need GLIBCXX_3.4.30
+  # which is provided in libstdcxx 12 and up.
+  conda_install -c conda-forge libstdcxx-ng=12.3.0
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
   if [[ $(uname -m) == "aarch64" ]]; then
