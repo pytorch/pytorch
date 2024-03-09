@@ -783,5 +783,68 @@ class TestFullyShard2DTraining(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
 
+class TestFullyShardHSDPTraining(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    @skip_if_lt_x_gpu(4)
+    def test_train_parity_hsdp(self):
+        global_mesh = init_device_mesh(
+            "cuda", (2, 2), mesh_dim_names=("replicate", "shard")
+        )
+        self.run_subtests(
+            {
+                # TODO
+                # "reshard_after_forward": [False, True],
+                # "use_activation_checkpointing": [False, True],
+                # "mlp_dim": [3, 16, 17],
+                "reshard_after_forward": [True],
+                "use_activation_checkpointing": [False],
+                "mlp_dim": [3],
+
+            },
+            functools.partial(self._test_train_parity_hsdp, global_mesh),
+        )
+
+    def _test_train_parity_hsdp(
+        self,
+        global_mesh: DeviceMesh,
+        reshard_after_forward: bool,
+        use_activation_checkpointing: bool,
+        mlp_dim: int,
+    ):
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            nn.LayerNorm(mlp_dim, bias=False),
+            # Use multiplier of 3 to exercise uneven case
+            MLP(mlp_dim, dim_multiplier=3),
+            MLP(mlp_dim),
+            MLP(mlp_dim, dim_multiplier=3),
+        )
+        ref_model = copy.deepcopy(model).cuda()
+        replicate(ref_model, device_ids=[self.rank])
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+
+        for mlp in model:
+            if use_activation_checkpointing:
+                checkpoint(mlp)
+            fully_shard(mlp, mesh=global_mesh, reshard_after_forward=reshard_after_forward)
+        fully_shard(model, mesh=global_mesh, reshard_after_forward=reshard_after_forward)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+
+        torch.manual_seed(42 + self.rank + 1)
+        device = torch.device("cuda")
+        for iter_idx in range(10):
+            inp = torch.randn((8, mlp_dim), device=device)
+            # TODO
+            losses: List[torch.Tensor] = []
+            for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+                _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+                losses.append(_model(inp).sum())
+                losses[-1].backward()
+                _optim.step()
+            self.assertEqual(losses[0], losses[1])
+
 if __name__ == "__main__":
     run_tests()
