@@ -2008,7 +2008,7 @@ class GraphModule(torch.nn.Module):
                 def fn(x):
                     return op(-10, x)
 
-                opt_fn = torch.compile(fullgraph=True)(fn)
+                opt_fn = torch._dynamo.optimize(fn)
 
                 x = torch.randn(10)
                 self.assertEqual(opt_fn(x), fn(x))
@@ -2020,7 +2020,7 @@ class GraphModule(torch.nn.Module):
                 def fn(x):
                     return op(x, -10)
 
-                opt_fn = torch.compile(fullgraph=True)(fn)
+                opt_fn = torch._dynamo.optimize(fn)
 
                 x = torch.randn(10)
                 self.assertEqual(opt_fn(x), fn(x))
