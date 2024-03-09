@@ -49,32 +49,150 @@
 #include <arm_neon.h>
 #endif
 
+#if defined(__GNUC__) || defined(__clang__)
+#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
+#define __ARM_V8__ 1
+#ifndef __ARM_V8_ONLY__
+#define NATIVE_FP16 1
+#endif // __ARM_V8_ONLY__
+#endif // __aarch64__
+#endif // GNUC or clang
+
+#if defined(__GNUC__) || defined(__clang__)
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386) || \
+    defined(_M_IX86)
+#if defined(__AVX2__) || defined(__AVX512__)
+#if !defined(__CUDACC__) && !defined(__HIPCC__) && \
+    !defined(__SYCL_DEVICE_ONLY__)
+#define X86_F16 1
+#include <immintrin.h> // import conversion ops from f16cintrin.h
+#endif // __CUDACC__, __HIPCC__, __SYCL_DEVICE_ONLY__
+#endif // __AVX2__
+#endif // __x86_64__ || _M_X64 || __i386 || _M_IX86
+#endif // __GNUC__ || __clang__
+
 namespace c10 {
 
 namespace detail {
 
+//*******************************************************************************
+// TODO(MKG): dedup with general h2f/f2h functions below
+
+#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
+constexpr inline float16_t fp16_from_bits(uint16_t h) {
+  union {
+    uint16_t as_bits;
+    float16_t as_value;
+  } fp16 = {h};
+  return fp16.as_value;
+}
+
+constexpr inline uint16_t fp16_to_bits(float16_t f) {
+  union {
+    float16_t as_value;
+    uint16_t as_bits;
+  } fp16 = {.as_value = f};
+  return fp16.as_bits;
+}
+
+// According to https://godbolt.org/z/8s14GvEjo it would translate to single
+// fcvt s0, h0
+inline float native_fp16_to_fp32_value(uint16_t h) {
+  return static_cast<float>(fp16_from_bits(h));
+}
+
+inline uint16_t native_fp16_from_fp32_value(float f) {
+  return fp16_to_bits(static_cast<float16_t>(f));
+}
+#endif
+//*******************************************************************************
+
+#if defined(X86_F16) &&                                                 \
+    (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && \
+    !defined(__APPLE__)
+static inline uint16_t _f2h(float val) {
+#if defined(CPU_CAPABILITY_AVX2)
+#if defined(_MSC_VER)
+  __m256 v = _mm256_set1_ps(val);
+  __m128i o =
+      _mm256_cvtps_ph(v, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+  return static_cast<std::uint16_t>(_mm_cvtsi128_si32(o));
+#else
+  return _cvtss_sh(val, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+#endif
+#elif defined(CPU_CAPABILITY_AVX512)
+  __m512 v = _mm512_set1_ps(val);
+  __m256i o =
+      _mm512_cvtps_ph(v, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+  return static_cast<std::uint16_t>(
+      _mm_cvtsi128_si32(_mm256_castsi256_si128(o)));
+#endif
+}
+
+C10_HOST_DEVICE static inline float _h2f(uint16_t val) {
+#if defined(CPU_CAPABILITY_AVX2)
+#if defined(_MSC_VER)
+  __m128i v = _mm_cvtsi32_si128(val);
+  __m256 o = _mm256_cvtph_ps(v);
+  return _mm256_cvtss_f32(o);
+#else
+  return _cvtsh_ss(val);
+#endif
+#elif defined(CPU_CAPABILITY_AVX512)
+  __m256i v =
+      _mm256_setr_epi16(val, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+  __m512 o = _mm512_cvtph_ps(v);
+  return _mm512_cvtss_f32(o);
+#endif
+}
+
+inline uint32_t _h2f_int32(uint16_t h) {
+  float f = _h2f(h);
+  return *(uint32_t*)&f;
+}
+
+#elif defined(__ARM_V8__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
+
+static inline uint16_t _f2h(float val) {
+  float16_t h = val;
+  return *(uint16_t*)&h;
+}
+
+C10_HOST_DEVICE static inline float _h2f(uint16_t h) {
+  return (float)*((float16_t*)&h);
+}
+
+static inline uint32_t _h2f_int32(uint16_t h) {
+  float f = _h2f(h);
+  return *(uint32_t*)&f;
+}
+
+#else // software-defined bit manipulation implementation
+
 /*
- * Convert a 16-bit floating-point number in IEEE half-precision format, in bit
- * representation, to a 32-bit floating-point number in IEEE single-precision
- * format, in bit representation.
+ * Convert a 16-bit floating-point number in IEEE half-precision format, in
+ * bit representation, to a 32-bit floating-point number in IEEE
+ * single-precision format, in bit representation.
  *
  * @note The implementation doesn't use any floating-point operations.
  */
-inline uint32_t fp16_ieee_to_fp32_bits(uint16_t h) {
+inline uint32_t _h2f_int32(uint16_t h) {
   /*
-   * Extend the half-precision floating-point number to 32 bits and shift to the
-   * upper part of the 32-bit word:
+   * Extend the half-precision floating-point number to 32 bits and shift to
+   * the upper part of the 32-bit word:
    *      +---+-----+------------+-------------------+
    *      | S |EEEEE|MM MMMM MMMM|0000 0000 0000 0000|
    *      +---+-----+------------+-------------------+
    * Bits  31  26-30    16-25            0-15
    *
-   * S - sign bit, E - bits of the biased exponent, M - bits of the mantissa, 0
+   * S - sign bit, E - bits of the biased exponent, M - bits of the mantissa,
+   * 0
    * - zero bits.
    */
   const uint32_t w = (uint32_t)h << 16;
   /*
-   * Extract the sign of the input number into the high bit of the 32-bit word:
+   * Extract the sign of the input number into the high bit of the 32-bit
+   * word:
    *
    *      +---+----------------------------------+
    *      | S |0000000 00000000 00000000 00000000|
@@ -83,8 +201,8 @@ inline uint32_t fp16_ieee_to_fp32_bits(uint16_t h) {
    */
   const uint32_t sign = w & UINT32_C(0x80000000);
   /*
-   * Extract mantissa and biased exponent of the input number into the bits 0-30
-   * of the 32-bit word:
+   * Extract mantissa and biased exponent of the input number into the bits
+   * 0-30 of the 32-bit word:
    *
    *      +---+-----+------------+-------------------+
    *      | 0 |EEEEE|MM MMMM MMMM|0000 0000 0000 0000|
@@ -94,12 +212,12 @@ inline uint32_t fp16_ieee_to_fp32_bits(uint16_t h) {
   const uint32_t nonsign = w & UINT32_C(0x7FFFFFFF);
   /*
    * Renorm shift is the number of bits to shift mantissa left to make the
-   * half-precision number normalized. If the initial number is normalized, some
-   * of its high 6 bits (sign == 0 and 5-bit exponent) equals one. In this case
-   * renorm_shift == 0. If the number is denormalize, renorm_shift > 0. Note
-   * that if we shift denormalized nonsign by renorm_shift, the unit bit of
-   * mantissa will shift into exponent, turning the biased exponent into 1, and
-   * making mantissa normalized (i.e. without leading 1).
+   * half-precision number normalized. If the initial number is normalized,
+   * some of its high 6 bits (sign == 0 and 5-bit exponent) equals one. In
+   * this case renorm_shift == 0. If the number is denormalize, renorm_shift >
+   * 0. Note that if we shift denormalized nonsign by renorm_shift, the unit
+   * bit of mantissa will shift into exponent, turning the biased exponent
+   * into 1, and making mantissa normalized (i.e. without leading 1).
    */
 #ifdef _MSC_VER
   unsigned long nonsign_bsr;
@@ -150,29 +268,31 @@ inline uint32_t fp16_ieee_to_fp32_bits(uint16_t h) {
 }
 
 /*
- * Convert a 16-bit floating-point number in IEEE half-precision format, in bit
- * representation, to a 32-bit floating-point number in IEEE single-precision
- * format.
+ * Convert a 16-bit floating-point number in IEEE half-precision format, in
+ * bit representation, to a 32-bit floating-point number in IEEE
+ * single-precision format.
  *
  * @note The implementation relies on IEEE-like (no assumption about rounding
  * mode and no operations on denormals) floating-point operations and bitcasts
  * between integer and floating-point variables.
  */
-C10_HOST_DEVICE inline float fp16_ieee_to_fp32_value(uint16_t h) {
+C10_HOST_DEVICE inline float _h2f(uint16_t h) {
   /*
-   * Extend the half-precision floating-point number to 32 bits and shift to the
-   * upper part of the 32-bit word:
+   * Extend the half-precision floating-point number to 32 bits and shift to
+   * the upper part of the 32-bit word:
    *      +---+-----+------------+-------------------+
    *      | S |EEEEE|MM MMMM MMMM|0000 0000 0000 0000|
    *      +---+-----+------------+-------------------+
    * Bits  31  26-30    16-25            0-15
    *
-   * S - sign bit, E - bits of the biased exponent, M - bits of the mantissa, 0
+   * S - sign bit, E - bits of the biased exponent, M - bits of the mantissa,
+   * 0
    * - zero bits.
    */
   const uint32_t w = (uint32_t)h << 16;
   /*
-   * Extract the sign of the input number into the high bit of the 32-bit word:
+   * Extract the sign of the input number into the high bit of the 32-bit
+   * word:
    *
    *      +---+----------------------------------+
    *      | S |0000000 00000000 00000000 00000000|
@@ -181,8 +301,8 @@ C10_HOST_DEVICE inline float fp16_ieee_to_fp32_value(uint16_t h) {
    */
   const uint32_t sign = w & UINT32_C(0x80000000);
   /*
-   * Extract mantissa and biased exponent of the input number into the high bits
-   * of the 32-bit word:
+   * Extract mantissa and biased exponent of the input number into the high
+   * bits of the 32-bit word:
    *
    *      +-----+------------+---------------------+
    *      |EEEEE|MM MMMM MMMM|0 0000 0000 0000 0000|
@@ -210,18 +330,18 @@ C10_HOST_DEVICE inline float fp16_ieee_to_fp32_value(uint16_t h) {
    * biased exponent of the single-precision output must be 0xFF (max possible
    * value). We do this correction in two steps:
    *   - First, we adjust the exponent by (0xFF - 0x1F) = 0xE0 (see exp_offset
-   * below) rather than by 0x70 suggested by the difference in the exponent bias
-   * (see above).
-   *   - Then we multiply the single-precision result of exponent adjustment by
-   * 2**(-112) to reverse the effect of exponent adjustment by 0xE0 less the
-   * necessary exponent adjustment by 0x70 due to difference in exponent bias.
-   *     The floating-point multiplication hardware would ensure than Inf and
-   * NaN would retain their value on at least partially IEEE754-compliant
+   * below) rather than by 0x70 suggested by the difference in the exponent
+   * bias (see above).
+   *   - Then we multiply the single-precision result of exponent adjustment
+   * by 2**(-112) to reverse the effect of exponent adjustment by 0xE0 less
+   * the necessary exponent adjustment by 0x70 due to difference in exponent
+   * bias. The floating-point multiplication hardware would ensure than Inf
+   * and NaN would retain their value on at least partially IEEE754-compliant
    * implementations.
    *
-   * Note that the above operations do not handle denormal inputs (where biased
-   * exponent == 0). However, they also do not operate on denormal inputs, and
-   * do not produce denormal results.
+   * Note that the above operations do not handle denormal inputs (where
+   * biased exponent == 0). However, they also do not operate on denormal
+   * inputs, and do not produce denormal results.
    */
   constexpr uint32_t exp_offset = UINT32_C(0xE0) << 23;
   // const float exp_scale = 0x1.0p-112f;
@@ -245,16 +365,15 @@ C10_HOST_DEVICE inline float fp16_ieee_to_fp32_value(uint16_t h) {
    *      +---------------------------+------------+
    * Bits             10-31                0-9
    *
-   * Now, remember that denormalized half-precision numbers are represented as:
-   *    FP16 = mantissa * 2**(-24).
-   * The trick is to construct a normalized single-precision number with the
-   * same mantissa and thehalf-precision input and with an exponent which would
-   * scale the corresponding mantissa bits to 2**(-24). A normalized
-   * single-precision floating-point number is represented as: FP32 = (1 +
-   * mantissa * 2**(-23)) * 2**(exponent - 127) Therefore, when the biased
-   * exponent is 126, a unit change in the mantissa of the input denormalized
-   * half-precision number causes a change of the constructed single-precision
-   * number by 2**(-24), i.e. the same amount.
+   * Now, remember that denormalized half-precision numbers are represented
+   * as: FP16 = mantissa * 2**(-24). The trick is to construct a normalized
+   * single-precision number with the same mantissa and thehalf-precision
+   * input and with an exponent which would scale the corresponding mantissa
+   * bits to 2**(-24). A normalized single-precision floating-point number is
+   * represented as: FP32 = (1 + mantissa * 2**(-23)) * 2**(exponent - 127)
+   * Therefore, when the biased exponent is 126, a unit change in the mantissa
+   * of the input denormalized half-precision number causes a change of the
+   * constructed single-precision number by 2**(-24), i.e. the same amount.
    *
    * The last step is to adjust the bias of the constructed single-precision
    * number. When the input half-precision number is zero, the constructed
@@ -271,8 +390,8 @@ C10_HOST_DEVICE inline float fp16_ieee_to_fp32_value(uint16_t h) {
   /*
    * - Choose either results of conversion of input as a normalized number, or
    * as a denormalized number, depending on the input exponent. The variable
-   * two_w contains input exponent in bits 27-31, therefore if its smaller than
-   * 2**27, the input is either a denormal number, or zero.
+   * two_w contains input exponent in bits 27-31, therefore if its smaller
+   * than 2**27, the input is either a denormal number, or zero.
    * - Combine the result of conversion of exponent and mantissa with the sign
    * of the input number.
    */
@@ -292,7 +411,7 @@ C10_HOST_DEVICE inline float fp16_ieee_to_fp32_value(uint16_t h) {
  * mode and no operations on denormals) floating-point operations and bitcasts
  * between integer and floating-point variables.
  */
-inline uint16_t fp16_ieee_from_fp32_value(float f) {
+inline uint16_t _f2h(float f) {
   // const float scale_to_inf = 0x1.0p+112f;
   // const float scale_to_zero = 0x1.0p-110f;
   constexpr uint32_t scale_to_inf_bits = (uint32_t)239 << 23;
@@ -328,33 +447,34 @@ inline uint16_t fp16_ieee_from_fp32_value(float f) {
       (shl1_w > UINT32_C(0xFF000000) ? UINT16_C(0x7E00) : nonsign));
 }
 
-#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
-constexpr inline float16_t fp16_from_bits(uint16_t h) {
-  union {
-    uint16_t as_bits;
-    float16_t as_value;
-  } fp16 = {h};
-  return fp16.as_value;
+#endif // software-defined conversion
+
+/*
+ * Convert a 16-bit floating-point number in IEEE half-precision format, in bit
+ * representation, to a 32-bit floating-point number in IEEE single-precision
+ * format, in bit representation.
+ */
+inline uint32_t fp16_ieee_to_fp32_bits(uint16_t h) {
+  return _h2f_int32(h);
 }
 
-constexpr inline uint16_t fp16_to_bits(float16_t f) {
-  union {
-    float16_t as_value;
-    uint16_t as_bits;
-  } fp16 = {.as_value = f};
-  return fp16.as_bits;
+/*
+ * Convert a 16-bit floating-point number in IEEE half-precision format, in bit
+ * representation, to a 32-bit floating-point number in IEEE single-precision
+ * format.
+ */
+C10_HOST_DEVICE inline float fp16_ieee_to_fp32_value(uint16_t h) {
+  return _h2f(h);
 }
 
-// According to https://godbolt.org/z/8s14GvEjo it would translate to single
-// fcvt s0, h0
-inline float native_fp16_to_fp32_value(uint16_t h) {
-  return static_cast<float>(fp16_from_bits(h));
+/*
+ * Convert a 32-bit floating-point number in IEEE single-precision format to a
+ * 16-bit floating-point number in IEEE half-precision format, in bit
+ * representation.
+ */
+inline uint16_t fp16_ieee_from_fp32_value(float f) {
+  return _f2h(f);
 }
-
-inline uint16_t native_fp16_from_fp32_value(float f) {
-  return fp16_to_bits(static_cast<float16_t>(f));
-}
-#endif
 
 } // namespace detail
 
