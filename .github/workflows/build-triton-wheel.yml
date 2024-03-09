@@ -42,6 +42,8 @@ jobs:
             rocm_version: "6.0"
           - device: "cuda"
             rocm_version: ""
+    env:
+      BUILD_DEVICE: ${{ needs.download-triton-deps.outputs.device }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -57,7 +59,15 @@ jobs:
         uses: ./.github/actions/setup-linux
 
       - name: Download packages
-        run: python3 "${GITHUB_WORKSPACE}/.github/scripts/download_triton_packages.py"
+        run: |
+            set -x
+
+            BUILD_ROCM=""
+            if [[ "$BUILD_DEVICE" == "rocm" ]]; then
+                BUILD_ROCM="--build-rocm"
+            fi
+
+            python3 "${GITHUB_WORKSPACE}/.github/scripts/download_triton_packages.py" ${BUILD_ROCM}
 
       - name: Upload Dependency Artifacts
         uses: actions/upload-artifact@v3
