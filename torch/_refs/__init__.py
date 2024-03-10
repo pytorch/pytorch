@@ -1368,6 +1368,12 @@ def fmod(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.fmod(a, b)
 
 
+@register_decomposition(aten.frexp)
+@out_wrapper("mantissa", "exponent")
+def frexp(self: TensorLikeType) -> Tuple[TensorLikeType, TensorLikeType]:
+    return torch.return_types.frexp(prims.frexp(self))
+
+
 @_make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_lhs_python_scalar=False,
@@ -3752,7 +3758,7 @@ def roll(
     # Avoid modulo by zero
     if a.numel() == 0:
         # Keeping this as ref for now as FakeTensor runs into some issues with complex tensors
-        return clone(a)
+        return a.clone()
 
     if a.dim() == 0 and len(dims) > 0:
         raise IndexError(
@@ -3783,9 +3789,8 @@ def roll(
     dim = dims[0]
     size = a.shape[dim]
     start = (size - shifts[0]) % size
-    t0 = torch.narrow(a, dim, start, size - start)
-    t1 = torch.narrow(a, dim, 0, start)
-    return torch.cat((t0, t1), dim)
+    idx = torch.arange(size, device=a.device)
+    return a.index_select(dim, torch.fmod(start + idx, size))
 
 
 @register_decomposition(aten.rot90)
@@ -4298,16 +4303,16 @@ def diag_embed(
     """
     Reference implementation of torch.diag_embed
     """
+    # convert from negative dims
+    rank = t.ndim + 1
+    dim1 = utils.canonicalize_dim(rank=rank, idx=dim1)
+    dim2 = utils.canonicalize_dim(rank=rank, idx=dim2)
+
     # as per the docs, exchanging dims is equivalent to changing the sign of
     # offset
     if dim1 > dim2:
         dim1, dim2 = dim2, dim1
         offset = -offset
-
-    # convert from negative dims
-    rank = t.ndim + 1
-    dim1 = utils.canonicalize_dim(rank=rank, idx=dim1)
-    dim2 = utils.canonicalize_dim(rank=rank, idx=dim2)
 
     torch._check(
         dim1 != dim2, lambda: f"diagonal dimensions cannot be identical {dim1}, {dim2}"
@@ -6327,21 +6332,15 @@ def _infer_scalar_type(obj):
 
 # Analogous to recursive_store
 # xref: recursive_store in torch/csrc/utils/tensor_new.cpp
-def _recursive_build(sizes, dim, scalarType, obj):
-    ndim = len(sizes)
-    assert dim <= ndim
-    if dim == ndim:
+def _recursive_build(scalarType: torch.dtype, obj: TensorOrNumberLikeType):
+    if isinstance(obj, Tensor) and obj.ndim <= 1:
+        obj = obj.item()
+        # fall through into next case
+    if isinstance(obj, Number):
         return torch.scalar_tensor(obj, dtype=scalarType)
-    n = sizes[dim]
+
     seq = obj
-    seq_size = len(seq)
-    if seq_size != n:
-        raise ValueError(
-            f"expected sequence of length {n} at dim {dim} (got {seq_size})"
-        )
-    return torch.stack(
-        [_recursive_build(sizes, dim + 1, scalarType, item) for item in seq]
-    )
+    return torch.stack([_recursive_build(scalarType, item) for item in seq])
 
 
 # xref: internal_new_from_data in torch/csrc/utils/tensor_new.cpp
@@ -6378,7 +6377,6 @@ def _internal_new_from_data(
     # TODO: test for numpy input with PyArray_Check
 
     device = device_opt if device_opt is not None else options["device"]
-    sizes = _compute_sizes(data, scalar_type)
     inferred_scalar_type = _infer_scalar_type(data) if type_inference else scalar_type
 
     # NB: Don't need to avoid tracing, as we aren't going to do any manual
@@ -6393,7 +6391,7 @@ def _internal_new_from_data(
         # of a freshly allocated CPU tensor.  Here, we're going to do an
         # alternate, heinously slow implementation: turn each individual
         # scalar into a tensor, and then repeatedly cat them together
-        tensor = _recursive_build(sizes, 0, inferred_scalar_type, data)
+        tensor = _recursive_build(inferred_scalar_type, data)
 
         tensor = tensor.to(device, inferred_scalar_type, non_blocking=False, copy=False)
 

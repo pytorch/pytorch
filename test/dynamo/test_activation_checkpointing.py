@@ -1,7 +1,8 @@
 # Owner(s): ["module: dynamo"]
 import functools
 import math
-import unittest
+import sys
+import unittest  # noqa: F811
 from importlib import import_module
 
 import torch
@@ -492,6 +493,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
     )
@@ -542,6 +546,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
     )
@@ -595,6 +602,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
     )
@@ -663,6 +673,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
     )
@@ -712,6 +725,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
     )
@@ -760,6 +776,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
     @unittest.skip(
         "In-place op support in selective checkpointing + torch.compile "
         "requires TorchDispatchMode + torch.compile work to complete"
@@ -814,6 +833,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
     )
@@ -875,6 +897,9 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             self._compare_orig_and_checkpointed_fns(gn, fn, x)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
     @torch._dynamo.config.patch(
         "_experimental_support_context_fn_in_torch_utils_checkpoint", True
     )

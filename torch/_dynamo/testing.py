@@ -43,16 +43,6 @@ def clone_me(x):
     return x.detach().clone().requires_grad_(x.requires_grad)
 
 
-def skip_if_pytest(fn):
-    @functools.wraps(fn)
-    def wrapped(*args, **kwargs):
-        if "PYTEST_CURRENT_TEST" in os.environ:
-            raise unittest.SkipTest("does not work under pytest")
-        return fn(*args, **kwargs)
-
-    return wrapped
-
-
 def named_parameters_for_optimized_module(mod):
     assert isinstance(mod, eval_frame.OptimizedModule)
     return mod._orig_mod.named_parameters
@@ -350,6 +340,12 @@ def skipIfNotPy311(fn):
     if sys.version_info >= (3, 11):
         return fn
     return unittest.skip(fn)
+
+
+def xfailIfPy311(fn):
+    if sys.version_info >= (3, 11):
+        return unittest.expectedFailure(fn)
+    return fn
 
 
 # Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py

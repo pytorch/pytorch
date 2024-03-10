@@ -879,9 +879,7 @@ void initJitScriptBindings(PyObject* module) {
               },
               [](const std::tuple<py::object, std::string>& state_tup)
                   -> Object {
-                py::object state;
-                std::string qualname;
-                std::tie(state, qualname) = state_tup;
+                auto [state, qualname] = state_tup;
                 auto class_type = getCustomClass(qualname);
                 TORCH_CHECK(
                     class_type,
