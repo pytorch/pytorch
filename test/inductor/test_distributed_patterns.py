@@ -102,6 +102,89 @@ class DistributedPatternTests(TestCase):
         self.assertEqual(out.untyped_storage().size(), x.untyped_storage().size())
         self.assertEqual(out, expected)
 
+    @torch.no_grad()
+    def test_unsafe_set_version_counter1(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(w, x):
+            x = x.sin()
+            v = w._version
+            w.copy_(x + 1)
+            torch._C._autograd._unsafe_set_version_counter(w, v)
+            return w, v
+
+        for v in (3, 0, 1):
+            w1 = torch.randn(16)
+            for i in range(v):
+                w1.fill_(i)  # bump w1._version
+            self.assertEqual(w1._version, v)
+            x1 = torch.randn(16)
+            w2, v2 = fn(w1, x1)
+
+            self.assertIs(w1, w2)
+            self.assertEqual(w1, x1.sin() + 1)
+            self.assertEqual(v2, v)
+            self.assertEqual(w1._version, v)
+            self.assertEqual(cnt.frame_count, 1)
+
+    def test_unsafe_set_version_counter2(self):
+        @torch.compile(backend="inductor", fullgraph=True)
+        def fn(w, x):
+            r = w.sin()
+            with torch.no_grad():
+                v = w._version
+                w.copy_(x)
+                torch._C._autograd._unsafe_set_version_counter(w, v)
+            return r
+
+        w1 = torch.randn(1, requires_grad=True)
+        x1 = torch.randn(1)
+        expected_r1 = w1.detach().sin()
+
+        r1 = fn(w1, x1)
+        r1.backward()
+        self.assertEqual(r1, expected_r1)
+        self.assertEqual(w1, x1)
+        self.assertEqual(w1.grad, x1.cos())
+
+    @torch.no_grad()
+    def test_unsafe_preserve_version_counter1(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(w, x):
+            x = x.sin()
+            with torch.autograd._unsafe_preserve_version_counter(w):
+                w.copy_(x + 1)
+            return w
+
+        w1 = torch.randn(16).fill_(0).fill_(1)
+        x1 = torch.randn(16)
+        v1 = w1._version
+        w2 = fn(w1, x1)
+        v2 = w1._version
+
+        self.assertIs(w1, w2)
+        self.assertEqual(w1, x1.sin() + 1)
+        self.assertEqual(v1, v2)
+
+    def test_unsafe_preserve_version_counter2(self):
+        @torch.compile(backend="inductor", fullgraph=True)
+        def fn(w, x):
+            r = w.sin()
+            with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(w):
+                w.copy_(x)
+            return r
+
+        w1 = torch.randn(1, requires_grad=True)
+        x1 = torch.randn(1)
+        expected_r1 = w1.detach().sin()
+
+        r1 = fn(w1, x1)
+        r1.backward()
+        self.assertEqual(r1, expected_r1)
+        self.assertEqual(w1, x1)
+        self.assertEqual(w1.grad, x1.cos())
+
     def test_module_backward_hooks_eager(self):
         m1, inp1 = init_module_bw_hooks(True)
         out1 = steps(m1, inp1)
