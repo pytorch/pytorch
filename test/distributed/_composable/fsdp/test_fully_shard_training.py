@@ -795,9 +795,9 @@ class TestFullyShardHSDPTraining(FSDPTest):
         )
         self.run_subtests(
             {
-                "reshard_after_forward": [True],
-                "use_activation_checkpointing": [False],
-                "mlp_dim": [3],
+                "reshard_after_forward": [False, True],
+                "use_activation_checkpointing": [False, True],
+                "mlp_dim": [3, 16, 17],
                 "sync_gradients_at_last_batch": [True, False],
             },
             functools.partial(self._test_train_parity_hsdp, global_mesh),
