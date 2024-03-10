@@ -89,25 +89,13 @@ class _ToTorchTensor(torch.autograd.Function):
             grad_output, mesh, dtensor_spec.placements
         )
         tensor_stride = tuple(tensor_stride)
-        if grad_placements is not None:
-            grad_spec = DTensorSpec(
-                mesh,
-                grad_placements,
-                tensor_meta=TensorMeta(
-                    shape=dtensor_meta.shape,
-                    stride=tensor_stride,
-                    dtype=dtensor_meta.dtype,
-                ),
-            )
-            grad_output = redistribute_local_tensor(
-                grad_output, grad_spec, dtensor_spec
-            )
+        grad_placements = grad_placements or dtensor_spec.placements
 
         return (
             DTensor(
                 grad_output,
                 mesh,
-                dtensor_spec.placements,
+                grad_placements,
                 shape=dtensor_meta.shape,
                 dtype=dtensor_meta.dtype,
                 requires_grad=grad_output.requires_grad,
@@ -289,8 +277,6 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             requires_grad=requires_grad,
             stride=outer_stride,
         )
-
-    __torch_function__ = torch._C._disabled_torch_function_impl
 
     @classmethod
     # pyre-fixme[3]: Return type must be annotated.
