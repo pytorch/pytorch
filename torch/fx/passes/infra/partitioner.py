@@ -244,14 +244,21 @@ class CapabilityBasedPartitioner:
             partitions_to_remove: List[int] = []
             for id, partition in partitions_by_id.items():
                 compute_node_count = 0
+                got_allowed_single_node_partition_op = False
                 for node in partition.nodes:
                     if node.op == "call_function":
                         assert callable(node.target)
                         if _get_qualified_name(node.target) not in non_compute_ops:
                             compute_node_count += 1
+                        # Though single_node_partition has been disabled here, we still allow
+                        # single node partition for certain ops.
                         if _get_qualified_name(node.target) in self.allowed_single_node_partition_ops:
-                            compute_node_count += 1
-                if compute_node_count <= 1:
+                            got_allowed_single_node_partition_op = True
+                        if compute_node_count == 1 and got_allowed_single_node_partition_op \
+                                or compute_node_count > 1:
+                            break
+                if compute_node_count == 0 or (compute_node_count <= 1 \
+                        and not got_allowed_single_node_partition_op):
                     partitions_to_remove.append(id)
             for id in partitions_to_remove:
                 del partitions_by_id[id]
