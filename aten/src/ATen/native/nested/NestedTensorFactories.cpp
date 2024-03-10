@@ -230,5 +230,23 @@ Tensor narrow_nested_symint(const at::Tensor& self, int64_t dim, SymInt start, S
       storage_offsets);
 }
 
+Tensor zeros_nested_symint(SymIntArrayRef size,
+                           c10::optional<ScalarType> dtype,
+                           c10::optional<Layout> layout,
+                           c10::optional<Device> device,
+                           c10::optional<bool> pin_memory) {
+  auto nt_sizes = get_nested_sizes_from_sym_sizes(size);
+  auto options = TensorOptions()
+    .dtype(dtype)
+    .layout(layout)
+    .device(device)
+    .pinned_memory(pin_memory);
+  Tensor zeros_buffer = at::zeros(
+      {at::native::get_numel_from_nested_size_tensor(nt_sizes)},
+      options);
+  auto nt_zeros = at::native::wrap_buffer(zeros_buffer, nt_sizes);
+  return nt_zeros;
+}
+
 } // namespace native
 } // namespace at

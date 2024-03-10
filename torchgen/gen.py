@@ -944,37 +944,44 @@ class ComputeBackendSelect:
         name = native.name(f.func)
         # BackendSelect can go to Meta, so it must preserve symints
         native_sig = NativeSignature(f.func, symint=True)
-
-        native_tensor_args = [
-            a
-            for a in native_sig.arguments()
-            if isinstance(a.argument, Argument) and a.argument.type.is_tensor_like()
+        native_sig_args = [
+            a for a in native_sig.arguments() if isinstance(a.argument, Argument)
         ]
+        native_tensor_args = [
+            a for a in native_sig_args if a.argument.type.is_tensor_like()  # type: ignore[union-attr]
+        ]
+        assert (len(native_tensor_args) > 0) == f.func.arguments.has_tensor_arg()
 
         dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
         sig: Union[NativeSignature, DispatcherSignature]
         sig = dispatcher_sig
         dispatcher_exprs = dispatcher_sig.exprs()
-        dispatch_key = "c10::computeDispatchKey(dtype, layout, device)"
+        dispatch_key = (
+            "c10::DispatchKeySet(c10::computeDispatchKey(dtype, layout, device))"
+        )
 
         if self.target is Target.DEFINITION:
+            for a in native_sig_args:
+                if a.argument.type.is_list_like() and a.argument.type.is_symint_like():  # type: ignore[union-attr]
+                    assert a.name == "size"
+                    dispatch_key = (
+                        f"{dispatch_key} | computeDispatchKeySetFromSize(size)"
+                    )
+                    break
+
             # I don't think there's actually a good reason to generate
             # these two cases differently
             # The first case could probably be improved though- it calls computeDispatchKeySet(),
             # which looks at TLS dispatch keys- there should not be any by the time we reach backend select.
             if native_tensor_args:
-                assert f.func.arguments.has_tensor_arg()
                 tensor_args = ", ".join(a.name for a in native_tensor_args)
                 compute_dk = f"""\
-DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::multi_dispatch_key_set({tensor_args});
+DispatchKeySet _dk_set = {dispatch_key} | c10::detail::multi_dispatch_key_set({tensor_args});
 DispatchKeySet _dk_mask = c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::BackendSelect);
 DispatchKeySet _dk = c10::impl::computeDispatchKeySet(_dk_set, _dk_mask);"""
             else:
-                assert not f.func.arguments.has_tensor_arg()
-                compute_dk = (
-                    f"DispatchKeySet _dk = c10::DispatchKeySet({dispatch_key});"
-                )
+                compute_dk = f"DispatchKeySet _dk = {dispatch_key};"
             return f"""\
 // aten::{f.func}
 C10_ALWAYS_INLINE
