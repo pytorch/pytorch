@@ -488,7 +488,7 @@ def aot_dispatch_autograd(
             for i in fw_metadata.mutated_graph_handled_indices_seen_by_autograd:
                 arg = deduped_flat_tensor_args[i]
                 if not (arg.requires_grad and arg.is_leaf):  # would error
-                    ctx.mark_dirty()
+                    ctx.mark_dirty(arg)
                 marked_dirty_inps.append(arg)
 
             if not CompiledFunction._fakify_first_call:
