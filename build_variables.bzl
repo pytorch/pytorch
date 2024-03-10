@@ -123,6 +123,7 @@ core_trainer_sources = [
     "torch/csrc/autograd/autograd_not_implemented_fallback.cpp",
     "torch/csrc/autograd/cpp_hook.cpp",
     "torch/csrc/autograd/custom_function.cpp",
+    "torch/csrc/autograd/variable_info.cpp",
     "torch/csrc/autograd/engine.cpp",
     "torch/csrc/autograd/function.cpp",
     "torch/csrc/autograd/input_metadata.cpp",
@@ -770,6 +771,7 @@ libtorch_python_cuda_sources = libtorch_python_cuda_core_sources + [
 ]
 
 libtorch_python_xpu_sources = [
+    "torch/csrc/xpu/Event.cpp",
     "torch/csrc/xpu/Module.cpp",
     "torch/csrc/xpu/Stream.cpp",
 ]
@@ -1152,6 +1154,8 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/airy_ai.cpp",
     "aten/src/ATen/native/cpu/batch_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/group_norm_kernel.cpp",
+    "aten/src/ATen/native/cpu/int4mm_kernel.cpp",
+    "aten/src/ATen/native/cpu/int8mm_kernel.cpp",
     "aten/src/ATen/native/cpu/layer_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/AmpGradScalerKernels.cpp",
     "aten/src/ATen/native/cpu/scaled_modified_bessel_k0.cpp",

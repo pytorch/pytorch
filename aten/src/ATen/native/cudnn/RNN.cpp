@@ -317,7 +317,7 @@ auto rnn_descriptor_sequence(
     uint32_t vector_size) { // packed case
   RNNDataDescriptor r;
   std::vector<int> seqLengthArray(batch_size, 1);
-  // cuDNN wants the sequence lenghts for a packed batch as if they
+  // cuDNN wants the sequence lengths for a packed batch as if they
   // were unpacked, e.g., for the
   // Sequence 1: ABCD
   // Sequence 2: EF
