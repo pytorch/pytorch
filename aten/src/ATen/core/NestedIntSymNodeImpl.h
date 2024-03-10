@@ -7,6 +7,7 @@
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 #include <cstdint>
+#include <unordered_map>
 #include <string>
 
 namespace c10 {
@@ -181,6 +182,30 @@ class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
  private:
   int64_t val_;
   int64_t coeff_;
+};
+
+class TORCH_API UnionFind {
+    std::unordered_map<int64_t, std::pair<int64_t, size_t>> data;
+public:
+    int64_t find(int64_t x) {
+        if(data.count(x) == 0) data[x] = {x, 1};
+        if (data[x].first != x) {
+            data[x].first = find(data[x].first);
+        }
+        return data[x].first;
+    }
+    void merge(int64_t x, int64_t y) {
+        if(data.count(x) == 0) data[x] = {x, 1};
+        if(data.count(y) == 0) data[y] = {y, 1};
+        int64_t x_root = find(x), y_root = find(y);
+        if (x_root == y_root)
+            return;
+        if (data[x_root].second < data[y_root].second) {
+            std::swap(x_root, y_root);
+        }
+        data[y_root].first = x_root;
+        data[x_root].second += data[y_root].second;
+    }
 };
 
 } // namespace c10
