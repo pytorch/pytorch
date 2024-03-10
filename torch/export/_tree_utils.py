@@ -17,14 +17,14 @@ def reorder_kwargs(user_kwargs: Dict[str, Any], spec: TreeSpec) -> Dict[str, Any
     kwargs_spec = spec.child(1)
     assert kwargs_spec.type is dict
 
-    if set(user_kwargs) != set(kwargs_spec.context):
+    if set(user_kwargs) != set(kwargs_spec.entries()):
         raise ValueError(
             f"kwarg key mismatch: "
-            f"Got {list(user_kwargs)} but expected {kwargs_spec.context}"
+            f"Got {list(user_kwargs)} but expected {kwargs_spec.entries()}"
         )
 
     reordered_kwargs = {}
-    for kw in kwargs_spec.context:
+    for kw in kwargs_spec.entries():
         reordered_kwargs[kw] = user_kwargs[kw]
 
     return reordered_kwargs
