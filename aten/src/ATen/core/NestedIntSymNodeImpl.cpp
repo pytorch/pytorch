@@ -9,9 +9,11 @@ bool _eq(const char* op, c10::SymNodeImpl* lhs, c10::SymNodeImpl* rhs) {
   TORCH_INTERNAL_ASSERT(lhs->is_nested_int());
   c10::optional<int64_t> c = rhs->nested_int();
   auto& union_find = get_nested_int_union_find();
-  return (
-      c.has_value() && union_find.find(*lhs->nested_int()) == union_find.find(*c) &&
-      lhs->nested_int_coeff() == rhs->nested_int_coeff());
+  if (!c.has_value()) {
+    return false;
+  }
+  TORCH_CHECK(union_find.find(*lhs->nested_int()) == union_find.find(*c));
+  return lhs->nested_int_coeff() == rhs->nested_int_coeff();
 }
 bool _ge(const char* op, c10::SymNodeImpl* lhs, c10::SymNodeImpl* rhs) {
   if (auto mb_si = lhs->nested_int()) {

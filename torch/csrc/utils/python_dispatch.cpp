@@ -670,8 +670,6 @@ void initDispatchBindings(PyObject* module) {
       .def("merge", &c10::UnionFind::merge)
       .def("find", &c10::UnionFind::find);
 
-<<<<<<< HEAD
-=======
   m.def("_get_nested_int_union_find", []() -> c10::UnionFind& {
     return c10::get_nested_int_union_find();
   }, py::return_value_policy::reference);
@@ -680,7 +678,6 @@ void initDispatchBindings(PyObject* module) {
     c10::set_nested_int_union_find(uf);
   });
 
->>>>>>> 1a885223dcc ([do not review])
   m.attr("_dispatch_autogradother_backends") =
       py::cast(c10::autogradother_backends);
 
