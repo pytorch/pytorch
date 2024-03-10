@@ -224,6 +224,7 @@ jobs:
         run: |
           set -x
           mkdir -p ${{runner.temp}}/artifacts/
+          ls -l ${{runner.temp}}/
           ls -l ${{runner.temp}}/artifacts-all/
           ls -l ${{runner.temp}}/artifacts-all/pytorch-triton-wheel-*/*
           mv ${{runner.temp}}/artifacts-all/pytorch-triton-wheel-*/* ${{runner.temp}}/artifacts/
