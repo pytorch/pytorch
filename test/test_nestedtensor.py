@@ -51,7 +51,9 @@ from torch.nested._internal.nested_tensor import (
     buffer_from_jagged,
     jagged_from_list,
     NestedTensor,
+    TensorUnionFind,
 )
+from torch.nested._internal.union_find import TensorIntMap, TensorUnionFind
 
 # Tests are ported from pytorch/nestedtensor.
 # This makes porting as_nested_tensor easier in the future.
@@ -3058,8 +3060,8 @@ class TestNestedTensorSubclass(TestCase):
                                     "directly calling torch.ops.aten.size"):
             torch.ops.aten.size.default(nt)
 
-        registry = torch.nested._internal.nested_tensor.NestedIntRegistry()
-        nested_int = registry.maybe_create(offsets)
+        nt_state = torch.nested._internal.nested_tensor.NestedTensorState()
+        nested_int = nt_state.create_nested_int(offsets)
         self.assertEqual(nt.size(), (3, nested_int, 3))
         self.assertEqual(nt.shape, (3, nested_int, 3))
         self.assertEqual(nt.dim(), 3)
@@ -4051,6 +4053,101 @@ class TestNestedTensorSubclass(TestCase):
             self.assertEqual(out, out_component, atol=output_ref_atol, rtol=output_ref_rtol)
 
 
+class TestTensorUnionFind(TestCase):
+    def _get_test_union_find(self):
+        class TestUnionFind(TensorUnionFind):
+            def merge(self, a, b):
+                super().merge(a, b)
+                super().validate_invariants()
+
+        return TestUnionFind()
+
+    def test_basic(self):
+        uf = self._get_test_union_find()
+        a = torch.tensor([1, 2, 3])
+        b = a.clone()
+        self.assertIsNot(uf.find(a), uf.find(b))
+        uf.merge(a, b)
+        self.assertIs(uf.find(a), uf.find(b))
+
+    @xfailIfTorchDynamo
+    def test_equiv_tensors(self):
+        uf = self._get_test_union_find()
+        a = torch.tensor([1, 2, 3])
+        self.assertEqual(set(uf.get_equiv_tensors(a)), {a})
+        b = a.clone()
+        c = a.clone()
+        uf.merge(a, b)
+        uf.merge(b, c)
+        canonical = uf.find(a)
+        self.assertEqual(set(uf.get_equiv_tensors(a)), {a, b, c})
+        self.assertIs(canonical, a)
+        del b
+        self.assertEqual(set(uf.get_equiv_tensors(a)), {a, c})
+
+    def test_metadata_merge(self):
+        uf = self._get_test_union_find()
+        a = torch.tensor([1, 2, 3])
+        b = a.clone()
+        uf.get_metadata(a)["foo"] = "bar"
+        uf.get_metadata(b)["foo"] = "baz"
+        uf.merge(a, b)
+        canonical = uf.find(a)
+        self.assertIs(canonical, a)
+        # See Note [TensorUnionFind: Metadata merging asymmetry]
+        self.assertEqual(uf.get_metadata(a)["foo"], "baz")
+
+    @xfailIfTorchDynamo
+    def test_lifetime(self):
+        # Tests the invariant that the canonical tensor is kept alive by the
+        # the tensors in its equiv set.
+        uf = self._get_test_union_find()
+        a = torch.tensor([1, 2, 3])
+        b = a.clone()
+        canonical = uf.find(a)
+        weak_canonical = weakref.ref(canonical)
+        uf.merge(a, b)
+        del canonical
+        self.assertIsNotNone(weak_canonical())
+        del a, b
+        self.assertIsNone(weak_canonical())
+
+    def test_tensor_int_map_version_counting(self):
+        m = TensorIntMap()
+        a = torch.tensor([1, 2, 3])
+        a_id_0 = m.get_int(a)
+        self.assertIs(m.get_opt_tensor(a_id_0), a)
+        a.add_(1)
+        self.assertIsNone(m.get_opt_tensor(a_id_0))
+        a_id_1 = m.get_int(a)
+        self.assertEqual(a_id_0 + 1, a_id_1)
+        self.assertIs(m.get_opt_tensor(a_id_1), a)
+        del a
+        self.assertIsNone(m.get_opt_tensor(a_id_1))
+
+    def test_union_find_mutate_canonical(self):
+        # See Note [TensorUnionFind: Union find over "versions of tensors"]
+        uf = self._get_test_union_find()
+        a = torch.tensor([1, 2, 3])
+        b = a.clone()
+        uf.merge(a, b)
+        self.assertIs(uf.find(a), uf.find(b))
+        # a is canonical
+        self.assertIs(uf.find(a), a)
+        # mutate the canonical
+        a.add_(1)
+
+        # When another tensor in the set tries to query for the canonical
+        with self.assertRaisesRegex(RuntimeError, "has been mutated"):
+            uf.find(b)
+
+        # What happens if we merge this new one with the old one? You can't!
+        with self.assertRaisesRegex(RuntimeError, "has been mutated"):
+            uf.merge(a, b)
+
+        # To the perspective of the mutated tensor, it will just belong
+        # to a new set where it is still canonical.
+        self.assertIs(uf.find(a), a)
 class TestNestedIntRegistry(TestCase):
     def test_basic_creation(self):
         registry = torch.nested._internal.nested_tensor.NestedIntRegistry()
@@ -4117,74 +4214,6 @@ class TestNestedIntRegistry(TestCase):
         ref = weakref.ref(vec)
         del vec
         self.assertIs(ref(), nested_int.node.nested_int_vec())
-
-    def test_changing_canonical_nested_int_and_vec(self):
-        registry = torch.nested._internal.nested_tensor.NestedIntRegistry()
-        vec = torch.tensor([1, 2, 3])
-        nested_int = registry.maybe_create(vec)
-        equiv_set_id = nested_int.node.nested_int()
-        del nested_int
-        nested_int2 = registry.maybe_create(vec)
-        # As long as the vec stays alive, the equiv_set_id should stay the same
-        self.assertEqual(nested_int2.node.nested_int(), equiv_set_id)
-
-        vec_clone = vec.clone()
-        nested_int3 = registry.maybe_create(vec_clone, equiv_set_from=nested_int2.node.nested_int_vec())
-        self.assertIs(nested_int3, nested_int2)
-        ref = weakref.ref(vec)
-        del vec, nested_int2, nested_int3
-        # vec is dead because there are no more nested ints keeping it alive
-        self.assertIsNone(ref())
-
-        nested_int4 = registry.maybe_create(vec_clone)
-        # The equiv_set_id should not have changed because at least one vec
-        # in the equiv set is still alive: vec_clone
-        self.assertEqual(nested_int4.node.nested_int(), equiv_set_id)
-        # The new canonical vec is vec_clone
-        self.assertIs(nested_int4.node.nested_int_vec(), vec_clone)
-
-        self.assertTrue(len(registry._equiv_sets) == 1)
-        with disable_gc():
-            del vec_clone, nested_int4
-            self.assertTrue(len(registry._equiv_sets) == 0)
-
-    def test_custom_equiv_set(self):
-        # A equiv set is "custom" if its canonical int was created using a
-        # custom ctor_fn.
-        count = [0]
-
-        def ctor_fn(equiv_id, vec):
-            count[0] += 1
-            return torch.nested._internal.nested_tensor._get_nested_int(equiv_id, vec)
-
-        registry = torch.nested._internal.nested_tensor.NestedIntRegistry()
-        vec = torch.tensor([1, 2, 3])
-        nested_int = registry.maybe_create(vec, ctor_fn=ctor_fn)
-        self.assertEqual(count[0], 1)
-
-        # Grab the same nested int again, and the ctor_fn should not be called
-        self.assertIs(registry.maybe_create(vec), nested_int)
-        self.assertEqual(count[0], 1)
-        # Okay to pass ctor_fn again, it won't be used here though
-        self.assertIs(registry.maybe_create(vec, ctor_fn=ctor_fn), nested_int)
-        self.assertEqual(count[0], 1)
-
-        # Custom equiv set are different from ordinary equiv set
-        # in that their canonical nested int cannot be changed. If the nested
-        # int of a custom equiv set dies, don't allow re-creation.
-        del nested_int
-        with self.assertRaises(AssertionError):
-            registry.maybe_create(vec)
-        with self.assertRaises(AssertionError):
-            registry.maybe_create(vec, ctor_fn=ctor_fn)
-
-        # Custom-ness of a given equiv set is immutable. ctor_fn cannot be used
-        # during re-creation.
-        vec = torch.tensor([1, 2, 3])
-        nested_int = registry.maybe_create(vec)
-        del nested_int
-        with self.assertRaises(AssertionError):
-            registry.maybe_create(vec, ctor_fn=ctor_fn)
 
 
 instantiate_parametrized_tests(TestNestedTensor)
