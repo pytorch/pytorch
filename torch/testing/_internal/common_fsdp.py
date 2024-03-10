@@ -5,10 +5,12 @@ import itertools
 import os
 import re
 import sys
+import warnings
 from abc import ABC, abstractmethod
 from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
+from functools import partial, wraps
 from typing import (
     Any,
     Callable,
@@ -49,6 +51,7 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import FILE_SCHEMA, get_cycles_per_ms
+from torch.utils._triton import has_triton
 
 
 class FSDPInitMode(Enum):
@@ -835,7 +838,7 @@ class MLP(nn.Module):
     def __init__(
         self,
         dim: int,
-        device: torch.device = torch.device("cpu"),
+        device: Optional[torch.device] = None,
         with_buffer: bool = False,
         dim_multiplier: int = 4,
     ):
@@ -852,9 +855,13 @@ class MLP(nn.Module):
         z = F.relu(z)
         z = self.out_proj(z)
         z = F.relu(z)
-        if self.buffer:
-            z += self.buffer
+        if self.buffer is not None:
+            z = z + self.buffer
         return z
+
+    def reset_parameters(self):
+        if self.buffer is not None:
+            torch.nn.init.normal_(self.buffer)
 
 
 class DoubleLinear(nn.Module):
@@ -1350,6 +1357,53 @@ class FSDPTest(MultiProcessTestCase):
                 exact_device=True,
                 msg="FSDP did not match DDP",
             )
+
+
+def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
+    def fully_shard_with_compiled_compute(*args, **kwargs):
+        # compile ``module._call_impl``
+        # to showcase how to include user-registered hooks
+        if compile_compute_on_module is None or isinstance(
+            args[0], compile_compute_on_module
+        ):
+            args[0].compile()
+        return torch.distributed._composable.fsdp.fully_shard(*args, **kwargs)  # type: ignore[operator]
+
+    class FullyShardPatch(Enum):
+        # apply ``partial`` in order to use ``Enum.value``
+        EAGER = partial(torch.distributed._composable.fsdp.fully_shard)  # type: ignore[var-annotated, arg-type]
+        COMPILED_COMPUTE = partial(fully_shard_with_compiled_compute)  # type: ignore[arg-type]
+        # add FULL for tracing FSDP
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            original_fully_shard = torch.distributed._composable.fsdp.fully_shard
+            for fully_shard_patch in FullyShardPatch:
+                if fully_shard_patch != FullyShardPatch.EAGER and not has_triton():
+                    warnings.warn("Inductor on GPU needs Triton and recent GPU arch")
+                    continue
+                imported_fully_shard = (
+                    f"{func.__module__}.{original_fully_shard.__name__}"
+                )
+                with mock.patch(
+                    imported_fully_shard,
+                    fully_shard_patch.value,
+                ):
+                    func(*args, **kwargs)
+                    torch.distributed.barrier()
+                # mock.patch.__exit__ does not work with multi-thread
+                # thread 1 set {func.__module__}.fully_shard
+                # thread 2 read {func.__module__}.fully_shard and thought it is original
+                # hence we manually reset them after __exit__
+                import_path, _ = mock._get_target(imported_fully_shard)  # type: ignore[attr-defined]
+                setattr(
+                    import_path(), original_fully_shard.__name__, original_fully_shard
+                )
+
+        return wrapper
+
+    return decorator
 
 
 class SkipModule(nn.Module):

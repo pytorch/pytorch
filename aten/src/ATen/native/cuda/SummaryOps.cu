@@ -192,7 +192,7 @@ bool CUDA_tensor_histogram(
 
   const dim3 block = getApplyBlock();
   dim3 grid;
-  int64_t curDevice = current_device();
+  auto curDevice = current_device();
   if (curDevice == -1 || !getApplyGrid(totalElements, grid, curDevice)) {
     return false;
   }

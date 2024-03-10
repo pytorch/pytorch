@@ -724,7 +724,7 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
     const auto& hx = std::get<0>(hidden);
     const auto& cx = std::get<1>(hidden);
 
-    if (input.is_cuda()) {
+    if (input.is_cuda() || input.is_privateuseone()) {
       TORCH_CHECK(!pre_compute_input);
       auto igates = params.matmul_ih(input);
       auto hgates = params.matmul_hh(hx);
@@ -760,7 +760,7 @@ struct GRUCell : Cell<Tensor, cell_params> {
       const hidden_type& hidden,
       const cell_params& params,
       bool pre_compute_input = false) const override {
-    if (input.is_cuda() || input.is_xpu()) {
+    if (input.is_cuda() || input.is_xpu() || input.is_privateuseone()) {
       TORCH_CHECK(!pre_compute_input);
       auto igates = params.matmul_ih(input);
       auto hgates = params.matmul_hh(hidden);
