@@ -133,6 +133,15 @@ void Context::setSDPUseMath(bool e) {
   enabled_mathSDP = e;
 }
 
+bool Context::userEnabledCuDNNSDP() const {
+  return enabled_cudnnSDP;
+}
+
+void Context::setSDPUseCuDNN(bool e) {
+  enabled_cudnnSDP = e;
+}
+
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
@@ -165,7 +174,7 @@ void Context::alertCuBLASConfigNotDeterministic() const {
     "case, you must set an environment variable before running your PyTorch application: ",
     cublas_config_var_name, "=", cublas_deterministic_configs[0], " or ",
     cublas_config_var_name, "=", cublas_deterministic_configs[1], ". For more information, go to ",
-    "https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility"
+    "https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility"
   );
 
   if (deterministicAlgorithmsWarnOnly()) {
@@ -424,25 +433,23 @@ bool NoTF32Guard::should_disable_tf32() {
   return override_allow_tf32_flag;
 }
 
-#ifdef USE_ROCM
 // Ops can query this flag to know they are in the backward pass.
 // This information can be used, for example, to select implementations
 // with different numerical or performance characteristics.
 // See https://pytorch.org/docs/stable/notes/numerical_accuracy.html for details.
-thread_local bool ROCmBackwardPassGuard::is_backward_pass_;
+thread_local bool rocm_is_backward_pass;
 
 ROCmBackwardPassGuard::ROCmBackwardPassGuard() {
-  is_backward_pass_ = true;
+  rocm_is_backward_pass = true;
 }
 
 ROCmBackwardPassGuard::~ROCmBackwardPassGuard() {
-  is_backward_pass_ = false;
+  rocm_is_backward_pass = false;
 }
 
 bool ROCmBackwardPassGuard::is_backward_pass() {
-  return is_backward_pass_;
+  return rocm_is_backward_pass;
 }
-#endif
 
 bool Context::areVmapFallbackWarningsEnabled() const {
   return display_vmap_fallback_warnings_;

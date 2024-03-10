@@ -361,10 +361,10 @@ struct TORCH_API TupleElements {
     switch (inlineSize_) {
       case 3:
         new (&elementsInline_[2]) IValue(elements[2]);
-        C10_FALLTHROUGH;
+        [[fallthrough]];
       case 2:
         new (&elementsInline_[1]) IValue(elements[1]);
-        C10_FALLTHROUGH;
+        [[fallthrough]];
       case 1:
         new (&elementsInline_[0]) IValue(elements[0]);
         break;
