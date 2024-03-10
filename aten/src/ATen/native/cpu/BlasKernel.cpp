@@ -5,7 +5,8 @@
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
 #include <iostream>
-#if defined(__ARM_FEATURE_FP16_SCALAR_ARITHMETIC) && !defined(C10_MOBILE)
+
+#if defined(__aarch64__) && !defined(C10_MOBILE)
 #include <arm_neon.h>
 
 namespace at::native::blas_impl {
@@ -272,7 +273,7 @@ void gemm_transab_(
   }
 }
 
-#if defined(__ARM_FEATURE_FP16_SCALAR_ARITHMETIC) && !defined(C10_MOBILE)
+#if defined(__aarch64__) && !defined(C10_MOBILE)
 template <>
 void gemm_notrans_(
     int64_t m,
