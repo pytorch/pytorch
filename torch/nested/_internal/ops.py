@@ -1044,7 +1044,7 @@ def jagged_factory(func, *args, **kwargs):
         )
     offsets = nested_int.node.nested_int_vec()
     nt_state = torch.nested._internal.nested_tensor.get_nt_state()
-    sum_offsets = nt_state.uf.get_metadata(offsets)["sum_vec"]
+    sum_offsets = nt_state.get_metadata(nested_int)["sum_vec"]
 
     return NestedTensor(func([sum_offsets, *Ds], **new_kwargs), offsets)
 

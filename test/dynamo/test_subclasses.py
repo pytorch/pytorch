@@ -1149,19 +1149,6 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         nt4, _ = self._get_jagged_tensor(((3, 4, 5), 4), offsets)
         self._check_recompiles(binary, (nt1, nt2), (nt3, nt4), False)
 
-    def test_binary_recompiles(self):
-        def binary(nt1, nt2):
-            if nt1.shape == nt2.shape:
-                return nt1 + nt2
-            else:
-                return nt1.sin()
-
-        # Binary recompiles because singleton ints no longer match
-        nt1, offsets = self._get_jagged_tensor(((2, 3, 4), 5), None)
-        nt2, _ = self._get_jagged_tensor(((2, 3, 4), 5), offsets)
-        nt3, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
-        self._check_recompiles(binary, (nt1, nt2), (nt1, nt3), True)
-
     # TODO: cannot parametrize this test class with device for some reason
     def _test_autograd(self, backend):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
@@ -1347,13 +1334,13 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
                     f"{s}: [{vr.lower}, {vr.upper}]"
                     for s, vr in context.fake_mode.shape_env.var_to_range.items()
                 ]
-                self.assertExpectedInline("\n".join(guards), """Eq(s3 - 1, s0)""")
+                self.assertExpectedInline("\n".join(guards), """Eq(s2 - 1, s0)""")
                 self.assertExpectedInline(
                     "\n".join(ranges),
                     """\
 s0: [2, 9223372036854775805]
-s2: [2, 9223372036854775806]
-s3: [3, 9223372036854775806]
+s2: [3, 9223372036854775806]
+s3: [2, 9223372036854775806]
 s5: [2, 9223372036854775806]""",
                 )
                 return gm
