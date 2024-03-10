@@ -795,14 +795,10 @@ class TestFullyShardHSDPTraining(FSDPTest):
         )
         self.run_subtests(
             {
-                # TODO
-                # "reshard_after_forward": [False, True],
-                # "use_activation_checkpointing": [False, True],
-                # "mlp_dim": [3, 16, 17],
                 "reshard_after_forward": [True],
                 "use_activation_checkpointing": [False],
                 "mlp_dim": [3],
-
+                "sync_gradients_at_last_batch": [True, False],
             },
             functools.partial(self._test_train_parity_hsdp, global_mesh),
         )
@@ -813,6 +809,7 @@ class TestFullyShardHSDPTraining(FSDPTest):
         reshard_after_forward: bool,
         use_activation_checkpointing: bool,
         mlp_dim: int,
+        sync_gradients_at_last_batch: bool,
     ):
         torch.manual_seed(42)
         model = nn.Sequential(
@@ -829,22 +826,33 @@ class TestFullyShardHSDPTraining(FSDPTest):
         for mlp in model:
             if use_activation_checkpointing:
                 checkpoint(mlp)
-            fully_shard(mlp, mesh=global_mesh, reshard_after_forward=reshard_after_forward)
-        fully_shard(model, mesh=global_mesh, reshard_after_forward=reshard_after_forward)
+            fully_shard(
+                mlp, mesh=global_mesh, reshard_after_forward=reshard_after_forward
+            )
+        fully_shard(
+            model, mesh=global_mesh, reshard_after_forward=reshard_after_forward
+        )
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
         torch.manual_seed(42 + self.rank + 1)
         device = torch.device("cuda")
-        for iter_idx in range(10):
-            inp = torch.randn((8, mlp_dim), device=device)
-            # TODO
-            losses: List[torch.Tensor] = []
-            for _model, _optim in ((ref_model, ref_optim), (model, optim)):
-                _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
-                losses.append(_model(inp).sum())
-                losses[-1].backward()
-                _optim.step()
-            self.assertEqual(losses[0], losses[1])
+        num_microbatches = 3
+        for iter_idx in range(5):
+            if iter_idx > 0:
+                for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+                    _optim.step()
+                    _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            for microbatch_idx in range(num_microbatches):
+                is_last_microbatch = microbatch_idx == num_microbatches - 1
+                if sync_gradients_at_last_batch:
+                    model.set_requires_gradient_sync(is_last_microbatch)
+                inp = torch.randn((8, mlp_dim), device=device)
+                losses: List[torch.Tensor] = []
+                for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+                    losses.append(_model(inp).sum())
+                    losses[-1].backward()
+                self.assertEqual(losses[0], losses[1])
+
 
 if __name__ == "__main__":
     run_tests()
