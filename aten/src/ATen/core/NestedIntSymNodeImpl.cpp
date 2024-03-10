@@ -8,8 +8,9 @@ namespace {
 bool _eq(const char* op, c10::SymNodeImpl* lhs, c10::SymNodeImpl* rhs) {
   TORCH_INTERNAL_ASSERT(lhs->is_nested_int());
   c10::optional<int64_t> c = rhs->nested_int();
+  auto& union_find = get_nested_int_union_find();
   return (
-      c.has_value() && lhs->nested_int() == *c &&
+      c.has_value() && union_find.find(*lhs->nested_int()) == union_find.find(*c) &&
       lhs->nested_int_coeff() == rhs->nested_int_coeff());
 }
 bool _ge(const char* op, c10::SymNodeImpl* lhs, c10::SymNodeImpl* rhs) {
@@ -81,5 +82,18 @@ at::Tensor get_nested_int_vec(const c10::SymNodeImpl* node) {
   TORCH_INTERNAL_ASSERT(node->is_nested_int());
   return at::Tensor(c10::intrusive_ptr<c10::TensorImpl>::reclaim_copy(node->nested_int_vec()));
 }
+
+namespace {
+  UnionFind nested_int_union_find_{};
+} // namespace
+
+UnionFind& get_nested_int_union_find() {
+  return nested_int_union_find_;
+}
+
+void set_nested_int_union_find(UnionFind& nested_int_union_find) {
+  nested_int_union_find_ = nested_int_union_find;
+}
+
 
 } // namespace c10
