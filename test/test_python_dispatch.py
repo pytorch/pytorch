@@ -864,8 +864,6 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)''')
 
     def test_new_ones(self) -> None:
         class MyTensor(torch.Tensor):
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 return MyTensor(3)
@@ -874,8 +872,6 @@ $6: f32[1] = torch._ops.aten.add_.Tensor($1, $5)''')
 
     def test_like(self) -> None:
         class MyTensor(torch.Tensor):
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 return MyTensor(3)
@@ -916,6 +912,13 @@ def forward(self, x_a_1, x_b_1, y_1):
     add = torch.ops.aten.add.Tensor(y_1, y_1);  y_1 = None
     return (mul, mul_1, add)
     """)
+
+    # See https://github.com/pytorch/pytorch/issues/117794
+    def test_return_and_correct_aliasing_gives_correct_stride(self):
+        t = TwoTensor(torch.randn(2, 2), torch.randn(2, 2))
+        x = torch.randn(2, 2)
+        # slicing should result in the same stride for TwoTensor as a dense tensor would give
+        self.assertEqual(t[:, 0].stride(), x[:, 0].stride())
 
     def test_make_wrapper_subclass_propagates_metadata(self) -> None:
         class WrapperTensor(torch.Tensor):
@@ -1048,7 +1051,6 @@ def forward(self, x_a_1, x_b_1, y_1):
         called_funcs = []
 
         class MyTensor(torch.Tensor):
-            __torch_function__ = torch._C._disabled_torch_function_impl
             elem: torch.Tensor
             __slots__ = ['elem']
 
@@ -1358,8 +1360,6 @@ $3: f32[] = torch._ops.aten.add.Tensor($1, $2)""")
 
                 return func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs))
 
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
         a = SubTensor(torch.randn(2))
         with PoliteMode() as mode:
             a.abs()
@@ -1594,8 +1594,6 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             def __new__(cls, elem):
                 return torch.Tensor._make_subclass(cls, elem)
 
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 called.append(func)
@@ -1614,8 +1612,6 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             def __new__(cls, elem):
                 return torch.Tensor._make_subclass(cls, elem)
 
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 called.append(func)
@@ -1632,8 +1628,6 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             @staticmethod
             def __new__(cls, elem):
                 return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
-
-            __torch_function__ = torch._C._disabled_torch_function_impl
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -1655,8 +1649,6 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         called = 0
 
         class SubTensor(torch.Tensor):
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 nonlocal called
@@ -1690,8 +1682,6 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             def __new__(cls, elem):
                 r = torch.Tensor._make_subclass(cls, elem)
                 return r
-
-            __torch_function__ = torch._C._disabled_torch_function_impl
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):

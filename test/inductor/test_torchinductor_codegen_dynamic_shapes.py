@@ -11,7 +11,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TestCase,
 )
 from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
@@ -38,6 +37,7 @@ from inductor.test_torchinductor import (
     copy_tests,
     run_and_get_cpp_code,
     run_and_get_triton_code,
+    TestCaseBase as TestCase,
     TestFailure,
 )
 from inductor.test_torchinductor_dynamic_shapes import make_dynamic_cls
@@ -69,6 +69,7 @@ def check_codegen(
         example_inputs = tuple(copy_fn(x) for x in example_inputs)
 
     torch._dynamo.reset()
+    torch._inductor.codecache.FxGraphCache.clear()
     torch._inductor.metrics.reset()
 
     called = False
@@ -142,6 +143,8 @@ test_failures = {
     #
     "test_complex_fallback_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_adaptive_avg_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_adaptive_max_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_fractional_max_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_argmax_to_float_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_avg_pool2d7_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_avg_pool2d_backward4_dynamic_shapes": TestFailure(("cpu", "cuda")),
@@ -169,6 +172,8 @@ test_failures = {
     "test_like_rands_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linspace2_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linspace3_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_logcumsumexp_dynamic_shapes": TestFailure(("cpu",)),
+    "test_logcumsumexp_zero_dim_dynamic_shapes": TestFailure(("cpu",)),
     "test_max_pool2d6_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_max_pool2d8_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_max_pool2d_with_indices_backward5_dynamic_shapes": TestFailure(
@@ -332,15 +337,12 @@ test_failures = {
 if TEST_WITH_ROCM:
     test_failures.update(
         {
-            "test_cumsum_dynamic_shapes": TestFailure(("cpu", "cuda")),
-            "test_cumsum_no_mask_dynamic_shapes": TestFailure(("cpu", "cuda")),
             "test_split_cumsum_dynamic_shapes": TestFailure(("cpu", "cuda")),
             "test_split_cumsum_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
             "test_split_cumprod_dynamic_shapes": TestFailure(("cpu", "cuda")),
             "test_split_cumprod_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
         }
     )
-
 
 DynamicShapesCodegenCommonTemplate = make_dynamic_cls(
     CommonTemplate, xfail_prop="_expected_failure_codegen_dynamic"
