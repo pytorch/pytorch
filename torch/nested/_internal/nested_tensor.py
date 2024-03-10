@@ -21,15 +21,22 @@ class NestedTensorState:
         )
 
     def create_nested_int(self, tensor, ctor_fn=None):
-        # Parameters:
-        #     ctor_fn (Callable[[int, Tensor], SymInt]): If not None, use a custom
-        #        constructor to create the nested int.
         if (isinstance(tensor, torch._subclasses.fake_tensor.FakeTensor) or
             isinstance(tensor, torch._subclasses.functional_tensor.FunctionalTensor)) and ctor_fn is None:
             # TODO: this seems weird, understand it better
             return tensor.create_nested_int(_get_nested_int, use_cache=True)
         _ctor_fn = ctor_fn if ctor_fn is not None else _get_nested_int
         return _ctor_fn(self._tensor_int_map.get_int(tensor), tensor)
+
+    def get_metadata(self, nested_int):
+        vec = nested_int.node.nested_int_vec()
+        if (isinstance(vec, torch._subclasses.fake_tensor.FakeTensor) or
+            isinstance(vec, torch._subclasses.functional_tensor.FunctionalTensor)):
+            # TODO: actually store version information on the symbolic nested int?
+            return self.uf.get_metadata(vec)
+        if self._tensor_int_map.get_int(vec) != nested_int.node.nested_int():
+            raise RuntimeError("the vec has been mutated")
+        return self.uf.get_metadata(vec)
 
 
 _nt_state: Optional[NestedTensorState] = None
@@ -39,6 +46,12 @@ def get_nt_state() -> NestedTensorState:
     if _nt_state is None:
         _nt_state = NestedTensorState()
     return _nt_state
+
+
+def reset_nt_state():
+    global _nt_state
+    _nt_state = None
+    torch._C._set_nested_int_union_find_copy(torch._C._UnionFind())
 
 
 def trust_me_assert_equal(vec1, vec2, _nt_state=None):
@@ -122,7 +135,7 @@ class NestedTensor(torch.Tensor):
         # TODO: why does printing break stuff when more than one test is ran
         # nt_state.print_metadata()
         # nt_state.validate_invariants()
-        metadata = nt_state.uf.get_metadata(ragged_source)
+        metadata = nt_state.get_metadata(ragged_size)
         metadata["sum_vec"] = values.shape[0]
 
         self._ragged_idx = kwargs.get("_ragged_idx", 1)

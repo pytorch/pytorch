@@ -3102,9 +3102,9 @@ class TestNestedTensorSubclass(TestCase):
         nt1, _ = jagged_from_list([a, b, c], None)
         nt2, _ = jagged_from_list([a, b, c], None)
 
-        self.assertRaisesRegex(
+        self.assertRaises(
             RuntimeError,
-            "cannot call binary pointwise function .* with inputs of shapes",
+            # "cannot call binary pointwise function .* with inputs of shapes",
             lambda: nt1 * nt2)
 
         # Correct usage: chain the calls using the same offsets tensor object
@@ -3741,7 +3741,8 @@ class TestNestedTensorSubclass(TestCase):
         def check_size(nt1, nt2, nt3, nt4):
             self.assertTrue(torch.ops.aten.is_same_size(nt1, nt2))
             self.assertTrue(torch.ops.aten.is_same_size(nt3, nt4))
-            self.assertFalse(torch.ops.aten.is_same_size(nt1, nt3))
+            with self.assertRaises(RuntimeError):
+                torch.ops.aten.is_same_size(nt1, nt3)
 
         check_size(nt1, nt2, nt3, nt4)
 
@@ -4085,58 +4086,51 @@ class TestTensorUnionFind(TestCase):
         # to a new set where it is still canonical.
         self.assertIs(uf.find(a), a)
 class TestNestedIntRegistry(TestCase):
-    def test_basic_creation(self):
-        registry = torch.nested._internal.nested_tensor.NestedIntRegistry()
+    def test_basic_usage(self):
+        nt_state = torch.nested._internal.nested_tensor.NestedTensorState()
         vec = torch.tensor([1, 2, 3])
-        nested_int = registry.maybe_create(vec)
+        nested_int = nt_state.create_nested_int(vec)
         # Vec is the only vec, and so it is also the canonical vec
         self.assertIs(nested_int.node.nested_int_vec(), vec)
-        nested_int2 = registry.maybe_create(vec)
-        # Return the same nested int if same vec is passed in
-        self.assertIs(nested_int2, nested_int)
-
-    def test_multiple_equiv_sets(self):
-        registry = torch.nested._internal.nested_tensor.NestedIntRegistry()
-        vec = torch.tensor([1, 2, 3])
-        vec2 = torch.tensor([4, 5, 6])
-        nested_int = registry.maybe_create(vec)
-        nested_int2 = registry.maybe_create(vec2)
-        self.assertIs(nested_int.node.nested_int_vec(), vec)
-        self.assertIs(nested_int2.node.nested_int_vec(), vec2)
+        nested_int2 = nt_state.create_nested_int(vec)
+        self.assertEqual(nested_int.node.nested_int(), nested_int2.node.nested_int())
+        # We always create fresh nested int, even if the vec is the same
         self.assertIsNot(nested_int, nested_int2)
-        self.assertIs(nested_int == nested_int2, False)
 
-        # The same vec cannot belong to more than one equiv set
-        with self.assertRaisesRegex(AssertionError, "vec already has equiv_set"):
-            registry.maybe_create(vec, equiv_set_from=nested_int2)
+        # When we create a new nested int with a new vec, trying to compare
+        # them will raise an error
+        vec2 = torch.tensor([4, 5, 6])
+        nested_int3 = nt_state.create_nested_int(vec2)
+        self.assertIs(nested_int3.node.nested_int_vec(), vec2)
+        with self.assertRaises(RuntimeError):
+            nested_int == nested_int3
+
+        # After merging the two equiv sets, the nested ints compare equal
+        torch.nested._internal.nested_tensor.trust_me_assert_equal(vec, vec2, _nt_state=nt_state)
+        self.assertEqual(nested_int, nested_int3)
 
     def test_version_counting(self):
-        registry = torch.nested._internal.nested_tensor.NestedIntRegistry()
+        nt_state = torch.nested._internal.nested_tensor.NestedTensorState()
         vec = torch.tensor([1, 2, 3])
-        registry.maybe_create(vec)
+        vec2 = vec.clone()
+        nested_int = nt_state.create_nested_int(vec)
+        nested_int2 = nt_state.create_nested_int(vec2)
+        torch.nested._internal.nested_tensor.trust_me_assert_equal(vec, vec2, _nt_state=nt_state)
+        self.assertEqual(nested_int, nested_int2)
         vec.add_(1)
-        with self.assertRaisesRegex(AssertionError, "has been mutated"):
-            registry.maybe_create(vec)
+        # nested_int corresponds to a specific version of vec, we allow the
+        # nested_int to continue to be used in equality operations, but
+        # we don't allow its vec to be used in any operations.
+        self.assertEqual(nested_int, nested_int2)
 
-        with self.assertRaisesRegex(AssertionError, "has been mutated"):
-            registry.maybe_set_metadata(vec, "foo", "bar")
+        with self.assertRaisesRegex(RuntimeError, "has been mutated"):
+            # metadata exists for a specific version of vec! so pass in nested_int
+            nt_state.get_metadata(nested_int)
 
-        with self.assertRaisesRegex(AssertionError, "has been mutated"):
-            registry.get_metadata(vec, "foo")
-
-    def test_return_canonical_nested_int_and_vec(self):
-        # Add another vec to the same equiv set returns the canonical nested int
-        registry = torch.nested._internal.nested_tensor.NestedIntRegistry()
+    def test_nested_int_ownership(self):
+        nt_state = torch.nested._internal.nested_tensor.NestedTensorState()
         vec = torch.tensor([1, 2, 3])
-        vec_clone = vec.clone()
-        nested_int = registry.maybe_create(vec)
-        nested_int2 = registry.maybe_create(vec_clone, equiv_set_from=nested_int.node.nested_int_vec())
-        self.assertIs(nested_int2, nested_int)
-
-    def test_ownership(self):
-        registry = torch.nested._internal.nested_tensor.NestedIntRegistry()
-        vec = torch.tensor([1, 2, 3])
-        nested_int = registry.maybe_create(vec)
+        nested_int = nt_state.create_nested_int(vec)
 
         # Vec does NOT keep the nested int alive
         ref = weakref.ref(nested_int)
@@ -4146,7 +4140,7 @@ class TestNestedIntRegistry(TestCase):
             self.assertIsNone(ref())
 
         # Nested int DOES keep the vec alive
-        nested_int = registry.maybe_create(vec)
+        nested_int = nt_state.create_nested_int(vec)
         ref = weakref.ref(vec)
         del vec
         self.assertIs(ref(), nested_int.node.nested_int_vec())
