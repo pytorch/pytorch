@@ -4,6 +4,36 @@ import torch
 import torch.nn.functional as F
 
 
+__all__ = [
+    "model_is_exported",
+    "_WrapperModule",
+]
+
+
+class _WrapperModule(torch.nn.Module):
+    """Class to wrap a callable in an :class:`torch.nn.Module`. Use this if you
+    are trying to export a callable.
+    """
+
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+
+    def forward(self, *args, **kwargs):
+        """Simple forward that just calls the ``fn`` provided to :meth:`WrapperModule.__init__`."""
+        return self.fn(*args, **kwargs)
+
+
+def model_is_exported(m: torch.nn.Module) -> bool:
+    """
+    Return True if the `torch.nn.Module` was exported, False otherwise
+    (e.g. if the model was FX symbolically traced or not traced at all).
+    """
+    return isinstance(m, torch.fx.GraphModule) and any(
+        "val" in n.meta for n in m.graph.nodes
+    )
+
+
 def _replace_dropout(m: torch.fx.GraphModule, train_to_eval: bool):
     """
     Switch dropout patterns in the model between train and eval modes.
@@ -32,11 +62,19 @@ def _replace_dropout(m: torch.fx.GraphModule, train_to_eval: bool):
 
         example_inputs = (torch.randn(1),)
         if train_to_eval:
-            match_pattern = get_aten_graph_module(dropout_train, example_inputs)
-            replacement_pattern = get_aten_graph_module(dropout_eval, example_inputs)
+            match_pattern = get_aten_graph_module(
+                _WrapperModule(dropout_train), example_inputs
+            )
+            replacement_pattern = get_aten_graph_module(
+                _WrapperModule(dropout_eval), example_inputs
+            )
         else:
-            match_pattern = get_aten_graph_module(dropout_eval, example_inputs)
-            replacement_pattern = get_aten_graph_module(dropout_train, example_inputs)
+            match_pattern = get_aten_graph_module(
+                _WrapperModule(dropout_eval), example_inputs
+            )
+            replacement_pattern = get_aten_graph_module(
+                _WrapperModule(dropout_train), example_inputs
+            )
 
         from torch.fx.subgraph_rewriter import replace_pattern_with_filters
 
@@ -99,11 +137,15 @@ def _replace_batchnorm(m: torch.fx.GraphModule, train_to_eval: bool):
         torch.randn(1),  # bn_running_var
     )
     if train_to_eval:
-        match_pattern = get_aten_graph_module(bn_train, example_inputs)
-        replacement_pattern = get_aten_graph_module(bn_eval, example_inputs)
+        match_pattern = get_aten_graph_module(_WrapperModule(bn_train), example_inputs)
+        replacement_pattern = get_aten_graph_module(
+            _WrapperModule(bn_eval), example_inputs
+        )
     else:
-        match_pattern = get_aten_graph_module(bn_eval, example_inputs)
-        replacement_pattern = get_aten_graph_module(bn_train, example_inputs)
+        match_pattern = get_aten_graph_module(_WrapperModule(bn_eval), example_inputs)
+        replacement_pattern = get_aten_graph_module(
+            _WrapperModule(bn_train), example_inputs
+        )
 
     from torch.fx.subgraph_rewriter import replace_pattern_with_filters
 
@@ -117,6 +159,7 @@ def _replace_batchnorm(m: torch.fx.GraphModule, train_to_eval: bool):
     m.recompile()
 
 
+# TODO: expose these under this namespace?
 def _move_exported_model_to_eval(model: torch.fx.GraphModule):
     """
     Move an exported GraphModule to eval mode.
