@@ -1269,7 +1269,7 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
 
     auto selfSlice = self.select(dim, 0);
     auto resultSlice = result.select(dim, 0);
-    auto selfSlice_data = selfSlice.data_ptr();
+    auto selfSlice_data = selfSlice.const_data_ptr();
     auto resultSlice_data = resultSlice.data_ptr();
     auto self_stride_bytes = self.stride(dim) * elementSize(self.scalar_type());
     auto result_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
@@ -1297,10 +1297,10 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
         for (const auto i : c10::irange(start, end)) {
           auto self_i = index_data[i];
           TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
-          auto self_data = static_cast<char*>(selfSlice_data) + self_i * self_stride_bytes;
+          auto self_data = static_cast<const char*>(selfSlice_data) + self_i * self_stride_bytes;
           auto result_data = static_cast<char*>(resultSlice_data) + i * result_stride_bytes;
           sub_iter.unsafe_replace_operand(0, result_data);
-          sub_iter.unsafe_replace_operand(1, self_data);
+          sub_iter.unsafe_replace_operand(1, const_cast<char*>(self_data));
           copy_stub(sub_iter.device_type(), sub_iter, false);
         };
       });
@@ -1326,7 +1326,7 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
             for (const auto i : c10::irange(start, end)) {
               auto self_i = index_data[i];
               TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
-              auto self_data = static_cast<char*>(selfSlice_data) + self_i * self_stride_bytes;
+              auto self_data = static_cast<const char*>(selfSlice_data) + self_i * self_stride_bytes;
               auto result_data = static_cast<char*>(resultSlice_data) + i * result_stride_bytes;
               memcpy(result_data, self_data, slice_size_bytes);
             }
@@ -1880,8 +1880,7 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
 }
 
 Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {
-  c10::MaybeOwned<Tensor> _mask, _self;
-  std::tie(_mask, _self) = expand_outplace(mask, self);
+  auto [_mask, _self] = expand_outplace(mask, self);
   return _self->clone(at::MemoryFormat::Contiguous).masked_scatter_(*_mask, source);
 }
 
@@ -1954,8 +1953,7 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Scalar& sourc
   auto maybe_outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
   {
     NoNamesGuard guard;
-    c10::MaybeOwned<Tensor> _mask, _self;
-    std::tie(_mask, _self) = expand_outplace(mask, self);
+    auto [_mask, _self] = expand_outplace(mask, self);
     result = _self->clone(at::MemoryFormat::Contiguous);
     result.masked_fill_(mask, source);
   }
@@ -1968,8 +1966,7 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & sour
   auto maybe_outnames = namedinference::broadcast_to_outnames(mask, self, "masked_fill");
   {
     NoNamesGuard guard;
-    c10::MaybeOwned<Tensor> _mask, _self;
-    std::tie(_mask, _self) = expand_outplace(mask, self);
+    auto [_mask, _self] = expand_outplace(mask, self);
     result = _self->clone(at::MemoryFormat::Contiguous);
     result.masked_fill_(mask, source);
   }
@@ -1989,8 +1986,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   at::assert_no_overlap(result, self);
   at::assert_no_overlap(result, mask);
 
-  c10::MaybeOwned<Tensor> _mask, _self;
-  std::tie(_mask, _self) = expand_outplace(mask, self);
+  auto [_mask, _self] = expand_outplace(mask, self);
 
   auto shape = _self->sizes();
   int64_t numel = _mask->sum().item().toLong();
@@ -2130,10 +2126,7 @@ static inline void checkDevice(CheckedFrom c, at::ArrayRef<Tensor> tensors, Devi
 Tensor take_along_dim(const Tensor& self, const Tensor& indices, c10::optional<int64_t> opt_dim) {
   checkDevice("torch.take_along_dim():", {self, indices}, self.device());
   if (opt_dim.has_value()) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t dim;
-    Tensor self_broadcasted, indices_broadcasted;
-    std::tie(self_broadcasted, indices_broadcasted, dim) =
+    auto [self_broadcasted, indices_broadcasted, dim] =
         _take_along_dim_helper(self, indices, opt_dim.value());
     return self_broadcasted.gather(dim, indices_broadcasted);
   }
@@ -2145,10 +2138,7 @@ Tensor take_along_dim(const Tensor& self, const Tensor& indices, c10::optional<i
 Tensor& take_along_dim_out(const Tensor& self, const Tensor& indices, c10::optional<int64_t> opt_dim, Tensor& result) {
   checkDevice("torch.take_along_dim():", {self, indices, result}, self.device());
   if (opt_dim.has_value()) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int64_t dim;
-    Tensor self_broadcasted, indices_broadcasted;
-    std::tie(self_broadcasted, indices_broadcasted, dim) =
+    auto [self_broadcasted, indices_broadcasted, dim] =
         _take_along_dim_helper(self, indices, opt_dim.value());
     return at::gather_out(result, self_broadcasted, dim, indices_broadcasted);
   }
@@ -2303,6 +2293,8 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
     return result;
   }
 
+  auto out_accessor = result.accessor<int64_t, 2>();
+
   // Pass 2: Write indexes
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       kComplexHalf, kHalf, kBFloat16, kBool, self.scalar_type(), "nonzero_cpu", [&] {
@@ -2323,7 +2315,6 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
         }
       }
 
-      auto out_accessor = result.accessor<int64_t, 2>();
       auto out_ptr = out_accessor[thread_count_nonzero[tid]].data();
 
       auto loop = [&](char** data, const int64_t* strides, int64_t n1, int64_t n2) {

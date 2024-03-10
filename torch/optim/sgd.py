@@ -53,10 +53,7 @@ class SGD(Optimizer):
                     has_sparse_grad = True
 
                 state = self.state[p]
-                if 'momentum_buffer' not in state:
-                    momentum_buffer_list.append(None)
-                else:
-                    momentum_buffer_list.append(state['momentum_buffer'])
+                momentum_buffer_list.append(state.get('momentum_buffer'))
 
         return has_sparse_grad
 

@@ -101,6 +101,7 @@ from torch.utils._pytree import tree_map_only
 
 
 counters: DefaultDict[str, Counter[str]] = collections.defaultdict(collections.Counter)
+optimus_scuba_log: Dict[str, Any] = {}
 troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
 nnmodule_doc_url = "https://pytorch.org/docs/master/compile/nn-module.html"
 nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
@@ -126,16 +127,27 @@ def tabulate(rows, headers):
         )
 
 
+def maybe_cprofile(func):
+    if config.cprofile:
+        return cprofile_wrapper(func)
+    return func
+
+
 def cprofile_wrapper(func):
     @wraps(func)
     def profile_wrapper(*args, **kwargs):
         global timer_counter
-        profile_path = Path(func.__name__ + f"{next(timer_counter)}.profile")
+        profile_cnt = next(timer_counter)
+        profile_path = Path(func.__name__ + f"{profile_cnt}.profile")
         prof = cProfile.Profile()
         prof.enable()
+        start_ts = time.time()
         retval = prof.runcall(func, *args, **kwargs)
+        profile_latency = time.time() - start_ts
         prof.disable()
-        print(f"### Cprofile for {func.__name__} iter {next(timer_counter)} ###")
+        print(
+            f"### Cprofile for {func.__name__} iter {profile_cnt} took {profile_latency:.3f} seconds ###"
+        )
         ps = pstats.Stats(prof)
         prof.dump_stats(profile_path)
         svg_path = profile_path.with_suffix(".svg")
@@ -543,14 +555,27 @@ def is_function(value):
 
 
 def unwrap_if_wrapper(fn):
+    return unwrap_with_attr_name_if_wrapper(fn)[0]
+
+
+def unwrap_with_attr_name_if_wrapper(fn):
+    # unpack @functools.lru_cache wrapped function
     if isinstance(fn, functools._lru_cache_wrapper):
         fn = inspect.getattr_static(fn, "__wrapped__")
+        attr_name = "__wrapped__"
     # unpack @torch._dynamo.optimize()(fn) wrapped function
-    fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
+    elif is_function(fn) and inspect.getattr_static(fn, "_torchdynamo_inline", False):
+        fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
+        attr_name = "_torchdynamo_inline"
     # unpack torch.jit.script_if_tracing
-    if inspect.getattr_static(fn, "__script_if_tracing_wrapper", False):
+    elif is_function(fn) and inspect.getattr_static(
+        fn, "__script_if_tracing_wrapper", False
+    ):
         fn = inspect.getattr_static(fn, "__original_fn", fn)
-    return fn
+        attr_name = "__original_fn"
+    else:
+        attr_name = None
+    return fn, attr_name
 
 
 def is_numpy_ndarray(value):
@@ -618,6 +643,7 @@ class CompilationMetrics:
     graph_op_count: Optional[int]
     graph_node_count: Optional[int]
     graph_input_count: Optional[int]
+    start_time: float
     entire_frame_compile_time_s: Optional[float]
     backend_compile_time_s: Optional[float]
     inductor_compile_time_s: Optional[float]
@@ -787,7 +813,9 @@ def skip_frame_if_in_functorch_mode(val: torch.Tensor):
 
 @contextmanager
 def preserve_rng_state():
-    with torch.utils._python_dispatch._disable_current_modes():
+    disable_functorch = torch._C._DisableFuncTorch
+    disable_current_modes = torch.utils._python_dispatch._disable_current_modes
+    with disable_current_modes(), disable_functorch():
         rng_state = torch.clone(torch.random.get_rng_state())
         skip_frame_if_in_functorch_mode(rng_state)
         if torch.cuda.is_available():
@@ -1154,10 +1182,7 @@ def dict_keys_repr(const_keys, *, local) -> str:
 GLOBAL_KEY_PREFIX = "__dict_key"
 
 
-from torch._subclasses import (  # noqa: F401
-    FakeTensorMode,
-    UnsupportedFakeTensorException,
-)
+from torch._subclasses import UnsupportedFakeTensorException  # noqa: F401
 
 
 def wrap_fake_exception(fn):
@@ -1568,14 +1593,16 @@ def ensure_graph_fake(e, tx):
 def get_fake_values_from_nodes(tx, nodes, allow_non_graph_fake):
     def visit(n: torch.fx.Node):
         if n.op == "call_function" and "example_value" not in n.meta:
+            # fake tensor validity is checked inside get_fake_value using
+            # ensure_graph_fake
             return get_fake_value(n, tx, allow_non_graph_fake)
 
-        return n.meta["example_value"]
+        out = n.meta["example_value"]
+        if not allow_non_graph_fake and isinstance(out, torch.Tensor):
+            return ensure_graph_fake(out, tx)
+        return out
 
-    args_kwargs = torch.fx.node.map_arg(nodes, visit)
-    return tree_map_only(
-        torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), args_kwargs
-    )
+    return torch.fx.node.map_arg(nodes, visit)
 
 
 def get_fake_value(node, tx, allow_non_graph_fake=False):
@@ -1661,7 +1688,11 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
                 )
                 if maybe_pystub is not None:
                     module, ctx = maybe_pystub
-                    import_suggestion = f"you may need to `import {module}` ({ctx}) for support, otherwise "
+                    import_suggestion = (
+                        f"It's possible that the support was implemented in "
+                        f"module `{module}` and you may need to `import {module}`"
+                        f"({ctx}), otherwise "
+                    )
             unimplemented(
                 f"unsupported operator: {cause.func} ({import_suggestion}see "
                 "https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0"
@@ -1724,6 +1755,10 @@ def run_node(tracer, node, args, kwargs, nnmodule):
     op = node.op
 
     with set_current_node(node):
+
+        def make_error_message(e):
+            return f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n" + str(e)
+
         try:
             if op == "call_function":
                 return node.target(*args, **kwargs)
@@ -1737,17 +1772,16 @@ def run_node(tracer, node, args, kwargs, nnmodule):
             elif op == "placeholder":
                 assert "example_value" in node.meta
                 return node.meta["example_value"]
-        except NotImplementedError as e:
+
+        except (NotImplementedError, UnsupportedFakeTensorException) as e:
             # NB: mimic how wrap_fake_exception does it
             from .exc import unimplemented
 
-            raise unimplemented(
-                f"running {op} {node.target}(*{args}, **{kwargs})"
-            ) from e
-
+            raise unimplemented(make_error_message(e)) from e
         except Exception as e:
-            fn_str = f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n"
-            raise RuntimeError(fn_str + str(e)).with_traceback(e.__traceback__) from e
+            raise RuntimeError(make_error_message(e)).with_traceback(
+                e.__traceback__
+            ) from e
 
     raise AssertionError(op)
 
@@ -2006,6 +2040,8 @@ def nnmodule_has_hooks(
 
 def to_numpy_helper(value):
     """Convert tensor and tnp.ndarray to numpy.ndarray."""
+    if is_fake(value):
+        return value
     if isinstance(value, tnp.ndarray):
         return to_numpy_helper(value.tensor)
     elif isinstance(value, torch.Tensor):
