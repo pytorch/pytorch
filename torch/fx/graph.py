@@ -750,19 +750,19 @@ class _GraphSideTable:
     Side table for the graph for the purpose of doing fast queries
     """
     def __init__(self):
-        self.op_to_nodes: Dict[str, Dict[Target, List[Node]]] = defaultdict(lambda: defaultdict(list))
+        self.table: Dict[str, Dict[Target, List[Node]]] = defaultdict(lambda: defaultdict(list))
 
     def __contains__(self, node) -> bool:
-        return node in self.op_to_nodes[node.op][node.target]
+        return node in self.table[node.op][node.target]
 
     def insert(self, node) -> None:
-        self.op_to_nodes[node.op][node.target].append(node)
+        self.table[node.op][node.target].append(node)
 
     def remove(self, node) -> None:
-        self.op_to_nodes[node.op][node.target].remove(node)
+        self.table[node.op][node.target].remove(node)
 
     def find_nodes(self, *, op: str, target: Target) -> List[Node]:
-        return self.op_to_nodes[op][target]
+        return self.table[op][target]
 
 @compatibility(is_backward_compatible=True)
 class Graph:
@@ -850,10 +850,7 @@ class Graph:
         """
         return _node_list(self)
 
-    @property
-    def side_table(self):
-        return self._side_table
-
+    @compatibility(is_backward_compatible=False)
     def find_nodes(self, *, op: str, target: 'Target'):
         return self._side_table.find_nodes(op=op, target=target)
 
@@ -975,6 +972,8 @@ class Graph:
         if len(to_erase.users) > 0:
             raise RuntimeError(f'Tried to erase Node {to_erase} but it still had {len(to_erase.users)} '
                                f'users in the graph: {to_erase.users}!')
+        if to_erase.graph != self:
+            raise RuntimeError(f"Attempting to remove {to_erase} from wrong graph!")
         if to_erase._erased:
             warnings.warn(f"erase_node({to_erase}) on an already erased node")
             return
