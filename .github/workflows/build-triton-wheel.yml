@@ -31,7 +31,6 @@ concurrency:
 jobs:
   download-triton-deps:
     name: "Download Triton Dependencies"
-    if: 0
     runs-on: [self-hosted, linux.large]
     timeout-minutes: 60
     strategy:
@@ -78,12 +77,11 @@ jobs:
   build-wheel:
     name: "Build Triton Wheel"
     runs-on: [self-hosted, linux.2xlarge]
-    # needs: download-triton-deps
+    needs: download-triton-deps
     strategy:
       fail-fast: false
       matrix:
-        #py_vers: [ "3.8", "3.9", "3.10", "3.11", "3.12" ]
-        py_vers: [ "3.8", "3.9"]
+        py_vers: [ "3.8", "3.9", "3.10", "3.11", "3.12" ]
         device: ["cuda", "rocm"]
         include:
           - device: "rocm"
@@ -115,13 +113,13 @@ jobs:
         with:
           docker-image: ${{ env.DOCKER_IMAGE }}
 
-      # - name: Download Dependency Artifacts
-      #   uses: actions/download-artifact@v3
-      #   with:
-      #     name: triton-packages-${{ matrix.device }}
+      - name: Download Dependency Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: triton-packages-${{ matrix.device }}
 
-      # - name: Untar Triton Dependencies
-      #   run: tar -xf triton-deps.tar
+      - name: Untar Triton Dependencies
+        run: tar -xf triton-deps.tar
 
       - name: Build Triton wheel
         env:
