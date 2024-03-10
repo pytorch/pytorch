@@ -2,10 +2,12 @@ from typing import Any, cast, Optional, Union
 
 import typing_extensions
 
+import torch
 import torch.nn as nn
 
 from torch.distributed._composable import contract
-from torch.distributed._tensor import DeviceMesh
+from torch.distributed._tensor import DeviceMesh, DTensor
+
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_init import (
@@ -117,6 +119,11 @@ def fully_shard(
             params, module, mesh_info, post_forward_mesh_info, device, mp_policy
         )
 
+    # for dynamo
+    for module in managed_modules:
+        module._is_fsdp_managed_module = True  # type: ignore[assignment]
+        module._fsdp_use_orig_params = True  # type: ignore[assignment]
+
     # Place FSDP leftmost for highest priority in the method resolution order
     cls = module.__class__
     dct = {"__deepcopy__": unimplemented_deepcopy}
@@ -200,3 +207,40 @@ class FSDP:
         if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:
             raise AssertionError(f"No FSDP state found on {self}")
         return state
+
+    def _apply(self, *args: Any, **kwargs: Any) -> Any:
+        # Reshard to ensure that sharded parameters are registered
+        self.reshard()
+        ret = super()._apply(*args, **kwargs)  # type: ignore[misc]
+        state = self._get_fsdp_state()
+        if not (fsdp_param_group := state._fsdp_param_group):
+            return ret
+        # TODO: Remove this padding logic once DTensor pads the local tensor:
+        # https://github.com/pytorch/pytorch/issues/113045
+        with torch.no_grad():
+            for fsdp_param in fsdp_param_group.fsdp_params:
+                module_info = fsdp_param._module_info
+                new_param = getattr(module_info.module, module_info.param_name)
+                if new_param is not fsdp_param.sharded_param:
+                    if torch.__future__.get_swap_module_params_on_conversion():
+                        raise AssertionError(
+                            "Expects swap_tensors to preserve object but got "
+                            f"{new_param} instead of {fsdp_param.sharded_param}"
+                        )
+                    else:
+                        raise AssertionError(
+                            "Please set torch.__future__.set_swap_module_params_on_conversion(True) "
+                            "to use _apply methods with FSDP"
+                        )
+                local_tensor = new_param._local_tensor
+                padded_sharded_size = fsdp_param.padded_sharded_param_size
+                if local_tensor.size() != padded_sharded_size:
+                    padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
+                    padded_local_tensor[: local_tensor.size(0)].copy_(local_tensor)
+                    local_tensor = padded_local_tensor
+                fsdp_param._sharded_param_data = local_tensor.view(-1)
+                assert isinstance(fsdp_param.sharded_param, DTensor)  # mypy
+                fsdp_param.sharded_param._local_tensor = local_tensor[
+                    : fsdp_param.sharded_size[0]
+                ]
+        return ret

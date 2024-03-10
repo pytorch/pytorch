@@ -11,7 +11,7 @@ import unittest
 
 from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
-    IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like
+    IS_X86, parametrize, TEST_WITH_ASAN, TEST_WITH_ROCM, noncontiguous_like
 from torch.testing._internal.common_utils import skipIfRocm, runOnRocm
 import torch
 from torch import Tensor
@@ -368,6 +368,10 @@ aliasing_ops_list_return = {
     # 'tensor_split' not composite compliant, see vjp_fail
 }
 
+skip_noncontig = {
+    '_batch_norm_with_update',
+}
+
 
 @unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
 @unMarkDynamoStrictTest
@@ -396,6 +400,14 @@ class TestOperators(TestCase):
         xfail('nn.functional.scaled_dot_product_attention'),
         xfail("torch.ops.aten._flash_attention_forward"),
         xfail("torch.ops.aten._efficient_attention_forward"),
+
+        # RuntimeError: Expected contiguous tensor, but got
+        # non-contiguous tensor for argument #2 'grad_output'
+        decorate(
+            '_batch_norm_with_update',
+            decorator=expectedFailureIf(TEST_WITH_ROCM),
+            device_type='cuda',
+        )
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
@@ -433,9 +445,10 @@ class TestOperators(TestCase):
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
 
-            noncontig_sample = sample.noncontiguous()
-            noncontig_args = [noncontig_sample.input] + list(noncontig_sample.args)
-            noncontig_kwargs = noncontig_sample.kwargs
+            if op.name not in skip_noncontig:
+                noncontig_sample = sample.noncontiguous()
+                noncontig_args = [noncontig_sample.input] + list(noncontig_sample.args)
+                noncontig_kwargs = noncontig_sample.kwargs
 
             diff_argnums = tuple(i for i, arg in enumerate(args) if diff_arg(arg))
             assert len(diff_argnums) > 0
@@ -458,11 +471,12 @@ class TestOperators(TestCase):
                 return result
 
             result = grad(wrapped_fn, diff_argnums)(*args, **kwargs)
-            result_noncontig = grad(wrapped_fn, diff_argnums)(*noncontig_args, **noncontig_kwargs)
             expected = _autograd_grad(_as_tuple(wrapped_fn(*args, **kwargs)), diff_args)
-
             self.assertEqual(result, expected)
-            self.assertEqual(result_noncontig, expected)
+
+            if op.name not in skip_noncontig:
+                result_noncontig = grad(wrapped_fn, diff_argnums)(*noncontig_args, **noncontig_kwargs)
+                self.assertEqual(result_noncontig, expected)
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
@@ -476,7 +490,8 @@ class TestOperators(TestCase):
         skip('nn.functional.max_unpool2d'),  # fails everywhere except on windows
         skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
         xfail("native_batch_norm"),          # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
-        xfail("_native_batch_norm_legit"),    # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
+        xfail("_native_batch_norm_legit"),   # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
+        xfail("_batch_norm_with_update"),     # TODO: fails comparing None to tensor of 0s for saved_mean/var tangents
 
         xfail('nn.functional.scaled_dot_product_attention'),
         xfail('torch.ops.aten._flash_attention_forward'),
@@ -545,15 +560,17 @@ class TestOperators(TestCase):
                 self.jvp_opinfo_test(outplace_variant, sample,
                                      sample.output_process_fn_grad,
                                      clone_inputs=False,
-                                     fixme_ref_jvp_local=fixme_ref_jvp_local)
+                                     fixme_ref_jvp_local=fixme_ref_jvp_local,
+                                     test_noncontig=op.name not in skip_noncontig)
             if is_valid_inplace_sample_input(sample, op, inplace_variant):
                 self.jvp_opinfo_test(inplace_variant, sample,
                                      sample.output_process_fn_grad,
                                      clone_inputs=True,
-                                     fixme_ref_jvp_local=fixme_ref_jvp_local)
+                                     fixme_ref_jvp_local=fixme_ref_jvp_local,
+                                     test_noncontig=op.name not in skip_noncontig)
 
     def jvp_opinfo_test(self, fn, sample, output_process_fn,
-                        clone_inputs, fixme_ref_jvp_local):
+                        clone_inputs, fixme_ref_jvp_local, test_noncontig):
         # NB: we used requires_grad=True to determine where the primals are,
         # but don't need that information otherwise
         args = (sample.input,) + sample.args
@@ -562,15 +579,6 @@ class TestOperators(TestCase):
             fn, args, kwargs, output_process_fn, requires_grad=True)
         orig_primals = tree_map(lambda x: x.detach(), primals)
         orig_tangents = tree_map(lambda x: torch.randn_like(x), primals)
-
-        noncontig_sample = sample.noncontiguous()
-        noncontig_args = (noncontig_sample.input,) + noncontig_sample.args
-        noncontig_kwargs = sample.kwargs
-        noncontig_fn, primals = normalize_op_input_output2(
-            fn, noncontig_args, noncontig_kwargs,
-            output_process_fn, requires_grad=True)
-        noncontig_primals = tree_map(lambda x: x.detach(), primals)
-        noncontig_tangents = tree_map(lambda x: noncontiguous_like(x), orig_tangents)
 
         def maybe_clone_inputs():
             if clone_inputs:
@@ -586,15 +594,24 @@ class TestOperators(TestCase):
         primals, tangents = maybe_clone_inputs()
         primal_outs, tangent_outs = jvp(contig_fn, primals, tangents)
 
-        noncontig_primal_outs, noncontig_tangent_outs = jvp(noncontig_fn,
-                                                            noncontig_primals,
-                                                            noncontig_tangents)
-
         self.assertEqual(primal_outs, expected_primal_outs)
         self.assertEqual(tangent_outs, expected_tangent_outs)
 
-        self.assertEqual(noncontig_primal_outs, expected_primal_outs)
-        self.assertEqual(noncontig_tangent_outs, expected_tangent_outs)
+        if test_noncontig:
+            noncontig_sample = sample.noncontiguous()
+            noncontig_args = (noncontig_sample.input,) + noncontig_sample.args
+            noncontig_kwargs = sample.kwargs
+            noncontig_fn, primals = normalize_op_input_output2(
+                fn, noncontig_args, noncontig_kwargs,
+                output_process_fn, requires_grad=True)
+            noncontig_primals = tree_map(lambda x: x.detach(), primals)
+            noncontig_tangents = tree_map(lambda x: noncontiguous_like(x), orig_tangents)
+            noncontig_primal_outs, noncontig_tangent_outs = jvp(noncontig_fn,
+                                                                noncontig_primals,
+                                                                noncontig_tangents)
+
+            self.assertEqual(noncontig_primal_outs, expected_primal_outs)
+            self.assertEqual(noncontig_tangent_outs, expected_tangent_outs)
 
     @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
@@ -655,22 +672,22 @@ class TestOperators(TestCase):
                 result = fn(*primals)
                 cotangents = tree_map(lambda x: torch.randn_like(x), result)
 
-                noncontig_fn, noncontig_primals = normalize_op_input_output(_op, sample.noncontiguous())
-                noncontig_cotangents = tree_map(lambda x: noncontiguous_like(x), cotangents)
-
                 out, vjp_fn = vjp(fn, *primals)
                 self.assertEqual(out, result)
                 result_vjps = vjp_fn(cotangents)
-
-                out_noncontig, vjp_fn = vjp(noncontig_fn, *noncontig_primals)
-                self.assertEqual(out_noncontig, result)
-                noncontig_result_vjps = vjp_fn(noncontig_cotangents)
 
                 _, vjp_fn = ref_vjp(fn, *primals)
                 expected_vjps = vjp_fn(cotangents)
 
                 self.assertEqual(result_vjps, expected_vjps)
-                self.assertEqual(noncontig_result_vjps, expected_vjps)
+
+                if op.name not in skip_noncontig:
+                    noncontig_fn, noncontig_primals = normalize_op_input_output(_op, sample.noncontiguous())
+                    noncontig_cotangents = tree_map(lambda x: noncontiguous_like(x), cotangents)
+                    out_noncontig, vjp_fn = vjp(noncontig_fn, *noncontig_primals)
+                    self.assertEqual(out_noncontig, result)
+                    noncontig_result_vjps = vjp_fn(noncontig_cotangents)
+                    self.assertEqual(noncontig_result_vjps, expected_vjps)
 
         _test(op)
         for a_op in op.aliases:
@@ -830,6 +847,8 @@ class TestOperators(TestCase):
         xfail("to_sparse"),
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
+        # TODO: implement batching rule
+        xfail("_batch_norm_with_update"),
     }))
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -921,6 +940,8 @@ class TestOperators(TestCase):
         skip('linalg.svdvals'),  # # really annoying thing where it passes correctness check but not has_batch_rule
         skip("native_batch_norm"),
         skip("_native_batch_norm_legit"),
+        # TODO: implement batching rule
+        skip("_batch_norm_with_update"),
         xfail('__getitem__', ''),  # dynamic error
         xfail('nanquantile', device_type='cpu'),  # checks q via a .item() call
         xfail('nn.functional.gaussian_nll_loss'),  # checks var for if any value < 0
@@ -1045,6 +1066,8 @@ class TestOperators(TestCase):
         xfail('nn.functional.batch_norm', 'without_cudnn'),
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
+        # TODO: implement batching rule
+        xfail("_batch_norm_with_update"),
 
         # https://github.com/pytorch/pytorch/issues/96560
         # ROCm: NotImplementedError
@@ -1230,6 +1253,8 @@ class TestOperators(TestCase):
         xfail('sparse.mm', 'reduce'),
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
+        # TODO: implement batching rule
+        xfail("_batch_norm_with_update"),
         xfail("native_dropout_backward"),
         xfail("index_fill"),  # aten::_unique hit the vmap fallback which is currently disabled
     }))
@@ -1306,6 +1331,8 @@ class TestOperators(TestCase):
         xfail('sparse.mm', 'reduce'),
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
+        # TODO: implement batching rule
+        xfail("_batch_norm_with_update"),
         xfail('as_strided', 'partial_views'),
     }))
     def test_vjpvmap(self, device, dtype, op):
@@ -1564,6 +1591,8 @@ class TestOperators(TestCase):
         # place, were not batched.
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
+        # TODO: implement batching rule
+        xfail("_batch_norm_with_update"),
         xfail('native_dropout_backward'),
     }))
     @ops(op_db + additional_op_db + autograd_function_db, allowed_dtypes=(torch.float,))
@@ -1808,6 +1837,14 @@ class TestOperators(TestCase):
         skip('sparse.sampled_addmm', ''),
         skip('sparse.mm', 'reduce'),
         skip('native_layer_norm', '', device_type='cpu'),
+
+        # RuntimeError: Expected contiguous tensor, but got
+        # non-contiguous tensor for argument #2 'grad_output'
+        decorate(
+            '_batch_norm_with_update',
+            decorator=expectedFailureIf(TEST_WITH_ROCM),
+            device_type='cuda',
+        )
     })
     @opsToleranceOverride('TestOperators', 'test_vmap_autograd_grad', (
         tol1('linalg.householder_product',

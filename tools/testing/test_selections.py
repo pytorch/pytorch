@@ -3,7 +3,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Callable, Dict, FrozenSet, List, Optional, Sequence, Tuple
 
 from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
 from tools.testing.test_run import ShardedTest, TestRun
@@ -91,7 +91,7 @@ def get_duration(
         return file_duration
 
     def get_duration_for_classes(
-        test_file: str, test_classes: Set[str]
+        test_file: str, test_classes: FrozenSet[str]
     ) -> Optional[float]:
         duration: float = 0
 
@@ -233,7 +233,7 @@ def calculate_shards(
     if total_time == 0:
         num_serial_shards = num_shards
     else:
-        num_serial_shards = math.ceil(serial_time / total_time * num_shards)
+        num_serial_shards = max(math.ceil(serial_time / total_time * num_shards), 1)
 
     sharded_jobs = [ShardJob() for _ in range(num_shards)]
     shard(
