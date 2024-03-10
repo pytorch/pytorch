@@ -94,6 +94,7 @@ slow:
 non_deterministic:
   # https://github.com/pytorch/pytorch/issues/98355
   - mobilenet_v3_large
+  - sam_fast
 
 
 dtype:
