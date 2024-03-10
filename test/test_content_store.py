@@ -1,13 +1,19 @@
 # Owner(s): ["oncall: pt2"]
 
 import tempfile
+import unittest
 
 import torch
 from torch._prims.debug_prims import load_tensor_reader
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import run_tests, skipIfRocm, TestCase
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    run_tests,
+    skipIfRocm,
+    TestCase,
+)
 from torch.utils._content_store import (
     ContentStoreReader,
     ContentStoreWriter,
@@ -15,6 +21,7 @@ from torch.utils._content_store import (
 )
 
 
+@unittest.skipIf(IS_WINDOWS, "Test case not supported on Windows")
 class TestContentStore(TestCase):
     def test_basic(self, device):
         # setup test data

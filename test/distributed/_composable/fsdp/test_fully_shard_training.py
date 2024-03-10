@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import contextlib
 import copy
 import functools
 import unittest
@@ -31,8 +32,13 @@ from torch.testing._internal.common_fsdp import (
     MLP,
     patch_all_gather,
     patch_reduce_scatter,
+    test_compiled_fsdp,
 )
-from torch.testing._internal.common_utils import get_cycles_per_ms, run_tests
+from torch.testing._internal.common_utils import (
+    get_cycles_per_ms,
+    run_tests,
+    wrapSwapTensorsTest,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -46,6 +52,7 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
         return 2
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @test_compiled_fsdp()
     def test_root_move_forward_input_to_device(self):
         device = torch.device("cuda", 0)
 
@@ -178,12 +185,53 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             self.assertEqual(param, ref_param)
 
 
+class TestFullyShardCastAfterInit(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @wrapSwapTensorsTest(True)
+    def test_to_float64_after_init(self):
+        """Tests that the user can cast the module to float64 after init."""
+        # NOTE: Test fp64 instead of a lower precision dtype like bf16 for
+        # better numerics. The important part is changing the dtype.
+        torch.manual_seed(42)
+        mlp_dim, device, dtype = 4, torch.device("cuda"), torch.float64
+        model = MLP(mlp_dim, device=device)
+        for param in model.parameters():
+            dist.broadcast(param, src=0)
+        ref_model = copy.deepcopy(model).to(dtype)
+        replicate(ref_model)
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        for module in (model.in_proj, model.out_proj, model):
+            fully_shard(module)
+        model.to(dtype)
+        for param in model.parameters():
+            self.assertEqual(param.dtype, dtype)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
+        check_1d_sharded_parity(self, ref_model, model)
+        torch.manual_seed(42 + self.rank + 1)
+        inp = torch.randn((2, mlp_dim), device="cuda", dtype=dtype)
+        for iter_idx in range(10):
+            losses: List[torch.Tensor] = []
+            for _model in (ref_model, model):
+                losses.append(_model(inp).sum())
+                losses[-1].backward()
+            self.assertEqual(losses[0], losses[1])
+            check_1d_sharded_parity(self, ref_model, model)
+            for _optim in (ref_optim, optim):
+                _optim.step()
+                _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+
+
 class TestFullyShard1DTrainingCore(FSDPTest):
     @property
     def world_size(self) -> int:
         return min(8, torch.cuda.device_count())
 
     @skip_if_lt_x_gpu(2)
+    @test_compiled_fsdp()
     def test_train_parity_single_group(self):
         """Tests train parity with DDP for a single FSDP group."""
         self.run_subtests(
@@ -215,7 +263,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
-    def test_train_parity_multi_group(self):
+    def test_train_parity_multi_group_eager(self):
         """
         Tests train parity against DDP when using multiple parameter groups for
         communication (for communication and computation overlap plus memory
@@ -228,6 +276,21 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 "delay_after_forward": [False, True],
                 "delay_before_all_gather": [False, True],
                 "delay_before_reduce_scatter": [False, True],
+                "delay_before_optim": [False, True],
+            },
+            self._test_train_parity_multi_group,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    @test_compiled_fsdp()
+    def test_train_parity_multi_group_compile(self):
+        self.run_subtests(
+            {
+                "reshard_after_forward": [True, False],
+                "device_type": ["cuda"],
+                "delay_after_forward": [False, True],
+                "delay_before_all_gather": [False],
+                "delay_before_reduce_scatter": [False],
                 "delay_before_optim": [False, True],
             },
             self._test_train_parity_multi_group,
@@ -273,19 +336,25 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         orig_reduce_scatter = dist.reduce_scatter_tensor
 
         def delayed_all_gather(*args, **kwargs):
-            if delay_before_all_gather:
-                torch.cuda._sleep(int(delay_in_ms * get_cycles_per_ms()))
+            torch.cuda._sleep(int(delay_in_ms * get_cycles_per_ms()))
             return orig_all_gather(*args, **kwargs)
 
         def delayed_reduce_scatter(*args, **kwargs):
-            if delay_before_reduce_scatter:
-                torch.cuda._sleep(int(delay_in_ms * get_cycles_per_ms()))
+            torch.cuda._sleep(int(delay_in_ms * get_cycles_per_ms()))
             return orig_reduce_scatter(*args, **kwargs)
 
         torch.manual_seed(42 + self.rank + 1)
-        with patch_all_gather(delayed_all_gather), patch_reduce_scatter(
-            delayed_reduce_scatter
-        ):
+        patch_all_gather_ctx = (
+            patch_all_gather(delayed_all_gather)
+            if delay_before_all_gather
+            else contextlib.nullcontext()
+        )
+        patch_reduce_scatter_ctx = (
+            patch_reduce_scatter(delayed_reduce_scatter)
+            if delay_before_reduce_scatter
+            else contextlib.nullcontext()
+        )
+        with patch_all_gather_ctx, patch_reduce_scatter_ctx:
             for iter_idx in range(10):
                 inp = torch.randn((8, lin_dim), device=torch.device(device_type))
                 losses: List[torch.Tensor] = []
@@ -301,6 +370,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
+    @test_compiled_fsdp()
     def test_non_root_forward_backward(self):
         """
         Tests running forward/backward through the root and then through a
@@ -346,6 +416,8 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         self.assertEqual(ref_nonroot_loss, nonroot_loss)
         self.assertEqual(ref_model(inp).sum(), model(inp).sum())
 
+    @skip_if_lt_x_gpu(2)
+    @test_compiled_fsdp()
     def test_multi_forward_module(self):
         """
         Tests parity with DDP when running a module that participates multiple
@@ -483,11 +555,22 @@ class TestFullyShardSharedParams(FSDPTest):
         return min(4, torch.cuda.device_count())
 
     @skip_if_lt_x_gpu(2)
-    def test_train_parity_with_shared_params(self):
+    @test_compiled_fsdp(compile_compute_on_module=TransformerBlock)
+    def test_train_parity_with_shared_params_no_ac(self):
         self.run_subtests(
             {
                 "reshard_after_forward": [False, True],
-                "use_activation_checkpointing": [False, True],
+                "use_activation_checkpointing": [False],
+            },
+            self._test_train_shared_params,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_train_parity_with_shared_params_ac(self):
+        self.run_subtests(
+            {
+                "reshard_after_forward": [False, True],
+                "use_activation_checkpointing": [True],
             },
             self._test_train_shared_params,
         )
@@ -523,6 +606,105 @@ class TestFullyShardSharedParams(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
 
+class TestFullyShardGradientAccumulation(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(2, torch.cuda.device_count())
+
+    @skip_if_lt_x_gpu(2)
+    def test_set_requires_gradient_sync(self):
+        """
+        Tests the ``set_requires_gradient_sync`` API to exercise gradient
+        accumulation without gradient reduction. This test includes mixing with
+        gradient accumulation *with* gradient reduction.
+        """
+        self.run_subtests(
+            {
+                "reshard_after_forward": [True, False, 2],
+                # For `True`, disable reduce-scatter for all MLPs, and for
+                # `False`, only disable it for some MLPs
+                "recurse": [True, False],
+            },
+            self._test_set_requires_gradient_sync,
+        )
+
+    def _test_set_requires_gradient_sync(
+        self,
+        reshard_after_forward: Union[bool, int],
+        recurse: bool,
+    ):
+        torch.manual_seed(42)
+        local_batch_size, lin_dim, num_mlps, num_microbatches = (2, 32, 3, 3)
+        global_batch_size = local_batch_size * self.world_size
+        if not recurse:
+            num_mlps_to_disable_reduce_scatter = 2
+        model = nn.Sequential(
+            *[MLP(lin_dim, torch.device("cpu")) for _ in range(num_mlps)]
+        )
+        ref_model = copy.deepcopy(model).cuda()
+        fully_shard_fn = functools.partial(
+            fully_shard, reshard_after_forward=reshard_after_forward
+        )
+        for mlp in model:
+            fully_shard_fn(mlp)
+        fully_shard_fn(model)
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        orig_reduce_scatter = dist.reduce_scatter_tensor
+        reduce_scatter_count = 0
+
+        def reduce_scatter_with_count(*args, **kwargs):
+            nonlocal reduce_scatter_count
+            reduce_scatter_count += 1
+            return orig_reduce_scatter(*args, **kwargs)
+
+        torch.manual_seed(1)  # same on all ranks
+        for iter_idx in range(5):
+            with patch_reduce_scatter(reduce_scatter_with_count):
+                for microbatch_idx in range(num_microbatches):
+                    is_last_microbatch = microbatch_idx == num_microbatches - 1
+                    if recurse:
+                        model.set_requires_gradient_sync(is_last_microbatch)
+                    else:
+                        for mlp in model[:num_mlps_to_disable_reduce_scatter]:
+                            mlp.set_requires_gradient_sync(
+                                is_last_microbatch, recurse=False
+                            )
+                    global_inp = torch.rand((global_batch_size, lin_dim), device="cuda")
+                    local_inp = global_inp[
+                        self.rank
+                        * local_batch_size : (self.rank + 1)
+                        * local_batch_size
+                    ].detach()
+                    losses: List[torch.Tensor] = []
+                    for _model, _optim, inp in (
+                        (ref_model, ref_optim, global_inp),
+                        (model, optim, local_inp),
+                    ):
+                        losses.append(_model(inp).sum())
+                        losses[-1].backward()
+                    dist.all_reduce(losses[1])  # partial -> replicated
+                    self.assertEqual(losses[0], losses[1])
+            # Expect one reduce-scatter per MLP on the last microbatch
+            expected_reduce_scatter_count = num_mlps
+            if not recurse:
+                # Expect additional reduce-scatters for non-disabled MLPs
+                expected_reduce_scatter_count += (
+                    num_mlps - num_mlps_to_disable_reduce_scatter
+                ) * (num_microbatches - 1)
+            self.assertEqual(reduce_scatter_count, expected_reduce_scatter_count)
+            reduce_scatter_count = 0
+            for param in ref_model.parameters():
+                if param.grad is not None:
+                    param.grad.div_(self.world_size)
+            check_1d_sharded_parity(self, ref_model, model)
+            for _optim in (optim, ref_optim):
+                _optim.step()
+                # When `set_to_none=False`, we are exercising mixing
+                # gradient accumulation with and without communication
+                _optim.zero_grad(set_to_none=(iter_idx % 2))
+
+
 class TestFullyShard2DTraining(FSDPTest):
     @property
     def world_size(self) -> int:
@@ -556,6 +738,7 @@ class TestFullyShard2DTraining(FSDPTest):
 
         torch.manual_seed(42)
         model = nn.Sequential(
+            nn.LayerNorm(mlp_dim, bias=False),
             # Use multiplier of 3 to exercise uneven case
             MLP(mlp_dim, dim_multiplier=3),
             MLP(mlp_dim),
@@ -568,15 +751,16 @@ class TestFullyShard2DTraining(FSDPTest):
         model = parallelize_module(
             model,
             device_mesh=tp_mesh,
+            # Leave the layer norm as implicitly replicated
             parallelize_plan={
                 # Pass `use_local_output=False` to keep as DTensor to preserve
                 # uneven activation dims
-                "0.in_proj": ColwiseParallel(use_local_output=False),
-                "0.out_proj": RowwiseParallel(use_local_output=False),
                 "1.in_proj": ColwiseParallel(use_local_output=False),
                 "1.out_proj": RowwiseParallel(use_local_output=False),
                 "2.in_proj": ColwiseParallel(use_local_output=False),
-                "2.out_proj": RowwiseParallel(),
+                "2.out_proj": RowwiseParallel(use_local_output=False),
+                "3.in_proj": ColwiseParallel(use_local_output=False),
+                "3.out_proj": RowwiseParallel(),
             },
         )
         for mlp in model:
