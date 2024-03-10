@@ -260,6 +260,36 @@ class MetaConverter:
             t, src, symbolic_context=symbolic_context
         ) -> Tuple[Tuple[int, ...], Tuple[int, ...], int]:
             if shape_env is not None:
+                def metafy_fn(t, src) -> torch.Tensor:
+                    # Note [Recursive fakification]
+                    #
+                    # Symints can sometimes hold tensors, and during the
+                    # syminfication process, we need to fakify these tensors.
+                    # Today we only support this for tensor wrapper subclasses.
+                    # (And the only case we have today is nested tensors/ints.)
+                    # In order to find the symbolic context for the tensor on
+                    # the symint, we require that that tensor be associated with
+                    # a inner tensor on the tensor wrapper subclass.
+                    #
+                    # For nested tensors in particular, we don't actually
+                    # enforce that the tensor on the symint is the same tensor
+                    # object as any inner tensor. Instead we only require that
+                    # they are in the same equivalence set.
+                    _symbolic_context = None
+                    if symbolic_context is not None:
+                        nt_state = torch.nested._internal.nested_tensor.get_nt_state()
+                        for vec in nt_state.uf.get_equiv_tensors(t):
+                            if vec in symbolic_context.tensor_to_inner_context:
+                                _symbolic_context = symbolic_context.tensor_to_inner_context[vec]
+                                break
+                    return self.meta_tensor(
+                        t,
+                        shape_env,
+                        callback,
+                        source=src,
+                        symbolic_context=_symbolic_context
+                    )
+
                 fake_mode = torch._subclasses.fake_tensor.maybe_get_fake_mode(t)
                 if fake_mode is not None and fake_mode.shape_env is shape_env:
                     # Don't reallocate the sizes; the shape envs are the same,
@@ -270,6 +300,7 @@ class MetaConverter:
                         t,
                         src,
                         symbolic_context=symbolic_context,
+                        metafy_fn=metafy_fn,
                     )
             else:
                 assert symbolic_context is None
@@ -322,7 +353,8 @@ class MetaConverter:
                             if symbolic_context is None
                             else symbolic_context.inner_contexts[attr]
                         ),
-                    )
+                    ),
+                    orig_t=inner_t,
                 ),
                 outer_size=outer_size,
                 outer_stride=outer_stride,

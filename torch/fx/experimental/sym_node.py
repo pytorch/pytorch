@@ -76,9 +76,20 @@ class SymNode:
         hint: Optional[Union[int, float, bool]],
         constant=None,
         fx_node=None,
+        nested_int=None,
+        nested_int_vec=None,
     ):
         self._expr = expr
         self.shape_env = shape_env
+        # Only populated when is_nested_int() is true
+        from torch.fx.experimental.symbolic_shapes import is_nested_int
+        if is_nested_int(hint):
+            # assert nested_int is not None
+            assert nested_int_vec is not None
+        self._nested_int: Optional[int] = nested_int
+        self._nested_int_vec: Optional[torch.Tensor] = nested_int_vec
+
+        # Symbolic nested int have pytype int.
         self.pytype = pytype
         # What's the difference between hint and constant?
         #
@@ -180,6 +191,39 @@ class SymNode:
             and isinstance(self._hint, SymInt)
             and self._hint.node.is_nested_int()
         )
+
+    def nested_int(self):
+        # Not really used for comparison. Only used to get at the data in
+        # the equiv set. The equiv set for symbolic is different than that
+        # of the hint.
+        assert self.is_nested_int()
+        return self._nested_int
+
+    def nested_int_vec(self):
+        assert self._nested_int_vec is not None
+        return self._nested_int_vec
+
+    def clone_nested_int_with_new_vec(self, equiv_set, vec):
+        assert self.is_nested_int()
+
+        def op(i, e, v):
+            return wrap_node(i.node.clone_nested_int_with_new_vec(e, v))
+
+        if sym_function_mode():
+            return to_node(
+                self, handle_sym_dispatch(op, (wrap_node(self), equiv_set, vec), {})
+            )
+        out = SymNode(
+            self._expr,
+            self.shape_env,
+            self.pytype,
+            self._hint,
+            constant=self.constant,
+            fx_node=self.fx_node,
+            nested_int=equiv_set,
+            nested_int_vec=vec,
+        )
+        return out
 
     def wrap_int(self, num):
         assert type(num) is int
@@ -433,9 +477,6 @@ class SymNode:
 
     def is_symbolic(self):
         return True
-
-    def nested_int(self):
-        return None
 
     def is_constant(self):
         return False
@@ -991,7 +1032,13 @@ def _make_node_magic(method, func):
         fx_node, _ = self.shape_env._create_fx_call_function(
             op, (self.fx_node, other.fx_node)
         )
-        return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
+        # Propagate nested int information
+        nested_int, nested_int_vec = None, None
+        if isinstance(out_hint, SymInt) and out_hint.node.is_nested_int():
+            nested_src = self if self.is_nested_int() else other
+            nested_int = nested_src.nested_int()
+            nested_int_vec = nested_src.nested_int_vec()
+        return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node, nested_int=nested_int, nested_int_vec=nested_int_vec)
 
     def unary_magic_impl(self):
         from torch.fx.experimental.symbolic_shapes import safe_expand

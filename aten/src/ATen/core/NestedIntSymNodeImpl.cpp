@@ -8,9 +8,12 @@ namespace {
 bool _eq(const char* op, c10::SymNodeImpl* lhs, c10::SymNodeImpl* rhs) {
   TORCH_INTERNAL_ASSERT(lhs->is_nested_int());
   c10::optional<int64_t> c = rhs->nested_int();
-  return (
-      c.has_value() && lhs->nested_int() == *c &&
-      lhs->nested_int_coeff() == rhs->nested_int_coeff());
+  auto& union_find = get_nested_int_union_find();
+  if (!c.has_value()) {
+    return false;
+  }
+  TORCH_CHECK(union_find.find(*lhs->nested_int()) == union_find.find(*c));
+  return lhs->nested_int_coeff() == rhs->nested_int_coeff();
 }
 bool _ge(const char* op, c10::SymNodeImpl* lhs, c10::SymNodeImpl* rhs) {
   if (auto mb_si = lhs->nested_int()) {
@@ -72,7 +75,27 @@ c10::SymNode NestedIntSymNodeImpl::mul(const c10::SymNode& other) {
   }
   c10::optional<int64_t> c = other->constant_int();
   TORCH_CHECK(c.has_value());
-  return SymNode(c10::make_intrusive<NestedIntSymNodeImpl>(val_, coeff_ * *c));
+  return SymNode(c10::make_intrusive<NestedIntSymNodeImpl>(val_, coeff_ * *c, vec_, type_));
 }
+
+// TODO: it would be nice to have a version of this that does not bump the
+// refcount.
+at::Tensor get_nested_int_vec(const c10::SymNodeImpl* node) {
+  TORCH_INTERNAL_ASSERT(node->is_nested_int());
+  return at::Tensor(c10::intrusive_ptr<c10::TensorImpl>::reclaim_copy(node->nested_int_vec()));
+}
+
+namespace {
+  UnionFind nested_int_union_find_{};
+} // namespace
+
+UnionFind& get_nested_int_union_find() {
+  return nested_int_union_find_;
+}
+
+void set_nested_int_union_find(UnionFind& nested_int_union_find) {
+  nested_int_union_find_ = nested_int_union_find;
+}
+
 
 } // namespace c10

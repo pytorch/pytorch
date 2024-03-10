@@ -42,7 +42,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.immutable_collections import immutable_list
 from torch.nested._internal.nested_tensor import NestedTensor
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-from torch.utils.weak import TensorWeakRef
+from torch.utils.weak import TensorWeakRef, WeakTensorKeyDictionary
 from .. import config, mutation_guard, replay_record, trace_rules
 
 from ..device_interface import get_registered_device_interfaces
@@ -1640,6 +1640,7 @@ def _automatic_dynamic(
         # Get symbolic contexts for inner tensors
         attrs, _ = type(e).__tensor_flatten__(e)
         inner_contexts = {}  # mapping from attr -> symbolic context
+        tensor_to_inner_context = WeakTensorKeyDictionary()
         for attr in attrs:
             inner_tensor = getattr(e, attr)
             inner_source = AttrSource(source, attr)
@@ -1647,6 +1648,7 @@ def _automatic_dynamic(
                 inner_tensor, tx, inner_source, static_shapes
             )
             inner_contexts[attr] = inner_context
+            tensor_to_inner_context[inner_tensor] = inner_context
 
         return SubclassSymbolicContext(
             dynamic_sizes=outer_context.dynamic_sizes,
@@ -1655,6 +1657,7 @@ def _automatic_dynamic(
             tensor_source=outer_context.tensor_source,
             shape_env_to_source_to_symbol_cache=outer_context.shape_env_to_source_to_symbol_cache,
             inner_contexts=inner_contexts,
+            tensor_to_inner_context=tensor_to_inner_context,
         )
 
     if static_shapes:

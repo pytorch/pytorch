@@ -669,6 +669,14 @@ void initDispatchBindings(PyObject* module) {
       .def("merge", &c10::UnionFind::merge)
       .def("find", &c10::UnionFind::find);
 
+  m.def("_get_nested_int_union_find", []() -> c10::UnionFind& {
+    return c10::get_nested_int_union_find();
+  }, py::return_value_policy::reference);
+
+  m.def("_set_nested_int_union_find_copy", [](c10::UnionFind& uf) {
+    c10::set_nested_int_union_find(uf);
+  });
+
   m.attr("_dispatch_autogradother_backends") =
       py::cast(c10::autogradother_backends);
 
@@ -829,10 +837,13 @@ void initDispatchBindings(PyObject* module) {
         include_set.has(c10::DispatchKey::FuncTorchDynamicLayerBackMode));
   });
 
-  m.def("_get_nested_int", [](int64_t data, int64_t coeff) {
-    return c10::SymInt(c10::SymNode(
-        c10::make_intrusive<c10::NestedIntSymNodeImpl>(data, coeff)));
-  });
+  m.def(
+      "_get_nested_int",
+      [](int64_t val, int64_t coeff, const at::Tensor& vec) {
+        return c10::SymInt(
+            c10::SymNode(c10::make_intrusive<c10::NestedIntSymNodeImpl>(
+                val, coeff, vec, c10::NestedTensorVariant::PYTHON)));
+      }, py::arg("val"), py::kw_only(), py::arg("coeff"), py::arg("vec"));
 
   m.def("_get_constant_bool_symnode", [](int64_t data) {
     return c10::SymNode(

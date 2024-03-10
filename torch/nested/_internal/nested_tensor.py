@@ -3,22 +3,60 @@ from typing import Tuple
 import torch
 from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
-from torch.fx.experimental.symbolic_shapes import has_free_symbols
+from .union_find import TensorIntMap, TensorUnionFind
 from torch.utils.weak import WeakTensorKeyDictionary
 from typing import *  # noqa: F403
+import weakref
 
-_tensor_id_counter = 0
-_tensor_symint_registry = WeakTensorKeyDictionary()
+def _get_nested_int(equiv_set, vec):
+    return torch._C._get_nested_int(equiv_set, coeff=1, vec=vec)
+
+class NestedTensorState:
+    # Class that encapsulates all the global state needed for NestedTensor
+    def __init__(self):
+        self._tensor_int_map = TensorIntMap()
+        self.uf = TensorUnionFind(
+            torch._C._get_nested_int_union_find(),
+            self._tensor_int_map,
+        )
+
+    def create_nested_int(self, tensor, ctor_fn=None):
+        if (isinstance(tensor, torch._subclasses.fake_tensor.FakeTensor) or
+            isinstance(tensor, torch._subclasses.functional_tensor.FunctionalTensor)) and ctor_fn is None:
+            # TODO: this seems weird, understand it better
+            return tensor.create_nested_int(_get_nested_int, use_cache=True)
+        _ctor_fn = ctor_fn if ctor_fn is not None else _get_nested_int
+        return _ctor_fn(self._tensor_int_map.get_int(tensor), tensor)
+
+    def get_metadata(self, nested_int):
+        vec = nested_int.node.nested_int_vec()
+        if (isinstance(vec, torch._subclasses.fake_tensor.FakeTensor) or
+            isinstance(vec, torch._subclasses.functional_tensor.FunctionalTensor)):
+            # TODO: actually store version information on the symbolic nested int?
+            return self.uf.get_metadata(vec)
+        if self._tensor_int_map.get_int(vec) != nested_int.node.nested_int():
+            raise RuntimeError("the vec has been mutated")
+        return self.uf.get_metadata(vec)
 
 
-def get_tensor_symint(tensor, *, coeff=1):
-    global _tensor_id_counter
-    tensor_symint = _tensor_symint_registry.get(tensor)
-    if tensor_symint is None:
-        tensor_symint = torch._C._get_nested_int(_tensor_id_counter, coeff)
-        _tensor_id_counter += 1
-        _tensor_symint_registry[tensor] = tensor_symint
-    return tensor_symint
+_nt_state: Optional[NestedTensorState] = None
+
+def get_nt_state() -> NestedTensorState:
+    global _nt_state
+    if _nt_state is None:
+        _nt_state = NestedTensorState()
+    return _nt_state
+
+
+def reset_nt_state():
+    global _nt_state
+    _nt_state = None
+    torch._C._set_nested_int_union_find_copy(torch._C._UnionFind())
+
+
+def trust_me_assert_equal(vec1, vec2, _nt_state=None):
+    nt_state = get_nt_state() if _nt_state is None else _nt_state
+    nt_state.uf.merge(vec1, vec2)
 
 
 # SDPA metadata; max / min seqlens are needed for e.g. flash
@@ -57,6 +95,7 @@ class NestedTensor(torch.Tensor):
         offsets,
         *,
         lengths=None,
+        nested_int=None,
         **kwargs,
     ):
         ks = DispatchKeySet(DispatchKey.NestedTensor)
@@ -89,7 +128,16 @@ class NestedTensor(torch.Tensor):
         # Query cache for the symint associated with offsets or lengths
         # (create a new one if needed).
         ragged_source = offsets if lengths is None else lengths
-        ragged_size = get_tensor_symint(ragged_source, coeff=1)
+
+        nt_state = get_nt_state()
+        ragged_size = nt_state.create_nested_int(ragged_source)
+        # print(ragged_size, ragged_source)
+        # TODO: why does printing break stuff when more than one test is ran
+        # nt_state.print_metadata()
+        # nt_state.validate_invariants()
+        metadata = nt_state.get_metadata(ragged_size)
+        metadata["sum_vec"] = values.shape[0]
+
         self._ragged_idx = kwargs.get("_ragged_idx", 1)
         B = offsets.shape[0] - 1
         Ds = values.shape[: self._ragged_idx - 1] + values.shape[self._ragged_idx :]
@@ -190,15 +238,76 @@ class NestedTensor(torch.Tensor):
         lengths = inner_tensors.get("_lengths", None)
         ragged_idx = meta["ragged_idx"]
 
-        # Note that we cannot simply check if is_fake(values) because
-        # during aot autograd, FunctionalTensors are not fake but hold
-        # symbolic sizes.
-        ragged_source = offsets if lengths is None else lengths
-        if has_free_symbols(ragged_source) or has_free_symbols(values):
-            # Associate offsets or lengths (possibly fake, possibly functionalized)
-            # with the ragged_size.
-            ragged_size = outer_size[ragged_idx]
-            _tensor_symint_registry[ragged_source] = ragged_size
+        vec = offsets if lengths is None else lengths
+        nested_int = None
+
+        # Note [Nested ints handling in __tensor_unflatten__]
+        #
+        # First, read "When you have tracing subclass tensors as vec".
+        #
+        # __tensor_unflatten__ is generally responsible for creating a new
+        # instance of the subclass given (1) some metadata (2) the inner tensors.
+        # and ordinarily, you would be able to use those inputs as-is to
+        # construct the new instance.
+        #
+        # This is not possible in the case of NT, however, because the NT's
+        # metadata is associated with one of the inner tensors. In particular,
+        # for every NT, its nested int is associated with some offsets or
+        # lengths (WLOG, let's say offsets from now on.) with the invariant that
+        # the offsets on the NT and the NT's nested int must be in the same
+        # equiv set. Naively using the metadata/inner tensors as-is would
+        # violate the invariant for example in the case when we are in
+        # AOTAutograd's runtime wrapper, constructing a new NT using traced
+        # metadata and real dense outputs.
+        #
+        # What you kind of want to do is to use offsets as the source of truth
+        # and rederive the nested int, and this is easy to do in the case
+        # where we have already seen and registered that offsets before, as it
+        # is already associated with a nested int. The harder case is when
+        # you don't actually know what the equiv set of offsets is. Unlike
+        # ordinary subclasses, NT's __tensor_unflatten__ has a second
+        # responsibility, which is to register the new vec via maybe_create if
+        # it is not already registered. This is because the caller of
+        # maybe_create is responsible for telling the registry what the equiv
+        # set of the new vec is, i.e., (1) either our offset is in the same
+        # equiv set as the vec associated with the metadata, or it is not.
+        #
+        # In this function we decide between the two by making the following
+        # assumption:
+        #
+        #   If the new offsets is the same type of tensor as the offsets
+        #   associated with the metadata, then we assume that they belong to the
+        #   same equiv set.
+        #
+        # Today it seems that this assumption holds for the below known cases:
+        # (TODO: expand on this part)
+        # - functional -> fake
+        # - runtime wrapper
+        # - fakification
+        # - grad_output aliasing
+        nt_state = get_nt_state()
+
+        if (isinstance(vec, torch._subclasses.fake_tensor.FakeTensor) or
+                isinstance(vec, torch._subclasses.functional_tensor.FunctionalTensor)):
+            old_nested_int = outer_size[ragged_idx]
+
+            def ctor_fn(i, v):
+                def creation_fn():
+                    return torch.SymInt(
+                        # TODO: update clone to no longer take id
+                        old_nested_int.node.clone_nested_int_with_new_vec(i, v)
+                    )
+                ret = v.create_nested_int(
+                    creation_fn,
+                    use_cache=old_nested_int.node._hint.node.nested_int_coeff() == 1,
+                )
+                return ret
+
+            old_vec = old_nested_int.node.nested_int_vec()
+            nt_state.create_nested_int(vec, ctor_fn=ctor_fn)
+
+            if type(vec) == type(old_vec):
+                trust_me_assert_equal(vec, old_vec)
 
         return NestedTensor(
             values,

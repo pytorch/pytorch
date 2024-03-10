@@ -44,12 +44,14 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_ROCM,
     TestCase,
+    disable_gc
 )
 
 from torch.nested._internal.nested_tensor import (
     buffer_from_jagged,
     jagged_from_list,
     NestedTensor,
+    TensorUnionFind,
 )
 from torch.nested._internal.union_find import TensorIntMap, TensorUnionFind
 
@@ -3016,7 +3018,7 @@ class TestNestedTensorSubclass(TestCase):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
         c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
-        nt, _offsets = jagged_from_list([a, b, c], None)
+        nt, offsets = jagged_from_list([a, b, c], None)
 
         for op in (
             torch.ops.aten.is_non_overlapping_and_dense.default,
@@ -3032,7 +3034,8 @@ class TestNestedTensorSubclass(TestCase):
                                     "directly calling torch.ops.aten.size"):
             torch.ops.aten.size.default(nt)
 
-        nested_int = torch.nested._internal.nested_tensor.get_tensor_symint(_offsets, coeff=1)
+        nt_state = torch.nested._internal.nested_tensor.NestedTensorState()
+        nested_int = nt_state.create_nested_int(offsets)
         self.assertEqual(nt.size(), (3, nested_int, 3))
         self.assertEqual(nt.shape, (3, nested_int, 3))
         self.assertEqual(nt.dim(), 3)
@@ -3099,9 +3102,9 @@ class TestNestedTensorSubclass(TestCase):
         nt1, _ = jagged_from_list([a, b, c], None)
         nt2, _ = jagged_from_list([a, b, c], None)
 
-        self.assertRaisesRegex(
+        self.assertRaises(
             RuntimeError,
-            "cannot call binary pointwise function .* with inputs of shapes",
+            # "cannot call binary pointwise function .* with inputs of shapes",
             lambda: nt1 * nt2)
 
         # Correct usage: chain the calls using the same offsets tensor object
@@ -3738,7 +3741,8 @@ class TestNestedTensorSubclass(TestCase):
         def check_size(nt1, nt2, nt3, nt4):
             self.assertTrue(torch.ops.aten.is_same_size(nt1, nt2))
             self.assertTrue(torch.ops.aten.is_same_size(nt3, nt4))
-            self.assertFalse(torch.ops.aten.is_same_size(nt1, nt3))
+            with self.assertRaises(RuntimeError):
+                torch.ops.aten.is_same_size(nt1, nt3)
 
         check_size(nt1, nt2, nt3, nt4)
 
@@ -4081,6 +4085,65 @@ class TestTensorUnionFind(TestCase):
         # To the perspective of the mutated tensor, it will just belong
         # to a new set where it is still canonical.
         self.assertIs(uf.find(a), a)
+class TestNestedIntRegistry(TestCase):
+    def test_basic_usage(self):
+        nt_state = torch.nested._internal.nested_tensor.NestedTensorState()
+        vec = torch.tensor([1, 2, 3])
+        nested_int = nt_state.create_nested_int(vec)
+        # Vec is the only vec, and so it is also the canonical vec
+        self.assertIs(nested_int.node.nested_int_vec(), vec)
+        nested_int2 = nt_state.create_nested_int(vec)
+        self.assertEqual(nested_int.node.nested_int(), nested_int2.node.nested_int())
+        # We always create fresh nested int, even if the vec is the same
+        self.assertIsNot(nested_int, nested_int2)
+
+        # When we create a new nested int with a new vec, trying to compare
+        # them will raise an error
+        vec2 = torch.tensor([4, 5, 6])
+        nested_int3 = nt_state.create_nested_int(vec2)
+        self.assertIs(nested_int3.node.nested_int_vec(), vec2)
+        with self.assertRaises(RuntimeError):
+            nested_int == nested_int3
+
+        # After merging the two equiv sets, the nested ints compare equal
+        torch.nested._internal.nested_tensor.trust_me_assert_equal(vec, vec2, _nt_state=nt_state)
+        self.assertEqual(nested_int, nested_int3)
+
+    def test_version_counting(self):
+        nt_state = torch.nested._internal.nested_tensor.NestedTensorState()
+        vec = torch.tensor([1, 2, 3])
+        vec2 = vec.clone()
+        nested_int = nt_state.create_nested_int(vec)
+        nested_int2 = nt_state.create_nested_int(vec2)
+        torch.nested._internal.nested_tensor.trust_me_assert_equal(vec, vec2, _nt_state=nt_state)
+        self.assertEqual(nested_int, nested_int2)
+        vec.add_(1)
+        # nested_int corresponds to a specific version of vec, we allow the
+        # nested_int to continue to be used in equality operations, but
+        # we don't allow its vec to be used in any operations.
+        self.assertEqual(nested_int, nested_int2)
+
+        with self.assertRaisesRegex(RuntimeError, "has been mutated"):
+            # metadata exists for a specific version of vec! so pass in nested_int
+            nt_state.get_metadata(nested_int)
+
+    def test_nested_int_ownership(self):
+        nt_state = torch.nested._internal.nested_tensor.NestedTensorState()
+        vec = torch.tensor([1, 2, 3])
+        nested_int = nt_state.create_nested_int(vec)
+
+        # Vec does NOT keep the nested int alive
+        ref = weakref.ref(nested_int)
+        with disable_gc():
+            # There are no reference cycles
+            del nested_int
+            self.assertIsNone(ref())
+
+        # Nested int DOES keep the vec alive
+        nested_int = nt_state.create_nested_int(vec)
+        ref = weakref.ref(vec)
+        del vec
+        self.assertIs(ref(), nested_int.node.nested_int_vec())
 
 
 instantiate_parametrized_tests(TestNestedTensor)

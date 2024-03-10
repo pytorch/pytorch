@@ -14,6 +14,8 @@ namespace c10 {
 class SymNodeImpl;
 using SymNode = c10::intrusive_ptr<SymNodeImpl>;
 
+struct TensorImpl;
+
 // When you add a method, you also need to edit
 // torch/csrc/jit/python/init.cpp
 // torch/csrc/utils/python_symnode.h
@@ -190,6 +192,9 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   };
   virtual c10::optional<int64_t> nested_int() {
     return c10::nullopt;
+  }
+  virtual TensorImpl* nested_int_vec() const {
+    TORCH_CHECK(false, "NYI");
   }
   virtual c10::optional<int64_t> nested_int_coeff() {
     return c10::nullopt;
