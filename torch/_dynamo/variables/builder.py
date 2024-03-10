@@ -794,7 +794,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return MethodWrapperVariable(value)
         elif issubclass(type(value), type):
-            if value in (torch.utils.hooks.BackwardHook,):
+            if value in (torch.utils.hooks.BackwardHook, torch.nn.Parameter):
                 # TODO(jansel): combine this case with the one above
                 return trace_rules.lookup(value).create_with_source(
                     value, source=self.source
