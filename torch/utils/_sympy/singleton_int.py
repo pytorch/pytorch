@@ -1,3 +1,5 @@
+import torch
+
 import sympy
 from sympy.multipledispatch import dispatch
 
@@ -22,11 +24,13 @@ class SingletonInt(sympy.AtomicExpr):
 
     # See NOTE [ Inequalities with nested int ]
     def _eval_Eq(self, other):
-        if (
-            isinstance(other, SingletonInt)
-            and other._val == self._val
-            and self._coeff == other._coeff
-        ):
+        if not isinstance(other, SingletonInt):
+            # TODO: should this error as well?
+            return sympy.false
+        uf = torch._C._get_nested_int_union_find()
+        if not uf.find(other._val) == uf.find(self._val):
+            raise ValueError("Symbolic SingletonInt: Relation is indeterminate")
+        elif self._coeff == other._coeff:
             return sympy.true
         else:
             return sympy.false
