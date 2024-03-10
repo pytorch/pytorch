@@ -17,7 +17,7 @@ namespace api {
 
 //
 // A Vulkan Runtime initializes a Vulkan instance and decouples the concept of
-// Vulkan instance initialization from intialization of, and subsequent
+// Vulkan instance initialization from initialization of, and subsequent
 // interactions with,  Vulkan [physical and logical] devices as a precursor to
 // multi-GPU support.  The Vulkan Runtime can be queried for available Adapters
 // (i.e. physical devices) in the system which in turn can be used for creation

@@ -1,7 +1,12 @@
 #pragma once
+#include <ATen/TensorGeometry.h>
+#include <ATen/core/ivalue.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
-#include <torch/csrc/autograd/custom_function.h>
-#include <torch/csrc/autograd/engine.h>
+#include <c10/util/flat_hash_map.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/input_metadata.h>
+#include <torch/csrc/autograd/saved_variable.h>
+#include <torch/csrc/autograd/variable_info.h>
 #include <torch/csrc/utils/python_stub.h>
 #include <torch/csrc/utils/torch_dispatch_mode.h>
 #include <typeindex>
@@ -236,6 +241,47 @@ class CompiledNodeArgs {
     collect(t.first);
     collect(t.second);
   }
+  template <typename V>
+  void collect(const ska::flat_hash_map<std::string, V>& m) {
+    collect_size(m.size());
+
+    std::vector<std::string> keys;
+    keys.reserve(m.size());
+    std::transform(
+        m.begin(), m.end(), std::back_inserter(keys), [](const auto& entry) {
+          return entry.first;
+        });
+    std::sort(keys.begin(), keys.end());
+    for (const auto& k : keys) {
+      collect(k);
+      collect(m.at(k));
+    }
+  }
+  void collect(const at::IValue& iv) {
+    if (iv.isList()) {
+      c10::List<at::IValue> list = iv.toList();
+      collect_size(list.size());
+      for (auto it = list.begin(); it != list.end(); it++) {
+        collect(*it);
+      }
+    } else if (iv.isGenericDict()) {
+      c10::Dict<at::IValue, at::IValue> ordered_dict = iv.toGenericDict();
+      collect_size(ordered_dict.size());
+      for (auto it = ordered_dict.begin(); it != ordered_dict.end(); it++) {
+        collect(it->key());
+        collect(it->value());
+      }
+    } else {
+      try {
+        collect(static_cast<uint64_t>(at::IValue::hash(iv)));
+      } catch (const std::runtime_error& e) {
+        std::string msg =
+            "Compiled autograd can not trace unhashable IValues, error: " +
+            std::string(e.what());
+        TORCH_CHECK_NOT_IMPLEMENTED(false, msg);
+      }
+    }
+  }
   void collect(const c10::Scalar& t) {
     auto type = t.type();
     specialize_on_bytes(type);
@@ -372,6 +418,10 @@ class CompiledNodeArgs {
   }
 
   int add_backward(c10::SafePyObject&& obj) {
+    return _compiler.emplace_hook(std::move(obj));
+  }
+
+  int add_backward_state(c10::SafePyObject&& obj) {
     return _compiler.emplace_hook(std::move(obj));
   }
 
@@ -520,6 +570,14 @@ class SwapSavedVariables {
     stashed_symints.restore(&t);
   }
 
+  void before(at::IValue& t) {
+    stashed_ivalues.save(&t, at::IValue(t));
+  }
+
+  void after(at::IValue& t) {
+    stashed_ivalues.restore(&t);
+  }
+
   void before(Edge& t) {
     if (t.is_valid()) {
       // need for symints used by validate_outputs
@@ -611,6 +669,27 @@ class SwapSavedVariables {
     }
   }
 
+  template <typename V>
+  void before(ska::flat_hash_map<std::string, V>& m) {
+    std::vector<std::string> keys;
+    keys.reserve(m.size());
+    std::transform(
+        m.begin(), m.end(), std::back_inserter(keys), [](const auto& entry) {
+          return entry.first;
+        });
+    std::sort(keys.begin(), keys.end());
+    for (auto& k : keys) {
+      before(m.at(k));
+    }
+  }
+
+  template <typename V>
+  void after(ska::flat_hash_map<std::string, V>& m) {
+    for (auto& [_, v] : m) {
+      after(v);
+    }
+  }
+
 #define NO_OP_VISIT(T)     \
   void before(const T&) {} \
   void after(const T&) {}
@@ -697,6 +776,7 @@ class SwapSavedVariables {
   StashedVars<SavedVariable> stashed_variables;
   StashedVars<at::Tensor> stashed_tensors;
   StashedVars<c10::SymInt> stashed_symints;
+  StashedVars<at::IValue> stashed_ivalues;
 };
 
 } // namespace torch::dynamo::autograd

@@ -25,8 +25,8 @@ import torch
 import torch._C
 from torch.types import Device
 from .. import device as _device
-from .._utils import classproperty
-from ._utils import _dummy_type, _get_device_index
+from .._utils import _dummy_type, _LazySeedTracker, classproperty
+from ._utils import _get_device_index
 from .graphs import (
     CUDAGraph,
     graph,
@@ -58,31 +58,6 @@ try:
     _HAS_PYNVML = True
 except ImportError as err:
     _PYNVML_ERR = err  # sometimes a lib is installed but the import fails for some other reason, so we log the error for later
-
-
-class _LazySeedTracker:
-    # Since seeding is memory-less, only track the latest seed.
-    # Note: `manual_seed_all` followed by `manual_seed` overwrites
-    # the seed on current device. We track the order of **latest**
-    # calls between these two API.
-    def __init__(self):
-        self.manual_seed_all_cb = None
-        self.manual_seed_cb = None
-        self.call_order = []
-
-    def queue_seed_all(self, cb, traceback):
-        self.manual_seed_all_cb = (cb, traceback)
-        # update seed_all to be latest
-        self.call_order = [self.manual_seed_cb, self.manual_seed_all_cb]
-
-    def queue_seed(self, cb, traceback):
-        self.manual_seed_cb = (cb, traceback)
-        # update seed to be latest
-        self.call_order = [self.manual_seed_all_cb, self.manual_seed_cb]
-
-    def get_calls(self) -> List:
-        return self.call_order
-
 
 _lazy_seed_tracker = _LazySeedTracker()
 
