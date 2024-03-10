@@ -94,11 +94,20 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         optim_tp = torch.optim.SGD(model_tp.parameters(), lr=LR)
 
         output = model(inp)
-        output_tp = model_tp(inp)
-        self.assertEqual(output, output_tp)
-
         output.sum().backward()
-        output_tp.sum().backward()
+
+        from torch.distributed._tensor.debug import CommDebugMode
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            output_tp = model_tp(inp)
+            output_tp.sum().backward()
+
+        self.assertEqual(output, output_tp)
+        if is_seq_parallel:
+            self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 2)
+            self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.reduce_scatter_tensor], 1)
+        else:
+            self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_reduce], 1)
 
         if is_seq_parallel:
             # Sum gradients from different ranks, since input

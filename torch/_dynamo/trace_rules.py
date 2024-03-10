@@ -1229,6 +1229,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._cast_Long",
         "torch._cast_Short",
         "torch._choose_qparams_per_tensor",
+        "torch._chunk_cat",
         "torch._coalesce",
         "torch._compute_linear_combination",
         "torch._conj_copy",
