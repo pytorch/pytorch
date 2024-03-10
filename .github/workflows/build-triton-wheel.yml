@@ -181,8 +181,7 @@ jobs:
         with:
           name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}
           if-no-files-found: error
-          path: $RUNNER_TEMP/artifacts/*
-
+          path: ${{ runner.temp }}/artifacts/*
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
@@ -217,17 +216,14 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           # Download every available artifact
-          path: $RUNNER_TEMP/artifacts-all/
+          path: artifacts-all
 
       - name: Select Wheel Artifacts
         shell: bash
         run: |
           set -x
-          mkdir -p $RUNNER_TEMP/artifacts/
-          ls -l $RUNNER_TEMP/
-          ls -l $RUNNER_TEMP/artifacts-all/
-          ls -l $RUNNER_TEMP/artifacts-all/pytorch-triton-wheel-*/*
-          mv $RUNNER_TEMP/artifacts-all/pytorch-triton-wheel-*/* $RUNNER_TEMP/artifacts/
+          mkdir -p ${{ runner.temp }}/artifacts/
+          mv ./artifacts-all/pytorch-triton-wheel-*/* ${{runner.temp}}/artifacts/
 
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) }}
@@ -253,7 +249,7 @@ jobs:
           # The UPLOAD_SUBFOLDER needs to be empty here so that triton wheels are uploaded
           # to nightly or test
           UPLOAD_SUBFOLDER: ""
-          PKG_DIR: $RUNNER_TEMP/artifacts
+          PKG_DIR: ${{ runner.temp }}/artifacts
         shell: bash
         run: |
           set -ex
@@ -327,7 +323,7 @@ jobs:
         with:
           name: pytorch-triton-conda-${{ matrix.py_vers }}
           if-no-files-found: error
-          path: $RUNNER_TEMP/artifacts/*
+          path: ${{ runner.temp }}/artifacts/*
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
@@ -346,15 +342,14 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           # Download all available artifacts
-          path: $RUNNER_TEMP/artifacts-all/
+          path: artifacts-all
 
       - name: Select Conda Artifacts
         shell: bash
         run: |
           set -x
-          mkdir -p $RUNNER_TEMP/artifacts/
-          ls -l $RUNNER_TEMP/artifacts-all/pytorch-triton-conda-*/*
-          mv $RUNNER_TEMP/artifacts-all/pytorch-triton-conda-*/* $RUNNER_TEMP/artifacts/
+          mkdir -p ${{ runner.temp }}/artifacts/
+          mv ./artifacts-all/pytorch-triton-conda-*/* ${{ runner.temp }}/artifacts/
 
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) }}
@@ -377,7 +372,7 @@ jobs:
       - name: Upload binaries to Anaconda
         env:
           PACKAGE_TYPE: conda
-          PKG_DIR: $RUNNER_TEMP/artifacts
+          PKG_DIR: ${{ runner.temp }}/artifacts
           # When running these on pull_request events these should be blank
           CONDA_PYTORCHBOT_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
           CONDA_PYTORCHBOT_TOKEN_TEST: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
