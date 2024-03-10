@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/DispatchKeySet.h>
 #include <c10/core/SafePyObject.h>
 #include <c10/core/SymNodeImpl.h>
 
@@ -175,7 +176,9 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return c10::make_intrusive<PythonSymNodeImpl>(r);
   }
 
-  c10::SymNode dispatch_common_(const char* fname, const c10::SymNode& other) {
+  c10::SymNode dispatch_common_(
+      const char* fname,
+      const c10::SymNode& other) {
     auto pother = dynamic_cast<PythonSymNodeImpl*>(other.get());
     TORCH_CHECK(pother);
     py::gil_scoped_acquire acquire;
@@ -283,6 +286,10 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
 
   c10::SymNode sym_float() override {
     return dispatch_common_(__func__);
+  }
+
+  c10::DispatchKeySet key_set() const override {
+    return is_nested_int() ? c10::py_nested_int_ks : c10::DispatchKeySet();
   }
 
   py::handle getPyObj() const {

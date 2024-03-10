@@ -192,6 +192,10 @@ class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
     return false;
   }
 
+  c10::DispatchKeySet key_set() const override {
+    return key_set_;
+  }
+
 #define DEFINE_BINARY_NOT_SUPPORTED(name)                           \
   c10::SymNode name(const c10::SymNode& other) override {           \
     TORCH_CHECK(false, #name " not supported by NestedIntSymNode"); \
