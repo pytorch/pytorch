@@ -423,6 +423,10 @@ class FakeTensor(torch.Tensor):
     _nonzero_memo: Optional[torch.SymInt]
     _nonzero_memo_vc: Optional[int]
 
+    # TODO: write something here
+    _nested_int_memo: Optional[torch.SymInt]
+    _nested_int_memo_vc: Optional[int]
+
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
     _mode_key = torch._C._TorchDispatchModeKey.FAKE
@@ -505,6 +509,8 @@ class FakeTensor(torch.Tensor):
         self.constant = constant  # type: ignore[attr-defined]
         self._nonzero_memo = None  # type: ignore[attr-defined]
         self._nonzero_memo_vc = None  # type: ignore[attr-defined]
+        self._nested_int_memo = None  # type: ignore[attr-defined]
+        self._nested_int_memo_vc = None  # type: ignore[attr-defined]
 
         if FakeTensorConfig.debug:
             import traceback
@@ -675,6 +681,26 @@ class FakeTensor(torch.Tensor):
             torch._constrain_as_size(s, min=2)
             out.append(s)
         return out
+
+    def create_nested_int(self, creation_fn, use_cache=True):
+        # TODO: how do I know whether we are an intermediate tensor or not?
+        # Version counter based tracking isn't 100% sound but it's close
+        # enough
+        if self._nested_int_memo_vc != self._version:
+            self._nested_int_memo = None
+            self._nested_int_memo_vc = self._version
+
+        if not use_cache:
+            # this is for coeff, we could cache for coeff too, but
+            # coeff can be symbolic and SymInt are not hashable
+            return creation_fn()
+
+        if self._nested_int_memo is None:
+            self._nested_int_memo = creation_fn()
+
+        return self._nested_int_memo
+
+    __torch_function__ = torch._C._disabled_torch_function_impl
 
 
 @dataclass(frozen=True)
