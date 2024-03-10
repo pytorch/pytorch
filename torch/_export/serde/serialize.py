@@ -231,7 +231,7 @@ def serialize_tensor_meta(t: torch.Tensor) -> TensorMeta:
         requires_grad=t.requires_grad,
         device=Device(type=t.device.type, index=t.device.index),
         strides=[serialize_sym_int(s) for s in t.stride()],
-        storage_offset=0,
+        storage_offset=serialize_sym_int(0),  # TODO needs to be fixed.
         layout=_TORCH_TO_SERIALIZE_LAYOUT[t.layout],
     )
 
@@ -1200,6 +1200,14 @@ class GraphModuleDeserializer:
                 sym = self.symbol_name_to_symbol[val.expr_str]
             else:
                 sym = sympy.sympify(val.expr_str, locals=self.symbol_name_to_symbol)
+                # NOTE(avik): Assumptions on symbols are not explicitly serialized.
+                # This seems dangerous: it might cause unknown differences in shape env behavior
+                # on deserialization? Probably deserves a follow-up.
+
+                # Here we force symbols corresponding to SymInts to be at least integers.
+                # Otherwise some expressions that the shape env would otherwise evaluate to False,
+                # e.g., 2*s = 9, can have rational solutions, e.g., 9/2.
+                sym = sym.subs({s: sympy.Symbol(s.name, integer=True) for s in sym.free_symbols})
                 if isinstance(sym, sympy.Symbol):
                     self.symbol_name_to_symbol[val.expr_str] = sym
 
@@ -1210,6 +1218,23 @@ class GraphModuleDeserializer:
                             compiler_min=vr.lower,  # type: ignore[arg-type]
                             compiler_max=vr.upper,  # type: ignore[arg-type]
                         )
+                else:
+                    # Placeholders, in particular, can have shapes as symbolic expressions.
+                    # We need to populate the shape env with the range constraints of their
+                    # free symbols, otherwise evaluating such expressions will error.
+                    self.symbol_name_to_symbol[val.expr_str] = sym
+                    free_symbols = sym.free_symbols
+                    for s in free_symbols:
+                        if s.name not in self.symbol_name_to_symbol:
+                            self.symbol_name_to_symbol[s.name] = s
+                        if vr := self.symbol_name_to_range.get(s.name):
+                            symbolic_shapes._constrain_symbol_range(
+                                self.shape_env,
+                                s,
+                                compiler_min=vr.lower,  # type: ignore[arg-type]
+                                compiler_max=vr.upper,  # type: ignore[arg-type]
+                            )
+
 
             if val.hint is None:
                 hint = None
@@ -1339,8 +1364,18 @@ class GraphModuleDeserializer:
 
         elif isinstance(target, torch._ops.HigherOrderOperator):
             args, kwargs = self.deserialize_hoo_inputs(serialized_node.inputs)
+            # If HOP returns a single tensor, name the
+            # newly-created node after it. This ensures that these tensor values
+            # have names that are consistent with serialized.
+            #
+            # HOPs don't have schema yet, just check the output lengths and as_tensor attribute
+            name = (
+                serialized_node.outputs[0].as_tensor.name
+                if len(serialized_node.outputs) == 1 and hasattr(serialized_node.outputs[0], "as_tensor")
+                else None
+            )
             fx_node = self.graph.create_node(
-                "call_function", target, args, kwargs, None
+                "call_function", target, args, kwargs, name
             )
             self.deserialize_outputs(serialized_node, fx_node)
             fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))
@@ -1871,10 +1906,12 @@ class EnumEncoder(json.JSONEncoder):
 
 def _dataclass_to_dict(obj):
     if isinstance(obj, _Union):
-        return {"$type": obj.type, "$value": _dataclass_to_dict(obj.value)}
+        return {obj.type: _dataclass_to_dict(obj.value)}
     elif dataclasses.is_dataclass(obj):
         return {
-            f.name: _dataclass_to_dict(getattr(obj, f.name)) for f in dataclasses.fields(obj)
+            f.name: _dataclass_to_dict(getattr(obj, f.name))
+            for f in dataclasses.fields(obj)
+            if not (f.default is None and getattr(obj, f.name) is None)
         }
     elif isinstance(obj, list):
         return [_dataclass_to_dict(x) for x in obj]
@@ -1918,8 +1955,9 @@ def _dict_to_dataclass(cls, data):
         return _dict_to_dataclass(ty_args[0], data)
     elif isinstance(cls, type) and issubclass(cls, _Union):
         assert isinstance(data, dict)
-        _type = data["$type"]
-        _value = data["$value"]
+        assert len(data) == 1
+        _type = next(iter(data.keys()))
+        _value = next(iter(data.values()))
         assert isinstance(_type, str)
         field_type = cls.__annotations__[_type]
         return cls.create(**{_type: _dict_to_dataclass(field_type, _value)})
@@ -2350,6 +2388,8 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
                     pass
                 else:
                     raise AssertionError(f"Unknown sym_int type: {s}")
+            elif arg.type in ("as_none", "as_int", "as_float", "as_string"):
+                return
             else:
                 raise AssertionError(f"Unknown input type: {arg}")
         elif spec.type == "loss_output":
