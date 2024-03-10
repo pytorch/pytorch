@@ -650,6 +650,12 @@ class TreeSpec:
     def is_leaf(self) -> bool:
         return self.num_nodes == 1 and self.num_leaves == 1
 
+    def children(self) -> List["TreeSpec"]:
+        return self.children_specs
+
+    def child(self, index: int) -> "TreeSpec":
+        return self.children_specs[index]
+
     def _flatten_up_to_helper(self, tree: PyTree, subtrees: List[PyTree]) -> None:
         if self.is_leaf():
             subtrees.append(tree)
@@ -1251,7 +1257,7 @@ def _broadcast_to_and_flatten(
 
     # Recursively flatten the children
     result: List[Any] = []
-    for child, child_spec in zip(child_pytrees, treespec.children_specs):
+    for child, child_spec in zip(child_pytrees, treespec.children()):
         flat = _broadcast_to_and_flatten(child, child_spec, is_leaf=is_leaf)
         if flat is not None:
             result += flat
@@ -1315,7 +1321,7 @@ def _treespec_to_json(treespec: TreeSpec) -> _TreeSpecSchema:
     else:
         serialized_context = serialize_node_def.to_dumpable_context(treespec.context)
 
-    child_schemas = [_treespec_to_json(child) for child in treespec.children_specs]
+    child_schemas = [_treespec_to_json(child) for child in treespec.children()]
 
     return _TreeSpecSchema(serialized_type_name, serialized_context, child_schemas)
 
