@@ -57,11 +57,17 @@ fi
   # Uncomment the below when resolved to track the latest conda update
   # as_jenkins conda update -y -n base conda
 
+  if [[ $(uname -m) == "aarch64" ]]; then
+    export SYSROOT_DEP="sysroot_linux-aarch64=2.17"
+  else
+    export SYSROOT_DEP="sysroot_linux-64=2.17"
+  fi
+
   # Install correct Python version
   # Also ensure sysroot is using a modern GLIBC to match system compilers
   as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y\
              python="$ANACONDA_PYTHON_VERSION" \
-             sysroot_linux-64=2.17
+             ${SYSROOT_DEP}
 
   # libstdcxx from conda default channels are too old, we need GLIBCXX_3.4.30
   # which is provided in libstdcxx 12 and up.
