@@ -277,12 +277,11 @@ class MetaConverter:
                     # they are in the same equivalence set.
                     _symbolic_context = None
                     if symbolic_context is not None:
-                        registry = torch.nested._internal.nested_tensor.get_nested_int_registry()
-                        if registry.contains_vec(t):
-                            for vec in registry.get_all_equiv_vecs(t):
-                                if vec in symbolic_context.tensor_to_inner_context:
-                                    _symbolic_context = symbolic_context.tensor_to_inner_context[vec]
-                                    break
+                        nt_state = torch.nested._internal.nested_tensor.get_nt_state()
+                        for vec in nt_state.uf.get_equiv_tensors(t):
+                            if vec in symbolic_context.tensor_to_inner_context:
+                                _symbolic_context = symbolic_context.tensor_to_inner_context[vec]
+                                break
                     return self.meta_tensor(
                         t,
                         shape_env,
