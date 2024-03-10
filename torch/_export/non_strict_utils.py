@@ -15,7 +15,7 @@ from torch._export.passes.add_runtime_assertions_for_constraints_pass import Inp
 from torch._guards import Source
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
-from torch.export._dynamic_shapes import _Constraint
+from torch.export.dynamic_shapes import _Constraint
 from torch.export.exported_program import InputKind
 from torch.export.graph_signature import CustomObjArgument, InputSpec, TensorArgument
 from torch.fx.experimental.symbolic_shapes import (
