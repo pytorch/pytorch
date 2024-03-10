@@ -1,13 +1,16 @@
 # Owner(s): ["module: meta tensors"]
 
+import sys
+
 from torch.testing._internal.common_utils import (
     TestCase, TEST_WITH_TORCHDYNAMO, run_tests, skipIfCrossRef, skipIfRocm, skipIfTorchDynamo, parametrize,
-    instantiate_parametrized_tests)
+    instantiate_parametrized_tests, TemporaryFileName)
 import torch
 import torch._dynamo
 import itertools
 import numpy as np
 from torch.testing._internal.jit_utils import RUN_CUDA
+from torch._guards import tracing, TracingContext
 from torch._subclasses.fake_tensor import (
     _ShapeEnvSettings,
     extract_tensor_metadata,
@@ -16,6 +19,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensorConverter,
     DynamicOutputShapeException,
     UnsupportedOperatorException,
+    unset_fake_temporarily,
 )
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, DimDynamic, free_symbols, StatelessSymbolicContext
 from torch.testing._internal.custom_op_db import custom_op_db
@@ -33,6 +37,7 @@ import torch._prims as prims
 import contextlib
 import weakref
 import copy
+import pickle
 import torch._functorch.config
 import torch.testing._internal.optests as optests
 from unittest.mock import patch
@@ -778,6 +783,19 @@ class FakeTensorTest(TestCase):
             grad_in = torch.ops.aten._adaptive_avg_pool2d_backward(grad_out, inp)
             self.assertTrue(torch._prims_common.suggest_memory_format(grad_in) == torch.channels_last)
 
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
+    def test_export_numpy(self):
+        class MyNumpyModel(torch.nn.Module):
+            def forward(self, input):
+                input = input.numpy()
+                return input + np.random.randn(*input.shape)
+
+        with FakeTensorMode():
+            ep = torch.export.export(MyNumpyModel(), args=(torch.randn(1000),))
+            self.assertTrue(isinstance(ep, torch.export.ExportedProgram))
+
 
 class FakeTensorConstHandling(TestCase):
     def assertConst(self, *args):
@@ -1285,6 +1303,46 @@ class FakeTensorPropTest(TestCase):
             another_optional_value = torch.randn(5, 4)
             graph_model = torch.fx.symbolic_trace(model, (value, None, another_optional_value))
             FakeTensorProp(graph_model, fake_mode).propagate(value, None, another_optional_value)
+
+
+    def test_torch_load_with_fake_mode(self):
+
+        class TheModelClass(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(5, 10)
+
+            def forward(self, x):
+                return self.fc1(x)
+
+        with TemporaryFileName() as state_dict_file:
+            # Create state_dict to be loaded later
+            model = TheModelClass()
+            torch.save(model.state_dict(), state_dict_file)
+
+            fake_mode = FakeTensorMode()
+            with fake_mode:
+                torch.load(state_dict_file)  # scenario 1
+                torch.load(state_dict_file, map_location="cpu")  # scenario 2
+
+
+class FakeTensorSerialization(TestCase):
+    def test_serialization(self):
+        x = torch.tensor([0], device="cpu")
+        with FakeTensorMode():
+            y = pickle.loads(pickle.dumps(x))
+            self.assertEqual(type(y), FakeTensor)
+            self.assertEqual(y.device.type, "meta")
+
+            with unset_fake_temporarily():
+                y = pickle.loads(pickle.dumps(x))
+                self.assertEqual(x.device, y.device)
+
+    def test_serialization_with_tracing(self):
+        x = torch.tensor([0], device="cpu")
+        with tracing(TracingContext(FakeTensorMode())):
+            y = pickle.loads(pickle.dumps(x))
+            self.assertEqual(x.device, y.device)
 
 
 class FakeTensorDispatchCache(TestCase):

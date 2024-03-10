@@ -11,7 +11,7 @@
 
 #include <utility>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 static bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
   return dim == 0 || dim == -1;
@@ -507,4 +507,5 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(_is_all_true, _is_all_true_batch_rule);
   VMAP_SUPPORT(_is_any_true, _is_any_true_batch_rule);
 }
-}}
+
+} // namespace at::functorch

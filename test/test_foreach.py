@@ -13,7 +13,7 @@ from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import \
-    TestCase, run_tests, TEST_WITH_ROCM, skipIfTorchDynamo, parametrize, gradcheck
+    TestCase, run_tests, TEST_WITH_ROCM, skipIfTorchDynamo, parametrize, gradcheck, skipIfRocmVersionLessThan
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCUDA, ops, OpDTypes)
 from torch.testing._internal.common_methods_invocations import (
@@ -66,8 +66,9 @@ class ForeachFuncWrapper:
             assert mta_called == (expect_fastpath and (not zero_size))
         else:
             actual = self.func(*inputs, **kwargs)
-        # note(mkozuki): inplace foreach functions are void functions.
-        return inputs[0] if self.is_inplace else actual
+        if self.is_inplace:
+            assert id(inputs[0]) == id(actual)
+        return actual
 
 
 class InplaceForeachVersionBumpCheck:
@@ -134,7 +135,7 @@ class TestForeach(TestCase):
             with InplaceForeachVersionBumpCheck(self, sample.input):
                 inplace_op((sample.input, *sample.args), is_cuda=self.is_cuda, expect_fastpath=True, zero_size=True)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "Skipped on ROCm, since it is failing on ROCm 5.7")
+    @skipIfRocmVersionLessThan((6, 0))
     @ops(
         foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_other_op_db,
     )

@@ -16,8 +16,7 @@
 // registered to FuncTorchVmapMode. This is because we need to interpose on
 // random operations even if they're not on a BatchedTensor.
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 template <typename F, F Func, typename... ExtraArgs>
 Tensor random_batching_rule(SymIntArrayRef shape, ExtraArgs... extra_args) {
@@ -491,4 +490,5 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   #undef UNARY_POINTWISE_RANDOM_LEADING_FLOAT
   #undef TENSOR_LIKE_COMMON_ARG_TYPES
 }
-}} // namespace at::functorch
+
+} // namespace at::functorch
