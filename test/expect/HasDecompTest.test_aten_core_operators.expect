@@ -6,6 +6,9 @@ aten::_adaptive_avg_pool2d
 aten::_adaptive_avg_pool2d.out
 aten::_addmm_activation
 aten::_addmm_activation.out
+aten::_batch_norm_no_update
+aten::_batch_norm_with_update
+aten::_batch_norm_with_update_functional
 aten::_euclidean_dist.out
 aten::_fused_dropout
 aten::_fused_dropout.out
@@ -76,6 +79,7 @@ aten::atanh
 aten::atanh.out
 aten::atanh_
 aten::baddbmm_
+aten::batch_norm_backward
 aten::bitwise_and.Scalar
 aten::bitwise_and.Scalar_Tensor
 aten::bitwise_and.Scalar_Tensor_out
@@ -238,6 +242,8 @@ aten::fmod.Tensor
 aten::fmod.Tensor_out
 aten::fmod_.Scalar
 aten::fmod_.Tensor
+aten::frexp.Tensor
+aten::frexp.Tensor_out
 aten::full
 aten::full.out
 aten::gcd
@@ -419,8 +425,6 @@ aten::remainder_.Scalar
 aten::remainder_.Tensor
 aten::repeat
 aten::repeat.out
-aten::roll
-aten::roll.out
 aten::round
 aten::round.decimals
 aten::round.decimals_out
