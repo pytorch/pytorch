@@ -233,14 +233,11 @@ def make_constraints(
         raise constraint_violation_error
 
     # create mapping from tensor id -> (dim -> user-specified constraint spec) for user tensor inputs
-    user_tensor_input_names = set(
-        [
-            spec.arg.name
-            for spec in input_specs
-            if spec.kind == InputKind.USER_INPUT
-            and isinstance(spec.arg, TensorArgument)
-        ]
-    )
+    user_tensor_input_names = {
+        spec.arg.name
+        for spec in input_specs
+        if spec.kind == InputKind.USER_INPUT and isinstance(spec.arg, TensorArgument)
+    }
     tensor_id_to_dim_constraint: Dict[int, Dict[str, int]] = defaultdict(defaultdict)
     for constraint in constraints:
         spec = constraint.serializable_spec
