@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (5, 1)
+SCHEMA_VERSION = (5, 2)
 TREESPEC_VERSION = 1
 
 

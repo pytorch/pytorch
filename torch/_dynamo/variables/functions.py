@@ -692,6 +692,8 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         # call_function must check any unsupported arguments and graph-break.
         # It's safe to assume args/kwargs from orig_fn map 1:1 to args/kwargs of remapped_fn,
         # since that's the contract for putting a mapping in `traceable_collective_remaps`
+        import torch.distributed as dist
+        from torch.distributed._functional_collectives import REDUCE_OP_TO_STR
 
         # Merge args into kwargs so positional and keyword args
         # can be processed the same way.
@@ -707,6 +709,18 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         if kwargs.get("group") is None or kwargs["group"].value is None:
             kwargs["group"] = ProcessGroupVariable.get_global_pg_variable()
 
+        if self.fn == dist.all_reduce:
+            reduce_op_var = kwargs.get("op")
+            reduce_op = (
+                reduce_op_var.value
+                if reduce_op_var is not None
+                else signature.parameters["op"].default
+            )
+            if reduce_op not in REDUCE_OP_TO_STR:
+                raise ValueError(f"Unsupported all_reduce op: {reduce_op}")
+            kwargs["op"] = variables.ConstantVariable.create(
+                REDUCE_OP_TO_STR[reduce_op]
+            )
         return self.replacement_var.call_function(tx, args, kwargs)
 
 

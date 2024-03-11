@@ -122,11 +122,6 @@ class FunctionalTensor(torch.Tensor):
         out.elem = elem
         return out
 
-    # Need to disable default torch_function. Why?
-    # Default torch_function will always wrap outputs into a subclass if they aren't already a subclass.
-    # We actually.. don't want to do this sometimes, see Note [FunctionalTensorMode inputs are sometimes plain tensors]
-    __torch_function__ = torch._C._disabled_torch_function_impl
-
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         unrecognized_types = [
             t
