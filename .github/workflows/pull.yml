@@ -37,40 +37,56 @@ jobs:
 
   linux-jammy-py3_8-gcc11-build:
     name: linux-jammy-py3.8-gcc11
+    permissions:
+      id-token: write
+      contents: read
     uses: ./.github/workflows/_linux-build.yml
     with:
+      aws-role-to-assume: arn:aws:iam::391835788720:role/gha-pytorch-ci-artifacts-role
       build-environment: linux-jammy-py3.8-gcc11
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
+      s3-bucket: pytorch-ci-artifacts
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "default", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "default", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "docs_test", shard: 1, num_shards: 1,  runner: "linux.2xlarge" },
-          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-          { config: "backwards_compat", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
-          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 3, runner: "arc-lf-linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 3, runner: "arc-lf-linux.2xlarge" },
+          { config: "default", shard: 3, num_shards: 3, runner: "arc-lf-linux.2xlarge" },
+          { config: "docs_test", shard: 1, num_shards: 1,  runner: "arc-lf-linux.2xlarge" },
+          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "arc-lf-linux.2xlarge" },
+          { config: "backwards_compat", shard: 1, num_shards: 1, runner: "arc-lf-linux.2xlarge" },
+          { config: "distributed", shard: 1, num_shards: 2, runner: "arc-lf-linux.2xlarge" },
+          { config: "distributed", shard: 2, num_shards: 2, runner: "arc-lf-linux.2xlarge" },
         ]}
 
   linux-jammy-py3_8-gcc11-test:
     name: linux-jammy-py3.8-gcc11
-    uses: ./.github/workflows/_linux-test.yml
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/_linux-test-arc.yml
     needs:
       - linux-jammy-py3_8-gcc11-build
       - target-determination
     with:
+      aws-role-to-assume: arn:aws:iam::391835788720:role/gha-pytorch-ci-artifacts-role
       build-environment: linux-jammy-py3.8-gcc11
       docker-image: ${{ needs.linux-jammy-py3_8-gcc11-build.outputs.docker-image }}
+      s3-bucket: pytorch-ci-artifacts
       test-matrix: ${{ needs.linux-jammy-py3_8-gcc11-build.outputs.test-matrix }}
 
   linux-docs:
     name: linux-docs
+    permissions:
+      id-token: write
+      contents: read
     uses: ./.github/workflows/_docs.yml
     needs: linux-jammy-py3_8-gcc11-build
     with:
+      aws-role-to-assume: arn:aws:iam::391835788720:role/gha-pytorch-ci-artifacts-role
       build-environment: linux-jammy-py3.8-gcc11
       docker-image: ${{ needs.linux-jammy-py3_8-gcc11-build.outputs.docker-image }}
+      s3-bucket: pytorch-ci-artifacts
+      upload-aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_pytorch_artifacts
 
   linux-jammy-py3_8-gcc11-no-ops:
     name: linux-jammy-py3.8-gcc11-no-ops

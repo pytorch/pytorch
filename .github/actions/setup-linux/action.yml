@@ -35,10 +35,12 @@ runs:
       shell: bash
       if: ${{ steps.check_arc_runner.outputs.IN_ARC_RUNNER == 'false' }}
       run: |
-        if systemctl is-active --quiet docker; then
-            echo "Docker daemon is running...";
-        else
-            echo "Starting docker deamon..." && sudo systemctl start docker;
+        if [ ! -e /.inarc ]; then
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
         fi
 
     - name: Log in to ECR
