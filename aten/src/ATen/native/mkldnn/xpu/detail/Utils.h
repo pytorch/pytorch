@@ -358,7 +358,7 @@ static inline bool binary_valid(
 }
 
 inline bool is_channels_last(at::MemoryFormat fmt){
-  return (at::MemoryFormat::ChannelsLast3d == fmt) || (at::MemoryFormat::ChannelsLast3d == fmt);
+  return (at::MemoryFormat::ChannelsLast == fmt) || (at::MemoryFormat::ChannelsLast3d == fmt);
 }
 
 inline bool is_smf_channels_last(const Tensor& t){

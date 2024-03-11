@@ -201,7 +201,7 @@ static void deconvolution(
   src_m = make_onednn_memory(src_md, engine, src.data_ptr());
   wgh_m = make_onednn_memory(wgh_md, engine, wgh.data_ptr());
   dst_m = make_onednn_memory(dst_md, engine, dst.data_ptr());
-  
+
   std::unordered_map<int, dnnl::memory> args;
   args.insert({DNNL_ARG_SRC, src_m});
   args.insert({DNNL_ARG_WEIGHTS, wgh_m});
@@ -326,14 +326,14 @@ static void deconvolution_backward_weights(
       GpuEngineManager::Instance().get_engine({c10::kXPU, c10::xpu::current_device()});
   auto stream = GpuStreamManager::Instance().get_stream();
 
-  bool is_channels_last_suggested = 
+  bool is_channels_last_suggested =
       use_channels_last_for_conv(src, diff_dst, /*is_transposed=*/true);
 
   // create memory desc
   dnnl::memory::desc src_md, wgh_md, dst_md;
   std::tie(src_md, wgh_md, dst_md) = deconv_get_plain_md(
           src, diff_wgh, diff_dst, groups, is_channels_last_suggested);
-  
+
   dnnl::memory::format_tag bia_fmt = dnnl::memory::format_tag::x;
   auto bia_md = diff_bia.defined()
       ? dnnl::memory::desc({diff_dst.size(1)}, src_md.get_data_type(), bia_fmt)
