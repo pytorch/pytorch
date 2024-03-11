@@ -232,6 +232,31 @@ Please also make sure to add milestone target to the PR/issue, especially if it 
 
 **NOTE**: The cherry pick process is not an invitation to add new features, it is mainly there to fix regressions
 
+#### How to do Cherry Picking
+
+You can now use `pytorchbot` to cherry pick a PR that has been committed
+to the main branch using `@pytorchbot cherry-pick` command as follows.
+
+```
+usage: @pytorchbot cherry-pick --onto ONTO [--fixes FIXES] -c
+                               {regression,critical,fixnewfeature,docs,release}
+
+Cherry pick a pull request onto a release branch for inclusion in a release
+
+optional arguments:
+  --onto ONTO           Branch you would like to cherry pick onto (Example: release/2.2)
+  --fixes FIXES         Link to the issue that your PR fixes (i.e. https://github.com/pytorch/pytorch/issues/110666)
+  -c {regression,critical,fixnewfeature,docs,release}
+                        A machine-friendly classification of the cherry-pick reason.
+```
+
+For example, [#120567](https://github.com/pytorch/pytorch/pull/120567#issuecomment-1978964376)
+created a cherry pick PR [#121232](https://github.com/pytorch/pytorch/pull/121232) onto `release/2.2`
+branch to fix a regression issue.  You can then refer to the original
+and the cherry-picked PRs on the release tracker issue.  Please note
+that the cherry-picked PR will still need to be reviewed by PyTorch
+RelEng team before it can go into the release branch.
+
 ### Cherry Picking Reverts
 
 If PR that has been cherry-picked into release branch has been reverted, it's cherry-pick must be reverted as well.
