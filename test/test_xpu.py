@@ -172,8 +172,30 @@ class TestBasicGEMM(TestCase):
         self.assertEqual(res1.cpu(), res3.cpu())
 
     @dtypes(torch.half, torch.float32, torch.float64, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
-    def test_mm(self, dtype):
-        pass
+    def test_mm(self, device, dtype):
+        def genf_int(x, y):
+            return torch.randint(0, 100, (x, y), dtype=dtype, device=device)
+
+        def genf_bfloat(x, y):
+            return torch.randn(x, y, dtype=torch.float32, device=device).to(dtype) * 0.1
+
+        def genf_float(x, y):
+            return torch.randn(x, y, dtype=dtype, device=device)
+
+        for (n, m, p) in [(20, 10, 15), (15, 20, 10), (25, 18, 10)]:
+            if (dtype == torch.int32) or (dtype == torch.int64):
+                genf = genf_int
+            elif (dtype == torch.bfloat16):
+                genf = genf_bfloat
+            else:
+                genf = genf_float
+            mat1 = genf(n, m)
+            mat2 = genf(m, p)
+            # mat1 = torch.randn((n, m), device=device, dtype=dtype)
+            # mat2 = torch.randn((m, p), device=device, dtype=dtype)
+            res = torch.mm(mat1, mat2)
+            ref = mat1.cpu().numpy() @ mat2.cpu().numpy()
+            self.assertEqual(res.cpu(), ref)
 
     @dtypes(*floating_and_complex_types_and(torch.half))
     def test_bmm(self, device, dtype):
