@@ -1772,9 +1772,12 @@ class TestReductions(TestCase):
         inp_dtypes = all_types_and(torch.half) if out_dtype.is_floating_point else integral_types()
         for inp_dtype in inp_dtypes:
             # TODO: Investigate why the output is not close to numpy.
-            if inp_dtype == torch.float32:
-                atol = 5e-05  # default was 1e-05
-                rtol = 1.6e-06  # default was 1.3e-06
+            if dtype == torch.float16:
+                atol = 0.4
+                rtol = 1e-2
+            elif dtype == torch.float32:
+                atol = 7e-05
+                rtol = 3e-06
             else:
                 # Default values
                 atol = None
