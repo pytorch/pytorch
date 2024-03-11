@@ -238,7 +238,9 @@ def make_constraints(
         for spec in input_specs
         if spec.kind == InputKind.USER_INPUT and isinstance(spec.arg, TensorArgument)
     }
-    tensor_id_to_dim_constraint: Dict[int, Dict[str, int]] = defaultdict(defaultdict)
+    tensor_id_to_dim_constraint: Dict[int, Dict[int, Dict[str, int]]] = defaultdict(
+        defaultdict
+    )
     for constraint in constraints:
         spec = constraint.serializable_spec
         tensor_id_to_dim_constraint[spec["t_id"]][spec["dim"]] = {
