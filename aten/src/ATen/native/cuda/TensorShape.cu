@@ -479,7 +479,7 @@ std::tuple<int64_t, int64_t, int64_t, int64_t, std::vector<int64_t*>> get_chunk_
   actual_tensor_sizes.reserve(num_tensors);
   tensor_idx_to_start_tensor_bytes.reserve(num_tensors);
   srcs.reserve(num_tensors);
-  //  block_idx_to_tensor_idx cannot be reserved since the number of blocks is data dependent.
+  //  block_idx_to_tensor_idx cannot be reserved since the number of blocks is data dependent
   std::vector<int64_t> block_idx_to_tensor_idx;
   int64_t chunk_size = 0;
   for (const auto i : c10::irange(num_tensors)) {
