@@ -3,7 +3,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/record_function.h>
 
-#include "detail/oneDNN.h"
+#include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <vector>
 
 #include <c10/util/typeid.h>
