@@ -333,7 +333,7 @@ class TestMaxAutotune(TestCase):
         Make sure autotuning mm in sub processes work without crashes.
         """
 
-        if max_autotune_gemm_backends == "CUTLASS" and torch.version.hip:
+        if "CUTLASS" in max_autotune_gemm_backends.upper() and torch.version.hip:
             return
 
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
