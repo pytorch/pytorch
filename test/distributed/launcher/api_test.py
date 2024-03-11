@@ -23,21 +23,19 @@ from unittest.mock import MagicMock, Mock, patch
 import torch
 import torch.distributed as dist
 from torch.distributed.elastic.agent.server.api import RunResult, WorkerState
-from torch.distributed.elastic.multiprocessing.api import (
-    SignalException,
-)
+from torch.distributed.elastic.multiprocessing.api import SignalException
 from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 from torch.distributed.elastic.utils import get_socket_with_port
 from torch.distributed.launcher.api import (
+    LaunchConfig,
     _get_entrypoint_name,
     elastic_launch,
     launch_agent,
-    LaunchConfig,
 )
 from torch.testing._internal.common_utils import (
-    skip_but_pass_in_sandcastle_if,
     TEST_WITH_DEV_DBG_ASAN,
+    skip_but_pass_in_sandcastle_if,
 )
 
 

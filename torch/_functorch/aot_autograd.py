@@ -375,31 +375,6 @@ AOT_COUNTER = itertools.count()
 # To work around this, we view every forward output when creating out tangent
 # tensors so that tangents can never be the same as forward inputs even if
 # forward inputs alias forward outputs.
-
-# Note [Side-Effectful Tokens in AOTAutograd]
-#
-# We allow some some side-effectful operators in
-# the post-AOTAutograd (functional) graph, such as prints and torchbind operations.
-# To ensure that these side-effects are compatible to future graph passes that
-# assume that the graph is functional, we will thread "effect tokens" to show
-# data dependence between these side-effectful operators. Practically speaking,
-# effect tokens are just dummy values (torch.tensor([])). The graph would look
-# like the following:
-#
-# def gm(self, token0, reader):
-#    token1, frame = with_token(ordered_effect_op, (reader,), token0)
-#    frame = frame * 2
-#    token2, frame2 = with_token(ordered_effect_op, (reader,), token1)
-#    frame2 = frame2 * 2
-#    return token2, frame, frame2
-#
-# We will pass the token as an input to the graph, thread it through
-# side-effectful operators using the `with_effects` high order operator, and then
-# return the updated token as an output.
-# So the signature of the graph input would look something like
-# (*tokens, *params_buffers, *user_inputs), and the signature of the graph
-# output would look something like (*tokens, *outputs).
-
 #
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -5,8 +5,6 @@ from typing import Dict, List, Tuple
 
 from sympy import Integer
 
-import torch
-
 from .. import metrics
 from ..scheduler import SchedulerNode
 from ..utils import ceildiv, Placeholder
@@ -164,10 +162,7 @@ class ForeachKernel(Kernel):
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
-        inductor_meta = {
-            "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
-            "backend_hash": torch.utils._triton.triton_hash_with_backend(),
-        }
+        inductor_meta = {"kernel_name": str(Placeholder.DESCRIPTIVE_NAME)}
         return (
             f"@foreach(num_warps={self.num_warps}, triton_meta={triton_meta!r}, inductor_meta={inductor_meta!r})\n"
             + "@triton.jit"

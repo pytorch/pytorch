@@ -662,7 +662,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
-        error_message="Trying to flatten user inputs with exported input tree spec"
+        error_message="kwarg key mismatch"
     )
     def test_gpt2_tiny_from_config(self):
         # Model
@@ -1081,12 +1081,8 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 kwargs = create_kwargs()
                 # Original outputs.
                 # model_with_state_dict=real_model is used to create non-fake weights
-                if isinstance(real_model, torch.export.ExportedProgram):
-                    outputs = real_model.module()(*args, **kwargs)
-                else:
-                    outputs = real_model(*args, **kwargs)
                 ref_outputs = onnx_program.adapt_torch_outputs_to_onnx(
-                    outputs, model_with_state_dict=real_model
+                    real_model(*args, **kwargs), model_with_state_dict=real_model
                 )
                 # ORT outputs.
                 # model_with_state_dict=real_model is used to create non-fake weights

@@ -388,7 +388,6 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     and src.args[0].kwargs["kwargs"][src.args[1]] == node.args[0]
                 )
                 or (src.args[0].target in inplaceable_foreach_ops)
-                or (src.args[0].target == torch.ops.higher_order.auto_functionalized)
             ):
                 src = src.args[0]
 
@@ -448,23 +447,6 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             )
 
     replace_dict: Dict[torch.fx.Node, torch.fx.Node] = {}
-
-    def reinplace_and_refine_tensors_to_clone(old_tensors_to_clone, kwargs):
-        tensors_to_clone: List[str] = []
-        for arg in old_tensors_to_clone:
-            assert arg in kwargs
-            mutated_arg = kwargs[arg]
-            if can_inplace(node, mutated_arg):
-                copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
-                if copy_node is not None:
-                    graph.erase_node(copy_node)
-                for user in node.users:
-                    if user.target == operator.getitem and user.args[1] == arg:
-                        replace_dict[user] = mutated_arg
-            else:
-                tensors_to_clone.append(arg)
-        return tensors_to_clone
-
     for node in graph.nodes:
         if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
             mutated_arg = node.args[inplaceable_op.mutated_arg]
@@ -476,32 +458,24 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 if copy_node is not None:
                     graph.erase_node(copy_node)
                 node.target = inplaceable_op.inplace_op
-        elif node.target == torch.ops.higher_order.auto_functionalized:
-            _mutable_op = node.args[0]
-            from torch._higher_order_ops.auto_functionalize import get_mutable_arg_names
-
-            tensors_to_clone = get_mutable_arg_names(_mutable_op)
-            # Don't try to reinplace Optional[Tensor] args that are None.
-            tensors_to_clone = [
-                t for t in tensors_to_clone if node.kwargs[t] is not None
-            ]
-            tensors_to_clone = reinplace_and_refine_tensors_to_clone(
-                tensors_to_clone, node.kwargs
-            )
-
-            # Stash the metadata. There is a pass later on where we decompose
-            # auto_functionalized into clones + a mutable op; this metadata
-            # tells the decomp to only clone the following inputs
-            node.meta["only_clone_these_tensors"] = tensors_to_clone
         elif node.target in inplaceable_triton_ops:
             # inplaceable_triton_ops take an additional argument called
             # tensors_to_clone which contain a list of tensors to clone
             # This pass iterates over them and sees which ones are safe
             # to eliminate (i.e. no longer need the clones)
-            tensors_to_clone = reinplace_and_refine_tensors_to_clone(
-                node.kwargs["tensors_to_clone"], node.kwargs["kwargs"]
-            )
-
+            tensors_to_clone = []
+            for arg in node.kwargs["tensors_to_clone"]:
+                assert arg in node.kwargs["kwargs"]
+                mutated_arg = node.kwargs["kwargs"][arg]
+                if can_inplace(node, mutated_arg):
+                    copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
+                    if copy_node is not None:
+                        graph.erase_node(copy_node)
+                    for user in node.users:
+                        if user.target == operator.getitem and user.args[1] == arg:
+                            replace_dict[user] = mutated_arg
+                else:
+                    tensors_to_clone.append(arg)
             kwargs = dict(node.kwargs)
             kwargs["tensors_to_clone"] = tensors_to_clone
             node.kwargs = immutable_dict(kwargs)

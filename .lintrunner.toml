@@ -2652,7 +2652,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.3.0',
+    'ruff==0.2.2',
 ]
 is_formatter = true
 
@@ -2665,96 +2665,6 @@ include_patterns = ['benchmarks/dynamo/ci_expected_accuracy/*.csv']
 command = [
     'python3',
     'tools/linter/adapters/no_merge_conflict_csv_linter.py',
-    '--',
-    '@{{PATHSFILE}}'
-]
-is_formatter = true
-
-[[linter]]
-code = 'ATEN_CPU_GPU_AGNOSTIC'
-include_patterns = [
-    # aten source
-    "aten/src/ATen/*.cpp",
-    "aten/src/ATen/cpu/*.cpp",
-    "aten/src/ATen/functorch/**/*.cpp",
-    "aten/src/ATen/nnapi/*.cpp",
-    "aten/src/ATen/quantized/*.cpp",
-    "aten/src/ATen/vulkan/*.cpp",
-    "aten/src/ATen/metal/*.cpp",
-    "aten/src/ATen/detail/CPUGuardImpl.cpp",
-    "aten/src/ATen/detail/MetaGuardImpl.cpp",
-    # aten native source
-    "aten/src/ATen/native/cpu/*.cpp",
-    "aten/src/ATen/native/ao_sparse/cpu/kernels/*.cpp",
-    "aten/src/ATen/native/ao_sparse/quantized/cpu/kernels/*.cpp",
-    "aten/src/ATen/native/quantized/cpu/kernels/*.cpp",
-    "aten/src/ATen/native/*.cpp",
-    "aten/src/ATen/native/cpu/**/*.cpp",
-    "aten/src/ATen/native/ao_sparse/*.cpp",
-    "aten/src/ATen/native/ao_sparse/**/*.cpp",
-    "aten/src/ATen/native/ao_sparse/quantized/*.cpp",
-    "aten/src/ATen/native/ao_sparse/quantized/**/*.cpp",
-    "aten/src/ATen/native/nested/*.cpp",
-    "aten/src/ATen/native/quantized/*.cpp",
-    "aten/src/ATen/native/quantized/**/*.cpp",
-    "aten/src/ATen/native/sparse/*.cpp",
-    "aten/src/ATen/native/transformers/*.cpp",
-    "aten/src/ATen/native/utils/*.cpp",
-    "aten/src/ATen/native/xnnpack/*.cpp",
-    "aten/src/ATen/native/metal/MetalPrepackOpRegister.cpp",
-    # aten headers
-    "aten/src/ATen/*.h",
-    "aten/src/ATen/functorch/**/*.h",
-    "aten/src/ATen/ops/*.h",
-    "aten/src/ATen/cpu/**/*.h",
-    "aten/src/ATen/nnapi/*.h",
-    "aten/src/ATen/quantized/*.h",
-    "aten/src/ATen/vulkan/*.h",
-    "aten/src/ATen/metal/*.h",
-    "aten/src/ATen/mps/*.h",
-    # aten native headers
-    "aten/src/ATen/native/*.h",
-    "aten/src/ATen/native/cpu/**/*.h",
-    "aten/src/ATen/native/nested/*.h",
-    "aten/src/ATen/native/sparse/*.h",
-    "aten/src/ATen/native/ao_sparse/*.h",
-    "aten/src/ATen/native/ao_sparse/cpu/*.h",
-    "aten/src/ATen/native/ao_sparse/quantized/*.h",
-    "aten/src/ATen/native/ao_sparse/quantized/cpu/*.h",
-    "aten/src/ATen/native/quantized/*.h",
-    "aten/src/ATen/native/quantized/cpu/*.h",
-    "aten/src/ATen/native/transformers/*.h",
-    "aten/src/ATen/native/quantized/cpu/qnnpack/include/*.h",
-    "aten/src/ATen/native/utils/*.h",
-    "aten/src/ATen/native/vulkan/ops/*.h",
-    "aten/src/ATen/native/xnnpack/*.h",
-    "aten/src/ATen/native/metal/MetalPrepackOpContext.h",
-    "aten/src/ATen/native/mps/Copy.h",
-    "aten/src/ATen/native/mkldnn/**/*.h",
-]
-exclude_patterns = [
-    "aten/src/ATen/Context.h",
-    "aten/src/ATen/Context.cpp",
-    "aten/src/ATen/DLConvertor.cpp",
-    "aten/src/ATen/core/Array.h",
-    "aten/src/ATen/native/ConvUtils.h",
-    "aten/src/ATen/native/quantized/ConvUtils.h",
-    "aten/src/ATen/native/sparse/SparseBlasImpl.cpp",  # triton implementation
-    "aten/src/ATen/native/transformers/attention.cpp",
-    "aten/src/ATen/native/**/cudnn/**",  # cudnn is cuda specific
-]
-command = [
-    'python3',
-    'tools/linter/adapters/grep_linter.py',
-    '--pattern=(^#if.*USE_ROCM.*)|(^#if.*USE_CUDA.*)',
-    '--linter-name=ATEN_CPU',
-    '--error-name=aten-cpu should be gpu agnostic',
-    """--error-description=\
-        We strongly discourage the compile-time divergence \
-        on ATen-CPU code for different GPU code. This \
-        disallows sharing the same aten-cpu shared object \
-        between different GPU backends \
-    """,
     '--',
     '@{{PATHSFILE}}'
 ]

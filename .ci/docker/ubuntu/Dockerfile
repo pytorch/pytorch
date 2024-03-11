@@ -161,13 +161,6 @@ COPY ./common/install_onnx.sh ./common/common_utils.sh ./
 RUN if [ -n "${ONNX}" ]; then bash ./install_onnx.sh; fi
 RUN rm install_onnx.sh common_utils.sh
 
-# (optional) Build ACL
-ARG ACL
-COPY ./common/install_acl.sh install_acl.sh
-RUN if [ -n "${ACL}" ]; then bash ./install_acl.sh; fi
-RUN rm install_acl.sh
-ENV INSTALLED_ACL ${ACL}
-
 # Install ccache/sccache (do this last, so we get priority in PATH)
 COPY ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH

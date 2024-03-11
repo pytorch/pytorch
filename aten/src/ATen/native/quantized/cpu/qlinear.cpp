@@ -123,8 +123,6 @@ at::Tensor& PackedLinearWeight::apply_impl(
   // Allocate a buffer for fbgemmPacked to use
   auto buffer = at::empty(out_sizes, output.options().dtype(at::kInt));
 
-  auto output_data = reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>());
-
   int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
     for (const auto task_id : c10::irange(begin, end)) {
@@ -186,7 +184,7 @@ at::Tensor& PackedLinearWeight::apply_impl(
         fbgemm::fbgemmPacked(
             /*packA=*/packA,
             /*packB=*/*packB,
-            /*C=*/output_data,
+            /*C=*/reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
             /*C_buffer=*/buffer.data_ptr<int32_t>(),
             /*ldc=*/N,
             /*outProcess=*/outputProcObj,
@@ -222,7 +220,7 @@ at::Tensor& PackedLinearWeight::apply_impl(
         fbgemm::fbgemmPacked(
             /*packA=*/packA,
             /*packB=*/*packB,
-            /*C=*/output_data,
+            /*C=*/reinterpret_cast<uint8_t*>(output.data_ptr<c10::quint8>()),
             /*C_buffer=*/buffer.data_ptr<int32_t>(),
             /*ldc=*/N,
             /*outProcess=*/outputProcObj,
@@ -360,8 +358,6 @@ at::Tensor PackedLinearWeight::apply_with_input_q_dq_qweight_dq_output_fp32_impl
       output.options().dtype(at::kInt),
       LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
-  auto output_data = output.data_ptr<float>();
-
   int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
     fbgemm::PackAWithQuantRowOffset<uint8_t> packA(
@@ -400,7 +396,7 @@ at::Tensor PackedLinearWeight::apply_with_input_q_dq_qweight_dq_output_fp32_impl
         fbgemm::fbgemmPacked(
             /*packA=*/packA,
             /*packB=*/*packB,
-            /*C=*/output_data,
+            /*C=*/output.data_ptr<float>(),
             /*C_buffer=*/buffer.data_ptr<int32_t>(),
             /*ldc=*/N,
             /*outProcess=*/outputProcObj,
@@ -432,7 +428,7 @@ at::Tensor PackedLinearWeight::apply_with_input_q_dq_qweight_dq_output_fp32_impl
         fbgemm::fbgemmPacked(
             /*packA=*/packA,
             /*packB=*/*packB,
-            /*C=*/output_data,
+            /*C=*/output.data_ptr<float>(),
             /*C_buffer=*/buffer.data_ptr<int32_t>(),
             /*ldc=*/N,
             /*outProcess=*/outputProcObj,
@@ -1161,33 +1157,6 @@ class QLinearOnednn final {
 #endif
     TORCH_CHECK(false, "Unimplemented (int8 linear with packed weight and bias)");
   }
-
-  static Tensor run_pointwise_tensor(
-      Tensor act, // int8 CPU tensor, not QTensor
-      Tensor act_scale,
-      Tensor act_zero_point,
-      Tensor onednn_weight, // int8 tensor from MkldnnCPU
-      Tensor weight_scales,
-      Tensor weight_zero_points,
-      c10::optional<Tensor> bias,
-      double output_scale,
-      int64_t output_zero_point,
-      c10::optional<c10::ScalarType> output_dtype,
-      std::string post_op_name,
-      torch::List<c10::optional<at::Scalar>> post_op_args,
-      std::string post_op_algorithm) {
-#if AT_MKLDNN_ENABLED()
-    TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() == 1,
-        "onednn int8 linear: act scale/zp size should be 1");
-    return linear_int8_with_onednn_weight(
-        act, act_scale.item().toDouble(), act_zero_point.item().toLong(),
-        onednn_weight, weight_scales, weight_zero_points,
-        bias, output_scale, output_zero_point, output_dtype,
-        post_op_name, post_op_args, post_op_algorithm
-    );
-#endif
-    TORCH_CHECK(false, "Unimplemented (int8 linear with packed weight and bias)");
-  }
 };
 
 
@@ -1212,8 +1181,6 @@ TORCH_LIBRARY_IMPL(quantized, CPU, m) {
 TORCH_LIBRARY_IMPL(onednn, MkldnnCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise"),
       TORCH_FN(QLinearOnednn::run_pointwise));
-  m.impl(TORCH_SELECTIVE_NAME("onednn::qlinear_pointwise.tensor"),
-      TORCH_FN(QLinearOnednn::run_pointwise_tensor));
 }
 
 } // namespace

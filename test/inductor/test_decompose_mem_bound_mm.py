@@ -37,15 +37,6 @@ class MyModule2(torch.nn.Module):
         return output
 
 
-class MyModule3(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, input1, input2):
-        output = torch.mm(input1, input2)
-        return output
-
-
 @requires_cuda
 @torch._inductor.config.patch(
     decompose_mem_bound_mm=True,
@@ -156,53 +147,6 @@ class TestDecomposeMemMM(TestCase):
 
         self.assertEqual(
             counters["inductor"]["decompose_mm"] - decompose_mm_fwd,
-            expected_val,
-        )
-        self.assertEqual(
-            counters["inductor"]["decompose_mmt"],
-            expected_val,
-        )
-        counters.clear()
-
-    @parametrize(
-        "m,k,n, should_decompose",
-        [(20480, 5, 2, True), (20480, 32, 2, False), (2048, 2, 2, False)],
-    )
-    @parametrize("has_bias", [True, False])
-    def test_decompose_mm(self, m, n, k, has_bias, should_decompose):
-        torch._logging.set_logs(inductor=logging.DEBUG)
-        mat1 = torch.randn(m, k, device="cuda").requires_grad_(True)
-        mat2 = torch.randn(k, n, device="cuda").requires_grad_(True)
-
-        counters.clear()
-
-        module = MyModule3().to("cuda")
-        traced = torch.compile(module)
-        input = [mat1, mat2]
-        ref = module(*input)
-        res = traced(*input)
-
-        self.compare_pred(module, traced, input)
-
-        expected_val = 1 if should_decompose else 0
-        self.assertEqual(
-            counters["inductor"]["decompose_mm"],
-            expected_val,
-        )
-        decompose_mm_fwd = counters["inductor"]["decompose_mm"]
-
-        ref.sum().backward()
-        res.sum().backward()
-        self.compare_parameters(module, traced)
-        self.compare_gradients(module, traced)
-
-        expected_val = 1 if should_decompose else 0
-        self.assertEqual(
-            counters["inductor"]["decompose_mm"] - decompose_mm_fwd,
-            expected_val,
-        )
-        self.assertEqual(
-            counters["inductor"]["decompose_mm_large_k"],
             expected_val,
         )
         counters.clear()

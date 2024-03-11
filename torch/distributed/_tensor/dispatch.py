@@ -181,9 +181,12 @@ class OpDispatcher:
             local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
             if op_call in self._random_ops and is_rng_supported_mesh(mesh):
                 if not random._rng_tracker:
-                    # Default to `OffsetBasedRNGTracker` if the parallelism API
-                    # did not already construct one
-                    random._rng_tracker = random.OffsetBasedRNGTracker(mesh.device_type)
+                    raise RuntimeError(
+                        "A CudaRNGStateTracker instance must be instantiated "
+                        "before executing a random op over a DTensor. "
+                        "Try calling random.manual_seed() or distribute_tensor() "
+                        "before executing a DTensor random op."
+                    )
                 # For DTensor random operator, run it within a distribute region
                 with random._rng_tracker._distribute_region(
                     cast(dtensor.DTensor, args[0])._spec

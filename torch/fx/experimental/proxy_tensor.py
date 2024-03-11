@@ -30,7 +30,6 @@ import logging
 from torch.overrides import TorchFunctionMode
 
 from torch.utils._python_dispatch import (
-    _push_mode,
     TorchDispatchMode,
 )
 
@@ -1121,35 +1120,22 @@ def get_torch_dispatch_modes():
 def get_innermost_proxy_mode():
     return torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
 
-# TODO (tmanlaibaatar) unify this with FunctionalTensorMode logic
+
 @contextlib.contextmanager
-def disable_proxy_modes_tracing():
-    from torch._ops import unset_mode_pre_dispatch
-
-    old_mode_from_aot_dispatch = torch._C._unset_dispatch_mode(
-        torch._C._TorchDispatchModeKey.PROXY
-    )
-    old_mode_from_pre_dispatch = unset_mode_pre_dispatch(
-        torch._C._TorchDispatchModeKey.PROXY
-    )
-
-    if old_mode_from_aot_dispatch:
-        assert old_mode_from_pre_dispatch is None, "Can only have one mode available"
-    if old_mode_from_pre_dispatch:
-        assert old_mode_from_aot_dispatch is None, "Can only have one mode available"
-
+def disable_proxy_modes_tracing(enable_current=False):
+    # enable_current=True is now a no-op, since only one proxy mode
+    # can live on the stack at a time.
+    # We should kill this API in a future PR.
+    maybe_old = None
+    if not enable_current:
+        # Only one proxy_mode can be "active" at a time.
+        # So we simply remove our active mode.
+        maybe_old = torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
     try:
-        if old_mode_from_aot_dispatch:
-            yield old_mode_from_aot_dispatch
-        elif old_mode_from_pre_dispatch:
-            yield old_mode_from_pre_dispatch
-        else:
-            yield
+        yield
     finally:
-        if old_mode_from_aot_dispatch is not None:
-            torch._C._set_dispatch_mode(old_mode_from_aot_dispatch)
-        if old_mode_from_pre_dispatch is not None:
-            _push_mode(old_mode_from_aot_dispatch, torch._C.DispatchKey.PreDispatch)
+        if maybe_old is not None:
+            torch._C._set_dispatch_mode(maybe_old)
 
 
 def maybe_handle_decomp(proxy_mode, op, args, kwargs):

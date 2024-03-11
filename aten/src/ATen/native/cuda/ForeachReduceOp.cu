@@ -65,7 +65,7 @@ struct LpNormFunctor {
     __shared__ opmath_t s_vals[512];
     opmath_t vals[kILP];
     T r_x[kILP];
-    for (int64_t i = 0; i < kILP; i++) {
+    for (int i = 0; i < kILP; i++) {
       vals[i] = opmath_t(0);
       r_x[i] = T(0);
     }
@@ -137,7 +137,7 @@ __global__ void lpnorm_cleanup(
   const opmath_t* output_this_tensor =
       output_per_tensor + blockIdx.x * max_chunks_per_tensor;
   opmath_t val = 0;
-  for (size_t i = threadIdx.x; i < max_chunks_per_tensor; i += blockDim.x) {
+  for (int i = threadIdx.x; i < max_chunks_per_tensor; i += blockDim.x) {
     if constexpr (norm_type == NormType::LInf) {
       val = max_propagate_nan(val, output_this_tensor[i]);
     } else {
@@ -187,7 +187,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
   const size_t ntensors = tensors.size();
   int max_chunks_per_tensor = -1;
 
-  for (const auto t : c10::irange(ntensors)) {
+  for (int t = 0; t < ntensors; t++) {
     int max_chunks_this_tensor =
         (tensors[t].numel() + kChunkSize - 1) / kChunkSize;
     if (max_chunks_this_tensor > max_chunks_per_tensor) {
@@ -201,7 +201,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
 
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(ntensors);
-  for (const auto i : c10::irange(ntensors)) {
+  for (int i = 0; i < ntensors; i++) {
     vec_res.push_back(at::empty({}, options));
   }
 
@@ -225,14 +225,14 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
           auto stream = at::cuda::getCurrentCUDAStream();
 
           const size_t num_kernels = ceil_div(ntensors, MAX_TENSORS_PER_KERNEL);
-          for (const auto i : c10::irange(num_kernels)) {
+          for (auto i = 0; i < num_kernels; i++) {
             const size_t num_tensors_this_kernel =
                 (i < num_kernels - 1 || ntensors % MAX_TENSORS_PER_KERNEL == 0)
                 ? MAX_TENSORS_PER_KERNEL
                 : (ntensors % MAX_TENSORS_PER_KERNEL);
 
             TensorListAddresses addr_struct;
-            for (const auto j : c10::irange(num_tensors_this_kernel)) {
+            for (auto j = 0; j < num_tensors_this_kernel; j++) {
               addr_struct.addresses[j] = vec_res[i * MAX_TENSORS_PER_KERNEL + j]
                                              .mutable_data_ptr<scalar_t>();
             }
@@ -265,14 +265,14 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
           auto stream = at::cuda::getCurrentCUDAStream();
 
           const size_t num_kernels = ceil_div(ntensors, MAX_TENSORS_PER_KERNEL);
-          for (const auto i : c10::irange(num_kernels)) {
+          for (auto i = 0; i < num_kernels; i++) {
             const size_t num_tensors_this_kernel =
                 (i < num_kernels - 1 || ntensors % MAX_TENSORS_PER_KERNEL == 0)
                 ? MAX_TENSORS_PER_KERNEL
                 : (ntensors % MAX_TENSORS_PER_KERNEL);
 
             TensorListAddresses addr_struct;
-            for (const auto j : c10::irange(num_tensors_this_kernel)) {
+            for (auto j = 0; j < num_tensors_this_kernel; j++) {
               addr_struct.addresses[j] = vec_res[i * MAX_TENSORS_PER_KERNEL + j]
                                              .mutable_data_ptr<scalar_t>();
             }
@@ -305,14 +305,14 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
           auto stream = at::cuda::getCurrentCUDAStream();
 
           const size_t num_kernels = ceil_div(ntensors, MAX_TENSORS_PER_KERNEL);
-          for (const auto i : c10::irange(num_kernels)) {
+          for (auto i = 0; i < num_kernels; i++) {
             const size_t num_tensors_this_kernel =
                 (i < num_kernels - 1 || ntensors % MAX_TENSORS_PER_KERNEL == 0)
                 ? MAX_TENSORS_PER_KERNEL
                 : (ntensors % MAX_TENSORS_PER_KERNEL);
 
             TensorListAddresses addr_struct;
-            for (const auto j : c10::irange(num_tensors_this_kernel)) {
+            for (auto j = 0; j < num_tensors_this_kernel; j++) {
               addr_struct.addresses[j] = vec_res[i * MAX_TENSORS_PER_KERNEL + j]
                                              .mutable_data_ptr<scalar_t>();
             }

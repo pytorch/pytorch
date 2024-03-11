@@ -57,12 +57,13 @@ class SourceTests(torch._dynamo.test_case.TestCase):
                 self.x = torch.randn(10, 10)
 
             def forward(self):
-                if (
-                    torch.utils._pytree.SUPPORTED_NODES[CausalLMOutputWithPast].type
-                    == int
-                ):
+                try:
+                    assert (
+                        torch.utils._pytree.SUPPORTED_NODES[CausalLMOutputWithPast].type
+                        == int
+                    )
                     x = torch.sin(self.x)
-                else:
+                except Exception:
                     x = torch.cos(self.x)
                 return x
 

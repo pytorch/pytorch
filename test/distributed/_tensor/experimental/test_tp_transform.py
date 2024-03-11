@@ -83,6 +83,7 @@ class TensorParallelTest(DTensorTestBase):
         exported_program = torch.export.export(
             model,
             inputs,
+            constraints=None,
         )
         tp_exported_program = tensor_parallel_transformation(
             exported_program,
@@ -131,6 +132,7 @@ class TensorParallelTest(DTensorTestBase):
         exported_program = torch.export.export(
             model,
             inputs,
+            constraints=None,
         )
         tp_exported_program = tensor_parallel_transformation(
             exported_program,
@@ -177,6 +179,7 @@ class TensorParallelTest(DTensorTestBase):
         exported_program = torch.export.export(
             model,
             inputs,
+            constraints=None,
         )
         tp_exported_program = tensor_parallel_transformation(
             exported_program,

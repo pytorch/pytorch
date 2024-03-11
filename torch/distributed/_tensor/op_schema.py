@@ -64,7 +64,7 @@ def _pretty_print_spec(spec: object) -> str:
 @dataclass
 class PlacementStrategy:
     """
-    A placement strategy describes acceptable sharding placements of the output
+    A placement strategy describes an acceptable sharding placements of the output
     and the tensor arguments of an operation.
 
     note: when the op return value is a single DTensor object, output_specs is
@@ -94,13 +94,17 @@ class PlacementStrategy:
                 f"function output_spec expects a single DTensorSpec but got: {self.output_specs}"
             )
 
-    def input_spec(self, index: int = 0) -> DTensorSpec:
+    @cached_property
+    def input_spec(self) -> DTensorSpec:
+        """
+        This function requires that the strategy have exactly one DTensorSpec as the
+        input spec. If the input_specs is a tuple with more than 1 element, we throw an exception.
+        """
         assert self.input_specs is not None, "input_specs of PlacementStrategy is None!"
-        assert len(self.input_specs) > index, (
-            f"Invalid index {index} for input_specs of length "
-            f"{len(self.input_specs)}: {self.input_specs}"
-        )
-        return self.input_specs[index]
+        assert (
+            len(self.input_specs) == 1
+        ), f"expect single input spec in PlacementStrategy, but got: {len(self.input_specs)}"
+        return self.input_specs[0]
 
     def __str__(self) -> str:
         input_specs_str = _pretty_print_spec(self.input_specs)
@@ -129,7 +133,7 @@ class OpStrategy(StrategyType):
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
         mesh_shape = self.output_mesh_shape
-        return f"OpStrategy:[{strategy_list_str}] @ mesh: {mesh_shape}"
+        return f"OpStrategy:[{strategy_list_str}] @mesh: {mesh_shape}"
 
     def max_num_shards(self) -> int:
         """
@@ -190,8 +194,8 @@ class RuntimeSchemaInfo:
     """
 
     # This static_argnum records static arg "starting index" for ops that have non-tensor
-    # args/kwargs which would affect sharding propagation results. All args starting from
-    # this index would be hashed to our sharding cache.
+    # args/kwargs which would affect sharding propagation results. All args after this
+    # index would be hashed to our sharding cache.
     # Note that only a few ops need this information, e.g. view, transpose, var.dim, etc.
     static_argnum: int = 100
     # This static_kwargkey records static kwarg names which would affect sharding prop

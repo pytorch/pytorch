@@ -155,7 +155,7 @@ inline at::Tensor construct_offsets(const at::Tensor& sizes) {
   const int64_t* sizes_ptr = sizes.data_ptr<int64_t>();
   offsets_ptr[0] = 0;
   for (const auto i : c10::irange(ntensors - 1)) {
-    const int64_t row_product = std::accumulate(sizes_ptr, sizes_ptr + orig_dim, 1, std::multiplies());
+    const int64_t row_product = std::accumulate(sizes_ptr, sizes_ptr + orig_dim, 1, std::multiplies<int64_t>());
     offsets_ptr[i + 1] = offsets_ptr[i] + row_product;
     sizes_ptr += orig_dim;
   }

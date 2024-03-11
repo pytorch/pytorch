@@ -89,9 +89,7 @@ class TestPatternMatcherBase(TestCase):
 
         return tuple(clone(x) for x in inputs)
 
-    def _generate_qdq_quantized_model(
-        self, mod, inputs, is_qat=False, is_dynamic=False
-    ):
+    def _generate_qdq_quantized_model(self, mod, inputs, is_qat=False):
         maybe_no_grad = contextlib.nullcontext() if is_qat else torch.no_grad()
         with maybe_no_grad:
             export_model = capture_pre_autograd_graph(
@@ -100,9 +98,7 @@ class TestPatternMatcherBase(TestCase):
             )
             quantizer = X86InductorQuantizer()
             quantizer.set_global(
-                xiq.get_default_x86_inductor_quantization_config(
-                    is_qat=is_qat, is_dynamic=is_dynamic
-                )
+                xiq.get_default_x86_inductor_quantization_config(is_qat=is_qat)
             )
             prepare_model = (
                 prepare_qat_pt2e(export_model, quantizer)
@@ -127,7 +123,6 @@ class TestPatternMatcherBase(TestCase):
         is_qat=False,
         matcher_check_fn=None,
         dtype=None,
-        is_dynamic=False,
     ):
         counters.clear()
         torch._dynamo.reset()
@@ -151,9 +146,7 @@ class TestPatternMatcherBase(TestCase):
             maybe_autocast = contextlib.nullcontext()
 
         if check_quantization:
-            convert_model = self._generate_qdq_quantized_model(
-                mod, inputs, is_qat, is_dynamic
-            )
+            convert_model = self._generate_qdq_quantized_model(mod, inputs, is_qat)
             with torch.no_grad(), maybe_autocast:
                 _ = torch.compile(convert_model)(*inputs)
                 if matcher_count is not None:
@@ -1202,8 +1195,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
         do_permute=False,
         matcher_check_fn=None,
         bias=True,
-        is_dynamic=False,
-        is_qat=False,
     ):
         class M(torch.nn.Module):
             def __init__(self, use_bias, do_permute=False):
@@ -1232,8 +1223,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
             matcher_check_fn=matcher_check_fn
             if matcher_check_fn is not None
             else _default_matcher_check_fn,
-            is_qat=is_qat,
-            is_dynamic=is_dynamic,
         )
 
     @skipIfNoDynamoSupport
@@ -1245,30 +1234,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
         """
         for bias in [True, False]:
             self._qlinear_cpu_test_helper((torch.randn((2, 4)),), bias=bias)
-
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNN
-    @skipIfRocm
-    def test_dynamic_qlinear_cpu(self):
-        r"""
-        This testcase will quantize a single Linear Moduel.
-        """
-        for bias in [True, False]:
-            self._qlinear_cpu_test_helper(
-                (torch.randn((2, 4)),), bias=bias, is_dynamic=True
-            )
-
-    @skipIfNoDynamoSupport
-    @skipIfNoONEDNN
-    @skipIfRocm
-    def test_dynamic_qlinear_qat_cpu(self):
-        r"""
-        This testcase will quantize a single Linear Moduel.
-        """
-        for bias in [True, False]:
-            self._qlinear_cpu_test_helper(
-                (torch.randn((2, 4)),), bias=bias, is_dynamic=True, is_qat=True
-            )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16

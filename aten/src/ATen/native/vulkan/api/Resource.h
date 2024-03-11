@@ -311,8 +311,6 @@ class VulkanImage final {
   VkImageLayout layout_;
 
  public:
-  void create_image_view();
-
   inline VkDevice device() const {
     VmaAllocatorInfo allocator_info{};
     vmaGetAllocatorInfo(allocator_, &allocator_info);
@@ -380,9 +378,6 @@ class VulkanImage final {
     VK_CHECK_COND(!memory_, "Cannot bind an already bound allocation!");
     VK_CHECK(vmaBindImageMemory(allocator_, memory.allocation, handles_.image));
     memory_.allocation = memory.allocation;
-
-    // Only create the image view if the image has been bound to memory
-    create_image_view();
   }
 
   VkMemoryRequirements get_memory_requirements() const;

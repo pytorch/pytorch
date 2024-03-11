@@ -20,7 +20,6 @@ def aot_autograd(**kwargs):
         if callable(kwargs.get("decompositions")):
             kwargs["decompositions"] = kwargs["decompositions"]()
 
-        # NB: dont delete counter increment
         counters["aot_autograd"]["total"] += 1
         use_fallback = False
 

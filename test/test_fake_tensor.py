@@ -10,7 +10,6 @@ import torch._dynamo
 import itertools
 import numpy as np
 from torch.testing._internal.jit_utils import RUN_CUDA
-from torch._guards import tracing, TracingContext
 from torch._subclasses.fake_tensor import (
     _ShapeEnvSettings,
     extract_tensor_metadata,
@@ -19,7 +18,6 @@ from torch._subclasses.fake_tensor import (
     FakeTensorConverter,
     DynamicOutputShapeException,
     UnsupportedOperatorException,
-    unset_fake_temporarily,
 )
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, DimDynamic, free_symbols, StatelessSymbolicContext
 from torch.testing._internal.custom_op_db import custom_op_db
@@ -37,7 +35,6 @@ import torch._prims as prims
 import contextlib
 import weakref
 import copy
-import pickle
 import torch._functorch.config
 import torch.testing._internal.optests as optests
 from unittest.mock import patch
@@ -1324,25 +1321,6 @@ class FakeTensorPropTest(TestCase):
             with fake_mode:
                 torch.load(state_dict_file)  # scenario 1
                 torch.load(state_dict_file, map_location="cpu")  # scenario 2
-
-
-class FakeTensorSerialization(TestCase):
-    def test_serialization(self):
-        x = torch.tensor([0], device="cpu")
-        with FakeTensorMode():
-            y = pickle.loads(pickle.dumps(x))
-            self.assertEqual(type(y), FakeTensor)
-            self.assertEqual(y.device.type, "meta")
-
-            with unset_fake_temporarily():
-                y = pickle.loads(pickle.dumps(x))
-                self.assertEqual(x.device, y.device)
-
-    def test_serialization_with_tracing(self):
-        x = torch.tensor([0], device="cpu")
-        with tracing(TracingContext(FakeTensorMode())):
-            y = pickle.loads(pickle.dumps(x))
-            self.assertEqual(x.device, y.device)
 
 
 class FakeTensorDispatchCache(TestCase):

@@ -47,28 +47,18 @@ def aot_compile(
     from .compile_fx import compile_fx_aot
 
     # We will serialize the pytree info into the .so as constant strings
-    in_spec = None
-    out_spec = None
+    serialized_in_spec = ""
+    serialized_out_spec = ""
     if isinstance(gm.graph._codegen, torch.fx.graph._PyTreeCodeGen):
         codegen = gm.graph._codegen
         gm.graph._codegen = torch.fx.graph.CodeGen()
         gm.recompile()
 
         if codegen.pytree_info.in_spec is not None:
-            in_spec = codegen.pytree_info.in_spec
+            serialized_in_spec = pytree.treespec_dumps(codegen.pytree_info.in_spec)
+
         if codegen.pytree_info.out_spec is not None:
-            out_spec = codegen.pytree_info.out_spec
-
-    else:
-        if hasattr(gm, "_in_spec"):
-            in_spec = gm._in_spec
-        if hasattr(gm, "_out_spec"):
-            out_spec = gm._out_spec
-
-    serialized_in_spec = pytree.treespec_dumps(in_spec) if in_spec is not None else ""
-    serialized_out_spec = (
-        pytree.treespec_dumps(out_spec) if out_spec is not None else ""
-    )
+            serialized_out_spec = pytree.treespec_dumps(codegen.pytree_info.out_spec)
 
     options = (
         {

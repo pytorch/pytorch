@@ -579,4 +579,7 @@ API Reference
 .. automodule:: torch.export.unflatten
     :members:
 
+.. automodule:: torch.export.wrapper
+    :members:
+
 .. automodule:: torch.export.custom_obj

@@ -129,8 +129,7 @@ def _move_states_to_device(
     # TODO: De-duplicate with `_apply` after `swap_tensors` path lands:
     # https://github.com/pytorch/pytorch/issues/115792
     for tensor in itertools.chain(params, buffers):
-        if tensor.device == device or tensor.device.type == "meta":
-            # Keep meta-device tensors on meta device for deferred init
+        if tensor.device == device:
             continue
         if isinstance(tensor, DTensor):
             if (dtensor_mesh_type := tensor._spec.mesh.device_type) != device.type:

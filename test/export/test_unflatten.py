@@ -546,7 +546,7 @@ class TestUnflatten(TestCase):
         export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
         unflattened = unflatten(export_module)
 
-        self.compare_outputs(export_module.module(), unflattened, (torch.randn((2, 3)),))
+        self.compare_outputs(export_module, unflattened, (torch.randn((2, 3)),))
 
     @skipIfTorchDynamo("custom objects not supported in dynamo yet")
     def test_unflatten_constant_obj(self):
@@ -583,7 +583,7 @@ class TestUnflatten(TestCase):
             export_module = torch.export.export(Mod(), (torch.randn((2, 3)),), strict=False)
         unflattened = unflatten(export_module)
 
-        self.compare_outputs(export_module.module(), unflattened, (torch.randn((2, 3)),))
+        self.compare_outputs(export_module, unflattened, (torch.randn((2, 3)),))
 
     def test_nested_leaf_non_strict(self):
         class Leaf(torch.nn.Module):

@@ -1593,16 +1593,14 @@ def ensure_graph_fake(e, tx):
 def get_fake_values_from_nodes(tx, nodes, allow_non_graph_fake):
     def visit(n: torch.fx.Node):
         if n.op == "call_function" and "example_value" not in n.meta:
-            # fake tensor validity is checked inside get_fake_value using
-            # ensure_graph_fake
             return get_fake_value(n, tx, allow_non_graph_fake)
 
-        out = n.meta["example_value"]
-        if not allow_non_graph_fake and isinstance(out, torch.Tensor):
-            return ensure_graph_fake(out, tx)
-        return out
+        return n.meta["example_value"]
 
-    return torch.fx.node.map_arg(nodes, visit)
+    args_kwargs = torch.fx.node.map_arg(nodes, visit)
+    return tree_map_only(
+        torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), args_kwargs
+    )
 
 
 def get_fake_value(node, tx, allow_non_graph_fake=False):
@@ -1688,11 +1686,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
                 )
                 if maybe_pystub is not None:
                     module, ctx = maybe_pystub
-                    import_suggestion = (
-                        f"It's possible that the support was implemented in "
-                        f"module `{module}` and you may need to `import {module}`"
-                        f"({ctx}), otherwise "
-                    )
+                    import_suggestion = f"you may need to `import {module}` ({ctx}) for support, otherwise "
             unimplemented(
                 f"unsupported operator: {cause.func} ({import_suggestion}see "
                 "https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.64r4npvq0w0"

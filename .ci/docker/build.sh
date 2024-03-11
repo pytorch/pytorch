@@ -297,15 +297,6 @@ case "$image" in
     CUDA_VERSION=11.8
     CONDA_CMAKE=yes
     ;;
-  pytorch-linux-jammy-aarch64-py3.10-gcc11)
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=11
-    ACL=yes
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    CONDA_CMAKE=yes
-    ;;
   *)
     # Catch-all for builds that are not hardcoded.
     PROTOBUF=yes
@@ -397,7 +388,6 @@ DOCKER_BUILDKIT=1 docker build \
        --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
        --build-arg "EXECUTORCH=${EXECUTORCH}" \
        --build-arg "BASEKIT_VERSION=${BASEKIT_VERSION}" \
-       --build-arg "ACL=${ACL:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \

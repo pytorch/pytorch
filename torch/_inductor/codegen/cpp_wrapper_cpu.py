@@ -24,9 +24,8 @@ class CppWrapperCpu(WrapperCodeGen):
     """
 
     def __init__(self):
-        if not hasattr(self, "device"):
-            self.device = "cpu"
         super().__init__()
+
         self.declare = "auto "
         self.declare_maybe_reference = "decltype(auto) "
         self.ending = ";"
@@ -150,12 +149,7 @@ class CppWrapperCpu(WrapperCodeGen):
             )
 
         if config.abi_compatible:
-            if config.c_shim_version == "1":
-                self.header.splice("#include <torch/csrc/inductor/aoti_torch/c/shim.h>")
-            else:
-                self.header.splice(
-                    f"#include <torch/csrc/inductor/aoti_torch/generated/c_shim_{self.device}.h>"
-                )
+            self.header.splice("#include <torch/csrc/inductor/aoti_torch/c/shim.h>")
         else:
             if not V.graph.aot_mode:
                 self.header.splice("#include <pybind11/pybind11.h>")
@@ -930,11 +924,7 @@ class CppWrapperCpu(WrapperCodeGen):
         kernel_suffix = kernel_tokens[-1]
         if kernel_suffix == "call":
             kernel_suffix = kernel_tokens[-2]
-        if config.c_shim_version == "1":
-            shim_fn = f"aoti_torch_{kernel_suffix}"
-        else:
-            shim_fn = f"aoti_torch_{self.device}_{kernel_suffix}"
-
+        shim_fn = f"aoti_torch_{kernel_suffix}"
         # HACK: val_to_arg_str jams multiple arguments together using a comma. If that
         # ever breaks, it needs to be reworked to be able to return multiple arguments,
         # and the split-on-comma code here needs to be removed.
@@ -1686,24 +1676,12 @@ class CppWrapperCpu(WrapperCodeGen):
         ):
             if val is None:
                 return "0"  # nullptr is not available in C
-            if not isinstance(type_.getElementType(), torch.TensorType):
+            if isinstance(val, (bool, int, str, float)):
                 var_name = f"var_{next(self.arg_var_id)}"
                 self.writeline(f"auto {var_name} = {self.val_to_arg_str(val)};")
                 return f"&{var_name}"
-            elif config.c_shim_version == "2":
-                # Similar to other data type, use pointer to denote optional tensor arg in v2 C shim
-                base_handle = self.val_to_arg_str(val)
-                if "wrap_with_raii_handle_if_needed" in base_handle:
-                    # wrap_with_raii_handle_if_needed creates a temp RAIIAtenTensorHandle, so we need to
-                    # explicitly store it. Otherwise, it will be destroyed before the fallback kernel call.
-                    tmp_var_name = f"var_{next(self.arg_var_id)}"
-                    self.writeline(
-                        f"RAIIAtenTensorHandle {tmp_var_name} = {base_handle};"
-                    )
-                    base_handle = tmp_var_name
-                var_name = f"var_{next(self.arg_var_id)}"
-                self.writeline(f"AtenTensorHandle {var_name} = {base_handle}.get();")
-                return f"&{var_name}"
+            if not isinstance(type_.getElementType(), torch.TensorType):
+                return f"&{self.val_to_arg_str(val)}"
 
         return self.val_to_arg_str(val)
 
@@ -1723,9 +1701,7 @@ class CppWrapperCpu(WrapperCodeGen):
             return f"{val}LL" if sys.platform == "darwin" else f"{val}L"
         elif isinstance(val, str):
             return f'"{val}"'
-        elif isinstance(
-            val, (ir.Buffer, ir.ReinterpretView, ir.StorageBox, ir.TensorBox)
-        ):
+        elif isinstance(val, (ir.Buffer, ir.ReinterpretView)):
             return val.codegen_reference()
         elif isinstance(val, torch.device):
             return self.codegen_device(val)

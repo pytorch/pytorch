@@ -35,11 +35,7 @@ inline Tensor optional_contiguous(const Tensor& source) {
 // or nullptr if the tensor is undefined.
 template <typename scalar_t>
 inline scalar_t* optional_data(const Tensor& source) {
-  if constexpr (std::is_const<scalar_t>::value) {
-    return source.defined() ? source.const_data_ptr<scalar_t>() : nullptr;
-  } else {
-    return source.defined() ? source.data_ptr<scalar_t>() : nullptr;
-  }
+  return source.defined() ? source.data_ptr<scalar_t>() : nullptr;
 }
 
 inline void check_inputs_nll_loss2d(
@@ -113,7 +109,7 @@ static void nll_loss2d_forward_out_frame(
   *total_weight_data = 0;
 
   auto weight_contiguous = optional_contiguous(weight);
-  const scalar_t* weight_data = optional_data<const scalar_t>(weight_contiguous);
+  const scalar_t* weight_data = optional_data<scalar_t>(weight_contiguous);
 
   if (reduction == Reduction::None) {
     const int64_t batch_size = input.size(0);
@@ -121,9 +117,9 @@ static void nll_loss2d_forward_out_frame(
     const int64_t W = input.size(3);
 
     at::native::resize_output(output, {batch_size, H, W});
-    auto input_acc = input.accessor<const scalar_t, 4>();
+    auto input_acc = input.accessor<scalar_t, 4>();
     auto output_acc = output.accessor<scalar_t, 3>();
-    auto target_acc = target.accessor<const int64_t, 3>();
+    auto target_acc = target.accessor<int64_t, 3>();
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
       for (const auto b : c10::irange(start, end)) {
@@ -174,8 +170,8 @@ static void nll_loss2d_forward_out_frame(
   auto input_contiguous = input.contiguous();
   auto target_contiguous = target.contiguous();
 
-  const scalar_t* input_data = input_contiguous.const_data_ptr<scalar_t>();
-  const int64_t* target_data = target_contiguous.const_data_ptr<int64_t>();
+  const scalar_t* input_data = input_contiguous.data_ptr<scalar_t>();
+  const int64_t* target_data = target_contiguous.data_ptr<int64_t>();
 
   const int64_t batch_size = input.size(0);
   const int64_t map_size = input.size(2) * input.size(3);

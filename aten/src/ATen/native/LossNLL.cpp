@@ -147,11 +147,7 @@ inline Tensor optional_contiguous(const Tensor& source) {
 // or nullptr if the tensor is undefined.
 template <typename scalar_t>
 inline scalar_t* optional_data(const Tensor& source) {
-  if constexpr (std::is_const<scalar_t>::value) {
-    return source.defined() ? source.const_data_ptr<scalar_t>() : nullptr;
-  } else {
-    return source.defined() ? source.data_ptr<scalar_t>() : nullptr;
-  }
+  return source.defined() ? source.data_ptr<scalar_t>() : nullptr;
 }
 
 template <typename scalar_t, typename target_t>
@@ -170,14 +166,14 @@ static void nll_loss_out_frame(
   *total_weight_data = 0;
 
   auto weight_contiguous = optional_contiguous(weight);
-  const scalar_t* weight_data = optional_data<const scalar_t>(weight_contiguous);
+  const scalar_t* weight_data = optional_data<scalar_t>(weight_contiguous);
 
   if (reduction == Reduction::None && n_dims == 2) {
     const auto batch_size = input.size(0);
     at::native::resize_output(output, {batch_size});
 
-    auto input_acc = input.accessor<const scalar_t, 2>();
-    auto target_acc = target.accessor<const target_t, 1>();
+    auto input_acc = input.accessor<scalar_t, 2>();
+    auto target_acc = target.accessor<target_t, 1>();
     auto output_acc = output.accessor<scalar_t, 1>();
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
@@ -223,8 +219,8 @@ static void nll_loss_out_frame(
   auto input_contiguous = input.contiguous();
   auto target_contiguous = target.contiguous();
 
-  const scalar_t* input_data = input_contiguous.const_data_ptr<scalar_t>();
-  const target_t* target_data = target_contiguous.const_data_ptr<target_t>();
+  const scalar_t* input_data = input_contiguous.data_ptr<scalar_t>();
+  const target_t* target_data = target_contiguous.data_ptr<target_t>();
 
   const int64_t ndim = input.dim();
   const int64_t batch_size = ndim == 1 ? 1 : input.size(0);
@@ -724,12 +720,12 @@ Tensor nll_loss_nd_symint(
     input_ = input_.contiguous();
     target_ = target_.contiguous();
     // support empty batches, see #15870
-    if (input_.sym_numel() > 0) {
+    if (input_.numel() > 0) {
       input_ = input_.view_symint({n, std::move(c), 1, -1});
     } else {
       input_ = input_.view_symint({n, std::move(c), 0, 0});
     }
-    if (target_.sym_numel() > 0) {
+    if (target_.numel() > 0) {
       target_ = target_.view_symint({std::move(n), 1, -1});
     } else {
       target_ = target_.view_symint({std::move(n), 0, 0});

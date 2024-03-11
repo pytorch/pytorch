@@ -46,6 +46,10 @@ basic_gnn_sage,pass,7
 
 
 
+cm3leon_generate,eager_fail_to_run,0
+
+
+
 dcgan,pass,6
 
 
@@ -58,11 +62,23 @@ densenet121,pass,6
 
 
 
+detectron2_fcos_r_50_fpn,model_fail_to_load,0
+
+
+
 detectron2_maskrcnn_r_50_c4,eager_fail_to_run,0
 
 
 
 dlrm,pass,6
+
+
+
+doctr_det_predictor,eager_fail_to_run,0
+
+
+
+doctr_reco_predictor,eager_fail_to_run,0
 
 
 
@@ -122,6 +138,10 @@ hf_T5_base,eager_2nd_run_OOM,0
 
 
 
+hf_T5_generate,eager_fail_to_run,0
+
+
+
 hf_T5_large,pass_due_to_skip,0
 
 
@@ -130,15 +150,15 @@ hf_Whisper,pass,6
 
 
 
+hf_clip,eager_fail_to_run,0
+
+
+
 hf_distil_whisper,model_fail_to_load,0
 
 
 
 lennard_jones,pass,7
-
-
-
-llava,model_fail_to_load,0
 
 
 
@@ -162,11 +182,7 @@ mobilenet_v3_large,pass,7
 
 
 
-moco,pass,11
-
-
-
-moondream,model_fail_to_load,0
+moco,pass,17
 
 
 

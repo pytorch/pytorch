@@ -5,7 +5,7 @@ input/output types, metadata, config, function signatures etc.
 
 import collections
 import functools
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Dict, List, NewType, Optional, Set, Tuple, Union
 
@@ -266,11 +266,6 @@ class ViewAndMutationMeta:
     # forward, but is turned on during the backward call, then an error is
     # raised
     deterministic: Optional[bool] = None
-
-    # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
-    # side-effectful operators, FunctionalTensorMode will populate this
-    # dictionary telling us how many tokens we will need during tracing.
-    tokens: Dict[Any, torch.Tensor] = field(default_factory=dict)
 
     def __post_init__(self):
         # pre-compute the indices of the inputs that are mutated.
@@ -554,9 +549,6 @@ class GraphSignature:
 
     backward_signature: Optional[BackwardSignature]
 
-    input_tokens: List[GraphInputName]
-    output_tokens: List[GraphOutputName]
-
     @classmethod
     def from_tracing_metadata(
         cls,
@@ -577,54 +569,35 @@ class GraphSignature:
         graph_outputs = graph_output_names
         parameters = list(named_parameters)
         buffers = list(named_buffers)
-        num_tokens = len(view_mutation_metadata.tokens)
 
         # Calling convention assumptions:
-        # (1) graph inputs = (input_tokens, params, buffers, user_inputs)
-        # (2) graph outputs = (output_tokens, mutated_inputs, user_outs, param_gradients)
+        # (1) graph inputs = (params, buffers, user_inputs)
+        # (2) graph outputs = (mutated_inputs, user_outs, param_gradients)
         # (If we are capturing an inference graph, this convention is identical
         #  except that param_gradients is empty)
-        # See Note [Side-Effectful Tokens in AOTAutograd] for information on tokens
+        user_inputs = graph_inputs[len(parameters) + len(buffers) :]
+        assert num_user_inputs == len(user_inputs)
+        assert len(graph_inputs) == (len(parameters) + len(buffers) + len(user_inputs))
 
-        # Address input calling conventions:
-        start, stop = 0, num_tokens
-        input_tokens = graph_inputs[start:stop]
-
-        start, stop = stop, stop + len(parameters)
-        inputs_to_parameters = dict(zip(graph_inputs[start:stop], parameters))
-
-        start, stop = stop, stop + len(buffers)
+        inputs_to_parameters = dict(zip(graph_inputs[: len(parameters)], parameters))
         inputs_to_buffers = dict(
             zip(
-                graph_inputs[start:stop],
+                graph_inputs[len(parameters) : len(parameters) + len(buffers)],
                 buffers,
             )
         )
 
-        start, stop = stop, stop + num_user_inputs
-        user_inputs = graph_inputs[start:stop]
-
-        # We should've gone through all the inputs now
-        assert len(graph_inputs) - stop == 0
-
-        # Address output calling conventions:
-        start, stop = 0, num_tokens
-        output_tokens = graph_outputs[start:stop]
-
-        names = [*input_tokens, *parameters, *buffers, *user_inputs]
+        names = [*parameters, *buffers, *user_inputs]
         mutations = []
         for idx, input_info in enumerate(view_mutation_metadata.input_info):
             if input_info.mutates_data:
                 # Only buffers can be mutated, not parameters
                 assert idx >= len(parameters)
-                mutations.append(names[idx + num_tokens])
+                mutations.append(names[idx])
 
         assert len(mutations) == view_mutation_metadata.num_mutated_inp_runtime_indices
 
-        start, stop = (
-            stop,
-            stop + view_mutation_metadata.num_mutated_inp_runtime_indices,
-        )
+        start, stop = 0, view_mutation_metadata.num_mutated_inp_runtime_indices
         outputs_to_mutations = dict(zip(graph_outputs[start:stop], mutations))
 
         user_inputs_to_mutate = {}
@@ -658,8 +631,6 @@ class GraphSignature:
             in_spec=in_spec,
             out_spec=out_spec,
             backward_signature=backward_signature,
-            input_tokens=input_tokens,  # type: ignore[arg-type]
-            output_tokens=output_tokens,  # type: ignore[arg-type]
         )
 
 

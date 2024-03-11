@@ -6,7 +6,6 @@ from typing import Callable, List, Optional
 
 import torch
 from torch import multiprocessing as mp
-from torch._dynamo import reset
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import reset_rng_state
 from torch._dynamo.utils import counters
@@ -24,7 +23,6 @@ from torch._inductor.select_algorithm import (
     ChoiceCaller,
     TritonTemplateCaller,
 )
-
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -221,78 +219,6 @@ class TestMaxAutotune(TestCase):
 
         with config.patch({"max_autotune": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
-
-    @skipIfRocm
-    @parametrize("dynamic", (False, True))
-    def test_max_autotune_remote_caching(self, dynamic: bool):
-        from unittest.mock import patch
-
-        def mm(a, b):
-            a = torch.sin(a)
-            return a @ b
-
-        a = torch.randn(100, 10).cuda()
-        b = torch.randn(10, 100).cuda()
-
-        class Model(torch.nn.Module):
-            def forward(self, x, y):
-                return x + y
-
-        def f(x, y):
-            return Model()(x, y)
-
-        x = torch.randn(100, 100).cuda()
-        y = torch.randn(100, 100).cuda()
-
-        cache = {}
-        num_get = 0
-        num_put = 0
-
-        class MyCache:
-            def __init__(self, key, is_autotune=False):
-                pass
-
-            def get(self, filenames):
-                nonlocal cache
-                nonlocal num_get
-                ret = {file: cache[file] for file in filenames if file in cache}
-                num_get += len(ret)
-                return ret
-
-            def put(self, filename, data):
-                nonlocal cache
-                nonlocal num_put
-                cache[filename] = data
-                num_put += 1
-
-        cache_module = (
-            "triton.runtime.fb_memcache.FbMemcacheRemoteCacheBackend"
-            if config.is_fbcode()
-            else "triton.runtime.cache.RedisRemoteCacheBackend"
-        )
-
-        with config.patch(
-            {
-                "use_autotune_local_cache": False,
-                "use_autotune_remote_cache": True,
-            }
-        ), patch.dict(os.environ), patch(cache_module, MyCache, create=True):
-            os.environ.pop("TRITON_CACHE_MANAGER", None)
-            with config.patch({"max_autotune": True}):
-                for _ in range(4):
-                    torch.compile(mm, dynamic=dynamic)(a, b)
-                    reset()
-                    torch._inductor.codecache.PyCodeCache.clear()
-                self.assertEqual(num_get, 3)
-                self.assertEqual(num_put, 1)
-            num_get = 0
-            num_put = 0
-            for _ in range(4):
-                torch.compile(f, dynamic=dynamic)(x, y)
-                reset()
-                torch._inductor.codecache.PyCodeCache.clear()
-            self.assertEqual(num_get, 3)
-            self.assertEqual(num_put, 1)
 
     def test_precompilation_threads(self):
         import threading

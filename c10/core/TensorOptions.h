@@ -359,16 +359,8 @@ struct C10_API TensorOptions {
     return layout_ == c10::Layout::Sparse;
   }
 
-  /// Returns if the layout is sparse CSR, deprecated, use
-  /// is_sparse_compressed() instead
   bool is_sparse_csr() const {
     return layout_ == c10::Layout::SparseCsr;
-  }
-
-  bool is_sparse_compressed() const {
-    return layout_ == c10::Layout::SparseCsr ||
-        layout_ == c10::Layout::SparseCsc ||
-        layout_ == c10::Layout::SparseBsr || layout_ == c10::Layout::SparseBsc;
   }
 
   // For compatibility with legacy tensor.type() comparisons
@@ -704,15 +696,12 @@ inline DispatchKey computeDispatchKey(
     case Layout::SparseBsr:
     case Layout::SparseBsc:
       switch (device_.type()) {
-#define DO_CASE(device, _)                 \
-  case c10::DeviceType::device: {          \
-    return DispatchKey::SparseCsr##device; \
-  }
-        C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, unused)
-#undef DO_CASE
+        case c10::DeviceType::CPU:
+          return DispatchKey::SparseCsrCPU;
+        case c10::DeviceType::CUDA:
+          return DispatchKey::SparseCsrCUDA;
         default:
-          TORCH_CHECK_NOT_IMPLEMENTED(
-              false,
+          AT_ERROR(
               "Unsupported device type for ",
               layout_,
               " layout: ",
@@ -729,11 +718,13 @@ inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
     C10_FORALL_BACKEND_COMPONENTS(DO_CASE, unused)
 #undef DO_CASE
     return Layout::Sparse;
-#define DO_CASE(bc, _) case DispatchKey::SparseCsr##bc:
-    C10_FORALL_BACKEND_COMPONENTS(DO_CASE, unused)
-#undef DO_CASE
-    TORCH_CHECK(
-        false, "Cannot map DispatchKey ", dispatch_key, " to a unique layout.");
+    case DispatchKey::SparseCsrCPU:
+    case DispatchKey::SparseCsrCUDA:
+      TORCH_CHECK(
+          false,
+          "Cannot map DispatchKey ",
+          dispatch_key,
+          " to a unique layout.");
     case DispatchKey::MkldnnCPU:
       return Layout::Mkldnn;
     default:

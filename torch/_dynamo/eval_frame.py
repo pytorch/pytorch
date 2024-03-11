@@ -1173,14 +1173,13 @@ def export(
     def inner(*args, **kwargs):
         nonlocal constraints
         if constraints is not None:
-            if _log_export_usage:
-                warnings.warn(
-                    "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
-                    "and will not be supported in the future. "
-                    "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+            warnings.warn(
+                "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
+                "and will not be supported in the future. "
+                "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         else:
             constraints = _process_dynamic_shapes(_f, args, kwargs, dynamic_shapes)
         f = _f

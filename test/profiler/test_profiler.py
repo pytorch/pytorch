@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 import weakref
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 import expecttest
 import subprocess
@@ -68,8 +68,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
-
-Json = Dict[str, Any]
 
 try:
     import psutil
@@ -339,34 +337,13 @@ class TestExecutionTrace(TestCase):
                 z = z.cpu()
             _record_function_with_args_exit(rf_handle)
 
-    def get_execution_trace_root(self, output_file_name) -> Json:
+    def get_execution_trace_root(self, output_file_name):
         nodes = []
         with open(output_file_name) as f:
             et_graph = json.load(f)
             assert "nodes" in et_graph
             nodes = et_graph["nodes"]
         return nodes
-
-    def get_execution_trace_rf_ids(self, nodes: List[Json]) -> List[int]:
-        """Returns a sorted list of rf_id (record function ids) in execution trace"""
-        def get_rf_id(node):
-            attrs = node['attrs']
-            for a in attrs:
-                if a['name'] == 'rf_id':
-                    return a['value']
-            return None
-        rf_ids_ = (
-            get_rf_id(n) for n in nodes
-            if n['name'] != "[pytorch|profiler|execution_trace|process]"
-            and n['name'] != "[pytorch|profiler|execution_trace|thread]")
-        return sorted(rf_id for rf_id in rf_ids_ if rf_id is not None)
-
-
-    def get_kineto_external_ids(self, events: List[Json]) -> List[int]:
-        """Returns a sorted list of external Ids for CPU operators and user annotations"""
-        ops_and_annotations = (e for e in events if e.get("cat", "") in ['cpu_op', 'user_annotation'])
-        return sorted(e.get("args", {}).get("External id", -1) for e in ops_and_annotations)
-
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_execution_trace_with_kineto(self):
@@ -377,41 +354,34 @@ class TestExecutionTrace(TestCase):
             trace_called_num += 1
 
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
-        # Create a temp file to save execution trace and kineto data.
+        # Create a temp file to save execution trace data.
         fp = tempfile.NamedTemporaryFile('w+t', suffix='.et.json', delete=False)
         fp.close()
-        kt = tempfile.NamedTemporaryFile(mode="w+t", suffix=".kineto.json", delete=False)
-        kt.close()
-
+        expected_loop_events = 0
+        et = ExecutionTraceObserver()
+        et.register_callback(fp.name)
         with profile(
             activities=supported_activities(),
             schedule=torch.profiler.schedule(
                 skip_first=3,
                 wait=1,
                 warmup=1,
-                active=2,
-                repeat=1),
+                active=2),
             on_trace_ready=trace_handler,
-            execution_trace_observer=(
-                ExecutionTraceObserver().register_callback(fp.name)
-            ),
         ) as p:
+            et.start()
             for idx in range(10):
+                expected_loop_events += 1
                 with record_function(f"## LOOP {idx} ##"):
                     self.payload(use_cuda=use_cuda)
                 p.step()
-            self.assertEqual(
-                fp.name,
-                p.execution_trace_observer.get_output_file_path()
-            )
+            et.stop()
 
-        # Uncomment for debugging
-        # print("Output kineto = ", kt.name)
-        # print("Output ET = ", fp.name)
+        assert trace_called_num == 2
+        assert fp.name == et.get_output_file_path()
 
-        p.export_chrome_trace(kt.name)
-        self.assertEqual(trace_called_num, 1)
-
+        # cleanup
+        et.unregister_callback()
         nodes = self.get_execution_trace_root(fp.name)
         loop_count = 0
         found_root_node = False
@@ -421,35 +391,8 @@ class TestExecutionTrace(TestCase):
                 found_root_node = True
             if n["name"].startswith("## LOOP "):
                 loop_count += 1
-        self.assertTrue(found_root_node)
-        # Since profiler trace is active for 2 iterations
-        self.assertEqual(loop_count, 2)
-
-        # Compare the collected Execution Trace and Kineto Trace
-        # in terms of record func ID (rf_id) and External IDs
-        # both of these should match for the same trace window.
-
-        with open(kt.name) as f:
-            kineto = json.load(f)
-            events = kineto["traceEvents"]
-
-        # Look up rf_ids and external ids as two lists.
-        rf_ids = self.get_execution_trace_rf_ids(nodes)
-        external_ids = self.get_kineto_external_ids(events)
-        self.assertEqual(len(rf_ids), len(external_ids))
-
-        # There should be a constant difference between elements in each list
-        # The test experiences a jump in the difference between iterations;
-        # adding some buffer.
-        deltas = {x - y for x, y in zip(rf_ids, external_ids)}
-        self.assertLessEqual(
-            len(deltas),
-            loop_count,
-            msg=f"ET and kineto rf_id should have constant difference, deltas = {deltas}\n"
-                f"rf_ids = {rf_ids}\n"
-                f"external_ids = {external_ids}\n"
-        )
-
+        assert found_root_node
+        assert loop_count == expected_loop_events
 
     def test_execution_trace_alone(self):
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
@@ -458,7 +401,8 @@ class TestExecutionTrace(TestCase):
         fp.close()
         expected_loop_events = 0
 
-        et = ExecutionTraceObserver().register_callback(fp.name)
+        et = ExecutionTraceObserver()
+        et.register_callback(fp.name)
         et.start()
         for idx in range(5):
             expected_loop_events += 1
@@ -508,7 +452,8 @@ class TestExecutionTrace(TestCase):
         test_module = torch.compile(ConvAndRelu())
 
         x = torch.rand(128, 4096)
-        et = ExecutionTraceObserver().register_callback(fp.name)
+        et = ExecutionTraceObserver()
+        et.register_callback(fp.name)
         et.start()
         test_module.forward(x)
         et.stop()

@@ -9,6 +9,9 @@
 #include <ATen/ops/empty_like.h>
 #endif
 
+#include <stdexcept>
+#include <string>
+
 namespace at {
 
 #define AT_FORALL_BINARY_OPS(_)                                             \

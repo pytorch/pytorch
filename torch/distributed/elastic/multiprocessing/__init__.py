@@ -67,9 +67,6 @@ from typing import Callable, Dict, Optional, Tuple, Union, Set
 
 from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
     _validate_full_rank,
-    DefaultLogsSpecs,
-    LogsDest,
-    LogsSpecs,
     MultiprocessContext,
     PContext,
     ProcessFailure,
@@ -89,9 +86,6 @@ __all__ = [
     "RunProcsResult",
     "SignalException",
     "Std",
-    "LogsDest",
-    "LogsSpecs",
-    "DefaultLogsSpecs",
     "SubprocessContext",
     "to_map",
 ]
@@ -104,9 +98,12 @@ def start_processes(
     entrypoint: Union[Callable, str],
     args: Dict[int, Tuple],
     envs: Dict[int, Dict[str, str]],
-    logs_specs: LogsSpecs,
+    log_dir: str,
     log_line_prefixes: Optional[Dict[int, str]] = None,
     start_method: str = "spawn",
+    redirects: Union[Std, Dict[int, Std]] = Std.NONE,
+    tee: Union[Std, Dict[int, Std]] = Std.NONE,
+    local_ranks_filter: Optional[Set[int]] = None,
 ) -> PContext:
     """
     Start ``n`` copies of ``entrypoint`` processes with the provided options.
@@ -201,10 +198,79 @@ def start_processes(
         local_ranks_filter: which ranks' logs to print to console
 
     """
+    # listdir raises FileNotFound or NotADirectoryError so no need to check manually
+    if log_dir != os.devnull and os.listdir(log_dir):
+        raise RuntimeError(
+            f"log_dir: {log_dir} is not empty, please provide an empty log_dir"
+        )
 
     nprocs = len(args)
     _validate_full_rank(args, nprocs, "args")
     _validate_full_rank(envs, nprocs, "envs")
+
+    # create subdirs for each local rank in the logs_dir
+    # logs_dir
+    #       |- 0
+    #          |- error.json
+    #          |- stdout.log
+    #          |- stderr.log
+    #       |- ...
+    #       |- (nprocs-1)
+    redirs = to_map(redirects, nprocs)
+    ts = to_map(tee, nprocs)
+
+    # to tee stdout/stderr we first redirect into a file
+    # then tail -f stdout.log/stderr.log so add tee settings to redirects
+    for local_rank, tee_std in ts.items():
+        redirect_std = redirs[local_rank]
+        redirs[local_rank] = redirect_std | tee_std
+
+    SYS_STREAM = ""  # special case to indicate to output to console
+    stdouts = dict.fromkeys(range(nprocs), SYS_STREAM)
+    stderrs = dict.fromkeys(range(nprocs), SYS_STREAM)
+    tee_stdouts: Dict[int, str] = {}
+    tee_stderrs: Dict[int, str] = {}
+    error_files = {}
+
+    for local_rank in range(nprocs):
+        if log_dir == os.devnull:
+            tee_stdouts[local_rank] = os.devnull
+            tee_stderrs[local_rank] = os.devnull
+            error_files[local_rank] = os.devnull
+            envs[local_rank]["TORCHELASTIC_ERROR_FILE"] = ""
+        else:
+            clogdir = os.path.join(log_dir, str(local_rank))
+            os.mkdir(clogdir)
+
+            rd = redirs[local_rank]
+            if (rd & Std.OUT) == Std.OUT:
+                stdouts[local_rank] = os.path.join(clogdir, "stdout.log")
+            if (rd & Std.ERR) == Std.ERR:
+                stderrs[local_rank] = os.path.join(clogdir, "stderr.log")
+
+            t = ts[local_rank]
+            if t & Std.OUT == Std.OUT:
+                tee_stdouts[local_rank] = stdouts[local_rank]
+            if t & Std.ERR == Std.ERR:
+                tee_stderrs[local_rank] = stderrs[local_rank]
+
+            if local_ranks_filter and local_rank not in local_ranks_filter:
+                # If stream is tee'd, only write to file, but don't tail
+                if local_rank in tee_stdouts:
+                    tee_stdouts.pop(local_rank, None)
+                if local_rank in tee_stderrs:
+                    tee_stderrs.pop(local_rank, None)
+
+                # If stream is not redirected, don't print
+                if stdouts[local_rank] == SYS_STREAM:
+                    stdouts[local_rank] = os.devnull
+                if stderrs[local_rank] == SYS_STREAM:
+                    stderrs[local_rank] = os.devnull
+
+            error_file = os.path.join(clogdir, "error.json")
+            error_files[local_rank] = error_file
+            log.info("Setting worker%s reply file to: %s", local_rank, error_file)
+            envs[local_rank]["TORCHELASTIC_ERROR_FILE"] = error_file
 
     context: PContext
     if isinstance(entrypoint, str):
@@ -213,7 +279,11 @@ def start_processes(
             entrypoint=entrypoint,
             args=args,
             envs=envs,
-            logs_specs=logs_specs,
+            stdouts=stdouts,
+            stderrs=stderrs,
+            tee_stdouts=tee_stdouts,
+            tee_stderrs=tee_stderrs,
+            error_files=error_files,
             log_line_prefixes=log_line_prefixes,
         )
     else:
@@ -222,9 +292,13 @@ def start_processes(
             entrypoint=entrypoint,
             args=args,
             envs=envs,
+            stdouts=stdouts,
+            stderrs=stderrs,
+            tee_stdouts=tee_stdouts,
+            tee_stderrs=tee_stderrs,
+            error_files=error_files,
             log_line_prefixes=log_line_prefixes,
             start_method=start_method,
-            logs_specs=logs_specs,
         )
 
     try:

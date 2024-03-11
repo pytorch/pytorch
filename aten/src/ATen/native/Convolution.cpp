@@ -1398,8 +1398,8 @@ static inline std::vector<int64_t> calc_output_size(
     conv_output_size(input.sizes(), weight.sizes(), params.padding, params.stride, params.dilation);
 
   // Handle empty # of channels.
-  if (input.size(input_channels_dim) == 0) {
-    output_size[output_channels_dim] = 0;
+  if (input.size(1) == 0) {
+    output_size[input_channels_dim] = 0;
   }
   return output_size;
 }

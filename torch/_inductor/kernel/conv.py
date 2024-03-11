@@ -203,7 +203,6 @@ aten_convolution = ExternKernelChoice(
     torch.convolution,
     "at::convolution",
     has_out_variant=False,
-    op_overload=aten.convolution.default,
 )
 
 
@@ -408,15 +407,10 @@ def convolution(
         bias.realize()
         bias.freeze_layout()
         V.graph.sizevars.evaluate_static_shapes(bias.get_size())
-    choices = [
-        aten_convolution.bind(
-            args,
-            layout,
-            ordered_kwargs_for_cpp_kernel,
-            **kwargs,
-        )
-    ]
 
+    choices = [
+        aten_convolution.bind(args, layout, ordered_kwargs_for_cpp_kernel, **kwargs)
+    ]
     if (
         use_triton_template(layout)
         # templates only support these:

@@ -1853,7 +1853,8 @@ def verify_ninja_availability():
 
 def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
     if IS_WINDOWS:
-        python_lib_path = os.path.join(sys.base_exec_prefix, 'libs')
+        python_path = os.path.dirname(sys.executable)
+        python_lib_path = os.path.join(python_path, 'libs')
 
         extra_ldflags.append('c10.lib')
         if with_cuda:

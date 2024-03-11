@@ -34,7 +34,7 @@ from torch.distributed.elastic.agent.server.local_elastic_agent import (
     LocalElasticAgent,
     TORCHELASTIC_TIMER_FILE,
 )
-from torch.distributed.elastic.multiprocessing import DefaultLogsSpecs, Std
+from torch.distributed.elastic.multiprocessing import Std
 from torch.distributed.elastic.multiprocessing.errors import ChildFailedError, record
 from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
@@ -301,6 +301,8 @@ class LocalElasticAgentTest(unittest.TestCase):
             rdzv_handler=rdzv_handler,
             max_restarts=max_restarts,
             monitor_interval=monitor_interval,
+            redirects=node_config.redirects,
+            tee=node_config.tee,
             master_addr=master_addr_override,
             master_port=master_port_override,
         )
@@ -308,7 +310,6 @@ class LocalElasticAgentTest(unittest.TestCase):
     def get_agent(
         self,
         spec: WorkerSpec,
-        node_config: Conf,
         start_method: str = "spawn",
         exit_barrier_timeout=5,
         log_line_prefix_template: Optional[str] = None,
@@ -317,11 +318,7 @@ class LocalElasticAgentTest(unittest.TestCase):
             spec,
             start_method=start_method,
             exit_barrier_timeout=exit_barrier_timeout,
-            logs_specs=DefaultLogsSpecs(
-                log_dir=self.log_dir(),
-                redirects=node_config.redirects,
-                tee=node_config.tee,
-            ),
+            log_dir=self.log_dir(),
             log_line_prefix_template=log_line_prefix_template,
         )
 
@@ -363,7 +360,6 @@ class LocalElasticAgentTest(unittest.TestCase):
         )
         agent = self.get_agent(
             spec=spec,
-            node_config=conf,
             start_method=start_method,
             exit_barrier_timeout=exit_barrier_timeout,
             log_line_prefix_template=log_line_prefix_template,
@@ -549,7 +545,7 @@ class LocalElasticAgentTest(unittest.TestCase):
         # Run the agent
         node_conf = Conf(entrypoint=_check_local_watchdog_setup, local_world_size=1, args=(TORCHELASTIC_TIMER_FILE, True))
         spec = self.get_worker_spec(node_conf, max_restarts=2)
-        agent = self.get_agent(spec, node_config=node_conf)
+        agent = self.get_agent(spec)
         res = agent.run()
         self.assertFalse(res.is_failed())
 
@@ -561,7 +557,7 @@ class LocalElasticAgentTest(unittest.TestCase):
         # Run the agent
         node_conf = Conf(entrypoint=_check_local_watchdog_setup, local_world_size=1, args=(TORCHELASTIC_TIMER_FILE, False))
         spec = self.get_worker_spec(node_conf, max_restarts=2)
-        agent = self.get_agent(spec, node_config=node_conf)
+        agent = self.get_agent(spec)
         res = agent.run()
         self.assertFalse(res.is_failed())
 
@@ -779,7 +775,7 @@ class LocalElasticAgentTest(unittest.TestCase):
         """
         node_conf = Conf(entrypoint=_bipolar_function, local_world_size=4)
         spec = self.get_worker_spec(node_conf, max_restarts=2)
-        agent = self.get_agent(spec, node_config=node_conf)
+        agent = self.get_agent(spec)
         run_result = agent.run()
         self.assertTrue(run_result.is_failed())
         self.assertEqual(0, agent._remaining_restarts)
@@ -1273,7 +1269,7 @@ class LocalElasticAgentTest(unittest.TestCase):
         start_processes_mock.return_value = pcontext_mock
         node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
         spec = self.get_worker_spec(node_conf, max_restarts=0)
-        agent = self.get_agent(spec, node_config=node_conf)
+        agent = self.get_agent(spec)
         with patch.object(agent, "_monitor_workers") as monitor_mock:
             monitor_mock.return_value = RunResult(
                 state=WorkerState.SUCCEEDED, return_values={0: 0}

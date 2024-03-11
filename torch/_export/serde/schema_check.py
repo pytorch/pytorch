@@ -54,21 +54,15 @@ def _staged_schema():
                 raise AssertionError(f"Type {t} is not supported in export schema.")
 
         def dump_field(f):
-            t = dump_type(f.type)
-            ret = {"type": t}
+            ret = {"type": dump_type(f.type)}
 
-            value = dataclasses.MISSING
+            value = None
             if f.default is not dataclasses.MISSING:
                 value = f.default
             elif f.default_factory is not dataclasses.MISSING:
                 value = f.default_factory()
 
-            if t.startswith("Optional[") and value is not None:
-                raise AssertionError(
-                    f"Optional field {ty.__name__}.{f.name} must have default value to be None."
-                )
-
-            if value is not dataclasses.MISSING:
+            if value is not None:
                 default = str(value)
                 ret["default"] = default
             return ret

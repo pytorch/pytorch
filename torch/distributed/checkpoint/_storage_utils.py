@@ -12,8 +12,6 @@ def _storage_setup(
     reader: bool = False,
 ) -> Union[None, StorageReader, StorageWriter]:
     if storage:
-        if checkpoint_id is not None:
-            storage.reset(checkpoint_id)
         return storage
 
     if not checkpoint_id:

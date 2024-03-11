@@ -4,19 +4,11 @@ import torch
 import torch._export
 import torch._inductor
 import torch.fx._pytree as fx_pytree
+from torch.export import WrapperModule
 
 from torch.testing._internal.common_utils import IS_FBCODE
 
 from torch.utils import _pytree as pytree
-
-
-class WrapperModule(torch.nn.Module):
-    def __init__(self, model):
-        super().__init__()
-        self.model = model
-
-    def forward(self, *args, **kwargs):
-        return self.model(*args, **kwargs)
 
 
 class AOTIRunnerUtil:

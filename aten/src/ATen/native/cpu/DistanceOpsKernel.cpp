@@ -203,8 +203,8 @@ struct Dist {
 
   template <typename F>
   static void run_parallel_cdist(Tensor& result, const Tensor& t1, const Tensor& t2, const scalar_t p) {
-    const scalar_t * const t1_start = t1.const_data_ptr<scalar_t>();
-    const scalar_t * const t2_start = t2.const_data_ptr<scalar_t>();
+    const scalar_t * const t1_start = t1.data_ptr<scalar_t>();
+    const scalar_t * const t2_start = t2.data_ptr<scalar_t>();
     int64_t d = t1.size(0);
     int64_t r1 = t1.size(-2);
     int64_t r2 = t2.size(-2);

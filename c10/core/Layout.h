@@ -41,12 +41,9 @@ inline Layout layout_from_backend(Backend backend) {
       return Layout::Mkldnn;
     case Backend::SparseCsrCPU:
     case Backend::SparseCsrCUDA:
-    case Backend::SparseCsrHIP:
-    case Backend::SparseCsrVE:
-    case Backend::SparseCsrXPU:
       TORCH_CHECK(
           false,
-          "Cannot map Backend SparseCsr(CPU|CUDA|HIP|VE|XPU) to a unique layout.");
+          "Cannot map Backend SparseCsrCPU|SparseCsrCUDA to a unique layout.");
     default:
       return Layout::Strided;
   }

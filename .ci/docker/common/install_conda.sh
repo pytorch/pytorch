@@ -9,19 +9,10 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   MAJOR_PYTHON_VERSION=$(echo "$ANACONDA_PYTHON_VERSION" | cut -d . -f 1)
   MINOR_PYTHON_VERSION=$(echo "$ANACONDA_PYTHON_VERSION" | cut -d . -f 2)
 
-if [[ $(uname -m) == "aarch64" ]]; then
-  BASE_URL="https://github.com/conda-forge/miniforge/releases/latest/download"
   case "$MAJOR_PYTHON_VERSION" in
-    3)
-      CONDA_FILE="Miniforge3-Linux-aarch64.sh"
+    2)
+      CONDA_FILE="Miniconda2-latest-Linux-x86_64.sh"
     ;;
-    *)
-      echo "Unsupported ANACONDA_PYTHON_VERSION: $ANACONDA_PYTHON_VERSION"
-      exit 1
-      ;;
-  esac
-else
-  case "$MAJOR_PYTHON_VERSION" in
     3)
       CONDA_FILE="Miniconda3-latest-Linux-x86_64.sh"
     ;;
@@ -30,7 +21,6 @@ else
       exit 1
       ;;
   esac
-fi
 
   mkdir -p /opt/conda
   chown jenkins:jenkins /opt/conda
@@ -61,22 +51,12 @@ fi
   as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y python="$ANACONDA_PYTHON_VERSION"
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
-  if [[ $(uname -m) == "aarch64" ]]; then
-    CONDA_COMMON_DEPS="astunparse pyyaml setuptools openblas==0.3.25=*openmp* ninja==1.11.1 scons==4.5.2"
-
-    if [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
-      conda_install numpy=1.24.4 ${CONDA_COMMON_DEPS}
-    else
-      conda_install numpy=1.26.2 ${CONDA_COMMON_DEPS}
-    fi
+  CONDA_COMMON_DEPS="astunparse pyyaml mkl=2021.4.0 mkl-include=2021.4.0 setuptools"
+  if [ "$ANACONDA_PYTHON_VERSION" = "3.11" ] || [ "$ANACONDA_PYTHON_VERSION" = "3.12" ]; then
+    conda_install numpy=1.26.0 ${CONDA_COMMON_DEPS}
   else
-    CONDA_COMMON_DEPS="astunparse pyyaml mkl=2021.4.0 mkl-include=2021.4.0 setuptools"
 
-    if [ "$ANACONDA_PYTHON_VERSION" = "3.11" ] || [ "$ANACONDA_PYTHON_VERSION" = "3.12" ]; then
-      conda_install numpy=1.26.0 ${CONDA_COMMON_DEPS}
-    else
-      conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS}
-    fi
+    conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS}
   fi
 
   # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source

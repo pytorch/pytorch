@@ -143,7 +143,6 @@ test_failures = {
     "test_complex_fallback_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_adaptive_avg_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_adaptive_max_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_fractional_max_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_argmax_to_float_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_avg_pool2d7_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_avg_pool2d_backward4_dynamic_shapes": TestFailure(("cpu", "cuda")),

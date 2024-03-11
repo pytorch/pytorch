@@ -24,7 +24,7 @@ namespace at { namespace native {
 namespace {
 
 template <typename scalar_t, typename index_t, ReductionType reduce>
-inline void _update(at::opmath_type<scalar_t>* out_ptr, int64_t e, int64_t c, const scalar_t val, const scalar_t* other_data, int64_t K) {
+inline void _update(at::opmath_type<scalar_t>* out_ptr, int64_t e, int64_t c, const scalar_t val, scalar_t* other_data, int64_t K) {
   using opmath_t = at::opmath_type<scalar_t>;
   using Vec = vec::Vectorized<scalar_t>;
   using aVec = VecType<scalar_t>;
@@ -33,7 +33,7 @@ inline void _update(at::opmath_type<scalar_t>* out_ptr, int64_t e, int64_t c, co
 
   int64_t k = 0;
   aVec val_vec = aVec((opmath_t)val);
-  const scalar_t* other_ptr = other_data + c * K;
+  scalar_t* other_ptr = other_data + c * K;
 
   for (; k < K - (K % kVLEN); k += kVLEN) {
     aVec out_vec0 = aVec::loadu(out_ptr + k);
@@ -83,7 +83,7 @@ void spmm_reduce_kernel_impl(
   auto csr_data = crow_indices.accessor<index_t, 1>();
   auto col_data = col_indices.accessor<index_t, 1>();
   auto val_data = values.accessor<scalar_t, 1>();
-  const scalar_t* other_data = other.const_data_ptr<scalar_t>();
+  scalar_t* other_data = other.data_ptr<scalar_t>();
 
   int64_t M = crow_indices.numel() - 1;
   int64_t K = other.size(-1);

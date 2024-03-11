@@ -166,6 +166,10 @@ hf_T5_large,pass_due_to_skip,0
 
 
 
+hf_clip,eager_fail_to_run,0
+
+
+
 hf_distil_whisper,pass,0
 
 
@@ -203,10 +207,6 @@ mobilenet_v3_large,pass,0
 
 
 moco,model_fail_to_load,0
-
-
-
-moondream,pass,0
 
 
 

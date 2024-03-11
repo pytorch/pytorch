@@ -17,7 +17,6 @@ from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import check_constant_args, get_first_attr, identity, istype, make_cell
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
-from .distributed import ProcessGroupVariable
 
 if TYPE_CHECKING:
     from torch._guards import Source
@@ -692,21 +691,10 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         # call_function must check any unsupported arguments and graph-break.
         # It's safe to assume args/kwargs from orig_fn map 1:1 to args/kwargs of remapped_fn,
         # since that's the contract for putting a mapping in `traceable_collective_remaps`
-
-        # Merge args into kwargs so positional and keyword args
-        # can be processed the same way.
-        signature = inspect.signature(self.fn)
-        kwargs = dict(signature.bind(*args, **kwargs).arguments)
-        args = ()
-
         if "async_op" in kwargs and kwargs["async_op"].as_python_constant():
             unimplemented(
                 f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.fn}"
             )
-
-        if kwargs.get("group") is None or kwargs["group"].value is None:
-            kwargs["group"] = ProcessGroupVariable.get_global_pg_variable()
-
         return self.replacement_var.call_function(tx, args, kwargs)
 
 
@@ -806,9 +794,6 @@ class TritonKernelVariable(VariableTracker):
                     and defaults["prune_configs_by"].default
                     != kernel.early_config_prune
                 )
-                # Set via reset_to_zero argument
-                or len(kernel.reset_idx) != 0
-                or len(kernel.restore_idx) != 0
             ):
                 raise Unsupported(
                     "Only configs and keys are supported for triton.autotune"

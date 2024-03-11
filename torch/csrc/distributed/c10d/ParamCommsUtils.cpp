@@ -8,7 +8,6 @@
 namespace torch {
 
 ParamCommsDebugInfo::ParamCommsDebugInfo(
-    int pgId,
     int rank,
     std::string&& colName,
     int inNelems,
@@ -19,8 +18,7 @@ ParamCommsDebugInfo::ParamCommsDebugInfo(
     int globalRankStart,
     int globalRankStride,
     int worldSize)
-    : pgId_(pgId),
-      rank_(rank),
+    : rank_(rank),
       worldSize_(worldSize),
       columnName_(colName),
       inMessageNelems_(inNelems),
@@ -29,12 +27,6 @@ ParamCommsDebugInfo::ParamCommsDebugInfo(
       inputSplitSizes_(std::move(inSplitSizes)),
       outputSplitSizes_(std::move(outSplitSizes)),
       globalRankStart_(globalRankStart),
-      globalRankStride_(globalRankStride) {
-  if (globalRankStride > 0) {
-    for (int i = 0; i < worldSize; i++) {
-      groupRanks_.push_back(globalRankStart + i * globalRankStride);
-    }
-  }
-}
+      globalRankStride_(globalRankStride) {}
 
 } // namespace torch

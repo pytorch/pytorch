@@ -1066,11 +1066,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return layout() == kSparseCsr;
   }
 
-  // Whether a tensor is sparse CSR/CSC/BSR/BSC or not.
-  bool is_sparse_compressed() const {
-    return key_set_.has_all(c10::sparse_csr_ks);
-  }
-
   bool is_quantized() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
@@ -1274,7 +1269,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return kStrided;
     } else if (is_sparse()) {
       return kSparse;
-    } else if (is_sparse_compressed()) {
+    } else if (key_set_.has_any(c10::sparse_csr_ks)) {
       // Typically, the tensor dispatch keys define the tensor layout
       // uniquely. This allows using non-virtual layout method for
       // better performance. However, when tensor's layout depends,
@@ -2040,15 +2035,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       constexpr auto sparse_k = DispatchKeySet(DispatchKey::Sparse);
       return ts.has_any(sparse_k) && ts.has_any(sparse_backends);
     };
-    auto is_sparse_compressed = [](DispatchKeySet ts) {
-      constexpr auto sparse_compressed_k =
-          DispatchKeySet(DispatchKey::SparseCsr);
-      return ts.has_any(sparse_compressed_k);
-    };
     return (key_set_ == from) || (is_dense(key_set_) && is_dense(from)) ||
-        (is_sparse(key_set_) && is_sparse(from)) ||
-        (is_sparse_compressed(key_set_) && is_sparse_compressed(from));
-    ;
+        (is_sparse(key_set_) && is_sparse(from));
   }
 
  private:
@@ -2262,7 +2250,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
             storage_offset_ == 0); // because we just reallocated
         return storage_.mutable_data();
       }
-      Allocator* allocator = storage_.allocator();
+      const Allocator* allocator = storage_.allocator();
       // Storage might have nullptr allocator in rare cases, for example, if
       // an external memory segment has been wrapped with Tensor and we don't
       // know how to reallocate it. However, in order to preserve legacy C2

@@ -100,14 +100,14 @@ def _set_compilation_env():
         torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
 
 
-def _has_potential_branch_input_mutation(branch, inputs, pre_dispatch=False):
+def _has_potential_branch_input_mutation(branch, inputs):
     """
     Dispatch-trace the branch with inputs and check if
     producing graph has mutable op on the input. This is
     bit restrictive as the branch must be traceable.
     """
     try:
-        gm = make_fx(branch, pre_dispatch=pre_dispatch)(*inputs)
+        gm = make_fx(branch)(*inputs)
     except UnsupportedAliasMutationException:
         # this can happen when nested cond_op is
         # functionalized
@@ -140,14 +140,15 @@ def _has_potential_branch_input_mutation(branch, inputs, pre_dispatch=False):
     return _detect_input_mutation(gm)
 
 
-def _has_potential_branch_input_alias(branch, inputs, pre_dispatch=False):
+def _has_potential_branch_input_alias(branch, inputs):
     """
     Dispatch-trace the branch with inputs and check if
     producing graph has output aliasing the branch input. This is
     bit restrictive as the branch must be traceable.
     """
     try:
-        gm = make_fx(branch, pre_dispatch=pre_dispatch)(*inputs)
+        gm = make_fx(branch)(*inputs)
+
     except UnsupportedAliasMutationException:
         # this can happen when nested cond_op is
         # functionalized

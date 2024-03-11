@@ -19,13 +19,6 @@ concurrency:
 permissions: read-all
 
 jobs:
-  target-determination:
-    name: before-test
-    uses: ./.github/workflows/target_determination.yml
-    permissions:
-      id-token: write
-      contents: read
-
   # Build PyTorch with BUILD_CAFFE2=ON
   caffe2-linux-jammy-py3_8-gcc11-build:
     name: caffe2-linux-jammy-py3.8-gcc11
@@ -54,9 +47,7 @@ jobs:
   linux-focal-cuda12_1-py3_10-gcc9-test:
     name: linux-focal-cuda12.1-py3.10-gcc9
     uses: ./.github/workflows/_linux-test.yml
-    needs:
-      - linux-focal-cuda12_1-py3_10-gcc9-build
-      - target-determination
+    needs: linux-focal-cuda12_1-py3_10-gcc9-build
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-build.outputs.docker-image }}
@@ -114,9 +105,9 @@ jobs:
       environment-file: .github/requirements/conda-env-macOS-ARM64
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 3, runner: "macos-m1-stable" },
-          { config: "default", shard: 2, num_shards: 3, runner: "macos-m1-stable" },
-          { config: "default", shard: 3, num_shards: 3, runner: "macos-m1-stable" },
+          { config: "default", shard: 1, num_shards: 3, runner: "macos-m1-12" },
+          { config: "default", shard: 2, num_shards: 3, runner: "macos-m1-12" },
+          { config: "default", shard: 3, num_shards: 3, runner: "macos-m1-12" },
         ]}
 
   macos-12-py3-arm64-mps-test:
@@ -131,15 +122,13 @@ jobs:
       python-version: 3.9.12
       test-matrix: |
         { include: [
-          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-stable" },
+          { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-12" },
         ]}
 
   macos-12-py3-arm64-test:
     name: macos-12-py3-arm64
     uses: ./.github/workflows/_mac-test.yml
-    needs:
-      - macos-12-py3-arm64-build
-      - target-determination
+    needs: macos-12-py3-arm64-build
     with:
       build-environment: macos-12-py3-arm64
       # Same as the build job
@@ -164,9 +153,7 @@ jobs:
   win-vs2019-cpu-py3-test:
     name: win-vs2019-cpu-py3
     uses: ./.github/workflows/_win-test.yml
-    needs:
-      - win-vs2019-cpu-py3-build
-      - target-determination
+    needs: win-vs2019-cpu-py3-build
     with:
       build-environment: win-vs2019-cpu-py3
       cuda-version: cpu
@@ -208,9 +195,7 @@ jobs:
       contents: read
     name: linux-focal-rocm6.0-py3.8
     uses: ./.github/workflows/_rocm-test.yml
-    needs:
-      - linux-focal-rocm6_0-py3_8-build
-      - target-determination
+    needs: linux-focal-rocm6_0-py3_8-build
     with:
       build-environment: linux-focal-rocm6.0-py3.8
       docker-image: ${{ needs.linux-focal-rocm6_0-py3_8-build.outputs.docker-image }}

@@ -336,8 +336,6 @@ def jagged_from_list(
     # Calculate jagged offsets if not provided.
     if offsets is None:
         # Jagged layout specifies that offsets are stored as int64 on the same device as values.
-        # TODO: An alternative way to construct offsets is to use F.pad. This avoids creating
-        # an extra leaf tensor during the forward, potentially resolving compatibility issues.
         offsets = torch.cat(
             [
                 torch.zeros(1, dtype=torch.int64, device=values.device),

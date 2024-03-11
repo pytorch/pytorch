@@ -433,23 +433,25 @@ bool NoTF32Guard::should_disable_tf32() {
   return override_allow_tf32_flag;
 }
 
+#ifdef USE_ROCM
 // Ops can query this flag to know they are in the backward pass.
 // This information can be used, for example, to select implementations
 // with different numerical or performance characteristics.
 // See https://pytorch.org/docs/stable/notes/numerical_accuracy.html for details.
-thread_local bool rocm_is_backward_pass;
+thread_local bool ROCmBackwardPassGuard::is_backward_pass_;
 
 ROCmBackwardPassGuard::ROCmBackwardPassGuard() {
-  rocm_is_backward_pass = true;
+  is_backward_pass_ = true;
 }
 
 ROCmBackwardPassGuard::~ROCmBackwardPassGuard() {
-  rocm_is_backward_pass = false;
+  is_backward_pass_ = false;
 }
 
 bool ROCmBackwardPassGuard::is_backward_pass() {
-  return rocm_is_backward_pass;
+  return is_backward_pass_;
 }
+#endif
 
 bool Context::areVmapFallbackWarningsEnabled() const {
   return display_vmap_fallback_warnings_;

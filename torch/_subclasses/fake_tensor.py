@@ -19,13 +19,7 @@ from torch._C._functorch import is_functorch_wrapped_tensor
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import suggest_memory_format
-from torch._subclasses.meta_utils import (
-    assert_eq,
-    assert_metadata_eq,
-    is_sparse_any,
-    is_sparse_compressed,
-    MetaConverter,
-)
+from torch._subclasses.meta_utils import assert_eq, assert_metadata_eq, MetaConverter
 from torch._utils import render_call
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -454,13 +448,6 @@ class FakeTensor(torch.Tensor):
     # that have dispatch keys which are higher than the "meta" key:
     # https://github.com/pytorch/pytorch/blob/main/c10/core/DispatchKey.h#L189
 
-    # We don't support named tensors; graph break
-    @property
-    def names(self):
-        raise UnsupportedFakeTensorException(
-            "torch.compile doesn't support named tensors"
-        )
-
     @staticmethod
     def __new__(cls, fake_mode, elem, device, constant=None):
         self = torch.Tensor._make_subclass(
@@ -691,7 +678,7 @@ class TensorMetadata:
     is_conj: bool
     is_neg: bool
     is_inference: bool
-    is_sparse: bool  # read: is sparse COO
+    is_sparse: bool
     is_coalesced: Optional[bool]
     dense_dim: Optional[int]
     sparse_dim: Optional[int]
@@ -702,7 +689,7 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
     Extract the TensorMetadata of a tensor.
     """
     memory_format = suggest_memory_format(t)
-    if is_sparse_any(t) or not t.is_contiguous(memory_format=memory_format):
+    if not t.is_contiguous(memory_format=memory_format):
         memory_format = None
 
     return TensorMetadata(
@@ -1058,8 +1045,6 @@ class FakeTensorMode(TorchDispatchMode):
                     raise _BypassDispatchCache("constant attribute")
                 if arg.is_sparse:
                     raise _BypassDispatchCache("sparse tensor")
-                if is_sparse_compressed(arg):
-                    raise _BypassDispatchCache("sparse compressed tensor")
                 result.append(extract_tensor_metadata(arg))
             elif isinstance(arg, torch.Tensor):
                 raise _BypassDispatchCache("non-fake tensor")
@@ -1101,9 +1086,6 @@ class FakeTensorMode(TorchDispatchMode):
         # TODO: support caching sparse outputs?
         if output.is_sparse:
             raise _BypassDispatchCache("sparse output")
-
-        if is_sparse_compressed(output):
-            raise _BypassDispatchCache("sparse compressed output")
 
         # Can an in-place op really reference a kwarg? If so, then we need
         # to extend the implementation to handle it.
@@ -1219,8 +1201,7 @@ class FakeTensorMode(TorchDispatchMode):
 
     def dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
-        with no_dispatch():
-            log.debug("%s %s %s", func, args, kwargs)
+        log.debug("%s %s %s", func, args, kwargs)
 
         if func in _DISPATCH_META_HANDLERS:
             return _DISPATCH_META_HANDLERS[func](args)

@@ -131,7 +131,6 @@ class TestTensorBoardPyTorchNumpy(BaseTestCase):
         with self.createSummaryWriter() as w:
             w.add_histogram('float histogram', torch.rand((50,)))
             w.add_histogram('int histogram', torch.randint(0, 100, (50,)))
-            w.add_histogram('bfloat16 histogram', torch.rand(50, dtype=torch.bfloat16))
 
     def test_pytorch_histogram_raw(self):
         with self.createSummaryWriter() as w:

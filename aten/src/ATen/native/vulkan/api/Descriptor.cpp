@@ -202,25 +202,6 @@ DescriptorPool::DescriptorPool(
       config_(config),
       mutex_{},
       piles_{} {
-  if (config.descriptorPoolMaxSets > 0) {
-    init(config);
-  }
-}
-
-DescriptorPool::~DescriptorPool() {
-  if (VK_NULL_HANDLE == pool_) {
-    return;
-  }
-  vkDestroyDescriptorPool(device_, pool_, nullptr);
-}
-
-void DescriptorPool::init(const DescriptorPoolConfig& config) {
-  VK_CHECK_COND(
-      pool_ == VK_NULL_HANDLE,
-      "Trying to init a DescriptorPool that has already been created!");
-
-  config_ = config;
-
   std::vector<VkDescriptorPoolSize> type_sizes{
       {
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
@@ -252,12 +233,16 @@ void DescriptorPool::init(const DescriptorPoolConfig& config) {
   VK_CHECK(vkCreateDescriptorPool(device_, &create_info, nullptr, &pool_));
 }
 
+DescriptorPool::~DescriptorPool() {
+  if (VK_NULL_HANDLE == pool_) {
+    return;
+  }
+  vkDestroyDescriptorPool(device_, pool_, nullptr);
+}
+
 DescriptorSet DescriptorPool::get_descriptor_set(
     VkDescriptorSetLayout set_layout,
     const ShaderLayout::Signature& signature) {
-  VK_CHECK_COND(
-      pool_ != VK_NULL_HANDLE, "DescriptorPool has not yet been initialized!");
-
   auto it = piles_.find(set_layout);
   if (piles_.cend() == it) {
     it = piles_
@@ -275,10 +260,8 @@ DescriptorSet DescriptorPool::get_descriptor_set(
 }
 
 void DescriptorPool::flush() {
-  if (pool_ != VK_NULL_HANDLE) {
-    VK_CHECK(vkResetDescriptorPool(device_, pool_, 0u));
-    piles_.clear();
-  }
+  VK_CHECK(vkResetDescriptorPool(device_, pool_, 0u));
+  piles_.clear();
 }
 
 } // namespace api

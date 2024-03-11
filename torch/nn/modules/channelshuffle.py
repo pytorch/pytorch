@@ -9,7 +9,7 @@ class ChannelShuffle(Module):
     r"""Divides and rearranges the channels in a tensor.
 
     This operation divides the channels in a tensor of shape :math:`(*, C , H, W)`
-    into g groups and rearranges them as :math:`(*, \frac{C}{g}, g, H, W)`,
+    into g groups and rearranges them as :math:`(*, C \frac g, g, H, W)`,
     while keeping the original tensor shape.
 
     Args:

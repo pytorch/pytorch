@@ -223,14 +223,12 @@ TEST(DispatchKeySet, DoubletonPerBackend) {
       // Skip these because they aren't real keys.
       if (tid1 == DispatchKey::StartOfDenseBackends ||
           tid1 == DispatchKey::StartOfSparseBackends ||
-          tid1 == DispatchKey::StartOfSparseCsrBackends ||
           tid1 == DispatchKey::StartOfQuantizedBackends ||
           tid1 == DispatchKey::StartOfNestedTensorBackends ||
           tid1 == DispatchKey::StartOfAutogradFunctionalityBackends)
         continue;
       if (tid2 == DispatchKey::StartOfDenseBackends ||
           tid2 == DispatchKey::StartOfSparseBackends ||
-          tid2 == DispatchKey::StartOfSparseCsrBackends ||
           tid2 == DispatchKey::StartOfQuantizedBackends ||
           tid2 == DispatchKey::StartOfNestedTensorBackends ||
           tid2 == DispatchKey::StartOfAutogradFunctionalityBackends)
@@ -328,12 +326,6 @@ TEST(DispatchKeySet, getHighestPriorityBackendTypeId) {
   ASSERT_EQ(
       DispatchKey::SparseCUDA, c10::highestPriorityBackendTypeId(sparse_cuda));
 
-  DispatchKeySet sparse_compressed_cuda(
-      {DispatchKey::Functionalize, DispatchKey::SparseCsrCUDA});
-  ASSERT_EQ(
-      DispatchKey::SparseCsrCUDA,
-      c10::highestPriorityBackendTypeId(sparse_compressed_cuda));
-
   // quantizedCUDA has higher priority than CUDA
   DispatchKeySet quantized_cuda(
       {DispatchKey::CUDA, DispatchKey::QuantizedCUDA});
@@ -425,7 +417,6 @@ TEST(DispatchKeySet, TestFunctionalityDispatchKeyToString) {
         k == DispatchKey::StartOfDenseBackends ||
         k == DispatchKey::StartOfQuantizedBackends ||
         k == DispatchKey::StartOfSparseBackends ||
-        k == DispatchKey::StartOfSparseCsrBackends ||
         k == DispatchKey::StartOfNestedTensorBackends ||
         k == DispatchKey::StartOfAutogradFunctionalityBackends)
       continue;

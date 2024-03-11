@@ -774,9 +774,6 @@ class OpInfo:
     # (e.g. functions like ones, zeros, methods like view, permute)
     supports_varargs: bool = False
 
-    # Whether the operation avoids materializing COW tensor inputs
-    supports_cow_input_no_materialize: bool = True
-
     # wrapper function for gradcheck
     gradcheck_wrapper: Callable = lambda op, *args, **kwargs: op(*args, **kwargs)
 

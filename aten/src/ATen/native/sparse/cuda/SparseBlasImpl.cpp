@@ -1454,8 +1454,8 @@ void sampled_addmm_out_sparse_csr(
         // ** On entry to cusparseSDDMM_bufferSize(): batched SDDMM is not supported
         // So we need to resort to the for loop
         for (const auto i : c10::irange(batchCount(A))) {
-          auto descA = at::cuda::sparse::CuSparseConstDnMatDescriptor(*A_, /*batch_offset=*/i);
-          auto descB = at::cuda::sparse::CuSparseConstDnMatDescriptor(*B_, /*batch_offset=*/i);
+          auto descA = at::cuda::sparse::CuSparseDnMatDescriptor(*A_, /*batch_offset=*/i);
+          auto descB = at::cuda::sparse::CuSparseDnMatDescriptor(*B_, /*batch_offset=*/i);
           auto descC = at::cuda::sparse::CuSparseSpMatCsrDescriptor(C, /*batch_offset=*/i);
 
           auto beta_ = beta.to<scalar_t>();
@@ -1468,8 +1468,8 @@ void sampled_addmm_out_sparse_csr(
               opA,
               opB,
               &alpha_,
-              descA.unsafe_mutable_descriptor(),
-              descB.unsafe_mutable_descriptor(),
+              descA.descriptor(),
+              descB.descriptor(),
               &beta_,
               descC.descriptor(),
               compute_type,
@@ -1485,8 +1485,8 @@ void sampled_addmm_out_sparse_csr(
               opA,
               opB,
               &alpha_,
-              descA.unsafe_mutable_descriptor(),
-              descB.unsafe_mutable_descriptor(),
+              descA.descriptor(),
+              descB.descriptor(),
               &beta_,
               descC.descriptor(),
               compute_type,
@@ -1498,8 +1498,8 @@ void sampled_addmm_out_sparse_csr(
               opA,
               opB,
               &alpha_,
-              descA.unsafe_mutable_descriptor(),
-              descB.unsafe_mutable_descriptor(),
+              descA.descriptor(),
+              descB.descriptor(),
               &beta_,
               descC.descriptor(),
               compute_type,

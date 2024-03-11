@@ -31,12 +31,6 @@
 
 namespace torch {
 namespace autograd {
-enum class can_mutate_inplace_result {
-  success,
-  non_default_backward_view,
-  view_of_leaf,
-  is_leaf,
-};
 
 // The requires_grad argument is used to know if the inplace operation needs
 // gradient to be setup for it.
@@ -44,47 +38,24 @@ enum class can_mutate_inplace_result {
 // writing a Tensor that requires gradients inplace into a Tensor that does not
 // require gradients: a = torch.rand(2) b = torch.rand(2, requires_grad=True)
 // a.copy_(b)
-inline can_mutate_inplace_result can_mutate_inplace(
-    const at::Tensor& tensor,
-    bool requires_grad) {
-  if (!requires_grad || !GradMode::is_enabled()) {
-    return can_mutate_inplace_result::success;
-  }
-  auto diff_view_meta = impl::get_view_autograd_meta(tensor);
-  if (diff_view_meta && diff_view_meta->has_bw_view()) {
-    if (diff_view_meta->get_creation_meta() != CreationMeta::DEFAULT) {
-      return can_mutate_inplace_result::non_default_backward_view;
-    }
-    if (tensor.requires_grad() && tensor._base().is_leaf()) {
-      return can_mutate_inplace_result::view_of_leaf;
-    }
-  }
-  if (tensor.requires_grad() && tensor.is_leaf()) {
-    return can_mutate_inplace_result::is_leaf;
-  }
-  return can_mutate_inplace_result::success;
-}
-
 inline void check_inplace(const at::Tensor& tensor, bool requires_grad) {
-  switch (can_mutate_inplace(tensor, requires_grad)) {
-    case can_mutate_inplace_result::success:
-      return;
-    case can_mutate_inplace_result::non_default_backward_view: {
-      return handle_view_on_rebase(impl::get_view_autograd_meta(tensor));
+  if (requires_grad && GradMode::is_enabled()) {
+    auto diff_view_meta = impl::get_view_autograd_meta(tensor);
+    if (diff_view_meta && diff_view_meta->has_bw_view()) {
+      // This can throw or warn
+      handle_view_on_rebase(diff_view_meta);
+      if (tensor.requires_grad() && tensor._base().is_leaf()) {
+        TORCH_CHECK(
+            false,
+            "a view of a leaf Variable that requires grad is being used in an in-place operation.");
+      }
     }
-    case can_mutate_inplace_result::view_of_leaf:
-      TORCH_CHECK(
-          false,
-          "a view of a leaf Variable that requires grad is being used in an in-place operation.");
-      break;
-
-    case can_mutate_inplace_result::is_leaf:
+    if (tensor.requires_grad() && tensor.is_leaf()) {
       TORCH_CHECK(
           false,
           "a leaf Variable that requires grad is being used in an in-place operation.");
-      break;
+    }
   }
-  TORCH_INTERNAL_ASSERT(false);
 }
 
 inline void check_inplace(at::ITensorListRef tensors, bool requires_grad) {
@@ -133,7 +104,7 @@ inline void throw_error_for_complex_autograd(
 
 // TODO: Blegh, bare references
 
-inline void rebase_history(const Variable& var, std::shared_ptr<Node> grad_fn) {
+inline void rebase_history(Variable& var, std::shared_ptr<Node> grad_fn) {
   if (grad_fn && var.defined()) {
     grad_fn->add_input_metadata(var);
     impl::rebase_history(var, {std::move(grad_fn), 0});

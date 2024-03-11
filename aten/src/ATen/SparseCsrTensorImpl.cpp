@@ -55,8 +55,7 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
                   "to https://github.com/pytorch/pytorch/issues.");
 
   TORCH_INTERNAL_ASSERT(((key_set.has(DispatchKey::SparseCsrCPU) && device().type() == kCPU)
-                         || (key_set.has(DispatchKey::SparseCsrCUDA) && device().type() == kCUDA)
-                         || (key_set.has(DispatchKey::SparseCsrMeta) && device().type() == kMeta)),
+                         || (key_set.has(DispatchKey::SparseCsrCUDA) && device().type() == kCUDA)),
                         "Inconsistent key_set (=", key_set, ") and device (=", device(), ")");
 
   set_storage_access_should_throw();

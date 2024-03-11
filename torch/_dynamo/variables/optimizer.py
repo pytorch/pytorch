@@ -4,7 +4,6 @@ import weakref
 from typing import Dict, List
 
 import torch
-
 from ..decorators import mark_static_address
 
 from ..guards import GuardBuilder, install_guard
@@ -129,14 +128,11 @@ class OptimizerVariable(UserDefinedObjectVariable):
             ):
                 param_source = p_vt.source
                 self.tensor_to_source[p] = param_source
-                grad_source = AttrSource(
-                    param_source,
-                    "grad",
-                )
                 if p.grad is not None:
-                    self.grad_to_source[p.grad] = grad_source
-                else:
-                    install_guard(grad_source.make_guard(GuardBuilder.CONSTANT_MATCH))
+                    self.grad_to_source[p.grad] = AttrSource(
+                        param_source,
+                        "grad",
+                    )
 
         # state guards take a long time to generate
         # so we manually generate them here

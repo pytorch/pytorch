@@ -482,39 +482,6 @@ class CompiledOptimizerTests(TestCase):
         self.assertTrue(p_ref() is None)
         gc.enable()
 
-    def test_guard_on_none_grads(self):
-        def training_loop():
-            input = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]).reshape(3, 2)
-
-            model = torch.nn.Sequential(
-                torch.nn.Linear(2, 3),
-                torch.nn.Sigmoid(),
-                torch.nn.Linear(3, 1),
-                torch.nn.Sigmoid(),
-            )
-
-            params = list(model.parameters())
-            optimizer = torch.optim.Adam(params)
-            step_list = []
-
-            for i in range(6):
-                optimizer.zero_grad()
-                # Test that step behaves as expected (a no-op) when grads are set to None
-                if i != 3:
-                    output = model(input)
-                    loss = output.sum()
-                    loss.backward()
-
-                optimizer.step()
-                step_list.append(optimizer.state[params[0]]["step"])
-
-            return step_list
-
-        compiled_training_loop = torch._dynamo.optimize("eager")(training_loop)
-        actual_steps = compiled_training_loop()
-        expected_steps = training_loop()
-        self.assertEqual(actual_steps, expected_steps)
-
     # Basic shampoo test to verify we support compiling the various ops without error
     @requires_cuda
     def test_basic_shampoo(self):

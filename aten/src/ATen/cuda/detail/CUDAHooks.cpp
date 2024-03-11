@@ -137,7 +137,7 @@ bool CUDAHooks::isPinnedPtr(const void* data) const {
   cudaPointerAttributes attr;
   // We do not believe that CUDA needs mutable access to the data
   // here.
-  cudaError_t err = cudaPointerGetAttributes(&attr, data);
+  cudaError_t err = cudaPointerGetAttributes(&attr, const_cast<void*>(data));
 #if !defined(USE_ROCM)
   if (err == cudaErrorInvalidValue) {
     (void)cudaGetLastError(); // clear CUDA error

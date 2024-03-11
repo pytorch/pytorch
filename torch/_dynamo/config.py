@@ -5,7 +5,7 @@ import re
 import sys
 import tempfile
 from os.path import abspath, dirname
-from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
+from typing import Any, Dict, Optional, Set, Type, TYPE_CHECKING, Union
 
 import torch
 
@@ -370,12 +370,6 @@ optimize_user_defined_triton_kernels = True
 # If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
 log_compilation_metrics = True
 
-# A set of logging functions which will be reordered to the end of graph breaks,
-# allowing dynamo to construct larget graph. Note that there are some
-# limitations to this, such as how it does not correctly print objects that were
-# mutated after the print statement.
-reorderable_logging_functions: Set[Callable[[Any], None]] = set()
-
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing
 inject_BUILD_SET_unimplemented_TESTING_ONLY = False
@@ -405,6 +399,11 @@ fake_tensor_cache_crosscheck_enabled = (
 # support `context_fn` in torch.utils.checkpoint.checkpoint API under torch.compile().
 # WARNING: this is an experimental flag and is subject to change.
 _experimental_support_context_fn_in_torch_utils_checkpoint = False
+
+# Approximate maximum number of nodes to unroll loops into. A value of 0 will
+# unroll fully but could result in very large graphs that take an inordinate
+# amount of time to process.
+max_loop_unroll_nodes = int(os.environ.get("TORCHDYNAMO_MAX_LOOP_UNROLL_NODES", 5000))
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

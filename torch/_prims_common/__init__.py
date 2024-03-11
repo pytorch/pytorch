@@ -12,7 +12,6 @@ from typing import (
     Callable,
     cast,
     List,
-    NamedTuple,
     Optional,
     overload,
     Sequence,
@@ -366,30 +365,7 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 
     # Checks that there exists a permutation of the strides s.t. the tensor would be contiguous
     # Sorts (length, stride) pairs by stride
-    #
-    # This sort is done in a size-oblivious way, which helps if we do a
-    # comparison like 2048*u0 > u0; we just want this to return True
-    # (and not worry about what if u0 is zero).
-    class K(NamedTuple):
-        size: int
-        stride: int
-
-        def __lt__(self, other):
-            return guard_size_oblivious(self.stride < other.stride)
-
-        def __gt__(self, other):
-            return guard_size_oblivious(self.stride > other.stride)
-
-        def __le__(self, other):
-            return guard_size_oblivious(self.stride <= other.stride)
-
-        def __ge__(self, other):
-            return guard_size_oblivious(self.stride >= other.stride)
-
-        def __eq__(self, other):
-            return guard_size_oblivious(self.stride == other.stride)
-
-    lengths_and_strides = sorted(map(K, a.shape, a.stride()))
+    lengths_and_strides = sorted(zip(a.shape, a.stride()), key=operator.itemgetter(1))
 
     expected_stride = 1
     for length, stride in lengths_and_strides:

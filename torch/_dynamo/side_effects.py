@@ -108,8 +108,6 @@ class SideEffects:
             return "store_attr_mutations: unknown diff"
         elif self.save_for_backward != other.save_for_backward:
             return "save_for_backward"
-        elif self.tensor_hooks != other.tensor_hooks:
-            return "tensor_hooks"
         else:
             return None
 

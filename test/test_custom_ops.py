@@ -14,7 +14,6 @@ import torch._custom_ops as custom_ops
 
 import torch.testing._internal.custom_op_db
 import torch.testing._internal.optests as optests
-import torch.utils.cpp_extension
 from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import custom_op, CustomOp
@@ -28,11 +27,9 @@ class CustomOpTestCaseBase(TestCase):
     test_ns = "_test_custom_op"
 
     def setUp(self):
-        super().setUp()
         self.libraries = []
 
     def tearDown(self):
-        super().tearDown()
         import torch._custom_op
 
         keys = list(torch._custom_op.impl.global_registry.keys())
@@ -1844,47 +1841,6 @@ def forward(self, x_1):
     def test_impl_device_invalid(self):
         with self.assertRaisesRegex(RuntimeError, "Expected one of cpu, cuda"):
             torch.library.impl("blah::blah", "somethingsomething")
-
-    def test_autograd_function_backed_op(self):
-        cpp_source = """
-struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
-  static constexpr bool is_traceable = true;
-
-  static torch::Tensor forward(
-      torch::autograd::AutogradContext* ctx,
-      const torch::Tensor& x) {
-    return x;
-  }
-
-  static torch::autograd::variable_list backward(
-      torch::autograd::AutogradContext *ctx,
-      torch::autograd::variable_list grad_output) {
-    return grad_output;
-  }
-};
-
-torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x) {
-  return CustomOpAutogradFunction::apply(x);
-}
-
-TORCH_LIBRARY(mylib, m) {
-    m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
-}
-        """
-
-        module = torch.utils.cpp_extension.load_inline(
-            name="mylib",
-            cpp_sources=cpp_source,
-            functions="custom_op_backed_by_autograd_fn",
-            verbose=True,
-        )
-
-        x = torch.ones(2, 2, requires_grad=True)
-        temp = x.clone().detach()
-        out = torch.ops.mylib.custom_op_backed_by_autograd_fn(x)
-        loss = out.sum()
-        loss.backward()
-        self.assertEqual(x.grad, temp)
 
 
 def op_with_incorrect_schema(testcase, name):

@@ -160,7 +160,7 @@ inline bool operator!=(std::nullptr_t, const DataPtr& dp) noexcept {
 struct C10_API Allocator {
   virtual ~Allocator() = default;
 
-  virtual DataPtr allocate(size_t n) = 0;
+  virtual DataPtr allocate(size_t n) const = 0;
 
   // Clones an allocation that came from this allocator.
   //
@@ -171,7 +171,7 @@ struct C10_API Allocator {
   // attached to the input data.
   //
   // Requires: input data was allocated by the same allocator.
-  DataPtr clone(const void* data, std::size_t n);
+  DataPtr clone(const void* data, std::size_t n) const;
 
   // Checks if DataPtr has a simple context, not wrapped with any out of the
   // ordinary contexts.

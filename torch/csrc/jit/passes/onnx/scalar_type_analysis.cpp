@@ -71,18 +71,12 @@ static const std::unordered_set<NodeKind> comparisonOps = {
     onnx::LessOrEqual,
 };
 
-static const std::unordered_set<NodeKind> selectorOps = {onnx::Where};
-
 static bool IsStandardOp(const NodeKind& nkind) {
   return standardOps.find(nkind) != standardOps.end();
 }
 
 static bool IsComparisonOp(const NodeKind& nkind) {
   return comparisonOps.find(nkind) != comparisonOps.end();
-}
-
-static bool IsSelectorOp(const NodeKind& nkind) {
-  return selectorOps.find(nkind) != selectorOps.end();
 }
 
 static TensorTypePtr CreateProfiledTensorTypeWithScalarType(
@@ -93,8 +87,7 @@ static TensorTypePtr CreateProfiledTensorTypeWithScalarType(
 }
 
 static bool IsImplicitCastSupported(const NodeKind& nodeKind) {
-  return IsStandardOp(nodeKind) || IsComparisonOp(nodeKind) ||
-      IsSelectorOp(nodeKind);
+  return IsStandardOp(nodeKind) || IsComparisonOp(nodeKind);
 }
 
 static c10::optional<c10::ScalarType> PromoteScalarTypes(
@@ -188,16 +181,8 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
         }
       };
 
-  size_t input_idx = 0;
   std::for_each(
       n->inputs().begin(), n->inputs().end(), [&](const Value* input) {
-        // We skip the 'condition' input (i.e., the first input) in case of
-        // onnx::Where operator.
-        if (IsSelectorOp(n->kind()) && input_idx == 0) {
-          input_idx++;
-          return;
-        }
-
         auto nkind = input->node()->kind();
         if (nkind == onnx::Gather &&
             input->node()->input(0)->node()->kind() == onnx::Shape) {
@@ -247,8 +232,6 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
           } else {
             typesFromTensors.emplace_back(scalar_type.value());
           }
-
-          input_idx++;
         }
       });
 
@@ -309,18 +292,10 @@ static void UpdateScalarTypeForInputs(
     return;
   }
 
-  size_t input_idx = 0;
   for (auto input : n->inputs()) {
     auto input_tensor_type = input->type()->cast<TensorType>();
     auto input_scalar_type =
         input_tensor_type ? input_tensor_type->scalarType() : c10::nullopt;
-
-    // We skip the 'condition' input (i.e., the first input) in case of
-    // onnx:Where operator.
-    if (IsSelectorOp(n->kind()) && input_idx == 0) {
-      input_idx++;
-      continue;
-    }
 
     if ((input->node()->kind() == onnx::Constant) ||
         (input_scalar_type && (*input_scalar_type != scalar_type))) {
@@ -347,8 +322,6 @@ static void UpdateScalarTypeForInputs(
         n->replaceInputWith(input, cast_node->output());
       }
     }
-
-    input_idx++;
   }
 }
 

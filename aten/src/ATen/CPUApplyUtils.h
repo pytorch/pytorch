@@ -6,6 +6,7 @@
 #include <c10/util/irange.h>
 #include <cstring>
 #include <limits>
+#include <utility>
 
 namespace at {
 

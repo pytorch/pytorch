@@ -319,9 +319,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         if not skip_dynamic_shapes_check:
             assert_dynamic_shapes(onnx_program, self.dynamic_shapes)
 
-        if isinstance(ref_model, torch.export.ExportedProgram):
-            ref_model = ref_model.module()
-
         _compare_pytorch_onnx_with_ort(
             onnx_program,
             ref_model,

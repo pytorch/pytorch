@@ -115,10 +115,10 @@ def normalize_split_base(
     graph = match.graph
     split_input, split_size, split_dim = _get_split_args(split_node)
     if split_input is None or split_dim is None or split_size is None:
-        log.debug("couldn't find split args")
+        log.info("couldn't find split args")
         return
     if "example_value" not in split_node.meta:
-        log.debug("example value absent for node: %s", split_node)
+        log.warning("example value absent for node: %s", split_node)
         return
     assert isinstance(split_node.meta["example_value"], (list, tuple))
     split_sections = [t.size()[split_dim] for t in split_node.meta["example_value"]]
@@ -180,10 +180,10 @@ def normalize_unbind_default(match: Match, *args, **kwargs):
         else:
             dim = 0
     if input is None:
-        log.debug("couldn't find unbind args")
+        log.info("couldn't find unbind args")
         return
     if "example_value" not in input.meta:
-        log.debug("example value absent for node: %s", input)
+        log.warning("example value absent for node: %s", input)
         return
     ndim = input.meta["example_value"].ndim
     if dim < 0:  # Normalize unbind dim
@@ -219,12 +219,12 @@ def normalize_cat_default(match: Match, *args, **kwargs):
         else:
             cat_dim = 0
     if tensors is None or cat_dim is None:
-        log.debug("couldn't find cat args")
+        log.info("couldn't find cat args")
         return
     assert isinstance(tensors, (list, tuple))
     for tensor in itertools.chain([cat_node], tensors):
         if "example_value" not in tensor.meta:
-            log.debug("example value absent for node: %s", tensor)
+            log.warning("example value absent for node: %s", tensor)
             return
 
     ndim = cat_node.meta["example_value"].dim()
@@ -264,14 +264,14 @@ def normalize_stack_default(match: Match, *args, **kwargs):
     tensors = get_arg_value(node, 0, "tensors")
     dim = get_arg_value(node, 1, "dim") or 0
     if tensors is None or dim is None:
-        log.debug("couldn't find stack args")
+        log.info("couldn't find stack args")
         return
     assert isinstance(tensors, (list, tuple))
 
     # A bug in pytorch, some nodes miss the example_value metadata
     for tensor in itertools.chain([node], tensors):
         if "example_value" not in tensor.meta:
-            log.debug("example value absent for node: %s", tensor)
+            log.warning("example value absent for node: %s", tensor)
             return
 
     ndim = node.meta["example_value"].dim()

@@ -387,7 +387,6 @@ aten::_linalg_det
 aten::_linalg_det.result
 aten::_linalg_eigh
 aten::_linalg_eigh.eigenvalues
-aten::_linalg_eigvals
 aten::_linalg_slogdet
 aten::_linalg_slogdet.sign
 aten::_linalg_solve_ex
@@ -541,7 +540,6 @@ aten::_test_optional_floatlist
 aten::_test_optional_floatlist.out
 aten::_test_optional_intlist
 aten::_test_optional_intlist.out
-aten::_test_parallel_materialize
 aten::_test_warn_in_autograd
 aten::_test_warn_in_autograd.out
 aten::_thnn_fused_gru_cell
@@ -845,7 +843,6 @@ aten::linalg_cholesky_ex
 aten::linalg_cholesky_ex.L
 aten::linalg_eig
 aten::linalg_eig.out
-aten::linalg_eigvals.out
 aten::linalg_householder_product
 aten::linalg_householder_product.out
 aten::linalg_inv_ex

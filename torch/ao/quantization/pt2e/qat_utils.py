@@ -11,7 +11,6 @@ from torch.fx.subgraph_rewriter import (
 )
 import torch.nn.functional as F
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
-from torch.ao.quantization.pt2e.export_utils import _WrapperModule
 from torch.ao.quantization.quantizer import (
     DerivedQuantizationSpec,
     EdgeOrNode,
@@ -90,7 +89,7 @@ def _get_conv_bn_pattern(conv_fn: Callable) -> Callable:
         x = conv_fn(x, conv_weight, conv_bias)
         x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True)
         return x
-    return _WrapperModule(_conv_bn_pattern)
+    return _conv_bn_pattern
 
 # TODO: merge this with the `no_conv_bias` case
 def _get_qat_conv_bn_pattern(conv_fn: Callable) -> Callable:
@@ -123,7 +122,7 @@ def _get_qat_conv_bn_pattern(conv_fn: Callable) -> Callable:
         x = x + conv_bias.reshape(bias_shape)
         x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True, eps=bn_eps)
         return x
-    return _WrapperModule(_qat_conv_bn_pattern)
+    return _qat_conv_bn_pattern
 
 def _get_qat_conv_bn_pattern_no_conv_bias(conv_fn: Callable) -> Callable:
     def _qat_conv_bn_pattern_no_conv_bias(
@@ -152,7 +151,7 @@ def _get_qat_conv_bn_pattern_no_conv_bias(conv_fn: Callable) -> Callable:
         x = x / scale_factor.reshape(bias_shape)
         x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=True, eps=bn_eps)
         return x
-    return _WrapperModule(_qat_conv_bn_pattern_no_conv_bias)
+    return _qat_conv_bn_pattern_no_conv_bias
 
 def _append_qdq(x, is_per_channel, kwargs):
     """
@@ -225,7 +224,7 @@ def _get_quantized_qat_conv_bn_pattern(
             x = x + kwargs["conv_bias"].reshape(bias_shape)
         x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=bn_is_training, eps=bn_eps)
         return x
-    return _WrapperModule(_quantized_qat_conv_bn_pattern)
+    return _quantized_qat_conv_bn_pattern
 
 def _get_folded_quantized_qat_conv_bn_pattern(
     is_per_channel: bool,
@@ -259,7 +258,7 @@ def _get_folded_quantized_qat_conv_bn_pattern(
         x = conv_fn(x, conv_weight, bias)
         x = F.batch_norm(x, bn_running_mean, bn_running_var, bn_weight, bn_bias, training=bn_is_training, eps=bn_eps)
         return x
-    return _WrapperModule(_folded_quantized_qat_conv_bn_pattern)
+    return _folded_quantized_qat_conv_bn_pattern
 
 def _has_conv_bias_filter(
     match: "InternalMatch",

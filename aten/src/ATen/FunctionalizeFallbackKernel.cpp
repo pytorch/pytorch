@@ -168,7 +168,7 @@ static const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatch
       return base.as_strided_scatter(mutated_view, size, c10::contiguous_strides(size));
     }
   );
-  at::functionalization::impl::mutate_view_meta(self, view_meta);
+  at::functionalization::impl::mutate_view_meta(self, std::move(view_meta));
   return self;
 }
 

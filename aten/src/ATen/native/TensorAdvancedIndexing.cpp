@@ -1269,7 +1269,7 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
 
     auto selfSlice = self.select(dim, 0);
     auto resultSlice = result.select(dim, 0);
-    auto selfSlice_data = selfSlice.const_data_ptr();
+    auto selfSlice_data = selfSlice.data_ptr();
     auto resultSlice_data = resultSlice.data_ptr();
     auto self_stride_bytes = self.stride(dim) * elementSize(self.scalar_type());
     auto result_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
@@ -1297,10 +1297,10 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
         for (const auto i : c10::irange(start, end)) {
           auto self_i = index_data[i];
           TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
-          auto self_data = static_cast<const char*>(selfSlice_data) + self_i * self_stride_bytes;
+          auto self_data = static_cast<char*>(selfSlice_data) + self_i * self_stride_bytes;
           auto result_data = static_cast<char*>(resultSlice_data) + i * result_stride_bytes;
           sub_iter.unsafe_replace_operand(0, result_data);
-          sub_iter.unsafe_replace_operand(1, const_cast<char*>(self_data));
+          sub_iter.unsafe_replace_operand(1, self_data);
           copy_stub(sub_iter.device_type(), sub_iter, false);
         };
       });
@@ -1326,7 +1326,7 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
             for (const auto i : c10::irange(start, end)) {
               auto self_i = index_data[i];
               TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
-              auto self_data = static_cast<const char*>(selfSlice_data) + self_i * self_stride_bytes;
+              auto self_data = static_cast<char*>(selfSlice_data) + self_i * self_stride_bytes;
               auto result_data = static_cast<char*>(resultSlice_data) + i * result_stride_bytes;
               memcpy(result_data, self_data, slice_size_bytes);
             }
@@ -2293,8 +2293,6 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
     return result;
   }
 
-  auto out_accessor = result.accessor<int64_t, 2>();
-
   // Pass 2: Write indexes
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       kComplexHalf, kHalf, kBFloat16, kBool, self.scalar_type(), "nonzero_cpu", [&] {
@@ -2315,6 +2313,7 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
         }
       }
 
+      auto out_accessor = result.accessor<int64_t, 2>();
       auto out_ptr = out_accessor[thread_count_nonzero[tid]].data();
 
       auto loop = [&](char** data, const int64_t* strides, int64_t n1, int64_t n2) {

@@ -6,7 +6,6 @@ import torch
 import numpy as np
 
 from itertools import product
-import sys
 
 from torch.testing._internal.common_utils import \
     (skipIfTorchDynamo, TestCase, run_tests)
@@ -257,18 +256,6 @@ class TestNumPyInterop(TestCase):
         x = np.array([3., 5., 8.])
         x.strides = (3,)
         self.assertRaises(ValueError, lambda: torch.from_numpy(x))
-
-    @skipIfTorchDynamo("No need to test invalid dtypes that should fail by design.")
-    def test_from_numpy_no_leak_on_invalid_dtype(self):
-        # This used to leak memory as the `from_numpy` call raised an exception and didn't decref the temporary
-        # object. See https://github.com/pytorch/pytorch/issues/121138
-        x = np.array("value".encode('ascii'))
-        for _ in range(1000):
-            try:
-                torch.from_numpy(x)
-            except TypeError:
-                pass
-        self.assertTrue(sys.getrefcount(x) == 2)
 
     @skipMeta
     def test_from_list_of_ndarray_warning(self, device):

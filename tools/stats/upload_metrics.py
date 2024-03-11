@@ -105,7 +105,7 @@ def emit_metric(
     env_var_metrics = [
         EnvVarMetric("repo", "GITHUB_REPOSITORY"),
         EnvVarMetric("workflow", "GITHUB_WORKFLOW"),
-        EnvVarMetric("build_environment", "BUILD_ENVIRONMENT", required=False),
+        EnvVarMetric("build_environment", "BUILD_ENVIRONMENT"),
         EnvVarMetric("job", "GITHUB_JOB"),
         EnvVarMetric("test_config", "TEST_CONFIG", required=False),
         EnvVarMetric("pr_number", "PR_NUMBER", required=False, type_conversion_fn=int),
@@ -177,8 +177,6 @@ def _convert_float_values_to_decimals(data: Dict[str, Any]) -> Dict[str, Any]:
             return [_helper(v) for v in o]
         if isinstance(o, dict):
             return {_helper(k): _helper(v) for k, v in o.items()}
-        if isinstance(o, tuple):
-            return tuple(_helper(v) for v in o)
         return o
 
     return {k: _helper(v) for k, v in data.items()}

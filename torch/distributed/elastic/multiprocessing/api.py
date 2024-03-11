@@ -10,11 +10,9 @@ import abc
 import logging
 import os
 import re
-import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass, field
@@ -22,7 +20,6 @@ from enum import IntFlag
 from multiprocessing import synchronize
 from types import FrameType
 from typing import Any, Callable, Dict, Optional, Set, Tuple, Union
-from abc import ABC, abstractmethod
 
 import torch.multiprocessing as mp
 from torch.distributed.elastic.multiprocessing.errors import ProcessFailure, record
@@ -38,18 +35,8 @@ IS_MACOS = sys.platform == "darwin"
 
 log = logging.getLogger(__name__)
 
-__all__ = [
-    "DefaultLogsSpecs",
-    "SignalException",
-    "Std",
-    "to_map",
-    "RunProcsResult",
-    "PContext",
-    "get_std_cm",
-    "MultiprocessContext",
-    "SubprocessHandler",
-    "SubprocessContext",
-]
+__all__ = ["SignalException", "Std", "to_map", "RunProcsResult", "PContext", "get_std_cm", "MultiprocessContext",
+           "SubprocessHandler", "SubprocessContext"]
 
 class SignalException(Exception):
     """
@@ -170,214 +157,6 @@ def to_map(
 
 
 @dataclass
-class LogsDest:
-    """
-    For each log type, holds mapping of local rank ids to file paths.
-    """
-    stdouts: Dict[int, str] = field(default_factory=dict)
-    stderrs: Dict[int, str] = field(default_factory=dict)
-    tee_stdouts: Dict[int, str] = field(default_factory=dict)
-    tee_stderrs: Dict[int, str] = field(default_factory=dict)
-    error_files: Dict[int, str] = field(default_factory=dict)
-
-
-class LogsSpecs(ABC):
-    """
-    Defines logs processing and redirection for each worker process.
-
-    Args:
-        log_dir:
-            Base directory where logs will be written.
-        redirects:
-            Streams to redirect to files. Pass a single ``Std``
-            enum to redirect for all workers, or a mapping keyed
-            by local_rank to selectively redirect.
-        tee:
-            Streams to duplicate to stdout/stderr.
-            Pass a single ``Std`` enum to duplicate streams for all workers,
-            or a mapping keyed by local_rank to selectively duplicate.
-    """
-
-    def __init__(
-        self,
-        log_dir: Optional[str] = None,
-        redirects: Union[Std, Dict[int, Std]] = Std.NONE,
-        tee: Union[Std, Dict[int, Std]] = Std.NONE,
-        local_ranks_filter: Optional[Set[int]] = None,
-    ) -> None:
-        self._root_log_dir = log_dir
-        self._redirects = redirects
-        self._tee = tee
-        self._local_ranks_filter = local_ranks_filter
-
-    @abstractmethod
-    def reify(self, envs: Dict[int, Dict[str, str]],) -> LogsDest:
-        """
-        Given the environment variables, builds destination of log files for each of the local ranks.
-
-        Envs parameter contains env variables dict for each of the local ranks, where entries are defined in:
-        :func:`~torchelastic.distributed.elastic.agent.server.local_elastic_agent.LocalElasticAgent._start_workers`.
-        """
-        pass
-
-    @property
-    @abstractmethod
-    def root_log_dir(self) -> str:
-        pass
-
-class DefaultLogsSpecs(LogsSpecs):
-    """
-    Default LogsSpecs implementation:
-
-    - `log_dir` will be created if it doesn't exist
-    - Generates nested folders for each attempt and rank.
-    """
-    def __init__(
-        self,
-        log_dir: Optional[str] = None,
-        redirects: Union[Std, Dict[int, Std]] = Std.NONE,
-        tee: Union[Std, Dict[int, Std]] = Std.NONE,
-        local_ranks_filter: Optional[Set[int]] = None,
-    ) -> None:
-        if log_dir != os.devnull:
-            if not log_dir:
-                log_dir = tempfile.mkdtemp(prefix="torchelastic_")
-            elif not os.path.exists(log_dir):
-                os.makedirs(log_dir)
-            else:
-                if os.path.isfile(log_dir):
-                    raise NotADirectoryError(f"log_dir: {log_dir} is a file")
-        super().__init__(log_dir, redirects, tee, local_ranks_filter)
-        # initialized only once
-        self._run_log_dir = None
-
-    @property
-    def root_log_dir(self) -> str:
-        return str(self._root_log_dir)
-
-    def _make_log_dir(self, log_dir: Optional[str], rdzv_run_id: str):
-        base_log_dir = log_dir or tempfile.mkdtemp(prefix="torchelastic_")
-        os.makedirs(base_log_dir, exist_ok=True)
-        dir = tempfile.mkdtemp(prefix=f"{rdzv_run_id}_", dir=base_log_dir)
-        log.info("log directory set to: %s", dir)
-        return dir
-
-    def reify(self, envs: Dict[int, Dict[str, str]],) -> LogsDest:
-        """
-        Uses following scheme to build log destination paths:
-
-        - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/<rank>/stdout.log`
-        - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/<rank>/stderr.log`
-        - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/<rank>/error.json`
-        """
-        nprocs = len(envs)
-        global_env = {}  # use only to query properies that are not dependent on a rank
-        if nprocs > 0:
-            global_env = envs[0]
-        else:
-            log.warning("Empty envs map provided when defining logging destinations.")
-        # Keys are always defined, but values can be missing in unit tests
-        run_id = global_env.get("TORCHELASTIC_RUN_ID", "test_run_id")
-        restart_count = global_env.get("TORCHELASTIC_RESTART_COUNT", "0")
-
-        attempt_log_dir: str = ""
-        if self._root_log_dir != os.devnull:
-            if not self._run_log_dir:
-                self._run_log_dir = self._make_log_dir(self._root_log_dir, run_id)
-
-            attempt_log_dir = os.path.join(self._run_log_dir, f"attempt_{restart_count}")  # type: ignore[call-overload]
-            shutil.rmtree(attempt_log_dir, ignore_errors=True)
-            os.makedirs(attempt_log_dir)
-
-        if self._root_log_dir == os.devnull:
-            attempt_log_dir = os.devnull
-
-        # create subdirs for each local rank in the logs_dir
-        # logs_dir
-        #       |- 0
-        #          |- error.json
-        #          |- stdout.log
-        #          |- stderr.log
-        #       |- ...
-        #       |- (nprocs-1)
-        redirs = to_map(self._redirects, nprocs)
-        ts = to_map(self._tee, nprocs)
-
-        # to tee stdout/stderr we first redirect into a file
-        # then tail -f stdout.log/stderr.log so add tee settings to redirects
-        for local_rank, tee_std in ts.items():
-            redirect_std = redirs[local_rank]
-            redirs[local_rank] = redirect_std | tee_std
-
-        SYS_STREAM = ""  # special case to indicate to output to console
-        stdouts = dict.fromkeys(range(nprocs), SYS_STREAM)
-        stderrs = dict.fromkeys(range(nprocs), SYS_STREAM)
-        tee_stdouts: Dict[int, str] = {}
-        tee_stderrs: Dict[int, str] = {}
-        error_files = {}
-
-        for local_rank in range(nprocs):
-
-            if attempt_log_dir == os.devnull:
-                tee_stdouts[local_rank] = os.devnull
-                tee_stderrs[local_rank] = os.devnull
-                error_files[local_rank] = os.devnull
-                envs[local_rank]["TORCHELASTIC_ERROR_FILE"] = ""
-            else:
-                clogdir = os.path.join(attempt_log_dir, str(local_rank))
-                os.mkdir(clogdir)
-
-                rd = redirs[local_rank]
-                if (rd & Std.OUT) == Std.OUT:
-                    stdouts[local_rank] = os.path.join(clogdir, "stdout.log")
-                if (rd & Std.ERR) == Std.ERR:
-                    stderrs[local_rank] = os.path.join(clogdir, "stderr.log")
-
-                t = ts[local_rank]
-                if t & Std.OUT == Std.OUT:
-                    tee_stdouts[local_rank] = stdouts[local_rank]
-                if t & Std.ERR == Std.ERR:
-                    tee_stderrs[local_rank] = stderrs[local_rank]
-
-                if self._local_ranks_filter and local_rank not in self._local_ranks_filter:
-                    # If stream is tee'd, only write to file, but don't tail
-                    if local_rank in tee_stdouts:
-                        tee_stdouts.pop(local_rank, None)
-                    if local_rank in tee_stderrs:
-                        tee_stderrs.pop(local_rank, None)
-
-                    # If stream is not redirected, don't print
-                    if stdouts[local_rank] == SYS_STREAM:
-                        stdouts[local_rank] = os.devnull
-                    if stderrs[local_rank] == SYS_STREAM:
-                        stderrs[local_rank] = os.devnull
-
-                error_file = os.path.join(clogdir, "error.json")
-                error_files[local_rank] = error_file
-                log.info("Setting worker%s reply file to: %s", local_rank, error_file)
-                envs[local_rank]["TORCHELASTIC_ERROR_FILE"] = error_file
-
-        return LogsDest(stdouts, stderrs, tee_stdouts, tee_stderrs, error_files)
-
-    def __repr__(self) -> str:
-        return (
-            f"DefaultLogsSpecs(root_log_dir={self._root_log_dir}, redirects={self._redirects}, "
-            f"tee={self._tee}, local_ranks_filter={self._local_ranks_filter})"
-        )
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, DefaultLogsSpecs):
-            return False
-
-        return (
-            self._root_log_dir == other._root_log_dir
-            and self._redirects == other._redirects
-            and self._tee == other._tee
-            and self._local_ranks_filter == other._local_ranks_filter
-        )
-
-
-@dataclass
 class RunProcsResult:
     """
     Results of a completed run of processes started with ``start_processes()``. Returned by ``PContext``.
@@ -417,31 +196,30 @@ class PContext(abc.ABC):
         entrypoint: Union[Callable, str],
         args: Dict[int, Tuple],
         envs: Dict[int, Dict[str, str]],
-        logs_specs: LogsSpecs,
+        stdouts: Dict[int, str],
+        stderrs: Dict[int, str],
+        tee_stdouts: Dict[int, str],
+        tee_stderrs: Dict[int, str],
+        error_files: Dict[int, str],
         log_line_prefixes: Optional[Dict[int, str]] = None,
-
     ):
         self.name = name
         # validate that all mappings have the same number of keys and
         # all local ranks are accounted for
         nprocs = len(args)
-
-        # TODO log_line_prefixes can be exanded too
-        logs_dest = logs_specs.reify(envs)
-
-        _validate_full_rank(logs_dest.stdouts, nprocs, "stdouts")
-        _validate_full_rank(logs_dest.stderrs, nprocs, "stderrs")
+        _validate_full_rank(stdouts, nprocs, "stdouts")
+        _validate_full_rank(stderrs, nprocs, "stderrs")
 
         self.entrypoint = entrypoint
         self.args = args
         self.envs = envs
-        self.stdouts = logs_dest.stdouts
-        self.stderrs = logs_dest.stderrs
-        self.error_files = logs_dest.error_files
+        self.stdouts = stdouts
+        self.stderrs = stderrs
+        self.error_files = error_files
         self.nprocs = nprocs
 
-        self._stdout_tail = TailLog(name, logs_dest.tee_stdouts, sys.stdout, log_line_prefixes)
-        self._stderr_tail = TailLog(name, logs_dest.tee_stderrs, sys.stderr, log_line_prefixes)
+        self._stdout_tail = TailLog(name, tee_stdouts, sys.stdout, log_line_prefixes)
+        self._stderr_tail = TailLog(name, tee_stderrs, sys.stderr, log_line_prefixes)
 
     def start(self) -> None:
         """Start processes using parameters defined in the constructor."""
@@ -590,8 +368,12 @@ class MultiprocessContext(PContext):
         entrypoint: Callable,
         args: Dict[int, Tuple],
         envs: Dict[int, Dict[str, str]],
+        stdouts: Dict[int, str],
+        stderrs: Dict[int, str],
+        tee_stdouts: Dict[int, str],
+        tee_stderrs: Dict[int, str],
+        error_files: Dict[int, str],
         start_method: str,
-        logs_specs: LogsSpecs,
         log_line_prefixes: Optional[Dict[int, str]] = None,
     ):
         super().__init__(
@@ -599,7 +381,11 @@ class MultiprocessContext(PContext):
             entrypoint,
             args,
             envs,
-            logs_specs,
+            stdouts,
+            stderrs,
+            tee_stdouts,
+            tee_stderrs,
+            error_files,
             log_line_prefixes,
         )
 
@@ -811,16 +597,23 @@ class SubprocessContext(PContext):
         entrypoint: str,
         args: Dict[int, Tuple],
         envs: Dict[int, Dict[str, str]],
-        logs_specs: LogsSpecs,
+        stdouts: Dict[int, str],
+        stderrs: Dict[int, str],
+        tee_stdouts: Dict[int, str],
+        tee_stderrs: Dict[int, str],
+        error_files: Dict[int, str],
         log_line_prefixes: Optional[Dict[int, str]] = None,
-
     ):
         super().__init__(
             name,
             entrypoint,
             args,
             envs,
-            logs_specs,
+            stdouts,
+            stderrs,
+            tee_stdouts,
+            tee_stderrs,
+            error_files,
             log_line_prefixes,
         )
 

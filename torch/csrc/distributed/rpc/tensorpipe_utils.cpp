@@ -152,7 +152,8 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   buffers.payload = std::move(rpcMessage->payload());
   // TensorPipe uses the same Message class for both reading and writing, thus
   // it uses non-const pointers even though it doesn't modify them when writing.
-  char* payloadPtr = buffers.payload.data();
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  char* payloadPtr = const_cast<char*>(buffers.payload.data());
   // kTpMessagePayloadIdx = 2
   tpMessage.payloads.push_back(
       tensorpipe::Message::Payload{payloadPtr, buffers.payload.size()});

@@ -75,8 +75,6 @@ endif()
 if(NOT CUDA_VERSION VERSION_LESS "12.0")
   list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "9.0a")
   list(APPEND CUDA_ALL_GPU_ARCHITECTURES "9.0a")
-  list(REMOVE_ITEM CUDA_COMMON_GPU_ARCHITECTURES "3.5")
-  list(REMOVE_ITEM CUDA_ALL_GPU_ARCHITECTURES "3.5")
 endif()
 
 ################################################################################################

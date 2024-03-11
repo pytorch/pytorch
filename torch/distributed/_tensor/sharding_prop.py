@@ -69,7 +69,6 @@ class ShardingPropagator:
         if schema_info is not None:
             self.op_to_schema_info[op_overload] = schema_info
 
-    @lru_cache
     def _propagate_tensor_meta(
         self, op_schema: OpSchema
     ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
@@ -286,15 +285,13 @@ class ShardingPropagator:
 
                 needs_redistribute = False
                 suggestion_args: List[object] = []
-                for arg_idx, arg in enumerate(op_schema.args_schema):
+                for arg in op_schema.args_schema:
                     if isinstance(arg, (list, tuple)) and isinstance(
                         arg[0], DTensorSpec
                     ):
-                        expected_input_spec_list: List[DTensorSpec] = []
+                        expected_input_spec_list = []
                         for idx, arg_spec in enumerate(arg):
-                            expected_input_spec = selected_strategies[idx].input_spec(
-                                arg_idx
-                            )
+                            expected_input_spec = selected_strategies[idx].input_spec
                             expected_input_spec = (
                                 expected_input_spec.shallow_copy_with_tensor_meta(
                                     arg_spec.tensor_meta
@@ -309,7 +306,7 @@ class ShardingPropagator:
                             else expected_input_spec_list
                         )
                     elif isinstance(arg, DTensorSpec):
-                        expected_input_spec = selected_strategies[0].input_spec(arg_idx)
+                        expected_input_spec = selected_strategies[0].input_spec
                         expected_input_spec = (
                             expected_input_spec.shallow_copy_with_tensor_meta(
                                 arg.tensor_meta

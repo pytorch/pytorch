@@ -1367,7 +1367,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.map_: lambda self, tensor, callable: -1,
         Tensor.map2_: lambda self, x, y, callable: -1,
         Tensor.mm: lambda self, mat2: -1,
-        Tensor.module_load: lambda self, other, assign=False: -1,
+        Tensor.module_load: lambda self, other: -1,
         Tensor.narrow_copy: lambda self, dimension, start, length: -1,
         Tensor.ndimension: lambda self: -1,
         Tensor.nelement: lambda self: -1,

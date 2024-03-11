@@ -20,16 +20,11 @@
 namespace at::native {
 
 Tensor channel_shuffle_cpu(const Tensor& self, int64_t groups) {
-  Tensor output;
-  if (self.numel() == 0) {
-    output = self.alias();
-  } else {
-    auto memory_format = self.suggest_memory_format();
-    output = at::empty({0}, self.options());
-    output.resize_(self.sizes(), memory_format);
-    auto input = self.contiguous(memory_format);
-    channel_shuffle_kernel(kCPU, output, input, groups);
-  }
+  auto memory_format = self.suggest_memory_format();
+  auto output = at::empty({0}, self.options());
+  output.resize_(self.sizes(), memory_format);
+  auto input = self.contiguous(memory_format);
+  channel_shuffle_kernel(kCPU, output, input, groups);
   return namedinference::propagate_names_if_nonempty(
       output,
       self.has_names() ? self.names() : at::ArrayRef<Dimname>{});

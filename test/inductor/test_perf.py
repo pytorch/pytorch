@@ -564,28 +564,6 @@ class SchedulerFusionTests(TestCase):
         inp = (T(10, 10),)
         self.assertExpectedInline(count_numel(f, *inp), """800""")
 
-    @patch.object(config, "pattern_matcher", False)
-    def test_fusion_choice4_cpu(self):
-        # Fuse nodes with same number of elements and compatible orginal var ranges
-        # [buf0: {d0: 60, d1: 11}, buf1: {d0: 660}] -> buf0_buf1
-        def f(x, w):
-            o1 = x * w
-            output = o1 + 1.0
-            return output
-
-        inp = (T(2, 3, 10, 11, device="cpu"), T(11, device="cpu"))
-        self.assertExpectedInline(count_numel(f, *inp), """1331""")
-
-        # [buf0_buf1: {d0: 60, d1: 11}, buf2: {d0: 660}] -> buf0_buf1_buf2
-        def f(x, w1, w2):
-            o1 = x * w1
-            o2 = x * w2
-            output = o1 + o2
-            return output
-
-        inp = (T(2, 3, 10, 11, device="cpu"), T(11, device="cpu"), T(11, device="cpu"))
-        self.assertExpectedInline(count_numel(f, *inp), """1342""")
-
 
 class TilingTests(TestCase):
     def test_tiling_simple(self):

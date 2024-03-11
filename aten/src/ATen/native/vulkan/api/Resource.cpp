@@ -416,12 +416,44 @@ VulkanImage::VulkanImage(
         &(handles_.image),
         &(memory_.allocation),
         nullptr));
-    // Only create the image view if the image has been bound to memory
-    create_image_view();
   } else {
     VK_CHECK(vkCreateImage(
         allocator_info.device, &image_create_info, nullptr, &(handles_.image)));
   }
+
+  // Image View
+
+  const VkComponentMapping component_mapping{
+      VK_COMPONENT_SWIZZLE_IDENTITY, // r
+      VK_COMPONENT_SWIZZLE_IDENTITY, // g
+      VK_COMPONENT_SWIZZLE_IDENTITY, // b
+      VK_COMPONENT_SWIZZLE_IDENTITY, // a
+  };
+
+  const VkImageSubresourceRange subresource_range{
+      VK_IMAGE_ASPECT_COLOR_BIT, // aspectMask
+      0u, // baseMipLevel
+      VK_REMAINING_MIP_LEVELS, // levelCount
+      0u, // baseArrayLayer
+      VK_REMAINING_ARRAY_LAYERS, // layerCount
+  };
+
+  const VkImageViewCreateInfo image_view_create_info{
+      VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, // sType
+      nullptr, // pNext
+      0u, // flags
+      handles_.image, // image
+      view_properties_.view_type, // viewType
+      view_properties_.view_format, // format
+      component_mapping, // components
+      subresource_range, // subresourceRange
+  };
+
+  VK_CHECK(vkCreateImageView(
+      allocator_info.device,
+      &(image_view_create_info),
+      nullptr,
+      &(handles_.image_view)));
 }
 
 VulkanImage::VulkanImage(VulkanImage&& other) noexcept
@@ -476,43 +508,6 @@ VulkanImage::~VulkanImage() {
     // memory
     memory_.allocation = VK_NULL_HANDLE;
   }
-}
-
-void VulkanImage::create_image_view() {
-  VmaAllocatorInfo allocator_info{};
-  vmaGetAllocatorInfo(allocator_, &allocator_info);
-
-  const VkComponentMapping component_mapping{
-      VK_COMPONENT_SWIZZLE_IDENTITY, // r
-      VK_COMPONENT_SWIZZLE_IDENTITY, // g
-      VK_COMPONENT_SWIZZLE_IDENTITY, // b
-      VK_COMPONENT_SWIZZLE_IDENTITY, // a
-  };
-
-  const VkImageSubresourceRange subresource_range{
-      VK_IMAGE_ASPECT_COLOR_BIT, // aspectMask
-      0u, // baseMipLevel
-      VK_REMAINING_MIP_LEVELS, // levelCount
-      0u, // baseArrayLayer
-      VK_REMAINING_ARRAY_LAYERS, // layerCount
-  };
-
-  const VkImageViewCreateInfo image_view_create_info{
-      VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, // sType
-      nullptr, // pNext
-      0u, // flags
-      handles_.image, // image
-      view_properties_.view_type, // viewType
-      view_properties_.view_format, // format
-      component_mapping, // components
-      subresource_range, // subresourceRange
-  };
-
-  VK_CHECK(vkCreateImageView(
-      allocator_info.device,
-      &(image_view_create_info),
-      nullptr,
-      &(handles_.image_view)));
 }
 
 VkMemoryRequirements VulkanImage::get_memory_requirements() const {

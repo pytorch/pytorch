@@ -54,14 +54,7 @@ DEFAULT_KERNEL_NAMESPACE = "at::native"
 
 # NOTE: Keep the list in sync with `DispatchKey` in c10/core/DispatchKey.h
 BACKEND_COMPONENTS = "CPU CUDA HIP XLA MTIA MPS IPU XPU HPU VE Lazy Meta PrivateUse1 PrivateUse2 PrivateUse3".split()
-FUNCTIONALITY_KEYS = [
-    "",
-    "Quantized",
-    "Sparse",
-    "SparseCsr",
-    "NestedTensor",
-    "Autograd",
-]
+FUNCTIONALITY_KEYS = ["", "Quantized", "Sparse", "NestedTensor", "Autograd"]
 
 # This list guards dispatches that can be used in derivatives.yaml
 # For now we omit AutogradFunctionality and AutogradOther
@@ -89,7 +82,8 @@ class DispatchKey(Enum):
     CustomRNGKeyId = auto()
     MkldnnCPU = auto()
     Sparse = auto()
-    SparseCsr = auto()
+    SparseCsrCPU = auto()
+    SparseCsrCUDA = auto()
     NestedTensor = auto()
     Dense = auto()
 
@@ -171,21 +165,6 @@ class DispatchKey(Enum):
     SparsePrivateUse1 = auto()
     SparsePrivateUse2 = auto()
     SparsePrivateUse3 = auto()
-    SparseCsrCPU = auto()
-    SparseCsrCUDA = auto()
-    SparseCsrHIP = auto()
-    SparseCsrXLA = auto()
-    SparseCsrMTIA = auto()
-    SparseCsrMPS = auto()
-    SparseCsrIPU = auto()
-    SparseCsrXPU = auto()
-    SparseCsrHPU = auto()
-    SparseCsrVE = auto()
-    SparseCsrLazy = auto()
-    SparseCsrMeta = auto()
-    SparseCsrPrivateUse1 = auto()
-    SparseCsrPrivateUse2 = auto()
-    SparseCsrPrivateUse3 = auto()
     NestedTensorCPU = auto()
     NestedTensorCUDA = auto()
     NestedTensorHIP = auto()
@@ -281,7 +260,6 @@ dispatch_keys = [
     # kernels
     DispatchKey.Meta,
     DispatchKey.SparseMeta,
-    DispatchKey.SparseCsrMeta,
     DispatchKey.QuantizedMeta,
     DispatchKey.NestedTensorMeta,
     DispatchKey.ZeroTensor,

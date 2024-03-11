@@ -4,7 +4,6 @@ import logging
 import traceback
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
-from unittest import mock
 
 import torch
 from torch import fx
@@ -258,7 +257,6 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
                 traceback.FrameSummary(__file__, 0, DDPOptimizer),
             ],
         )
-
         wrapper = WrapperModule(
             self.compiler(input_mod, args),
             unwrap_singleton_tuple,
@@ -314,42 +312,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             # be FakeTensors already since Dynamo would have made them FakeTensors in the
             # non-DDP flow.  However, the parameters are _not_ expected to be FakeTensors,
             # since this wrapping happens during compilation
-
-            # Note: Returning Fake Tensors on First AOT Autograd Call
-            #
-            # Inductor will optimize strides of outputs when it deems it profitable.
-            # For instance, converting to channels last. When we split the graph here
-            # into multiple inductor compilations, we need to make sure that the
-            # output strides of one compilation is appropriately passed to the subsequent
-            # compilations. However, the mapping from inductor output to dynamo output
-            # is non-trivial due to aot_autograd's deduping, de-aliasing, mutation, re-writing,
-            # subclass handling, etc. In order to replay all this logic we set a flag such that
-            # the first invocation of inductor in aot_autograd will return Fake Tensors with
-            # appropriate strides. Then, all of aot autograd's runtime logic is replayed.
-            # This gives us the appropriately strided outputs here which will reflect runtime strides.
-
-            class FakeifyFirstAOTInvocationGuard:
-                def __init__(self):
-                    self.tc = torch._guards.TracingContext.try_get()
-                    assert self.tc
-                    torch._guards.TracingContext.try_get().fakify_first_call = True
-
-                def __del__(self):
-                    self.tc.fakify_first_call = False
-
-            # For aot_eager and other backends, tracing context is not set
-            has_tracing_context = torch._guards.TracingContext.try_get() is not None
-            if has_tracing_context:
-                g = FakeifyFirstAOTInvocationGuard()
-
-            from torch._dynamo.utils import counters
-
-            init = counters["aot_autograd"]["total"]
             compiled_submod_real = self.compile_submod(real_mod, new_args, kwargs)
-
-            # TODO - better way of doing this?
-            # Only aot autograd handles fakifying first call
-            invoked_aot_autograd = init != counters["aot_autograd"]["total"]
 
             # We update the original (outer) graph with a call into the compiled module
             # instead of the uncompiled one.
@@ -359,27 +322,14 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
 
             # Finally, we have to produce inputs for use compiling the next submodule,
             # and these need to be FakeTensors, so we execute the module under fake_mode
-            # Because parameters are not fake we patch fake tensor mode to allow non fake inputs
-            with self.fake_mode, mock.patch.object(
-                self.fake_mode, "allow_non_fake_inputs", True
-            ):
-                if has_tracing_context and invoked_aot_autograd:
-                    out = compiled_submod_real(*new_args, **kwargs)
-                    # output should be fake or subclass
-                    assert all(
-                        (not isinstance(t, torch.Tensor) or type(t) is not torch.Tensor)
-                        for t in (out if isinstance(out, (list, tuple)) else [out])
-                    )
-                    return out
-                else:
-                    return curr_submod(*new_args, **kwargs)
+            with self.fake_mode:
+                return curr_submod(*new_args, **kwargs)
         else:
             # placeholder or output nodes don't need to get compiled, just executed
             return getattr(self, n.op)(n.target, new_args, kwargs)
 
 
 class DDPOptimizer:
-
     """Note [DDPOptimizer]
     DDPOptimizer applies when dynamo compiles models wrapped in DistributedDataParallel (DDP),
     breaking the dynamo graph into chunks to compile separately, with the breaks aligning to
@@ -593,6 +543,12 @@ class DDPOptimizer:
             # to the second graph to be wrong.
             # To really fix this, we would need to faithfully ask inductor
             # what the outputs to each graph it expects are.
+            assert torch._inductor.config.keep_output_stride, """\
+Detected that you are running DDP with torch.compile, along with these two flags:
+- torch._dynamo.config.optimize_ddp = True
+- torch._inductor.config.keep_output_stride = False
+This combination of flags is incompatible. Please set keep_output_stride to False,
+or file a github issue."""
             fake_mode = detect_fake_mode(example_inputs)
             if fake_mode is None:
                 fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()

@@ -374,10 +374,9 @@ def create_graph_signature(
     graph_output_names = _graph_output_names(fx_g)
 
     num_params_buffers = len(param_names) + len(buffer_names)
-    num_tokens = len(fw_metadata.tokens)
     # We have enough restrictions on the graph (no de-duping, synthetic bases, etc),
     # Such that # graph inps = # user inps + # params + # buffers
-    num_user_args = len(graph_input_names) - num_params_buffers - num_tokens
+    num_user_args = len(graph_input_names) - num_params_buffers
 
     if trace_joint:
         assert num_user_fw_outs is not None
@@ -412,9 +411,7 @@ def create_graph_signature(
     else:
         backward_signature = None
         num_user_fw_outs = (
-            len(graph_output_names)
-            - fw_metadata.num_mutated_inp_runtime_indices
-            - num_tokens
+            len(graph_output_names) - fw_metadata.num_mutated_inp_runtime_indices
         )
 
     return GraphSignature.from_tracing_metadata(

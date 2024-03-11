@@ -6332,15 +6332,21 @@ def _infer_scalar_type(obj):
 
 # Analogous to recursive_store
 # xref: recursive_store in torch/csrc/utils/tensor_new.cpp
-def _recursive_build(scalarType: torch.dtype, obj: TensorOrNumberLikeType):
-    if isinstance(obj, Tensor) and obj.ndim <= 1:
-        obj = obj.item()
-        # fall through into next case
-    if isinstance(obj, Number):
+def _recursive_build(sizes, dim, scalarType, obj):
+    ndim = len(sizes)
+    assert dim <= ndim
+    if dim == ndim:
         return torch.scalar_tensor(obj, dtype=scalarType)
-
+    n = sizes[dim]
     seq = obj
-    return torch.stack([_recursive_build(scalarType, item) for item in seq])
+    seq_size = len(seq)
+    if seq_size != n:
+        raise ValueError(
+            f"expected sequence of length {n} at dim {dim} (got {seq_size})"
+        )
+    return torch.stack(
+        [_recursive_build(sizes, dim + 1, scalarType, item) for item in seq]
+    )
 
 
 # xref: internal_new_from_data in torch/csrc/utils/tensor_new.cpp
@@ -6377,6 +6383,7 @@ def _internal_new_from_data(
     # TODO: test for numpy input with PyArray_Check
 
     device = device_opt if device_opt is not None else options["device"]
+    sizes = _compute_sizes(data, scalar_type)
     inferred_scalar_type = _infer_scalar_type(data) if type_inference else scalar_type
 
     # NB: Don't need to avoid tracing, as we aren't going to do any manual
@@ -6391,7 +6398,7 @@ def _internal_new_from_data(
         # of a freshly allocated CPU tensor.  Here, we're going to do an
         # alternate, heinously slow implementation: turn each individual
         # scalar into a tensor, and then repeatedly cat them together
-        tensor = _recursive_build(inferred_scalar_type, data)
+        tensor = _recursive_build(sizes, 0, inferred_scalar_type, data)
 
         tensor = tensor.to(device, inferred_scalar_type, non_blocking=False, copy=False)
 

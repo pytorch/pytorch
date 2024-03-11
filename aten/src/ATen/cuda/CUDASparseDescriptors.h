@@ -73,10 +73,6 @@ using bsrsm2Info = std::remove_pointer<bsrsm2Info_t>::type;
 #endif
 #endif
 
-// NOTE: This is only needed for CUDA 11 and earlier, since CUDA 12 introduced
-// API for const descriptors
-cusparseStatus_t destroyConstDnMat(const cusparseDnMatDescr* dnMatDescr);
-
 class TORCH_CUDA_CPP_API CuSparseMatDescriptor
     : public CuSparseDescriptor<cusparseMatDescr, &cusparseDestroyMatDescr> {
  public:
@@ -134,18 +130,6 @@ class TORCH_CUDA_CPP_API CuSparseDnMatDescriptor
   explicit CuSparseDnMatDescriptor(const Tensor& input, int64_t batch_offset = -1);
 };
 
-class TORCH_CUDA_CPP_API CuSparseConstDnMatDescriptor
-    : public CuSparseDescriptor<const cusparseDnMatDescr, &destroyConstDnMat> {
- public:
-  explicit CuSparseConstDnMatDescriptor(const Tensor& input, int64_t batch_offset = -1);
-  cusparseDnMatDescr* unsafe_mutable_descriptor() const {
-    return const_cast<cusparseDnMatDescr*>(descriptor());
-  }
-  cusparseDnMatDescr* unsafe_mutable_descriptor() {
-    return const_cast<cusparseDnMatDescr*>(descriptor());
-  }
-};
-
 class TORCH_CUDA_CPP_API CuSparseDnVecDescriptor
     : public CuSparseDescriptor<cusparseDnVecDescr, &cusparseDestroyDnVec> {
  public:
@@ -164,22 +148,6 @@ class TORCH_CUDA_CPP_API CuSparseSpMatDescriptor
     explicit CuSparseDnMatDescriptor(
         const Tensor& input,
         int64_t batch_offset = -1);
-  };
-
-  class TORCH_CUDA_CPP_API CuSparseConstDnMatDescriptor
-      : public ConstCuSparseDescriptor<
-            const cusparseDnMatDescr,
-            &destroyConstDnMat> {
-   public:
-    explicit CuSparseConstDnMatDescriptor(
-        const Tensor& input,
-        int64_t batch_offset = -1);
-  cusparseDnMatDescr* unsafe_mutable_descriptor() const {
-    return const_cast<cusparseDnMatDescr*>(descriptor());
-  }
-  cusparseDnMatDescr* unsafe_mutable_descriptor() {
-    return const_cast<cusparseDnMatDescr*>(descriptor());
-  }
   };
 
   class TORCH_CUDA_CPP_API CuSparseDnVecDescriptor

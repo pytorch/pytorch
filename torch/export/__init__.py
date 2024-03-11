@@ -58,6 +58,7 @@ __all__ = [
     "unflatten",
     "FlatArgsAdapter",
     "UnflattenedModule",
+    "WrapperModule",
 ]
 
 
@@ -65,6 +66,7 @@ from .dynamic_shapes import Constraint, Dim, dims, dynamic_dim
 from .exported_program import ExportedProgram, ModuleCallEntry, ModuleCallSignature
 from .graph_signature import ExportBackwardSignature, ExportGraphSignature
 from .unflatten import FlatArgsAdapter, unflatten, UnflattenedModule
+from .wrapper import WrapperModule
 
 
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
@@ -75,6 +77,7 @@ def export(
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
+    constraints: Optional[List[Constraint]] = None,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
@@ -126,6 +129,15 @@ def export(
 
         kwargs: Optional example keyword inputs.
 
+        constraints: [DEPRECATED: use ``dynamic_shapes`` instead, see below]
+         An optional list of constraints on the dynamic arguments
+         that specify their possible range of shapes. By default, shapes of
+         input torch.Tensors are assumed to be static. If an input torch.Tensor
+         is expected to have dynamic shapes, please use :func:`dynamic_dim`
+         to define :class:`Constraint` objects that specify the dynamics and the possible
+         range of shapes. See :func:`dynamic_dim` docstring for examples on
+         how to use it.
+
         dynamic_shapes:
          An optional argument where the type should either be:
          1) a dict from argument names of ``f`` to their dynamic shape specifications,
@@ -175,6 +187,7 @@ def export(
         mod,
         args,
         kwargs,
+        constraints,
         dynamic_shapes,
         strict=strict,
         preserve_module_call_signature=preserve_module_call_signature,

@@ -52,7 +52,7 @@ inline void get_strides(int64_t* strides, ArrayRef<OperandInfo> operands, int64_
   }
   // Always at least 2d strides to support 2d for_each loops
   if (ndim < 2) {
-    auto ntensors = operands.size();
+    const int64_t ntensors = operands.size();
     std::fill_n(strides, (2 - ndim) * ntensors, 0);
   }
 }
@@ -92,7 +92,7 @@ void OperandInfo::tensor(c10::MaybeOwned<TensorBase> &&tensor) {
 
 void OperandInfo::exchange_tensor(c10::MaybeOwned<TensorBase> &&new_tensor) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!original_tensor_base_->defined());
-  original_tensor_base_ = std::exchange(tensor_base_, std::move(new_tensor));
+  original_tensor_base_ = std::exchange(tensor_base_, new_tensor);
   *original_tensor_storage_ = std::exchange(*tensor_storage_, make_otr(*tensor_base_));
 }
 
@@ -549,7 +549,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
   }
 }
 
-StrideVector TensorIteratorBase::compatible_stride(int64_t element_size) const {
+StrideVector TensorIteratorBase::compatible_stride(int element_size) const {
   auto stride = StrideVector();
   int64_t next_stride = element_size;
   for (const auto dim : c10::irange(ndim())) {
@@ -576,8 +576,8 @@ void TensorIteratorBase::allocate_or_resize_outputs() {
     auto& op = operands_[i];
     if (!op.tensor_base().defined() || op.will_resize) {
       TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
-      auto element_size = elementSize(op.target_dtype);
-      op.stride_bytes = compatible_stride(static_cast<int64_t>(element_size));
+      int element_size = elementSize(op.target_dtype);
+      op.stride_bytes = compatible_stride(element_size);
       // check if permutation is just an inverted order
       bool inverted = true;
       for (const auto j : c10::irange(ndim())) {
@@ -595,7 +595,7 @@ void TensorIteratorBase::allocate_or_resize_outputs() {
       } else {
         auto tensor_stride = invert_perm(op.stride_bytes);
         for (const auto dim : c10::irange(ndim())) {
-          tensor_stride[dim] /= static_cast<int64_t>(element_size);
+          tensor_stride[dim] /= element_size;
         }
         set_output_raw_strided(i, tensor_shape, tensor_stride, original_options(op), names_);
       }
@@ -775,7 +775,7 @@ void TensorIteratorBase::for_each(loop2d_t loop, int64_t grain_size) {
 
 StrideVector TensorIteratorBase::get_strides() const {
   const auto dim = ndim();
-  StrideVector strides(static_cast<size_t>(std::max(dim, 2)) * ntensors());
+  StrideVector strides(std::max(dim, 2) * ntensors());
   at::get_strides(strides.data(), operands_, dim);
   return strides;
 }
@@ -789,7 +789,7 @@ void TensorIteratorBase::serial_for_each(loop2d_t loop, Range range) const {
   const auto ndim = this->ndim();
 
   c10::SmallBuffer<char*, 4> ptrs(ntensors);
-  c10::SmallBuffer<int64_t, 8> strides(ntensors * static_cast<size_t>(std::max(ndim, 2)));
+  c10::SmallBuffer<int64_t, 8> strides(ntensors * std::max(ndim, 2));
 
   at::get_base_ptrs(ptrs.data(), operands_);
   at::get_strides(strides.data(), operands_, ndim);
@@ -813,7 +813,7 @@ bool TensorIteratorBase::is_contiguous() const {
 }
 
 
-bool TensorIteratorBase::is_scalar(int64_t arg) const {
+bool TensorIteratorBase::is_scalar(int arg) const {
   const auto& stride = operands_[arg].stride_bytes;
   for (const auto i : c10::irange(ndim())) {
     if (stride[i] != 0 && shape_[i] != 1) {
@@ -823,7 +823,7 @@ bool TensorIteratorBase::is_scalar(int64_t arg) const {
   return true;
 }
 
-bool TensorIteratorBase::is_cpu_scalar(int64_t arg) const {
+bool TensorIteratorBase::is_cpu_scalar(int arg) const {
   return is_scalar(arg) && device(arg).is_cpu();
 }
 
@@ -844,15 +844,15 @@ void TensorIteratorBase::cast_outputs() {
   }
 }
 
-void* TensorIteratorBase::data_ptr(int64_t arg) const {
+void* TensorIteratorBase::data_ptr(int arg) const {
   return operands_[arg].data;
 }
 
-void TensorIteratorBase::remove_operand(int64_t arg) {
+void TensorIteratorBase::remove_operand(int arg) {
   operands_.erase(operands_.begin() + arg);
 }
 
-void TensorIteratorBase::unsafe_replace_operand(int64_t arg, void* data) {
+void TensorIteratorBase::unsafe_replace_operand(int arg, void* data) {
   operands_[arg].data = data;
 }
 
@@ -1539,7 +1539,6 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
   for (auto& op : operands_) {
     TORCH_INTERNAL_ASSERT(op.tensor_base().defined());
     if (op.is_const) {
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       op.data = const_cast<void*>(op.tensor_base().const_data_ptr());
     } else {
       op.data = op.tensor_base().mutable_data_ptr();
@@ -1679,7 +1678,7 @@ SplitUntil32Bit::iterator& SplitUntil32Bit::iterator::operator++() {
   vec.pop_back();
   while (!vec.empty() && !vec.back()->can_use_32bit_indexing()) {
     auto& iter = *vec.back();
-    auto split_dim = iter.get_dim_to_split();
+    int64_t split_dim = iter.get_dim_to_split();
     vec.emplace_back(iter.split(split_dim));
   }
   return *this;
@@ -1708,7 +1707,7 @@ DimCounter::DimCounter(IntArrayRef shape, Range range)
   }
 
   int64_t linear_offset = range.begin;
-  auto ndim = values.size();
+  int64_t ndim = values.size();
   for (const auto dim : c10::irange(ndim)) {
     int64_t size = shape[dim];
     if (size > 0) {
@@ -1725,9 +1724,9 @@ bool DimCounter::is_done() const {
 
 void DimCounter::increment(const std::array<int64_t, 2>& step) {
   offset += step[0] * step[1];
-  auto ndim = values.size();
+  int64_t ndim = values.size();
   int64_t overflow = step[0];
-  size_t i = 0;
+  int i = 0;
   if (step[1] != 1) {
     TORCH_INTERNAL_ASSERT(step[0] == shape[0] && values[0] == 0);
     i = 1;
@@ -1744,7 +1743,7 @@ void DimCounter::increment(const std::array<int64_t, 2>& step) {
     } else {
       overflow = 0;
     }
-    values[i] = static_cast<int64_t>(value);
+    values[i] = value;
   }
   TORCH_INTERNAL_ASSERT(overflow == 0 || overflow == 1);
 }

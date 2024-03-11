@@ -37,17 +37,7 @@ from __future__ import annotations
 import copy
 import itertools
 import os
-from typing import (
-    Any,
-    Callable,
-    Collection,
-    List,
-    Mapping,
-    Optional,
-    Tuple,
-    Type,
-    Union,
-)
+from typing import Any, Callable, Collection, Mapping, Optional, Tuple, Type, Union
 
 import error_reproduction
 
@@ -904,6 +894,16 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("GroupNormalization", "float16"),
     ),
     xfail(
+        "nn.functional.instance_norm",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+        reason="fixme: Assertion error: result mismatch",
+    ),
+    xfail(
+        "nn.functional.instance_norm",
+        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
+        reason="Functionalize pass failed",
+    ),
+    xfail(
         "nn.functional.local_response_norm",
         dtypes=(torch.int64,),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("avgpool", "int64"),
@@ -1549,13 +1549,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         ),
     ),
     xfail(
-        "nn.functional.instance_norm",
-        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
-        matcher=lambda sample: sample.kwargs.get("running_mean") is not None
-        or sample.input.dtype in (torch.float16,),
-        reason="fixme: KeyError: 'self___kwargs__running_mean'",
-    ),
-    xfail(
         "nn.functional.max_pool3d",
         matcher=lambda sample: sample.kwargs.get("ceil_mode") is True
         and sample.kwargs.get("padding") == 1,
@@ -1662,16 +1655,6 @@ OP_WITH_SKIPPED_XFAIL_SUBTESTS = frozenset(meta.op_name for meta in SKIP_XFAIL_S
 ALL_OPS_IN_DB = frozenset(op_info.name for op_info in OPS_DB)
 
 
-def _torch_size_flatten_spec(d: List[Any], spec: Any) -> List[Any]:
-    return [d[i] for i in range(spec.num_children)]
-
-
-torch.fx._pytree.register_pytree_flatten_spec(
-    torch.Size,
-    _torch_size_flatten_spec,
-)
-
-
 class SingleOpModel(torch.nn.Module):
     """Test model to wrap around a single op for export."""
 
@@ -1749,10 +1732,7 @@ def _compare_onnx_and_torch_exported_program(
     # Thus, ONNXProgram() must run before ref_model() to prevent ref_model.forward() from changing the state_dict.
     # Otherwise, the ref_model can change buffers on state_dict which would be used by ONNXProgram.__call__()
     onnx_outputs = onnx_exported_program(*input_args, **input_kwargs)
-    if isinstance(torch_exported_program, torch.export.ExportedProgram):
-        torch_outputs = torch_exported_program.module()(*input_args, **input_kwargs)
-    else:
-        torch_outputs = torch_exported_program(*input_args, **input_kwargs)
+    torch_outputs = torch_exported_program(*input_args, **input_kwargs)
     torch_outputs_onnx_format = onnx_exported_program.adapt_torch_outputs_to_onnx(
         torch_outputs
     )
@@ -1982,7 +1962,6 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "nn.functional.hardsigmoid": [1e-3, 5e-3],
         "nn.functional.hardswish": [1e-3, 5e-3],
         "nn.functional.hinge_embedding_loss": [4e-1, 3e-3],
-        "nn.functional.instance_norm": [1e-2, 1e-3],
         "nn.functional.interpolate": [1e-2, 1e-3],
         "nn.functional.kl_div": [2e-3, 2e-4],
         "nn.functional.multilabel_soft_margin_loss": [4e-2, 5e-3],
