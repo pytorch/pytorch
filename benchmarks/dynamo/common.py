@@ -732,13 +732,11 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             "compression_ratio",
             "eager_peak_mem",
             "dynamo_peak_mem",
-            "cache_lookup_latency",
         ]
         row.append(kwargs["compilation_latency"])
         row.append(kwargs["compression_ratio"])
         row.append(kwargs["eager_peak_mem"])
         row.append(kwargs["dynamo_peak_mem"])
-        row.append(kwargs["cache_lookup_latency"])
     if "dynamo_stats" in kwargs:
         for k, v in kwargs["dynamo_stats"].items():
             headers.append(k)
@@ -2624,7 +2622,7 @@ class BenchmarkRunner:
             with self.pick_grad(name, self.args.training):
                 return experiment(*self.maybe_cast(model, example_inputs))
 
-        def warmup(fn, model, example_inputs, mode, niters=20):
+        def warmup(fn, model, example_inputs, mode, niters=5):
             peak_mem = 0
             start_stats = get_dynamo_stats()
             try:
@@ -2675,24 +2673,10 @@ class BenchmarkRunner:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
                 aot_compilation_time = 0
 
-            with torch.profiler.profile(
-                activities=[torch.profiler.ProfilerActivity.CPU]
-            ) as prof:
-                with maybe_enable_compiled_autograd(self.args.compiled_autograd):
-                    dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
-                        optimized_model_iter_fn, model, example_inputs, "dynamo"
-                    )
-
-            events = list(
-                filter(
-                    lambda event: "TorchDynamo Cache Lookup" in event.key,
-                    prof.key_averages(),
+            with maybe_enable_compiled_autograd(self.args.compiled_autograd):
+                dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
+                    optimized_model_iter_fn, model, example_inputs, "dynamo"
                 )
-            )
-            dynamo_cache_lookup_latency = events[0].self_cpu_time_total
-            # print(
-            #     f"Cache lookup latency = {dynamo_cache_lookup_latency} us",
-            # )
 
             compilation_time = dynamo_latency - eager_latency + aot_compilation_time
             compression_ratio = (
@@ -2711,7 +2695,6 @@ class BenchmarkRunner:
                 experiment_kwargs["eager_peak_mem"] = eager_peak_mem
                 experiment_kwargs["dynamo_peak_mem"] = dynamo_peak_mem
                 experiment_kwargs["dynamo_stats"] = dynamo_stats
-                experiment_kwargs["cache_lookup_latency"] = dynamo_cache_lookup_latency
 
             if experiment.func is coverage_experiment:
                 ok, total = Stats.reset_counters()
