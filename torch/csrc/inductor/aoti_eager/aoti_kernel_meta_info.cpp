@@ -1,29 +1,63 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
 #include <torch/csrc/inductor/aoti_eager/aoti_kernel_meta_info.h>
 
+#include <torch/csrc/inductor/aoti_eager/aoti_kernel_checker.h>
+#include <torch/csrc/inductor/aoti_eager/aoti_static_checker.h>
+
 #include <filesystem>
 #include <fstream>
 
 namespace torch::inductor {
 
+TensorMetaInfo::TensorMetaInfo(const at::Tensor& src_tensor)
+    : is_symbolic(false),
+      device(src_tensor.device()),
+      sizes(src_tensor.sym_sizes().vec()),
+      strides(src_tensor.sym_strides().vec()) {
+  for (const auto& size : sizes) {
+    if (size.is_symbolic()) {
+      is_symbolic = true;
+      break;
+    }
+  }
+
+  if (!is_symbolic) {
+    for (const auto& stride : strides) {
+      if (stride.is_symbolic()) {
+        is_symbolic = true;
+        break;
+      }
+    }
+  }
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      !is_symbolic,
+      "Eager through torch.compile does not support symbolic shape now.");
+  // TODO: Support symbolic shape
+  tensor_checker = std::make_shared<StaticTensorChecker>(src_tensor);
+}
+
 TensorMetaInfo::TensorMetaInfo(
     bool is_symbolic,
     c10::ScalarType dtype,
     c10::Device device,
-    std::vector<int64_t> sizes,
-    std::vector<int64_t> strides)
+    std::vector<c10::SymInt> sizes,
+    std::vector<c10::SymInt> strides)
     : is_symbolic(is_symbolic),
       dtype(dtype),
       device(device),
       sizes(sizes),
-      strides(strides) {}
+      strides(strides) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      !is_symbolic,
+      "Eager through torch.compile does not support symbolic shape now");
+  tensor_checker = std::make_shared<StaticTensorChecker>(*this);
+}
 
 bool TensorMetaInfo::operator==(const TensorMetaInfo& other) const {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       !is_symbolic, "To support symbolic shape now");
-  return is_symbolic == other.is_symbolic && dtype == other.dtype &&
-      device.type() == other.device.type() && sizes == other.sizes &&
-      strides == other.strides;
+  return tensor_checker->check(other);
 }
 
 bool TensorMetaInfo::sanityCheck(const TensorMetaInfo& tensor_meta_info) {
@@ -37,13 +71,14 @@ bool TensorMetaInfo::sanityCheck(const TensorMetaInfo& tensor_meta_info) {
   return true;
 }
 
-AOTIKernelMetaInfo TensorMetaInfo::fromConfig(
+AOTIKernelMetaInfo TensorMetaInfo::loadFromFile(
     const std::vector<std::string>& tensors_meta_info) {
   auto parse_symbolic = [](const std::string& symbolic_str) -> bool {
     return symbolic_str == "true";
   };
 
   auto parse_dtype = [](const std::string& dtype_str) -> c10::ScalarType {
+    // The dtype format is torch.float32, float32, torch.int32, int32, etc.
     std::string to_remove = "torch.";
     std::string canonicalized_dtype_str = dtype_str;
     size_t start_pos = dtype_str.find(to_remove);
@@ -94,18 +129,19 @@ AOTIKernelMetaInfo TensorMetaInfo::fromConfig(
   };
 
   auto parse_sizes_or_strides =
-      [](const std::string& sizes_or_strides_str) -> std::vector<int64_t> {
-    std::vector<int64_t> sizes_or_strides;
+      [](const std::string& sizes_or_strides_str) -> std::vector<c10::SymInt> {
+    std::vector<c10::SymInt> sizes_or_strides;
     std::stringstream ss(sizes_or_strides_str);
     std::string size_or_stride_str;
     while (getline(ss, size_or_stride_str, ',')) {
-      sizes_or_strides.push_back(std::stoi(size_or_stride_str));
+      // TODO: Support dynamic shape.
+      sizes_or_strides.push_back(c10::SymInt(atoi(size_or_stride_str.c_str())));
     }
     return sizes_or_strides;
   };
 
   // config file is in the following format:
-  //  ${dtype};${device};${sizes};${strides}
+  //  ${is_symbolic};${dtype};${device};[${sizes}];[${strides}]
   auto parse_tensor_meta_info = [&](const std::string& line) -> TensorMetaInfo {
     std::stringstream ss(line);
     std::string symbolic_str, dtype_str, device_str, sizes_str, strides_str;
@@ -132,10 +168,11 @@ AOTIKernelMetaInfo TensorMetaInfo::fromConfig(
         parse_sizes_or_strides(strides_str));
   };
 
-  // Suppose there are 3 input tensors, and the config file format is:
-  //   ${tensor1_dtype};${tensor1_device};${tensor1_sizes};${tensor1_strides}
-  //   ${tensor2_dtype};${tensor2_device};${tensor2_sizes};${tensor2_strides}
-  //   ${tensor3_dtype};${tensor3_device};${tensor3_sizes};${tensor3_strides}
+  // Suppose there are 3 input tensors, and the config file format will be as
+  // follows:
+  //   ${is_symbolic};${tensor1_dtype};${tensor1_device};[${tensor1_sizes}];[${tensor1_strides}]
+  //   ${is_symbolic};${tensor2_dtype};${tensor2_device};[${tensor2_sizes}];[${tensor2_strides}]
+  //   ${is_symbolic};${tensor3_dtype};${tensor3_device};[${tensor3_sizes}];[${tensor3_strides}]
   // Parse the config file line by line:
   //   1. Parse each line into a TensorMetaInfo object
   //   2. Sanity check the TensorMetaInfo object
@@ -157,11 +194,17 @@ size_t TensorMetaInfoHash::operator()(
       hash, std::hash<c10::ScalarType>()(tensor_meta_info.dtype));
   hash = c10::hash_combine(
       hash, std::hash<c10::DeviceType>()(tensor_meta_info.device.type()));
+
   for (auto& e : tensor_meta_info.sizes) {
-    hash = c10::hash_combine(hash, std::hash<int64_t>()(e));
+    if (e.is_symbolic()) {
+      hash = c10::hash_combine(hash, std::hash<int64_t>()(e.expect_int()));
+    }
   }
+
   for (auto& e : tensor_meta_info.strides) {
-    hash = c10::hash_combine(hash, std::hash<int64_t>()(e));
+    if (e.is_symbolic()) {
+      hash = c10::hash_combine(hash, std::hash<int64_t>()(e.expect_int()));
+    }
   }
   return hash;
 }
