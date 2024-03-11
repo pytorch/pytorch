@@ -1,4 +1,3 @@
-# mypy: ignore-errors
 import functools
 import inspect
 import logging
@@ -418,7 +417,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             torch.overrides.has_torch_function_unary,
         )
         def handle_has_torch_function(self, tx, *args):
-            return ConstantVariable.create(any(has_torch_function(x) for x in args))
+            elems = (
+                args[0].unpack_var_sequence(tx)
+                if len(args) == 1 and isinstance(args[0], TupleVariable)
+                else args
+            )
+            return ConstantVariable.create(
+                any(has_torch_function(x) for x in elems),
+            )
 
         @register(
             *dict.fromkeys(  # remove duplicates
@@ -451,12 +457,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return the_value
 
         @register(torch.backends.cudnn.is_acceptable)
-        def handle_cudnn_is_acceptable(self, tx, tensor):
+        def handle_cudnn_is_acceptable(self, tx, tensor, *extra):
             # is_acceptable(tensor) returns true if
             #   (a) tensor dtype/device are supported by cudnn
             #   (b) cudnn is available
             #   (c) some initialization has completed
             # technically, it depends on some global state from (c) (torch.backends.cudnn.__cudnn_version)
+            if extra:
+                unimplemented("cudnn.is_acceptable with >1 args")
             tensor_variable = tensor
             assert isinstance(
                 tensor_variable, TensorVariable

@@ -247,6 +247,15 @@ class TestCuda(TestCase):
         y = torch.ones(10000000 - 1, dtype=torch.uint8).cuda()
         _test_copy_non_blocking(x, y)
 
+    def test_copy_non_blocking_type_conversion(self):
+        a = torch.ones(1, device="cuda")
+        b = torch.zeros(1, device="cpu", pin_memory=True)
+        c = torch.empty(1, device="cuda", dtype=torch.long)
+        torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+        b.copy_(a, non_blocking=True)
+        c.copy_(b, non_blocking=True)
+        self.assertEqual(a, c, exact_dtype=False)
+
 
     def test_to_non_blocking(self):
         stream = torch.cuda.current_stream()
