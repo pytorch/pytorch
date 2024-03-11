@@ -100,8 +100,8 @@ echo "Testing pytorch"
 
 export LANG=C.UTF-8
 
-if [ -e "/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/lib/libstdc++.so.6" ] ; then
-  echo "Sometimes anaconda decides to use its own libstdc++ instead of the system one. As we've always been relying on the system one, let's make sure it's used."
+if [[ `uname -r` == 5.* ]] && [[ -e "/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/lib/libstdc++.so.6" ]] ; then
+  echo "Sometimes in kernel 5+ anaconda decides to use its own libstdc++ instead of the system one. As we've always been relying on the system one, let's make sure it's used."
   sudo rm "/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/lib/libstdc++.so.6"
 fi
 
