@@ -20,8 +20,7 @@ from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..utils import (
-    check_constant_args,
-    check_unspec_python_args,
+    check_unspec_or_constant_args,
     guard_if_dyn,
     has_torch_function,
     hashable,
@@ -46,29 +45,33 @@ except ModuleNotFoundError:
 
 log = logging.getLogger(__name__)
 
-supported_ctx_manager_classes = {
-    torch.profiler.profiler.profile,
-    torch.autograd.profiler.profile,
-    torch.autograd.profiler.record_function,
-    torch._C.DisableTorchFunctionSubclass,
-    torch._functorch.vmap.vmap_increment_nesting,
-    torch._functorch.eager_transforms.grad_increment_nesting,
-    torch._functorch.eager_transforms.enable_inplace_requires_grad,
-    torch.amp.autocast_mode.autocast,
-    torch.autograd.grad_mode.enable_grad,
-    torch.autograd.grad_mode.inference_mode,
-    torch.autograd.grad_mode.no_grad,
-    torch.autograd.grad_mode.set_grad_enabled,
-    torch.autograd.graph.disable_saved_tensors_hooks,
-    torch.cpu.amp.autocast_mode.autocast,
-    torch.cuda.amp.autocast_mode.autocast,
-}
+supported_ctx_manager_classes = dict.fromkeys(
+    [
+        torch.profiler.profiler.profile,
+        torch.autograd.profiler.profile,
+        torch.autograd.profiler.record_function,
+        torch._C.DisableTorchFunctionSubclass,
+        torch._functorch.vmap.vmap_increment_nesting,
+        torch._functorch.eager_transforms.grad_increment_nesting,
+        torch._functorch.eager_transforms.enable_inplace_requires_grad,
+        torch.amp.autocast_mode.autocast,
+        torch.autograd.grad_mode.enable_grad,
+        torch.autograd.grad_mode.inference_mode,
+        torch.autograd.grad_mode.no_grad,
+        torch.autograd.grad_mode.set_grad_enabled,
+        torch.autograd.graph.disable_saved_tensors_hooks,
+        torch.cpu.amp.autocast_mode.autocast,
+        torch.cuda.amp.autocast_mode.autocast,
+    ]
+)
 
 
-REWRITE_OPS_TO_TENSOR_SIZE_METHOD = [
-    torch.onnx.operators.shape_as_tensor,
-    torch._shape_as_tensor,
-]
+REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
+    [
+        torch.onnx.operators.shape_as_tensor,
+        torch._shape_as_tensor,
+    ]
+)
 
 constant_fold_functions = [
     torch._assert,
@@ -88,8 +91,6 @@ constant_fold_functions = [
     torch.promote_types,
     torch._C._get_privateuse1_backend_name,
 ]
-
-
 if torch.distributed.is_available():
     constant_fold_functions.extend(
         [
@@ -98,6 +99,8 @@ if torch.distributed.is_available():
             torch.distributed.get_world_size,
         ]
     )
+# Convert to dict for O(1) access times
+constant_fold_functions = dict.fromkeys(constant_fold_functions)
 
 
 tracing_state_functions = {
@@ -284,13 +287,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             TensorVariable,
             UserDefinedObjectVariable,
         )
-
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
-        constant_args = check_constant_args(args, kwargs)
-        unspec_python_args = check_unspec_python_args(args, kwargs)
-
-        if self.can_constant_fold_through() and (constant_args or unspec_python_args):
+        if self.can_constant_fold_through() and check_unspec_or_constant_args(
+            args, kwargs
+        ):
             # constant fold
             return ConstantVariable.create(
                 self.as_python_constant()(
@@ -325,7 +326,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return tx.inline_user_function_return(
                 SourcelessBuilder()(tx, polyfill.accumulate_grad), args, kwargs
             )
-        elif self.value == math.radians and not (constant_args or unspec_python_args):
+        elif self.value == math.radians and not check_unspec_or_constant_args(
+            args, kwargs
+        ):
             # Use polyfill to convert math.radians(x) into math.pi * x / 180.0
             from .builder import SourcelessBuilder
 
