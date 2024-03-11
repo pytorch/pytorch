@@ -11,6 +11,11 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
+if [[ `uname -r` == 5.* ]] && [[ -e "/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/lib/libstdc++.so.6" ]] ; then
+  echo "Sometimes in kernel 5+ anaconda decides to use its own libstdc++ instead of the system one. As we've always been relying on the system one, let's make sure it's used."
+  sudo rm "/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/lib/libstdc++.so.6"
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
 fi
