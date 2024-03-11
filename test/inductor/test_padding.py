@@ -229,6 +229,25 @@ class PaddingTest(TestCase):
         y = torch.randn(127, 127)
         self.common_numeric_check(f, x, y)
 
+    def test_nvidia_deeprecommender(self):
+        layer_sizes = [197951, 512, 512, 1024, 512, 512, 197951]
+        x = torch.randn(4, layer_sizes[0])
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                mod_list = []
+                for i in range(len(layer_sizes) - 1):
+                    mod_list.append(nn.Linear(layer_sizes[i], layer_sizes[i + 1]))
+                    mod_list.append(nn.SELU())
+                self.seq = nn.Sequential(*mod_list)
+
+            def forward(self, x):
+                return self.seq(x)
+
+        m = Model()
+        self.common_numeric_check(m, x)
+
 
 if __name__ == "__main__":
     if HAS_CUDA:

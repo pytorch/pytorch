@@ -261,15 +261,15 @@ class CompiledNodeArgs {
     if (iv.isList()) {
       c10::List<at::IValue> list = iv.toList();
       collect_size(list.size());
-      for (const auto& i : list) {
-        collect(i);
+      for (auto it = list.begin(); it != list.end(); it++) {
+        collect(*it);
       }
     } else if (iv.isGenericDict()) {
       c10::Dict<at::IValue, at::IValue> ordered_dict = iv.toGenericDict();
       collect_size(ordered_dict.size());
-      for (const auto& entry : ordered_dict) {
-        collect(entry.key());
-        collect(entry.value());
+      for (auto it = ordered_dict.begin(); it != ordered_dict.end(); it++) {
+        collect(it->key());
+        collect(it->value());
       }
     } else {
       try {

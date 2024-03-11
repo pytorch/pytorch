@@ -2569,9 +2569,11 @@ class Layout(IRNode):
         # smallest stride to be 1.
         new_stride[fill_order[0]] = 1
 
-        # don't align an too small stride since that cause too much memory
-        # increase. Pick heuristic value 320 since for alignement=16, that
-        # results in at most 5% memory increase.
+        # don't align an too small stride since that cause too much memory increase.
+        # Pick heuristic value 320 since for alignement=16, that results in at most 5% memory increase.
+        #
+        # Pad too small stride may also cause perf loss. We may result in many tiny data blocks
+        # with gaps in between. That causes less coalesced GPU memory access!
         align_stride_threshold = 320
         for rank, idx in enumerate(fill_order[1:], start=1):
             prev_idx = fill_order[rank - 1]
@@ -4479,7 +4481,11 @@ class InplaceBernoulliFallback(ExternKernel):
         )
         self.name = V.graph.register_buffer(self)
         self.python_kernel_name = "aten.bernoulli_"
-        self.cpp_kernel_name = "at::native::bernoulli_"
+        self.cpp_kernel_name = (
+            "aoti_torch_bernoulli_"
+            if config.abi_compatible
+            else "at::native::bernoulli_"
+        )
         mark_node_as_mutating(self, x)
 
 
@@ -8046,11 +8052,16 @@ class _WaitKernel(_CollectiveKernel):
             # Out-of-place single-output
             return [inp.inputs[0]]
         elif isinstance(inp, MultiOutput):
-            # Out-of-place multi-output
+            # This can be two things:
+            # 1. Out-of-place multi-output coll
+            # 2. In-place coll with inputs coming from another MultiOutput
             coll = inp.inputs[0]
-            assert isinstance(coll, _CollectiveKernel)
-            _, idx = inp.indices[0]
-            return [coll.inputs[idx]]
+            # Case 1
+            if isinstance(coll, _CollectiveKernel):
+                _, idx = inp.indices[0]
+                return [coll.inputs[idx]]
+            # Case 2
+            return []
         else:
             # In-place requires no additional deps handling for volatile
             # reads since the inputs are mutated.
