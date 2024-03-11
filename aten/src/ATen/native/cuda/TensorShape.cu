@@ -118,6 +118,13 @@ static __device__ __inline__ void get_aligned_region(
   aligned_size = (chunk_size - align_off) / alignment * alignment;
 }
 
+// Check if _chunk_cat has fast support for source type ST and destination type DT.
+template <typename ST, typename DT>
+static bool _chunk_cat_fast_support_dtype() {
+  bool is_bfloat16_to_float32 = std::is_same<DT, float>::value && std::is_same<ST, at::ScalarType::BFloat16>::value;
+  return std::is_same<ST, DT>::value || is_bfloat16_to_float32;
+}
+
 __device__ inline uint4 get_zero_uint4() {
   uint4 zero;
   reinterpret_cast<uint64_t*>(&zero)[0] = 0;
@@ -369,7 +376,7 @@ static __device__ __inline__ void copy_chunk_with_pad_cast_bfloat16_to_float(
   int64_t elem_index = thread_idx;
   while (elem_index < actual_num_elems) {
 #if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
-    reinterpret_cast<float*>(dst)[elem_index] = static_cast<at::BFloat16>(
+    reinterpret_cast<float*>(dst)[elem_index] = static_cast<float>(
       reinterpret_cast<const at::BFloat16*>(src)[elem_index]
     );
 #else
@@ -389,6 +396,7 @@ static __device__ __inline__ void copy_chunk_with_pad_cast_bfloat16_to_float(
 // chunk_cat_cuda adopts a "jagged grid" strategy, inspired by NOTE [CUDA fast path for split_with_sizes_copy.out].
 // In addition, chunk_cat_cuda supports padding via copy_chunk_with_pad when src chunk size is less than
 // dst chunk size.
+template<typename ST, typename DT>
 static __global__ void chunk_cat_cuda_kernel(
   char** src,
   char* dst,
@@ -399,9 +407,13 @@ static __global__ void chunk_cat_cuda_kernel(
   int64_t* pad_tensor_chunk_sizes,
   int64_t* num_blocks_per_tensor_chunk,
   int64_t slice_size,
-  int64_t chunk_size,
-  bool bf162float // copying from bf16 to float if True else assuming same elem type for src and dst
+  int64_t chunk_size
 ) {
+  bool bf162float = std::is_same<DT, float>::value && std::is_same<ST, at::ScalarType::BFloat16>::value;
+  int64_t ratio = 1;
+  if (bf162float) {
+    ratio = 2;
+  }
   const int64_t slice_idx = blockIdx.z;
   const int64_t chunk_idx = blockIdx.y;
   const int64_t tensor_idx = block_idx_to_tensor_idx[blockIdx.x];
@@ -409,10 +421,6 @@ static __global__ void chunk_cat_cuda_kernel(
   // Number of threads for the `tensor_idx`-th tensor chunk.
   const int64_t num_threads = num_blocks_per_tensor_chunk[tensor_idx] * BLOCK_SIZE;
   const int64_t thread_idx = tile_idx * BLOCK_SIZE + threadIdx.x;
-  int64_t ratio = 1;
-  if (bf162float) {
-    ratio = 2;
-  }
   const char* src_addr = src[tensor_idx]
       + slice_idx * actual_tensor_sizes[tensor_idx]
       + chunk_idx * pad_tensor_chunk_sizes[tensor_idx] / ratio;
@@ -453,13 +461,14 @@ bool all_contiguous(TensorList tensors) {
 }
 
 // Gets metadata for chunk_cat.
+template<typename ST, typename DT>
 std::tuple<int64_t, int64_t, int64_t, int64_t, std::vector<int64_t*>> get_chunk_cat_metadata(
   TensorList tensors,
   int64_t dim,
-  int64_t num_chunks,
-  int64_t src_elem_size,
-  int64_t dst_elem_size
+  int64_t num_chunks
 ) {
+  int64_t dst_elem_size = sizeof(DT);
+  int64_t src_elem_size = sizeof(ST);
   TORCH_CHECK(dst_elem_size % src_elem_size == 0,
     "get_chunk_cat_metadata error: only support dst_elem_size % src_elem_size == 0");
   auto num_tensors = tensors.size();
@@ -526,11 +535,14 @@ Tensor _chunk_cat_cuda_contiguous_no_cast(
   int64_t num_chunks
 ) {
   int64_t elem_size = tensors[0].element_size();
-  auto [chunk_size, leading_dim, num_blocks_per_chunk, slice_size, device_ptrs] = get_chunk_cat_metadata(tensors, dim, num_chunks, elem_size, elem_size);
-  Tensor out = tensors[0].new_empty(chunk_size * num_chunks * leading_dim / elem_size);
+  auto [chunk_size, leading_dim, num_blocks_per_chunk, slice_size, device_ptrs] = get_chunk_cat_metadata<tensors[0].dtype(), tensors[0].dtype()>(tensors, dim, num_chunks);
+  auto first_tensor_sizes = tensors[0].sizes();
+  std::vector<int64_t> view_sizes = std::vector<int64_t>(first_tensor_sizes.begin(), first_tensor_sizes.begin()+dim);
+  view_sizes.insert(view_sizes.end(), {num_chunks, -1});
+  Tensor out = tensors[0].new_empty(chunk_size * num_chunks * leading_dim / elem_size).view(view_sizes);
   dim3 blocks(num_blocks_per_chunk, num_chunks, leading_dim);
   dim3 threads(detail::BLOCK_SIZE, 1, 1);
-  detail::chunk_cat_cuda_kernel<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+  detail::chunk_cat_cuda_kernel<tensors[0].dtype(), tensors[0].dtype()><<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     /*srcs=*/reinterpret_cast<char**>(device_ptrs[0]),
     reinterpret_cast<char*>(out.data_ptr()),
     /*block_idx_to_tensor_idx=*/device_ptrs[1],
@@ -540,14 +552,10 @@ Tensor _chunk_cat_cuda_contiguous_no_cast(
     /*pad_tensor_chunk_sizes=*/device_ptrs[5],
     /*num_blocks_per_tensor_chunk=*/device_ptrs[6],
     slice_size,
-    chunk_size,
-    /*bf162float=*/false
+    chunk_size
   );
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-  auto first_tensor_sizes = tensors[0].sizes();
-  std::vector<int64_t> view_sizes = std::vector<int64_t>(first_tensor_sizes.begin(), first_tensor_sizes.begin()+dim);
-  view_sizes.insert(view_sizes.end(), {num_chunks, -1});
-  return out.view(view_sizes);
+  return out;
 }
 
 void _chunk_cat_out_cuda_contiguous(
@@ -558,14 +566,14 @@ void _chunk_cat_out_cuda_contiguous(
 ) {
   int64_t src_elem_size = tensors[0].element_size();
   int64_t dst_elem_size = out.element_size();
-  auto [chunk_size, leading_dim, num_blocks_per_chunk, slice_size, device_ptrs] = get_chunk_cat_metadata(tensors, dim, num_chunks, src_elem_size, dst_elem_size);
+  auto [chunk_size, leading_dim, num_blocks_per_chunk, slice_size, device_ptrs] = get_chunk_cat_metadata<tensors[0].dtype(), out.dtype()>(tensors, dim, num_chunks);
   auto first_tensor_sizes = tensors[0].sizes();
   std::vector<int64_t> view_sizes = std::vector<int64_t>(first_tensor_sizes.begin(), first_tensor_sizes.begin()+dim);
   view_sizes.insert(view_sizes.end(), {num_chunks, chunk_size / dst_elem_size});
   at::native::resize_output(out, view_sizes);
   dim3 blocks(num_blocks_per_chunk, num_chunks, leading_dim);
   dim3 threads(detail::BLOCK_SIZE, 1, 1);
-  detail::chunk_cat_cuda_kernel<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+  detail::chunk_cat_cuda_kernel<tensors[0].dtype(), out.dtype()><<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     /*srcs=*/reinterpret_cast<char**>(device_ptrs[0]),
     reinterpret_cast<char*>(out.data_ptr()),
     /*block_idx_to_tensor_idx=*/device_ptrs[1],
@@ -575,8 +583,7 @@ void _chunk_cat_out_cuda_contiguous(
     /*pad_tensor_chunk_sizes=*/device_ptrs[5],
     /*num_blocks_per_tensor_chunk=*/device_ptrs[6],
     slice_size,
-    chunk_size,
-    /*bf162float=*/src_elem_size != dst_elem_size
+    chunk_size
   );
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
@@ -748,6 +755,7 @@ Tensor _chunk_cat_cuda(
 ) {
   dim = at::native::preprocess_chunk_cat_inputs(tensors, dim, num_chunks);
   if(detail::all_contiguous(tensors)) {
+    // Return a tensor with the same dtype as input tensors
     return detail::_chunk_cat_cuda_contiguous_no_cast(tensors, dim, num_chunks);
   } else {
     return at::native::_chunk_cat(tensors, dim, num_chunks);
@@ -763,12 +771,9 @@ Tensor& _chunk_cat_out_cuda(
   dim = at::native::preprocess_chunk_cat_inputs(tensors, dim, num_chunks);
   TORCH_CHECK(tensors[0].device() == out.device(),
     "_chunk_cat_out_cuda: mismatch between input and out tensor devices");
-  bool is_same_type = tensors[0].dtype() == out.dtype();
-  bool is_bfloat16_to_float32 =
-    (tensors[0].dtype() == at::ScalarType::BFloat16) &&
-    (out.dtype() == at::ScalarType::Float);
   bool both_input_output_contiguous = detail::all_contiguous(tensors) && out.is_non_overlapping_and_dense();
-  if(both_input_output_contiguous && (is_same_type || is_bfloat16_to_float32)) {
+  if(both_input_output_contiguous && detail::_chunk_cat_fast_support_dtype<tensors[0].dtype(), out.dtype()>()) {
+    // Support out with different dtype from input tensor dtype
     detail::_chunk_cat_out_cuda_contiguous(tensors, dim, num_chunks, out);
   } else {
     at::native::_chunk_cat_out(tensors, dim, num_chunks, out);
