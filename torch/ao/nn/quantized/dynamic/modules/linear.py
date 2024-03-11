@@ -64,9 +64,7 @@ class Linear(nnq.Linear):
         return 'DynamicQuantizedLinear'
 
     def extra_repr(self):
-        extra_repr_str = 'in_features={}, out_features={}, dtype={}'.format(
-            self.in_features, self.out_features, self._packed_params.dtype
-        )
+        extra_repr_str = f'in_features={self.in_features}, out_features={self.out_features}, dtype={self._packed_params.dtype}'
         if self._packed_params.dtype == torch.qint8:
             extra_repr_str += f', qscheme={self.weight().qscheme()}'
         return extra_repr_str

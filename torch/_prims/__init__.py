@@ -1660,9 +1660,7 @@ def _split_dim_meta(a: TensorLikeType, dim: int, outer_length: int) -> TensorLik
     inner_length = a.shape[dim] // outer_length
 
     if (a.shape[dim] % outer_length) != 0:
-        msg = "Attempting to split dimension of length {}, but outer length of {} divides it with a remainder!".format(
-            a.shape[dim], outer_length
-        )
+        msg = f"Attempting to split dimension of length {a.shape[dim]}, but outer length of {outer_length} divides it with a remainder!"
         raise ValueError(msg)
 
     new_shape: List[int] = []
@@ -1739,9 +1737,7 @@ squeeze = _make_prim(
 
 def _transpose_meta(a: TensorLikeType, permutation: DimsSequenceType) -> TensorLikeType:
     if a.ndim != len(permutation):
-        msg = "Attempting to permute a tensor of rank {}, but received a permutation of length {}!".format(
-            a.ndim, len(permutation)
-        )
+        msg = f"Attempting to permute a tensor of rank {a.ndim}, but received a permutation of length {len(permutation)}!"
         raise ValueError(msg)
 
     if not utils.is_valid_permutation(a.ndim, permutation):

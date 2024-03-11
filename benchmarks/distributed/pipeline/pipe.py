@@ -187,9 +187,7 @@ def train(lm_dataloader, model, criterion, optimizer, vocab_size, args):
             cur_loss = total_loss / log_interval
             elapsed = time.time() - start_time
             print(
-                "| batch {:5d} | wps {:5.2f} | loss {:5.2f} | ppl {:8.2f}".format(
-                    i, word_counter / elapsed, cur_loss, math.exp(cur_loss)
-                )
+                f"| batch {i:5d} | wps {word_counter / elapsed:5.2f} | loss {cur_loss:5.2f} | ppl {math.exp(cur_loss):8.2f}"
             )
             word_counter = 0
             total_loss = 0

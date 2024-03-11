@@ -2131,8 +2131,7 @@ class TestDistributions(DistributionsTestCase):
 
         self._check_sampler_sampler(LowRankMultivariateNormal(mean, cov_factor, cov_diag),
                                     scipy.stats.multivariate_normal(mean.detach().numpy(), cov.detach().numpy()),
-                                    'LowRankMultivariateNormal(loc={}, cov_factor={}, cov_diag={})'
-                                    .format(mean, cov_factor, cov_diag), multivariate=True)
+                                    f'LowRankMultivariateNormal(loc={mean}, cov_factor={cov_factor}, cov_diag={cov_diag})', multivariate=True)
 
     def test_lowrank_multivariate_normal_properties(self):
         loc = torch.randn(5)
@@ -3604,8 +3603,7 @@ class TestDistributionShapes(DistributionsTestCase):
                 try:
                     actual_shape = dist.entropy().size()
                     expected_shape = dist.batch_shape if dist.batch_shape else torch.Size()
-                    message = '{} example {}/{}, shape mismatch. expected {}, actual {}'.format(
-                        Dist.__name__, i + 1, len(params), expected_shape, actual_shape)
+                    message = f'{Dist.__name__} example {i + 1}/{len(params)}, shape mismatch. expected {expected_shape}, actual {actual_shape}'
                     self.assertEqual(actual_shape, expected_shape, msg=message)
                 except NotImplementedError:
                     continue
@@ -4526,15 +4524,13 @@ class TestNumericalStability(DistributionsTestCase):
                          expected_value,
                          atol=atol,
                          rtol=0,
-                         msg='Incorrect value for tensor type: {}. Expected = {}, Actual = {}'
-                         .format(type(x), expected_value, log_pdf))
+                         msg=f'Incorrect value for tensor type: {type(x)}. Expected = {expected_value}, Actual = {log_pdf}')
         if expected_gradient is not None:
             self.assertEqual(p.grad,
                              expected_gradient,
                              atol=atol,
                              rtol=0,
-                             msg='Incorrect gradient for tensor type: {}. Expected = {}, Actual = {}'
-                             .format(type(x), expected_gradient, p.grad))
+                             msg=f'Incorrect gradient for tensor type: {type(x)}. Expected = {expected_gradient}, Actual = {p.grad}')
 
     def test_bernoulli_gradient(self):
         for tensor_type in [torch.FloatTensor, torch.DoubleTensor]:
