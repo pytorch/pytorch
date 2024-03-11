@@ -173,7 +173,9 @@ class AveragedModel(Module):
         model: Module,
         device: Optional[Union[int, device]] = None,
         avg_fn: Optional[Callable[[Tensor, Tensor, Tensor], Tensor]] = None,
-        multi_avg_fn: Optional[Callable[[Tensor, Tensor, Tensor], Tensor]] = None,
+        multi_avg_fn: Optional[
+            Callable[[List[Optional[Tensor]], List[Optional[Tensor]], Tensor],
+                     Tensor]] = None,
         use_buffers=False,
     ):
         super().__init__()
