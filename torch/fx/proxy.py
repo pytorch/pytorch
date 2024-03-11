@@ -19,6 +19,7 @@ from .node import Target, Node, Argument, base_types, map_aggregate
 from ._compatibility import compatibility
 from .operator_schemas import check_for_mutable_operation
 import torch.fx.traceback as fx_traceback
+from torch.hint_tracker import ContextHintTracker
 
 __all__ = ['TracerBase', 'GraphAppendingTracer', 'TraceError',
            'Proxy', 'Attribute', 'ParameterProxy', 'Scope',
@@ -161,6 +162,24 @@ class TracerBase:
             if current_meta.get("in_grad_fn", 0) > 0:
                 new_seq_nr = current_meta["grad_fn_seq_nr"][-1]
             node.meta["seq_nr"] = new_seq_nr
+
+            node_hints = ContextHintTracker.get_hints_merged()
+            if node_hints:
+                node.meta["context_hints"] = node_hints
+
+                example_value = current_meta.get("example_value", False)
+                # [TODO]: is there some better way to check if current node generate autograd nodes?
+                if isinstance(example_value, torch.Tensor) and example_value.grad_fn:
+                    # This node will generate backward nodes.
+                    # We need this check because sometimes we have no-grad nodes right after
+                    # completely different nodes and they might share seq_nr because no autograd
+                    # node was created for the second one. That would cause attaching second node hints
+                    # to first, different, node even if it was out of scope. If there is grad_fn then we
+                    # know it will either have unique seq_nr or share it with the next nodes that also do
+                    # not generate autograd nodes but in that case this is not an issue as they won't
+                    # generate bwd code anyway and next actually meaningful node would have its own seq_nr,
+                    # so there should be no issues with hints mixing in that scenario.
+                    node.meta["propagate_hints_to_bwd"] = True
 
         elif self.module_stack:
             node.meta['nn_module_stack'] = copy.copy(self.module_stack)

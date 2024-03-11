@@ -187,6 +187,33 @@ def aot_dispatch_autograd(
         flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
     )
 
+    # Now that we have full joint graph, let's propagate hints
+    # from FWD nodes to corresponding BWD nodes.
+    hinted_map = {}
+    for node in fx_g.graph.nodes:
+        # We base the propagation on "seq_nr" so it needs to be available.
+        if "seq_nr" in node.meta:
+            # If this node has hints and was marked to propagate to BWD, let's fill the map
+            # for BWD using this node hint and seq_nr.
+            if "context_hints" in node.meta and "propagate_hints_to_bwd" in node.meta and node.meta["propagate_hints_to_bwd"] == True:
+                # Check if there was already some FWD op with same seq_nr and a hint.
+                if node.meta["seq_nr"] in hinted_map:
+                    if hinted_map[node.meta["seq_nr"]] != node.meta["context_hints"]:
+                        # Case where we have duplicate seq_nr with different hints
+                        # could happen for nodes within single autograd override as they do not
+                        # generate separate autograd nodes. This is not an issue because
+                        # these nodes do not need to have backward propagation anyway as user
+                        # SHOULD specify some hint specifically for backward if they did so in forward.
+                        # It is that way because we assume that we don't make propagation for BWD
+                        # nodes that are already annotated.
+                        # [TODO]: can we detect that op was generated from inside autograd overridden op
+                        # in cleaner fashion and just not set "propagate_hints_to_bwd" flag for them?
+                        continue
+                hinted_map[node.meta["seq_nr"]] = node.meta["context_hints"]
+            elif node.meta["seq_nr"] in hinted_map and "context_hints" not in node.meta:
+                # We expect this to be newly discovered BWD op - just take the hint from map.
+                node.meta["context_hints"] = hinted_map[node.meta["seq_nr"]]
+
     # Copied from aot_dispatch_autograd_graph.
     disable_amp = torch._C._is_any_autocast_enabled()
 
