@@ -377,7 +377,7 @@ void cpu_serial_kernel_vec(TensorIteratorBase& iter, func_t&& op, vec_func_t&& v
   // this could be extended to work with void return types
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
-  TORCH_INTERNAL_ASSERT((!needs_dynamic_casting<func_t>::check(iter), "Dynamic casting is not currently supported on CPU");
+  TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter), "Dynamic casting is not currently supported on CPU");
 
   iter.serial_for_each(make_vectorized_loop2d(op, vop), range);
   iter.cast_outputs();
