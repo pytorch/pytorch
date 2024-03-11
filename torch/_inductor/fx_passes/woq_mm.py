@@ -74,6 +74,8 @@ def _get_woq_mm_patterns():
 
     for pattern, replacement, args, workaround, extra_check in [
         # _weight_int8pack_mm kernel only supports cpu now
+        # cuda calls into 2unsqueeze+mul+sum
+        # TODO: add cuda support
         (
             _woq_mm_pattern_1,
             _woq_mm_replacement_1,
