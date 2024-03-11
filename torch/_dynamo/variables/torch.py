@@ -1,5 +1,5 @@
 # mypy: ignore-errors
-
+import functools
 import inspect
 import logging
 
@@ -34,7 +34,7 @@ from .ctx_manager import (
     NullContextVariable,
     TorchFunctionDisableVariable,
 )
-from .distributed import is_constant_pg_functions, is_from_local, ProcessGroupVariable
+from .distributed import DistributedVariable, ProcessGroupVariable
 from .lists import ListVariable, TupleVariable
 from .torch_function import can_dispatch_torch_function, dispatch_torch_function
 
@@ -274,32 +274,40 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
     def get_function(self):
         return self.value
 
-    def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-    ) -> "VariableTracker":
+    @staticmethod
+    @functools.lru_cache(None)
+    def _get_handlers():
+        """Build a dict from function -> method to handle it so that we are O(1)
+        in terms of the number of function with special handling."""
+        handlers = {}
+
+        def register(*fns):
+            def _register(handler):
+                for fn in fns:
+                    assert fn not in handlers, fn
+                    handlers[fn] = handler
+                return handler
+
+            if not callable(fns[0]):
+                assert len(fns) == 1
+                fns = [*fns[0]]
+            assert callable(fns[0])
+            return _register
+
+        from torch.backends.cuda import SDPAParams
         from . import (
             ConstantVariable,
             DeterministicAlgorithmsVariable,
             GradModeVariable,
-            SDPAParamsVariable,
             StreamContextVariable,
             SymNodeVariable,
             TensorVariable,
             UserDefinedObjectVariable,
         )
-        from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
+        from .builder import SourcelessBuilder, wrap_fx_proxy, wrap_fx_proxy_cls
 
-        if self.can_constant_fold_through() and check_unspec_or_constant_args(
-            args, kwargs
-        ):
-            # constant fold
-            return ConstantVariable.create(
-                self.as_python_constant()(
-                    *[x.as_python_constant() for x in args],
-                    **{k: v.as_python_constant() for k, v in kwargs.items()},
-                ),
-            )
-        elif self.value in tracing_state_functions:
+        @register(tracing_state_functions)
+        def handle_tracing_state_functions(self, tx, *args, **kwargs):
             assert not args and not kwargs
             # See: https://github.com/pytorch/pytorch/issues/110765
             if self.value in (
@@ -310,51 +318,48 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             ):
                 tx.mark_inconsistent_side_effects()
             return ConstantVariable.create(tracing_state_functions[self.value])
-        elif self.value is torch.overrides.get_default_nowrap_functions.__wrapped__:
+
+        @register(torch.overrides.get_default_nowrap_functions.__wrapped__)
+        def handle_get_default_nowrap_functions(self, tx, *args, **kwargs):
             # [Note: __torch_function__] we return empty here because we restrict
             # the set of functions that we trace __torch_function__ on to
             # functions outside of the actual set. Implementing this properly will require implementing
             # some variable types to track and compare tensor getset descriptors
-            from .builder import SourcelessBuilder
-
             return SourcelessBuilder()(
                 tx, torch.overrides.get_default_nowrap_functions()
             )
-        elif self.value == torch.ops.inductor.accumulate_grad_.default:
-            from .builder import SourcelessBuilder
 
+        @register(torch.ops.inductor.accumulate_grad_.default)
+        def handle_accumulate_grad_(self, tx, *args, **kwargs):
             return tx.inline_user_function_return(
                 SourcelessBuilder()(tx, polyfill.accumulate_grad), args, kwargs
             )
-        elif self.value == math.radians and not check_unspec_or_constant_args(
-            args, kwargs
-        ):
-            # Use polyfill to convert math.radians(x) into math.pi * x / 180.0
-            from .builder import SourcelessBuilder
 
-            return tx.inline_user_function_return(
-                SourcelessBuilder()(tx, polyfill.radians), args, kwargs
-            )
-        elif self.value in (torch.is_tensor, torch.overrides.is_tensor_like):
-            assert len(args) == 1
-            if isinstance(args[0], TensorVariable) or (
+        @register(math.radians)
+        def handle_radians(self, tx, *args, **kwargs):
+            if not check_unspec_or_constant_args(args, kwargs):
+                # Use polyfill to convert math.radians(x) into math.pi * x / 180.0
+                return tx.inline_user_function_return(
+                    SourcelessBuilder()(tx, polyfill.radians), args, kwargs
+                )
+
+        @register(torch.is_tensor, torch.overrides.is_tensor_like)
+        def handle_is_tensor(self, tx, arg):
+            if isinstance(arg, TensorVariable) or (
                 self.value is torch.overrides.is_tensor_like
-                and isinstance(args[0], UserDefinedObjectVariable)
-                and hasattr(args[0].value, "__torch_function__")
+                and isinstance(arg, UserDefinedObjectVariable)
+                and hasattr(arg.value, "__torch_function__")
             ):
                 return ConstantVariable.create(True)
             else:
                 return ConstantVariable.create(False)
-        elif self.value in (
+
+        @register(
             torch.is_floating_point,
             torch.is_complex,
-        ):
-            input_arg = None
-            if args:
-                input_arg = args[0]
-            else:
-                assert "input" in kwargs
-                input_arg = kwargs["input"]
+        )
+        def handle_is_floating_point(self, tx, input):
+            input_arg = input
             if isinstance(input_arg, TensorVariable) and input_arg.dtype is not None:
                 if self.value is torch.is_floating_point:
                     return ConstantVariable.create(input_arg.dtype.is_floating_point)
@@ -362,59 +367,71 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     return ConstantVariable.create(input_arg.dtype.is_complex)
                 else:
                     raise AssertionError(f"calling {self.value}")
-        elif (
-            self.value is torch.numel
-            and isinstance(args[0], TensorVariable)
-            and args[0].size is not None
-        ):
-            return ConstantVariable.create(product(args[0].size))
-        elif self.value in REWRITE_OPS_TO_TENSOR_SIZE_METHOD:
-            assert len(args) == 1
-            assert isinstance(args[0], TensorVariable)
-            return args[0].call_method(tx, "size", [], {})
-        elif self.value in (
+
+        @register(torch.numel)
+        def handle_numel(self, tx, input):
+            if isinstance(input, TensorVariable) and input.size is not None:
+                return ConstantVariable.create(product(input.size))
+            elif isinstance(input, TensorVariable):
+                return input.call_method(tx, "numel", [input], {})
+
+        @register(REWRITE_OPS_TO_TENSOR_SIZE_METHOD)
+        def handle_tensor_size_rewrites(self, tx, input):
+            assert isinstance(input, TensorVariable)
+            return input.call_method(tx, "size", [], {})
+
+        @register(
             torch.nn.modules.utils._single,
             torch.nn.modules.utils._pair,
             torch.nn.modules.utils._triple,
             torch.nn.modules.utils._quadruple,
             torch.nn.modules.utils._ntuple,
-        ):
+        )
+        def handle_ntuple(self, tx, *args, **kwargs):
             return self._call_ntuple(tx, args, kwargs)
-        elif self.value is torch.is_grad_enabled:
-            assert not (args or kwargs)
+
+        @register(torch.is_grad_enabled)
+        def handle_is_grad_enabled(self, tx):
             install_guard(GradModeVariable._guards_singleton)
             return ConstantVariable.create(torch.is_grad_enabled())
-        elif self.value is torch.use_deterministic_algorithms and len(args) == 1:
-            return DeterministicAlgorithmsVariable.create(
-                tx, args[0].as_python_constant()
-            )
-        elif self.value is torch.are_deterministic_algorithms_enabled:
-            assert not (args or kwargs)
+
+        @register(torch.use_deterministic_algorithms)
+        def handle_use_deterministic_algorithms(self, tx, mode, warn_only=False):
+            if warn_only and warn_only.as_python_constant():
+                unimplemented("torch.use_deterministic_algorithms(warn_only=True)")
+            return DeterministicAlgorithmsVariable.create(tx, mode.as_python_constant())
+
+        @register(torch.are_deterministic_algorithms_enabled)
+        def handle_are_deterministic_algorithms_enabled(self, tx):
             install_guard(DeterministicAlgorithmsVariable._guards_singleton)
             return ConstantVariable.create(torch.are_deterministic_algorithms_enabled())
-        elif self.value is torch._C._is_torch_function_enabled:
-            assert not (args or kwargs)
+
+        @register(torch._C._is_torch_function_enabled)
+        def handle_is_torch_function_enabled(self, tx):
             install_guard(TorchFunctionDisableVariable._guards_singleton)
             return ConstantVariable.create(tx.output.torch_function_enabled)
-        elif self.value in (
+
+        @register(
             torch.overrides.has_torch_function,
             torch.overrides.has_torch_function_variadic,
             torch.overrides.has_torch_function_unary,
-        ):
-            assert not kwargs
+        )
+        def handle_has_torch_function(self, tx, *args):
             return ConstantVariable.create(
                 any(has_torch_function(a) for a in args),
             )
-        elif any(
-            self.value is method
-            for method in [
+
+        @register(
+            dict.fromkeys(
                 device_interface.stream
                 for _, device_interface in get_registered_device_interfaces()
-            ]
-        ):
-            assert len(args) == 1
-            return StreamContextVariable.create(tx, args[0])
-        elif self.value is torch.from_numpy:
+            )
+        )
+        def handle_device_interface_stream(self, tx, stream):
+            return StreamContextVariable.create(tx, stream)
+
+        @register(torch.from_numpy)
+        def handle_from_numpy(self, tx, *args):
             if not config.trace_numpy:
                 unimplemented("torch.from_numpy. config.trace_numpy is False")
             if not np:
@@ -429,21 +446,19 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 ),
                 example_value=None,
             )
-        elif can_dispatch_torch_function(tx, args, kwargs):
-            return dispatch_torch_function(tx, self, args, kwargs)
-        elif self.value is torch.jit.annotate:
-            assert len(args) == 2
-            return args[1]
-        elif self.value is torch.backends.cudnn.is_acceptable:
+
+        @register(torch.jit.annotate)
+        def handle_jit_annotate(self, tx, the_type, the_value):
+            return the_value
+
+        @register(torch.backends.cudnn.is_acceptable)
+        def handle_cudnn_is_acceptable(self, tx, tensor):
             # is_acceptable(tensor) returns true if
             #   (a) tensor dtype/device are supported by cudnn
             #   (b) cudnn is available
             #   (c) some initialization has completed
             # technically, it depends on some global state from (c) (torch.backends.cudnn.__cudnn_version)
-            assert (
-                len(args) == 1 or "tensor" in kwargs
-            ), "Expect 1 input to cudnn.is_acceptable"
-            tensor_variable = args[0] if len(args) > 0 else kwargs["tensor"]
+            tensor_variable = tensor
             assert isinstance(
                 tensor_variable, TensorVariable
             ), "Expect input to cudnn.is_acceptable to be a tensor"
@@ -453,71 +468,48 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return ConstantVariable.create(
                 torch.backends.cudnn.is_acceptable(tensor_inp)
             )
-        elif self.value is torch.utils.hooks.BackwardHook:
+
+        @register(torch.utils.hooks.BackwardHook)
+        def handle_backward_hook(self, tx, *args, **kwargs):
             return variables.BackwardHookVariable.create(tx, *args, **kwargs)
-        elif (
-            self.value == torch.numel
-            and len(args) == 1
-            and isinstance(args[0], TensorVariable)
-            and len(kwargs) == 0
-        ):
-            # TODO(voz): This is rewritten as a call_method because
-            # torch.numel(x) w/ sym shapes raises a RuntimeError and x.numel() does not
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_method",
-                    "numel",
-                    *proxy_args_kwargs(args, kwargs),
-                ),
-            )
+
         # TODO: These special cases shouldn't be necessary; we should
         # generically support torch.ops that return int
-        elif (
-            self.value in (torch.ops.aten.sym_size, torch.ops.aten.sym_size.int)
-            and len(args) == 2
-            and len(kwargs) == 0
-            and isinstance(args[0], TensorVariable)
-        ):
+
+        @register(torch.ops.aten.sym_size, torch.ops.aten.sym_size.int)
+        def handle_sym_size(self_, tx, self, dim):
             # we see this when retracing already traced code
-            return args[0].call_method(tx, "size", [args[1]], {})
-        elif (
-            self.value in (torch.ops.aten.sym_stride, torch.ops.aten.sym_stride.int)
-            and len(args) == 2
-            and len(kwargs) == 0
-            and isinstance(args[0], TensorVariable)
-        ):
-            return args[0].call_method(tx, "stride", [args[1]], {})
-        elif (
-            self.value == torch.addcdiv
-            and len(args) == 3
-            and "value" in kwargs
-            and len(kwargs) == 1
-        ):
-            # decompose addcdiv into constituent ops, prevents a graph break due to converting
-            # value to a scalar
-            result = TorchInGraphFunctionVariable(torch.div).call_function(
-                tx, args[1:], {}
-            )
-            result = TorchInGraphFunctionVariable(torch.mul).call_function(
-                tx, [result, kwargs["value"]], {}
-            )
-            return TorchInGraphFunctionVariable(torch.add).call_function(
-                tx, [args[0], result], {}
-            )
-        elif (
-            self.value is torch._assert
-            and len(args) >= 1
-            and (
-                (args[0].is_python_constant() and args[0].as_python_constant())
-                or (
-                    isinstance(args[0], variables.SymNodeVariable)
-                    and args[0].evaluate_expr()
+            return self.call_method(tx, "size", [dim], {})
+
+        @register(torch.ops.aten.sym_stride, torch.ops.aten.sym_stride.int)
+        def handle_sym_stride(self_, tx, self, dim):
+            return self.call_method(tx, "stride", [dim], {})
+
+        @register(torch.addcdiv)
+        def handle_addcdiv(self, tx, *args, **kwargs):
+            if len(args) == 3 and "value" in kwargs and len(kwargs) == 1:
+                # decompose addcdiv into constituent ops, prevents a graph break due to converting
+                # value to a scalar
+                result = TorchInGraphFunctionVariable(torch.div).call_function(
+                    tx, args[1:], {}
                 )
-            )
-        ):
-            return ConstantVariable(None)
-        elif SDPAParamsVariable.is_sdpa_params(self.value):
+                result = TorchInGraphFunctionVariable(torch.mul).call_function(
+                    tx, [result, kwargs["value"]], {}
+                )
+                return TorchInGraphFunctionVariable(torch.add).call_function(
+                    tx, [args[0], result], {}
+                )
+
+        @register(torch._assert)
+        def handle_assert(self, tx, condition, message):
+            if (condition.is_python_constant() and condition.as_python_constant()) or (
+                isinstance(condition, variables.SymNodeVariable)
+                and condition.evaluate_expr()
+            ):
+                return ConstantVariable(None)
+
+        @register(SDPAParams)
+        def handle_sdpa_params(self, tx, *args, **kwargs):
             return wrap_fx_proxy(
                 tx,
                 proxy=tx.output.create_proxy(
@@ -527,86 +519,132 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 ),
                 param_vars=args,
             )
-        elif is_constant_pg_functions(self.value):
-            # because the input is a "ProcessGroupVariable", we'll be guarding on its
-            # ID_MATCH based on how it was constructed.
 
-            # We desugar it at trace-time into ranks by directly calling util
-            # bake the result into the trace
-            if len(args) == 1:
-                # group or group name
-                assert isinstance(args[0], (ProcessGroupVariable, ConstantVariable))
-            elif len(args) == 2:
-                # ranks + tag
-                assert isinstance(args[0], ListVariable) and isinstance(
-                    args[1], ConstantVariable
-                )
-            else:
-                raise AssertionError(
-                    f"Invalid group value ({args}) for constant pg "
-                    f"function {self.value}"
-                )
-            args_as_value = [arg.as_python_constant() for arg in args]
-            invocation_result = self.value(*args_as_value)
-
-            # Note - while we *could* cook up sources around invocations, like a FunctionSource
-            # the space of invoking functions in the middle of the guard chain is very iffy. As such,
-            # guard propagation via options is the best we can do.
-            from .builder import SourcelessBuilder
-
-            return SourcelessBuilder()(tx, invocation_result)
-        elif is_from_local(self.value):
-            # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
-            # and rewrite args to have only proxyable args, then insert call_function
-            args_as_value = [x.as_python_constant() for x in args[1:]]
-            kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
-
-            def fn_with_prim_types(x):
-                return self.value(x, *args_as_value, **kwargs_as_value)
-
-            # attach the same function name for better debugging
-            fn_with_prim_types.__name__ = "prim " + self.value.__name__
-
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    fn_with_prim_types,
-                    *proxy_args_kwargs([args[0]], {}),
-                ),
+        if DistributedVariable.is_available():
+            from torch.distributed._tensor import DTensor
+            from torch.distributed.distributed_c10d import (
+                _get_group_size_by_name,
+                _get_group_tag,
+                _rank_not_in_group,
+                _resolve_group_name_by_ranks_and_tag,
+                get_process_group_ranks,
             )
-        elif (
-            self.value is torch.nested.nested_tensor
-            and kwargs.get("layout", torch.strided) == torch.strided
-        ):
-            raise unimplemented("torch.compile does not support strided NestedTensor")
-        elif self.value is torch.nn.functional.one_hot and (
-            len(args) + len(kwargs) == 1
-            or (
+
+            @register(
+                _get_group_size_by_name,
+                _get_group_tag,
+                _rank_not_in_group,
+                get_process_group_ranks,
+                _resolve_group_name_by_ranks_and_tag,
+            )
+            def handle_constant_processgroup_functions(self, tx, *args):
+                # because the input is a "ProcessGroupVariable", we'll be guarding on its
+                # ID_MATCH based on how it was constructed.
+
+                # We desugar it at trace-time into ranks by directly calling util
+                # bake the result into the trace
+                if len(args) == 1:
+                    # group or group name
+                    assert isinstance(args[0], (ProcessGroupVariable, ConstantVariable))
+                elif len(args) == 2:
+                    # ranks + tag
+                    assert isinstance(args[0], ListVariable) and isinstance(
+                        args[1], ConstantVariable
+                    )
+                else:
+                    raise AssertionError(
+                        f"Invalid group value ({args}) for constant pg "
+                        f"function {self.value}"
+                    )
+                args_as_value = [arg.as_python_constant() for arg in args]
+                invocation_result = self.value(*args_as_value)
+
+                # Note - while we *could* cook up sources around invocations, like a FunctionSource
+                # the space of invoking functions in the middle of the guard chain is very iffy. As such,
+                # guard propagation via options is the best we can do.
+                return SourcelessBuilder()(tx, invocation_result)
+
+            @register(DTensor.from_local)
+            def handle_from_local(self, tx, *args, **kwargs):
+                # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
+                # and rewrite args to have only proxyable args, then insert call_function
+                args_as_value = [x.as_python_constant() for x in args[1:]]
+                kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
+
+                def fn_with_prim_types(x):
+                    return self.value(x, *args_as_value, **kwargs_as_value)
+
+                # attach the same function name for better debugging
+                fn_with_prim_types.__name__ = "prim " + self.value.__name__
+
+                return wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        fn_with_prim_types,
+                        *proxy_args_kwargs([args[0]], {}),
+                    ),
+                )
+
+        @register(torch.nested.nested_tensor)
+        def handle_nested_tensor(self, tx, *args, layout=None, **kwargs):
+            if layout and layout.as_python_constant() == torch.strided:
+                raise unimplemented(
+                    "torch.compile does not support strided NestedTensor"
+                )
+
+        @register(torch.nn.functional.one_hot)
+        def handle_one_hot(self, tx, *args, **kwargs):
+            if len(args) + len(kwargs) == 1 or (
                 len(args) == 2
                 and args[1].is_python_constant()
                 and args[1].as_python_constant() == -1
-            )
+            ):
+                raise unimplemented(
+                    "torch.nn.functional.one_hot with data-dependent output shape"
+                )
+
+        @register(torch.fx.experimental.symbolic_shapes.guard_size_oblivious)
+        def handle_guard_size_oblivious(self, tx, expr):
+            if isinstance(expr, SymNodeVariable):
+                # TODO: this probably should be folded somewhere else but I'm not sure where
+                # TODO: some of the other symbolic_shapes special tools can also get this treatment too
+                return variables.ConstantVariable.create(
+                    torch.fx.experimental.symbolic_shapes.guard_size_oblivious(
+                        expr.sym_num
+                    )
+                )
+
+        return handlers
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from . import ConstantVariable, SymNodeVariable, TensorVariable
+        from .builder import wrap_fx_proxy
+
+        if self.can_constant_fold_through() and check_unspec_or_constant_args(
+            args, kwargs
         ):
-            raise unimplemented(
-                "torch.nn.functional.one_hot with data-dependent output shape"
-            )
-        elif (
-            self.value is torch.fx.experimental.symbolic_shapes.guard_size_oblivious
-            and len(args) == 1
-            and isinstance(args[0], SymNodeVariable)
-        ):
-            # TODO: this probably should be folded somewhere else but I'm not
-            # sure where
-            # TODO: some of the other symbolic_shapes special tools can also
-            # get this treatment too
-            (cond,) = args
-            return variables.ConstantVariable.create(
-                torch.fx.experimental.symbolic_shapes.guard_size_oblivious(cond.sym_num)
+            # constant fold
+            return ConstantVariable.create(
+                self.as_python_constant()(
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                ),
             )
 
+        handler = self._get_handlers().get(self.value)
+        if handler:
+            result = handler(self, tx, *args, **kwargs)
+            if result:
+                return result
+
+        if can_dispatch_torch_function(tx, args, kwargs):
+            return dispatch_torch_function(tx, self, args, kwargs)
         else:
             any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
+
             all_ints_or_floats = all(
                 isinstance(x, (variables.ConstantVariable, variables.SymNodeVariable))
                 for x in args
