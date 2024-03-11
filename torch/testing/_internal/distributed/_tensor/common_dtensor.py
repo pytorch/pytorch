@@ -164,6 +164,7 @@ class Transformer(nn.Module):
         assert args.vocab_size is not None
         assert args.max_seq_len is not None
         self.model_args = args
+        self.max_seq_len = args.max_seq_len
         self.tok_embeddings = nn.Embedding(args.vocab_size, args.dim)
         self.pos_embeddings = nn.Embedding(args.max_seq_len, args.dim)
         self.dropout = nn.Dropout(args.dropout_p)
@@ -178,7 +179,7 @@ class Transformer(nn.Module):
 
     def forward(self, tokens):
         _bsz, seq_len = tokens.size()
-        assert seq_len <= self.model_args.max_seq_len
+        assert seq_len <= self.max_seq_len
         h = self.tok_embeddings(tokens)
         pos = torch.arange(0, seq_len, device=tokens.device)
         p = self.pos_embeddings(pos)  # positional embeddings of shape (seq_len, dim)
