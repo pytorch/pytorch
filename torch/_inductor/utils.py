@@ -693,9 +693,9 @@ try:
 
     attrs_descriptor_available = True
     # Determine if 'ids_of_folded_args' is a valid field for AttrsDescriptor
-    ids_of_folded_args_available = "ids_of_folded_args" in [
-        f.name for f in fields(AttrsDescriptor)
-    ]
+    attr_desc_fields = {f.name for f in fields(AttrsDescriptor)}
+    ids_of_folded_args_available = "ids_of_folded_args" in attr_desc_fields
+    divisible_by_8_available = "divisible_by_8" in attr_desc_fields
 except ImportError:
     attrs_descriptor_available = False
 
@@ -712,12 +712,13 @@ if attrs_descriptor_available:
         kwargs = {
             "divisible_by_16": divisible_by_16,
             "equal_to_1": equal_to_1,
-            "divisible_by_8": divisible_by_8,
         }
 
         # Conditionally add 'ids_of_folded_args' if it's available in AttrsDescriptor
         if ids_of_folded_args_available:
             kwargs["ids_of_folded_args"] = ids_of_folded_args
+        if divisible_by_8_available:
+            kwargs["divisible_by_8"] = divisible_by_8
 
         # Instantiate AttrsDescriptor with the prepared arguments
         return AttrsDescriptor(**kwargs)
@@ -1032,11 +1033,13 @@ def run_and_get_code(fn, *args, **kwargs):
             source_codes.append(f.read())
         return mod
 
-    with mock.patch.object(
-        GraphLowering, "compile_to_module", patched_compile_to_module
-    ):
-        torch._dynamo.reset()
-        result = fn(*args, **kwargs)
+    # If FX code caching is enabled, a hit prevents getting the code.
+    with config.patch({"fx_graph_cache": False}):
+        with mock.patch.object(
+            GraphLowering, "compile_to_module", patched_compile_to_module
+        ):
+            torch._dynamo.reset()
+            result = fn(*args, **kwargs)
     return result, source_codes
 
 
