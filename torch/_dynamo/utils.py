@@ -1673,10 +1673,17 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         elif isinstance(
             cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
         ):
-            unimplemented(
-                f"dynamic shape operator: {cause.func}; "
-                "to enable, set torch._dynamo.config.capture_dynamic_output_shape_ops = True"
-            )
+            if not torch._dynamo.config.capture_dynamic_output_shape_ops:
+                unimplemented(
+                    f"dynamic shape operator: {cause.func}; "
+                    "to enable, set torch._dynamo.config.capture_dynamic_output_shape_ops = True"
+                )
+            else:
+                unimplemented(
+                    f"dynamic shape operator: {cause.func}; "
+                    "Operator does not have a meta kernel that supports dynamic output shapes, "
+                    "please report an issue to PyTorch"
+                )
         elif isinstance(
             cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
         ):
