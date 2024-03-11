@@ -15,10 +15,13 @@ import torch.onnx.operators
 from torch._logging import warning_once
 
 from torch._streambase import _StreamBase
+from ..._guards import TracingContext
 from .. import config, polyfill, variables
+from ..codegen import PyCodegen
 from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
+from ..source import SyntheticLocalSource
 from ..utils import (
     check_unspec_or_constant_args,
     guard_if_dyn,
@@ -288,9 +291,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     handlers[fn] = handler
                 return handler
 
-            if not callable(fns[0]):
-                assert len(fns) == 1
-                fns = [*fns[0]]
             assert callable(fns[0])
             return _register
 
@@ -306,7 +306,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         )
         from .builder import SourcelessBuilder, wrap_fx_proxy, wrap_fx_proxy_cls
 
-        @register(tracing_state_functions)
+        @register(*tracing_state_functions)
         def handle_tracing_state_functions(self, tx, *args, **kwargs):
             assert not args and not kwargs
             # See: https://github.com/pytorch/pytorch/issues/110765
@@ -373,9 +373,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if isinstance(input, TensorVariable) and input.size is not None:
                 return ConstantVariable.create(product(input.size))
             elif isinstance(input, TensorVariable):
-                return input.call_method(tx, "numel", [input], {})
+                # Workaround dynamic shapes issue
+                return input.call_method(tx, "numel", [], {})
 
-        @register(REWRITE_OPS_TO_TENSOR_SIZE_METHOD)
+        @register(*REWRITE_OPS_TO_TENSOR_SIZE_METHOD)
         def handle_tensor_size_rewrites(self, tx, input):
             assert isinstance(input, TensorVariable)
             return input.call_method(tx, "size", [], {})
@@ -417,12 +418,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             torch.overrides.has_torch_function_unary,
         )
         def handle_has_torch_function(self, tx, *args):
-            return ConstantVariable.create(
-                any(has_torch_function(a) for a in args),
-            )
+            return ConstantVariable.create(any(has_torch_function(x) for x in args))
 
         @register(
-            dict.fromkeys(
+            *dict.fromkeys(  # remove duplicates
                 device_interface.stream
                 for _, device_interface in get_registered_device_interfaces()
             )
@@ -473,17 +472,20 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_backward_hook(self, tx, *args, **kwargs):
             return variables.BackwardHookVariable.create(tx, *args, **kwargs)
 
-        # TODO: These special cases shouldn't be necessary; we should
-        # generically support torch.ops that return int
+        @register(torch.nn.Parameter)
+        def handle_parameter(self, tx, *args, **kwargs):
+            return self.call_nn_parameter(tx, *args, **kwargs)
 
         @register(torch.ops.aten.sym_size, torch.ops.aten.sym_size.int)
-        def handle_sym_size(self_, tx, self, dim):
+        def handle_sym_size(self_, tx, self, dim=None):
             # we see this when retracing already traced code
-            return self.call_method(tx, "size", [dim], {})
+            if dim is not None:
+                return self.call_method(tx, "size", [dim], {})
 
         @register(torch.ops.aten.sym_stride, torch.ops.aten.sym_stride.int)
-        def handle_sym_stride(self_, tx, self, dim):
-            return self.call_method(tx, "stride", [dim], {})
+        def handle_sym_stride(self_, tx, self, dim=None):
+            if dim is not None:
+                return self.call_method(tx, "stride", [dim], {})
 
         @register(torch.addcdiv)
         def handle_addcdiv(self, tx, *args, **kwargs):
@@ -615,6 +617,14 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     )
                 )
 
+        @register(torch._C._autograd._unsafe_set_version_counter)
+        def handle_unsafe_set_version_counter(self, tx, *args, **kwargs):
+            from ..tensor_version_op import _unsafe_set_version_counter
+
+            return TorchInGraphFunctionVariable(
+                _unsafe_set_version_counter
+            ).call_function(tx, args, kwargs)
+
         return handlers
 
     def call_function(
@@ -634,9 +644,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 ),
             )
 
-        handler = self._get_handlers().get(self.value)
-        if handler:
-            result = handler(self, tx, *args, **kwargs)
+        special_handler = self._get_handlers().get(self.value)
+        if special_handler:
+            result = special_handler(self, tx, *args, **kwargs)
             if result:
                 return result
 
@@ -800,3 +810,50 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             return variables.LambdaVariable(handle_ntuple)
         else:
             return handle_ntuple(args[0])
+
+    @classmethod
+    def call_nn_parameter(cls, tx, data=None, requires_grad=True):
+        """A call to torch.nn.Parameter() gets lifted to before the graph"""
+        if isinstance(requires_grad, variables.VariableTracker):
+            try:
+                requires_grad = requires_grad.as_python_constant()
+            except NotImplementedError:
+                unimplemented("Parameter(requires_grad=...) not constant")
+
+        if not isinstance(data, variables.TensorVariable):
+            unimplemented(f"Parameter(data={data}) not implemented")
+
+        # this results in cleaner graphs, but only works for inputs
+        if data.source:
+            return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
+
+        unimplemented("Parameter() on non-input")
+
+    @staticmethod
+    def _nn_param_via_prefix_insert(tx, data, requires_grad):
+        # Alternate version if we have a .source
+        from .builder import VariableBuilder
+
+        varname = tx.output.new_var()
+
+        # construct the nn.Parmeter before the graph save it to varname
+        cg = PyCodegen(tx)
+        cg.load_import_from("torch.nn", "Parameter")
+        cg(data.source)
+        cg(variables.ConstantVariable(requires_grad))
+        cg.call_function(2, True)
+        cg.store(varname)
+        tx.output.pregraph_bytecode.extend(cg.get_instructions())
+
+        # add the newly constructed nn.Parameter as a graph input
+        source = SyntheticLocalSource(varname)
+        example_value = torch.nn.Parameter(
+            tx.output.example_value_from_input_node(data.as_proxy().node)
+        )
+        result = VariableBuilder(tx, source)(example_value)
+        # No need to guard on this since we already guarded on `data`.
+        # These guards would fail since varname doesn't exist until after the function starts
+        TracingContext.get().guards_context.dynamo_guards.remove_guards_with_source(
+            source
+        )
+        return result
