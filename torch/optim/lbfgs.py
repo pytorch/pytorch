@@ -257,20 +257,28 @@ class LBFGS(Optimizer):
                 view = p.grad.to_dense().view(-1)
             else:
                 view = p.grad.view(-1)
-            if torch.is_complex(view):
-                view = torch.view_as_real(view).view(-1)
-            views.append(view)
+            if torch.is_complex(p):
+                views.append(view.real.view(-1))
+                views.append(view.imag.view(-1))
+            else:
+                views.append(view)
         return torch.cat(views, 0)
 
     def _add_grad(self, step_size, update):
+        print(f"IN _ADD_GRAD NOW {step_size=} {update=}")
         offset = 0
         for p in self._params:
-            if torch.is_complex(p):
-                p = torch.view_as_real(p)
             numel = p.numel()
-            # view as to avoid deprecated pointwise semantics
-            p.add_(update[offset:offset + numel].view_as(p), alpha=step_size)
-            offset += numel
+            if torch.is_complex(p):
+                p.real.add_(update[offset:offset + numel].view_as(p), alpha=step_size)
+                offset += numel
+                p.imag.add_(update[offset:offset + numel].view_as(p), alpha=step_size)
+                offset += numel
+            else:
+                # view as to avoid deprecated pointwise semantics
+                p.add_(update[offset:offset + numel].view_as(p), alpha=step_size)
+                offset += numel
+        print(f"ABOUT TO LEAVE _ADD_GRAD NOW {self._params=}")
         assert offset == self._numel()
 
     def _clone_param(self):
@@ -322,6 +330,7 @@ class LBFGS(Optimizer):
         state['func_evals'] += 1
 
         flat_grad = self._gather_flat_grad()
+        print(f"FIRST {flat_grad=}")
         opt_cond = flat_grad.abs().max() <= tolerance_grad
 
         # optimal condition
@@ -336,11 +345,14 @@ class LBFGS(Optimizer):
         ro = state.get('ro')
         H_diag = state.get('H_diag')
         prev_flat_grad = state.get('prev_flat_grad')
+        print(f"{prev_flat_grad=}")
+
         prev_loss = state.get('prev_loss')
 
         n_iter = 0
         # optimize for a max of max_iter iterations
         while n_iter < max_iter:
+            print(f"NEW ITERRRRRR {n_iter=}")
             # keep track of nb of iterations
             n_iter += 1
             state['n_iter'] += 1
@@ -350,6 +362,7 @@ class LBFGS(Optimizer):
             ############################################################
             if state['n_iter'] == 1:
                 d = flat_grad.neg()
+                print(f"{d=}")
                 old_dirs = []
                 old_stps = []
                 ro = []
@@ -359,6 +372,7 @@ class LBFGS(Optimizer):
                 y = flat_grad.sub(prev_flat_grad)
                 s = d.mul(t)
                 ys = y.dot(s)  # y*s
+                print(f"{ys=}")
                 if ys > 1e-10:
                     # updating memory
                     if len(old_dirs) == history_size:
@@ -407,12 +421,16 @@ class LBFGS(Optimizer):
             ############################################################
             # reset initial guess for step size
             if state['n_iter'] == 1:
+                print(f"{flat_grad.abs()=}")
+                print(f"{flat_grad.abs().sum()=}")
                 t = min(1., 1. / flat_grad.abs().sum()) * lr
             else:
                 t = lr
+            print(f"{t=}")
 
             # directional derivative
             gtd = flat_grad.dot(d)  # g * d
+            print(f"{gtd=}")
 
             # directional derivative is below tolerance
             if gtd > -tolerance_change:
@@ -434,6 +452,7 @@ class LBFGS(Optimizer):
                         obj_func, x_init, t, d, loss, flat_grad, gtd)
                 self._add_grad(t, d)
                 opt_cond = flat_grad.abs().max() <= tolerance_grad
+                print(f"{flat_grad.abs().max()=}, {tolerance_grad=}, {opt_cond=}")
             else:
                 # no line search, simply move with fixed-step
                 self._add_grad(t, d)
@@ -445,6 +464,7 @@ class LBFGS(Optimizer):
                         loss = float(closure())
                     flat_grad = self._gather_flat_grad()
                     opt_cond = flat_grad.abs().max() <= tolerance_grad
+                    print(f"{flat_grad.abs().max()=}, {tolerance_grad=}, {opt_cond=}")
                     ls_func_evals = 1
 
             # update func eval

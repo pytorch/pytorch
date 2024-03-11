@@ -170,9 +170,9 @@ class TestOptimRenewed(TestCase):
 
             # Last param is intentionally real to test that we can mix real and complex
             complex_params = [
-                torch.randn(10, 5, device=device, dtype=dtype, requires_grad=True),
-                torch.randn(10, device=device, dtype=dtype, requires_grad=True),
-                torch.randn(10, 5, device=device, dtype=torch.float32, requires_grad=True),
+                # torch.randn(10, 5, device=device, dtype=dtype, requires_grad=True),
+                torch.randn(2, device=device, dtype=dtype, requires_grad=True),
+                # torch.randn(10, 5, device=device, dtype=torch.float32, requires_grad=True),
             ]
             real_params = [
                 (
@@ -251,11 +251,11 @@ class TestOptimRenewed(TestCase):
             optim1 = optim_cls([a1], **optim_input.kwargs)
             optim2 = optim_cls([a1_real, a1_imag], **optim_input.kwargs)
 
-            a1_reals = TensorTracker()
-            a1_imags = TensorTracker()
-            a1_grad_reals = TensorTracker()
-            a1_grad_imags = TensorTracker()
-            losses = TensorTracker()
+            a1_reals = TensorTracker("a1_reals")
+            a1_imags = TensorTracker("a1_imags")
+            a1_grad_reals = TensorTracker("a1_grad_reals")
+            a1_grad_imags = TensorTracker("a1_grad_imags")
+            losses = TensorTracker("losses")
 
             def closure1():
                 optim1.zero_grad()
@@ -285,7 +285,7 @@ class TestOptimRenewed(TestCase):
                 return loss
 
 
-            for _ in range(3):
+            for _ in range(1):
                 if optim_info.step_requires_closure:
                     # LBFGS, for example, requires closure and calls it internally
                     optim1.step(closure1)

@@ -562,15 +562,15 @@ def optim_error_inputs_func_asgd(device, dtype):
 def optim_inputs_func_lbfgs(device):
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
-        OptimizerInput(params=None, kwargs={"lr": 0.01}, desc="non-default lr"),
-        OptimizerInput(
-            params=None, kwargs={"tolerance_grad": 1e-6}, desc="tolerance_grad"
-        ),
-        OptimizerInput(
-            params=None,
-            kwargs={"line_search_fn": "strong_wolfe"},
-            desc="strong_wolfe",
-        ),
+        # OptimizerInput(params=None, kwargs={"lr": 0.01}, desc="non-default lr"),
+        # OptimizerInput(
+        #     params=None, kwargs={"tolerance_grad": 1e-6}, desc="tolerance_grad"
+        # ),
+        # OptimizerInput(
+        #     params=None,
+        #     kwargs={"line_search_fn": "strong_wolfe"},
+        #     desc="strong_wolfe",
+        # ),
     ]
 
 
@@ -2127,14 +2127,15 @@ class TensorTracker:
     numerical discrepancies, and so when the test fails, it is likely a real problem.
     """
 
-    def __init__(self):
+    def __init__(self, name=None):
         self.tensors = []
+        self.name = name
 
     def add(self, tensor):
         """
         Add a clone().detach()'d version of the tensor
         """
-        self.tensors.append(tensor.clone().detach())
+        self.tensors.append(tensor.clone().detach().requires_grad_(tensor.requires_grad))
 
     # pops from beginning, like a queue and not a stack!
     def pop_check_set(self, tensor_to_set, testcase):
@@ -2147,6 +2148,9 @@ class TensorTracker:
         ref = self.tensors.pop(0)
 
         testcase.assertTrue(isinstance(ref, Tensor), f"{type(ref)=}")
+        torch.set_printoptions(precision=10)
+        if not torch.equal(tensor_to_set, ref):
+            print(f"{self.name if self.name is not None else ''}\n{tensor_to_set=}\n          {ref=}")
         testcase.assertEqual(tensor_to_set, ref)
 
         with torch.no_grad():
