@@ -31,6 +31,7 @@ from .utils import (
     conditional_product,
     create_bandwidth_info_str,
     do_bench,
+    get_max_y_grid,
     get_num_bytes,
     next_power_of_2,
     triton_config_to_hashable,
@@ -1442,7 +1443,7 @@ def grid(*numels):
         x_grid = get_grid_dim(xnumel, meta.get("XBLOCK", 1))
         y_grid = get_grid_dim(ynumel, meta.get("YBLOCK", None))
 
-        MAX_Y_GRID = 65536
+        MAX_Y_GRID = get_max_y_grid()
         if znumel is None and max_grid_dims <= 2:
             div = ceildiv(y_grid, MAX_Y_GRID)
             y_grid = y_grid // div
@@ -1450,7 +1451,7 @@ def grid(*numels):
         else:
             z_grid = get_grid_dim(znumel, meta.get("ZBLOCK", None))
             torch._check(
-                y_grid <= 65535,
+                y_grid <= MAX_Y_GRID,
                 lambda: f"Generated y grid behind 2^16 ({y_grid}) not supported with z dimension present. File issue",
             )
 

@@ -51,6 +51,7 @@ from ..utils import (
     get_dtype_size,
     get_fused_kernel_name,
     get_kernel_metadata,
+    get_max_y_grid,
     green_text,
     is_welford_reduction,
     next_power_of_2,
@@ -1098,11 +1099,12 @@ class IterationRangesRoot(IterationRanges):
         key = f"tl.program_id({self.grid_dim})"
         # y_grid has a limit, so express it in terms of y and z in case of overflow.
         # z grid is only exercised when max_tiles == 3 (off by default).
-        MAX_Y_GRID = 65536
-        if self.grid_dim == 1 and config.triton.max_tiles <= 2 and not (
-            isinstance(self.numel, int) and self.numel <= MAX_Y_GRID
+        if (
+            self.grid_dim == 1
+            and config.triton.max_tiles <= 2
+            and not (isinstance(self.numel, int) and self.numel <= get_max_y_grid())
         ):
-            key = f'{key} * {f"tl.program_id({self.grid_dim + 1})"}'
+            key = f"{key} * (tl.program_id({self.grid_dim + 1}) + 1)"
         pid = self.pid_cache.get(key, key)
         if self.kernel.index_dtype != "tl.int32":
             return f"{pid}.to({self.kernel.index_dtype})"
