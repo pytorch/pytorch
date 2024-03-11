@@ -122,8 +122,7 @@ manual_torch_name_rule_map = {
     "torch.manual_seed": SkipFunctionVariable,
     # https://github.com/pytorch/pytorch/issues/93501
     "torch.nn.utils.rnn.pack_padded_sequence": SkipFunctionVariable,
-    # https://github.com/pytorch/pytorch/issues/99569
-    "torch.nn.Parameter": SkipFunctionVariable,
+    "torch.nn.Parameter": TorchInGraphFunctionVariable,
     "torch._nested_tensor_from_mask": SkipFunctionVariable,
     "torch._nested_from_padded": SkipFunctionVariable,
     # symbol operators implemented in Python
@@ -244,6 +243,7 @@ manual_torch_name_rule_map = {
     "torch.sparse_csc_tensor": SkipFunctionVariable,
     "torch.sparse_csr_tensor": SkipFunctionVariable,
     "torch.sparse_compressed_tensor": SkipFunctionVariable,
+    "torch._C._autograd._unsafe_set_version_counter": TorchInGraphFunctionVariable,
 }
 
 
@@ -815,6 +815,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._last_executed_optimized_graph",
         "torch._C._len_torch_dispatch_stack",
         "torch._C._len_torch_function_stack",
+        "torch._C._linalg._linalg_eigvals",
         "torch._C._linalg.linalg_cholesky_ex",
         "torch._C._linalg.linalg_cholesky",
         "torch._C._linalg.linalg_cond",
@@ -1026,6 +1027,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._scatter_out",
         "torch._C._scatter",
         "torch._C._select_conv_backend",
+        "torch._C._select_batch_norm_backend",
         "torch._C._set_autograd_fallback_mode",
         "torch._C._set_backcompat_broadcast_warn",
         "torch._C._set_backcompat_keepdim_warn",
@@ -1249,6 +1251,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._cast_Long",
         "torch._cast_Short",
         "torch._choose_qparams_per_tensor",
+        "torch._chunk_cat",
         "torch._coalesce",
         "torch._compute_linear_combination",
         "torch._conj_copy",

@@ -2712,9 +2712,6 @@ class GraphModule(torch.nn.Module):
 
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
-
-        count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
-
         _enter_dual_level = torch._C._enter_dual_level()
 
         maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
@@ -2855,9 +2852,6 @@ class GraphModule(torch.nn.Module):
 
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
-
-        count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
-
         _enter_dual_level = torch._C._enter_dual_level()
 
         maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
@@ -4526,9 +4520,6 @@ class GraphModule(torch.nn.Module):
 
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
-
-        count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
-
         _enter_dual_level = torch._C._enter_dual_level()
 
         maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
@@ -4587,9 +4578,6 @@ class GraphModule(torch.nn.Module):
 
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
-
-        count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
-
         _enter_dual_level = torch._C._enter_dual_level()
 
         maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
@@ -4652,9 +4640,6 @@ class GraphModule(torch.nn.Module):
 
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
-
-        count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
-
         _enter_dual_level = torch._C._enter_dual_level()
 
         maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
@@ -4723,9 +4708,6 @@ class GraphModule(torch.nn.Module):
 
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
         _set_fwd_grad_enabled_1 = torch._C._set_fwd_grad_enabled(True)
-
-        count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
-
         _enter_dual_level = torch._C._enter_dual_level()
 
         maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
@@ -4800,9 +4782,6 @@ class GraphModule(torch.nn.Module):
 
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
         _set_fwd_grad_enabled_3 = torch._C._set_fwd_grad_enabled(True)
-
-        count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
-
         _enter_dual_level = torch._C._enter_dual_level()
 
         maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
@@ -4858,9 +4837,73 @@ class GraphModule(torch.nn.Module):
             return torch.func.jvp(fn, (x,), (x,))
 
         x = torch.randn(3, 3, 3)
-        expected = wrapper_fn(x)
-        actual = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(x)
-        self.assertEqual(actual, expected)
+        wrapped_gm = self._compile_check(wrapper_fn, (x,))
+
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        t = L_x_
+
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+
+        _jvp_treespec_compare = torch._functorch.eager_transforms._jvp_treespec_compare((t,), (t,))
+
+        _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
+        _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
+        _enter_dual_level = torch._C._enter_dual_level()
+
+        maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
+
+        t_1 = torch._make_dual(t, t, level = 0);  t = None
+
+        _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+
+        _jvp_treespec_compare_1 = torch._functorch.eager_transforms._jvp_treespec_compare((t_1,), (t_1,))
+
+        _jvp_increment_nesting_1 = torch._C._functorch._jvp_increment_nesting()
+        _set_fwd_grad_enabled_1 = torch._C._set_fwd_grad_enabled(True)
+
+        maybe_load_decompositions_1 = torch.autograd.forward_ad.maybe_load_decompositions()
+
+        _make_dual_1 = torch._make_dual(t_1, t_1, level = 0);  t_1 = None
+
+        dual = torch.sin(_make_dual_1);  _make_dual_1 = None
+
+        _unpack_dual = torch._unpack_dual(dual, level = 0);  dual = None
+        child_3 = _unpack_dual[0]
+        child_4 = _unpack_dual[1];  _unpack_dual = None
+
+        dual_2 = torch._C._functorch._unwrap_for_grad(child_3, 2);  child_3 = None
+
+        dual_4 = torch._C._functorch._unwrap_for_grad(child_4, 2);  child_4 = None
+
+        _set_fwd_grad_enabled_2 = torch._C._set_fwd_grad_enabled(True)
+        _jvp_decrement_nesting = torch._C._functorch._jvp_decrement_nesting()
+        _saved_tensors_hooks_disable_2 = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
+
+        _unpack_dual_1 = torch._unpack_dual(dual_2, level = 0);  dual_2 = None
+        child_7 = _unpack_dual_1[0]
+        child_9 = _unpack_dual_1[1];  _unpack_dual_1 = None
+        _unpack_dual_2 = torch._unpack_dual(dual_4, level = 0);  dual_4 = None
+        child_8 = _unpack_dual_2[0]
+        child_10 = _unpack_dual_2[1];  _unpack_dual_2 = None
+
+        _unwrap_for_grad_2 = torch._C._functorch._unwrap_for_grad(child_7, 1);  child_7 = None
+        _unwrap_for_grad_3 = torch._C._functorch._unwrap_for_grad(child_8, 1);  child_8 = None
+
+        _unwrap_for_grad_4 = torch._C._functorch._unwrap_for_grad(child_9, 1);  child_9 = None
+        _unwrap_for_grad_5 = torch._C._functorch._unwrap_for_grad(child_10, 1);  child_10 = None
+
+        _exit_dual_level = torch._C._exit_dual_level(0)
+        _set_fwd_grad_enabled_3 = torch._C._set_fwd_grad_enabled(True)
+        _jvp_decrement_nesting_1 = torch._C._functorch._jvp_decrement_nesting()
+        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
+        return (_unwrap_for_grad_2, _unwrap_for_grad_3, _unwrap_for_grad_4, _unwrap_for_grad_5)
+""",
+        )
 
     @config.patch(capture_func_transforms=True)
     def test_jvp_freevar_python_scalar(self):
