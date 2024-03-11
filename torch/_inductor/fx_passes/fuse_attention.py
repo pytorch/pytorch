@@ -482,47 +482,10 @@ def _sfdp_replacement_18(
         query.transpose(1, 2),
         key.transpose(1, 2),
         value.transpose(1, 2),
-        attn_mask=None,
+        attn_mask=causal_mask,
         dropout_p=dropout_p,
-        is_causal=True,
-        scale=1.0 / inv_scale.item(),
-    )
-
-
-def _sfdp_pattern_18_with_attn_mask(
-    query, key, value, inv_scale, attn_mask, causal_mask_value, causal_mask, dropout_p
-):
-    # for hf_GPT2 with dropout
-    query = query.permute([0, 2, 1, 3])
-    key = key.permute([0, 2, 1, 3])
-    value = value.permute([0, 2, 1, 3])
-    attn_weights = torch.matmul(query, key.permute(0, 1, 3, 2))
-    attn_weights = attn_weights.div(inv_scale)
-    attn_weights = torch.where(causal_mask, attn_weights, causal_mask_value)
-    attn_weights += attn_mask
-    return (
-        (
-            torch.nn.functional.dropout(attn_weights.softmax(dim=-1), dropout_p).matmul(
-                value
-            )
-        ),
-        key,
-        value,
-    )
-
-
-def _sfdp_replacement_18_with_attn_mask(
-    query, key, value, inv_scale, attn_mask, causal_mask_value, causal_mask, dropout_p
-):
-    counters["inductor"]["fuse_attention"] += 1
-    return aten.scaled_dot_product_attention(
-        query.transpose(1, 2),
-        key.transpose(1, 2),
-        value.transpose(1, 2),
-        attn_mask=None,
-        dropout_p=dropout_p,
-        is_causal=True,
-        scale=1.0 / inv_scale.item(),
+        is_causal=False,
+        scale=1.0 / math.sqrt(value.size(-1)),
     )
 
 
@@ -546,38 +509,10 @@ def _sfdp_replacement_19(
         query,
         key,
         value,
-        attn_mask=None,
+        attn_mask=causal_mask,
         dropout_p=dropout_p,
-        is_causal=True,
-        scale=1.0 / inv_scale.item(),
-    )
-
-
-def _sfdp_pattern_19_with_attn_mask(
-    query, key, value, inv_scale, attn_mask, causal_mask_value, causal_mask, dropout_p
-):
-    # for hf_GPT2 with dropout (batch size 1)
-    attn_weights = torch.matmul(query, key.permute(0, 1, 3, 2))
-    attn_weights = attn_weights.div(inv_scale)
-    attn_weights = torch.where(causal_mask, attn_weights, causal_mask_value)
-    attn_weights += attn_mask
-    return torch.nn.functional.dropout(attn_weights.softmax(dim=-1), dropout_p).matmul(
-        value
-    )
-
-
-def _sfdp_replacement_19_with_attn_mask(
-    query, key, value, inv_scale, attn_mask, causal_mask_value, causal_mask, dropout_p
-):
-    counters["inductor"]["fuse_attention"] += 1
-    return aten.scaled_dot_product_attention(
-        query,
-        key,
-        value,
-        attn_mask=attn_mask,
-        dropout_p=dropout_p,
-        is_causal=True,
-        scale=1.0 / inv_scale.item(),
+        is_causal=False,
+        scale=1.0 / math.sqrt(value.size(-1)),
     )
 
 
@@ -856,28 +791,6 @@ def _get_sfdp_patterns():
                 _sfdp_pattern_19,
                 _sfdp_replacement_19,
                 [g(), g(), g(), c(), c(), cmask_q_post_permute()],
-                d,
-                _sfdp_params_check,
-            ),
-            (
-                _sfdp_pattern_18_with_attn_mask,
-                _sfdp_replacement_18_with_attn_mask,
-                [g(), g(), g(), c(), m(), c(), cmask()],
-                d,
-                _sfdp_params_check,
-            ),
-            (
-                _sfdp_pattern_19_with_attn_mask,
-                _sfdp_replacement_19_with_attn_mask,
-                [
-                    g(),
-                    g(),
-                    g(),
-                    c(),
-                    m_transposed_inputs(),
-                    c(),
-                    cmask_q_post_permute(),
-                ],
                 d,
                 _sfdp_params_check,
             ),
