@@ -2561,6 +2561,14 @@ class Layout(IRNode):
         if len(in_strides) == 0:
             return in_strides
 
+        # get_stride_order does not work with dynamic shape. Also we can not
+        # statically decide if a padding is needed or how much padding we should
+        # do for dynamic shape.
+        #
+        # Skip padding the strides for dynamic shape for now.
+        if not all(isinstance(s, (int, sympy.Integer)) for s in in_strides):
+            return in_strides
+
         stride_order = get_stride_order(in_strides)
         fill_order = stride_order2fill_order(stride_order)
 
