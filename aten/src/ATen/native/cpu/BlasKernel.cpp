@@ -288,15 +288,15 @@ void gemm_notrans_(
     at::Half* c,
     int64_t ldc) {
   // c += alpha * (a @ b)
-  if (n == 1) {
+  if (n == 1 && beta == 0.0) {
     at::native::blas_impl::fp16_gemv_notrans(m, k, alpha, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(b), 1, beta, reinterpret_cast<float16_t*>(c), 1);
     return;
   }
   for (const auto i : c10::irange(m)) {
     for (const auto j : c10::irange(n)) {
       const auto dot = sum(k, [&](int64_t l) -> float {
-        return c10::detail::fp16_from_bits(a[l * lda + i].x) *
-            c10::detail::fp16_from_bits(b[j * ldb + l].x);
+        return float(c10::detail::fp16_from_bits(a[l * lda + i].x)) *
+            float(c10::detail::fp16_from_bits(b[j * ldb + l].x));
       });
       if (beta == 0) {
         c[j * ldc + i] = alpha * dot;
@@ -305,6 +305,23 @@ void gemm_notrans_(
       }
     }
   }
+}
+
+
+static float compute_dot(const float16_t *a, const float16_t *b, int64_t l) {
+    if ((l&3) != 0) {
+      return sum(l, [&](int64_t i) -> float {
+        return float(a[i]) * float(b[i]);
+      });
+    }
+    float32x4_t rcv = vdupq_n_f32(0);
+    for (int64_t idx = 0; idx < l; idx += 4) {
+      float32x4_t aVec = vcvt_f32_f16(vld1_f16(a + idx));
+      float32x4_t bVec = vcvt_f32_f16(vld1_f16(b + idx));
+      rcv = vaddq_f32(rcv, vmulq_f32(aVec, bVec));
+    }
+    auto sum = vpaddq_f32(rcv, rcv);
+    return vgetq_lane_f32(vpaddq_f32(sum, sum), 0);
 }
 
 template <>
@@ -317,7 +334,7 @@ void gemm_transa_(
     float beta,
     at::Half *c, int64_t ldc) {
   // c = alpha * (a.T @ b) + beta * c
-  if (n == 1) {
+  if (n == 1 && beta == 0.0) {
     at::native::blas_impl::fp16_gemv_trans(k, m, alpha, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(b), 1, beta, reinterpret_cast<float16_t*>(c), 1);
     return;
   }
@@ -325,9 +342,7 @@ void gemm_transa_(
   for (const auto i : c10::irange(m)) {
     const auto *b_ = b;
     for (const auto j : c10::irange(n)) {
-      const auto dot = sum(k, [&](int64_t l) -> float {
-        return c10::detail::fp16_from_bits(a_[l].x) * c10::detail::fp16_from_bits(b_[l].x);
-      });
+      const auto dot = compute_dot(reinterpret_cast<const float16_t*>(a_), reinterpret_cast<const float16_t*>(b_), k);
       b_ += ldb;
       if (beta == 0) {
         c[j*ldc+i] = alpha*dot;
