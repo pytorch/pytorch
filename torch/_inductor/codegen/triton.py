@@ -1254,8 +1254,7 @@ class TritonKernel(Kernel):
         self.iter_vars_count = itertools.count()
         self.inside_reduction = self.numels[-1] != 1
         self.body = IndentedBuffer()
-        self.prologue_A_body = IndentedBuffer()
-        self.prologue_B_body = IndentedBuffer()
+        self.prologue_body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
         self.suffix: IndentedBuffer = IndentedBuffer()  # type: ignore[assignment]
         self.outside_loop_vars: Set[Any] = set()
@@ -1266,7 +1265,7 @@ class TritonKernel(Kernel):
         self.block_ptr_id = itertools.count()
         # buffer accesses in the kernel
         self.buf_accesses: DefaultDict[str, List[Dep]] = collections.defaultdict(list)
-        self.isEpilogue = True
+        self.is_epilogue = True
         self.rename_dict = dict()
 
         self.persistent_reduction: bool = (
@@ -2427,13 +2426,10 @@ class TritonKernel(Kernel):
         result_var.mask_vars = masks  # type: ignore[attr-defined]
         return result_var
 
-    def codegen_prologue_body(self, x):
-        if x == "a":
-            # self.compute is not cleared for x == b
-            if len(self.prologue_A_body.getvalue()) == 0:
-                self.prologue_A_body.splice(self.compute.getvalue().replace("prologue_A_or_B", "a"))
-        else:
-            self.prologue_B_body.splice(self.compute.getvalue().replace("prologue_A_or_B", "b"))
+    def codegen_prologue_body(self, x, clear_buffer=False):
+        self.prologue_body.clear()
+        self.prologue_body.splice(self.compute.getvalue().replace("prologue_val", x))
+        if clear_buffer:
             self.compute.clear()
 
     def codegen_body(self):
@@ -3575,7 +3571,7 @@ class TritonScheduling(BaseScheduling):
 
         return kernel_name
 
-    def codegen_template(self, template_node: BaseSchedulerNode, nodes: List[SchedulerNode], rename_dict: Dict[str, set] = None, isEpilogue = True):
+    def codegen_template(self, template_node: BaseSchedulerNode, nodes: List[SchedulerNode], rename_dict: Optional[Dict[str, Set[Any]]] = None, is_epilogue = True):
         """
         Codegen a triton template
         """
@@ -3584,7 +3580,7 @@ class TritonScheduling(BaseScheduling):
         kernel, render = template_node.node.make_kernel_render(template_node.node)
 
         with kernel:
-            kernel.isEpilogue = isEpilogue
+            kernel.is_epilogue = is_epilogue
             kernel.rename_dict = rename_dict
             for node in [template_node, *nodes]:
                 node.mark_run()

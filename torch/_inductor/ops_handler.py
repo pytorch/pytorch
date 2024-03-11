@@ -177,6 +177,12 @@ class OpsHandler(Protocol[T]):
         """
         ...
 
+    def set_cse_store_cache(self, name: str, value: str) -> None:
+        """
+        Cache 'value' with 'name'.
+        """
+        ...
+
     # TODO: Better explain how the "collective" semantics of these ops;
     # remember that the input value is a scalar, you can't reduce on it in the
     # traditional sense!

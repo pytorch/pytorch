@@ -1526,7 +1526,7 @@ class Kernel(CodeGen):
                 return self.load(name, index)
 
             @staticmethod
-            def cache_assign(name, value):
+            def set_cse_store_cache(name: str, value: str):
                 self.cse.store_cache[name] = value
 
             @staticmethod
@@ -1535,8 +1535,7 @@ class Kernel(CodeGen):
             ) -> None:
                 self.store_buffer_names.add(name)
                 if mode is None:
-                    if name not in self.cse.store_cache:
-                        self.cse.store_cache[name] = value
+                    self.cse.store_cache[name] = value
                     if self.current_node:
                         for other_name in self.current_node.get_mutations():
                             self.cse.store_cache[other_name] = value

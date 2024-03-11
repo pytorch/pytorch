@@ -214,6 +214,7 @@ def mm_options(config, sym_m, sym_n, sym_k, layout, b_prologue_cast_type=None):
         ALLOW_TF32=allow_tf32,
         ACC_TYPE=acc_type(layout.dtype),
         B_PROLOGUE_CAST_TYPE=b_prologue_cast_type,
+        ENABLED_PROLOGUE_FUSION=inductor_config.prologue_fusion,
         num_stages=config.num_stages,
         num_warps=config.num_warps,
         **config.kwargs,

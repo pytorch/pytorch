@@ -76,8 +76,10 @@ mm_template = TritonTemplate(
             b = tl.load(B, mask=rk[:, None] < k, other=0.)
         if B_PROLOGUE_CAST_TYPE is not None:
             b = b.to(B_PROLOGUE_CAST_TYPE)
-        {{prologue_A("a")}}
-        {{prologue_B("b")}}
+{% if ENABLED_PROLOGUE_FUSION %}
+        {{prologue("a", 0)}}
+        {{prologue("b", 1, True)}}
+{% endif %}
         acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
         A += BLOCK_K * stride_ak
         B += BLOCK_K * stride_bk

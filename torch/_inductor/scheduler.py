@@ -862,7 +862,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         self.users: List[NodeUser] = []
         self.inverse_users = []
         self.node_users = []
-        self.rename_dict: [str, set()] = dict()
+        self.rename_dict: Dict[str, Set[...]] = dict()
         self.group = max(snodes, key=lambda x: int(x.is_reduction())).group
         self.ancestors = set.union(
             *[x.ancestors for x in snodes if x.ancestors is not None]
@@ -2378,7 +2378,7 @@ class Scheduler:
                     *node1, node2 = node.get_nodes()
                     if isinstance(node2.node, ir.TemplateBuffer):
                         # prologue
-                        self.get_backend(device).codegen_template(node2, node1, rename_dict=node.rename_dict, isEpilogue=False)
+                        self.get_backend(device).codegen_template(node2, node1, rename_dict=node.rename_dict, is_epilogue=False)
             elif node.is_extern():
                 self.codegen_extern_call(node)
             elif node.is_foreach():
@@ -2450,7 +2450,7 @@ class BaseScheduling:
         raise NotImplementedError()
 
     def codegen_template(
-        self, template_node: SchedulerNode, epilogue_nodes: List[SchedulerNode], isEpilogue=True
+        self, template_node: SchedulerNode, epilogue_nodes: List[SchedulerNode], rename_dict: Optional[Dict[str, Set[Any]]] = None, is_epilogue=True
     ):
         """
         Given a template node, generate a kernel.

@@ -5,7 +5,7 @@ from .cuda.cuda_cpp_scheduling import CUDACPPScheduling
 
 from .triton import TritonScheduling
 
-from typing import Dict
+from typing import Any, Dict, Optional, Set
 
 class CUDACombinedScheduling(BaseScheduling):
     """
@@ -49,7 +49,7 @@ class CUDACombinedScheduling(BaseScheduling):
         return self._triton_scheduling.group_fn(sizes)
 
     def codegen_template(
-        self, template_node: SchedulerNode, epilogue_nodes: List[SchedulerNode], rename_dict: Dict[str, set] = None, isEpilogue = True
+        self, template_node: SchedulerNode, epilogue_nodes: List[SchedulerNode], rename_dict: Optional[Dict[str, Set[Any]]] = None, is_epilogue = True
     ):
         if self._cuda_cpp_scheduling.is_cuda_cpp_template(template_node):
             return self._cuda_cpp_scheduling.codegen_template(
@@ -57,7 +57,7 @@ class CUDACombinedScheduling(BaseScheduling):
             )
         else:
             return self._triton_scheduling.codegen_template(
-                template_node, epilogue_nodes, rename_dict, isEpilogue
+                template_node, epilogue_nodes, rename_dict, is_epilogue
             )
 
     def codegen_nodes(self, nodes: List[SchedulerNode]):
