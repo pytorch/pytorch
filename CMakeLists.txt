@@ -746,12 +746,12 @@ endif()
 # 1. USE_ROCM is always ON until include(cmake/Dependencies.cmake)
 # 2. USE_CUDA will become OFF during re-configuration
 # Truth Table:
-# CUDA 1st pass: USE_CUDA=True;USE_ROCM=True, FLASH evaluetes to ON by default
-# CUDA 2nd pass: USE_CUDA=True;USE_ROCM=False, FLASH evaluetes to ON by default
-# ROCM 1st pass: USE_CUDA=True;USE_ROCM=True, FLASH evaluetes to ON by default
-# ROCM 2nd pass: USE_CUDA=False;USE_ROCM=True, FLASH evaluetes to ON by default
-# CPU 1st pass: USE_CUDA=False(Cmd Option);USE_ROCM=True, FLASH evaluetes to OFF by default
-# CPU 2nd pass: USE_CUDA=False(Cmd Option);USE_ROCM=False, FLASH evaluetes to OFF by default
+# CUDA 1st pass: USE_CUDA=True;USE_ROCM=True, FLASH evaluates to ON by default
+# CUDA 2nd pass: USE_CUDA=True;USE_ROCM=False, FLASH evaluates to ON by default
+# ROCM 1st pass: USE_CUDA=True;USE_ROCM=True, FLASH evaluates to ON by default
+# ROCM 2nd pass: USE_CUDA=False;USE_ROCM=True, FLASH evaluates to ON by default
+# CPU 1st pass: USE_CUDA=False(Cmd Option);USE_ROCM=True, FLASH evaluates to OFF by default
+# CPU 2nd pass: USE_CUDA=False(Cmd Option);USE_ROCM=False, FLASH evaluates to OFF by default
 # Thus we cannot tell ROCM 2nd pass and CPU 1st pass
 #
 # The only solution is to include(cmake/Dependencies.cmake), and defer the
