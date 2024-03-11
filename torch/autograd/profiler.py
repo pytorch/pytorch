@@ -993,7 +993,7 @@ class KinetoStepTracker:
     for now. The result could be incorrect increments of the step count.
     """
 
-    _current_step = -1
+    _current_step = 0
     _step_dict: Dict[str, int] = defaultdict(int)
 
     @classmethod
