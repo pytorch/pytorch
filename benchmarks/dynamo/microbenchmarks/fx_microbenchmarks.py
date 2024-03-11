@@ -1,4 +1,5 @@
 import timeit
+
 import torch.fx
 
 N = 100000
