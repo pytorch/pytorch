@@ -399,8 +399,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             torch.overrides.has_torch_function_unary,
         ):
             assert not kwargs
+            elems = (
+                args[0].unpack_var_sequence(tx)
+                if len(args) == 1 and isinstance(args[0], TupleVariable)
+                else args
+            )
             return ConstantVariable.create(
-                any(has_torch_function(a) for a in args),
+                any(has_torch_function(x) for x in elems),
             )
         elif any(
             self.value is method
