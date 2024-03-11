@@ -326,7 +326,7 @@ void gemm_transa_(
     const auto *b_ = b;
     for (const auto j : c10::irange(n)) {
       const auto dot = sum(k, [&](int64_t l) -> float {
-        return c10::detail::fp32_from_bits(a_[l].x) * c10::detail::fp32_from_bits(b_[l].x);
+        return c10::detail::fp16_from_bits(a_[l].x) * c10::detail::fp16_from_bits(b_[l].x);
       });
       b_ += ldb;
       if (beta == 0) {
