@@ -487,7 +487,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.device_type: DeviceType = device_type
         self.device_index: int = device_index
         self.device_resource_id: int = (
-thread if device_resource_id is None else device_resource_id
+            thread if device_resource_id is None else device_resource_id
         )
         self.is_legacy: bool = is_legacy
         self.flops: Optional[int] = flops
