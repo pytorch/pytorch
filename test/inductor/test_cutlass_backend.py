@@ -219,8 +219,7 @@ class TestCutlassBackend(TestCase):
                 "cuda.cutlass_max_profiling_configs": 2,
             }
         ):
-            mm_compiled = torch.compile(mm, dynamic=dynamic)
-            Y_compiled = mm_compiled(a, b)
+            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
             Y = mm(a, b)
             torch.testing.assert_close(Y_compiled, Y)
 
@@ -948,10 +947,10 @@ class TestCutlassBackend(TestCase):
     @unittest.skipIf(torch.version.hip, "HIP not supported")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_max_autotune_cutlass_backend_simple_bmm(self):
-        def mm(a, b):
+        def bmm(a, b):
             return torch.bmm(a, b)
 
-        self._test_max_autotune_cutlass_backend_epilogue_fusion(
+        self._test_max_autotune_cutlass_backend_epilogue_fusion( # test bmm
             mixed_precision=False,
             fp16=True,
             expected_fuse_count=0,
@@ -979,6 +978,8 @@ class TestCutlassBackend(TestCase):
             batch_size=31,
             evt_only=True,
         )
+
+
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @unittest.skipIf(torch.version.hip, "HIP not supported")
