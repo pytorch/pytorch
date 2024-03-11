@@ -388,6 +388,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         ] = []
         self.random_values_var = None
 
+        # Bytecode to insert right before we call the graph
+        self.pregraph_bytecode: List[Instruction] = []
+
         # Use to pass values to backward hooks when using compiled autograd
         self.backward_state: Dict[str, VariableTracker] = {}
         self.backward_state_proxy: Optional[torch.fx.Proxy] = None
@@ -885,6 +888,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     )
                 else:
                     prefix_insts.append(copy.copy(inst))
+        assert not (
+            self.pregraph_bytecode and self.export
+        ), "export does not support pregraph_bytecode"
+        prefix_insts.extend(self.pregraph_bytecode)
 
         def append_prefix_insts():
             self.add_output_instructions(prefix_insts)
@@ -1486,7 +1493,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                         missing = fvs - symbol_to_proxy.keys()
                         if missing:
                             i1 = sorted(missing)[0]
-                            assert self.shape_env.is_unbacked_symint(i1), i1
+                            # TODO: Remove relaxing assert on unbacked_symint https://github.com/pytorch/pytorch/issues/119689
+                            # assert self.shape_env.is_unbacked_symint(i1), i1
                             ras_by_symbol.setdefault(i1, []).append(ra)
                         else:
                             # Convert the sympy expression into a sequence of FX
@@ -1574,6 +1582,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self, register_finalizer: Callable[[fx.GraphModule], None]
     ) -> None:
         self.register_finalizer_fns.append(register_finalizer)
+
+    def example_value_from_input_node(self, node: torch.fx.Node):
+        """Extract the non-fake example tensor"""
+        if node.op == "placeholder":
+            return node.meta["grapharg"].example
+        assert node.op == "get_attr"
+        return self.nn_modules[node.target]  # type: ignore[index]
 
 
 err_epilogue = (
