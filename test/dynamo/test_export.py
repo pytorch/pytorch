@@ -2329,6 +2329,25 @@ def forward(self, x):
             )
         )
 
+    def test_export_fast_binary_broadcast_check(self):
+        # This test looks at the case where we erroneously create a guard
+        # when checking the equality of the operands' shape and the output
+        # shape during FakeTensor's binary op fast path.
+
+        class MyModel(torch.nn.Module):
+            def forward(self, a, b):
+                # final shape is (dim0, 4, 8)
+                # order matters since a & the output have the same shape
+                return b + a
+
+        a = torch.randn(100, 4, 8)
+        b = torch.randn(4, 8)
+        model = MyModel().eval().cuda()
+        batchsize = torch.export.Dim("dim0", min=3, max=1024)
+        dynamic_shape_spec = {"a": [batchsize, None, None], "b": [None, None]}
+
+        torch.export.export(model, (a, b), dynamic_shapes=dynamic_shape_spec)
+
     def test_export_meta(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -2720,7 +2739,7 @@ def forward(self, x):
     def test_trivial_constraint(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
-                # non-trivial divisibility condition
+                # complex divisibility condition
                 if (2 * x.shape[0] + 3) % (x.shape[0] - 3) == 0:
                     return x + 1
                 else:
@@ -2738,6 +2757,16 @@ def forward(self, x):
 
         bar = Bar()
 
+        class Qux(torch.nn.Module):
+            def forward(self, x):
+                # simple divisibility condition (not trivially true)
+                if (3 * x.shape[0]) % 2 == 0:
+                    return x + 1
+                else:
+                    return x - 1
+
+        qux = Qux()
+
         x = torch.randn(12)
         dim0 = torch.export.Dim("dim0", max=100)
         dynamic_shapes = {"x": (dim0,)}
@@ -2748,6 +2777,12 @@ def forward(self, x):
             torch.export.export(foo, (x,), dynamic_shapes=dynamic_shapes)
 
         torch.export.export(bar, (x,), dynamic_shapes=dynamic_shapes)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Not all values.*satisfy the generated guard",
+        ):
+            torch.export.export(qux, (x,), dynamic_shapes=dynamic_shapes)
 
     def test_list_contains(self):
         def func(x):

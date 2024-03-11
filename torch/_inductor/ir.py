@@ -7935,11 +7935,16 @@ class _WaitKernel(_CollectiveKernel):
             # Out-of-place single-output
             return [inp.inputs[0]]
         elif isinstance(inp, MultiOutput):
-            # Out-of-place multi-output
+            # This can be two things:
+            # 1. Out-of-place multi-output coll
+            # 2. In-place coll with inputs coming from another MultiOutput
             coll = inp.inputs[0]
-            assert isinstance(coll, _CollectiveKernel)
-            _, idx = inp.indices[0]
-            return [coll.inputs[idx]]
+            # Case 1
+            if isinstance(coll, _CollectiveKernel):
+                _, idx = inp.indices[0]
+                return [coll.inputs[idx]]
+            # Case 2
+            return []
         else:
             # In-place requires no additional deps handling for volatile
             # reads since the inputs are mutated.
