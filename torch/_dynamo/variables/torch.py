@@ -591,9 +591,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         @register(torch.nested.nested_tensor)
         def handle_nested_tensor(self, tx, *args, layout=None, **kwargs):
             if layout and layout.as_python_constant() == torch.strided:
-                raise unimplemented(
-                    "torch.compile does not support strided NestedTensor"
-                )
+                unimplemented("torch.compile does not support strided NestedTensor")
+            if not args and not kwargs:
+                unimplemented("nested_tensor with no args")
 
         @register(torch.nn.functional.one_hot)
         def handle_one_hot(self, tx, *args, **kwargs):
