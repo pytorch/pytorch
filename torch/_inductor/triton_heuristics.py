@@ -1452,7 +1452,7 @@ def grid(*numels):
             z_grid = get_grid_dim(znumel, meta.get("ZBLOCK", None))
             torch._check(
                 y_grid <= MAX_Y_GRID,
-                lambda: f"Generated y grid behind 2^16 ({y_grid}) not supported with z dimension present. File issue",
+                lambda: f"Generated y grid beyond 2^16 ({y_grid}) not supported with z dimension present. File issue",
             )
 
         return (
