@@ -1073,7 +1073,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
             with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
                 onnx_program.save(
-                    tmp_onnx_file.name, model_state_dict=tmp_checkpoint_file.name
+                    tmp_onnx_file.name, model_state=tmp_checkpoint_file.name
                 )
 
                 # Generate random inputs.
