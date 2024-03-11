@@ -3,6 +3,7 @@
 import torch
 import torch._export
 import torch._inductor
+import torch.export._trace
 import torch.fx._pytree as fx_pytree
 
 from torch.testing._internal.common_utils import IS_FBCODE
@@ -32,14 +33,14 @@ class AOTIRunnerUtil:
         if not isinstance(model, torch.nn.Module):
             model = WrapperModule(model)
         # The exact API is subject to change
-        so_path = torch._export.aot_compile(
+        gm = torch.export._trace._export(
             model,
             example_inputs,
-            options=options,
             dynamic_shapes=dynamic_shapes,
-            remove_runtime_assertions=True,
-            disable_constraint_solver=disable_constraint_solver,
-        )
+            pre_dispatch=True,
+        ).module()
+        with torch.no_grad():
+            so_path = torch._inductor.aot_compile(gm, (example_inputs, {}))  # type: ignore[arg-type]
         return so_path
 
     @classmethod

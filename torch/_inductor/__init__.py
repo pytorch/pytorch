@@ -65,6 +65,15 @@ def aot_compile(
         if hasattr(gm, "_out_spec"):
             out_spec = gm._out_spec
 
+    if in_spec is not None:
+        example_inputs, treespec = pytree.tree_flatten(example_inputs)
+        if treespec != in_spec:
+            raise RuntimeError(
+                "Input treespec does not match with the graph module's:\n"
+                f"Input treespec: {treespec}. ",
+                f"Graph module's treespec: {in_spec}",
+            )
+
     serialized_in_spec = pytree.treespec_dumps(in_spec) if in_spec is not None else ""
     serialized_out_spec = (
         pytree.treespec_dumps(out_spec) if out_spec is not None else ""
