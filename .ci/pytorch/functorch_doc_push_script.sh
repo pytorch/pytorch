@@ -10,6 +10,11 @@ set -ex
 version=${DOCS_VERSION:-nightly}
 echo "version: $version"
 
+if [[ "$BUILD_ENVIRONMENT" == linux-jammy-py3.8-gcc11* ]] ; then
+  echo "Sometimes in kernel 5+ anaconda decides to use its own libstdc++ instead of the system one. As we've always been relying on the system one, let's make sure it's used."
+  sudo rm "/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/lib/libstdc++.so.6"
+fi
+
 # Build functorch docs
 pushd $pt_checkout/functorch/docs
 make html
