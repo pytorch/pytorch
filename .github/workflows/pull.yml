@@ -77,6 +77,7 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3_8-gcc11-build.outputs.docker-image }}
       s3-bucket: pytorch-ci-artifacts
       aws-role-to-assume: arn:aws:iam::391835788720:role/gha-pytorch-ci-artifacts-role
+      upload-aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_pytorch_artifacts
 
   linux-jammy-py3_8-gcc11-no-ops:
     name: linux-jammy-py3.8-gcc11-no-ops

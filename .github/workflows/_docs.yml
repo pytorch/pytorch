@@ -38,6 +38,11 @@ on:
         required: false
         type: string
         default: ""
+      upload-aws-role-to-assume:
+        description: role to assume for downloading artifacts
+        required: false
+        type: string
+        default: ""
     secrets:
       GH_PYTORCHBOT_TOKEN:
         required: false
@@ -173,6 +178,14 @@ jobs:
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace
         if: always()
+
+      - name: configure aws credentials
+        if : ${{ inputs.upload-aws-role-to-assume != '' }}
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{ inputs.upload-aws-role-to-assume }}
+          role-session-name: gha-linux-test
+          aws-region: us-east-1
 
       - name: Upload Python Docs Preview
         uses: seemethere/upload-artifact-s3@v5
