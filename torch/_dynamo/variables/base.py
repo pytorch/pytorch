@@ -224,11 +224,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         cache[idx] = (result, value)
         return result
 
-    def __str__(self):
-        return f"{self.__class__.__name__}()"
-
     def __repr__(self):
-        return str(self)
+        return f"{self.__class__.__name__}()"
 
     def python_type(self):
         """

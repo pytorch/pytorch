@@ -11,7 +11,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TestCase,
 )
 from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
@@ -38,6 +37,7 @@ from inductor.test_torchinductor import (
     copy_tests,
     run_and_get_cpp_code,
     run_and_get_triton_code,
+    TestCaseBase as TestCase,
     TestFailure,
 )
 from inductor.test_torchinductor_dynamic_shapes import make_dynamic_cls
@@ -69,6 +69,7 @@ def check_codegen(
         example_inputs = tuple(copy_fn(x) for x in example_inputs)
 
     torch._dynamo.reset()
+    torch._inductor.codecache.FxGraphCache.clear()
     torch._inductor.metrics.reset()
 
     called = False
