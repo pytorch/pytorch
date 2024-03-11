@@ -503,7 +503,6 @@ std::tuple<int64_t, int64_t, int64_t, int64_t, std::vector<int64_t*>> get_chunk_
     tensor_idx_to_start_tensor_bytes.push_back(tensor_idx_to_start_tensor_bytes.back() + pad_tensor_chunk_size);
     actual_tensor_sizes.push_back(size_along_dim * trailing_numel * src_elem_size);
   }
-  // Tensor out = tensors[0].new_empty(chunk_size * num_chunks * leading_dim / tensors[0].element_size());
   const int64_t num_blocks_per_chunk = start_block_idx_per_tensor_chunk.back();
   const int64_t slice_size = num_chunks * chunk_size;
   auto packed = detail::pack_vecs(
