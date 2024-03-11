@@ -8,8 +8,6 @@ from typing import List, Tuple
 
 import torch
 
-import torch.distributed._tensor.dispatch as op_dispatch
-
 from torch.distributed._tensor import DTensor, init_device_mesh, Shard
 from torch.distributed._tensor.debug.visualize_sharding import visualize_sharding
 
@@ -19,10 +17,6 @@ class TorchrecLocalShards(torch.Tensor):
     _shard_offsets: List[Tuple[int, ...]]
     _shard_sizes: List[torch.Size]
     __slots__ = ["_local_shards", "_shard_offsets", "_shard_sizes"]
-
-    # class attribute that handles operator placements propagation
-    # rules, keyed by aten op name, value is propagation func
-    _op_dispatcher: op_dispatch.OpDispatcher = op_dispatch.OpDispatcher()
 
     @staticmethod
     def __new__(
