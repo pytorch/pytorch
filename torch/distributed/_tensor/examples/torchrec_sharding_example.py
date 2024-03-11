@@ -64,10 +64,17 @@ class TorchrecLocalShards(torch.Tensor):
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        return TorchrecLocalShards._op_dispatcher.dispatch(
-            func,
-            args,
-            kwargs or {},
+        if kwargs is None:
+            kwargs = {}
+
+        # so far, only view_as() can be performed
+        # TODO: allow _c10d_functional::all_gather_into_tensor()
+        local_shards = args[0]._local_shards
+        res_list = [func(t, t.shape, **kwargs) for t in local_shards]
+        return TorchrecLocalShards(
+            res_list,
+            args[0]._shard_offsets,
+            args[0]._shard_sizes,
         )
 
 
@@ -232,7 +239,19 @@ def run_torchrec_col_wise_even_sharding_example(rank, world_size):
         shape=emb_table_shape,  # shape and stride are required for col-wise sharding
         stride=(1, num_embeddings),
     )
+    for x, y in zip(dtensor._local_tensor._local_shards, local_shards_on_rank[rank]):
+        assert torch.equal(x, y)
 
+    # display the DTensor's sharding
+    # TODO: need fix
+    visualize_sharding(dtensor, header="Col-wise even sharding example in DTensor")
+
+    exit()
+    # TODO: need to support to_local()
+    for x, y in zip(dtensor.to_local(), local_shards_on_rank[rank]):
+        assert torch.equal(x, y)
+
+    # TODO: need to support all-gather
     # get the global tensor from the DTensor
     dtensor_full = dtensor.full_tensor()  # torch.Tensor
     # manually compose the global tensor from the local shards
