@@ -43,7 +43,7 @@ from .torch_function import can_dispatch_torch_function, dispatch_torch_function
 try:
     import numpy as np
 except ModuleNotFoundError:
-    np = None
+    np = None  # type: ignore[assignment]
 
 log = logging.getLogger(__name__)
 
@@ -89,7 +89,7 @@ constant_fold_functions = [
     torch.is_autocast_enabled,
     torch.is_complex,
     torch.is_floating_point,
-    torch.nn.functional._Reduction.get_enum,
+    torch.nn.functional._Reduction.get_enum,  # type: ignore[attr-defined]
     torch.promote_types,
     torch._C._get_privateuse1_backend_name,
 ]
@@ -265,6 +265,8 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             return DisabledSavedTensorsHooksVariable.create(
                 tx, args[0].as_python_constant()
             )
+
+        return super().call_function(tx, args, kwargs)
 
 
 class TorchInGraphFunctionVariable(BaseTorchVariable):
@@ -463,15 +465,11 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             #   (b) cudnn is available
             #   (c) some initialization has completed
             # technically, it depends on some global state from (c) (torch.backends.cudnn.__cudnn_version)
-            if extra:
-                unimplemented("cudnn.is_acceptable with >1 args")
-            tensor_variable = tensor
+            assert not extra, "Expect 1 input to cudnn.is_acceptable"
             assert isinstance(
-                tensor_variable, TensorVariable
+                tensor, TensorVariable
             ), "Expect input to cudnn.is_acceptable to be a tensor"
-            tensor_inp = torch.tensor(
-                0, dtype=tensor_variable.dtype, device=tensor_variable.device
-            )
+            tensor_inp = torch.tensor(0, dtype=tensor.dtype, device=tensor.device)
             return ConstantVariable.create(
                 torch.backends.cudnn.is_acceptable(tensor_inp)
             )
@@ -501,7 +499,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # decompose addcdiv into constituent ops, prevents a graph break due to converting
                 # value to a scalar
                 result = TorchInGraphFunctionVariable(torch.div).call_function(
-                    tx, args[1:], {}
+                    tx, [*args[1:]], {}
                 )
                 result = TorchInGraphFunctionVariable(torch.mul).call_function(
                     tx, [result, kwargs["value"]], {}
@@ -633,7 +631,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             return TorchInGraphFunctionVariable(
                 _unsafe_set_version_counter
-            ).call_function(tx, args, kwargs)
+            ).call_function(tx, [*args], kwargs)
 
         return handlers
 
@@ -762,6 +760,8 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                         if (
                             out_tensor.source
                             and out_tensor in tx.output.graphargs
+                            and isinstance(out_tensor, variables.TensorVariable)
+                            and isinstance(result_tensor, variables.TensorVariable)
                             and out_tensor.size != result_tensor.size
                         ):
                             # It's hard to get out variants with resizing on graph inputs work
