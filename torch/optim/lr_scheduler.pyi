@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, Iterable, List, Optional, Union, Sequence
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Union
 
 from .optimizer import Optimizer
 
