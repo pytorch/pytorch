@@ -744,6 +744,9 @@ if torch._C._has_mkldnn:
             pass_number=1,
         )
         def reshape_linear_reshape_pattern(match, *args, **kwargs):
+            def get_val(val):
+                return val if isinstance(val, int) else val.meta.get("val")
+
             reshape_1 = kwargs.get("reshape_1")
             reshape_2 = kwargs.get("reshape_2")
             assert isinstance(reshape_1, list)
@@ -757,23 +760,13 @@ if torch._C._has_mkldnn:
             # and check product(reshape_2[:-1]) == reshape_1[0]
             can_remove_reshape = linear_input_node.meta.get("val").shape[
                 :-1
-            ] == torch.Size(
-                [
-                    val if isinstance(val, int) else val.meta.get("val")
-                    for val in reshape_2[:-1]
-                ]
-            )
+            ] == torch.Size([get_val(val) for val in reshape_2[:-1]])
             can_remove_reshape = can_remove_reshape and (
                 reduce(
                     operator.mul,
-                    [
-                        val if isinstance(val, int) else val.meta.get("val")
-                        for val in reshape_2[:-1]
-                    ],
+                    [get_val(val) for val in reshape_2[:-1]],
                 )
-                == reshape_1[0]
-                if isinstance(reshape_1[0], int)
-                else reshape_1[0].meta.get("val")
+                == get_val(reshape_1[0])
             )
 
             if can_remove_reshape:
