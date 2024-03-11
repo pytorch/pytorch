@@ -50,14 +50,6 @@ static __host__ __device__ inline int64_t div_up(int64_t a, int64_t b) {
   return (a + b - 1) / b;
 }
 
-static __host__ __device__ inline int64_t maxInt64(int64_t a, int64_t b) {
-  return a < b ? b : a;
-}
-
-static __host__ __device__ inline int64_t minInt64(int64_t a, int64_t b) {
-  return a < b ? a : b;
-}
-
 template <typename T>
 __device__ inline void stream_load128(uint4& val, const T* addr) {
   uint64_t low, high;
@@ -300,6 +292,10 @@ static __device__ __inline__ void copy_chunk_with_pad(
   int64_t thread_idx,
   int64_t num_threads
 ) {
+  // Fast path when the number of threads is larger than the number of bytes to be copied
+  // (i.e., max_chunk_size). In this case, each thread only copies 1 byte.
+  // For 0 <= thread_idx < actual_chunk_size, the thread copies data from `src`.
+  // For actual_chunk_size <= thread_idx < max_chunk_size, the thread set the val=0 for padding.
   if (max_chunk_size < num_threads) {
     int64_t val = 0;
     if (thread_idx < actual_chunk_size) {
@@ -311,6 +307,9 @@ static __device__ __inline__ void copy_chunk_with_pad(
     return;
   }
   uint4 zero = get_zero_uint4();
+  // Split dst array into three parts:
+  // [dst, dst+align_off), [dst+align_off, dst+align_end), [dst+align_end, dst+max_chunk_size)
+  // The second part is aligned with BYTES_PER_THREAD(=16 bytes) to enable `stream_store128`.
   int64_t align_off, aligned_size;
   get_aligned_region(dst, actual_chunk_size, BYTES_PER_THREAD, align_off, aligned_size);
   int64_t align_end = align_off + aligned_size;
@@ -329,6 +328,8 @@ static __device__ __inline__ void copy_chunk_with_pad(
     }
     stream_store128(&dst[i], val);
   }
+  // Copy data for the first part of dst array [dst, dst+align_off).
+  // Check `thread_idx<max_chunk_sze` for the edge case that max_chunk_size < align_off.
   if(thread_idx < align_off && thread_idx < max_chunk_size) {
     char val = (char) 0;
     if (thread_idx < actual_chunk_size) {
@@ -336,6 +337,7 @@ static __device__ __inline__ void copy_chunk_with_pad(
     }
     dst[thread_idx] = val;
   }
+  // Copy data for the third part of dst array [dst+align_end, dst+max_chunk_size).
   while(align_end + thread_idx < max_chunk_size) {
     char val = (char) 0;
     if (align_end + thread_idx < actual_chunk_size) {
@@ -419,8 +421,8 @@ static __global__ void chunk_cat_cuda_kernel(
       + chunk_idx  * chunk_size
       + tensor_idx_to_start_tensor_bytes[tensor_idx];
   // Compute the actual number of bytes to copy from src.
-  const int64_t actual_copy_size = minInt64(pad_tensor_chunk_sizes[tensor_idx] / ratio,
-     maxInt64(0, actual_tensor_sizes[tensor_idx] - chunk_idx * pad_tensor_chunk_sizes[tensor_idx] / ratio));
+  const int64_t actual_copy_size = std::min(pad_tensor_chunk_sizes[tensor_idx] / ratio,
+     std::max((int64_t)0, actual_tensor_sizes[tensor_idx] - chunk_idx * pad_tensor_chunk_sizes[tensor_idx] / ratio));
   if (bf162float) {
     copy_chunk_with_pad_cast_bfloat16_to_float(
       dst_addr,
@@ -560,12 +562,7 @@ void _chunk_cat_out_cuda_contiguous(
   auto first_tensor_sizes = tensors[0].sizes();
   std::vector<int64_t> view_sizes = std::vector<int64_t>(first_tensor_sizes.begin(), first_tensor_sizes.begin()+dim);
   view_sizes.insert(view_sizes.end(), {num_chunks, chunk_size / dst_elem_size});
-  if(out.sizes() != view_sizes) {
-    if(out.numel() > 0) {
-      TORCH_WARN("An output with one or more elements has been resized");
-    }
-    out.resize_(view_sizes);
-  }
+  at::native::resize_output(out, view_sizes);
   dim3 blocks(num_blocks_per_chunk, num_chunks, leading_dim);
   dim3 threads(detail::BLOCK_SIZE, 1, 1);
   detail::chunk_cat_cuda_kernel<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
