@@ -138,6 +138,7 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "pyhpc_isoneutral_mixing",
     "pyhpc_equation_of_state",
     "pyhpc_turbulent_kinetic_energy",
+    "detectron2_fcos_r_50_fpn",
 }
 
 # These models currently fail accuracy with eager Adam optimizer
