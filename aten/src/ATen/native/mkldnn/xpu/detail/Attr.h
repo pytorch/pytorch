@@ -353,6 +353,10 @@ class Attr {
             dnnl::query::exec_arg_md,
             DNNL_ARG_ATTR_MULTIPLE_POST_OP(i) | DNNL_ARG_SRC_1);
 
+        binary_m = at::native::xpu::onednn::make_onednn_memory(
+          md, engine, binary.data_ptr()
+        );
+
         args.insert(
             {DNNL_ARG_ATTR_MULTIPLE_POST_OP(i) | DNNL_ARG_SRC_1, binary_m});
       }
