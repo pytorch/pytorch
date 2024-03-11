@@ -222,10 +222,6 @@ class TestOptimRenewed(TestCase):
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             device, dtype, optim_info, skip=("differentiable", "fused"))
         for optim_input in all_optim_inputs:
-            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
-                    and not optim_input.kwargs.get("foreach", False)):
-                continue
-
             if optim_info.step_requires_closure:
                 # Why? The way we implement complex is by turning complex params into view_as_real
                 # alternatives. For example, an size (M,N) tensor will become (M,N,2). In this test,
