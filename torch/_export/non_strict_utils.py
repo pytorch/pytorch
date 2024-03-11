@@ -174,7 +174,7 @@ def make_constraints(
     equalities_inputs: EqualityConstraint,
     flat_args: List[Any],
     input_specs: List[InputSpec],
-    constraints: List[_Constraint | _DerivedConstraint],
+    constraints: List[Union[_Constraint, _DerivedConstraint]],
     original_signature: inspect.Signature,
     gm: torch.fx.GraphModule,
 ):
