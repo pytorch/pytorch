@@ -487,11 +487,11 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
         >>>     return wrapper
         >>>
         >>> torch.library.define(
-        >>>     "mylib::custom_linear",
+        >>>     "mylib::decorated_custom_linear",
         >>>     "(Tensor x, Tensor weight, Tensor bias) -> Tensor")
         >>>
         >>> # When called, the function below will print "my_decorator called."
-        >>> @torch.library.impl_abstract("mylib::custom_linear")
+        >>> @torch.library.impl_abstract("mylib::dedcorated_custom_linear")
         >>> @my_decorator
         >>> def custom_linear_abstract(x, weight):
         >>>     assert x.dim() == 2
