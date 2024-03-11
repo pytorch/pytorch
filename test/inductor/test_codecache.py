@@ -4,7 +4,6 @@ import pickle
 import unittest
 
 import torch
-from torch._inductor.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
 from torch._inductor.codecache import (
