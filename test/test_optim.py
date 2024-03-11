@@ -214,6 +214,7 @@ class TestOptimRenewed(TestCase):
             self.assertEqual(complex_steps, real_steps)
 
 
+    @skipMPS
     @optims([o for o in optim_db if o.supports_complex], dtypes=[torch.complex64])
     def test_complex_2d(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
