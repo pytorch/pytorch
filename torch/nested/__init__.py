@@ -314,17 +314,17 @@ def nested_tensor_from_jagged(
 ) -> Tensor:
     r"""
 Constructs a jagged layout nested tensor from the given jagged components. The jagged layout
-consists of a required values buffer with the jagged dimension collapsed into a single dimension.
+consists of a required values buffer with the jagged dimension packed into a single dimension.
 The offsets / lengths metadata determines how this dimension is split into batch elements
 and are expected to be allocated on the same device as the values buffer.
 
 Expected metadata formats:
-    * offsets: Indices within the collapsed dimension splitting it into heterogeneously-sized
-      batch elements. Example: [0, 2, 3, 6] indicates that a collapsed jagged dim of size 6
+    * offsets: Indices within the packed dimension splitting it into heterogeneously-sized
+      batch elements. Example: [0, 2, 3, 6] indicates that a packed jagged dim of size 6
       should be conceptually split into batch elements of length [2, 1, 3]. Note that both the
       beginning and ending offsets are required for kernel convenience (i.e. shape batch_size + 1).
     * lengths: Lengths of the individual batch elements; shape == batch_size. Example: [2, 1, 3]
-      indicates that a collapsed jagged dim of size 6 should be conceptually split into batch
+      indicates that a packed jagged dim of size 6 should be conceptually split into batch
       elements of length [2, 1, 3].
 
 Note that it can be useful to provide both offsets and lengths. This describes a nested tensor
@@ -335,11 +335,11 @@ The returned jagged layout nested tensor will be a view of the input values tens
 
 Args:
     values (:class:`torch.Tensor`): The underlying buffer in the shape of
-        (sum_B(*), D_1, ..., D_N). The jagged dimension is collapsed into a single dimension,
+        (sum_B(*), D_1, ..., D_N). The jagged dimension is packed into a single dimension,
         with the offsets / lengths metadata used to distinguish batch elements.
     offsets (optional :class:`torch.Tensor`): Offsets into the jagged dimension of shape B + 1.
     lengths (optional :class:`torch.Tensor`): Lengths of the batch elements of shape B.
-    jagged_dim (optional int): Indicates which dimension in values is the collapsed jagged
+    jagged_dim (optional int): Indicates which dimension in values is the packed jagged
         dimension. If None, this is set to dim=1 (i.e. the dimension immediately following
         the batch dimension). Default: None
 
