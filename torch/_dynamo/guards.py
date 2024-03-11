@@ -466,12 +466,15 @@ class GuardBuilder(GuardBuilderBase):
                     key, get_verbose_code_parts(f"{key_source} == {key}", guard)
                 )
 
+    def get_global_guard_manager(self):
+        assert self.guard_manager  # to make mypy happy
+        return self.guard_manager.root.globals_dict_manager(
+            f_globals=self.scope["G"], source="G", example_value=None
+        )
+
     def get_guard_manager_from_source(self, source):
         assert self.guard_manager  # to make mypy happy
         root_guard_manager = self.guard_manager.root
-        global_manager = root_guard_manager.globals_dict_manager(
-            f_globals=self.scope["G"], source="G", example_value=None
-        )
 
         example_value = None
         source_name = source.name()
@@ -501,13 +504,13 @@ class GuardBuilder(GuardBuilderBase):
             # Global manager accepts a dict but it is not a DictGuardManager
             # because globals dict is big and we typically guard on a very
             # selected items on globals.
-            return global_manager.dict_getitem_manager(
+            return self.get_global_guard_manager().dict_getitem_manager(
                 key=source.global_name,
                 source=source_name,
                 example_value=example_value,
             )
         elif istype(source, GlobalWeakRefSource):
-            return global_manager.global_weakref_manager(
+            return self.get_global_guard_manager().global_weakref_manager(
                 global_name=source.global_name,
                 source=source_name,
                 example_value=example_value,
@@ -1376,30 +1379,26 @@ class GuardBuilder(GuardBuilderBase):
             )
 
             if not static:
-                dynamic_indices = set()
-                dynamic_indices_code_part = ""
-                has_attr = True
-
                 if hasattr(value, "_dynamo_dynamic_indices"):
-                    dynamic_indices_code_part = f"(({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  # noqa: B950
                     dynamic_indices = value._dynamo_dynamic_indices
-                    has_attr = True
+                    code_part = f"(({tensor_name}._dynamo_dynamic_indices.issubset({dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True)"  # noqa: B950
+                    code.append(code_part)
+                    if config.enable_cpp_guard_manager:
+                        self.get_guard_manager(guard).add_dynamic_indices_guard(
+                            dynamic_indices, get_verbose_code_parts(code_part, guard)
+                        )
                 # In the case of us not having any dynamic dimension indices, we compiled the frame with no chance of
                 # raising for this specific tensor - and any inputs with more dynamic user directives specified must be recompiled.
                 else:
-                    has_attr = False
-                    dynamic_indices_code_part = (
+                    code_part = (
                         f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
                     )
-
-                code.append(dynamic_indices_code_part)
-
-                if config.enable_cpp_guard_manager:
-                    self.get_guard_manager(guard).add_dynamic_indices_guard(
-                        has_attr,
-                        dynamic_indices,
-                        get_verbose_code_parts(dynamic_indices_code_part, guard),
-                    )
+                    code.append(code_part)
+                    if config.enable_cpp_guard_manager:
+                        self.get_guard_manager(guard).add_no_hasattr_guard(
+                            "_dynamo_dynamic_indices",
+                            get_verbose_code_parts(code_part, guard),
+                        )
             if len(code) > 0:
                 self._produce_guard_code(guard, code)
 
