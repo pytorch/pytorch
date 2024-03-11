@@ -947,6 +947,8 @@ class Graph:
         if len(to_erase.users) > 0:
             raise RuntimeError(f'Tried to erase Node {to_erase} but it still had {len(to_erase.users)} '
                                f'users in the graph: {to_erase.users}!')
+        if to_erase.graph != self:
+            raise RuntimeError(f"Attempting to remove {to_erase} from wrong graph!")
         if to_erase._erased:
             warnings.warn(f"erase_node({to_erase}) on an already erased node")
             return
