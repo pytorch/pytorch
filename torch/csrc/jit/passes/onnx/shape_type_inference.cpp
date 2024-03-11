@@ -918,7 +918,7 @@ void ProcessReduceNode(Node* n) {
     std::vector<int64_t> axes_vector(rank_0);
     if (n->hasAttributeS("axes")) {
         axes_vector = n->is(attr::axes);
-    } else if (n->inputs().size() > 1) {        
+    } else if (n->inputs().size() > 1) {
       axes_vector = ConstantValueMap::GetValueInto1DInt64Vector(
         n->input(1)->debugName());
     } else {

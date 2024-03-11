@@ -3954,7 +3954,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(MyMaxnInt(), torch.randn(3, 3).to(torch.int32))
 
     @skipIfUnsupportedOpsetVersion([7])
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_normalize(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -3963,7 +3962,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 3)
         self.run_test(Model(), x)
 
-    @skipIfUnsupportedMaxOpsetVersion(17)
     def test_norm_with_dtype(self):
         class Model(torch.nn.Module):
             def forward(self, x):
