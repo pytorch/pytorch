@@ -67,6 +67,11 @@ split_cat_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
 unbind_stack_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
 merge_getitem_cat_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
 
+
+def fuse_parallel_linear_pass(graph):
+    return None
+
+
 pattern_matcher_passes: List[PatternMatcherPass] = [
     normalization_pass,
     merge_getitem_cat_pass,
@@ -149,6 +154,11 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 remove_reshape_pass.apply,
                 gm,
                 "[Pre grad(predispatch IR)] Apply remove_reshape_pass",
+            )
+            pass_execution_and_save(
+                fuse_parallel_linear_pass,
+                gm,
+                "[Pre grad(predispatch IR)] Apply fuse_parallel_linear_pass",
             )
         else:
             # We only log the graph with changes to avoid the excessive compilation time
