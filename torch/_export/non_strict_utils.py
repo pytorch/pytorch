@@ -15,7 +15,7 @@ from torch._export.passes.add_runtime_assertions_for_constraints_pass import Inp
 from torch._guards import Source
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
-from torch.export.dynamic_shapes import _Constraint
+from torch.export.dynamic_shapes import _Constraint, _DerivedConstraint
 from torch.export.exported_program import InputKind
 from torch.export.graph_signature import CustomObjArgument, InputSpec, TensorArgument
 from torch.fx.experimental.symbolic_shapes import (
@@ -174,7 +174,7 @@ def make_constraints(
     equalities_inputs: EqualityConstraint,
     flat_args: List[Any],
     input_specs: List[InputSpec],
-    constraints: List[_Constraint],
+    constraints: List[_Constraint | _DerivedConstraint],
     original_signature: inspect.Signature,
     gm: torch.fx.GraphModule,
 ):
@@ -241,8 +241,8 @@ def make_constraints(
     tensor_id_to_dim_constraint: Dict[int, Dict[int, Dict[str, int]]] = defaultdict(
         defaultdict
     )
-    for constraint in constraints:
-        spec = constraint.serializable_spec
+    for const in constraints:
+        spec = const.serializable_spec
         tensor_id_to_dim_constraint[spec["t_id"]][spec["dim"]] = {
             "lower": spec["min"],
             "upper": spec["max"],
