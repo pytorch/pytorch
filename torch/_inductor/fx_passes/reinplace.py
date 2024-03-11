@@ -1,3 +1,4 @@
+import itertools
 import operator
 from collections import defaultdict
 from dataclasses import dataclass
@@ -190,10 +191,10 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
 
 def decompose_generalized_scatter(graph: torch.fx.Graph) -> None:
     """Replace _generalized_scatter with normal aten ops"""
-    for node in graph.nodes:
-        if node.target not in (_generalized_scatter, _inplace_generalized_scatter):
-            continue
-
+    for node in itertools.chain(
+        graph.find_nodes(target=_generalized_scatter),
+        graph.find_nodes(target=_inplace_generalized_scatter),
+    ):
         use_mutation = (
             node.target is _inplace_generalized_scatter
             or scatter_always_uses_mutation(node)

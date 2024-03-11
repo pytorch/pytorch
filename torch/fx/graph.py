@@ -5,7 +5,7 @@ from . import _pytree as fx_pytree
 from ._compatibility import compatibility
 
 import contextlib
-from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Type
+from typing import TYPE_CHECKING, Callable, Any, List, Dict, Iterator, NamedTuple, Optional, Tuple, Set, FrozenSet, Type
 from dataclasses import dataclass
 from contextlib import contextmanager
 import copy
@@ -755,14 +755,24 @@ class _GraphSideTable:
     def __contains__(self, node) -> bool:
         return node in self.table[node.op][node.target]
 
-    def insert(self, node) -> None:
+    def insert(self, node: Node) -> None:
         self.table[node.op][node.target].append(node)
 
-    def remove(self, node) -> None:
+    def remove(self, node: Node) -> None:
         self.table[node.op][node.target].remove(node)
 
-    def find_nodes(self, *, op: str, target: Target) -> List[Node]:
-        return self.table[op][target]
+    def find_nodes(self, *, op: Optional[str] = None, target: Optional['Target'] = None) -> Iterator[Node]:
+        assert op is not None or target is not None
+        if target is None:
+            assert op is not None
+            for nodes in self.table[op].values():
+                yield from nodes
+        elif op is None:
+            assert target is not None
+            for targets in self.table.values():
+                yield from targets[target]
+        else:
+            yield from self.table[op][target]
 
 @compatibility(is_backward_compatible=True)
 class Graph:
@@ -851,7 +861,7 @@ class Graph:
         return _node_list(self)
 
     @compatibility(is_backward_compatible=False)
-    def find_nodes(self, *, op: str, target: 'Target'):
+    def find_nodes(self, *, op: Optional[str] = None, target: Optional['Target'] = None) -> Iterator[Node]:
         return self._side_table.find_nodes(op=op, target=target)
 
     @compatibility(is_backward_compatible=True)

@@ -87,9 +87,7 @@ class NumpyCompatNormalization:
                 self.inverse_mapping[numpy_kwarg] = actual_kwarg
 
     def __call__(self, graph: torch.fx.Graph):
-        for node in graph.nodes:
-            if node.op != "call_function":
-                continue
+        for node in graph.find_nodes(op="call_function"):
             if isinstance(node.target, (OpOverload, OpOverloadPacket)):
                 # only applies to torch ops; e.g. torch.stack(axis=1) works, torch.ops.aten.stack(axis=1) doesn't.
                 continue

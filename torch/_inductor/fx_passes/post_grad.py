@@ -620,12 +620,9 @@ def remove_noop_ops(graph: torch.fx.Graph):
     input_storages = set()
     output_storages = set()
 
-    for node in graph.nodes:
-        if node.op == "placeholder":
-            inputs.add(node)
-            input_storages.add(get_node_storage(node))
-        else:
-            break
+    for node in graph.find_nodes(op="placeholder"):
+        inputs.add(node)
+        input_storages.add(get_node_storage(node))
 
     output_node = next(iter(reversed(graph.nodes)))
     assert output_node.op == "output"
