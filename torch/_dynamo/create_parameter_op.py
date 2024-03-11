@@ -35,7 +35,8 @@ class TracableCreateParameter(torch.autograd.Function):
 
 
 def tracable_create_parameter(tensor, placeholder):
-    return TracableCreateParameter.apply(tensor, placeholder)
+    with torch.set_grad_enabled(placeholder.requires_grad):
+        return TracableCreateParameter.apply(tensor, placeholder)
 
 
 def new_parameter_placeholder(size, dtype, device, requires_grad):

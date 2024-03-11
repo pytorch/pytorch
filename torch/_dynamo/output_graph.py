@@ -397,8 +397,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.backward_state_proxy: Optional[torch.fx.Proxy] = None
         self.backward_state_var: Optional[str] = None
 
-    def add_backward_state_hook(self, hook: VariableTracker):
-        name = f"hook{len(self.backward_state)}"
+    def add_backward_state_hook(self, hook: VariableTracker, prefix="hook"):
+        name = f"{prefix}{len(self.backward_state)}"
         assert name not in self.backward_state
         self.backward_state[name] = hook
         return name, self.get_backward_state_proxy()

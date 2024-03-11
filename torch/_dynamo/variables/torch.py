@@ -784,9 +784,8 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             unimplemented(f"Parameter(data={data}) not implemented")
 
         # this results in cleaner graphs, but only works for inputs
-        # disabled for CI testing
-        # if data.source:
-        #     return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
+        if data.source:
+            return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
 
         try:
             shape = tuple(data.var_getattr(tx, "shape").as_python_constant())
@@ -800,8 +799,17 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         )
         if data.requires_grad:
             data = data.call_method(tx, "detach", [], {})
-        result = TorchInGraphFunctionVariable(tracable_create_parameter).call_function(
-            tx, [data, placeholder], {}
+
+        from .builder import wrap_fx_proxy
+
+        result = wrap_fx_proxy(
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                tracable_create_parameter,
+                (data.as_proxy(), placeholder.as_proxy()),
+                {},
+            ),
         )
         assert isinstance(result, variables.TensorVariable)
         result.class_type = torch.nn.Parameter
