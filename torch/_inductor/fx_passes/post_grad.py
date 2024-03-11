@@ -57,6 +57,12 @@ pass_patterns = [
     PatternMatcherPass(),
     PatternMatcherPass(),
 ]
+move_views_below_pointwise_pass_aten = PatternMatcherPass(
+    prevent_match_across_mutations=True, pass_name="move_views_below_pointwise_pass"
+)
+pattern_matcher_passes_aten: List[PatternMatcherPass] = [
+    move_views_below_pointwise_pass_aten,
+]
 # patterns applied only in inference
 inference_patterns = PatternMatcherPass()
 decompose_mm_pass = PatternMatcherPass()
@@ -84,12 +90,20 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     if config.pattern_matcher:
         lazy_init()
         inductor_before_change = copy.deepcopy(counters["inductor"])
+        optimus_scuba_log["before_post_grad_transformation"] = upload_graph(gm.graph)
         group_batch_fusion_passes(gm.graph, pre_grad=False)
         if counters["inductor"] != inductor_before_change:
             optimus_scuba_log["group_batch_fusion_post_grad"] = upload_graph(gm.graph)
         remove_noop_ops(gm.graph)
         for patterns in pass_patterns:
             patterns.apply(gm.graph)  # type: ignore[arg-type]
+        for pattern_matcher_pass in pattern_matcher_passes_aten:
+            inductor_before_change = copy.deepcopy(counters["inductor"])
+            pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
+            if counters["inductor"] != inductor_before_change:
+                optimus_scuba_log[
+                    f"split_cat_pattern_{pattern_matcher_pass.pass_name}_post_grad"
+                ] = upload_graph(gm.graph)
         if is_inference:
             inference_patterns.apply(gm.graph)  # type: ignore[arg-type]
         decompose_mm_pass.apply(gm.graph)  # type: ignore[arg-type]
@@ -111,6 +125,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     gm.recompile()
     gm.graph.lint()
 
+    optimus_scuba_log["after_post_grad_transformation"] = upload_graph(gm.graph)
 
 @init_once_fakemode
 def lazy_init():

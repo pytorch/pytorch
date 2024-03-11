@@ -27,6 +27,11 @@ from ..pattern_matcher import (
     RepeatedExpr,
 )
 from .group_batch_fusion import is_node_meta_valid
+from functools import reduce
+
+from torch._inductor.fx_passes.group_batch_fusion import is_node_meta_valid
+
+from .post_grad import move_views_below_pointwise_pass_aten
 from .pre_grad import (
     merge_getitem_cat_pass,
     merge_splits_pass,
@@ -36,6 +41,7 @@ from .pre_grad import (
 )
 
 log = logging.getLogger(__name__)
+aten = torch.ops.aten
 
 _Arguments: TypeAlias = Tuple[torch.fx.node.Argument, ...]
 _TransformParam: TypeAlias = Tuple[
@@ -1535,3 +1541,158 @@ def merge_stack_tahn_unbind(match: Match, split_sections: List[int], dim: int):
                 split_sections = new_split_sections
 
                 counters["inductor"]["stack_tahn_unbind_merged"] += 1
+
+
+# noqa: W605
+# ############The pattern to be optimized is#########
+# reshape1    permute
+#     \      /
+#         mm (user = 1)
+#         |
+#        reshape2 (user=1)   input
+#             \             /
+#                   add
+#                    |
+# ################After transformation#############
+#        Approach 1
+# reshape1   permute input
+#     \       /        |
+#                    reshape3
+#                   /
+#             addmm
+#              |
+#             reshape2
+#               |
+#            Approach 2
+# reshape1   permute input
+#     \      /      /
+#            addmm
+#              |
+#            reshape3
+#               |
+
+def can_be_broadcasted(input: torch.fx.Node, other: torch.fx.Node):
+    """
+    Check if the input and other can be broadcasted to a common shape.
+    """
+    if not is_node_meta_valid(input) or not is_node_meta_valid(other):
+        return False
+    input_shape = list(input.meta["val"].shape)
+    other_shape = list(other.meta["val"].shape)
+    if len(input_shape) < len(other_shape):
+        input_shape = [1] * (len(other_shape) - len(input_shape)) + input_shape
+    elif len(other_shape) < len(input_shape):
+        other_shape = [1] * (len(input_shape) - len(other_shape)) + other_shape
+
+    for i in range(len(input_shape) - 1, -1, -1):
+        if (input_shape[i] != other_shape[i]) and (input_shape[i] != 1 and other_shape[i] != 1):
+            return False
+
+    return True
+
+
+def update_addmm_val(addmm_node, input, mat1, mat2):
+    """
+    Update the example value of the node in the graph to enable followup split cat opt.
+    """
+    if addmm_node is not None and hasattr(addmm_node, "meta"):
+        example_value = aten.addmm(input, mat1, mat2)
+        addmm_node.meta["val"] = example_value
+
+
+def can_be_reshaped(source: torch.fx.Node, target: torch.fx.Node):
+    """
+    Check if the source node can be reshaped to target node.
+    """
+    if not is_node_meta_valid(source) or not is_node_meta_valid(target):
+        return False
+    source_dim = reduce(lambda x, y: x * y, list(source.meta["val"].shape))
+    target_dim = reduce(lambda x, y: x * y, list(target.meta["val"].shape))
+
+    return source_dim == target_dim
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.add,
+        CallFunction(
+            aten.reshape,
+            CallFunction(aten.mm, Arg(), Arg()),
+            Ignored(),
+        ),
+        KeywordArg("input"),
+    ),
+    pass_dict=move_views_below_pointwise_pass_aten,
+    extra_check=config_flag("split_cat_fx_passes"),
+)
+@register_graph_pattern(
+    CallFunction(
+        aten.add,
+        CallFunction(
+            aten.reshape,
+            CallFunction(aten.mm, Arg(), Arg()),
+            Ignored(),
+        ),
+        KeywordArg("input"),
+    ),
+    pass_dict=move_views_below_pointwise_pass_aten,
+    extra_check=config_flag("split_cat_fx_passes"),
+)
+def move_views_below_pointwise(match, mat1, mat2, *, input):
+    graph = match.graph
+    mm_node = next(node for node in match.nodes if node.target == aten.mm.default)
+    reshape_node = next(node for node in mm_node.users)
+    if len(mm_node.users) != 1 or len(reshape_node.users) != 1:
+        return
+    # reshape_node only has one user
+    add_user = next(iter(reshape_node.users.keys()))
+    if add_user.target == aten.add.Tensor and is_node_meta_valid(add_user):
+        # find its input of add tensor
+        add_input = add_user.args[0] if add_user.args[0].name != reshape_node.name else add_user.args[1]
+        # Check if the input node has meta data and can be reshaped to the shape of mm_node
+        if not is_node_meta_valid(add_input):
+            return
+        if can_be_reshaped(add_input, mm_node):
+            # reshape the input to the same shape as mm_node
+            with graph.inserting_after(add_input):
+                reshape_input = graph.call_function(
+                    aten.reshape.default,
+                    args=(add_input, list(mm_node.meta["val"].shape)),
+                )
+                reshape_input.meta.update(mm_node.meta)
+                # construct addmm node
+                addmm_node = graph.call_function(
+                    aten.addmm.default,
+                    args=(reshape_input, mm_node.args[0], mm_node.args[1]),
+                )
+                update_addmm_val(
+                    addmm_node, reshape_input.meta["val"], mm_node.args[0].meta["val"], mm_node.args[1].meta["val"]
+                )
+                mm_node.replace_all_uses_with(addmm_node)
+                add_user.replace_all_uses_with(reshape_node)
+                graph.erase_node(mm_node)
+                graph.erase_node(add_user)
+                counters["inductor"]["move_views_below_pointwise"] += 1
+        elif can_be_broadcasted(add_input, mm_node):
+            # construct add_mm node
+            with graph.inserting_after(add_input):
+                addmm_node = graph.call_function(
+                    aten.addmm.default,
+                    args=(add_input, mm_node.args[0], mm_node.args[1]),
+                )
+                update_addmm_val(
+                    addmm_node, add_input.meta["val"], mm_node.args[0].meta["val"], mm_node.args[1].meta["val"]
+                )
+                mm_node.replace_all_uses_with(addmm_node)
+                # reshape add_mm to the same shape as add_user
+                if can_be_reshaped(addmm_node, add_user):
+                    reshape_addmm = graph.call_function(
+                        aten.reshape.default,
+                        args=(addmm_node, list(add_user.meta["val"].shape)),
+                    )
+                    reshape_addmm.meta.update(add_user.meta)
+                    add_user.replace_all_uses_with(reshape_addmm)
+                    graph.erase_node(add_user)
+                    graph.erase_node(mm_node)
+                    graph.erase_node(reshape_node)
+                    counters["inductor"]["move_views_below_pointwise"] += 1

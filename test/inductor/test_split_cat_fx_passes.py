@@ -1173,6 +1173,65 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
+    @patch
+    def test_move_views_below_pointwise(self):
+        def replace_with_addmm(x, y, z, w):
+            l1_out = torch.split(x, [10, 10, 10], 0)
+            item0 = l1_out[0]
+            view = torch.reshape(y, (200, 10))
+            permute = torch.permute(z, (1, 0))
+            mm_node = torch.mm(view, permute)
+            view_2 = torch.reshape(mm_node, (10, 20, 30))
+            return torch.add(view_2, item0)
+
+        def replace_with_addmm_with_mm_multiple_users(x, y, z, w):
+            l1_out = torch.split(x, [10, 10, 10], 0)
+            item0 = l1_out[0]
+            view = torch.reshape(y, (200, 10))
+            permute = torch.permute(z, (1, 0))
+            mm_node = torch.mm(view, permute)
+            view_2 = torch.reshape(mm_node, (10, 20, 30))
+            return [mm_node, torch.add(view_2, item0)]
+
+        def replace_with_addmm_with_view_multiple_users(x, y, z, w):
+            l1_out = torch.split(x, [10, 10, 10], 0)
+            item0 = l1_out[0]
+            view = torch.reshape(y, (200, 10))
+            permute = torch.permute(z, (1, 0))
+            mm_node = torch.mm(view, permute)
+            view_2 = torch.reshape(mm_node, (10, 20, 30))
+            return [view_2, torch.add(view_2, item0)]
+
+        def replace_with_addmm_with_broadcast(x, y, z, w):
+            view = torch.reshape(y, (200, 10))
+            permute = torch.permute(z, (1, 0))
+            mm_node = torch.mm(view, permute)
+            view_2 = torch.reshape(mm_node, (10, 20, 30))
+            return torch.add(view_2, w)
+
+        args = [
+            torch.randn(30, 20, 30), torch.randn(10, 20, 10), torch.randn(30, 10), torch.randn(30)
+        ]
+        for fn, expected_replace_with_addmm in [
+            (replace_with_addmm, 1),
+            (replace_with_addmm_with_mm_multiple_users, 0),
+            (replace_with_addmm_with_view_multiple_users, 0),
+            (replace_with_addmm_with_broadcast, 1),
+        ]:
+            expected = fn(*args)
+            actual = torch.compile(fn)(*args)
+
+            torch.testing.assert_close(actual, expected)
+            self.assertEqual(
+                counters["inductor"]["move_views_below_pointwise"],
+                expected_replace_with_addmm,
+            )
+            if expected_replace_with_addmm > 0:
+                self.assertIn(
+                    "split_cat_pattern_move_views_below_pointwise_pass_post_grad", optimus_scuba_log
+                )
+            counters.clear()
+
     def test_numpy_compat_normalization(self):
         def fn(x, y):
             a = torch.stack([x, y], axis=1)

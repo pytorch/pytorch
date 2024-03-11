@@ -166,6 +166,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
             if example_inputs is not None:
                 gm = fuse_fx(gm, example_inputs)
             numpy_compat_normalization(gm.graph)
+            optimus_scuba_log["before_pre_grad_transformation"] = upload_graph(gm.graph)
             inductor_before_change = copy.deepcopy(counters["inductor"])
             group_batch_fusion_passes(gm.graph, pre_grad=True)
             if counters["inductor"] != inductor_before_change:
@@ -202,6 +203,8 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
             config.fx_passes_numeric_check.get("num_iterations", 1),
             config.fx_passes_numeric_check.get("precision", 1e-4),
         )
+
+    optimus_scuba_log["after_pre_grad_transformation"] = upload_graph(gm.graph)
 
     return gm
 
