@@ -3658,7 +3658,7 @@ def _unsafe_masked_index_put_accumulate(x, mask, indices, values):
     for i in range(len(indices)):
         index = indices[i]
         if index is not None:
-            indices[i] = index.clamp(min=0, max=x.size(i) - 1)
+            indices[i] = index.clamp(min=-x.size(i), max=x.size(i) - 1)
 
     masked_value = values.masked_fill(~mask, 0)
     return aten._unsafe_index_put(x, indices, masked_value, accumulate=True)
