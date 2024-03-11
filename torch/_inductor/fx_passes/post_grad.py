@@ -616,16 +616,20 @@ def remove_noop_ops(graph: torch.fx.Graph):
     """
     Removes both operations that are essentially aten.clone and operations that are essentially aten.alias from the graph.
     """
+    inputs = set()
     input_storages = set()
     output_storages = set()
 
     for node in graph.nodes:
         if node.op == "placeholder":
+            inputs.add(node)
             input_storages.add(get_node_storage(node))
         else:
             break
 
-    for out in next(iter(reversed(graph.nodes))).args[0]:
+    output_node = next(iter(reversed(graph.nodes)))
+    assert output_node.op == "output"
+    for out in output_node.args[0]:
         if isinstance(out, torch.fx.Node):
             output_storages.add(get_node_storage(out))
 
@@ -638,13 +642,28 @@ def remove_noop_ops(graph: torch.fx.Graph):
                 src = src_index(node.args)
             if not isinstance(src, torch.fx.Node):
                 continue
+            # Don't introduce new aliasing between inputs and outputs.
             # See fx_passes/README.md for a discussion of why this is
             # necessary.
-            if get_node_storage(node) in output_storages and (
-                get_node_storage(src) in input_storages
-                or get_node_storage(src) in output_storages
+            node_storage = get_node_storage(node)
+            src_storage = get_node_storage(src)
+            node_is_view = node_storage == src_storage
+            if (
+                not node_is_view
+                and node_storage in output_storages
+                and (src_storage in input_storages or src_storage in output_storages)
             ):
                 continue
+
+            # Even if input and outputs are expected to alias,
+            # don't make "node is src" True
+            if (
+                node_is_view
+                and node in output_node.args
+                and (src in inputs or src in output_node.args)
+            ):
+                continue
+
             is_valid, args, kwargs = get_fake_args_kwargs(node)
             if not is_valid:
                 continue
