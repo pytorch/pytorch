@@ -911,7 +911,7 @@ class ChainedScheduler(LRScheduler):
 
     def __init__(self, schedulers: Sequence[LRScheduler], optimizer: Optional[Optimizer] = None):
         if len(schedulers) < 1:
-            raise ValueError("ChainedScheduler expects at least one schedulers to be chained, but got no scheduler.")
+            raise ValueError("ChainedScheduler expects at least one scheduler to be chained, but got no scheduler.")
 
         optimizer = optimizer or schedulers[0].optimizer
         for sch_idx, scheduler in enumerate(schedulers):
