@@ -342,6 +342,7 @@ class TestDeserialize(TestCase):
             _check_graph(False)
         else:
             _check_graph(False)
+
     def test_auto_functionalize(self):
         try:
             lib = torch.library.Library("mylib", "FRAGMENT")  # noqa: TOR901
