@@ -1,6 +1,7 @@
 # Owner(s): ["module: optimizer"]
 import functools
 import math
+import tempfile
 from typing import Any, Dict, Tuple
 import unittest
 from copy import deepcopy
@@ -23,16 +24,10 @@ from torch.testing._internal.common_utils import markDynamoStrictTest, parametri
 FP16_REDUCED_PRECISION = {'atol': 1e-5, 'rtol': 1e-4}
 
 
-def _force_capturable_False_for_unsupported_single_tensor(optim_info, kwargs):
-    if optim_info.only_supports_capturable_on_foreach and not kwargs.get("foreach", False) and kwargs.get("capturable", False):
-        kwargs["capturable"] = False
-
-
 def rosenbrock(tensor):
     assert tensor.size() == torch.Size([2]), f"Requires tensor with 2 scalars but got {tensor.size()}"
     x, y = tensor
     return (1 - x) ** 2 + 100 * (y - x**2) ** 2
-
 
 @markDynamoStrictTest
 class TestOptimRenewed(TestCase):
@@ -80,9 +75,6 @@ class TestOptimRenewed(TestCase):
         for optim_input in optim_inputs:
             if "foreach" in optim_info.supported_impls:
                 optim_input.kwargs["foreach"] = False  # force forloop
-
-            _force_capturable_False_for_unsupported_single_tensor(optim_info, optim_input.kwargs)
-
             if contiguous:
                 weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
                 bias = Parameter(torch.randn((10), device=device, dtype=dtype))
@@ -124,10 +116,6 @@ class TestOptimRenewed(TestCase):
             if "foreach" in optim_info.supported_impls:
                 optim_input.kwargs["foreach"] = False  # force forloop
 
-            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
-                    and not optim_input.kwargs.get("foreach", False)):
-                continue
-
             weight = Parameter(torch.randn((10, 5), device="cuda:0", dtype=dtype))
             bias = Parameter(torch.randn((10), device="cuda:1", dtype=dtype))
             input = torch.randn(5, device="cuda:0", dtype=dtype)
@@ -163,10 +151,6 @@ class TestOptimRenewed(TestCase):
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             device, dtype, optim_info, skip=("differentiable", "fused"))
         for optim_input in all_optim_inputs:
-            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
-                    and not optim_input.kwargs.get("foreach", False)):
-                continue
-
             # Last param is intentionally real to test that we can mix real and complex
             complex_params = [
                 torch.randn(10, 5, device=device, dtype=dtype, requires_grad=True),
@@ -241,6 +225,16 @@ class TestOptimRenewed(TestCase):
             if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
                     and not optim_input.kwargs.get("foreach", False)):
                 continue
+
+            if optim_info.step_requires_closure:
+                # Why? The way we implement complex is by turning complex params into view_as_real
+                # alternatives. For example, an size (M,N) tensor will become (M,N,2). In this test,
+                # we break apart a tensor into its real and imaginary parts, which would be 2x(M,N).
+                # For other pointwise optimizers, this distinction is trivial, but for LBFGS where
+                # there are reductions across all parameters (and all the grads get flattened into
+                # one long Tensor), this ordering matters. Why? Reductions (like sum) are NOT
+                # commutative, i.e., a + b + c != a + c + b in computers.
+                torch.manual_seed(2024)
 
             a1 = torch.randn(2, device=device, dtype=dtype, requires_grad=True)
             a1_real = a1.real.clone().detach()
@@ -328,9 +322,6 @@ class TestOptimRenewed(TestCase):
                 continue
             for flag_value in (False, True):
                 kwargs[flag] = flag_value
-
-                _force_capturable_False_for_unsupported_single_tensor(optim_info, kwargs)
-
                 input = torch.tensor(
                     [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=dtype, device=device
                 ).reshape(3, 2)
@@ -432,9 +423,6 @@ class TestOptimRenewed(TestCase):
         for optim_input in optim_inputs:
             updated_params, state = [], []
             kwargs = deepcopy(optim_input.kwargs)
-
-            _force_capturable_False_for_unsupported_single_tensor(optim_info, kwargs)
-
             if kwargs.get("capturable", False) and str(device) == "cpu" :
                 # capturable is not supported on CPU
                 continue
@@ -521,9 +509,6 @@ class TestOptimRenewed(TestCase):
             max_mems = []
             for flag_value in (False, True):
                 kwargs["foreach"] = flag_value
-
-                _force_capturable_False_for_unsupported_single_tensor(optim_info, kwargs)
-
                 # The 128 is critical here! Our CUDACachingAllocator allocates in blocks of 512,
                 # meaning any tensor that occupies <512 bytes of memory will allocate a whole
                 # 512 bytes anyway. We use 128 (since datasize would be 4 bytes) so that param
@@ -629,11 +614,6 @@ class TestOptimRenewed(TestCase):
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info, skip=("differentiable",))
         for optim_input in all_optim_inputs:
-            # See https://github.com/pytorch/pytorch/issues/117836 and #118230
-            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
-                    and not optim_input.kwargs.get("foreach", False)):
-                continue
-
             weight_kwargs = optim_input.kwargs
             bias_kwargs = deepcopy(optim_input.kwargs)
             bias_kwargs["weight_decay"] = 0.0
@@ -670,11 +650,6 @@ class TestOptimRenewed(TestCase):
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info, skip=("differentiable",))
         for optim_input in all_optim_inputs:
-            # See https://github.com/pytorch/pytorch/issues/117836 and #118230
-            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
-                    and not optim_input.kwargs.get("foreach", False)):
-                continue
-
             # optim_input.kwargs will be the param group kwargs, which should have >0 lr
             if "lr" not in optim_input.kwargs or optim_input.kwargs["lr"] == 0:
                 optim_input.kwargs["lr"] = 1e-3
@@ -730,10 +705,6 @@ class TestOptimRenewed(TestCase):
             return torch.tensor([1], device=device, dtype=dtype)
 
         for optim_input in all_optim_inputs:
-            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
-                    and not optim_input.kwargs.get("foreach", False)):
-                continue
-
             optimizer = optim_cls(params, **optim_input.kwargs)
             optimizer.step(closure)
 
@@ -750,10 +721,6 @@ class TestOptimRenewed(TestCase):
 
         for optim_input in all_optim_inputs:
             kwargs = optim_input.kwargs
-
-            if (optim_info.only_supports_capturable_on_foreach and kwargs.get("capturable", False)
-                    and not kwargs.get("foreach", False)):
-                continue
 
             # params will decay even if grads are empty if weight_decay != 0,
             # and capturable doesn't work for CPU tensors
@@ -789,10 +756,6 @@ class TestOptimRenewed(TestCase):
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
         params = [Parameter(torch.randn(2, 3, requires_grad=True, device=device, dtype=dtype)) for _ in range(2)]
         for optim_input in all_optim_inputs:
-            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
-                    and not optim_input.kwargs.get("foreach", False)):
-                continue
-
             optimizer = optim_cls(params, **optim_input.kwargs)
             optimizer.__repr__()
 
@@ -815,10 +778,6 @@ class TestOptimRenewed(TestCase):
             return loss
 
         for optim_input in all_optim_inputs:
-            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
-                    and not optim_input.kwargs.get("foreach", False)):
-                continue
-
             optimizer = optim_cls(params, **optim_input.kwargs)
             closure = functools.partial(fwd_bwd, optimizer, weight, bias, input)
 
@@ -862,10 +821,6 @@ class TestOptimRenewed(TestCase):
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info, skip=("differentiable",))
         for optim_input in all_optim_inputs:
-            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
-                    and not optim_input.kwargs.get("foreach", False)):
-                continue
-
             torch.manual_seed(1)
             model = torch.nn.Sequential(
                 torch.nn.Conv2d(4, 2, 1, stride=2),
@@ -907,6 +862,48 @@ class TestOptimRenewed(TestCase):
 
 
     @optims(optim_db, dtypes=[torch.float32])
+    def test_save_load_equality_with_weights_only(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+
+        # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info, skip=("differentiable",))
+        weight = Parameter(torch.randn(2, 3, requires_grad=True, device=device, dtype=dtype))
+        bias = Parameter(torch.randn(2, requires_grad=True, device=device, dtype=dtype))
+        input = torch.randn(3, requires_grad=True, device=device, dtype=dtype)
+        params = [weight, bias]
+
+        def fwd_bwd(optim, w, b, i):
+            optim.zero_grad()
+            loss = (w.mv(i) + b).pow(2).sum()
+            loss.backward()
+            if optim_info.only_supports_sparse_grads:
+                weight.grad = weight.grad.to_sparse()
+                bias.grad = bias.grad.to_sparse()
+            return loss
+
+        for optim_input in all_optim_inputs:
+            optimizer = optim_cls(params, **optim_input.kwargs)
+            closure = functools.partial(fwd_bwd, optimizer, weight, bias, input)
+
+            # Prime the optimizer
+            for _ in range(3):
+                optimizer.step(closure)
+
+            sd = optimizer.state_dict()
+
+            # === Check saved/loaded state_dict are the same (including weights_only load). ===
+            with tempfile.TemporaryFile() as f:
+                torch.save(sd, f)
+                f.seek(0)
+                sd_copy = torch.load(f)
+                self.assertEqual(sd_copy, sd)
+                del sd_copy
+                f.seek(0)
+                sd_copy_wo = torch.load(f, weights_only=True)
+                self.assertEqual(sd_copy_wo, sd)
+
+
+    @optims(optim_db, dtypes=[torch.float32])
     def test_load_nontensor_step(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
 
@@ -928,10 +925,6 @@ class TestOptimRenewed(TestCase):
 
         for optim_input in all_optim_inputs:
             kwargs = optim_input.kwargs
-            if (optim_info.only_supports_capturable_on_foreach and kwargs.get("capturable", False)
-                    and not kwargs.get("foreach", False)):
-                continue
-
             optimizer = optim_cls(params, **optim_input.kwargs)
             for _ in range(3):
                 optimizer.step(closure)
@@ -959,10 +952,6 @@ class TestOptimRenewed(TestCase):
             return closure_loss if optim_info.step_requires_closure else None
 
         for optim_input in cpu_optim_inputs:
-            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
-                    and not optim_input.kwargs.get("foreach", False)):
-                continue
-
             params = [Parameter(torch.randn(2, 3, device="cpu", dtype=dtype)) for _ in range(2)]
             for p in params:
                 p.grad = torch.randn_like(p)
@@ -1023,10 +1012,6 @@ class TestOptimRenewed(TestCase):
         optim_cls = optim_info.optim_cls
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
         for optim_input in all_optim_inputs:
-            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
-                    and not optim_input.kwargs.get("foreach", False)):
-                continue
-
             param = torch.rand(2, 3, device=device, dtype=dtype, requires_grad=True)
             optim = optim_cls([param], **optim_input.kwargs)
             optim.register_state_dict_pre_hook(self.__class__._state_dict_pre_hook)
@@ -1039,10 +1024,6 @@ class TestOptimRenewed(TestCase):
         optim_cls = optim_info.optim_cls
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
         for optim_input in all_optim_inputs:
-            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
-                    and not optim_input.kwargs.get("foreach", False)):
-                continue
-
             param = torch.rand(2, 3, device=device, dtype=dtype, requires_grad=True)
             optim = optim_cls([param], **optim_input.kwargs)
             optim.register_state_dict_post_hook(self.__class__._state_dict_post_hook)
@@ -1055,10 +1036,6 @@ class TestOptimRenewed(TestCase):
         optim_cls = optim_info.optim_cls
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
         for optim_input in all_optim_inputs:
-            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
-                    and not optim_input.kwargs.get("foreach", False)):
-                continue
-
             param = torch.rand(2, 3, device=device, dtype=dtype, requires_grad=True)
             optim = optim_cls([param], **optim_input.kwargs)
             optim.register_state_dict_pre_hook(self.__class__._state_dict_pre_hook)
@@ -1093,10 +1070,6 @@ class TestOptimRenewed(TestCase):
         optim_cls = optim_info.optim_cls
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
         for optim_input in all_optim_inputs:
-            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
-                    and not optim_input.kwargs.get("foreach", False)):
-                continue
-
             param = torch.rand(2, 3, device=device, dtype=dtype, requires_grad=True)
             optim = optim_cls([param], **optim_input.kwargs)
             state_dict = optim.state_dict()
@@ -1117,10 +1090,6 @@ class TestOptimRenewed(TestCase):
         optim_cls = optim_info.optim_cls
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
         for optim_input in all_optim_inputs:
-            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
-                    and not optim_input.kwargs.get("foreach", False)):
-                continue
-
             param = torch.rand(2, 3, device=device, dtype=dtype, requires_grad=True)
             optim = optim_cls([param], **optim_input.kwargs)
 
@@ -1135,10 +1104,6 @@ class TestOptimRenewed(TestCase):
         optim_cls = optim_info.optim_cls
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
         for optim_input in all_optim_inputs:
-            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
-                    and not optim_input.kwargs.get("foreach", False)):
-                continue
-
             param = torch.rand(2, 3, device=device, dtype=dtype, requires_grad=True)
             optim = optim_cls([param], **optim_input.kwargs)
 
@@ -1164,10 +1129,6 @@ class TestOptimRenewed(TestCase):
 
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
         for optim_input in all_optim_inputs:
-            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
-                    and not optim_input.kwargs.get("foreach", False)):
-                continue
-
             optim = optim_info.optim_cls(params, **optim_input.kwargs)
             data = 2
             hook_handle = optim.register_step_post_hook(post_hook)
@@ -1199,10 +1160,6 @@ class TestOptimRenewed(TestCase):
 
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
         for optim_input in all_optim_inputs:
-            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
-                    and not optim_input.kwargs.get("foreach", False)):
-                continue
-
             optim = optim_info.optim_cls(params, **optim_input.kwargs)
             data = 5
             hook_handle = optim.register_step_pre_hook(pre_hook)
@@ -1246,10 +1203,6 @@ class TestOptimRenewed(TestCase):
 
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info)
         for optim_input in all_optim_inputs:
-            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
-                    and not optim_input.kwargs.get("foreach", False)):
-                continue
-
             optim = optim_info.optim_cls(params, **optim_input.kwargs)
             optim2 = SGD(params)
             data = []
@@ -1307,10 +1260,6 @@ class TestOptimRenewed(TestCase):
             return {k for k in obj.__dict__ if not k.startswith("_")}
 
         for optim_input in all_optim_inputs:
-            if (optim_info.only_supports_capturable_on_foreach and optim_input.kwargs.get("capturable", False)
-                    and not optim_input.kwargs.get("foreach", False)):
-                continue
-
             optimizer = optim_cls(params, **optim_input.kwargs)
 
             # Make some state
