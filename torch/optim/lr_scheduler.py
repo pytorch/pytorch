@@ -921,9 +921,6 @@ class ChainedScheduler(LRScheduler):
                     f"but got {type(scheduler)}"
                 )
 
-            if not sch_idx and optimizer is None:
-                optimizer = scheduler.optimizer
-
             if optimizer != scheduler.optimizer:
                 raise ValueError(
                     "ChainedScheduler expects all schedulers to belong to the same optimizer, but "
