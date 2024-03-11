@@ -12,6 +12,7 @@ from unittest.mock import patch
 import numpy as np
 import sympy
 import torch
+from torch import nn
 from torch._C import FileCheck
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
@@ -1574,25 +1575,19 @@ class CPUReproTests(TestCase):
     def test_auto_simd(self):
         vec_avx512 = codecache.supported_vec_isa_list[0]
         vec_avx2 = codecache.supported_vec_isa_list[1]
-        vec_neon = codecache.supported_vec_isa_list[2]
         self.assertTrue(vec_avx512.bit_width() == 512)
         self.assertTrue(vec_avx2.bit_width() == 256)
-        self.assertTrue(vec_neon.bit_width() == 256)
         self.assertTrue(vec_avx512.nelements() == 16)
         self.assertTrue(vec_avx2.nelements() == 8)
-        self.assertTrue(vec_neon.nelements() == 8)
         self.assertTrue(vec_avx512.nelements(torch.bfloat16) == 32)
         self.assertTrue(vec_avx2.nelements(torch.bfloat16) == 16)
-        self.assertTrue(vec_neon.nelements(torch.bfloat16) == 16)
 
         with config.patch({"cpp.simdlen": None}):
             isa = codecache.pick_vec_isa()
             if vec_avx512 in codecache.valid_vec_isa_list():
                 self.assertTrue(isa == vec_avx512)
-            elif vec_avx2 in codecache.valid_vec_isa_list():
-                self.assertTrue(isa == vec_avx2)
             else:
-                self.assertTrue(isa == vec_neon)
+                self.assertTrue(isa == vec_avx2)
 
         with config.patch({"cpp.simdlen": 0}):
             isa = codecache.pick_vec_isa()
@@ -1622,9 +1617,6 @@ class CPUReproTests(TestCase):
             if vec_avx2 in isa_list:
                 isa = codecache.pick_vec_isa()
                 self.assertTrue(isa == vec_avx2)
-            elif vec_neon in isa_list:
-                isa = codecache.pick_vec_isa()
-                self.assertTrue(isa == vec_neon)
 
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -1776,6 +1768,72 @@ class CPUReproTests(TestCase):
             ref_grad = test_args_for_ref["input"].grad
             res_grad = test_args_for_opt["input"].grad
             self.assertEqual(ref_grad, res_grad)
+
+    def test_decomposed_fake_quant_per_channel(self):
+        def fq(input, scales, zero_points, axis, quant_min, quant_max):
+            res = torch.fake_quantize_per_channel_affine(
+                input, scales, zero_points, axis, quant_min, quant_max
+            )
+            return res
+
+        def qdq(input, scales, zero_points, axis, quant_min, quant_max):
+            res = torch.ops.quantized_decomposed.fake_quant_per_channel(
+                input, scales, zero_points, axis, quant_min, quant_max
+            )
+            return res
+
+        def run_eager_aten_fake_quant(
+            input, scales, zero_points, axis, quant_min, quant_max
+        ):
+            input.grad = None
+            res = fq(input, scales, zero_points, axis, quant_min, quant_max)
+            res.sum().backward()
+            return res, input.grad
+
+        def run_eager_decomposed_fake_quant(
+            input, scales, zero_points, axis, quant_min, quant_max
+        ):
+            input.grad = None
+            res = qdq(input, scales, zero_points, axis, quant_min, quant_max)
+            res.sum().backward()
+            return res, input.grad
+
+        def run_compile_decomposed_fake_quant(
+            input, scales, zero_points, axis, quant_min, quant_max
+        ):
+            input.grad = None
+            compiled_qdq = torch.compile(qdq)
+            res = compiled_qdq(input, scales, zero_points, axis, quant_min, quant_max)
+            res.sum().backward()
+            return res, input.grad
+
+        input = torch.randn(2, 3, 224, 224)
+        input[1, 2, 3, 4] = 257
+        input.requires_grad_()
+        scales = torch.ones((3,))
+        zero_points = torch.zeros((3,))
+        axis = 1
+        quant_min = -128
+        quant_max = 127
+
+        aten_input = copy.deepcopy(input)
+        compiler_input = copy.deepcopy(input)
+
+        res_aten_eager, input_grad_aten_eager = run_eager_aten_fake_quant(
+            aten_input, scales, zero_points, axis, quant_min, quant_max
+        )
+        res_decomp_eager, input_grad_decomp_eager = run_eager_decomposed_fake_quant(
+            input, scales, zero_points, axis, quant_min, quant_max
+        )
+        res, input_grad = run_compile_decomposed_fake_quant(
+            compiler_input, scales, zero_points, axis, quant_min, quant_max
+        )
+
+        self.assertEqual(res_aten_eager, res)
+        self.assertEqual(res_decomp_eager, res)
+        self.assertEqual(input_grad_aten_eager, input_grad)
+        self.assertEqual(input_grad_decomp_eager, input_grad)
+        self.assertEqual(input_grad[1, 2, 3, 4], torch.tensor(0.0))
 
     @patch("torch.cuda.is_available", lambda: False)
     def test_scatter_using_atomic_add(self):
@@ -2924,6 +2982,35 @@ class CPUReproTests(TestCase):
         jit_func = torch.compile(func)
         self.assertRaises(RuntimeError, lambda: func(example_inputs))
         self.assertRaises(RuntimeError, lambda: jit_func(example_inputs))
+
+    def test_nn_param_assign(self):
+        # https://github.com/pytorch/pytorch/issues/99569
+        class Model2(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(in_channels=3, out_channels=5, kernel_size=3)
+                self.batchnorm = nn.BatchNorm2d(num_features=5)
+                self.conv_weight = torch.randn(5, 3, 3, 3)
+                self.conv_bias = torch.randn(5)
+
+            def forward(self, x):
+                self.conv.weight = nn.Parameter(self.conv_weight)
+                self.conv.bias = nn.Parameter(self.conv_bias, requires_grad=False)
+                self.conv.eval()
+                x = self.conv(x)
+                x = self.batchnorm(x)
+                x = F.relu(x)
+                return x
+
+        input_tensor = torch.randn(1, 3, 10, 10)
+        func = Model2().to("cpu")
+
+        with torch.no_grad():
+            func.train(False)
+            v1 = func(input_tensor)
+            jit_func = torch.compile(func, fullgraph=True)
+            v2 = jit_func(input_tensor)
+            self.assertEqual(v1, v2)
 
     @config.patch(inplace_buffers=True)
     def test_in_out_buffer(self):
