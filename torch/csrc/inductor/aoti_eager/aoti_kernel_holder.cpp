@@ -171,8 +171,8 @@ AOTIKernelMetaInfo AOTIPythonKernelHolder::getInputsMetaInfo(
         is_symbolic_,
         input.scalar_type(),
         input.device(),
-        input.sizes().vec(),
-        input.strides().vec()));
+        input.sym_sizes().vec(),
+        input.sym_strides().vec()));
   }
   return inputs_meta_info;
 }
@@ -276,7 +276,7 @@ void AOTIPythonKernelHolder::initAOTIKernelCache() {
       }
 
       std::vector<std::string> tensors_meta_info = element["meta_info"];
-      auto kernel_meta_info = TensorMetaInfo::fromConfig(tensors_meta_info);
+      auto kernel_meta_info = TensorMetaInfo::loadFromFile(tensors_meta_info);
       if (kernel_meta_info.size() > 0) {
         aoti_kernel_cache_[kernel_meta_info] =
             getAOTIEagerKernelRunner(kernel_so_path);
