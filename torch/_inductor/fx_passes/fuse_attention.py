@@ -478,14 +478,18 @@ def _sfdp_replacement_18(
     query, key, value, inv_scale, causal_mask_value, causal_mask, dropout_p
 ):
     counters["inductor"]["fuse_attention"] += 1
-    return aten.scaled_dot_product_attention(
-        query.transpose(1, 2),
-        key.transpose(1, 2),
-        value.transpose(1, 2),
-        attn_mask=causal_mask,
-        dropout_p=dropout_p,
-        is_causal=False,
-        scale=1.0 / math.sqrt(value.size(-1)),
+    return (
+        aten.scaled_dot_product_attention(
+            query.transpose(1, 2),
+            key.transpose(1, 2),
+            value.transpose(1, 2),
+            attn_mask=causal_mask,
+            dropout_p=dropout_p,
+            is_causal=False,
+            scale=1.0 / math.sqrt(value.size(-1)),
+        ),
+        key,
+        value,
     )
 
 
