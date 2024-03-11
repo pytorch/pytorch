@@ -178,8 +178,8 @@ static std::unordered_map<void*, uint8_t> g_cuda_device_affiliation;
 // Data structures for optional memory tracking. Access to these structures
 // is guarded by the CUDAContext::mutex.
 static std::unordered_map<void*, long> g_size_map;
-static std::vector<long> g_total_by_gpu_map(c10::Device::MAX_NUM_DEVICES, 0);
-static std::vector<long> g_max_by_gpu_map(c10::Device::MAX_NUM_DEVICES, 0);
+static std::vector<long> g_total_by_gpu_map(C10_COMPILE_TIME_MAX_GPUS, 0);
+static std::vector<long> g_max_by_gpu_map(C10_COMPILE_TIME_MAX_GPUS, 0);
 
 static long g_total_mem = 0;
 static long g_last_rep = 0;
@@ -208,10 +208,10 @@ static void Caffe2InitializeCuda() {
   // of GPUs.
   CAFFE_ENFORCE_LE(
       NumCudaDevices(),
-      c10::Device::MAX_NUM_DEVICES,
+      C10_COMPILE_TIME_MAX_GPUS,
       "Number of CUDA devices on the machine is larger than the compiled "
       "max number of gpus expected (",
-      c10::Device::MAX_NUM_DEVICES,
+      C10_COMPILE_TIME_MAX_GPUS,
       "). Increase that and recompile.");
 
   for (DeviceIndex i = 0; i < NumCudaDevices(); ++i) {
@@ -306,7 +306,7 @@ struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
     baseAllocator_ = GetDefaultCPUAllocator();
   }
   ~PinnedCPUAllocator() override {}
-  at::DataPtr allocate(size_t nbytes) const override {
+  at::DataPtr allocate(size_t nbytes) override {
     if (nbytes == 0) {
       // replicate c10::alloc_cpu behavior - return nullptr
       return {nullptr, nullptr, &Delete, at::Device(CPU)};
@@ -513,7 +513,7 @@ void TrackMemoryAlloc(size_t nbytes) {
 struct DefaultCUDAAllocator final : public at::Allocator {
   DefaultCUDAAllocator() {}
   ~DefaultCUDAAllocator() override {}
-  at::DataPtr allocate(size_t nbytes) const override {
+  at::DataPtr allocate(size_t nbytes) override {
     // Lock the mutex
     std::lock_guard<std::mutex> lock(CUDAContext::mutex());
     // A one-time caffe2 cuda initializer.

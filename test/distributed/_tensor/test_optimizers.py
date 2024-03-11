@@ -38,14 +38,14 @@ def shard_fn(name, module, device_mesh):
 
 
 # prepare input
-def input_fn(inputs, device_mesh):
+def input_fn(mod, inputs, device_mesh):
     # split the input tensor to be sharded input
     dist_inp = distribute_tensor(inputs[0], device_mesh, [Shard(0)])
     return dist_inp
 
 
 # prepare output to be local torch.Tensor
-def output_fn(outputs, device_mesh):
+def output_fn(mod, outputs, device_mesh):
     assert isinstance(outputs, DTensor)
     return outputs.redistribute(placements=[Replicate()] * device_mesh.ndim).to_local()
 

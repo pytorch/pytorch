@@ -18,11 +18,13 @@
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ForeachUtils.h>
+#include <ATen/native/Normalization.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
+#include <c10/util/thread_name.h>
 #include <libshm.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -90,7 +92,10 @@
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <torch/csrc/profiler/combined_traceback.h>
 #include <sstream>
+
 #ifdef USE_CUDA
+#include <ATen/cuda/CUDAConfig.h>
+#include <ATen/native/cudnn/BatchNorm.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #endif
 
@@ -192,6 +197,11 @@ static PyObject* THPModule_initExtension(
   torch::tensors::initialize_python_bindings();
   std::string path = THPUtils_unpackString(shm_manager_path);
   libshm_init(path.c_str());
+
+  // The main thread usually launches CPU/GPU/Accelerator kernels and therefore
+  // becomes latency sensitive. If the thread is named, we can debug performance
+  // issues easier.
+  c10::setThreadName("pt_main_thread");
 
   auto module = THPObjectPtr(PyImport_ImportModule("torch"));
   if (!module)
@@ -992,6 +1002,25 @@ PyObject* THPModule_allowBF16ReductionCuBLAS(
   Py_RETURN_FALSE;
 }
 
+PyObject* THPModule_setAllowFP16ReductionCPU(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_allow_fp16_reduction_cpu expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setAllowFP16ReductionCPU(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_allowFP16ReductionCPU(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().allowFP16ReductionCPU()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
 PyObject* THPModule_setFlushDenormal(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -1365,6 +1394,14 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      nullptr},
     {"_set_cublas_allow_bf16_reduced_precision_reduction",
      THPModule_setAllowBF16ReductionCuBLAS,
+     METH_O,
+     nullptr},
+    {"_get_cpu_allow_fp16_reduced_precision_reduction",
+     THPModule_allowFP16ReductionCPU,
+     METH_NOARGS,
+     nullptr},
+    {"_set_cpu_allow_fp16_reduced_precision_reduction",
+     THPModule_setAllowFP16ReductionCPU,
      METH_O,
      nullptr},
     {"_vmapmode_increment_nesting",
@@ -2028,10 +2065,23 @@ Call this whenever a new thread is created in order to propagate values from
   // torch/csrc/pybind.h` would solve this but it caused segmentation fault in
   // my environment.
   using _DeviceDtypeKey = std::pair<at::Device, std::string>;
+  // Custom hasher is necessary to make unordered_map compilable for Windows
+  // debug targets. As `at::native::ParamsHash` only works on structs with
+  // standard layout, but std::string isn't one in Visual C++ debug builds,
+  // which one can easily verify by running something like:
+  //   #define _DEBUG
+  //   #include <type_traits>
+  //   #include <string>
+  //   static_assert(std::is_standard_layout_v<std::string>, "Oh noes");
+  // If above condition is not met, VC++ raises a very cryptic compilation
+  // error. See
+  // https://github.com/pytorch/pytorch/pull/100007#discussion_r1227116292 for
+  // more detail
   struct _DeviceDtypeHasher {
     std::size_t operator()(const _DeviceDtypeKey& k) const noexcept {
-      return std::hash<at::Device>{}(k.first) ^
-          std::hash<std::string>{}(k.second);
+      static at::native::ParamsHash<at::Device> device_hasher;
+      static std::hash<std::string> string_hasher;
+      return device_hasher(k.first) ^ string_hasher(k.second);
     }
   };
   using _FlatMap = std::unordered_map<
@@ -2075,6 +2125,44 @@ Call this whenever a new thread is created in order to propagate values from
         return c10::impl::cow::is_cow_data_ptr(tensor.storage().data_ptr());
       },
       "Checks if a tensor's data pointer is COW");
+
+  py_module.def(
+      "_get_cudnn_batch_norm_reserve_space_size",
+      [](const at::Tensor& input, bool training) {
+#ifdef USE_CUDA
+        return at::native::_get_cudnn_batch_norm_reserve_space_size(
+            input, training);
+#else
+        TORCH_CHECK(false, "PyTorch was not built with cuda");
+#endif
+      },
+      py::arg("input"),
+      py::arg("training"));
+
+  py::enum_<at::native::BatchNormBackend>(py_module, "_BatchNormBackend")
+      .value("Native", at::native::BatchNormBackend::Native)
+      .value("Cudnn", at::native::BatchNormBackend::Cudnn)
+      .value("Miopen", at::native::BatchNormBackend::Miopen);
+
+  py_module.def(
+      "_select_batch_norm_backend",
+      [](const at::Tensor& input,
+         const at::Tensor& weight,
+         const at::Tensor& bias,
+         const at::Tensor& running_mean,
+         const at::Tensor& running_var,
+         bool training,
+         double eps) {
+        return at::native::_select_batch_norm_backend(
+            input, weight, bias, running_mean, running_var, training, eps);
+      },
+      py::arg("input"),
+      py::arg("weight"),
+      py::arg("bias"),
+      py::arg("running_mean"),
+      py::arg("running_var"),
+      py::arg("training"),
+      py::arg("eps"));
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
   THPDefaultCPUGenerator =

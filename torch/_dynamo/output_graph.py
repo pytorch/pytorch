@@ -30,6 +30,7 @@ from torch._guards import (
 )
 from torch._utils_internal import signpost_event
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
+from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -60,6 +61,7 @@ from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import (
     AttrSource,
+    BackwardStateSource,
     ConstantSource,
     GlobalStateSource,
     is_constant_source,
@@ -87,7 +89,13 @@ from .utils import (
     same,
 )
 from .variables.base import VariableTracker
-from .variables.builder import GraphArg, TrackedFake, VariableBuilder, wrap_fx_proxy
+from .variables.builder import (
+    BackwardStateGraphArg,
+    GraphArg,
+    TrackedFake,
+    VariableBuilder,
+    wrap_fx_proxy,
+)
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -379,6 +387,32 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             Tuple[Callable[..., object], Tuple[object, ...], Dict[str, object]]
         ] = []
         self.random_values_var = None
+
+        # Bytecode to insert right before we call the graph
+        self.pregraph_bytecode: List[Instruction] = []
+
+        # Use to pass values to backward hooks when using compiled autograd
+        self.backward_state: Dict[str, VariableTracker] = {}
+        self.backward_state_proxy: Optional[torch.fx.Proxy] = None
+        self.backward_state_var: Optional[str] = None
+
+    def add_backward_state_hook(self, hook: VariableTracker):
+        name = f"hook{len(self.backward_state)}"
+        assert name not in self.backward_state
+        self.backward_state[name] = hook
+        return name, self.get_backward_state_proxy()
+
+    def get_backward_state_proxy(self):
+        if self.backward_state_proxy is None:
+            if self.export:
+                unimplemented("backward_state does not support export")
+            self.backward_state_proxy = self.root_tracer.create_graph_input(
+                "dynamo_backward_state", BackwardState, source=BackwardStateSource()
+            )
+            self.backward_state_proxy.node.meta["grapharg"] = BackwardStateGraphArg()
+            self.backward_state_proxy.node.meta["example_value"] = BackwardState()
+            self.backward_state_var = self.new_var()
+        return self.backward_state_proxy
 
     # This gets its own helper function so guards DEBUG logs are more informative
     def init_ambient_guards(self):
@@ -854,6 +888,10 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                     )
                 else:
                     prefix_insts.append(copy.copy(inst))
+        assert not (
+            self.pregraph_bytecode and self.export
+        ), "export does not support pregraph_bytecode"
+        prefix_insts.extend(self.pregraph_bytecode)
 
         def append_prefix_insts():
             self.add_output_instructions(prefix_insts)
@@ -924,6 +962,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             and all(isinstance(x, TensorVariable) for x in stack_values)
             and len(set(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
+            and not len(tx.debug_locals) != 0
+            and not self.backward_state
         ):
             append_prefix_insts()
             # optimization to generate better code in a common case
@@ -934,10 +974,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         else:
             graph_output_var = self.new_var("graph_out")
             pass1 = PyCodegen(tx, root, graph_output_var)
-            self.side_effects.codegen_hooks(pass1)
-            self.side_effects.codegen_save_tempvars(pass1)
-            pass1.restore_stack(stack_values, value_from_source=not tx.export)
-            self.side_effects.codegen_update_mutated(pass1)
+            self.codegen_suffix(tx, stack_values, pass1)
 
             # one more time now that we have established tempvars
             pass2 = PyCodegen(
@@ -946,10 +983,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 graph_output_var,
                 tempvars={val: None for val, count in pass1.uses.items() if count > 1},
             )
-            self.side_effects.codegen_hooks(pass2)
-            self.side_effects.codegen_save_tempvars(pass2)
-            pass2.restore_stack(stack_values, value_from_source=not tx.export)
-            self.side_effects.codegen_update_mutated(pass2)
+            self.codegen_suffix(tx, stack_values, pass2)
 
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
@@ -968,6 +1002,26 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.add_output_instructions(
             [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
         )
+
+    def codegen_suffix(self, tx, stack_values, cg):
+        if self.backward_state:
+            assert not self.export
+            for name, val in self.backward_state.items():
+                cg(val)
+                cg.append_output(cg.create_load(self.backward_state_var))
+                cg.store_attr(name)
+        self.side_effects.codegen_hooks(cg)
+        self.side_effects.codegen_save_tempvars(cg)
+
+        # Return variables used for logging at the end
+        for debug_var, args in tx.debug_locals:
+            cg(debug_var)
+            for arg in args:
+                cg(arg)
+            cg.extend_output(create_call_function(len(args), True))
+
+        cg.restore_stack(stack_values, value_from_source=not tx.export)
+        self.side_effects.codegen_update_mutated(cg)
 
     def cleanup_graph(self):
         """
@@ -1243,11 +1297,15 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 if not node.users:
                     recheck_placeholders.append(node)
             else:
-                if not node.users:
+                if not node.users and not isinstance(
+                    node.meta["grapharg"], BackwardStateGraphArg
+                ):
                     remove_unused(node)
                 else:
                     # Register the free symbols as uses
                     arg = node.meta["grapharg"]
+                    if isinstance(arg, BackwardStateGraphArg):
+                        continue
                     fake = (
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example
                     )
@@ -1435,7 +1493,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                         missing = fvs - symbol_to_proxy.keys()
                         if missing:
                             i1 = sorted(missing)[0]
-                            assert self.shape_env.is_unbacked_symint(i1), i1
+                            # TODO: Remove relaxing assert on unbacked_symint https://github.com/pytorch/pytorch/issues/119689
+                            # assert self.shape_env.is_unbacked_symint(i1), i1
                             ras_by_symbol.setdefault(i1, []).append(ra)
                         else:
                             # Convert the sympy expression into a sequence of FX
@@ -1523,6 +1582,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self, register_finalizer: Callable[[fx.GraphModule], None]
     ) -> None:
         self.register_finalizer_fns.append(register_finalizer)
+
+    def example_value_from_input_node(self, node: torch.fx.Node):
+        """Extract the non-fake example tensor"""
+        if node.op == "placeholder":
+            return node.meta["grapharg"].example
+        assert node.op == "get_attr"
+        return self.nn_modules[node.target]  # type: ignore[index]
 
 
 err_epilogue = (
