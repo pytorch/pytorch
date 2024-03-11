@@ -857,8 +857,10 @@ class GuardBuilder(GuardBuilderBase):
 
         if config.enable_cpp_guard_manager:
             # TODO(anijain2305) - Consider this moving this guard to C++
+            compare_fn = torch._functorch.pyfunctorch.compare_functorch_state
+
             def fn(x):
-                return torch._functorch.pyfunctorch.compare_functorch_state(states)
+                return compare_fn(states)
 
             assert self.guard_manager  # to make mypy happy
             self.guard_manager.root.add_lambda_guard(
@@ -1185,8 +1187,10 @@ class GuardBuilder(GuardBuilderBase):
 
         if config.enable_cpp_guard_manager:
             # TODO(anijain2305,williamwen42) - Move this guard to C++
+            check_backend = torch._dynamo.eval_frame.check_current_backend
+
             def fn(x):
-                return torch._dynamo.eval_frame.check_current_backend(backend_id)
+                return check_backend(backend_id)
 
             self.get_guard_manager(guard).add_lambda_guard(
                 fn, get_verbose_code_parts(code, guard)
