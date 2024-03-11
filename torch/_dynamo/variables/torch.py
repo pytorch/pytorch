@@ -117,6 +117,8 @@ tracing_state_functions = {
     torch.compiler.is_dynamo_compiling: True,
 }
 
+bin_ops = dict.fromkeys(["add", "sub", "mul", "div", "sqrt"])
+
 
 class BaseTorchVariable(VariableTracker):
     """common base for all torch.* functions, classes, modules and other things"""
@@ -629,6 +631,33 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 _unsafe_set_version_counter
             ).call_function(tx, [*args], kwargs)
 
+        @register(torch.tensor)
+        def handle_torch_tensor(self, tx, *args, **kwargs):
+            def check_any_unspec(x):
+                # NB: This includes UnspecializedPythonVariable
+                if isinstance(x, (TensorVariable, SymNodeVariable)):
+                    return True
+                elif isinstance(x, (ListVariable, TupleVariable)):
+                    return any(check_any_unspec(y) for y in x.items)
+                # TODO: there maybe other recursive structures you need to
+                # check
+                else:
+                    return False
+
+            data_arg = None
+            if args:
+                data_arg = args[0]
+            elif "data" in kwargs:
+                data_arg = kwargs["data"]
+
+            # NB: OK to pass torch.tensor(tensor), this will trace fine
+            if not isinstance(data_arg, TensorVariable) and check_any_unspec(data_arg):
+                # This is slower and less canonical, so only use it if we
+                # have to
+                return TorchInGraphFunctionVariable(torch._refs.tensor).call_function(
+                    tx, [*args], kwargs
+                )
+
         return handlers
 
     def call_function(
@@ -663,7 +692,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 isinstance(x, (variables.ConstantVariable, variables.SymNodeVariable))
                 for x in args
             )
-            bin_ops = {"add", "sub", "mul", "div", "sqrt"}
             if (
                 getattr(self.value, "__module__", "") == "torch"
                 and self.value.__name__ in bin_ops
@@ -682,39 +710,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             # Ideally, we would be able to do this at ctor time, but alas we need a combination
             # of value + args to determine this.
             fn_ = self.value
-            if any(isinstance(x, SymNodeVariable) for x in args):
+            if any_symints_or_symfloats:
                 torch_sym_op = f"_sym_{self.value.__name__}"
                 if getattr(self.value, "__module__", None) == "math" and hasattr(
                     torch, torch_sym_op
                 ):
                     fn_ = getattr(torch, torch_sym_op)
-
-            if fn_ is torch.tensor:
-
-                def check_any_unspec(x):
-                    # NB: This includes UnspecializedPythonVariable
-                    if isinstance(x, (TensorVariable, SymNodeVariable)):
-                        return True
-                    elif isinstance(x, (ListVariable, TupleVariable)):
-                        return any(check_any_unspec(y) for y in x.items)
-                    # TODO: there maybe other recursive structures you need to
-                    # check
-                    else:
-                        return False
-
-                data_arg = None
-                if args:
-                    data_arg = args[0]
-                elif "data" in kwargs:
-                    data_arg = kwargs["data"]
-
-                # NB: OK to pass torch.tensor(tensor), this will trace fine
-                if not isinstance(data_arg, TensorVariable) and check_any_unspec(
-                    data_arg
-                ):
-                    # This is slower and less canonical, so only use it if we
-                    # have to
-                    fn_ = torch._refs.tensor
 
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
