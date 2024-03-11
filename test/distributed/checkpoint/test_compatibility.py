@@ -50,13 +50,11 @@ class TestDCPCompatbility(TestCase):
             dcp.save(
                 {"a": torch.zeros(4, 4)},
                 dcp.FileSystemWriter("/tmp/dcp_testing"),
-                no_dist=True,
             )
 
         dcp.load(
             {"a": torch.zeros(4, 4)},
             dcp.FileSystemReader("/tmp/dcp_testing"),
-            no_dist=True,
         )
 
 

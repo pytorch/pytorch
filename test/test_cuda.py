@@ -2643,6 +2643,46 @@ exit(2)
             model_graphed({"x": real_inputs[0]}), model_control({"x": real_inputs[0]})
         )
 
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    def test_graph_make_graphed_callables_same_pool(self):
+        torch.manual_seed(5)
+        torch.cuda.manual_seed(5)
+        models = []
+        num_models = 3
+        for _ in range(num_models):
+            models.append(
+                torch.nn.Sequential(
+                    torch.nn.Linear(32, 128),
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(128, 128),
+                ).cuda()
+            )
+        # we will reuse the same pool for all graph captures
+        mempool = torch.cuda.graph_pool_handle()
+        graphed_models = []
+        for model in models:
+            x = torch.randn([64, 32], device="cuda")
+            graphed_model = deepcopy(model)
+            graphed_model = torch.cuda.make_graphed_callables(graphed_model, (x,), pool=mempool)
+            graphed_models.append(graphed_model)
+
+        for model, graphed_model in zip(models, graphed_models):
+            x = torch.randn([64, 32], device="cuda")
+            y = model(x)
+            yg = graphed_model(x)
+            l = y.norm()
+            lg = yg.norm()
+            l.backward()
+            lg.backward()
+
+            self.assertEqual(y, yg)
+            self.assertEqual(l, lg)
+            for p, pg in zip(model.parameters(), graphed_model.parameters()):
+                self.assertEqual(p, pg)
+                self.assertEqual(p.grad, pg.grad)
+                self.assertNotEqual(p.data_ptr(), pg.data_ptr())
+                self.assertNotEqual(p.grad.data_ptr, pg.grad.data_ptr)
+
     def _test_graphed_optimizer(self, steps_warmup, steps_train, optimizer_ctor, kwargs):
         for actually_do_graphs in (True, False):
             params = [
@@ -2696,9 +2736,9 @@ exit(2)
         # Needs generalization if we want to extend this test to non-Adam-like optimizers.
         cases = [
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "foreach": foreach,
-                              "decoupled_weight_decay": decoupled_weight_decay})
-            for optimizer_ctor, foreach, decoupled_weight_decay in product(
-                (torch.optim.NAdam,), (False, True), (False, True),)
+                              "decoupled_weight_decay": decoupled_weight_decay, "weight_decay": weight_decay})
+            for optimizer_ctor, foreach, decoupled_weight_decay, weight_decay in product(
+                (torch.optim.NAdam, torch.optim.RAdam,), (False, True,), (False, True,), (0.0, 0.1,))
         ] + [
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "foreach": foreach, "amsgrad": amsgrad})
             for optimizer_ctor, foreach, amsgrad in product(
@@ -2707,12 +2747,9 @@ exit(2)
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad})
             for optimizer_ctor, amsgrad in product((torch.optim.Adam, torch.optim.AdamW), (False, True))
         ] + [
-            (optimizer_ctor, {"lr": 0.1, "foreach": True, "maximize": maximize, "weight_decay": weight_decay})
-            for optimizer_ctor, maximize, weight_decay in product((torch.optim.Adamax, torch.optim.ASGD), (False, True), (0, 0.1))
-        ] + [
-            (torch.optim.RAdam, {"lr": 0.1, "foreach": True, "decoupled_weight_decay": decoupled_weight_decay,
-                                 "weight_decay": weight_decay})
-            for decoupled_weight_decay, weight_decay in product((False, True), (0.0, 0.1))
+            (optimizer_ctor, {"lr": 0.1, "foreach": foreach, "maximize": maximize, "weight_decay": weight_decay})
+            for optimizer_ctor, foreach, maximize, weight_decay in product((torch.optim.Adamax, torch.optim.ASGD), (False, True),
+                                                                           (False, True), (0, 0.1))
         ]
 
         for optimizer_ctor, kwargs in cases:
@@ -2724,7 +2761,8 @@ exit(2)
         # mimicking `_test_graphed_optimizer` maladroitly to pass two param_groups to optimizer.__init__
         n_warmup, n_replay = 3, 2
         for optimizer, second_param_group_capturable in product((torch.optim.Adam, torch.optim.AdamW,
-                                                                 torch.optim.NAdam), (True, False)):
+                                                                 torch.optim.ASGD, torch.optim.Adamax,
+                                                                 torch.optim.NAdam, torch.optim.RAdam), (True, False)):
             ref_p1, param1 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
             ref_p2, param2 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
             grads1, grads2 = ([torch.randn_like(param1) for _ in range(n_warmup + n_replay)] for _ in range(2))
