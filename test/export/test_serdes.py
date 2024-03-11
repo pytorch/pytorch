@@ -9,6 +9,7 @@ except ImportError:
     import testing
 
 from torch.export import export, load, save
+from torch.export._trace import _export
 
 test_classes = {}
 
@@ -21,8 +22,9 @@ def mocked_serder_export(*args, **kwargs):
     loaded_ep = load(buffer)
     return loaded_ep
 
+
 def mocked_serder_export_pre_dispatch(*args, **kwargs):
-    ep = export(*args, **kwargs)
+    ep = _export(*args, **kwargs, pre_dispatch=True)
     buffer = io.BytesIO()
     save(ep, buffer)
     buffer.seek(0)
@@ -60,7 +62,6 @@ def make_dynamic_cls(cls):
     globals()[test_class_pre_dispatch.__name__] = test_class_pre_dispatch
     test_class.__module__ = __name__
     test_class_pre_dispatch.__module__ = __name__
-    return test_class, test_class_pre_dispatch
 
 
 tests = [
