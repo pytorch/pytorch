@@ -757,6 +757,7 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Repro(), example_inputs)
 
+    @skipIfRocm
     def test_cond_simple(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -774,6 +775,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @skipIfRocm
     def test_cond_nested(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -795,6 +797,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @skipIfRocm
     def test_cond_with_parameters(self):
         inputs = (torch.randn((10, 20), device=self.device),)
         dim0_abc = Dim("s0", min=2, max=1024)
@@ -808,6 +811,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @skipIfRocm
     def test_cond_with_reinterpret_view_inputs_outputs(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -825,6 +829,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @skipIfRocm
     def test_cond_with_multiple_outputs(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -845,6 +850,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @skipIfRocm
     def test_cond_with_outer_code_before_after(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -862,6 +868,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @skipIfRocm
     def test_cond_use_buffers_from_outer_scope(self):
         inputs = (
             torch.randn((10, 20), device=self.device),

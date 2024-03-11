@@ -4,6 +4,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/record_function.h>
 #include <c10/core/thread_pool.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/edge.h>
@@ -239,6 +240,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     std::size_t initialSize_{stack_.size()};
   };
 
+  struct C10_UNUSED DoNothing {};
+
 #if defined(__GNUC__) || defined(__clang__)
 #define JIT_USE_COMPUTED_GOTO
 #endif
@@ -265,7 +268,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   inst = instFetch(1); \
   INST_DISPATCH
 
-  bool runImpl(Stack& stack) {
+  template <bool EnableProfiling>
+  bool runTemplate(Stack& stack) {
     // if we have never run before, then we might have to return the
     // stack when we suspend, record where it starts so we return the right
     // stack
@@ -301,8 +305,12 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         };
 
         auto instGuard = [&] {
-          return profiling::InstructionSpan{
-              *frame.function->instructions_source()[frame.pc]};
+          if constexpr (!EnableProfiling) {
+            return DoNothing{};
+          } else {
+            return profiling::InstructionSpan{
+                *frame.function->instructions_source()[frame.pc]};
+          }
         };
 
         Instruction inst = instFetch(0);
@@ -888,6 +896,14 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
 #undef INST_DISPATCH
 #undef INST
 #undef JIT_USE_COMPUTED_GOTO
+
+  bool runImpl(Stack& stack) {
+    if (!profiling::isProfilingOngoing()) {
+      return runTemplate</*EnableProfiling*/ false>(stack);
+    } else {
+      return runTemplate</*EnableProfiling*/ true>(stack);
+    }
+  }
 
   void formatStackTrace(std::ostream& out) {
     format_stack_trace(out, callstack());

@@ -78,11 +78,9 @@ def get_effect_key(op, args, kwargs) -> Optional[_EffectType]:
     if op in SIDE_EFFECTS:
         return SIDE_EFFECTS[op]
 
-    # TODO(angelayi): Enable this when enabling tokens with export -- this will
-    # break some existing export tests right now
-    # for arg in args:
-    #     if isinstance(arg, torch.ScriptObject):
-    #         return _EffectType.ORDERED
+    for arg in args:
+        if isinstance(arg, torch.ScriptObject):
+            return _EffectType.ORDERED
 
     return None
 

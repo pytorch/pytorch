@@ -350,6 +350,11 @@ def _verify_exported_program_signature(exported_program) -> None:
                 raise SpecViolationError(
                     f"Custom object {custom_obj} is not in the constants dictionary."
                 )
+        elif input_spec.kind == InputKind.TOKEN:
+            if not isinstance(input_spec.arg, TensorArgument):
+                raise SpecViolationError(
+                    f"Constant tensor {input_spec.name} is not a tensor argument. Found {input_spec.arg} instead."
+                )
         else:
             raise SpecViolationError(
                 f"Unknown InputKind {input_spec.kind}."
@@ -371,8 +376,9 @@ def _verify_exported_program_signature(exported_program) -> None:
             f"Number of user outputs: {len(gs.user_outputs)}. \n"
         )
 
-    end = len(gs.buffers_to_mutate) + len(gs.user_inputs_to_mutate)
-    mutate_nodes: List[str] = output_nodes[:end]
+    num_tokens = len(gs.output_tokens)
+    end = len(gs.buffers_to_mutate) + len(gs.user_inputs_to_mutate) + num_tokens
+    mutate_nodes: List[str] = output_nodes[num_tokens:end]
     user_output_nodes = output_nodes[end:end + len(gs.user_outputs)]
 
     for mutation_node in mutate_nodes:

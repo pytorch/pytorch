@@ -9570,7 +9570,7 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
 
             r = fn_gpu(x)
             code = run_and_get_triton_code(fn_gpu, x)
-            self.assertIn("tl.sin", code)
+            self.assertIn("tl_math.sin", code)
             self.assertEqual(type(r), np.ndarray)
             self.assertEqual(r, np.sin(x))
 
