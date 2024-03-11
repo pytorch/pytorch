@@ -200,6 +200,7 @@ skip:
       - llama
       - llama_v2_7b_16h
       - simple_gpt
+      - sam_fast
       # Model's DEFAULT_TRAIN_BSIZE is not implemented
       - cm3leon_generate
       - hf_T5_generate
