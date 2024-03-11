@@ -1350,10 +1350,13 @@ def same(
                 passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
                 if not passes_test:
                     log_error(
-                        "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s",
+                        "RMSE (res-fp64): %.5f, (ref-fp64): %.5f and shape=%s. res.dtype: %s, multiplier: %f, tol: %f",
                         res_error,
                         ref_error,
                         res.size(),
+                        res.dtype,
+                        multiplier,
+                        tol,
                     )
                     # import pdb; pdb.set_trace()
                 return passes_test
