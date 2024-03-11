@@ -4149,9 +4149,6 @@ class GraphModule(torch.nn.Module):
 
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
-
-        count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
-
         _enter_dual_level = torch._C._enter_dual_level()
 
         maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
@@ -4241,9 +4238,6 @@ class GraphModule(torch.nn.Module):
 
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
-
-        count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
-
         _enter_dual_level = torch._C._enter_dual_level()
 
         maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
@@ -4334,9 +4328,6 @@ class GraphModule(torch.nn.Module):
 
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
-
-        count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
-
         _enter_dual_level = torch._C._enter_dual_level()
 
         maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
@@ -4432,9 +4423,6 @@ class GraphModule(torch.nn.Module):
 
         _jvp_increment_nesting = torch._C._functorch._jvp_increment_nesting()
         _set_fwd_grad_enabled = torch._C._set_fwd_grad_enabled(True)
-
-        count_jvp_interpreters = torch._C._functorch.count_jvp_interpreters()
-
         _enter_dual_level = torch._C._enter_dual_level()
 
         maybe_load_decompositions = torch.autograd.forward_ad.maybe_load_decompositions()
@@ -4838,6 +4826,10 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 3, 3)
         wrapped_gm = self._compile_check(wrapper_fn, (x,))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
 
         actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
         self.assertExpectedInline(
