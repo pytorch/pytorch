@@ -317,13 +317,25 @@ def grad_increment_nesting():
         _grad_decrement_nesting()
 
 
+def enter_jvp_nesting():
+    global JVP_NESTING
+    jvp_level = _jvp_increment_nesting()
+    JVP_NESTING += 1
+    return jvp_level
+
+
+def exit_jvp_nesting():
+    global JVP_NESTING
+    _jvp_decrement_nesting()
+    JVP_NESTING -= 1
+
+
 @contextlib.contextmanager
 def jvp_increment_nesting():
     try:
-        jvp_level = _jvp_increment_nesting()
-        yield jvp_level
+        yield enter_jvp_nesting()
     finally:
-        _jvp_decrement_nesting()
+        exit_jvp_nesting()
 
 
 @doesnt_support_saved_tensors_hooks
@@ -830,6 +842,9 @@ def _slice_argnums(args, argnums, as_tuple=True):
     return tuple(args[i] for i in argnums)
 
 
+JVP_NESTING = 0
+
+
 def assert_flat_tuple_of_tensors(elts: Any, api: str, argname: str) -> None:
     if not isinstance(elts, tuple):
         raise RuntimeError(
@@ -992,9 +1007,10 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
     assert_non_empty_list_of_tensors(flat_primals, jvp_str, 'primals')
     assert_non_empty_list_of_tensors(flat_tangents, jvp_str, 'tangents')
 
+    global JVP_NESTING
+
     with jvp_increment_nesting() as level:
         with fwAD._set_fwd_grad_enabled(True):
-            JVP_NESTING = torch._C._functorch.count_jvp_interpreters()
             ctx = fwAD.dual_level if JVP_NESTING == 1 else contextlib.nullcontext
             with ctx():
                 flat_duals = tuple(fwAD.make_dual(p, t)
