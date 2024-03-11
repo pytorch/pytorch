@@ -1,6 +1,6 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/Resize.h>
-#include "BlasImpl.h"
+#include <ATen/native/mkldnn/xpu/BlasImpl.h>
 #include <torch/library.h>
 
 namespace at {
@@ -186,13 +186,14 @@ Tensor& baddbmm_out(
   // general case
   xpu::onednn::Attr attr;
   float beta_ = beta.to<float>();
+  Tensor binary;
   if (beta_ == 0.f) {
     if (alpha.to<float>() != 1.f) {
       attr.append_post_eltwise(
           1.f, alpha.to<float>(), 0.f, attr.kind_with_linear);
     }
   } else {
-    Tensor binary = binary.dim() < 3 ? input.unsqueeze(0) : input;
+    binary = input.dim() < 3 ? input.unsqueeze(0) : input;
     binary = binary.dim() < 3 ? binary.unsqueeze_(0) : binary;
     float alpha_ = alpha.to<float>() / beta_;
     if (alpha_ != 1.f)
@@ -222,7 +223,7 @@ Tensor baddbmm(
     const Scalar& beta,
     const Scalar& alpha) {
   Tensor r = at::empty({0}, input.options());
-  at::native::xpu::baddbmm_out(input, batch1, batch2, beta, alpha, r);
+  r = at::native::xpu::baddbmm_out(input, batch1, batch2, beta, alpha, r);
   return r;
 }
 
@@ -398,7 +399,7 @@ Tensor& tensordot_out(
 }
 
 TORCH_LIBRARY_IMPL(aten, XPU, m){
-  m.impl("admm.out", TORCH_FN(addmm_out));
+  m.impl("addmm.out", TORCH_FN(addmm_out));
   m.impl("_addmm_activation.out", TORCH_FN(_addmm_activation_out));
   m.impl("mm.out", TORCH_FN(mm_out));
   m.impl("mm", TORCH_FN(mm));
