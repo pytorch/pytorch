@@ -111,7 +111,9 @@ class TestExportTorchbind(TestCase):
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
             def forward(self, x):
-                return x + torch.ops._TorchScriptTesting.takes_foo(self.attr, x)
+                a = torch.ops._TorchScriptTesting.takes_foo(self.attr, x)
+                b = torch.ops._TorchScriptTesting.takes_foo(self.attr, a)
+                return x + b
 
         m = MyModule()
         input = torch.ones(2, 3)
@@ -120,6 +122,61 @@ class TestExportTorchbind(TestCase):
 
         unlifted = ep.module()
         self.assertEqual(m(input), unlifted(input))
+
+        with enable_torchbind_tracing():
+            ep2 = torch.export.export(unlifted, (input,), strict=False)
+
+        self.assertEqual(m(input), ep2.module()(input))
+
+    def test_custom_obj_list_out(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
+
+            def forward(self, x):
+                a = torch.ops._TorchScriptTesting.takes_foo_list_return(self.attr, x)
+                y = a[0] + a[1] + a[2]
+                b = torch.ops._TorchScriptTesting.takes_foo(self.attr, y)
+                return x + b
+
+        m = MyModule()
+        input = torch.ones(2, 3)
+        with enable_torchbind_tracing():
+            ep = torch.export.export(m, (input,), strict=False)
+
+        unlifted = ep.module()
+        self.assertEqual(m(input), unlifted(input))
+
+        with enable_torchbind_tracing():
+            ep2 = torch.export.export(unlifted, (input,), strict=False)
+
+        self.assertEqual(m(input), ep2.module()(input))
+
+    def test_custom_obj_tuple_out(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
+
+            def forward(self, x):
+                a = torch.ops._TorchScriptTesting.takes_foo_tuple_return(self.attr, x)
+                y = a[0] + a[1]
+                b = torch.ops._TorchScriptTesting.takes_foo(self.attr, y)
+                return x + b
+
+        m = MyModule()
+        input = torch.ones(2, 3)
+        with enable_torchbind_tracing():
+            ep = torch.export.export(m, (input,), strict=False)
+
+        unlifted = ep.module()
+        self.assertEqual(m(input), unlifted(input))
+
+        with enable_torchbind_tracing():
+            ep2 = torch.export.export(unlifted, (input,), strict=False)
+
+        self.assertEqual(m(input), ep2.module()(input))
 
 
 if __name__ == "__main__":

@@ -55,7 +55,7 @@ class TorchDispatchMode:
         raise NotImplementedError()
 
     def __enter__(self):
-        _push_mode(self, self.__dict__.get("_dispatch_key", None))
+        _push_mode(self)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -92,13 +92,37 @@ def _detect_functional_mode():
 
     return pre_dispatch_functional_mode
 
+def _unset_infra_mode(key):
+    from torch._ops import unset_mode_pre_dispatch, _get_dispatch_mode_pre_dispatch
+    pre_dispatch_mode = _get_dispatch_mode_pre_dispatch(key)
+    post_dispatch_mode = torch._C._get_dispatch_mode(key)
+    if pre_dispatch_mode and post_dispatch_mode:
+        raise AssertionError("Can't have active infra mode on both pre and post dispatch mode stack")
+
+    if pre_dispatch_mode:
+        mode = unset_mode_pre_dispatch(key)
+        return mode
+    if post_dispatch_mode:
+        return torch._C._unset_dispatch_mode(key)
+
+
+def _disable_infra_mode(key):
+    assert key in (torch._C._TorchDispatchModeKey.FUNCTIONAL, torch._C._TorchDispatchModeKey.PROXY)
+    mode_unset = _unset_infra_mode(key)
+    try:
+        yield mode_unset
+    finally:
+        if mode_unset is not None:
+            _push_mode(mode_unset)
+
 
 def _get_current_dispatch_mode_stack():
     stack_len = _len_torch_dispatch_stack()
     return [_get_dispatch_stack_at(i) for i in range(stack_len)]
 
-# TODO (tmanlaibaatar) it doesn't need to take in dispatch key
-def _push_mode(mode, k: Optional[DispatchKey] = None):
+
+def _push_mode(mode):
+    k = mode._dispatch_key if hasattr(mode, "_dispatch_key") else None
     assert k is None or k == torch._C.DispatchKey.PreDispatch
     if k is None:
         _push_on_torch_dispatch_stack(mode)
@@ -128,7 +152,7 @@ def _pop_mode_temporarily(k: Optional[DispatchKey] = None):
     try:
         yield old
     finally:
-        _push_mode(old, k)
+        _push_mode(old)
 
 @contextlib.contextmanager
 def _disable_current_modes():
@@ -163,7 +187,7 @@ def _disable_current_modes():
         for mode in reversed(old_modes):
             _push_mode(mode)
         for mode in reversed(old_pre_dispatch_modes):
-            _push_mode(mode, torch._C.DispatchKey.PreDispatch)
+            _push_mode(mode)
 
 
 class BaseTorchDispatchMode(TorchDispatchMode):
