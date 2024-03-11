@@ -278,6 +278,11 @@ class Redistribute(torch.autograd.Function):
         current_spec = input._spec
         ctx.current_spec = current_spec
         ctx.async_op = async_op
+
+        # Early return the original DTensor if the placements are the same.
+        if current_spec.placements == placements:
+            return input
+
         target_spec = DTensorSpec(
             device_mesh, placements, tensor_meta=input._spec.tensor_meta
         )
