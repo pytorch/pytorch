@@ -129,8 +129,32 @@ Autograd
 
 PyTorch supports autograd for complex tensors. The gradient computed is the Conjugate Wirtinger derivative,
 the negative of which is precisely the direction of steepest descent used in Gradient Descent algorithm. Thus,
-all the existing optimizers work out of the box with complex parameters. For more details,
+all the existing optimizers can be implemented to work out of the box with complex parameters. For more details,
 check out the note :ref:`complex_autograd-doc`.
+
+
+Optimizers
+----------
+
+Semantically, stepping through a PyTorch optimizer with complex parameters is equivalent to stepping through the
+same optimizer on the :func:`torch.view_as_real` equivalent of the complex params. More concretely:
+
+::
+
+     >>> params = [torch.rand(2, 3, dtype=torch.complex64) for _ in range(5)]
+     >>> real_params = [torch.view_as_real(p) for p in params]
+
+     >>> complex_optim = torch.optim.AdamW(params)
+     >>> real_optim = torch.optim.AdamW(real_params)
+
+
+`real_optim` and `complex_optim` will compute the same updates on the parameters. Note that the :func:`torch.view_as_real`
+equivalent will convert a complex tensor to a real tensor with shape :math:`(..., 2)`, which is distinct from splitting
+every complex parameter into `p.real` and `p.imag` and feeding twice the number of parameters into the optimizer. This
+distinction is trivial for pointwise optimizers (like AdamW) but will cause slight discrepancy in second order optimizers
+like LBFGS where there are reductions across all the gradients of the parameters. Reductions like sum are programmatically
+not associative--the order in which you reduce matters!
+
 
 We do not fully support the following subsystems:
 
