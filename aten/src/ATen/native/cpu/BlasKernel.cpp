@@ -4,35 +4,34 @@
 #include <ATen/native/cpu/zmath.h>
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
-#include <iostream>
 
 #if defined(__aarch64__) && !defined(C10_MOBILE)
 #include <arm_neon.h>
 
 namespace at::native::blas_impl {
 void fp16_gemv_notrans(
-    int m,
-    int n,
-    const float16_t alpha,
+    const int m,
+    const int n,
+    const float alpha,
     const float16_t* a,
     const int lda,
     const float16_t* x,
     const int incx,
-    const float16_t beta,
+    const float beta,
     float16_t* y,
-    int incy);
+    const int incy);
 
 void fp16_gemv_trans(
-    int m,
-    int n,
-    const float16_t alpha,
+    const int m,
+    const int n,
+    const float alpha,
     const float16_t* a,
     const int lda,
     const float16_t* x,
     const int incx,
-    const float16_t beta,
+    const float beta,
     float16_t* y,
-    int incy);
+    const int incy);
 }
 #endif
 

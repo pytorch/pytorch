@@ -81,28 +81,28 @@ namespace at::native {
 namespace blas_impl {
 #if defined(__aarch64__) && !defined(C10_MOBILE)
 void fp16_gemv_notrans(
-    int m,
-    int n,
-    const float16_t alpha,
+    const int m,
+    const int n,
+    const float alpha,
     const float16_t* a,
     const int lda,
     const float16_t* x,
     const int incx,
-    const float16_t beta,
+    const float beta,
     float16_t* y,
-    int incy);
+    const int incy);
 
 void fp16_gemv_trans(
-    int m,
-    int n,
-    const float16_t alpha,
+    const int m,
+    const int n,
+    const float alpha,
     const float16_t* a,
     const int lda,
     const float16_t* x,
     const int incx,
-    const float16_t beta,
+    const float beta,
     float16_t* y,
-    int incy);
+    const int incy);
 #endif
 
 template <typename scalar_t>
@@ -212,7 +212,7 @@ static inline float reduce(float32x4_t x) {
 }
 
 
-static void fp16_gemv_trans_fp16_arith(int m, int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
+static void fp16_gemv_trans_fp16_arith(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
   for (auto i = 0 ; i < n; i += 4) {
     float16x4_t sum0Vec = vdup_n_f16(0);
     float16x4_t sum1Vec = vdup_n_f16(0);
@@ -240,7 +240,7 @@ static void fp16_gemv_trans_fp16_arith(int m, int n, const float16_t* a, const i
   }
 }
 
-static void fp16_gemv_trans_fp32_arith(int m, int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
+static void fp16_gemv_trans_fp32_arith(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
   for (auto i = 0 ; i < n; i += 4) {
     float32x4_t sum0Vec = vdupq_n_f32(0);
     float32x4_t sum1Vec = vdupq_n_f32(0);
@@ -269,16 +269,16 @@ static void fp16_gemv_trans_fp32_arith(int m, int n, const float16_t* a, const i
 }
 
 void fp16_gemv_trans(
-    int m,
-    int n,
-    const float16_t alpha,
+    const int m,
+    const int n,
+    const float alpha,
     const float16_t* a,
     const int lda,
     const float16_t* x,
     const int incx,
-    const float16_t beta,
+    const float beta,
     float16_t* y,
-    int incy) {
+    const int incy) {
   if (incx == 1 && alpha == 1.0 && beta == 0.0 && m % 4 == 0 && n % 4 == 0) {
     return at::globalContext().allowFP16ReductionCPU() ? fp16_gemv_trans_fp16_arith(m, n, a, lda, x, y, incy)
                                                        : fp16_gemv_trans_fp32_arith(m, n, a, lda, x, y, incy);
@@ -312,10 +312,10 @@ static void fp16_gemv_notrans_fp16_arith(int m, int n, const float16_t* a, const
   }
 }
 
-static void fp32_gemv_notrans_fp32_arith(int m, int n, const float16_t* a, const int lda, const float16_t *x, float16_t *y) {
+static void fp16_gemv_notrans_fp32_arith(int m, int n, const float16_t* a, const int lda, const float16_t *x, float16_t *y) {
   std::vector<float> sum(m);
   for (auto j = 0; j < n; j++) {
-    auto vecCol = vdup_n_f16(x[j]);
+    auto vecCol = vdup_n_f32(x[j]);
     const auto* column = a + lda * j;
     for (auto i = 0; i < m; i += 4) {
       auto sf32 = sum.data() + i;
@@ -326,24 +326,25 @@ static void fp32_gemv_notrans_fp32_arith(int m, int n, const float16_t* a, const
     }
   }
 
-  for(auto i = 0; i < m; i+= 4) {
+  for (auto i = 0; i < m; i+= 4) {
     vst1_f16(y + i, vcvt_f16_f32(vld1q_f32(sum.data() + i)));
   }
 }
 
 void fp16_gemv_notrans(
-    int m,
-    int n,
-    const float16_t alpha,
+    const int m,
+    const int n,
+    const float alpha,
     const float16_t* a,
     const int lda,
     const float16_t* x,
     const int incx,
-    const float16_t beta,
+    const float beta,
     float16_t* y,
-    int incy) {
+    const int incy) {
   if (incx == 1 && alpha == 1.0 && beta == 0.0 && m % 4 == 0 && incy == 1) {
-    return fp16_gemv_notrans_fp16_arith(m, n, a, lda, x, y);
+    return at::globalContext().allowFP16ReductionCPU() ? fp16_gemv_notrans_fp16_arith(m, n, a, lda, x, y)
+                                                       : fp16_gemv_notrans_fp32_arith(m, n, a, lda, x, y);
   }
   std::vector<float> sum(m);
   for (const auto j : c10::irange(n)) {
