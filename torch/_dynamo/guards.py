@@ -1991,7 +1991,7 @@ def get_guard_fail_reason(
         verbose_code_parts = guard_fn.verbose_code_parts
         # This is not needed for CPP guard because the verbose check is already
         # run in C++.
-        scope["___check_tensors_verbose"] = scope["___check_tensors"]
+        scope["___check_tensors"] = scope["___check_tensors_verbose"]
 
     for part in verbose_code_parts:
         global_scope = dict(guard_fn.global_scope)
