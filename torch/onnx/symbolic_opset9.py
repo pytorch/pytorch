@@ -807,14 +807,19 @@ def _reduce_op_symbolic(onnx_op_name, allow_multi_dim_support=True):
                 desc = "is" if allow_multi_dim_support else "i"
                 dim = symbolic_helper._get_const(dim, desc, "dim")
                 dim_list = dim if allow_multi_dim_support else [dim]
-                return g.op(
-                    onnx_op_name, self, axes_i=dim_list, keepdims_i=keepdim
-                )
+                return g.op(onnx_op_name, self, axes_i=dim_list, keepdims_i=keepdim)
             else:
-                if allow_multi_dim_support:
-                    axes = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.long))
+                if symbolic_helper._is_value(dim):
+                    axes = dim
                 else:
-                    axes = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
+                    if allow_multi_dim_support:
+                        axes = g.op(
+                            "Constant", value_t=torch.tensor(dim, dtype=torch.long)
+                        )
+                    else:
+                        axes = g.op(
+                            "Constant", value_t=torch.tensor([dim], dtype=torch.long)
+                        )
                 return g.op(onnx_op_name, self, axes, keepdims_i=keepdim)
 
     return symbolic
@@ -1368,7 +1373,9 @@ def mish(g: jit_utils.GraphContext, input):
 @symbolic_helper.quantized_args(True)
 @_beartype.beartype
 def relu(g: jit_utils.GraphContext, input):
-    return symbolic_helper._op_with_optional_float_cast(g, "Relu", input, opset_before=14)
+    return symbolic_helper._op_with_optional_float_cast(
+        g, "Relu", input, opset_before=14
+    )
 
 
 @_onnx_symbolic("aten::relu6")
@@ -1431,7 +1438,10 @@ def glu(g: jit_utils.GraphContext, input, dim):
     if dim_size is not None:
         assert dim_size % 2 == 0
 
-    first, second = g.op("Split", input, axis_i=dim, outputs=2)
+    if g.opset < 18:
+        first, second = g.op("Split", input, axis_i=dim, outputs=2)
+    else:
+        first, second = g.op("Split", input, axis_i=dim, num_outputs_i=2, outputs=2)
     return g.op("Mul", first, g.op("Sigmoid", second))
 
 
@@ -2902,7 +2912,8 @@ def native_layer_norm(
         mean = g.op(
             "ReduceMean",
             input,
-            g.op("Constant", value_t=torch.tensor(axes, dtype=torch.long)))
+            g.op("Constant", value_t=torch.tensor(axes, dtype=torch.long)),
+        )
 
     numerator = sub(g, input, mean)
 
@@ -2924,7 +2935,8 @@ def native_layer_norm(
         variance = g.op(
             "ReduceMean",
             pow(g, numerator, two_cst),
-            g.op("Constant", value_t=torch.tensor(axes, dtype=torch.long)))
+            g.op("Constant", value_t=torch.tensor(axes, dtype=torch.long)),
+        )
 
     denominator = sqrt(g, g.op("Add", variance, eps_cst))
     normalized = g.op("Div", numerator, denominator)
@@ -3396,7 +3408,9 @@ def clamp_min(g: jit_utils.GraphContext, self, min):
     else:
         dtype = _type_utils.JitScalarType.from_value(self)
         min = g.op("Cast", min, to_i=dtype.onnx_type())
-        return symbolic_helper._op_with_optional_float_cast(g, "Max", self, min, opset_before=12)
+        return symbolic_helper._op_with_optional_float_cast(
+            g, "Max", self, min, opset_before=12
+        )
 
 
 @_onnx_symbolic("aten::clamp_max")
@@ -3410,7 +3424,9 @@ def clamp_max(g: jit_utils.GraphContext, self, max):
     else:
         dtype = _type_utils.JitScalarType.from_value(self)
         max = g.op("Cast", max, to_i=dtype.onnx_type())
-        return symbolic_helper._op_with_optional_float_cast(g, "Min", self, max, opset_before=12)
+        return symbolic_helper._op_with_optional_float_cast(
+            g, "Min", self, max, opset_before=12
+        )
 
 
 @_onnx_symbolic("aten::max")
@@ -3424,7 +3440,9 @@ def max(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
         return g.op("ReduceMax", self, keepdims_i=0)
     # torch.max(input, other)
     if keepdim is None:
-        return symbolic_helper._op_with_optional_float_cast(g, "Max", self, dim_or_y, opset_before=12)
+        return symbolic_helper._op_with_optional_float_cast(
+            g, "Max", self, dim_or_y, opset_before=12
+        )
     # torch.max(input, dim, keepdim)
     else:
         keepdim = symbolic_helper._get_const(keepdim, "i", "keepdim")
@@ -3454,7 +3472,9 @@ def min(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
         return g.op("ReduceMin", self, keepdims_i=0)
     # torch.min(input, other)
     if keepdim is None:
-        return symbolic_helper._op_with_optional_float_cast(g, "Min", self, dim_or_y, opset_before=12)
+        return symbolic_helper._op_with_optional_float_cast(
+            g, "Min", self, dim_or_y, opset_before=12
+        )
     # torch.min(input, dim, keepdim)
     else:
         keepdim = symbolic_helper._get_const(keepdim, "i", "keepdim")
@@ -3480,7 +3500,11 @@ def minimum(g: jit_utils.GraphContext, input, other):
 @symbolic_helper.parse_args("v", "is", "i")
 @_beartype.beartype
 def amax(g: jit_utils.GraphContext, self, dim, keepdim):
-    return g.op("ReduceMax", self, axes_i=dim, keepdims_i=keepdim)
+    if g.opset < 18:
+        return g.op("ReduceMax", self, axes_i=dim, keepdims_i=keepdim)
+    else:
+        axes = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.long))
+        return g.op("ReduceMax", self, axes, keepdims_i=keepdim)
 
 
 @_onnx_symbolic("aten::amin")
@@ -3488,7 +3512,11 @@ def amax(g: jit_utils.GraphContext, self, dim, keepdim):
 @symbolic_helper.parse_args("v", "is", "i")
 @_beartype.beartype
 def amin(g: jit_utils.GraphContext, self, dim, keepdim):
-    return g.op("ReduceMin", self, axes_i=dim, keepdims_i=keepdim)
+    if g.opset < 18:
+        return g.op("ReduceMin", self, axes_i=dim, keepdims_i=keepdim)
+    else:
+        axes = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.long))
+        return g.op("ReduceMin", self, axes, keepdims_i=keepdim)
 
 
 @_onnx_symbolic("aten::aminmax")
@@ -3496,14 +3524,26 @@ def amin(g: jit_utils.GraphContext, self, dim, keepdim):
 @symbolic_helper.parse_args("v", "v", "i")
 @_beartype.beartype
 def aminmax(g: jit_utils.GraphContext, self, dim, keepdim):
-    reduce_kwargs = {"keepdims_i": keepdim}
-    if not symbolic_helper._is_none(dim):
-        dim = symbolic_helper._get_const(dim, "i", "dim")
-        reduce_kwargs["axes_i"] = [dim]
+    if g.opset < 18:
+        reduce_kwargs = {"keepdims_i": keepdim}
+        if not symbolic_helper._is_none(dim):
+            dim = symbolic_helper._get_const(dim, "i", "dim")
+            reduce_kwargs["axes_i"] = [dim]
 
-    return g.op("ReduceMin", self, **reduce_kwargs), g.op(
-        "ReduceMax", self, **reduce_kwargs
-    )
+        return g.op("ReduceMin", self, **reduce_kwargs), g.op(
+            "ReduceMax", self, **reduce_kwargs
+        )
+    else:
+        if not symbolic_helper._is_none(dim):
+            dim = symbolic_helper._get_const(dim, "i", "dim")
+            axes = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
+            return g.op("ReduceMin", self, axes, keepdims_i=keepdim), g.op(
+                "ReduceMax", self, axes, keepdims_i=keepdim
+            )
+        else:
+            return g.op("ReduceMin", self, keepdims_i=keepdim), g.op(
+                "ReduceMax", self, keepdims_i=keepdim
+            )
 
 
 @_onnx_symbolic("aten::exp")
@@ -5559,37 +5599,75 @@ def gather(g: jit_utils.GraphContext, self, dim, index, sparse_grad=False):
 @symbolic_helper.parse_args("v", "is", "i", "i")
 @_beartype.beartype
 def _var_mean(g: jit_utils.GraphContext, input, dim, correction, keepdim):
-    if dim is None:
-        mean = g.op("ReduceMean", input, keepdims_i=0)
-        t_mean = mean
-        num_elements = numel(g, input)
+    if g.opset < 18:
+        if dim is None:
+            mean = g.op("ReduceMean", input, keepdims_i=0)
+            t_mean = mean
+            num_elements = numel(g, input)
+        else:
+            mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=keepdim)
+            t_mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=1)
+            redudced_dims = g.op("Shape", input)
+            # dim could contain one or multiple dimensions
+            redudced_dims = g.op(
+                "Gather",
+                redudced_dims,
+                g.op("Constant", value_t=torch.tensor(dim)),
+                axis_i=0,
+            )
+            num_elements = g.op("ReduceProd", redudced_dims, keepdims_i=0)
+        sub_v = g.op("Sub", input, t_mean)
+        sqr_sub = g.op("Mul", sub_v, sub_v)
+        keepdim_mean = 0 if dim is None else keepdim
+        var = g.op("ReduceMean", sqr_sub, axes_i=dim, keepdims_i=keepdim_mean)
+        # Correct bias in calculating variance, by dividing it over (N - correction) instead on N
+        if correction is None:
+            correction = 1
+        if correction != 0:
+            num_elements = g.op(
+                "Cast", num_elements, to_i=_C_onnx.TensorProtoDataType.FLOAT
+            )
+            one = g.op("Constant", value_t=torch.tensor(correction, dtype=torch.float))
+            mul = g.op("Mul", var, num_elements)
+            var = g.op("Div", mul, g.op("Sub", num_elements, one))
+        return var, mean
     else:
-        mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=keepdim)
-        t_mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=1)
-        redudced_dims = g.op("Shape", input)
-        # dim could contain one or multiple dimensions
-        redudced_dims = g.op(
-            "Gather",
-            redudced_dims,
-            g.op("Constant", value_t=torch.tensor(dim)),
-            axis_i=0,
-        )
-        num_elements = g.op("ReduceProd", redudced_dims, keepdims_i=0)
-    sub_v = g.op("Sub", input, t_mean)
-    sqr_sub = g.op("Mul", sub_v, sub_v)
-    keepdim_mean = 0 if dim is None else keepdim
-    var = g.op("ReduceMean", sqr_sub, axes_i=dim, keepdims_i=keepdim_mean)
-    # Correct bias in calculating variance, by dividing it over (N - correction) instead on N
-    if correction is None:
-        correction = 1
-    if correction != 0:
-        num_elements = g.op(
-            "Cast", num_elements, to_i=_C_onnx.TensorProtoDataType.FLOAT
-        )
-        one = g.op("Constant", value_t=torch.tensor(correction, dtype=torch.float))
-        mul = g.op("Mul", var, num_elements)
-        var = g.op("Div", mul, g.op("Sub", num_elements, one))
-    return var, mean
+        if dim is None:
+            mean = g.op("ReduceMean", input, keepdims_i=0)
+            t_mean = mean
+            num_elements = numel(g, input)
+        else:
+            axes = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.long))
+
+            mean = g.op("ReduceMean", input, axes, keepdims_i=keepdim)
+            t_mean = g.op("ReduceMean", input, axes, keepdims_i=1)
+            redudced_dims = g.op("Shape", input)
+            # dim could contain one or multiple dimensions
+            redudced_dims = g.op(
+                "Gather",
+                redudced_dims,
+                g.op("Constant", value_t=torch.tensor(dim)),
+                axis_i=0,
+            )
+            num_elements = g.op("ReduceProd", redudced_dims, keepdims_i=0)
+        sub_v = g.op("Sub", input, t_mean)
+        sqr_sub = g.op("Mul", sub_v, sub_v)
+        keepdim_mean = 0 if dim is None else keepdim
+        if dim is None:
+            var = g.op("ReduceMean", sqr_sub, keepdims_i=keepdim_mean)
+        else:
+            var = g.op("ReduceMean", sqr_sub, axes, keepdims_i=keepdim_mean)
+        # Correct bias in calculating variance, by dividing it over (N - correction) instead on N
+        if correction is None:
+            correction = 1
+        if correction != 0:
+            num_elements = g.op(
+                "Cast", num_elements, to_i=_C_onnx.TensorProtoDataType.FLOAT
+            )
+            one = g.op("Constant", value_t=torch.tensor(correction, dtype=torch.float))
+            mul = g.op("Mul", var, num_elements)
+            var = g.op("Div", mul, g.op("Sub", num_elements, one))
+        return var, mean
 
 
 @_onnx_symbolic("aten::std")
@@ -5631,7 +5709,14 @@ def std_mean(g: jit_utils.GraphContext, input, *args):
 @symbolic_helper.parse_args("v", "is", "i")
 @_beartype.beartype
 def logsumexp(g: jit_utils.GraphContext, input, dim, keepdim):
-    return g.op("ReduceLogSumExp", input, axes_i=dim, keepdims_i=keepdim)
+    if g.opset < 18:
+        return g.op("ReduceLogSumExp", input, axes_i=dim, keepdims_i=keepdim)
+    else:
+        if dim is None:
+            return g.op("ReduceLogSumExp", input, keepdims_i=0)
+        else:
+            axes = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.long))
+            return g.op("ReduceLogSumExp", input, axes, keepdims_i=keepdim)
 
 
 @_onnx_symbolic("aten::arange")
@@ -5970,23 +6055,54 @@ def linalg_vector_norm(
     keepdim: bool,
     dtype: torch._C.Value,
 ):
+    axes = None
     # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.vector_norm.html
     if symbolic_helper._is_none(dim):
         self = symbolic_helper._reshape_helper(g, self, [-1])
         keepdim = False
+    elif g.opset >= 18:
+        axes = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.long))
 
     if ord == math.inf:
-        result = g.op("ReduceMax", g.op("Abs", self), axes_i=dim, keepdims_i=keepdim)
+        if g.opset < 18:
+            result = g.op(
+                "ReduceMax", g.op("Abs", self), axes_i=dim, keepdims_i=keepdim
+            )
+        else:
+            if axes is None:
+                result = g.op("ReduceMax", g.op("Abs", self), keepdims_i=keepdim)
+            else:
+                result = g.op("ReduceMax", g.op("Abs", self), axes, keepdims_i=keepdim)
     elif ord == -math.inf:
-        result = g.op("ReduceMin", g.op("Abs", self), axes_i=dim, keepdims_i=keepdim)
+        if g.opset < 18:
+            result = g.op(
+                "ReduceMin", g.op("Abs", self), axes_i=dim, keepdims_i=keepdim
+            )
+        else:
+            if axes is None:
+                result = g.op("ReduceMin", g.op("Abs", self), keepdims_i=keepdim)
+            else:
+                result = g.op("ReduceMin", g.op("Abs", self), axes, keepdims_i=keepdim)
     elif ord == 0:
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "linalg_vector_norm", 9, 11, "ord=0 not supported", self
         )
     elif ord == 1:
-        result = _reduce_op_symbolic("ReduceL1")(g, self, dim=dim, keepdim=keepdim)
+        if g.opset < 18:
+            result = _reduce_op_symbolic("ReduceL1")(g, self, dim=dim, keepdim=keepdim)
+        else:
+            if axes is None:
+                result = _reduce_op_symbolic("ReduceL1")(g, self, keepdim=keepdim)
+            else:
+                result = _reduce_op_symbolic("ReduceL1")(g, self, axes, keepdim=keepdim)
     elif ord == 2:
-        result = _reduce_op_symbolic("ReduceL2")(g, self, dim=dim, keepdim=keepdim)
+        if g.opset < 18:
+            result = _reduce_op_symbolic("ReduceL2")(g, self, dim=dim, keepdim=keepdim)
+        else:
+            if axes is None:
+                result = _reduce_op_symbolic("ReduceL2")(g, self, keepdim=keepdim)
+            else:
+                result = _reduce_op_symbolic("ReduceL2")(g, self, axes, keepdim=keepdim)
     else:
         ord_op = g.op("Constant", value_t=torch.tensor(ord, dtype=torch.float32))
         result = symbolic_helper._reducesum_helper(
@@ -6818,7 +6934,9 @@ def prim_shape(g: jit_utils.GraphContext, self):
 @_onnx_symbolic("prim::max")
 @_beartype.beartype
 def prim_max(g: jit_utils.GraphContext, self, other):
-    return symbolic_helper._op_with_optional_float_cast(g, "Max", self, other, opset_before=12)
+    return symbolic_helper._op_with_optional_float_cast(
+        g, "Max", self, other, opset_before=12
+    )
 
 
 @_onnx_symbolic("prim::min")

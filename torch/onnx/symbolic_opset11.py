@@ -164,7 +164,9 @@ def clamp_min(g: jit_utils.GraphContext, self, min):
             g, "Clip", self, min, max, opset_before=12
         )
     else:
-        return symbolic_helper._op_with_optional_float_cast(g, "Max", self, min, opset_before=12)
+        return symbolic_helper._op_with_optional_float_cast(
+            g, "Max", self, min, opset_before=12
+        )
 
 
 @_onnx_symbolic("aten::clamp_max")
@@ -178,7 +180,9 @@ def clamp_max(g: jit_utils.GraphContext, self, max):
             g, "Clip", self, min, max, opset_before=12
         )
     else:
-        return symbolic_helper._op_with_optional_float_cast(g, "Min", self, max, opset_before=12)
+        return symbolic_helper._op_with_optional_float_cast(
+            g, "Min", self, max, opset_before=12
+        )
 
 
 @_onnx_symbolic("aten::relu6")
@@ -1385,9 +1389,25 @@ def embedding_bag(
             loop_context, embeddings, axes_i=[0], keepdims_i=0
         )
     elif mode == 1:
-        embeddings = loop_context.op("ReduceMean", embeddings, axes_i=[0], keepdims_i=0)
+        if loop_context.opset < 18:
+            embeddings = loop_context.op(
+                "ReduceMean", embeddings, axes_i=[0], keepdims_i=0
+            )
+        else:
+            axes = loop_context.op(
+                "Constant", value_t=torch.tensor([0], dtype=torch.long)
+            )
+            embeddings = loop_context.op("ReduceMean", embeddings, axes, keepdims_i=0)
     else:
-        embeddings = loop_context.op("ReduceMax", embeddings, axes_i=[0], keepdims_i=0)
+        if loop_context.opset < 18:
+            embeddings = loop_context.op(
+                "ReduceMax", embeddings, axes_i=[0], keepdims_i=0
+            )
+        else:
+            axes = loop_context.op(
+                "Constant", value_t=torch.tensor([0], dtype=torch.long)
+            )
+            embeddings = loop_context.op("ReduceMax", embeddings, axes, keepdims_i=0)
 
     cond_out = loop_context.op(
         "Cast", loop_condition, to_i=_C_onnx.TensorProtoDataType.BOOL
