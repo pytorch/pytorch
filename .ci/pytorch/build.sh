@@ -6,6 +6,11 @@ set -ex
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
+if [[ "$BUILD_ENVIRONMENT" == linux-jammy-py3.8-gcc11* ]] && [ "$ANACONDA_PYTHON_VERSION" == "3.8" ] ; then
+  echo "Sometimes in kernel 5+ anaconda decides to use its own libstdc++ instead of the system one. As we've always been relying on the system one, let's make sure it's used."
+  sudo rm "/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/lib/libstdc++.so.6"
+fi
+
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
@@ -26,11 +31,6 @@ cmake --version
 
 echo "Environment variables:"
 env
-
-if [[ "$BUILD_ENVIRONMENT" == linux-jammy-py3.8-gcc11* ]] ; then
-  echo "Sometimes in kernel 5+ anaconda decides to use its own libstdc++ instead of the system one. As we've always been relying on the system one, let's make sure it's used."
-  sudo rm "/opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/lib/libstdc++.so.6"
-fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   # Use jemalloc during compilation to mitigate https://github.com/pytorch/pytorch/issues/116289
